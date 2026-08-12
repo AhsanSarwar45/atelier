@@ -19,20 +19,32 @@ export interface ReportEntry {
   card: string | null;
 }
 
+/**
+ * One answer shared by every caller. Each card on the board asks whether it has
+ * a report, and a board holds a hundred of them, so without this the screen
+ * fires a hundred identical requests on every paint.
+ */
+let inFlight: Promise<ReportEntry[]> | null = null;
+
+function fetchReports(): Promise<ReportEntry[]> {
+  inFlight ??= fetch("/api/reports")
+    .then(res => (res.ok ? res.json() : []))
+    .catch(() => [])
+    .finally(() => {
+      // Held only for the burst of callers that mount together.
+      setTimeout(() => { inFlight = null; }, 2_000);
+    });
+  return inFlight;
+}
+
 /** Every report on this machine; the page itself is rebuilt when it is opened. */
 export function useReports() {
   const [reports, setReports] = useState<ReportEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const reload = useCallback(async () => {
-    try {
-      const res = await fetch("/api/reports");
-      setReports(res.ok ? await res.json() : []);
-    } catch {
-      setReports([]);
-    } finally {
-      setIsLoading(false);
-    }
+    setReports(await fetchReports());
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -153,7 +165,13 @@ interface CardReportButtonProps {
   projectPath: string;
 }
 
-/** Shown on a card only when that card has a report. */
+/**
+ * Shown on a card only when that card has a report — no report, no button.
+ *
+ * It sits under the card rather than on it: a card's own corners already carry
+ * its number, its type and its badges, and every card layout arranges those
+ * differently, so anything placed over them collides in one layout or another.
+ */
 export function CardReportButton({ card, projectPath }: CardReportButtonProps) {
   const { reports } = useReports();
   const [open, setOpen] = useState(false);
@@ -164,11 +182,17 @@ export function CardReportButton({ card, projectPath }: CardReportButtonProps) {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className="h-8 px-3 text-sm font-medium rounded-md flex items-center gap-1.5 bg-surface-overlay/50 text-t-secondary hover:text-t-primary transition-colors"
+        onClick={e => {
+          e.stopPropagation(); // the card underneath opens its own detail panel
+          setOpen(true);
+        }}
+        title={mine.title}
+        className="w-full px-3 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1.5
+                   bg-surface-overlay/40 text-t-secondary hover:text-t-primary hover:bg-surface-overlay/70
+                   border border-b-default/60 border-t-0 rounded-t-none transition-colors"
       >
-        <FileText className="size-4" aria-hidden="true" />
-        Report
+        <FileText className="size-3.5" aria-hidden="true" />
+        Manager report
       </button>
       <ReportPanel open={open} onOpenChange={setOpen} projectPath={projectPath} card={card} />
     </>

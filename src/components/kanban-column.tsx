@@ -4,6 +4,7 @@ import { PackageOpen } from "lucide-react";
 
 import { BeadCard } from "@/components/bead-card";
 import { EpicCard } from "@/components/epic-card";
+import { CardReportButton } from "@/components/report-panel";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { Bead, BeadStatus, Epic } from "@/types";
@@ -170,6 +171,7 @@ export function KanbanColumn({
                   onSelect={onSelectBead}
                 />
             )}
+            <CardReportButton card={bead.id} projectPath={projectPath ?? ""} />
             </div>
           ))}
           {beads.length === 0 && (

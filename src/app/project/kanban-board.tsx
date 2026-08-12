@@ -16,7 +16,7 @@ import { KanbanColumn } from "@/components/kanban-column";
 import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
-import { CardReportButton, ReportPanel } from "@/components/report-panel";
+import { ReportPanel } from "@/components/report-panel";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -400,7 +400,6 @@ export default function KanbanBoard() {
           onChildClick={openBead}
           onUpdate={refreshBeads}
         >
-          <CardReportButton card={detailBead.id} projectPath={fsPath ?? ""} />
           <CommentList
             comments={detailBead.comments}
             beadId={detailBead.id}
