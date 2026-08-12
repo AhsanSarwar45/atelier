@@ -11,12 +11,33 @@ are filed under its own name in `pages/`.
 report new <slug>                 # start a spec for the project you are in
 report pages/<project>/<slug>.report.json   # build it; the page lands beside the spec
 report list                       # every spec, newest first
+report check                      # the gates, on their own
 ```
 
 `report` is on the path as a link to `bin/report`. The project a report is
 about is the directory the command was run from: the pictures a spec names are
 resolved there first, so a spec kept here can point at a render that lives in
 the project.
+
+Every build runs the gates first, so a broken rule costs the next report rather
+than waiting for someone to run the checks by hand.
+
+## Wiring a project to it
+
+Three things, and none of them is report code:
+
+1. A skill that tells an agent to use `report` and where the specs are —
+   corsetta's is `.claude/skills/report/SKILL.md`.
+2. The publish gate on the Artifact tool, pointed at `tools/publish-gate.py`,
+   so a hand-written page cannot be published.
+3. A check that report machinery has not been copied back in — corsetta's is
+   `crates/corsetta-core/tests/checks/reports_live_elsewhere.rs`.
+
+## This project is a fork
+
+Forked from `weselow/beads-web` at `c459cf3` (v0.12.2), branch `ours`, upstream
+kept as the `upstream` remote. Everything of ours is under `reporting/`; taking
+their updates is a merge that should not touch it.
 
 Specs are committed here. A report is a running page — same page, same decision
 numbers, updated in place for the life of the work.
