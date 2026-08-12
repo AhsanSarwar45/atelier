@@ -150,8 +150,10 @@ export function drawnInColumns<T extends { status: string; parent_id?: string }>
  * are being worked still reads `open`. Grouping by the stored status alone
  * leaves every job in Open however many sessions are on it, and In Progress
  * empty. The live work wins: anything under way anywhere below the card pulls
- * the card into that column, in progress ahead of in review. A card with
- * nothing under it keeps its own status.
+ * the card into that column, in progress ahead of in review. The card's own
+ * status is live work of the same kind, so it is ranked with its children
+ * rather than only serving as the fallback. A card with nothing under it keeps
+ * its own status.
  *
  * Derived for display only — the board's own record is never rewritten from here.
  *
@@ -166,12 +168,12 @@ export function columnFor<T extends { id: string; status: string; children?: str
   if (seen.has(bead.id)) return bead.status; // a cycle in the graph is not a reason to hang
   seen.add(bead.id);
 
-  const below = (bead.children ?? [])
+  const here = [bead.status, ...(bead.children ?? [])
     .map((id) => byId.get(id))
     .filter((k): k is T => k !== undefined)
-    .map((k) => columnFor(k, byId, seen));
+    .map((k) => columnFor(k, byId, seen))];
 
-  if (below.includes("in_progress")) return "in_progress";
-  if (below.includes("inreview")) return "inreview";
+  if (here.includes("in_progress")) return "in_progress";
+  if (here.includes("inreview")) return "inreview";
   return bead.status;
 }

@@ -47,7 +47,8 @@ def board_says(project):
     The screen draws one card per job: a step is not a card of its own, so a
     goal stands in for whatever is happening below it. A goal with live work
     under it belongs in that work's column however open its own record still
-    says it is; with nothing live under it, its own status decides.
+    says it is; with nothing live under it, its own status decides. The card's
+    own status is live work of the same kind and ranks alongside what is below.
     """
     cards = bd_list(project)
     kids = {}
@@ -69,7 +70,8 @@ def board_says(project):
     for b in cards:
         if b.get("parent"):
             continue
-        column = COLUMN_OF.get(live_below(b["id"]) or b["status"])
+        here = [b["status"], live_below(b["id"])]
+        column = COLUMN_OF.get(next((s for s in LIVE if s in here), b["status"]))
         if column:
             want.setdefault(column, set()).add(b["id"])
     return want

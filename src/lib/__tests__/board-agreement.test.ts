@@ -98,6 +98,13 @@ describe("a card sits in the column of the work under it", () => {
     expect(columnFor(goal, map)).toBe("in_progress");
   });
 
+  it("a card being worked itself outranks work below it waiting to land", () => {
+    // The card's own status is live work too, so it enters the same ranking as
+    // its children instead of only being the fallback nobody looks at.
+    const card = { id: "g", status: "in_progress", children: ["s1"] };
+    expect(columnFor(card, board(card, { id: "s1", status: "inreview" }))).toBe("in_progress");
+  });
+
   it("a goal nobody has started keeps its own status", () => {
     const goal = { id: "g", status: "open", children: ["s1"] };
     expect(columnFor(goal, board(goal, { id: "s1", status: "open" }))).toBe("open");
