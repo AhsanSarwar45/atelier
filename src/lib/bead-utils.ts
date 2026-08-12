@@ -128,3 +128,24 @@ export function isBlocked(
     return status !== undefined && status !== "closed";
   });
 }
+
+/**
+ * The beads the kanban columns draw as cards of their own.
+ *
+ * A child normally belongs inside its epic card, not in a column. But an epic
+ * stays open until its last child closes, so drawing only parents leaves the
+ * whole working layer invisible — nothing ever reaches In Progress however many
+ * sessions are claiming steps. A child that is in progress or in review is
+ * therefore a card in its own right; one nobody has started stays inside its
+ * epic, so Open does not fill with unstarted steps and Closed does not fill
+ * with finished ones.
+ *
+ * @param beads - Beads whose status has already been mapped to a column.
+ */
+export function drawnInColumns<T extends { status: string; parent_id?: string }>(
+  beads: ReadonlyArray<T>,
+): T[] {
+  return beads.filter(
+    (b) => !b.parent_id || b.status === "in_progress" || b.status === "inreview",
+  );
+}

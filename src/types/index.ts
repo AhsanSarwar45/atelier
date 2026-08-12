@@ -73,6 +73,7 @@ export type BeadStatus = 'open' | 'in_progress' | 'inreview' | 'closed';
 export type KnownRawStatus =
   | BeadStatus
   | 'in_review'
+  | 'pinned'
   | 'blocked'
   | 'deferred'
   | 'tombstone'
@@ -109,6 +110,7 @@ export const STATUS_MAP: Record<KnownRawStatus, { column: BeadStatus; badge?: St
   // Mapped with badges
   blocked:     { column: 'open',        badge: { label: 'Blocked',  variant: 'warning' } },
   deferred:    { column: 'open',        badge: { label: 'Deferred', variant: 'muted'   } },
+  pinned:      { column: 'open',        badge: { label: 'Pinned',   variant: 'info'    } },
   hooked:      { column: 'in_progress', badge: { label: 'Waiting',  variant: 'info'    } },
   // Hidden
   tombstone:   null,
