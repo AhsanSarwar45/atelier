@@ -108,8 +108,8 @@ export function ReportPanel({ open, onOpenChange, projectPath, card }: ReportPan
             <Loader2 className="size-5 animate-spin text-t-muted" aria-hidden="true" />
           </div>
         ) : showing ? (
-          <div className="flex-1 mt-4 -mx-6 flex flex-col min-h-0">
-            <div className="px-6 pb-2 flex items-center gap-3">
+          <div className="flex-1 mt-4 flex flex-col min-h-0">
+            <div className="pb-2 flex items-center gap-3">
               <button
                 type="button"
                 onClick={() => setShowing(null)}
@@ -127,10 +127,13 @@ export function ReportPanel({ open, onOpenChange, projectPath, card }: ReportPan
                 Own window
               </a>
             </div>
+            {/* Inset and framed: the report is a page being held up, not the
+                drawer's own wallpaper. */}
             <iframe
               title={showing.title}
               src={reportUrl(showing, projectPath)}
-              className="flex-1 w-full border-0 bg-white dark:bg-transparent"
+              className="flex-1 w-full mb-6 rounded-lg border border-b-default/60
+                         bg-white dark:bg-transparent"
             />
           </div>
         ) : (
@@ -163,23 +166,24 @@ export function ReportPanel({ open, onOpenChange, projectPath, card }: ReportPan
   );
 }
 
-interface CardReportButtonProps {
-  card: string;
+/** The report belonging to this card, or null when it has none. */
+export function useCardReport(card: string): ReportEntry | null {
+  const { reports } = useReports();
+  return reports.find(r => r.card === card) ?? null;
+}
+
+interface CardReportLinkProps {
+  entry: ReportEntry;
   projectPath: string;
 }
 
 /**
- * Shown on a card only when that card has a report — no report, no button.
- *
- * It sits under the card rather than on it: a card's own corners already carry
- * its number, its type and its badges, and every card layout arranges those
- * differently, so anything placed over them collides in one layout or another.
+ * A card's report, worn where the card already wears its comment count: it is
+ * one of the card's own facts. Anything sitting outside the card's frame reads
+ * as a separate object stuck underneath it, which is what this replaced.
  */
-export function CardReportButton({ card, projectPath }: CardReportButtonProps) {
-  const { reports } = useReports();
+export function CardReportLink({ entry, projectPath }: CardReportLinkProps) {
   const [open, setOpen] = useState(false);
-  const mine = reports.find(r => r.card === card);
-  if (!mine) return null;
 
   return (
     <>
@@ -189,15 +193,14 @@ export function CardReportButton({ card, projectPath }: CardReportButtonProps) {
           e.stopPropagation(); // the card underneath opens its own detail panel
           setOpen(true);
         }}
-        title={mine.title}
-        className="w-full px-3 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1.5
-                   bg-surface-overlay/40 text-t-secondary hover:text-t-primary hover:bg-surface-overlay/70
-                   border border-b-default/60 border-t-0 rounded-t-none transition-colors"
+        title={entry.title}
+        className="flex items-center gap-1 text-[10px] font-medium text-t-tertiary
+                   hover:text-t-primary hover:underline transition-colors"
       >
-        <FileText className="size-3.5" aria-hidden="true" />
+        <FileText className="size-3 shrink-0" aria-hidden="true" />
         Manager report
       </button>
-      <ReportPanel open={open} onOpenChange={setOpen} projectPath={projectPath} card={card} />
+      <ReportPanel open={open} onOpenChange={setOpen} projectPath={projectPath} card={entry.card} />
     </>
   );
 }

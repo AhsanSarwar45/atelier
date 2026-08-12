@@ -20,9 +20,12 @@ import hashlib
 import html
 import json
 import mimetypes
+import os
 import re
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,6 +38,35 @@ STAMP = "@@REPORT-BUILD@@"
 MAX_BYTES = 15_500_000
 DECISION_REF = re.compile(r"\bD\d+\b")
 SLOTS = ("title", "actions", "status", "content", "decisions", "next")
+
+# A count of the work, typed. True the day it is written and wrong by the next
+# morning, while the board beside it keeps moving.
+# Only a count OF STEPS: a measurement that happens to be "48 of 166" is a
+# number the report is allowed to carry.
+NUMBER = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten"
+COUNTED = re.compile(rf"\b(?:{NUMBER})\s+steps?\b", re.I)
+# A section that sets out the work in order is the checklist written twice. The
+# label has to BE the list's name; a section merely about the plan is fine.
+STEP_LIST = re.compile(r"^(the )?(work|plan|steps|roadmap)\b[\s,]*(in order|so far|ahead)?$", re.I)
+BOARD_URL = os.environ.get("BOARD_URL", "http://127.0.0.1:3008").rstrip("/")
+
+
+def handover(spec: Path, project: Path, out: Path) -> tuple[str, str]:
+    """The link to hand the manager, and a word about it when it is second best.
+
+    A path on disk is a path on disk: an editor claims it before any browser
+    sees it. The screen serves the same report over http, rebuilt from this
+    spec as it opens, so that link is the one worth handing over.
+    """
+    slug = spec.name.replace(".report.json", "")
+    query = urllib.parse.urlencode(
+        {"project": spec.resolve().parent.name, "slug": slug, "path": str(project.resolve())}
+    )
+    try:
+        urllib.request.urlopen(f"{BOARD_URL}/api/reports", timeout=1.0).read(1)
+    except Exception:
+        return out.resolve().as_uri(), "the board screen is not up, so this is the file itself"
+    return f"{BOARD_URL}/api/reports/page?{query}", ""
 
 
 # ── the spec, walked ─────────────────────────────────────────────────────────
@@ -160,6 +192,22 @@ def validate(spec: dict, spec_path: Path) -> tuple[list[str], list[str]]:
                 f"the status slot names a card AND types {', '.join(typed)} — the board owns all "
                 "three when a card is named; delete them from the spec"
             )
+        # The board owns the list of the work, so nothing else may set it out
+        # again: a second copy freezes the day it is typed.
+        for where, s in strings(spec):
+            hit = COUNTED.search(s)
+            if hit:
+                bad.append(
+                    f"{where} counts the work itself ({hit.group(0)!r}) while this report reads a "
+                    "card — say what is happening, and let the checklist carry the count"
+                )
+        for sec in spec["content"]:
+            if STEP_LIST.search(str(sec.get("label", ""))):
+                bad.append(
+                    f"section {sec.get('label')!r} sets out the work in order, and the checklist "
+                    "already does that from the card — cut the section, or drop status.card and "
+                    "own the list by hand"
+                )
     else:
         if not status.get("now"):
             bad.append("the status slot needs a 'now' line")
@@ -429,10 +477,14 @@ def main() -> int:
         return 1
 
     args.out.write_text(page, encoding="utf-8")
-    tail = f", {len(warnings)} words to plain up" if warnings else ""
+    parts = [f"{len(page) / 1024:.0f} KB", f"{len(spec['content'])} content sections"]
+    if warnings:
+        parts.append(f"{len(warnings)} words to plain up")
+    link, why = handover(args.spec, args.project, args.out)
+    if why:
+        parts.append(why)
     # The link IS the deliverable: it is what the manager is handed in chat.
-    print(f"{args.out.resolve().as_uri()}  "
-          f"({len(page) / 1024:.0f} KB, {len(spec['content'])} content sections{tail})")
+    print(f"{link}  ({', '.join(parts)})")
     return 0
 
 

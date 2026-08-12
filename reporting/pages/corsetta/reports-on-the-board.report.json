@@ -1,24 +1,9 @@
 {
   "title": "Reports Inside The Board",
-  "eyebrow": "Three of five steps in — the checklist below is the board's, not mine",
+  "eyebrow": "The checklist below is the work list's own, not mine",
   "actions": {
-    "questions": [
-      {
-        "ask": "Step one is in. Do I carry straight on through the rest, or stop after each one?",
-        "options": [
-          {
-            "label": "Straight through",
-            "say": "Carry on through all five steps.",
-            "pick": true
-          },
-          {
-            "label": "Stop each time",
-            "say": "Stop and show me after each step."
-          }
-        ],
-        "note": "Nothing left in the plan needs a decision from you; the remaining four are build work."
-      }
-    ]
+    "none": true,
+    "fyi": "Nothing is waiting on you. Everything left here is build work already under way, and the checklist below moves on its own as it lands."
   },
   "status": {
     "card": "cor-7d4"
@@ -100,44 +85,6 @@
           "tone": "good",
           "label": "The real win",
           "text": "A report stops being a picture of the work and becomes the work — the same list, read and changed from one screen."
-        }
-      ]
-    },
-    {
-      "label": "The work, in order",
-      "lead": "Five steps. Each one is useful on its own if you stop after it.",
-      "blocks": [
-        {
-          "kind": "rows",
-          "rows": [
-            {
-              "n": "1",
-              "title": "Stand up the shared project",
-              "tone": "gone",
-              "note": "Done. Our own copy of the board screen is a project in its own right and the report tools live in it; the racing game keeps a pointer and nothing else."
-            },
-            {
-              "n": "2",
-              "title": "Cut the cloud",
-              "tone": "hot",
-              "note": "A finished report lands as a file in that project. How it looks, what it must contain and every gate on it carry over untouched."
-            },
-            {
-              "n": "3",
-              "title": "The work list fills the report",
-              "note": "The checklist, what is happening now and what is next stop being typed by hand and start being read from the work list."
-            },
-            {
-              "n": "4",
-              "title": "A button on every card, and a tab for all of them",
-              "note": "The report opens from the card it belongs to, in whichever project that card lives."
-            },
-            {
-              "n": "5",
-              "title": "Buttons that act",
-              "note": "Answering a question or overriding a decision changes the work list as you press it, and shows you what it did."
-            }
-          ]
         }
       ]
     },

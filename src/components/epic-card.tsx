@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from "react";
 
 import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
 
@@ -37,6 +37,8 @@ export interface EpicCardProps {
   projectPath?: string;
   /** Callback after epic is closed (to refresh board) */
   onUpdate?: () => void;
+  /** Sits with the card's other facts, beside the comment count. */
+  report?: ReactNode;
 }
 
 /**
@@ -74,7 +76,8 @@ export function EpicCard({
   onChildClick,
   onNavigateToDependency,
   projectPath,
-  onUpdate
+  onUpdate,
+  report
 }: EpicCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -275,6 +278,7 @@ export function EpicCard({
             {progressSection}
             {closeButton}
             {childrenSection}
+            {report}
           </div>
         </div>
       </div>
@@ -317,6 +321,7 @@ export function EpicCard({
             {commentCount > 0 && (
               <span className="text-[10px] text-t-faint">{commentCount} comments</span>
             )}
+            {report}
           </div>
 
           {progressSection}
@@ -399,12 +404,15 @@ export function EpicCard({
         {closeButton}
         {childrenSection}
 
-        {commentCount > 0 && (
-          <div className="flex items-center pt-2">
-            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              <MessageSquare className="h-3 w-3" aria-hidden="true" />
-              {commentCount} {commentCount === 1 ? "comment" : "comments"}
-            </span>
+        {(commentCount > 0 || report) && (
+          <div className="flex items-center gap-2 pt-2">
+            {commentCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <MessageSquare className="h-3 w-3" aria-hidden="true" />
+                {commentCount} {commentCount === 1 ? "comment" : "comments"}
+              </span>
+            )}
+            {report}
           </div>
         )}
       </div>

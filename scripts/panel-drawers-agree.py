@@ -14,6 +14,10 @@ should still be moving:
 Their widths need not match: a drawer holding a document is not the same thing
 as a drawer holding a card's details. Swallowing the screen is the fault, and
 that is what is measured.
+
+A third rule is about the report the drawer holds rather than the drawer: it is
+inset from the drawer's edges, and its contents list is still on screen once the
+page has been scrolled to the bottom.
 """
 import argparse
 import base64
@@ -109,6 +113,49 @@ def sample(b, panel):
            json.dumps(panel["find"]), panel["name"]))
 
 
+# Less than this between the report and the drawer's edge and the page reads as
+# the drawer's wallpaper rather than as a document being held up.
+MARGIN_PX = 12
+
+
+def report_in_drawer(b):
+    """Open a card's report, scroll it to the end, and measure what is left."""
+    return b.js("""
+    (async () => {
+      const opener = [...document.querySelectorAll('[data-bead-id] button')]
+        .find(b => (b.innerText || '').includes('Manager report'));
+      if (!opener) return {error: 'no card on this board offers a report'};
+      opener.click();
+      await new Promise(r => setTimeout(r, 1200));
+      const frame = document.querySelector('[role=dialog] iframe');
+      if (!frame) return {error: 'the report drawer holds no page'};
+      for (let i = 0; i < 40 && !frame.contentDocument?.querySelector('nav'); i++)
+        await new Promise(r => setTimeout(r, 250));
+      const doc = frame.contentDocument;
+      const nav = doc && doc.querySelector('nav');
+      if (!nav) return {error: 'the report in the drawer never finished loading'};
+
+      const dialog = frame.closest('[role=dialog]').getBoundingClientRect();
+      const box = frame.getBoundingClientRect();
+
+      const win = frame.contentWindow;
+      win.scrollTo(0, doc.body.scrollHeight);
+      await new Promise(r => setTimeout(r, 400));
+      const n = nav.getBoundingClientRect();
+      return {
+        left: Math.round(box.left - dialog.left),
+        right: Math.round(dialog.right - box.right),
+        scrolled: Math.round(win.scrollY),
+        contents_top: Math.round(n.top),
+        contents_bottom: Math.round(n.bottom),
+        page_height: Math.round(win.innerHeight),
+        page_width: Math.round(doc.documentElement.clientWidth),
+        page_reach: Math.round(doc.documentElement.scrollWidth),
+      };
+    })()
+    """)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("project")
@@ -133,6 +180,11 @@ def main():
             seen[panel["name"]] = sample(b, panel)
             if args.shots:
                 b.shoot(f"{args.shots}/panel-{panel['name'].replace(' ', '-')}.png")
+        b.send("Page.navigate", url=page)
+        time.sleep(8)
+        held = report_in_drawer(b)
+        if args.shots:
+            b.shoot(f"{args.shots}/report-scrolled.png")
     finally:
         b.close()
 
@@ -152,12 +204,32 @@ def main():
         if share > 0.5:
             bad.append(f"the {name} panel takes {share:.0%} of the screen")
 
+    if not held or held.get("error"):
+        bad.append((held or {}).get("error", "the report in the drawer could not be measured"))
+    else:
+        on_screen = held["contents_top"] >= 0 and held["contents_bottom"] <= held["page_height"]
+        print(f"\nthe report it holds  inset {held['left']}px left, {held['right']}px right"
+              f"   scrolled {held['scrolled']}px   contents at {held['contents_top']}px"
+              f" ({'still on screen' if on_screen else 'scrolled away'})"
+              f"   reaches {held['page_reach']}px across {held['page_width']}px")
+        if held["page_reach"] > held["page_width"] + 1:
+            bad.append(f"the report runs off the side of the drawer — it reaches "
+                       f"{held['page_reach']}px across a {held['page_width']}px page")
+        if min(held["left"], held["right"]) < MARGIN_PX:
+            bad.append(f"the report touches the drawer's edge — {held['left']}px left, "
+                       f"{held['right']}px right, and {MARGIN_PX}px is the least that reads as a margin")
+        if held["scrolled"] < 200:
+            bad.append("the report in the drawer did not scroll, so the contents rule proved nothing")
+        elif not on_screen:
+            bad.append(f"the report's contents scrolled away — it sits at {held['contents_top']}px "
+                       f"in a {held['page_height']}px page")
+
     if bad:
         print("\nthese are not drawers:")
         for line in bad:
             print("  " + line)
         return 1
-    print("\nevery panel slid, and none of them swallowed the screen")
+    print("\nevery panel slid, none of them swallowed the screen, and the report it holds reads")
     return 0
 
 

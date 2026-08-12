@@ -100,8 +100,20 @@ nav .flag { display: inline-block; width: 7px; height: 7px; border-radius: 50%; 
 
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; gap: 18px; }
-  nav { position: static; }
-  nav ol { grid-auto-flow: column; grid-auto-columns: max-content; overflow-x: auto; gap: 4px; }
+  /* Narrow is where this page is read in a side drawer, so the contents rail
+     lies down as a strip and stays at the top rather than scrolling away. */
+  /* min-width: 0 or the strip grows to the width of its longest row and takes
+     the whole page sideways with it — a grid item's floor is its content. */
+  nav {
+    position: sticky; top: 0; z-index: 5; min-width: 0;
+    background: var(--ground); padding: 10px 0 8px;
+    box-shadow: 0 8px 12px -10px rgb(0 0 0 / 45%);
+  }
+  nav .label { margin-bottom: 6px; }
+  nav ol {
+    grid-auto-flow: column; grid-auto-columns: max-content; gap: 4px;
+    min-width: 0; overflow-x: auto; scrollbar-width: thin;
+  }
   nav a { border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
   nav a.on { border-left: 0; border-bottom-color: var(--blue); }
 }

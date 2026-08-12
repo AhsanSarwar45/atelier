@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { FolderOpen, GitPullRequest, Link2, MessageSquare, Check, X, Clock } from "lucide-react";
 
 import { CopyableText } from "@/components/copyable-text";
@@ -21,6 +23,8 @@ export interface BeadCardProps {
   prStatus?: PRStatus;
   isSelected?: boolean;
   onSelect: (bead: Bead) => void;
+  /** Sits with the card's other facts, beside the comment count. */
+  report?: ReactNode;
 }
 
 /**
@@ -148,7 +152,7 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
   }
 }
 
-export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatus, isSelected = false, onSelect }: BeadCardProps) {
+export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatus, isSelected = false, onSelect, report }: BeadCardProps) {
   const { layout } = useTheme();
   const blocked = isBlocked(bead, allBeads);
   const commentCount = (bead.comments ?? []).length;
@@ -273,6 +277,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
               {commentCount}
             </span>
           )}
+          {report}
         </div>
       </div>
     );
@@ -337,6 +342,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
               {commentCount} {commentCount === 1 ? "comment" : "comments"}
             </span>
           )}
+          {report}
         </div>
       </div>
     );
@@ -417,8 +423,8 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
           <div className="px-3 pb-3">{worktreeSection}</div>
         )}
 
-        {/* Footer: comment count + related count */}
-        {(commentCount > 0 || relatedCount > 0) && (
+        {/* Footer: comment count + related count + this card's report */}
+        {(commentCount > 0 || relatedCount > 0 || report) && (
           <div className="flex items-center p-3 pt-0 gap-2 text-muted-foreground card-footer-text">
             {commentCount > 0 && (
               <span className="flex items-center gap-1 text-[10px]">
@@ -432,6 +438,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
                 {relatedCount} related
               </span>
             )}
+            {report}
           </div>
         )}
       </div>

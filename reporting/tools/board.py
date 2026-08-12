@@ -23,6 +23,10 @@ STATE = {
     "deferred": "todo",
 }
 
+# Finished first, then what is moving, then what nobody has touched: a reader
+# runs down the list once and stops where the work stops.
+ORDER = {"done": 0, "draft": 1, "todo": 2}
+
 
 def children(card: str, project: Path) -> list[dict]:
     """The card's direct children, in board order, closed ones included."""
@@ -68,21 +72,38 @@ def _under_way(kid: str, project: Path) -> bool:
 
 
 def status(card: str, project: Path) -> dict:
-    """The whole status slot: what is happening now, what is next, and the list."""
+    """The whole status slot: what is happening now, what is next, and the list.
+
+    Both lines are about the whole board, not its first row: naming one of three
+    live items reads as the only one, and a board with nothing left to start
+    still has everything left to finish.
+    """
     kids = children(card, project)
-    items, doing, nxt = [], None, None
+    items = []
     for k in kids:
         state = STATE.get(k.get("status", "open"), "todo")
         if state != "done" and (state == "draft" or _under_way(k["id"], project)):
             state = "draft"
         items.append({"state": state, "text": k.get("title", k["id"])})
-        if state == "draft" and doing is None:
-            doing = k.get("title")
-        if state == "todo" and nxt is None:
-            nxt = k.get("title")
+    items.sort(key=lambda i: ORDER[i["state"]])
 
-    return {
-        "now": doing or "Nothing is being worked on right now.",
-        "next_up": nxt or "Nothing left to start.",
-        "items": items,
-    }
+    doing = [i["text"] for i in items if i["state"] == "draft"]
+    waiting = [i["text"] for i in items if i["state"] == "todo"]
+
+    # The list below already names every live item, so this counts the rest
+    # rather than repeating them.
+    if not doing:
+        now = "Nothing is being worked on right now."
+    elif len(doing) == 1:
+        now = doing[0]
+    else:
+        now = "%s — and %d more, marked below" % (doing[0], len(doing) - 1)
+
+    if waiting:
+        next_up = waiting[0]
+    elif doing:
+        next_up = "Nothing is waiting to start; everything left is already under way."
+    else:
+        next_up = "Nothing left — every piece of this is finished."
+
+    return {"now": now, "next_up": next_up, "items": items}

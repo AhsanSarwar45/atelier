@@ -126,6 +126,31 @@ READ_COLUMNS = """
 })()
 """
 
+# A card's report is one of the card's own facts, so it is drawn inside the
+# card's frame. Anything hanging below the frame reads as a separate object
+# stuck to the card, which is how this last went wrong.
+READ_REPORTS = """
+(() => {
+  const out = [];
+  for (const btn of document.querySelectorAll('button')) {
+    if (btn.textContent.trim() !== 'Manager report') continue;
+    const frame = btn.closest('.theme-card[data-bead-id]');
+    if (!frame) {
+      out.push({id: '(loose)', inside: false, why: 'it hangs outside every card'});
+      continue;
+    }
+    const f = frame.getBoundingClientRect(), r = btn.getBoundingClientRect();
+    out.push({
+      id: frame.dataset.beadId,
+      inside: r.top >= f.top && r.bottom <= f.bottom && r.left >= f.left && r.right <= f.right,
+      why: `the card spans ${f.top.toFixed(0)}-${f.bottom.toFixed(0)} and the report sits at ` +
+           `${r.top.toFixed(0)}-${r.bottom.toFixed(0)}`,
+    });
+  }
+  return out;
+})()
+"""
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -148,6 +173,7 @@ def main():
         b.send("Page.navigate", url=f"{args.url}/project?id={match[0]['id']}")
         time.sleep(8)
         drawn = b.js(READ_COLUMNS)
+        reports = b.js(READ_REPORTS)
         if args.shot:
             import base64
             shot = b.send("Page.captureScreenshot", format="png")
@@ -186,6 +212,17 @@ def main():
             print("  " + line)
         return 1
     print("\nevery card the board holds is drawn in its own column")
+
+    outside = [r for r in reports if not r["inside"]]
+    print(f"\nreports on cards  {len(reports):>3}   drawn outside their card  {len(outside):>3}")
+    if not reports:
+        print("no card on this board carries a report, so that rule checked nothing")
+        return 1
+    if outside:
+        for r in outside:
+            print(f"  a report is drawn outside its card ({r['id']}) — {r['why']}")
+        return 1
+    print("every card's report is drawn inside the card")
     return 0
 
 

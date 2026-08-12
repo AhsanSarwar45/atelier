@@ -26,10 +26,15 @@ Several sessions work one board at once, so the board is read either side of the
 screen and only the cards that sat still across both are compared; it says how
 many it left out.
 
+A second rule rides along, because it needs the same loaded screen: **a card's
+report is drawn inside the card.** It walks up from every "Manager report" on
+the page looking for a card frame around it, so a report parked beside a card
+is caught rather than counted as that card's own.
+
 ## `panel-drawers-agree.py <project-path>`
 
 Opens each side panel and samples it 120 ms later, while it should still be
-moving. Two rules:
+moving. Two rules about the drawer itself:
 
 - **every drawer slides** — one already in place at that moment never animated,
   and one still fully off-screen never started
@@ -38,6 +43,16 @@ moving. Two rules:
 
 Their widths need not match: a drawer holding a document is not the same thing
 as a drawer holding a card's details.
+
+Then it opens a card's report, scrolls it to the end, and reads three more rules
+about the page the drawer holds:
+
+- **the report is inset from the drawer's edges** — 12 px is the least that
+  reads as a margin rather than as the drawer's own wallpaper
+- **its contents list is still on screen at the bottom of the page** — the rail
+  is only sticky on a wide screen, and a drawer is not one
+- **the page never reaches wider than the drawer** — a sideways scrollbar means
+  the right-hand column of every table is off the screen
 
 ## Adding to these
 

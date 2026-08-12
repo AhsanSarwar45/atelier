@@ -119,6 +119,33 @@ def card_and_typed_status(s):
     s["status"]["card"] = "xx-1"
 
 
+def reads_board(s):
+    s["status"] = {"card": "xx-1"}
+
+
+def board_and_typed_count(s):
+    reads_board(s)
+    s["eyebrow"] = "Three of five steps in"
+
+
+def board_and_typed_step_list(s):
+    reads_board(s)
+    s["content"].append({
+        "label": "The work, in order",
+        "blocks": [{"kind": "rows", "rows": [{"n": "1", "title": "Measure", "note": "First."}]}],
+    })
+
+
+def board_and_a_measured_count(s):
+    """A number that counts something real, and a section merely about the plan."""
+    reads_board(s)
+    s["content"][0]["blocks"][1]["text"] = "48 of 166 corners now read clearly."
+    s["content"].append({
+        "label": "What the plan was wrong about",
+        "blocks": [{"kind": "note", "tone": "warn", "text": "The near corners were never the problem."}],
+    })
+
+
 case("a complete report builds", None, "", "")
 case("a missing slot", drop_slot, "slot 'status' is missing")
 case("a title that is a sentence", long_title, "title is")
@@ -135,6 +162,9 @@ case("a colour in the content", colour_in_text, "a colour")
 case("a step with no cost", no_cost, "needs a cost")
 case("more than six glossed terms", too_many_glosses, "six is the ceiling")
 case("a status both read from the board and typed", card_and_typed_status, "the board owns all three")
+case("a report that reads a card and counts its steps too", board_and_typed_count, "counts the work itself")
+case("a report that reads a card and lists its steps too", board_and_typed_step_list, "sets out the work in order")
+case("a measured count and a section about the plan are allowed", board_and_a_measured_count, "", "")
 
 
 def run() -> int:
@@ -221,9 +251,32 @@ def run() -> int:
         if "checklist" not in str(e) and "board" not in str(e):
             failures.append(f"a card with no work under it: unhelpful complaint — {e}")
 
+    # ── the two status lines describe the whole board, not its first row ──
+    # From here on the board is a fixture, so nothing below may reach `bd`.
+    import board as board_mod
+    board_mod._under_way = lambda kid, project: False
+    full = [{"id": "a", "title": "Alpha", "status": "closed"},
+            {"id": "b", "title": "Bravo", "status": "open"},
+            {"id": "c", "title": "Charlie", "status": "in_progress"},
+            {"id": "d", "title": "Delta", "status": "in_progress"}]
+
+    board_mod.children = lambda card, project: full
+    st = board_mod.status("x", tmp)
+    if [i["state"] for i in st["items"]] != ["done", "draft", "draft", "todo"]:
+        failures.append("the checklist is not ordered finished, then moving, then untouched")
+    if st["next_up"] != "Bravo":
+        failures.append(f"next up did not name the one unstarted item — {st['next_up']!r}")
+    if "1 more" not in st["now"]:
+        failures.append(f"now named one live item and hid the other — {st['now']!r}")
+
+    board_mod.children = lambda card, project: [k for k in full if k["status"] != "open"]
+    st = board_mod.status("x", tmp)
+    if "under way" not in st["next_up"]:
+        failures.append(f"with nothing unstarted, next up reads as finished — {st['next_up']!r}")
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 10 - len(failures)}/{len(CASES) + 10} report gates hold")
+    print(f"{len(CASES) + 14 - len(failures)}/{len(CASES) + 14} report gates hold")
     return 1 if failures else 0
 
 
