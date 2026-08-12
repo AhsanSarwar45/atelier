@@ -9,10 +9,15 @@ are filed under its own name in `pages/`.
 
 ```
 report new <slug>                 # start a spec for the project you are in
-report pages/<project>/<slug>.report.json   # build it; the page lands beside the spec
+report <slug>                     # build it; prints the link to hand over
+report open <slug>                # build it and open it in the browser
 report list                       # every spec, newest first
 report check                      # the gates, on their own
 ```
+
+A report is **never published anywhere**. The build prints a link to the file
+it wrote, and that link is the whole delivery; `tools/publish-gate.py` refuses
+a built page handed to the Artifact tool.
 
 `report` is on the path as a link to `bin/report`. The project a report is
 about is the directory the command was run from: the pictures a spec names are
@@ -29,7 +34,7 @@ Three things, and none of them is report code:
 1. A skill that tells an agent to use `report` and where the specs are —
    corsetta's is `.claude/skills/report/SKILL.md`.
 2. The publish gate on the Artifact tool, pointed at `tools/publish-gate.py`,
-   so a hand-written page cannot be published.
+   so a report cannot be pushed to the cloud instead of handed over.
 3. A check that report machinery has not been copied back in — corsetta's is
    `crates/corsetta-core/tests/checks/reports_live_elsewhere.rs`.
 
@@ -106,11 +111,11 @@ explains each inline. Past six, the page is written for the wrong reader.
 | No markup, colours or sizes in content | The builder refuses to emit a page |
 | Plain words | The builder warns, naming each term and its replacement |
 | Only shelf blocks appear | The builder, by name |
-| A page is built, never hand-written | `tools/publish-gate.py`, on every publish |
+| A report is never published | `tools/publish-gate.py` refuses a built page |
 | Every gate has teeth | `tools/selftest.py` — 24 faults, each of which must go red |
 
-The publish gate hashes what the builder emitted. A page edited after building
-no longer matches, and is refused with the same message as a hand-written one.
+The gate recognises a page by the builder's hash of its own content, so a
+report cannot reach the cloud by being renamed or lightly edited.
 
 ## Debt
 
@@ -119,7 +124,7 @@ no longer matches, and is refused with the same message as a hand-written one.
 - Charts are static pictures. No hover readouts, no live data.
 - The checklist and the status are still typed into the spec by hand, so they
   can disagree with the board. Reading them from the board is the next step.
-- Built pages are not yet shown by this project's own screen; a report is still
-  published as a page in the cloud.
-- `tools/selftest.py` is not yet wired into this project's checks; it is run by
-  hand.
+- Built pages are not yet shown by this project's own screen — the link opens
+  the file directly in a browser.
+- The gates run on every build, not in this project's own test run — a change
+  to the tools is only caught the next time someone makes a report.

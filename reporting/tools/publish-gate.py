@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (Artifact) — a report page is built, never hand-written.
+"""PreToolUse hook (Artifact) — a report is a file here, never a page out there.
 
-Every published HTML page must carry the builder's stamp and hash exactly the
-content the builder emitted. A page written by hand, or edited after building,
-is refused: the slot order, the look and the plain-words gate all live in the
-builder, and a hand-cut page silently escapes all three.
+A report the builder made is refused: it is already written to disk, and the
+link the build printed is the whole delivery. Pages the builder did not make
+are none of this hook's business.
 """
 import json
 import sys
@@ -13,8 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 HOW = (
-    "Write the spec (reporting/README.md), then: "
-    "report <spec>.report.json -o <page>.html — and publish the file it writes."
+    "Build it with `report <slug>` and hand over the link it prints. "
+    "The manager reads reports from this machine."
 )
 
 
@@ -42,20 +41,14 @@ def main() -> None:
         return
 
     try:
-        from build import verify
+        from build import STAMP, verify
     except Exception as e:
         deny(f"the report builder will not load ({e}) — fix it before publishing")
         return
 
     page = p.read_text(encoding="utf-8", errors="replace")
-    if "@@REPORT-BUILD@@" in page:
-        deny("this page still carries the unfilled build stamp — rebuild it. " + HOW)
-        return
-    if not verify(page):
-        deny(
-            "this page was not produced by the report builder, or was edited after it was built. "
-            "Agents fill a report, they do not write one. " + HOW
-        )
+    if verify(page) or STAMP in page:
+        deny("a report is not published — it is a file on this machine. " + HOW)
 
 
 if __name__ == "__main__":

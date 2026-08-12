@@ -419,7 +419,9 @@ def main() -> int:
 
     args.out.write_text(page, encoding="utf-8")
     tail = f", {len(warnings)} words to plain up" if warnings else ""
-    print(f"{args.out}  ({len(page) / 1024:.0f} KB, {len(spec['content'])} content sections{tail})")
+    # The link IS the deliverable: it is what the manager is handed in chat.
+    print(f"{args.out.resolve().as_uri()}  "
+          f"({len(page) / 1024:.0f} KB, {len(spec['content'])} content sections{tail})")
     return 0
 
 
