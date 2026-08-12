@@ -59,7 +59,7 @@ Six, in this order, and none of them optional:
 |---|------|-------|
 | 1 | Title | A short noun phrase, six words or fewer. Not a sentence, no explainer after a dash |
 | 2 | What I need from you | The questions themselves, each answerable by clicking. Never a pointer to a decision number |
-| 3 | Where we are | One "now" line, the very next piece of work, then done / drawn-once / not-started |
+| 3 | Where we are | Read from the board — see below |
 | 4 | Content | One card per section. Format is free |
 | 5 | Decisions | Every call already made, each overridable by its number |
 | 6 | Next | What happens if the manager says nothing, then the steps with a cost each |
@@ -67,6 +67,19 @@ Six, in this order, and none of them optional:
 A question reaches slot 2 only when the manager's input is genuinely required.
 Everything else is decided and listed in slot 5, where a single button flags it
 for change.
+
+### Where we are, read from the board
+
+`"status": {"card": "<id>"}` and nothing else. The children of that card become
+the checklist — closed is a tick, claimed or part-finished is the half tick,
+the rest are empty — and the now and next-up lines are the first of each. A
+spec that names a card and also types a status is refused: the board owns all
+three or none of them.
+
+Only the card's direct children reach the page. Their own steps are internal.
+
+Typing the status by hand still works for a report with no card behind it, and
+then it is only as true as whoever typed it.
 
 ### Decision numbers
 
@@ -110,9 +123,10 @@ explains each inline. Past six, the page is written for the wrong reader.
 | Decision numbers never move | The builder, against the committed spec |
 | No markup, colours or sizes in content | The builder refuses to emit a page |
 | Plain words | The builder warns, naming each term and its replacement |
+| A status is the board's or the spec's, never both | The builder refuses to emit a page |
 | Only shelf blocks appear | The builder, by name |
 | A report is never published | `tools/publish-gate.py` refuses a built page |
-| Every gate has teeth | `tools/selftest.py` — 24 faults, each of which must go red |
+| Every gate has teeth | `tools/selftest.py` — 26 faults, each of which must go red |
 
 The gate recognises a page by the builder's hash of its own content, so a
 report cannot reach the cloud by being renamed or lightly edited.
@@ -122,8 +136,6 @@ report cannot reach the cloud by being renamed or lightly edited.
 - The phrasebook is seeded from the terms one project used most; it is not a
   complete list of what a report should not say.
 - Charts are static pictures. No hover readouts, no live data.
-- The checklist and the status are still typed into the spec by hand, so they
-  can disagree with the board. Reading them from the board is the next step.
 - Built pages are not yet shown by this project's own screen — the link opens
   the file directly in a browser.
 - The gates run on every build, not in this project's own test run — a change

@@ -267,7 +267,7 @@ SHELF = {
 
 # Fields holding a machine value, never manager-facing prose. The jargon check
 # and the markup check both skip these.
-OPAQUE = {"kind", "tone", "align", "src", "path", "id", "url", "favicon", "ordered", "n"}
+OPAQUE = {"kind", "tone", "align", "src", "path", "id", "card", "url", "favicon", "ordered", "n"}
 
 
 def render(block: dict, ctx) -> str:

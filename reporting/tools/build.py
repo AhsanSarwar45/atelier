@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blocks import OPAQUE, ReportError, render as render_block  # noqa: E402
+from board import status as board_status  # noqa: E402
 from jargon import jargon, markup  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -152,10 +153,18 @@ def validate(spec: dict, spec_path: Path) -> tuple[list[str], list[str]]:
             bad.append(f"question {i} needs exactly one recommended answer")
 
     status = spec["status"]
-    if not status.get("now"):
-        bad.append("the status slot needs a 'now' line")
-    if not status.get("next_up"):
-        bad.append("the status slot needs 'next_up' — name the very next piece of work")
+    if status.get("card"):
+        typed = [k for k in ("now", "next_up", "items") if status.get(k)]
+        if typed:
+            bad.append(
+                f"the status slot names a card AND types {', '.join(typed)} — the board owns all "
+                "three when a card is named; delete them from the spec"
+            )
+    else:
+        if not status.get("now"):
+            bad.append("the status slot needs a 'now' line")
+        if not status.get("next_up"):
+            bad.append("the status slot needs 'next_up' — name the very next piece of work")
     for it in status.get("items", []):
         if it.get("state") not in ("done", "draft", "todo"):
             bad.append(f"checklist item {it.get('text', '')!r} needs state done, draft or todo")
@@ -244,11 +253,13 @@ def action_card(spec: dict, ctx: Ctx) -> str:
 
 def status_card(spec: dict, ctx: Ctx) -> str:
     s = spec["status"]
+    if s.get("card"):
+        s = board_status(s["card"], ctx.project)
     items = s.get("items", [])
     n = max(len(items), 1)
     done = sum(1 for i in items if i["state"] == "done") / n * 100
     draft = sum(1 for i in items if i["state"] == "draft") / n * 100
-    glyph = {"done": "✓", "draft": "◐", "todo": ""}
+    glyph = {"done": "✓", "draft": "", "todo": ""}
     rows = []
     for it in items:
         tag = f' <span class="pill p-amber">{ctx.text(it["tag"])}</span>' if it.get("tag") else ""
@@ -265,7 +276,7 @@ def status_card(spec: dict, ctx: Ctx) -> str:
         f'<div class="bar"><i style="width:{done:.0f}%"></i><u style="width:{draft:.0f}%"></u></div>'
         '<div class="barkey">'
         '<span><b style="background:var(--green)"></b>Settled</span>'
-        '<span><b style="background:var(--amber)"></b>Drawn once, not yet automatic</span>'
+        '<span><b style="background:var(--amber)"></b>Started, not finished</span>'
         '<span><b style="background:var(--line)"></b>Not started</span>'
         "</div></div>"
         '<ul class="check">' + "".join(rows) + "</ul>"

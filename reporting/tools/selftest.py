@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fault injection on the report gates — each rule must go red on its own fault.
 
-    python3 scripts/report/selftest.py
+    report check
 """
 from __future__ import annotations
 
@@ -115,6 +115,10 @@ def too_many_glosses(s):
     s["glossary"] = [{"term": f"word{i}", "plain": "plain"} for i in range(7)]
 
 
+def card_and_typed_status(s):
+    s["status"]["card"] = "xx-1"
+
+
 case("a complete report builds", None, "", "")
 case("a missing slot", drop_slot, "slot 'status' is missing")
 case("a title that is a sentence", long_title, "title is")
@@ -130,6 +134,7 @@ case("markup in the content", markup_in_text, "an HTML tag")
 case("a colour in the content", colour_in_text, "a colour")
 case("a step with no cost", no_cost, "needs a cost")
 case("more than six glossed terms", too_many_glosses, "six is the ceiling")
+case("a status both read from the board and typed", card_and_typed_status, "the board owns all three")
 
 
 def run() -> int:
@@ -206,9 +211,19 @@ def run() -> int:
         failures.append("a decision rewritten under its old number went unnoticed")
     build.previous = lambda _p: None
 
+    # a card with nothing under it refuses, rather than quietly showing no work
+    spec = copy.deepcopy(GOOD)
+    spec["status"] = {"card": "nope-0"}
+    try:
+        build.build(spec, build.Ctx([], tmp, tmp))
+        failures.append("a card with no work under it: built anyway")
+    except ReportError as e:
+        if "checklist" not in str(e) and "board" not in str(e):
+            failures.append(f"a card with no work under it: unhelpful complaint — {e}")
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 9 - len(failures)}/{len(CASES) + 9} report gates hold")
+    print(f"{len(CASES) + 10 - len(failures)}/{len(CASES) + 10} report gates hold")
     return 1 if failures else 0
 
 
