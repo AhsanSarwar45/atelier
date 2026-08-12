@@ -137,6 +137,8 @@ def main():
     if not match:
         sys.exit(f"the screen does not know a project at {args.project}")
 
+    before = board_says(args.project)
+
     b = Browser()
     try:
         b.send("Page.enable")
@@ -154,10 +156,20 @@ def main():
     if not drawn:
         sys.exit("no column on the screen says which cards it drew — is this the fork?")
 
+    # Other sessions are working the same board, and the screen shows whatever it
+    # read when it loaded. A card that moved while this was looking is not
+    # evidence of anything, so only cards the board placed the same way both
+    # before and after the screen was read are compared.
+    after = board_says(args.project)
+    steady = {c: ids & after.get(c, set()) for c, ids in before.items()}
+    moved = sum(len(ids) for ids in before.values()) - sum(len(ids) for ids in steady.values())
+    if moved:
+        print(f"({moved} card{'s' if moved > 1 else ''} moved while this was looking, "
+              f"and {'they are' if moved > 1 else 'it is'} left out)")
+
     bad = []
-    owed = board_says(args.project)
     for column in COLUMN_OF.values():
-        want = owed.get(column, set())
+        want = steady.get(column, set())
         here = set(drawn.get(column, []))
         elsewhere = {c: set(ids) for c, ids in drawn.items() if c != column}
         for card in sorted(want - here):
