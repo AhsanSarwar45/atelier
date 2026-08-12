@@ -102,6 +102,11 @@ function isEpic(bead: Bead): bead is Epic {
 /**
  * Reusable Kanban column component with header, count badge, and scrollable bead list
  * Renders EpicCard for epics and BeadCard for standalone tasks
+ *
+ * The column carries `data-column` and each card it draws carries `data-bead-id`,
+ * so what reached the screen can be read from outside and compared with what the
+ * board says: scripts/board-columns-agree.py. A child drawn inside an epic card is
+ * not one of these, which is what makes the comparison meaningful.
  */
 export function KanbanColumn({
   status,
@@ -122,6 +127,7 @@ export function KanbanColumn({
         "flex flex-col h-full min-h-0 theme-column",
         "bg-surface-raised/30 border border-b-default/50"
       )}
+      data-column={status}
       style={{ '--column-accent': getColumnAccentColor(status) } as React.CSSProperties}
     >
       {/* Column Header - fixed height with colored accent border */}
@@ -141,12 +147,10 @@ export function KanbanColumn({
       {/* Scrollable Bead List */}
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
         <div className="space-y-3">
-          {beads.map((bead) => {
-            // Render EpicCard for epics, BeadCard for standalone tasks
-            if (isEpic(bead)) {
-              return (
+          {beads.map((bead) => (
+            <div key={bead.id} data-bead-id={bead.id}>
+            {isEpic(bead) ? (
                 <EpicCard
-                  key={bead.id}
                   epic={bead}
                   allBeads={allBeads}
                   ticketNumber={ticketNumbers?.get(bead.id)}
@@ -157,20 +161,17 @@ export function KanbanColumn({
                   projectPath={projectPath}
                   onUpdate={onUpdate}
                 />
-              );
-            }
-
-            return (
-              <BeadCard
-                key={bead.id}
-                bead={bead}
-                allBeads={allBeads}
-                ticketNumber={ticketNumbers?.get(bead.id)}
-                isSelected={selectedBeadId === bead.id}
-                onSelect={onSelectBead}
-              />
-            );
-          })}
+            ) : (
+                <BeadCard
+                  bead={bead}
+                  allBeads={allBeads}
+                  ticketNumber={ticketNumbers?.get(bead.id)}
+                  isSelected={selectedBeadId === bead.id}
+                  onSelect={onSelectBead}
+                />
+            )}
+            </div>
+          ))}
           {beads.length === 0 && (
             <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-b-strong/50 rounded-lg">
               <PackageOpen className="size-8 text-t-muted mb-2" aria-hidden="true" />
