@@ -405,6 +405,7 @@ def build(spec: dict, ctx: Ctx) -> str:
     js = (HERE / "page.js").read_text(encoding="utf-8")
 
     return (
+        '<meta charset="utf-8">\n'
         f"<title>{ctx.text(spec['title'])}</title>\n"
         f"<!-- built by scripts/report/build.py — {STAMP} -->\n"
         f"<style>{css}</style>\n"

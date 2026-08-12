@@ -274,9 +274,18 @@ def run() -> int:
     if "under way" not in st["next_up"]:
         failures.append(f"with nothing unstarted, next up reads as finished — {st['next_up']!r}")
 
+    # a job's own steps reach the reader by purpose, not by this system's name
+    board_mod.children = lambda card, project: [
+        {"id": "s", "status": "open", "labels": ["step:build", "of:x"],
+         "title": "Build: the whole goal title again"},
+    ]
+    st = board_mod.status("x", tmp)
+    if st["items"][0]["text"] != "Build it":
+        failures.append(f"a job's step reached the reader as {st['items'][0]['text']!r}")
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 14 - len(failures)}/{len(CASES) + 14} report gates hold")
+    print(f"{len(CASES) + 15 - len(failures)}/{len(CASES) + 15} report gates hold")
     return 1 if failures else 0
 
 

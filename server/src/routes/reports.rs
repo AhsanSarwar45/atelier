@@ -116,7 +116,12 @@ pub async fn report_page(Query(p): Query<PageParams>) -> impl IntoResponse {
     }
 
     match std::fs::read_to_string(&built) {
-        Ok(html) => ([(axum::http::header::CONTENT_TYPE, "text/html")], html).into_response(),
+        // Without the charset the browser reads the page as windows-1252.
+        Ok(html) => (
+            [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            html,
+        )
+            .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("built page unreadable: {e}")).into_response(),
     }
 }

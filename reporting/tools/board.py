@@ -27,6 +27,30 @@ STATE = {
 # runs down the list once and stops where the work stops.
 ORDER = {"done": 0, "draft": 1, "todo": 2}
 
+# A job's own steps are titled in this system's vocabulary and repeat the goal's
+# title after it. What the reader is owed is the step's purpose, in their words.
+STEP_LABEL = "step:"
+STEPS = {
+    "prove": "Reproduce it",
+    "ground": "Read the sources",
+    "design": "Decide the shape",
+    "build": "Build it",
+    "verify": "Check that it works",
+    "test": "Stop it coming back",
+    "record": "Write it up",
+    "review": "Have someone else read it",
+    "land": "Merge it",
+}
+
+
+def _title(kid: dict) -> str:
+    """What this row of the checklist is called."""
+    for label in kid.get("labels", []):
+        if label.startswith(STEP_LABEL):
+            name = label[len(STEP_LABEL):]
+            return STEPS.get(name, name.capitalize())
+    return kid.get("title", kid["id"])
+
 
 def children(card: str, project: Path) -> list[dict]:
     """The card's direct children, in board order, closed ones included."""
@@ -84,7 +108,7 @@ def status(card: str, project: Path) -> dict:
         state = STATE.get(k.get("status", "open"), "todo")
         if state != "done" and (state == "draft" or _under_way(k["id"], project)):
             state = "draft"
-        items.append({"state": state, "text": k.get("title", k["id"])})
+        items.append({"state": state, "text": _title(k)})
     items.sort(key=lambda i: ORDER[i["state"]])
 
     doing = [i["text"] for i in items if i["state"] == "draft"]
