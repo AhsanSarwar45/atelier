@@ -87,10 +87,11 @@ export function BeadDetail({
   /**
    * Whether the panel has been told to move yet.
    *
-   * The panel is mounted at the same moment it is asked to open, so painting it
-   * open straight away gives the browser nothing to animate from — that is why
-   * this one appeared instantly while every other panel slid. It is parked
-   * off-screen for one painted frame first, and only then let go.
+   * The panel is mounted at the same moment it is asked to open, so binding the
+   * slide to `open` paints it already arrived and the browser has nothing to
+   * animate from — that is why this one appeared instantly while every other
+   * panel slid. Starting here at false parks it for the first paint, and the
+   * effect below lets it go on the next one.
    */
   const [slid, setSlid] = useState(false);
   useEffect(() => {
@@ -98,15 +99,7 @@ export function BeadDetail({
       setSlid(false);
       return;
     }
-    // Two frames: the first paints it parked, the second starts the transition.
-    let second = 0;
-    const first = requestAnimationFrame(() => {
-      second = requestAnimationFrame(() => setSlid(true));
-    });
-    return () => {
-      cancelAnimationFrame(first);
-      cancelAnimationFrame(second);
-    };
+    setSlid(true);
   }, [open]);
 
   // Close on Escape key
