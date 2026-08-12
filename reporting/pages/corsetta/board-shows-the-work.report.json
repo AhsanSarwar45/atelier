@@ -1,10 +1,10 @@
 {
   "title": "The Board Shows The Work",
-  "eyebrow": "Three faults you named, all fixed and each one now checked automatically",
+  "eyebrow": "Three faults you named are fixed, checked and now running; the fourth is a job of its own",
 
   "actions": {
     "none": true,
-    "fyi": "Nothing is waiting on you. One round of review by fresh eyes is still owed on the column work, and I cannot be the one to do it."
+    "fyi": "Nothing is waiting on you. The outside round of review has been done and the screen you are looking at is the fixed one. The fourth thing you named — a card never showing its two tags — was living in this job's notes instead of on the board; it is now a job of its own and I start it next unless you say otherwise."
   },
 
   "status": {
@@ -109,6 +109,31 @@
           ]
         }
       ]
+    },
+    {
+      "label": "The outside round of review",
+      "lead": "Read by someone who had not written any of it, once, as you asked.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "One fault found, and fixed",
+              "note": "A job that is itself being worked, while one of its steps sits waiting to land, was filed under In Review rather than In Progress — the job's own state was being read as a last resort instead of counting as work like any other. It now counts, and a case that fails without the fix holds it there."
+            },
+            {
+              "title": "Two more filed rather than fixed",
+              "note": "Searching for a step empties the whole board, because the search matches the step and the screen only draws jobs. And the ring chart on the home page counts by a different rule from the columns beside it, so the two disagree. Both are outside what this job promised, and both are now cards."
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The screen you are looking at is the fixed one",
+          "text": "The running screen had been left on a build made before the review, so the fix was not actually in front of you. It was rebuilt and restarted, and the card-by-card check was run again against what is now serving: every column agrees with the work list."
+        }
+      ]
     }
   ],
 
@@ -128,14 +153,25 @@
       "id": "D3",
       "title": "The two drawers are allowed to be different widths",
       "why": "A drawer holding a document and a drawer holding a card's details are not the same thing, and forcing them to match would have made the report unreadable. The rule they both keep is that neither takes more than half the screen."
+    },
+    {
+      "id": "D4",
+      "title": "A card's own state is work like any other",
+      "why": "Being worked beats waiting to land wherever either is found, on the card itself or anywhere below it. The alternative — the card's own state only breaking a tie nobody else claimed — is what put a job that was moving into the waiting column."
+    },
+    {
+      "id": "D5",
+      "title": "The tags become their own job rather than a fifth fix here",
+      "why": "Showing both tags on a card face and filtering by them is new work with its own before-and-after, not a defect in the column rule. Bolting it on would have left this job with two things to prove and neither one checked."
     }
   ],
 
   "next": {
-    "if_nothing": "The screen stays correct and the checks keep it that way; the one round of outside review stays owed.",
+    "if_nothing": "I start the tags job: both tags on every card face, and a filter beside the type filter.",
     "steps": [
-      { "step": "Someone who did not write this reviews it once", "cost": "small", "starting": true },
-      { "step": "Every line of a report's checklist stops repeating the goal's title", "cost": "small" },
+      { "step": "Every card shows its system and its kind, and you can filter by either", "cost": "medium", "starting": true },
+      { "step": "Searching for a step finds it instead of emptying the board", "cost": "small" },
+      { "step": "The ring chart and the columns count the same way", "cost": "small" },
       { "step": "Buttons on a report that write straight back to the work list", "cost": "medium" }
     ]
   }
