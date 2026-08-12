@@ -72,6 +72,7 @@ export type BeadStatus = 'open' | 'in_progress' | 'inreview' | 'closed';
  */
 export type KnownRawStatus =
   | BeadStatus
+  | 'in_review'
   | 'blocked'
   | 'deferred'
   | 'tombstone'
@@ -101,6 +102,7 @@ export const STATUS_MAP: Record<KnownRawStatus, { column: BeadStatus; badge?: St
   inreview:    { column: 'inreview' },
   closed:      { column: 'closed' },
   // Synonyms
+  in_review:   { column: 'inreview' },   // what bd writes for this column
   done:        { column: 'closed' },
   resolved:    { column: 'closed' },
   pending:     { column: 'open' },

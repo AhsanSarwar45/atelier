@@ -159,13 +159,22 @@ export default function KanbanBoard() {
   );
 
   /**
-   * Filter to only top-level beads (no parent_id)
+   * The cards the columns draw: every top-level bead, plus any child that is
+   * actually under way.
+   *
+   * A child normally belongs inside its epic card, not in a column. But an epic
+   * stays open until its last child closes, so with children-only filtering the
+   * whole working layer is invisible — nothing ever reaches In Progress. A child
+   * that is in progress or in review is therefore drawn as its own card; one that
+   * nobody has started stays inside its epic, so Open does not fill with them.
+   *
    * Then apply the issue type filter ("all" or a specific type).
    * Unknown/missing issue types resolve to "task" via getIssueTypeMeta.
-   * Child tasks should not appear in columns - they appear inside epic cards
    */
   const topLevelBeads = useMemo(() => {
-    const topLevel = filteredBeads.filter(b => !b.parent_id);
+    const topLevel = filteredBeads.filter(
+      b => !b.parent_id || b.status === "in_progress" || b.status === "inreview"
+    );
 
     // Apply issue type filter
     if (typeFilter === "all") return topLevel;

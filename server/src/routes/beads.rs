@@ -329,7 +329,8 @@ fn upsert_counts_cache(
         match bead.status.as_str() {
             "open" => open += 1,
             "in_progress" => in_progress += 1,
-            "inreview" => inreview += 1,
+            // bd writes `in_review`; this screen has always called the column `inreview`.
+            "inreview" | "in_review" => inreview += 1,
             "closed" => closed += 1,
             _ => {}
         }
