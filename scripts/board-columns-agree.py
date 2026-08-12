@@ -25,28 +25,54 @@ import websocket  # pip install websocket-client
 
 PORT = 9333
 
-# What each column owes the board. `steps` says whether a card with a parent has
-# to be drawn there in its own right: work under way must be visible wherever it
-# sits, while a finished step belongs inside the goal it finished, not as its own
-# tombstone in Closed. A status named nowhere here is one the screen deliberately
-# folds into Open with a badge, and is not compared.
-COLUMN_OF = {
-    "in_progress": ("in_progress", True),
-    "in_review": ("inreview", True),
-    "closed": ("closed", False),
-}
+# The column each board status answers to. A status named nowhere here is one the
+# screen deliberately folds into Open with a badge, and is not compared.
+COLUMN_OF = {"in_progress": "in_progress", "in_review": "inreview", "closed": "closed"}
+
+# Live work pulls the card it belongs to along, the first of these that is found.
+LIVE = ["in_progress", "in_review"]
 
 
-def board_says(project, status, steps):
-    """The ids `bd` holds at this status, and that this column owes a card."""
-    out = subprocess.run(
-        ["bd", "list", "--status", status, "--json"],
-        cwd=project, capture_output=True, text=True,
-    )
+def bd_list(project, *args):
+    out = subprocess.run(["bd", "list", *args, "--all", "--json"],
+                         cwd=project, capture_output=True, text=True)
     if out.returncode != 0:
-        sys.exit(f"bd list --status {status} failed:\n{out.stderr.strip()}")
-    return {b["id"] for b in json.loads(out.stdout or "[]")
-            if steps or not b.get("parent")}
+        sys.exit(f"bd list {' '.join(args)} failed:\n{out.stderr.strip()}")
+    return json.loads(out.stdout or "[]")
+
+
+def board_says(project):
+    """Which column each card of the board's own belongs in.
+
+    The screen draws one card per job: a step is not a card of its own, so a
+    goal stands in for whatever is happening below it. A goal with live work
+    under it belongs in that work's column however open its own record still
+    says it is; with nothing live under it, its own status decides.
+    """
+    cards = bd_list(project)
+    kids = {}
+    for b in cards:
+        if b.get("parent"):
+            kids.setdefault(b["parent"], []).append(b["id"])
+    status = {b["id"]: b["status"] for b in cards}
+
+    def live_below(card, seen=None):
+        seen = seen or set()
+        if card in seen:
+            return None
+        seen.add(card)
+        below = [status[k] for k in kids.get(card, [])]
+        below += [d for d in (live_below(k, seen) for k in kids.get(card, [])) if d]
+        return next((s for s in LIVE if s in below), None)
+
+    want = {}
+    for b in cards:
+        if b.get("parent"):
+            continue
+        column = COLUMN_OF.get(live_below(b["id"]) or b["status"])
+        if column:
+            want.setdefault(column, set()).add(b["id"])
+    return want
 
 
 class Browser:
@@ -129,17 +155,16 @@ def main():
         sys.exit("no column on the screen says which cards it drew — is this the fork?")
 
     bad = []
-    for status, (column, steps) in COLUMN_OF.items():
-        want = board_says(args.project, status, steps)
-        if not want:
-            continue
+    owed = board_says(args.project)
+    for column in COLUMN_OF.values():
+        want = owed.get(column, set())
         here = set(drawn.get(column, []))
         elsewhere = {c: set(ids) for c, ids in drawn.items() if c != column}
         for card in sorted(want - here):
             where = next((c for c, ids in elsewhere.items() if card in ids), None)
-            bad.append(f"{card} is {status} on the board but "
+            bad.append(f"{card} belongs under {column} but is "
                        + (f"drawn under {where}" if where else "drawn nowhere"))
-        print(f"{status:<12} board {len(want):>3}   screen {len(here):>3}")
+        print(f"{column:<12} board {len(want):>3}   screen {len(here):>3}")
 
     if bad:
         print("\nthe screen and the board disagree:")

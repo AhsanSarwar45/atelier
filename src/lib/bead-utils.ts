@@ -130,22 +130,48 @@ export function isBlocked(
 }
 
 /**
- * The beads the kanban columns draw as cards of their own.
- *
- * A child normally belongs inside its epic card, not in a column. But an epic
- * stays open until its last child closes, so drawing only parents leaves the
- * whole working layer invisible — nothing ever reaches In Progress however many
- * sessions are claiming steps. A child that is in progress or in review is
- * therefore a card in its own right; one nobody has started stays inside its
- * epic, so Open does not fill with unstarted steps and Closed does not fill
- * with finished ones.
+ * The beads the kanban columns draw as cards of their own: the goals and the
+ * standalone tasks. A step belongs inside the goal it is a step of, which is
+ * where the goal card already lists it with its own state.
  *
  * @param beads - Beads whose status has already been mapped to a column.
  */
 export function drawnInColumns<T extends { status: string; parent_id?: string }>(
   beads: ReadonlyArray<T>,
 ): T[] {
-  return beads.filter(
-    (b) => !b.parent_id || b.status === "in_progress" || b.status === "inreview",
-  );
+  return beads.filter((b) => !b.parent_id);
+}
+
+/**
+ * The column a card belongs in, which is the column of the work happening
+ * under it.
+ *
+ * A goal keeps its own status until somebody closes it, so a goal whose steps
+ * are being worked still reads `open`. Grouping by the stored status alone
+ * leaves every job in Open however many sessions are on it, and In Progress
+ * empty. The live work wins: anything under way anywhere below the card pulls
+ * the card into that column, in progress ahead of in review. A card with
+ * nothing under it keeps its own status.
+ *
+ * Derived for display only — the board's own record is never rewritten from here.
+ *
+ * @param bead - The card to place.
+ * @param byId - Every bead on the board, by id, for walking children.
+ */
+export function columnFor<T extends { id: string; status: string; children?: string[] | null }>(
+  bead: T,
+  byId: ReadonlyMap<string, T>,
+  seen: Set<string> = new Set(),
+): string {
+  if (seen.has(bead.id)) return bead.status; // a cycle in the graph is not a reason to hang
+  seen.add(bead.id);
+
+  const below = (bead.children ?? [])
+    .map((id) => byId.get(id))
+    .filter((k): k is T => k !== undefined)
+    .map((k) => columnFor(k, byId, seen));
+
+  if (below.includes("in_progress")) return "in_progress";
+  if (below.includes("inreview")) return "inreview";
+  return bead.status;
 }

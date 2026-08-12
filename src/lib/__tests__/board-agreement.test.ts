@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { drawnInColumns } from "@/lib/bead-utils";
+import { columnFor, drawnInColumns } from "@/lib/bead-utils";
 import { STATUS_MAP } from "@/types";
 
 /**
@@ -64,34 +64,68 @@ describe("every status the board can hold has a column", () => {
   });
 });
 
-describe("the columns draw the work that is under way", () => {
+describe("the columns draw one card per job", () => {
   const goal = { id: "g", status: "open" };
   const step = (status: string) => ({ id: `s-${status}`, status, parent_id: "g" });
 
-  it("a step being worked is a card of its own", () => {
-    const drawn = drawnInColumns([goal, step("in_progress")]).map((b) => b.id);
-    expect(drawn).toContain("s-in_progress");
-  });
-
-  it("a step waiting to land is a card of its own", () => {
-    const drawn = drawnInColumns([goal, step("inreview")]).map((b) => b.id);
-    expect(drawn).toContain("s-inreview");
-  });
-
-  it("a step nobody has started stays inside its goal", () => {
-    const drawn = drawnInColumns([goal, step("open")]).map((b) => b.id);
+  it("a step is not a card of its own, whatever it is doing", () => {
+    const drawn = drawnInColumns([goal, step("in_progress"), step("open")]).map((b) => b.id);
     expect(drawn).toEqual(["g"]);
   });
+});
 
-  it("a finished step stays inside the goal it finished", () => {
-    const drawn = drawnInColumns([goal, step("closed")]).map((b) => b.id);
-    expect(drawn).toEqual(["g"]);
+describe("a card sits in the column of the work under it", () => {
+  type Node = { id: string; status: string; children?: string[] };
+  const board = (...nodes: Node[]) => new Map(nodes.map((n) => [n.id, n]));
+
+  it("a goal whose step is claimed is in progress, not open", () => {
+    // The shape that produced the report: the goal stays `open` on the board
+    // until its last step closes, so its own status never says it is moving.
+    const goal = { id: "g", status: "open", children: ["s1", "s2"] };
+    const map = board(goal, { id: "s1", status: "closed" }, { id: "s2", status: "in_progress" });
+    expect(columnFor(goal, map)).toBe("in_progress");
   });
 
-  it("a board of nothing but steps still fills In Progress", () => {
-    // The shape that produced the report: every claimed card is a child.
-    const board = [goal, step("open"), step("in_progress"), step("closed")];
-    const inProgress = drawnInColumns(board).filter((b) => b.status === "in_progress");
-    expect(inProgress).toHaveLength(1);
+  it("a goal whose remaining work is waiting to land is in review", () => {
+    const goal = { id: "g", status: "open", children: ["s1", "s2"] };
+    const map = board(goal, { id: "s1", status: "closed" }, { id: "s2", status: "inreview" });
+    expect(columnFor(goal, map)).toBe("inreview");
+  });
+
+  it("work being done wins over work waiting to land", () => {
+    const goal = { id: "g", status: "open", children: ["s1", "s2"] };
+    const map = board(goal, { id: "s1", status: "inreview" }, { id: "s2", status: "in_progress" });
+    expect(columnFor(goal, map)).toBe("in_progress");
+  });
+
+  it("a goal nobody has started keeps its own status", () => {
+    const goal = { id: "g", status: "open", children: ["s1"] };
+    expect(columnFor(goal, board(goal, { id: "s1", status: "open" }))).toBe("open");
+  });
+
+  it("a closed goal stays closed once its steps are done", () => {
+    const goal = { id: "g", status: "closed", children: ["s1"] };
+    expect(columnFor(goal, board(goal, { id: "s1", status: "closed" }))).toBe("closed");
+  });
+
+  it("work two levels down still pulls the goal along", () => {
+    // `job under` hangs the real work below a step, so the live card is a
+    // grandchild of the goal and a single level of lookup would miss it.
+    const goal = { id: "g", status: "open", children: ["s1"] };
+    const map = board(goal,
+      { id: "s1", status: "open", children: ["w1"] },
+      { id: "w1", status: "in_progress" });
+    expect(columnFor(goal, map)).toBe("in_progress");
+  });
+
+  it("a card with nothing under it keeps its own status", () => {
+    const lone = { id: "t", status: "in_progress" };
+    expect(columnFor(lone, board(lone))).toBe("in_progress");
+  });
+
+  it("a loop in the graph does not hang the screen", () => {
+    const a = { id: "a", status: "open", children: ["b"] };
+    const b = { id: "b", status: "open", children: ["a"] };
+    expect(columnFor(a, board(a, b))).toBe("open");
   });
 });

@@ -35,7 +35,7 @@ import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
 import { useTheme } from "@/hooks/use-theme";
 import { useWorktreeStatuses } from "@/hooks/use-worktree-statuses";
-import { drawnInColumns, isBlocked } from "@/lib/bead-utils";
+import { columnFor, drawnInColumns, isBlocked } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
@@ -172,8 +172,9 @@ export default function KanbanBoard() {
   }, [filteredBeads, typeFilter]);
 
   /**
-   * Group top-level beads by status for columns.
-   * Defensive: falls back to 'open' for any status not in the 4 columns.
+   * Group the drawn beads into columns. A card follows the work happening under
+   * it (columnFor), so a goal whose steps are being worked is not left in Open.
+   * Defensive: falls back to 'open' for any column not among the 4.
    */
   const filteredBeadsByStatus = useMemo(() => {
     const grouped: Record<BeadStatus, Bead[]> = {
@@ -182,12 +183,14 @@ export default function KanbanBoard() {
       inreview: [],
       closed: [],
     };
+    const byId = new Map(beads.map(b => [b.id, b]));
     for (const bead of topLevelBeads) {
-      const column = grouped[bead.status] ? bead.status : 'open';
+      const live = columnFor(bead, byId) as BeadStatus;
+      const column = grouped[live] ? live : 'open';
       grouped[column].push(bead);
     }
     return grouped;
-  }, [topLevelBeads]);
+  }, [topLevelBeads, beads]);
 
   /**
    * Detect beads with truly unknown statuses for the warning indicator.
