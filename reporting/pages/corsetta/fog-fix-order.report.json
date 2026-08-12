@@ -2,25 +2,8 @@
   "title": "Fog Fix Order",
   "eyebrow": "Design checkpoint — before build",
   "actions": {
-    "questions": [
-      {
-        "ask": "The fix can open a visible seam along the horizon. Do I build the guard against that first, or wire it up and chase seams if they show?",
-        "options": [
-          {
-            "label": "Guard first",
-            "say": "Build the horizon guard first, then wire the exact fog.",
-            "pick": true,
-            "note": "Half a day before anything changes on screen. The seam is the one way this fix can look worse than what it replaces, and it would show on every foggy horizon"
-          },
-          {
-            "label": "Wire first",
-            "say": "Wire the exact fog now; add the horizon guard afterwards.",
-            "note": "Pictures sooner. If a seam appears I would be judging it by eye instead of by a number, and it can reach a build before anyone looks"
-          }
-        ],
-        "note": "Right now the sky and the near air can't disagree at the horizon, because they run the same code. The fix deliberately gives them different treatment, so that free agreement stops being free."
-      }
-    ]
+    "none": true,
+    "fyi": "Nothing needed from you. You caught the one bad call in this design and it is corrected; the next thing I bring you is pictures and a re-measure."
   },
   "status": {
     "card": "cor-d2o.3"
@@ -179,25 +162,78 @@
       ]
     },
     {
-      "label": "The one risk, and what I want to do about it",
+      "label": "You caught a bad call, and it is corrected",
+      "lead": "I had the sky and the near air solving fog differently — the sky in one go, the near air stretch by stretch. You said that breaks the very thing the job is for. You were right.",
       "blocks": [
         {
           "kind": "note",
-          "tone": "warn",
-          "label": "The horizon seam",
-          "text": "A sky pixel just above the horizon and the furthest ground pixel just below it must look the same. Today they cannot disagree — they are drawn by identical code. This fix gives them different treatment on purpose, so that agreement has to be proved rather than assumed."
+          "tone": "bad",
+          "label": "What I had wrong",
+          "text": "Today those two agree at the horizon because they run identical code — they cannot disagree. My version would have replaced that guarantee with a test watching for it to break, and then asked you which order to manage the risk in. Inventing the risk was the mistake."
         },
         {
           "kind": "note",
           "tone": "info",
-          "label": "The guard",
-          "text": "A test that photographs both sides of the horizon and fails if they part company by more than they already do with fog switched off. That gap is measured first, so the test has a real number behind it rather than a guess."
+          "label": "It also bought nothing",
+          "text": "Solving the whole line at once and solving it stretch by stretch give the identical number — the formula is an exact answer read off the two ends of a stretch, so chopping the line changes nothing. The split was pure divergence for no gain."
+        },
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            "What I showed you",
+            "Corrected"
+          ],
+          "rows": [
+            [
+              "Sky and near air can disagree",
+              {
+                "pill": "possible, needs watching",
+                "tone": "red"
+              },
+              {
+                "pill": "impossible",
+                "tone": "green"
+              }
+            ],
+            [
+              "Approximations left over",
+              {
+                "num": "2"
+              },
+              {
+                "num": "1, and smaller",
+                "tone": "green"
+              }
+            ],
+            [
+              "Patchy fog banks",
+              {
+                "pill": "kept",
+                "tone": "green"
+              },
+              {
+                "pill": "kept",
+                "tone": "green"
+              }
+            ],
+            [
+              "Decisions needed from you",
+              {
+                "num": "1"
+              },
+              {
+                "num": "0",
+                "tone": "green"
+              }
+            ]
+          ]
         },
         {
           "kind": "note",
           "tone": "good",
-          "label": "A second guard, non-negotiable either way",
-          "text": "The yardstick currently checks the fog against a slower copy of itself. Change the fog and the yardstick changes with it, and it would go green however wrong the answer got. Today's fog gets frozen as the thing to be judged against before a line of it moves."
+          "label": "The guard that stays, regardless",
+          "text": "The yardstick currently checks the fog against a slower copy of itself. Change the fog and the yardstick changes with it, and it would go green however wrong the answer got. Today's fog is frozen as the thing to be judged against before a line of it moves."
         }
       ]
     },
@@ -207,8 +243,7 @@
         {
           "kind": "list",
           "items": [
-            "The fog's own glow is not dimmed by the air it sits in. Small, and it gets a measured number rather than an argument.",
-            "The skylight feeding that glow is taken at one height for the sky rather than at every height. Same treatment.",
+            "The fog's own glow is not dimmed by the air it sits in, across a single stretch of the line. Small, and it gets a measured number rather than an argument.",
             "The exact answer describes a flat fog layer on flat ground; a line of sight skimming the horizon is held at a shallow angle rather than curving with the planet. Every such line is already fully fogged, so it is invisible — but it is written down."
           ]
         }
@@ -289,8 +324,9 @@
     },
     {
       "id": "D9",
-      "title": "D3 is answered: fog is solved whole, air stays sampled, and the two multiply",
-      "why": "Dimming from two causes multiplies, so the two can be separated exactly. Fog is the thin, sharp one and gets solved outright; air is the smooth one and stays sampled. That is what removes the error rather than reducing it."
+      "title": "D3 is answered: fog is solved exactly over every stretch the render already walks, everywhere, with no exceptions",
+      "tag": "revised",
+      "why": "Dimming from two causes multiplies, so fog and air separate exactly: fog is the thin sharp one and gets solved outright, air is the smooth one and stays sampled. Revised 13 Aug on your call — the first version let the sky and the near air solve fog at different granularities, which would have broken an agreement at the horizon that is currently free. One rule, both paths, no seam to police."
     },
     {
       "id": "D10",
@@ -304,7 +340,7 @@
     }
   ],
   "next": {
-    "if_nothing": "I build the horizon guard first, then wire the exact fog into the sky and the near air, and come back with pictures and a re-measure.",
+    "if_nothing": "I freeze today's fog as the yardstick, then solve fog exactly in the sky and the near air with one rule, and come back with pictures and a re-measure.",
     "steps": [
       {
         "step": "Freeze today's fog as the thing to judge against, and prove the freeze changed no number",
@@ -312,11 +348,7 @@
         "starting": true
       },
       {
-        "step": "Measure the horizon gap with fog off, and write the guard around it",
-        "cost": "small"
-      },
-      {
-        "step": "Solve fog whole in the sky and in the near air; delete the sampled fog in the same change",
+        "step": "Solve fog exactly over every stretch, in the sky and the near air alike; delete the sampled fog in the same change",
         "cost": "medium"
       },
       {
