@@ -175,6 +175,8 @@ async fn main() {
         .route("/api/fs/roots", get(routes::fs::fs_roots))
         .route("/api/fs/open-external", post(routes::fs::open_external))
         .route("/api/bd/command", post(routes::cli::bd_command))
+        .route("/api/reports", get(routes::reports::list_reports))
+        .route("/api/reports/page", get(routes::reports::report_page))
         .route("/api/git/branch-status", get(routes::git::branch_status))
         // Worktree endpoints
         .route("/api/git/worktree-status", get(routes::worktree::worktree_status))

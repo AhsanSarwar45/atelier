@@ -85,3 +85,7 @@ beads-web-darwin-*
 
 # Built report pages are derived from their spec.
 reporting/pages/**/*.html
+
+# Python bytecode from the report builder
+__pycache__/
+*.pyc

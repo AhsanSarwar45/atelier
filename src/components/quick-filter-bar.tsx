@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 
-import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes } from 'lucide-react';
+import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, FileText } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -73,6 +73,9 @@ interface QuickFilterBarProps {
   isAgentsOpen?: boolean;
   /** Callback to toggle agents panel */
   onAgentsToggle?: () => void;
+  /** Reports panel */
+  isReportsOpen?: boolean;
+  onReportsToggle?: () => void;
   /** Whether the project has a filesystem path (not dolt-only) */
   hasProjectPath?: boolean;
   /** Count of beads with truly unknown statuses */
@@ -123,6 +126,8 @@ export function QuickFilterBar({
   onMemoryToggle,
   isAgentsOpen,
   onAgentsToggle,
+  isReportsOpen,
+  onReportsToggle,
   hasProjectPath = true,
   unknownStatusCount = 0,
   unknownStatusNames = [],
@@ -283,6 +288,24 @@ export function QuickFilterBar({
         >
           <Bot className="size-4" aria-hidden="true" />
           Agents
+        </button>
+      )}
+
+      {/* Reports Toggle */}
+      {onReportsToggle && (
+        <button
+          type="button"
+          onClick={onReportsToggle}
+          aria-pressed={isReportsOpen}
+          className={cn(
+            'h-8 px-3 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised',
+            isReportsOpen
+              ? 'bg-epic/20 text-epic'
+              : 'bg-surface-overlay/50 text-t-tertiary hover:text-t-secondary'
+          )}
+        >
+          <FileText className="size-4" aria-hidden="true" />
+          Reports
         </button>
       )}
 

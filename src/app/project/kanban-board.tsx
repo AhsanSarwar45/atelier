@@ -16,6 +16,7 @@ import { KanbanColumn } from "@/components/kanban-column";
 import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
+import { CardReportButton, ReportPanel } from "@/components/report-panel";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -111,6 +112,9 @@ export default function KanbanBoard() {
 
   // Agents panel state
   const [isAgentsOpen, setIsAgentsOpen] = useState(false);
+
+  // Reports panel state
+  const [isReportsOpen, setIsReportsOpen] = useState(false);
 
   // Create bead dialog state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -337,6 +341,8 @@ export default function KanbanBoard() {
           // Agents
           isAgentsOpen={isAgentsOpen}
           onAgentsToggle={() => setIsAgentsOpen((prev) => !prev)}
+          isReportsOpen={isReportsOpen}
+          onReportsToggle={() => setIsReportsOpen((prev) => !prev)}
           // Filesystem features require a real project path
           hasProjectPath={!isDoltOnly}
           // Unknown status warning
@@ -392,6 +398,7 @@ export default function KanbanBoard() {
           onChildClick={openBead}
           onUpdate={refreshBeads}
         >
+          <CardReportButton card={detailBead.id} projectPath={fsPath ?? ""} />
           <CommentList
             comments={detailBead.comments}
             beadId={detailBead.id}
@@ -407,6 +414,15 @@ export default function KanbanBoard() {
           />
         </BeadDetail>
       )}
+      </ErrorBoundary>
+
+      {/* Reports Panel */}
+      <ErrorBoundary label="Reports Panel">
+        <ReportPanel
+          open={isReportsOpen}
+          onOpenChange={setIsReportsOpen}
+          projectPath={fsPath ?? ""}
+        />
       </ErrorBoundary>
 
       {/* Memory Panel (requires filesystem path) */}
