@@ -2,62 +2,28 @@
   "title": "Fog Fix Order",
   "eyebrow": "Design checkpoint — before build",
   "actions": {
-    "none": true,
-    "fyi": "Nothing needed from you. Everything the sweep raised is now decided or building; the next thing I bring you is pictures."
-  },
-  "status": {
-    "now": "Fog now has one way in for light, and it is proven. Nothing reads the exact fog yet, so nothing looks different on screen.",
-    "next_up": "Route the sky, the reflections and the car and track shading through the exact fog, then show you before and after.",
-    "items": [
+    "questions": [
       {
-        "state": "done",
-        "text": "Built the yardstick that says how wrong the fog is"
-      },
-      {
-        "state": "done",
-        "text": "Ran it with the fog switched off — that result is why this page exists"
-      },
-      {
-        "state": "done",
-        "text": "You approved building the exact fog first"
-      },
-      {
-        "state": "done",
-        "text": "The exact fog is written, runs on the graphics card, and is proven against brute force"
-      },
-      {
-        "state": "done",
-        "text": "Checked the published literature — nobody solves a thin layer by spreading samples"
-      },
-      {
-        "state": "done",
-        "text": "Worked out where the wiring lands — three places, not ten"
-      },
-      {
-        "state": "done",
-        "text": "Wrote both of your lighting rulings into the plan, with owners for every gap they exposed"
-      },
-      {
-        "state": "done",
-        "text": "Swept the whole game for places one body outranks the other"
-      },
-      {
-        "state": "done",
-        "text": "Gave fog one way in for light, the same for every source"
-      },
-      {
-        "state": "todo",
-        "text": "Route the sky, the reflections and the shading through it"
-      },
-      {
-        "state": "todo",
-        "text": "Delete the old sampled fog"
-      },
-      {
-        "state": "todo",
-        "text": "Re-measure and report before and after"
+        "ask": "The fix can open a visible seam along the horizon. Do I build the guard against that first, or wire it up and chase seams if they show?",
+        "options": [
+          {
+            "label": "Guard first",
+            "say": "Build the horizon guard first, then wire the exact fog.",
+            "pick": true,
+            "note": "Half a day before anything changes on screen. The seam is the one way this fix can look worse than what it replaces, and it would show on every foggy horizon"
+          },
+          {
+            "label": "Wire first",
+            "say": "Wire the exact fog now; add the horizon guard afterwards.",
+            "note": "Pictures sooner. If a seam appears I would be judging it by eye instead of by a number, and it can reach a build before anyone looks"
+          }
+        ],
+        "note": "Right now the sky and the near air can't disagree at the horizon, because they run the same code. The fix deliberately gives them different treatment, so that free agreement stops being free."
       }
     ]
+  },
+  "status": {
+    "card": "cor-d2o.3"
   },
   "content": [
     {
@@ -93,187 +59,64 @@
       ]
     },
     {
-      "label": "The exact fog, checked",
-      "lead": "Measured against a brute-force answer computed a completely different way — 480 situations per fog type.",
+      "label": "Re-measured today, and nothing has moved",
+      "lead": "Before designing anything I re-ran the yardstick on today's game. Every number came back identical to the ones this page was built on.",
       "blocks": [
         {
           "kind": "table",
           "columns": [
             "",
             {
-              "name": "Worst error found",
+              "name": "How wrong the shipping fog is",
               "align": "right"
             },
-            "Where"
+            {
+              "name": "The exact formula, same test",
+              "align": "right"
+            }
           ],
           "rows": [
             [
-              "Dimming",
+              "Sky — dimming",
               {
-                "num": "0.0003"
+                "num": "0.86",
+                "tone": "red"
               },
-              "Grazing the horizon"
-            ],
-            [
-              "Brightness",
               {
-                "num": "1.6%"
-              },
-              "Grazing the horizon"
-            ],
-            [
-              "Same measure, shipping sky",
-              {
-                "num": "0.86 and 99%"
-              },
-              "Everywhere fog is dense"
-            ]
-          ]
-        },
-        {
-          "kind": "note",
-          "tone": "good",
-          "label": "Teeth",
-          "text": "Deliberately breaking one sign in the formula throws the answer 100% off and the check goes red."
-        },
-        {
-          "kind": "note",
-          "tone": "info",
-          "label": "The literature agrees",
-          "text": "The dimming half of this formula is published games work from 2006, and nobody fixes a thin layer by spreading samples."
-        }
-      ]
-    },
-    {
-      "label": "Every light the same",
-      "lead": "You are right twice: there is no sunbeam, and there is no sun and moon — one kind of body, one set of rules.",
-      "blocks": [
-        {
-          "kind": "note",
-          "tone": "bad",
-          "label": "I had this wrong",
-          "text": "I told you the moon casts no shadows anywhere. It does — the scene already hands the shadows to whichever body is lighting it, and that crosses over at dusk."
-        },
-        {
-          "kind": "table",
-          "columns": [
-            "Light",
-            "Lights the fog?",
-            "Casts beams in it?",
-            "State"
-          ],
-          "rows": [
-            [
-              "Sun",
-              {
-                "pill": "yes",
+                "num": "0.0003",
                 "tone": "green"
-              },
-              {
-                "pill": "yes",
-                "tone": "green"
-              },
-              "—"
-            ],
-            [
-              "Moon",
-              {
-                "pill": "yes",
-                "tone": "green"
-              },
-              {
-                "pill": "yes",
-                "tone": "green"
-              },
-              "Fixed. Whichever body is lighting the scene throws the beams; at dusk, when both are up, the brighter one does"
-            ],
-            [
-              "Trackside and showroom lights",
-              {
-                "pill": "not yet",
-                "tone": "amber"
-              },
-              {
-                "pill": "not yet",
-                "tone": "amber"
-              },
-              "Nothing left to build in the fog — they just have to be handed to it, and that waits on sorting the scene's lights"
-            ],
-            [
-              "Headlights and brake lights",
-              {
-                "pill": "not yet",
-                "tone": "amber"
-              },
-              {
-                "pill": "not yet",
-                "tone": "amber"
-              },
-              "Same, plus they emit nothing anywhere yet"
-            ]
-          ]
-        },
-        {
-          "kind": "note",
-          "tone": "good",
-          "label": "Now built",
-          "text": "The fog no longer knows which light is which. Proven by deliberately putting the privilege back: the same light then gave two different answers depending on where it sat in the list."
-        },
-        {
-          "kind": "text",
-          "text": "The fix is to stop the fog knowing which body is which: one list, each entry carrying its own shadow, so a beam is simply what a blocked glow looks like."
-        },
-        {
-          "kind": "note",
-          "tone": "good",
-          "label": "So there is no \"add the lamps later\"",
-          "text": "Fog is handed the lights and treats them all the same. A source that did not exist when it was built still works — it just turns up in the list."
-        },
-        {
-          "kind": "table",
-          "columns": [
-            "Swept the whole game for it",
-            "Count",
-            "State"
-          ],
-          "rows": [
-            [
-              "Places one body can do something the other cannot",
-              {
-                "num": "3"
-              },
-              {
-                "pill": "2 fixed, 1 queued",
-                "tone": "amber"
               }
             ],
             [
-              "Places the code calls it the sun when it means either",
+              "Sky — glow",
               {
-                "num": "7"
+                "num": "99%",
+                "tone": "red"
               },
               {
-                "pill": "queued",
-                "tone": "amber"
+                "num": "1.6%",
+                "tone": "green"
               }
             ],
             [
-              "A shape that contradicts itself in one file",
+              "Near air — dimming",
               {
-                "num": "1"
+                "num": "0.009",
+                "tone": "amber"
               },
               {
-                "pill": "queued",
-                "tone": "amber"
+                "num": "0.0003",
+                "tone": "green"
               }
             ],
             [
-              "Things only one body can do that may be correct",
+              "Near air — glow",
               {
-                "num": "1"
+                "num": "24%",
+                "tone": "red"
               },
               {
-                "pill": "decided",
+                "num": "1.6%",
                 "tone": "green"
               }
             ]
@@ -282,78 +125,79 @@
         {
           "kind": "note",
           "tone": "warn",
-          "label": "Why names count",
-          "text": "The naming is what made me report the moon as shadowless — a name that misleads its own reader is as real a fault as a wrong number."
-        },
-        {
-          "kind": "note",
-          "tone": "info",
-          "label": "The test earned its keep",
-          "text": "It caught a lamp being placed about a metre from where it actually is, which would have made every lamp glow the wrong brightness. Fixed the same day."
+          "label": "The near air is not the easy half",
+          "text": "I had assumed only the sky was badly wrong. The air between you and the car is 24% out on the glow as well, over fifteen kilometres and sixty-four checks. Both halves need the fix."
         }
       ]
     },
     {
-      "label": "What the wiring buys",
-      "lead": "Today the sky's fog is worked out once from a fixed point 1.5 m above the ground and reused for everything.",
+      "label": "The fix, and it is smaller than the plan said",
+      "lead": "Fog stops being sampled at points along a line and starts being solved for the whole line at once. The air keeps being sampled — it is smooth, and that is what sampling is good at.",
       "blocks": [
         {
           "kind": "table",
           "columns": [
-            "Effect",
+            "",
             "Today",
             "After"
           ],
           "rows": [
             [
-              "Dense fog reaches the sky",
+              "Fog is worked out by",
+              "Checking a point every kilometre and hoping the layer is there",
+              "Solving the whole line of sight in one go"
+            ],
+            [
+              "Places that have to change",
               {
-                "pill": "no",
-                "tone": "red"
+                "num": "10 believed"
               },
               {
-                "pill": "yes",
+                "num": "2 actual",
                 "tone": "green"
               }
             ],
             [
-              "Drive up out of the fog and see clear sky",
-              {
-                "pill": "impossible",
-                "tone": "red"
-              },
-              {
-                "pill": "works",
-                "tone": "green"
-              }
-            ],
-            [
-              "Fog in car paint matches the fog you see",
-              {
-                "pill": "no",
-                "tone": "red"
-              },
-              {
-                "pill": "yes",
-                "tone": "green"
-              }
-            ],
-            [
-              "Cost of fog per frame",
-              {
-                "pill": "paid on clear days too",
-                "tone": "red"
-              },
-              {
-                "pill": "near zero when off",
-                "tone": "green"
-              }
+              "How much of the job was already done",
+              "—",
+              "The light coming through fog was already exact; only what you see of the fog itself was not"
             ]
           ]
         },
         {
-          "kind": "text",
-          "text": "Smaller than the plan assumed: ten things read the fog, but nine read it from two shared places, so the change lands in three."
+          "kind": "note",
+          "tone": "good",
+          "label": "Why it collapsed to two",
+          "text": "Nine of the ten places do not work fog out at all — they read a finished answer from the sky picture or from the near-air grid. Fix those two and everything downstream is fixed with them."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Patchy fog survives",
+          "text": "Fog banks drifting in patches still work. The exact answer is applied over each stretch of the line rather than the whole of it, so the patchiness is kept and the accuracy is still won."
+        }
+      ]
+    },
+    {
+      "label": "The one risk, and what I want to do about it",
+      "blocks": [
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "The horizon seam",
+          "text": "A sky pixel just above the horizon and the furthest ground pixel just below it must look the same. Today they cannot disagree — they are drawn by identical code. This fix gives them different treatment on purpose, so that agreement has to be proved rather than assumed."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The guard",
+          "text": "A test that photographs both sides of the horizon and fails if they part company by more than they already do with fog switched off. That gap is measured first, so the test has a real number behind it rather than a guess."
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "A second guard, non-negotiable either way",
+          "text": "The yardstick currently checks the fog against a slower copy of itself. Change the fog and the yardstick changes with it, and it would go green however wrong the answer got. Today's fog gets frozen as the thing to be judged against before a line of it moves."
         }
       ]
     },
@@ -361,14 +205,37 @@
       "label": "What this does not cover",
       "blocks": [
         {
-          "kind": "note",
-          "tone": "warn",
-          "label": "Flat ground",
-          "text": "The exact answer describes a flat fog layer on flat ground; a line of sight skimming the horizon is held at a shallow angle rather than curving with the planet."
-        },
+          "kind": "list",
+          "items": [
+            "The fog's own glow is not dimmed by the air it sits in. Small, and it gets a measured number rather than an argument.",
+            "The skylight feeding that glow is taken at one height for the sky rather than at every height. Same treatment.",
+            "The exact answer describes a flat fog layer on flat ground; a line of sight skimming the horizon is held at a shallow angle rather than curving with the planet. Every such line is already fully fogged, so it is invisible — but it is written down."
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Found on the way, now owned",
+      "blocks": [
         {
-          "kind": "text",
-          "text": "Every such line of sight is already fully fogged, so the difference is invisible — but it is an approximation and it is written down as one."
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "A fog fault on the list was already fixed",
+              "note": "The sky's bounce off the ground ignored fog. The one-way-in-for-light work fixed it; that job is dead on arrival"
+            },
+            {
+              "n": "2",
+              "title": "A described feature that was never built",
+              "note": "Three comments explain how a reflection gets its haze from a route that nothing calls"
+            },
+            {
+              "n": "3",
+              "title": "The 250 m rule is not what it was filed as",
+              "note": "Fog is not hand-drawn near the camera — it is switched off entirely, because the grid is too coarse there. This fix removes that reason"
+            }
+          ]
         }
       ]
     }
@@ -419,26 +286,41 @@
       "title": "Nothing places a celestial body by hand; the sky obeys the time and the coordinates",
       "tag": "revised",
       "why": "Ruled 12 Aug. A body's position is a result of when and where you are, never something you set. The hand-set sun and the switch that reaches it are deleted, so a scene, a test or a preset states a time and a place instead."
+    },
+    {
+      "id": "D9",
+      "title": "D3 is answered: fog is solved whole, air stays sampled, and the two multiply",
+      "why": "Dimming from two causes multiplies, so the two can be separated exactly. Fog is the thin, sharp one and gets solved outright; air is the smooth one and stays sampled. That is what removes the error rather than reducing it."
+    },
+    {
+      "id": "D10",
+      "title": "Today's fog is frozen as the thing to be judged against, before anything changes",
+      "why": "Otherwise the yardstick moves with the fix and passes whatever happens. This costs a morning and is the difference between a proof and a claim."
+    },
+    {
+      "id": "D11",
+      "title": "The two approximations the design leaves get measured, not argued",
+      "why": "Both are small on paper. On paper is not a number, and this project does not ship one."
     }
   ],
   "next": {
-    "if_nothing": "I finish the one way in for light, wire the exact fog to everything that reads it, and come back with pictures.",
+    "if_nothing": "I build the horizon guard first, then wire the exact fog into the sky and the near air, and come back with pictures and a re-measure.",
     "steps": [
       {
-        "step": "Finish and prove the one way in for light — each light carries its own shadow",
+        "step": "Freeze today's fog as the thing to judge against, and prove the freeze changed no number",
         "cost": "small",
         "starting": true
       },
       {
-        "step": "Route the sky, the distance haze and the car and track shading through the exact fog",
-        "cost": "medium"
-      },
-      {
-        "step": "Delete the old sampled fog so only one fog exists",
+        "step": "Measure the horizon gap with fog off, and write the guard around it",
         "cost": "small"
       },
       {
-        "step": "Re-run the yardstick and the eight fog captures; report before and after",
+        "step": "Solve fog whole in the sky and in the near air; delete the sampled fog in the same change",
+        "cost": "medium"
+      },
+      {
+        "step": "Re-run the yardstick and the eight fog captures; report before and after, with the cost per frame",
         "cost": "small"
       },
       {
