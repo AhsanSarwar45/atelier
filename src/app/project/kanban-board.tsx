@@ -86,6 +86,7 @@ export default function KanbanBoard() {
     clearFilters,
     hasActiveFilters,
     availableOwners,
+    availableTags,
   } = useBeadFilters(beads, ticketNumbers, 300);
 
   // Issue type filter state ("all" or a specific issue type)
@@ -148,6 +149,16 @@ export default function KanbanBoard() {
       : [...filters.owners, owner];
     setFilters({ owners: newOwners });
   }, [filters.owners, setFilters]);
+
+  /**
+   * Toggle a tag in the filter
+   */
+  const toggleTag = useCallback((tag: string) => {
+    const newTags = filters.tags.includes(tag)
+      ? filters.tags.filter(t => t !== tag)
+      : [...filters.tags, tag];
+    setFilters({ tags: newTags });
+  }, [filters.tags, setFilters]);
 
   // Filter out closed beads to avoid unnecessary polling for finalized tasks
   const beadIds = useMemo(() => beads.filter(b => b.status !== 'closed').map(b => b.id), [beads]);
@@ -335,6 +346,11 @@ export default function KanbanBoard() {
           owners={filters.owners}
           onOwnerToggle={toggleOwner}
           availableOwners={availableOwners}
+          // Tag filter
+          tags={filters.tags}
+          onTagToggle={toggleTag}
+          onTagsClear={() => setFilters({ tags: [] })}
+          availableTags={availableTags}
           onClearFilters={clearFilters}
           hasActiveFilters={hasActiveFilters}
           // Memory

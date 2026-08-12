@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } fro
 
 import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
 
+import { BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { DependencyBadge } from "@/components/dependency-badge";
 import { SubtaskList, ChildPRStatus } from "@/components/subtask-list";
@@ -274,6 +275,7 @@ export function EpicCard({
               <span className="text-xs text-t-muted font-mono shrink-0">{formatBeadId(epic.id)}</span>
               <span className="text-[13px] font-semibold text-t-primary truncate">{epic.title}</span>
               <span className="text-[10px] font-semibold text-epic shrink-0">EPIC</span>
+              <BeadTags bead={epic} className="shrink-0" />
             </div>
             {progressSection}
             {closeButton}
@@ -318,6 +320,7 @@ export function EpicCard({
             <span className="theme-badge text-[10px] px-1.5 py-0.5 bg-surface-overlay text-t-tertiary">
               {progressPercentage}% · {children.length} tasks
             </span>
+            <BeadTags bead={epic} />
             {commentCount > 0 && (
               <span className="text-[10px] text-t-faint">{commentCount} comments</span>
             )}
@@ -371,6 +374,8 @@ export function EpicCard({
         </div>
 
         <h3 className="font-bold text-base leading-tight text-t-primary">{truncate(epic.title, 60)}</h3>
+
+        <BeadTags bead={epic} />
 
         {epic.description && (
           <p className="text-xs text-t-tertiary leading-relaxed">{truncate(epic.description, 100)}</p>

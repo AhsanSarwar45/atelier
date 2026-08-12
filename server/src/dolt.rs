@@ -396,6 +396,7 @@ async fn read_beads_from_conn(
     let beads = query_issues(conn, db_name).await?;
     let mut beads = merge_comments(conn, db_name, beads).await?;
     merge_dependencies(conn, db_name, &mut beads).await?;
+    merge_labels(conn, db_name, &mut beads).await?;
     Ok(beads)
 }
 
@@ -440,8 +441,46 @@ async fn query_issues(conn: &mut mysql_async::Conn, db_name: &str) -> Result<Vec
         design: get_opt_str(row, "design"),
         notes: get_opt_str(row, "notes"),
         parent_id: None, children: None, deps: None,
-        relates_to: None, comments: None, dependencies: None,
+        relates_to: None, comments: None, labels: None, dependencies: None,
     }).collect())
+}
+
+/// Tolerates a missing `labels` table, absent before bd 1.2.
+async fn merge_labels(
+    conn: &mut mysql_async::Conn,
+    db_name: &str,
+    beads: &mut [Bead],
+) -> Result<(), DoltError> {
+    let table_exists: Option<Row> = conn.exec_first(
+        "SELECT TABLE_NAME FROM information_schema.TABLES \
+         WHERE TABLE_SCHEMA = :db AND TABLE_NAME = 'labels'",
+        mysql_async::params! { "db" => db_name },
+    ).await.map_err(|e| DoltError::QueryFailed(format!("labels schema: {}", e)))?;
+    if table_exists.is_none() {
+        return Ok(());
+    }
+
+    let query = format!(
+        "SELECT issue_id, label FROM `{}`.labels ORDER BY issue_id, label",
+        db_name
+    );
+    let rows: Vec<Row> = conn.query(&query).await
+        .map_err(|e| DoltError::QueryFailed(format!("labels: {}", e)))?;
+
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for row in &rows {
+        let label = get_str(row, "label");
+        if label.is_empty() {
+            continue;
+        }
+        map.entry(get_str(row, "issue_id")).or_default().push(label);
+    }
+    for bead in beads {
+        if let Some(labels) = map.remove(&bead.id) {
+            bead.labels = Some(labels);
+        }
+    }
+    Ok(())
 }
 
 /// Queries comments and merges them into beads.

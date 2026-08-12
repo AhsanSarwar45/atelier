@@ -9,6 +9,8 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 
+import { matchesTags, tagValues, LABEL_NAMESPACES } from "@/lib/bead-labels";
+import type { LabelNamespace } from "@/lib/bead-labels";
 import type { Bead, BeadStatus } from "@/types";
 
 /**
@@ -33,6 +35,8 @@ export interface BeadFilters {
   priorities: number[];
   /** Owner/agent filter - empty array means all owners */
   owners: string[];
+  /** Tag filter as raw labels (`area:board`) - empty array means all tags */
+  tags: string[];
   /** Sort field */
   sortField: SortField;
   /** Sort direction */
@@ -59,6 +63,8 @@ export interface UseBeadFiltersResult {
   activeFilterCount: number;
   /** Unique owners extracted from beads */
   availableOwners: string[];
+  /** Tag values present on the beads, per namespace */
+  availableTags: Record<LabelNamespace, string[]>;
   /** Debounced search value (for display) */
   debouncedSearch: string;
 }
@@ -71,6 +77,7 @@ const DEFAULT_FILTERS: BeadFilters = {
   statuses: [],
   priorities: [],
   owners: [],
+  tags: [],
   sortField: "created_at",
   sortDirection: "desc",
   todayOnly: false,
@@ -172,6 +179,15 @@ export function useBeadFilters(
   }, [beads]);
 
   /**
+   * Extract the tag values present on the board, per namespace
+   */
+  const availableTags = useMemo(() => {
+    return Object.fromEntries(
+      LABEL_NAMESPACES.map((namespace) => [namespace, tagValues(beads, namespace)]),
+    ) as Record<LabelNamespace, string[]>;
+  }, [beads]);
+
+  /**
    * Apply all filters to beads and sort
    */
   const filteredBeads = useMemo(() => {
@@ -203,6 +219,9 @@ export function useBeadFilters(
       if (filters.owners.length > 0) {
         if (!filters.owners.includes(bead.owner)) return false;
       }
+
+      // Tag filter - OR inside a namespace, AND across namespaces
+      if (!matchesTags(bead, filters.tags)) return false;
 
       // Today filter - items updated (worked on) today, regardless of status.
       // Uses client-computed todayStr to avoid SSR/client hydration mismatch.
@@ -240,6 +259,7 @@ export function useBeadFilters(
       filters.statuses.length > 0 ||
       filters.priorities.length > 0 ||
       filters.owners.length > 0 ||
+      filters.tags.length > 0 ||
       filters.todayOnly ||
       filters.sortField !== DEFAULT_FILTERS.sortField ||
       filters.sortDirection !== DEFAULT_FILTERS.sortDirection
@@ -254,6 +274,7 @@ export function useBeadFilters(
     if (filters.statuses.length > 0) count++;
     if (filters.priorities.length > 0) count++;
     if (filters.owners.length > 0) count++;
+    if (filters.tags.length > 0) count++;
     if (filters.todayOnly) count++;
     return count;
   }, [filters]);
@@ -266,6 +287,7 @@ export function useBeadFilters(
     hasActiveFilters,
     activeFilterCount,
     availableOwners,
+    availableTags,
     debouncedSearch,
   };
 }

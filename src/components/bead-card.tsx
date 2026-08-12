@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { FolderOpen, GitPullRequest, Link2, MessageSquare, Check, X, Clock } from "lucide-react";
 
+import { BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { Badge } from "@/components/ui/badge";
 import { useTheme } from "@/hooks/use-theme";
@@ -271,6 +272,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
 
         {/* Right badges */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <BeadTags bead={bead} />
           {commentCount > 0 && (
             <span className="flex items-center gap-0.5 text-[11px] text-t-faint">
               <MessageSquare className="size-3" aria-hidden="true" />
@@ -336,6 +338,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
               P{bead.priority}
             </span>
           )}
+          <BeadTags bead={bead} />
           {inlinePRBadge}
           {commentCount > 0 && (
             <span className="text-[10px] text-t-faint px-1">
@@ -409,6 +412,8 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
           <div className="font-semibold text-sm leading-tight">
             {truncate(bead.title, 60)}
           </div>
+
+          <BeadTags bead={bead} />
 
           {/* Description */}
           {bead.description && (

@@ -31,6 +31,7 @@ export const BeadSchema = z.object({
   deps: z.array(z.string()).nullish(),
   blockers: z.array(z.string()).nullish(),
   relates_to: z.array(z.string()).nullish(),
+  labels: z.array(z.string()).nullish(),
   _originalStatus: z.string().nullish(),
   close_reason: z.string().nullish(),
   closed_at: z.string().nullish(),

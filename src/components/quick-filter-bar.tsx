@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 
-import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, FileText } from 'lucide-react';
+import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, FileText, Tag } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +21,8 @@ import {
   TooltipContent,
   TooltipProvider,
 } from '@/components/ui/tooltip';
+import { LABEL_NAMESPACES, LABEL_NAMESPACE_TITLES, parseLabel } from '@/lib/bead-labels';
+import type { LabelNamespace } from '@/lib/bead-labels';
 import { ISSUE_TYPES, getIssueTypeMeta } from '@/lib/issue-types';
 import type { IssueTypeFilter } from '@/lib/issue-types';
 import { cn } from '@/lib/utils';
@@ -61,6 +63,14 @@ interface QuickFilterBarProps {
   onOwnerToggle: (owner: string) => void;
   /** List of available owners */
   availableOwners: string[];
+  /** Active tag filters as raw labels (`area:board`) */
+  tags: string[];
+  /** Callback when a tag filter toggles */
+  onTagToggle: (tag: string) => void;
+  /** Callback that drops every tag filter */
+  onTagsClear: () => void;
+  /** Tag values present on the board, per namespace */
+  availableTags: Record<LabelNamespace, string[]>;
   /** Callback to clear all filters */
   onClearFilters: () => void;
   /** Whether any filters are active */
@@ -120,6 +130,10 @@ export function QuickFilterBar({
   owners,
   onOwnerToggle,
   availableOwners,
+  tags,
+  onTagToggle,
+  onTagsClear,
+  availableTags,
   onClearFilters,
   hasActiveFilters,
   isMemoryOpen,
@@ -138,6 +152,13 @@ export function QuickFilterBar({
   // Active issue-type filter metadata for the type dropdown trigger
   const activeType = typeFilter === 'all' ? null : getIssueTypeMeta(typeFilter);
   const TypeTriggerIcon = activeType?.icon ?? Shapes;
+
+  const tagTriggerLabel =
+    tags.length === 0
+      ? 'All tags'
+      : tags.length === 1
+        ? (parseLabel(tags[0])?.value ?? tags[0])
+        : `${tags.length} tags`;
 
   const handleSortOptionSelect = (value: string) => {
     const option = SORT_OPTIONS.find((opt) => opt.value === value);
@@ -229,6 +250,56 @@ export function QuickFilterBar({
               </DropdownMenuCheckboxItem>
             );
           })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Tag Filter Dropdown */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              'h-8 px-3 gap-1.5 bg-surface-overlay/50 text-sm font-medium',
+              tags.length > 0 ? 'text-t-primary' : 'text-t-tertiary hover:text-t-secondary'
+            )}
+            aria-label="Filter by tag"
+          >
+            <Tag className="size-4 shrink-0" aria-hidden="true" />
+            {tagTriggerLabel}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="bg-surface-raised border-b-default max-h-[60vh] overflow-y-auto">
+          <DropdownMenuCheckboxItem
+            checked={tags.length === 0}
+            onCheckedChange={onTagsClear}
+            className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
+          >
+            All tags
+          </DropdownMenuCheckboxItem>
+          {LABEL_NAMESPACES.map((namespace) => (
+            availableTags[namespace].length > 0 && (
+              <React.Fragment key={namespace}>
+                <DropdownMenuSeparator className="bg-surface-overlay" />
+                <DropdownMenuLabel className="text-t-muted text-xs">
+                  {LABEL_NAMESPACE_TITLES[namespace]}
+                </DropdownMenuLabel>
+                {availableTags[namespace].map((value) => {
+                  const raw = `${namespace}:${value}`;
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={raw}
+                      checked={tags.includes(raw)}
+                      onCheckedChange={() => onTagToggle(raw)}
+                      className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
+                    >
+                      {value}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </React.Fragment>
+            )
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
 
