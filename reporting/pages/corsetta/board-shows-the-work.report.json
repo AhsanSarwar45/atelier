@@ -1,0 +1,95 @@
+{
+  "title": "The Board Shows The Work",
+  "eyebrow": "Fixed and guarded — the screen and the work list now agree on every column",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. One round of review by fresh eyes is still owed, and I cannot be the one to do it."
+  },
+
+  "status": {
+    "card": "cor-um2"
+  },
+
+  "content": [
+    {
+      "label": "What you were looking at",
+      "lead": "Four pieces of work were under way and the screen showed none of them.",
+      "blocks": [
+        {
+          "kind": "compare",
+          "before": { "path": "shots/before-board.png", "caption": "Before — In Progress and In Review both empty" },
+          "after": { "path": "shots/after-board.png", "caption": "After — the four claimed cards and the one waiting to land" }
+        },
+        {
+          "kind": "table",
+          "columns": ["Column", "Work list said", "Screen showed", "Now shows"],
+          "rows": [
+            ["In Progress", "4", "0", "4"],
+            ["In Review", "1", "0", "1"]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Why it was empty",
+      "lead": "Two separate reasons, both of which looked like an idle board rather than a fault.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "Every claimed card was hidden",
+              "note": "A job is a goal with steps under it, and it is always a step that somebody claims. The screen only drew goals, and a goal stays open until its last step finishes — so however many people were working, the middle columns read zero."
+            },
+            {
+              "title": "Finished work fell back into Open",
+              "note": "Work that is written but not yet landed has a name the screen did not recognise, so it was filed under Open with a warning marker instead of reaching In Review."
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "title": "A third one turned up while guarding this",
+          "text": "A card you pin to the top of the list had no column either, and would have dropped into Open the same way. It is fixed too, and it was the new check that found it, not me."
+        }
+      ]
+    },
+    {
+      "label": "What stops it coming back",
+      "lead": "Both faults now fail loudly instead of quietly reading zero.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "The work list is asked directly which states it can put a card in, so a state the screen has no column for fails the test suite rather than silently landing in Open.",
+            "The rule for which cards reach the columns has its own cases, including the exact shape that caused this: a board where every live card is a step.",
+            "A check drives a real browser at the running screen, reads back what each column actually drew, and compares it with the work list card by card. It was switched off twice on purpose — once per fault — and went red both times before being switched back on."
+          ]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "A step under way gets its own card; a finished one does not",
+      "why": "Work in flight has to be visible wherever it sits, or the columns lie. A finished step belongs inside the goal it finished — listing every one of them again in Closed would bury the goals you actually want to read."
+    },
+    {
+      "id": "D2",
+      "title": "The goal card was left where it is rather than dragged along by its steps",
+      "why": "A goal with two live steps can only sit in one column, so it would be wrong for one of them either way, and you still would not see which step was moving."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "The screen stays correct and the checks keep it that way; the one round of outside review stays owed.",
+    "steps": [
+      { "step": "Someone who did not write this reviews it once", "cost": "small", "starting": true },
+      { "step": "Buttons on a report that write straight back to the work list", "cost": "medium" }
+    ]
+  }
+}
