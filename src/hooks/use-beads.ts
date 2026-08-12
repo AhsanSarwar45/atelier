@@ -36,6 +36,9 @@ export interface UseBeadsResult {
   refresh: () => Promise<void>;
 }
 
+/** How often a Dolt-backed board re-checks for changes it was not told about. */
+const BACKSTOP_POLL_MS = 15_000;
+
 /**
  * Empty grouped beads object for initial state
  */
@@ -82,6 +85,9 @@ export function useBeads(projectPath: string): UseBeadsResult {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  // Which store the server answered from, which decides whether the backstop
+  // poll below is needed
+  const [source, setSource] = useState<string | undefined>(undefined);
 
   // Track if initial load has completed
   const hasLoadedRef = useRef(false);
@@ -113,7 +119,9 @@ export function useBeads(projectPath: string): UseBeadsResult {
     try {
       // Incremental fetch: pass updatedAfter on subsequent loads
       const updatedAfter = hasLoadedRef.current ? lastUpdatedRef.current ?? undefined : undefined;
-      const fetchedBeads = await loadProjectBeads(projectPath, { updatedAfter });
+      const { beads: fetchedBeads, source: fetchedSource } =
+        await loadProjectBeads(projectPath, { withSource: true, updatedAfter });
+      setSource(fetchedSource);
 
       // Compute max updated_at from fetched results
       const maxUpdated = fetchedBeads.reduce((max, b) => {
@@ -195,16 +203,22 @@ export function useBeads(projectPath: string): UseBeadsResult {
     }
   }, [watchError, error]);
 
-  // Polling for dolt:// projects (no file watcher available)
+  // Backstop for boards served from Dolt, whether addressed as a dolt:// URL
+  // or opened as a directory: a missed change event costs one interval instead
+  // of a manual refresh. The request only asks for what changed since the last
+  // one, so an idle board costs almost nothing.
+  const needsBackstopPoll =
+    isDoltProject(projectPath) || (source?.startsWith("dolt") ?? false);
+
   useEffect(() => {
-    if (!projectPath || !isDoltProject(projectPath)) return;
+    if (!projectPath || !needsBackstopPoll) return;
 
     const intervalId = setInterval(() => {
       loadBeads();
-    }, 15_000);
+    }, BACKSTOP_POLL_MS);
 
     return () => clearInterval(intervalId);
-  }, [projectPath, loadBeads]);
+  }, [projectPath, needsBackstopPoll, loadBeads]);
 
   return {
     beads,

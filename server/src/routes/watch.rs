@@ -1,8 +1,10 @@
 //! File watcher SSE endpoint for real-time file change notifications.
 //!
-//! Provides Server-Sent Events for monitoring changes to beads issue files.
-//! When the beads file changes, this module also recomputes epic statuses
-//! based on their children's statuses.
+//! Provides Server-Sent Events for monitoring changes to a project's board.
+//! What counts as a change is derived from where the board is actually stored:
+//! a `.beads/issues.jsonl` file, or a Dolt database under `.beads/dolt/`.
+//! For the jsonl store this module also recomputes epic statuses based on
+//! their children's statuses.
 
 use axum::{
     extract::Query,
@@ -13,13 +15,93 @@ use notify::{
     event::ModifyKind, Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, path::PathBuf, time::Duration};
+use std::{
+    convert::Infallible,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
 use super::beads::{recompute_epic_statuses, resolve_issues_path};
 use super::validate_path_security;
+
+/// How long a burst of writes must be quiet before it is reported, in ms.
+/// A single logical board write produces several filesystem writes.
+const DEBOUNCE_MS: u64 = 100;
+
+/// Where a project's board is stored, and therefore what has to change on disk
+/// for the board itself to have changed.
+enum BoardStore {
+    /// Issues live in a `.beads/issues.jsonl` file.
+    Jsonl { file: PathBuf },
+    /// Issues live in a Dolt database under `.beads/dolt/`. Rows are persisted
+    /// into the database's chunk journal, so that is what moves on a write.
+    Dolt { root: PathBuf },
+}
+
+impl BoardStore {
+    /// Decides a project's store from what exists on disk. A Dolt database
+    /// takes precedence: when one is present the read path serves the board
+    /// from it, so it is also what the board changes with.
+    fn resolve(project_path: &Path) -> Self {
+        let dolt_root = project_path.join(".beads").join("dolt");
+        if dolt_root.is_dir() {
+            BoardStore::Dolt { root: dolt_root }
+        } else {
+            BoardStore::Jsonl {
+                file: resolve_issues_path(project_path),
+            }
+        }
+    }
+
+    /// The directory to hand to the filesystem watcher. For the jsonl store
+    /// this is the containing directory, because the file may not exist yet.
+    fn watch_root(&self) -> PathBuf {
+        match self {
+            BoardStore::Jsonl { file } => file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| file.clone()),
+            BoardStore::Dolt { root } => root.clone(),
+        }
+    }
+
+    /// The path reported to the client as the thing that changed.
+    fn reported_path(&self) -> &Path {
+        match self {
+            BoardStore::Jsonl { file } => file,
+            BoardStore::Dolt { root } => root,
+        }
+    }
+
+    /// Whether a filesystem event under the watch root means the board changed.
+    fn is_board_change(&self, changed: &Path) -> bool {
+        match self {
+            BoardStore::Jsonl { file } => {
+                changed.ends_with("issues.jsonl")
+                    || changed.ends_with(".beads")
+                    || changed == file
+            }
+            // Only the database's chunk journal carries rows. Dolt keeps its
+            // query statistics in a second database under the server root and
+            // rewrites it on a background schedule with no board write behind
+            // it; treating that as a change would refresh an idle board.
+            BoardStore::Dolt { .. } => {
+                let mut under_noms = false;
+                for component in changed.components() {
+                    match component.as_os_str().to_str() {
+                        Some("stats") => return false,
+                        Some("noms") => under_noms = true,
+                        _ => {}
+                    }
+                }
+                under_noms
+            }
+        }
+    }
+}
 
 /// Query parameters for the watch endpoint.
 #[derive(Debug, Deserialize)]
@@ -38,18 +120,10 @@ pub struct FileChangeEvent {
     pub change_type: String,
 }
 
-/// SSE endpoint for watching beads file changes.
+/// SSE endpoint for watching a project's board for changes.
 ///
-/// Monitors the `.beads/issues.jsonl` file in the specified project path
-/// and sends SSE events when changes are detected.
-///
-/// # Query Parameters
-///
-/// - `path`: The project directory path to monitor
-///
-/// # Returns
-///
-/// A Server-Sent Events stream of file change notifications.
+/// Takes the project directory as `path`, and returns a Server-Sent Events
+/// stream of board change notifications.
 pub async fn watch_beads(
     Query(params): Query<WatchParams>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -63,17 +137,17 @@ pub async fn watch_beads(
         return Sse::new(ReceiverStream::new(rx));
     }
 
-    let beads_file = resolve_issues_path(&project_path);
+    let store = BoardStore::resolve(&project_path);
 
-    info!("Starting file watcher for: {:?}", beads_file);
+    info!("Starting board watcher for: {:?}", store.reported_path());
 
     // Create channel for events with buffer for debouncing
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(100);
 
     // Spawn the watcher task
     tokio::spawn(async move {
-        if let Err(e) = run_watcher(beads_file, tx).await {
-            error!("File watcher error: {}", e);
+        if let Err(e) = run_watcher(store, tx).await {
+            error!("Board watcher error: {}", e);
         }
     });
 
@@ -85,9 +159,9 @@ pub async fn watch_beads(
     )
 }
 
-/// Runs the file watcher and sends events through the channel.
+/// Runs the board watcher and sends events through the channel.
 async fn run_watcher(
-    beads_file: PathBuf,
+    store: BoardStore,
     tx: mpsc::Sender<Result<Event, Infallible>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create a channel for notify events
@@ -104,115 +178,105 @@ async fn run_watcher(
         Config::default().with_poll_interval(Duration::from_millis(100)),
     )?;
 
-    // Watch the parent directory (.beads) since the file might not exist yet
-    let watch_path = beads_file
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| beads_file.clone());
+    let watch_root = store.watch_root();
 
-    // Create the .beads directory if it doesn't exist
-    if !watch_path.exists() {
-        warn!(
-            "Watch path does not exist, waiting for creation: {:?}",
-            watch_path
-        );
-    }
-
-    // Try to watch the path, or watch parent if it doesn't exist
-    let actual_watch_path = if watch_path.exists() {
-        watch_path.clone()
-    } else if let Some(parent) = watch_path.parent() {
-        if parent.exists() {
-            parent.to_path_buf()
-        } else {
-            error!("Neither watch path nor parent exists: {:?}", watch_path);
-            return Ok(());
-        }
+    // Fall back to the parent when the store's directory has not been created
+    // yet, so a board that appears later still starts reporting.
+    let actual_watch_path = if watch_root.exists() {
+        watch_root.clone()
+    } else if let Some(parent) = watch_root.parent().filter(|p| p.exists()) {
+        warn!("Watch path does not exist yet: {:?}", watch_root);
+        parent.to_path_buf()
     } else {
-        error!("No valid path to watch: {:?}", watch_path);
+        error!("Neither watch path nor parent exists: {:?}", watch_root);
         return Ok(());
     };
 
     watcher.watch(&actual_watch_path, RecursiveMode::Recursive)?;
-    info!("File watcher active on: {:?}", actual_watch_path);
+    info!("Board watcher active on: {:?}", actual_watch_path);
+
+    let reported_path = store.reported_path().to_string_lossy().to_string();
 
     // Send initial connection event
     let connect_event = Event::default().data(
         serde_json::to_string(&FileChangeEvent {
-            path: beads_file.to_string_lossy().to_string(),
+            path: reported_path.clone(),
             change_type: "connected".to_string(),
         })
         .unwrap_or_default(),
     );
     let _ = tx.send(Ok(connect_event)).await;
 
-    // Debounce state
-    let mut last_event_time = std::time::Instant::now();
-    let debounce_duration = Duration::from_millis(100);
+    // Trailing-edge debounce: a burst is reported once it goes quiet, so the
+    // client always refetches after the final write rather than before it.
+    let debounce = Duration::from_millis(DEBOUNCE_MS);
+    let mut pending: Option<&'static str> = None;
 
-    // Process events
-    while let Some(event) = notify_rx.recv().await {
-        // Check if the event is for our target file
-        let is_relevant = event.paths.iter().any(|p| {
-            p.ends_with("issues.jsonl")
-                || p.ends_with(".beads")
-                || p == &beads_file
-        });
+    loop {
+        tokio::select! {
+            // Bias so a queued event always wins over a timer that is already
+            // due, keeping the quiet period measured from the last write.
+            biased;
 
-        if !is_relevant {
-            continue;
-        }
+            received = notify_rx.recv() => {
+                let Some(event) = received else { break };
 
-        // Debounce rapid changes
-        let now = std::time::Instant::now();
-        if now.duration_since(last_event_time) < debounce_duration {
-            continue;
-        }
-        last_event_time = now;
+                if !event.paths.iter().any(|p| store.is_board_change(p)) {
+                    continue;
+                }
 
-        // Determine event type
-        let change_type = match event.kind {
-            EventKind::Create(_) => "created",
-            EventKind::Modify(ModifyKind::Data(_)) => "modified",
-            EventKind::Modify(_) => "modified",
-            EventKind::Remove(_) => "removed",
-            _ => continue, // Ignore other events
-        };
+                let change_type = match event.kind {
+                    EventKind::Create(_) => "created",
+                    EventKind::Modify(ModifyKind::Data(_)) => "modified",
+                    EventKind::Modify(_) => "modified",
+                    EventKind::Remove(_) => "removed",
+                    _ => continue, // Ignore other events
+                };
 
-        let file_event = FileChangeEvent {
-            path: beads_file.to_string_lossy().to_string(),
-            change_type: change_type.to_string(),
-        };
+                pending = Some(change_type);
+            }
 
-        info!("File change detected: {:?}", file_event);
+            _ = tokio::time::sleep(debounce), if pending.is_some() => {
+                let change_type = pending.take().unwrap_or("modified");
 
-        // Recompute epic statuses when beads file is modified
-        // This ensures epic status stays in sync with children
-        if change_type == "modified" || change_type == "created" {
-            match recompute_epic_statuses(&beads_file) {
-                Ok(updated_epics) => {
-                    if !updated_epics.is_empty() {
-                        info!("Updated epic statuses: {:?}", updated_epics);
+                let file_event = FileChangeEvent {
+                    path: reported_path.clone(),
+                    change_type: change_type.to_string(),
+                };
+
+                info!("Board change detected: {:?}", file_event);
+
+                // Only the jsonl store has a file to recompute epic status
+                // from; a Dolt board is served from the database.
+                if let BoardStore::Jsonl { file } = &store {
+                    if change_type == "modified" || change_type == "created" {
+                        match recompute_epic_statuses(file) {
+                            Ok(updated_epics) => {
+                                if !updated_epics.is_empty() {
+                                    info!("Updated epic statuses: {:?}", updated_epics);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to recompute epic statuses: {}", e);
+                            }
+                        }
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to recompute epic statuses: {}", e);
+
+                let sse_event = Event::default()
+                    .data(serde_json::to_string(&file_event).unwrap_or_default());
+
+                // If send fails, client disconnected
+                if tx.send(Ok(sse_event)).await.is_err() {
+                    info!("Client disconnected, stopping watcher");
+                    break;
                 }
             }
-        }
-
-        let sse_event = Event::default()
-            .data(serde_json::to_string(&file_event).unwrap_or_default());
-
-        // If send fails, client disconnected
-        if tx.send(Ok(sse_event)).await.is_err() {
-            info!("Client disconnected, stopping watcher");
-            break;
         }
     }
 
     // Watcher is automatically dropped and cleaned up here
-    info!("File watcher stopped");
+    info!("Board watcher stopped");
     Ok(())
 }
 
@@ -236,5 +300,59 @@ mod tests {
         let params: WatchParams =
             serde_json::from_str(r#"{"path": "/test/project"}"#).unwrap();
         assert_eq!(params.path, "/test/project");
+    }
+
+    #[test]
+    fn jsonl_store_reports_only_its_own_file() {
+        let store = BoardStore::Jsonl {
+            file: PathBuf::from("/p/.beads/issues.jsonl"),
+        };
+        assert!(store.is_board_change(Path::new("/p/.beads/issues.jsonl")));
+        assert!(!store.is_board_change(Path::new("/p/.beads/config.yaml")));
+    }
+
+    #[test]
+    fn dolt_store_reports_a_row_write() {
+        let store = BoardStore::Dolt {
+            root: PathBuf::from("/p/.beads/dolt"),
+        };
+        assert!(store.is_board_change(Path::new(
+            "/p/.beads/dolt/cor/.dolt/noms/journal.idx"
+        )));
+    }
+
+    #[test]
+    fn dolt_store_ignores_its_own_statistics() {
+        let store = BoardStore::Dolt {
+            root: PathBuf::from("/p/.beads/dolt"),
+        };
+        // Written by a background job with no board write behind it.
+        assert!(!store.is_board_change(Path::new(
+            "/p/.beads/dolt/.dolt/stats/.dolt/noms/journal.idx"
+        )));
+        // Locks and spool files move constantly during a write.
+        assert!(!store.is_board_change(Path::new("/p/.beads/dolt/cor/.dolt/temptf")));
+    }
+
+    #[test]
+    fn a_dolt_project_resolves_to_the_dolt_store() {
+        let dir = std::env::temp_dir().join("beads-web-watch-store-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".beads").join("dolt")).unwrap();
+
+        assert!(matches!(BoardStore::resolve(&dir), BoardStore::Dolt { .. }));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_project_without_dolt_resolves_to_the_jsonl_store() {
+        let dir = std::env::temp_dir().join("beads-web-watch-store-test-jsonl");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".beads")).unwrap();
+
+        assert!(matches!(BoardStore::resolve(&dir), BoardStore::Jsonl { .. }));
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
