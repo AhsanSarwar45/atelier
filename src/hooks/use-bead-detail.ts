@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 
+import { PANEL_SLIDE_MS } from "@/components/bead-detail";
 import type { Bead } from "@/types";
 
 export interface UseBeadDetailResult {
@@ -31,25 +32,29 @@ export function useBeadDetail(allBeads: Bead[]): UseBeadDetailResult {
     return allBeads.find((b) => b.id === detailBeadId) || null;
   }, [detailBeadId, allBeads]);
 
-  const openBead = useCallback((bead: Bead) => {
-    setDetailBeadId(bead.id);
+  // The panel only exists while a bead is selected, so the selection has to
+  // outlive the close by the length of the slide out or it is cut off.
+  const clearing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdOpen = useCallback((id: string) => {
+    if (clearing.current) clearTimeout(clearing.current);
+    setDetailBeadId(id);
     setIsDetailOpen(true);
   }, []);
+  useEffect(() => () => { if (clearing.current) clearTimeout(clearing.current); }, []);
+
+  const openBead = useCallback((bead: Bead) => holdOpen(bead.id), [holdOpen]);
 
   const handleDetailOpenChange = useCallback((open: boolean) => {
     setIsDetailOpen(open);
     if (!open) {
-      setDetailBeadId(null);
+      clearing.current = setTimeout(() => setDetailBeadId(null), PANEL_SLIDE_MS);
     }
   }, []);
 
   const navigateToBead = useCallback((beadId: string) => {
     const found = allBeads.find((b) => b.id === beadId);
-    if (found) {
-      setDetailBeadId(found.id);
-      setIsDetailOpen(true);
-    }
-  }, [allBeads]);
+    if (found) holdOpen(found.id);
+  }, [allBeads, holdOpen]);
 
   return {
     detailBead,

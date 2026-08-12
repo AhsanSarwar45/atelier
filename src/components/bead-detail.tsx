@@ -59,6 +59,15 @@ export interface BeadDetailProps {
 }
 
 /**
+ * How long a side panel takes to slide, in milliseconds.
+ *
+ * The panel is mounted by whoever owns the selection, so that owner has to keep
+ * it alive for exactly this long after closing it or the slide out is cut off:
+ * use-bead-detail reads the same number.
+ */
+export const PANEL_SLIDE_MS = 300;
+
+/**
  * Bead detail panel — slides in from the right.
  * Displays full bead information with metadata, PR section, subtasks, and comments.
  */
@@ -75,6 +84,31 @@ export function BeadDetail({
   onCleanup,
   onUpdate,
 }: BeadDetailProps) {
+  /**
+   * Whether the panel has been told to move yet.
+   *
+   * The panel is mounted at the same moment it is asked to open, so painting it
+   * open straight away gives the browser nothing to animate from — that is why
+   * this one appeared instantly while every other panel slid. It is parked
+   * off-screen for one painted frame first, and only then let go.
+   */
+  const [slid, setSlid] = useState(false);
+  useEffect(() => {
+    if (!open) {
+      setSlid(false);
+      return;
+    }
+    // Two frames: the first paints it parked, the second starts the transition.
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setSlid(true));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [open]);
+
   // Close on Escape key
   useEffect(() => {
     if (!open) return;
@@ -213,18 +247,21 @@ export function BeadDetail({
   return (
     <>
       {/* Overlay */}
-      {open && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80"
-          onClick={() => onOpenChange(false)}
-        />
-      )}
+      <div
+        className={cn(
+          "fixed inset-0 z-50 bg-black/80 transition-opacity ease-in-out",
+          slid ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}
+        style={{ transitionDuration: `${PANEL_SLIDE_MS}ms` }}
+        onClick={() => onOpenChange(false)}
+      />
       {/* Slide-in panel */}
       <div
         className={cn(
-          "fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl overflow-y-auto bg-surface-base border-l border-b-default p-6 shadow-lg transition-transform duration-300 ease-in-out",
-          open ? "translate-x-0" : "translate-x-full"
+          "fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl overflow-y-auto bg-surface-base border-l border-b-default p-6 shadow-lg transition-transform ease-in-out",
+          slid ? "translate-x-0" : "translate-x-full"
         )}
+        style={{ transitionDuration: `${PANEL_SLIDE_MS}ms` }}
       >
           {/* Header with Back button */}
           <div className="flex items-center justify-between mb-6">

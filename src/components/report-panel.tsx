@@ -82,9 +82,12 @@ export function ReportPanel({ open, onOpenChange, projectPath, card }: ReportPan
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
+      {/* A drawer never takes more than half the screen: the board behind it is
+          what the reader came back to, and a report page lays out its own
+          reading column inside this, so it does not need the room. */}
       <SheetContent
         side="right"
-        className="w-full sm:max-w-3xl md:max-w-5xl bg-surface-base border-b-default flex flex-col"
+        className="w-full sm:max-w-xl md:max-w-2xl bg-surface-base border-b-default flex flex-col"
       >
         <SheetHeader className="space-y-1">
           <SheetTitle className="flex items-center gap-2 text-t-primary">
