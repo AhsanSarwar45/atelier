@@ -1,29 +1,29 @@
 {
   "title": "Reports Inside The Board",
-  "eyebrow": "Plan — one shared project, used by all the others",
+  "eyebrow": "Step one of five is done — the shared project is standing",
   "url": "https://claude.ai/code/artifact/7e7e972c-052d-45bb-b99c-5a7ef48a322b",
 
   "actions": {
     "questions": [
       {
-        "ask": "Everything is decided. Do I start on the first step?",
+        "ask": "Step one is in. Do I carry straight on through the rest, or stop after each one?",
         "options": [
-          { "label": "Go", "say": "Go. Start with the first step.", "pick": true },
-          { "label": "Hold", "say": "Hold. Do not start yet." }
+          { "label": "Straight through", "say": "Carry on through all five steps.", "pick": true },
+          { "label": "Stop each time", "say": "Stop and show me after each step." }
         ],
-        "note": "The first step alone ends the cloud page and changes nothing about how a report looks."
+        "note": "Nothing left in the plan needs a decision from you; the remaining four are build work."
       }
     ]
   },
 
   "status": {
-    "now": "Every question is answered. The plan is settled and waiting only on your word to start.",
-    "next_up": "Standing up the shared project, so the report tools stop belonging to the racing game.",
+    "now": "The shared project is standing. Every project on this machine can now make a report; the racing game owns none of it.",
+    "next_up": "Cutting the cloud, so a finished report is a file here rather than a page on the internet.",
     "items": [
       { "state": "done", "text": "Checked what the work list can hand a report" },
       { "state": "done", "text": "Checked how much of the board screen we would have to own" },
-      { "state": "todo", "text": "One shared project holds the board screen, the report tools and the reports" },
-      { "state": "todo", "text": "The racing game keeps none of it, and neither does any other project" },
+      { "state": "done", "text": "One shared project holds the board screen, the report tools and the reports" },
+      { "state": "done", "text": "The racing game keeps none of it, and neither does any other project" },
       { "state": "todo", "text": "A report lands on this machine, not in the cloud" },
       { "state": "todo", "text": "The checklist and the status come straight from the work list" },
       { "state": "todo", "text": "Every card opens its own report from a button" },
@@ -67,8 +67,8 @@
         {
           "kind": "rows",
           "rows": [
-            { "n": "1", "title": "Stand up the shared project", "tone": "hot", "note": "Our own copy of the board screen becomes a project in its own right, and the report tools move into it. The racing game keeps a pointer and nothing else." },
-            { "n": "2", "title": "Cut the cloud", "note": "A finished report lands as a file in that project. How it looks, what it must contain and every gate on it carry over untouched." },
+            { "n": "1", "title": "Stand up the shared project", "tone": "gone", "note": "Done. Our own copy of the board screen is a project in its own right and the report tools live in it; the racing game keeps a pointer and nothing else." },
+            { "n": "2", "title": "Cut the cloud", "tone": "hot", "note": "A finished report lands as a file in that project. How it looks, what it must contain and every gate on it carry over untouched." },
             { "n": "3", "title": "The work list fills the report", "note": "The checklist, what is happening now and what is next stop being typed by hand and start being read from the work list." },
             { "n": "4", "title": "A button on every card, and a tab for all of them", "note": "The report opens from the card it belongs to, in whichever project that card lives." },
             { "n": "5", "title": "Buttons that act", "note": "Answering a question or overriding a decision changes the work list as you press it, and shows you what it did." }
@@ -124,8 +124,7 @@
   "next": {
     "if_nothing": "Reports keep going to the cloud, stay stuck to the racing game, and the checklist stays hand-typed — so it can keep disagreeing with the work list.",
     "steps": [
-      { "step": "Stand up the shared project and move the report tools into it", "cost": "small", "starting": true },
-      { "step": "A report lands on this machine", "cost": "small" },
+      { "step": "A report lands on this machine", "cost": "small", "starting": true },
       { "step": "The work list fills the checklist and the status", "cost": "medium" },
       { "step": "A button on every card, and a tab for all of them", "cost": "medium" },
       { "step": "Buttons that change the work list", "cost": "small" }
