@@ -10,7 +10,6 @@
  * stable variant from a hash of its own name.
  */
 
-import type { BadgeProps } from '@/components/ui/badge';
 import type { Bead } from '@/types';
 
 /** Namespaces drawn on the card face and offered in the tag filter. */
@@ -34,16 +33,19 @@ export interface BeadTag {
   raw: string;
 }
 
-type BadgeVariant = NonNullable<BadgeProps['variant']>;
-
-const KIND_VARIANTS: Record<string, BadgeVariant> = {
-  bug: 'destructive',
-  feature: 'info',
-  chore: 'secondary',
+/** Hue per kind of work: a fault reads red, new work blue, upkeep amber. */
+const KIND_HUES: Record<string, number> = {
+  bug: 2,
+  feature: 222,
+  chore: 38,
 };
 
-/** Palette an `area:` value is hashed into, so one system keeps one color. */
-const AREA_VARIANTS: readonly BadgeVariant[] = ['primary', 'success', 'warning', 'info', 'destructive'];
+/** Hue a system is hashed into, so one system keeps one color. Spaced far
+ *  enough apart that neighbours in a column stay told apart. */
+const AREA_HUES: readonly number[] = [199, 152, 275, 20, 96, 320, 245, 172, 62, 350, 128, 296];
+
+/** Hue for anything with no seat in the palettes above. */
+const UNKNOWN_HUE = 215;
 
 function isNamespace(candidate: string): candidate is LabelNamespace {
   return (LABEL_NAMESPACES as readonly string[]).includes(candidate);
@@ -71,6 +73,11 @@ export function beadTags(bead: Pick<Bead, 'labels'>): BeadTag[] {
   );
 }
 
+/** The bead's tag in one namespace, or null when it carries none. */
+export function tagFor(bead: Pick<Bead, 'labels'>, namespace: LabelNamespace): BeadTag | null {
+  return beadTags(bead).find((tag) => tag.namespace === namespace) ?? null;
+}
+
 /** Every value seen for a namespace across the given beads, sorted. */
 export function tagValues(beads: readonly Pick<Bead, 'labels'>[], namespace: LabelNamespace): string[] {
   const seen = new Set<string>();
@@ -90,10 +97,10 @@ function hash(text: string): number {
   return acc;
 }
 
-/** Badge variant for a tag chip: fixed for a known kind, hashed for a system. */
-export function tagVariant(tag: BeadTag): BadgeVariant {
-  if (tag.namespace === 'kind') return KIND_VARIANTS[tag.value] ?? 'secondary';
-  return AREA_VARIANTS[hash(tag.value) % AREA_VARIANTS.length];
+/** Chip hue in degrees: fixed for a known kind, hashed for a system. */
+export function tagHue(tag: BeadTag): number {
+  if (tag.namespace === 'kind') return KIND_HUES[tag.value] ?? UNKNOWN_HUE;
+  return AREA_HUES[hash(tag.value) % AREA_HUES.length];
 }
 
 /**

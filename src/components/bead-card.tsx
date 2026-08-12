@@ -4,10 +4,11 @@ import type { ReactNode } from "react";
 
 import { FolderOpen, GitPullRequest, Link2, MessageSquare, Check, X, Clock } from "lucide-react";
 
-import { BeadTags } from "@/components/bead-tags";
+import { BeadKindTag, BeadSystemTag, BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { Badge } from "@/components/ui/badge";
 import { useTheme } from "@/hooks/use-theme";
+import { tagFor } from "@/lib/bead-labels";
 import { formatBeadId, formatWorktreePath, isBlocked, truncate } from "@/lib/bead-utils";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import { cn } from "@/lib/utils";
@@ -324,10 +325,15 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
               Blocked
             </span>
           )}
-          <span className="theme-badge inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-surface-overlay text-t-tertiary">
-            <TypeIcon className={cn("size-3 shrink-0", typeMeta.colorClass)} aria-hidden="true" />
-            {getTypeLabel(bead)}
-          </span>
+          <BeadSystemTag bead={bead} />
+          {tagFor(bead, "kind") ? (
+            <BeadKindTag bead={bead} />
+          ) : (
+            <span className="theme-badge inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-surface-overlay text-t-tertiary">
+              <TypeIcon className={cn("size-3 shrink-0", typeMeta.colorClass)} aria-hidden="true" />
+              {getTypeLabel(bead)}
+            </span>
+          )}
           {bead.priority !== undefined && bead.priority <= 2 && (
             <span className={cn(
               "theme-badge text-[10px] font-medium px-1.5 py-0.5",
@@ -338,7 +344,6 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
               P{bead.priority}
             </span>
           )}
-          <BeadTags bead={bead} />
           {inlinePRBadge}
           {commentCount > 0 && (
             <span className="text-[10px] text-t-faint px-1">
@@ -401,10 +406,16 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
                   {bead._statusBadge.label}
                 </Badge>
               )}
-              <Badge variant="outline" size="xs" className="theme-badge">
-                <TypeIcon className={cn("shrink-0", typeMeta.colorClass)} aria-hidden="true" />
-                {getTypeLabel(bead)}
-              </Badge>
+              {/* The kind of work stands where the issue type used to: on this
+                  board every card is a task or an epic, so the type said nothing. */}
+              {tagFor(bead, "kind") ? (
+                <BeadKindTag bead={bead} />
+              ) : (
+                <Badge variant="outline" size="xs" className="theme-badge">
+                  <TypeIcon className={cn("shrink-0", typeMeta.colorClass)} aria-hidden="true" />
+                  {getTypeLabel(bead)}
+                </Badge>
+              )}
             </div>
           </div>
 
@@ -413,7 +424,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
             {truncate(bead.title, 60)}
           </div>
 
-          <BeadTags bead={bead} />
+          <BeadSystemTag bead={bead} />
 
           {/* Description */}
           {bead.description && (

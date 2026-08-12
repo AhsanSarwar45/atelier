@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import type { CSSProperties } from 'react';
 
 import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, FileText, Tag } from 'lucide-react';
 
@@ -21,7 +22,7 @@ import {
   TooltipContent,
   TooltipProvider,
 } from '@/components/ui/tooltip';
-import { LABEL_NAMESPACES, LABEL_NAMESPACE_TITLES, parseLabel } from '@/lib/bead-labels';
+import { LABEL_NAMESPACES, LABEL_NAMESPACE_TITLES, parseLabel, tagHue } from '@/lib/bead-labels';
 import type { LabelNamespace } from '@/lib/bead-labels';
 import { ISSUE_TYPES, getIssueTypeMeta } from '@/lib/issue-types';
 import type { IssueTypeFilter } from '@/lib/issue-types';
@@ -293,7 +294,14 @@ export function QuickFilterBar({
                       onCheckedChange={() => onTagToggle(raw)}
                       className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
                     >
-                      {value}
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="bead-tag-dot"
+                          style={{ '--tag-h': `${tagHue({ namespace, value, raw })}` } as CSSProperties}
+                          aria-hidden="true"
+                        />
+                        {value}
+                      </span>
                     </DropdownMenuCheckboxItem>
                   );
                 })}
