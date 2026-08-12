@@ -3,19 +3,18 @@
 
 Every published HTML page must carry the builder's stamp and hash exactly the
 content the builder emitted. A page written by hand, or edited after building,
-is refused: the slot order, the look and the plain-words gate all live in
-`scripts/report/build.py`, and a hand-cut page silently escapes all three.
+is refused: the slot order, the look and the plain-words gate all live in the
+builder, and a hand-cut page silently escapes all three.
 """
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "report"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 HOW = (
-    "Write the spec (docs/reporting.md), then: "
-    "python3 scripts/report/build.py <spec>.report.json -o <page>.html — "
-    "and publish the file it writes."
+    "Write the spec (reporting/README.md), then: "
+    "report <spec>.report.json -o <page>.html — and publish the file it writes."
 )
 
 
