@@ -1,10 +1,10 @@
 {
   "title": "The Board Shows The Work",
-  "eyebrow": "Fixed and guarded — the screen and the work list now agree on every column",
+  "eyebrow": "Three faults you named, all fixed and each one now checked automatically",
 
   "actions": {
     "none": true,
-    "fyi": "Nothing is waiting on you. One round of review by fresh eyes is still owed, and I cannot be the one to do it."
+    "fyi": "Nothing is waiting on you. One round of review by fresh eyes is still owed on the column work, and I cannot be the one to do it."
   },
 
   "status": {
@@ -19,7 +19,7 @@
         {
           "kind": "compare",
           "before": { "path": "shots/before-board.png", "caption": "Before — In Progress and In Review both empty" },
-          "after": { "path": "shots/after-board.png", "caption": "After — the four claimed cards and the one waiting to land" }
+          "after": { "path": "shots/after-board.png", "caption": "After — each job in its own column, showing which step is moving" }
         },
         {
           "kind": "table",
@@ -28,6 +28,12 @@
             ["In Progress", "4", "0", "4"],
             ["In Review", "1", "0", "1"]
           ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Your second look was right",
+          "text": "The first fix put the claimed steps on screen but left every job sitting in Open, so a job still read as untouched while its own step was being worked. A job now moves with the work under it, at any depth, and its steps stay inside it — one card per job, in the column that is true."
         }
       ]
     },
@@ -57,6 +63,39 @@
       ]
     },
     {
+      "label": "The other two you pointed at",
+      "lead": "The report button was in the wrong place, and the drawers behaved differently.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "No card seemed to have a report",
+              "note": "The button existed, but only at the bottom of a card's detail panel, so from the board itself the whole feature read as missing. It is now a strip under the card, and it opens that card's report. Cards without one still show nothing."
+            },
+            {
+              "title": "The two drawers were not the same drawer",
+              "note": "The report drawer covered more than two thirds of the screen; it now takes under half, and the page lays out its own reading column inside it. The card drawer appeared instantly instead of sliding — it was being built already open, so there was nothing to slide from."
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "columns": ["Drawer", "Width before", "Width now", "Slides"],
+          "rows": [
+            ["Report", "68% of the screen", "45%", "Yes, before and after"],
+            ["Card details", "38%", "38%", "Now it does"]
+          ]
+        },
+        {
+          "kind": "images",
+          "shots": [
+            { "path": "shots/panel-mid-slide.png", "caption": "The card drawer caught mid-slide, with the board still readable behind it" }
+          ]
+        }
+      ]
+    },
+    {
       "label": "What stops it coming back",
       "lead": "Both faults now fail loudly instead of quietly reading zero.",
       "blocks": [
@@ -65,7 +104,8 @@
           "items": [
             "The work list is asked directly which states it can put a card in, so a state the screen has no column for fails the test suite rather than silently landing in Open.",
             "The rule for which cards reach the columns has its own cases, including the exact shape that caused this: a board where every live card is a step.",
-            "A check drives a real browser at the running screen, reads back what each column actually drew, and compares it with the work list card by card. It was switched off twice on purpose — once per fault — and went red both times before being switched back on."
+            "A check drives a real browser at the running screen, reads back what each column actually drew, and compares it with the work list card by card. It was switched off twice on purpose — once per fault — and went red both times before being switched back on.",
+            "A second check opens each drawer and measures it while it should still be moving, so a drawer that stops sliding, or grows to swallow the screen again, fails instead of merely looking wrong. Each of its two rules was switched off on its own and it named the right drawer each time."
           ]
         }
       ]
@@ -80,8 +120,14 @@
     },
     {
       "id": "D2",
-      "title": "The goal card was left where it is rather than dragged along by its steps",
-      "why": "A goal with two live steps can only sit in one column, so it would be wrong for one of them either way, and you still would not see which step was moving."
+      "tag": "revised",
+      "title": "A job is one card, and it moves with the work under it",
+      "why": "Overruled by you, and rightly. Drawing the live steps as cards of their own filled the middle columns but left every job in Open and showed each job twice. The job now follows its own work and lists its steps inside itself."
+    },
+    {
+      "id": "D3",
+      "title": "The two drawers are allowed to be different widths",
+      "why": "A drawer holding a document and a drawer holding a card's details are not the same thing, and forcing them to match would have made the report unreadable. The rule they both keep is that neither takes more than half the screen."
     }
   ],
 
@@ -89,6 +135,7 @@
     "if_nothing": "The screen stays correct and the checks keep it that way; the one round of outside review stays owed.",
     "steps": [
       { "step": "Someone who did not write this reviews it once", "cost": "small", "starting": true },
+      { "step": "Every line of a report's checklist stops repeating the goal's title", "cost": "small" },
       { "step": "Buttons on a report that write straight back to the work list", "cost": "medium" }
     ]
   }
