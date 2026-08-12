@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Build a manager report page. Runs from any project; the project it is about is
+# the directory it was called from, so the pictures a spec names resolve there.
+#
+#   report new <slug>                 start a spec for the current project
+#   report <spec>.report.json         build it; the page lands beside the spec
+#   report list                       every spec, newest project first
+#
+# Specs and pages live in this project, filed under the project they are about.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+TOOLS="$HERE/tools"
+PAGES="$HERE/pages"
+
+project_name() {
+  local root
+  root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  basename "$root"
+}
+
+case "${1:-}" in
+  list)
+    find "$PAGES" -name "*.report.json" -printf "%T@ %p\n" | sort -rn | cut -d' ' -f2-
+    ;;
+  new)
+    [ $# -ge 2 ] || { echo "report new <slug>" >&2; exit 2; }
+    dir="$PAGES/$(project_name)"
+    mkdir -p "$dir"
+    dest="$dir/$2.report.json"
+    [ -e "$dest" ] && { echo "already there: $dest" >&2; exit 1; }
+    cp "$TOOLS/spec-template.report.json" "$dest"
+    echo "$dest"
+    ;;
+  ""|-h|--help)
+    sed -n '2,9p' "$0" | cut -c3-
+    ;;
+  *)
+    exec python3 "$TOOLS/build.py" "$@" --project "$(pwd)"
+    ;;
+esac

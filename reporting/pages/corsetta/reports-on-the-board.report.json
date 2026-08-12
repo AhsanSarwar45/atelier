@@ -1,0 +1,134 @@
+{
+  "title": "Reports Inside The Board",
+  "eyebrow": "Plan — one shared project, used by all the others",
+  "url": "https://claude.ai/code/artifact/7e7e972c-052d-45bb-b99c-5a7ef48a322b",
+
+  "actions": {
+    "questions": [
+      {
+        "ask": "Everything is decided. Do I start on the first step?",
+        "options": [
+          { "label": "Go", "say": "Go. Start with the first step.", "pick": true },
+          { "label": "Hold", "say": "Hold. Do not start yet." }
+        ],
+        "note": "The first step alone ends the cloud page and changes nothing about how a report looks."
+      }
+    ]
+  },
+
+  "status": {
+    "now": "Every question is answered. The plan is settled and waiting only on your word to start.",
+    "next_up": "Standing up the shared project, so the report tools stop belonging to the racing game.",
+    "items": [
+      { "state": "done", "text": "Checked what the work list can hand a report" },
+      { "state": "done", "text": "Checked how much of the board screen we would have to own" },
+      { "state": "todo", "text": "One shared project holds the board screen, the report tools and the reports" },
+      { "state": "todo", "text": "The racing game keeps none of it, and neither does any other project" },
+      { "state": "todo", "text": "A report lands on this machine, not in the cloud" },
+      { "state": "todo", "text": "The checklist and the status come straight from the work list" },
+      { "state": "todo", "text": "Every card opens its own report from a button" },
+      { "state": "todo", "text": "Answering on a report changes the work list on the spot" }
+    ]
+  },
+
+  "content": [
+    {
+      "label": "What changes for you",
+      "lead": "One screen for every project, and a checklist that cannot be wrong.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "Today", "After"],
+          "rows": [
+            ["Who has reports", "Only the racing game", "Every project you work on"],
+            ["Where a report lives", "A page in the cloud", "A file in the shared project"],
+            ["Finding the one you want", "You keep the link", "A button on the card"],
+            ["Reading it", "One link at a time", "A tab beside the work list"],
+            ["The checklist", "Typed into the report by hand", "The work list itself"],
+            ["When the two disagree", { "pill": "You cannot tell which is right", "tone": "red" }, { "pill": "They cannot disagree", "tone": "green" }],
+            ["Answering a question", "Copies text for you to paste back", "Files your answer on the work list"],
+            ["Opening it", "Waits on the network", "Instant, works offline"],
+            ["Sending it to someone", { "pill": "Works", "tone": "green" }, { "pill": "Dropped", "tone": "grey" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "The real win",
+          "text": "A report stops being a picture of the work and becomes the work — the same list, read and changed from one screen."
+        }
+      ]
+    },
+
+    {
+      "label": "The work, in order",
+      "lead": "Five steps. Each one is useful on its own if you stop after it.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            { "n": "1", "title": "Stand up the shared project", "tone": "hot", "note": "Our own copy of the board screen becomes a project in its own right, and the report tools move into it. The racing game keeps a pointer and nothing else." },
+            { "n": "2", "title": "Cut the cloud", "note": "A finished report lands as a file in that project. How it looks, what it must contain and every gate on it carry over untouched." },
+            { "n": "3", "title": "The work list fills the report", "note": "The checklist, what is happening now and what is next stop being typed by hand and start being read from the work list." },
+            { "n": "4", "title": "A button on every card, and a tab for all of them", "note": "The report opens from the card it belongs to, in whichever project that card lives." },
+            { "n": "5", "title": "Buttons that act", "note": "Answering a question or overriding a decision changes the work list as you press it, and shows you what it did." }
+          ]
+        }
+      ]
+    },
+
+    {
+      "label": "What we take on",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", { "name": "Size", "align": "right" }],
+          "rows": [
+            ["One more project to keep alive", { "pill": "Small, and it earns it back", "tone": "amber" }],
+            ["Keeping our copy of the board screen current with theirs", { "pill": "Small, each time they update", "tone": "amber" }],
+            ["Building that screen needs tools this machine does not use today", { "pill": "One-time setup", "tone": "amber" }],
+            ["A report can no longer be sent by link on its own", { "pill": "Dropped, you do not need it", "tone": "grey" }],
+            ["Every other project gets reports without doing anything", { "pill": "Free", "tone": "green" }],
+            ["How a report looks, what it must contain, its gates", { "pill": "Unchanged", "tone": "green" }],
+            ["The work list itself", { "pill": "Untouched", "tone": "green" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "The one thing that can bite",
+          "text": "Their board screen is someone else's project and still moving. Our addition stays small on purpose, so an update is a re-apply rather than a rewrite."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    { "id": "D1", "title": "The report tools stay exactly as they are", "why": "Only where the finished page lands changes. The look, the shape and every gate carry over." },
+    { "id": "D2", "title": "The checklist is the work list, never a copy of it", "why": "A number that can drift is a number you cannot trust." },
+    { "id": "D3", "title": "A standing chore is never a checklist item", "why": "It can never be ticked, so it holds the bar short forever. Chores live on the work list. This retires the one open box on the blueprint page." },
+    { "id": "D4", "title": "Our copy of the board screen stays thin", "why": "It shows reports and lists them, nothing more. Every rule about what a report is stays in our own code." },
+    { "id": "D5", "title": "One report page per piece of work, named by its card", "why": "Same page for the life of the work, same as today." },
+    { "id": "D6", "title": "Nothing already published is moved", "why": "Existing links keep working until the work they track lands." },
+    { "id": "D7", "title": "Answering on the page writes to the work list", "why": "Only possible once the page is local. It shows you what it wrote, and nothing is written silently." },
+    { "id": "D8", "title": "A report never leaves this machine", "tag": "your call", "why": "You said sharing does not matter, so nothing is built for it." },
+    { "id": "D9", "title": "A report belongs to one card and opens from it", "tag": "your call", "why": "The card is the address. No link to keep, no list to search." },
+    { "id": "D10", "title": "A report is written for you and nobody else", "tag": "your call", "why": "Agents read the card. Nothing goes on a report to help them do their job." },
+    { "id": "D11", "title": "We keep our own copy of the board screen", "why": "A button on a card cannot exist without it. Override this if you would rather have the report in a second window." },
+    { "id": "D12", "title": "A card with no report shows no button", "tag": "your call", "why": "Most cards will never have one. A button that does nothing is worse than no button." },
+    { "id": "D13", "title": "Everything lives in one shared project of its own", "tag": "revised — your call", "why": "The board screen, the report tools and the reports are one project, outside every product. I first had it living inside the racing game; that was wrong, and it would have kept reports from every other project you work on." },
+    { "id": "D14", "title": "The racing game keeps a pointer and nothing else", "why": "No report code, no report files. Whatever it needs, it asks the shared project for." },
+    { "id": "D15", "title": "A report is filed under its project and its card", "why": "One place holds every project's reports, and a card in any of them opens its own." }
+  ],
+
+  "next": {
+    "if_nothing": "Reports keep going to the cloud, stay stuck to the racing game, and the checklist stays hand-typed — so it can keep disagreeing with the work list.",
+    "steps": [
+      { "step": "Stand up the shared project and move the report tools into it", "cost": "small", "starting": true },
+      { "step": "A report lands on this machine", "cost": "small" },
+      { "step": "The work list fills the checklist and the status", "cost": "medium" },
+      { "step": "A button on every card, and a tab for all of them", "cost": "medium" },
+      { "step": "Buttons that change the work list", "cost": "small" }
+    ]
+  }
+}

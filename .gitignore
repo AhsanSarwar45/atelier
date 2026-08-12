@@ -82,3 +82,6 @@ beads_*/
 beads-web-linux-*
 beads-web-win-*
 beads-web-darwin-*
+
+# Built report pages are derived from their spec.
+reporting/pages/**/*.html

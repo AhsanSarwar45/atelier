@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Fault injection on the report gates — each rule must go red on its own fault.
+
+    python3 scripts/report/selftest.py
+"""
+from __future__ import annotations
+
+import copy
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build  # noqa: E402
+from blocks import ReportError  # noqa: E402
+
+GOOD = {
+    "title": "Mirror Blur Fix",
+    "actions": {
+        "questions": [{
+            "ask": "Ship the sharper mirrors, or hold for the wider road test?",
+            "options": [{"label": "Ship", "say": "Ship the sharper mirrors.", "pick": True},
+                        {"label": "Hold", "say": "Hold the mirrors."}],
+            "note": "One day of work either way",
+        }],
+    },
+    "status": {
+        "now": "Waiting on your answer above.",
+        "next_up": "The wider road test starts the moment you say ship.",
+        "items": [{"state": "done", "text": "Measured the old mirrors"},
+                  {"state": "todo", "text": "Drive the long circuit"}],
+    },
+    "content": [{
+        "label": "What changed",
+        "blocks": [
+            {"kind": "table",
+             "columns": ["Where", {"name": "Sharpness", "align": "num"}],
+             "rows": [["Left mirror", {"num": "2.4"}], ["Right mirror", {"num": "2.6"}]]},
+            {"kind": "note", "tone": "good", "label": "Result", "text": "Both mirrors read clearly at speed."},
+        ],
+    }],
+    "decisions": [
+        {"id": "D1", "title": "Mirrors stay sharp at every distance", "why": "The driver looks at them briefly."},
+        {"id": "D2", "title": "The long circuit is the test we trust"},
+    ],
+    "next": {
+        "if_nothing": "The old blurry mirrors stay.",
+        "steps": [{"step": "Drive the long circuit", "cost": "small", "starting": True}],
+    },
+}
+
+CASES: list[tuple[str, object, str, str]] = []
+
+
+def case(name: str, mutate, expect: str, kind: str = "error") -> None:
+    """kind: 'error' stops the page, 'warn' only names the problem, '' is clean."""
+    CASES.append((name, mutate, expect, kind))
+
+
+def drop_slot(s):
+    del s["status"]
+
+
+def long_title(s):
+    s["title"] = "A Very Long Title That Runs On And On"
+
+
+def points_at_decision(s):
+    s["actions"]["questions"][0]["ask"] = "Do you agree with D2 about the circuit?"
+
+
+def one_option(s):
+    s["actions"]["questions"][0]["options"] = [{"label": "Ship", "pick": True}]
+
+
+def no_pick(s):
+    for o in s["actions"]["questions"][0]["options"]:
+        o.pop("pick", None)
+
+
+def bad_state(s):
+    s["status"]["items"][0]["state"] = "nearly"
+
+
+def no_next_up(s):
+    del s["status"]["next_up"]
+
+
+def duplicate_id(s):
+    s["decisions"][1]["id"] = "D1"
+
+
+def out_of_order(s):
+    s["decisions"][0]["id"], s["decisions"][1]["id"] = "D2", "D1"
+
+
+def jargon_word(s):
+    s["content"][0]["blocks"][1]["text"] = "The mirror shader now samples fewer texels."
+
+
+def markup_in_text(s):
+    s["content"][0]["blocks"][1]["text"] = "Both mirrors read <b>clearly</b> at speed."
+
+
+def colour_in_text(s):
+    s["content"][0]["label"] = "Now #FF8800 across the glass"
+
+
+def no_cost(s):
+    del s["next"]["steps"][0]["cost"]
+
+
+def too_many_glosses(s):
+    s["glossary"] = [{"term": f"word{i}", "plain": "plain"} for i in range(7)]
+
+
+case("a complete report builds", None, "", "")
+case("a missing slot", drop_slot, "slot 'status' is missing")
+case("a title that is a sentence", long_title, "title is")
+case("a question pointing at a decision number", points_at_decision, "points at D2")
+case("a question with one answer", one_option, "at least two answers")
+case("a question with no recommendation", no_pick, "exactly one recommended")
+case("an invented checklist state", bad_state, "state done, draft or todo")
+case("no next-up named", no_next_up, "next_up")
+case("two decisions sharing a number", duplicate_id, "share a number")
+case("decision numbers going backwards", out_of_order, "out of order")
+case("jargon in the content warns but still builds", jargon_word, "shader", "warn")
+case("markup in the content", markup_in_text, "an HTML tag")
+case("a colour in the content", colour_in_text, "a colour")
+case("a step with no cost", no_cost, "needs a cost")
+case("more than six glossed terms", too_many_glosses, "six is the ceiling")
+
+
+def run() -> int:
+    failures = []
+    tmp = Path(tempfile.mkdtemp())
+    spec_path = tmp / "case.report.json"
+    build.previous = lambda _p: None
+
+    for name, mutate, expect, kind in CASES:
+        spec = copy.deepcopy(GOOD)
+        if mutate:
+            mutate(spec)
+        spec_path.write_text(json.dumps(spec), encoding="utf-8")
+        problems, warnings = build.validate(spec, spec_path)
+        looked_at = warnings if kind == "warn" else problems
+        joined = " | ".join(looked_at)
+        if expect and expect not in joined:
+            failures.append(f"{name}: expected {expect!r}, got {joined or 'no complaint'}")
+        if kind == "warn" and problems:
+            failures.append(f"{name}: warned AND refused — a plain-words hit must not stop the page")
+        if not expect and (problems or warnings):
+            failures.append(f"{name}: a clean report was refused — {joined}")
+
+    # an unknown block kind names the shelf instead of guessing
+    spec = copy.deepcopy(GOOD)
+    spec["content"][0]["blocks"] = [{"kind": "sankey"}]
+    try:
+        build.build(spec, build.Ctx([], tmp))
+        failures.append("an unknown block: built anyway")
+    except ReportError as e:
+        if "sankey" not in str(e):
+            failures.append(f"an unknown block: unhelpful complaint — {e}")
+
+    # a table whose rows do not match its header
+    spec = copy.deepcopy(GOOD)
+    spec["content"][0]["blocks"][0]["rows"] = [["only one cell"]]
+    try:
+        build.build(spec, build.Ctx([], tmp))
+        failures.append("a ragged table: built anyway")
+    except ReportError:
+        pass
+
+    # a glossed term is allowed through, and reaches the page explained
+    spec = copy.deepcopy(GOOD)
+    spec["glossary"] = [{"term": "shader", "plain": "the code that colours a surface"}]
+    spec["content"][0]["blocks"][1]["text"] = "The shader is unchanged."
+    errs, warns = build.validate(spec, spec_path)
+    if errs or warns:
+        failures.append("a glossed term was still flagged")
+    else:
+        page = build.build(spec, build.Ctx(spec["glossary"], tmp))
+        if 'class="gloss"' not in page:
+            failures.append("a glossed term reached the page unexplained")
+
+    # the stamp catches a page edited after building
+    page = build.stamped(build.build(copy.deepcopy(GOOD), build.Ctx([], tmp)))
+    if not build.verify(page):
+        failures.append("a freshly built page failed its own stamp")
+    if build.verify(page.replace("Mirror Blur Fix", "Something Else")):
+        failures.append("an edited page passed the stamp")
+    if build.verify("<title>hand written</title>"):
+        failures.append("a hand-written page passed the stamp")
+
+    # a decision may not be withdrawn once published
+    old = copy.deepcopy(GOOD)
+    build.previous = lambda _p: old
+    spec = copy.deepcopy(GOOD)
+    spec["decisions"] = [spec["decisions"][0]]
+    if not any("D2 vanished" in p for p in build.validate(spec, spec_path)[0]):
+        failures.append("a withdrawn decision number went unnoticed")
+    spec = copy.deepcopy(GOOD)
+    spec["decisions"][1]["title"] = "The short circuit is the test we trust"
+    if not any("D2 now says" in p for p in build.validate(spec, spec_path)[0]):
+        failures.append("a decision rewritten under its old number went unnoticed")
+    build.previous = lambda _p: None
+
+    for f in failures:
+        print("FAIL  " + f)
+    print(f"{len(CASES) + 9 - len(failures)}/{len(CASES) + 9} report gates hold")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())

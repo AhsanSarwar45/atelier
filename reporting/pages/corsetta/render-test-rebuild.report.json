@@ -1,0 +1,223 @@
+{
+  "title": "Render Test Rebuild",
+  "eyebrow": "The black strip is the sky",
+  "url": "https://claude.ai/code/artifact/4fe64407-22f7-4205-8bc6-97b08b494e18",
+
+  "actions": {
+    "questions": [
+      {
+        "ask": "The black is empty sky, on purpose. What should empty look like?",
+        "options": [
+          {
+            "label": "Say \"nothing here\"",
+            "say": "Mark the empty area in diagnostic pictures with a colour no reading can produce.",
+            "pick": true,
+            "note": "The picture stops looking broken, and black goes back to meaning zero"
+          },
+          {
+            "label": "Leave it black",
+            "say": "Leave the empty area black; it is not a bug.",
+            "note": "Free. Black keeps meaning both \"none of it\" and \"nothing here\""
+          },
+          {
+            "label": "Draw the sky in too",
+            "say": "Draw the sky in the diagnostic pictures so the frame looks whole.",
+            "note": "The frame looks whole, but sky colours then sit inside a measurement and read as readings"
+          }
+        ],
+        "note": "Nothing is broken. A diagnostic picture only draws surfaces, so the sky is left out — and where the car and the floor stop, the picture is empty. With the camera the tests use it is a thin strip at the top; point the camera level and it is half the frame."
+      }
+    ]
+  },
+
+  "status": {
+    "now": "The black strip you asked about is empty sky, not a fault — proven by turning the camera. Five subsystems have a case, twenty-two checks, green every time and in a reordered run.",
+    "next_up": "The remaining subsystems, without stopping to report each one.",
+    "items": [
+      { "state": "done", "text": "You approved the thirteen decisions and the prototype" },
+      { "state": "done", "text": "Added the missing picture: the blocked light actually applied to a surface's colour" },
+      { "state": "done", "text": "Built the runner — one app, many measurements, no window" },
+      { "state": "done", "text": "Declared the fixture list, tagged by what each car can actually exercise" },
+      { "state": "done", "text": "Framing comes from the app; no test aims a camera" },
+      { "state": "done", "text": "Every case is followed by a reset that is checked, not assumed" },
+      { "state": "done", "text": "Blocked light, shadows and reflections each have a first case" },
+      { "state": "done", "text": "Exposure and the lens each have a first case" },
+      { "state": "done", "text": "The diagnostics survive as named tools you run on purpose" },
+      { "state": "done", "text": "Ran down the black strip: it is empty sky, and the sweep that proves it is now a tool" },
+      { "state": "todo", "text": "Decide what an empty area should look like" },
+      { "state": "todo", "text": "The remaining subsystems" },
+      { "state": "todo", "text": "Move speed onto the profiler soak" },
+      { "state": "todo", "text": "Delete the old way of testing" }
+    ]
+  },
+
+  "content": [
+    {
+      "label": "The black strip, diagnosed",
+      "lead": "Same car, same scene, same picture. Only the camera moved.",
+      "blocks": [
+        {
+          "kind": "compare",
+          "before": { "path": "render-test-rebuild/rep_band_strip.jpg", "caption": "As the tests frame it — a thin strip" },
+          "after": { "path": "render-test-rebuild/rep_band_level.jpg", "caption": "Camera level — nearly half the frame" }
+        },
+        {
+          "kind": "table",
+          "columns": ["Camera", { "name": "Black", "align": "right" }, "What is up there"],
+          "rows": [
+            ["As loaded", { "num": "2.5%" }, "A thin band of sky above the floor"],
+            ["Level, from the front", { "num": "44.9%" }, "Everything above the horizon"],
+            ["Straight down", { "num": "0.0%" }, "No sky in frame at all"],
+            ["From below", { "num": "85.2%" }, "Almost nothing but sky"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Why it looked like a fault",
+          "text": "It is the same 2.5% at every window size because the camera's up-and-down field of view is fixed, so the horizon always lands at the same fraction of the height."
+        }
+      ]
+    },
+    {
+      "label": "What the five cases prove",
+      "lead": "Twenty-two checks. Not one of them is a number anyone chose.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Subsystem", { "name": "Checks", "align": "right" }, "The claim", "Verdict"],
+          "rows": [
+            ["Blocked light", { "num": "6" }, "It only ever removes light, it never reaches the sun, and part of the car stays untouched — so it is a local effect", { "pill": "green", "tone": "green" }],
+            ["Shadows", { "num": "6" }, "A shadow removes direct light only; sharpening it cannot change a surface in open sun", { "pill": "green", "tone": "green" }],
+            ["Reflections", { "num": "4" }, "Switch them off and none is left; no surface colour moves, only shine", { "pill": "green", "tone": "green" }],
+            ["Exposure", { "num": "5" }, "The camera cannot change the world it photographs, and a stop is a stop whichever dial buys it", { "pill": "green", "tone": "green" }],
+            ["Lens", { "num": "6" }, "The glass bends the picture outward from the centre and does nothing at all at zero", { "pill": "green", "tone": "green" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "Order cannot change a verdict",
+          "text": "Twenty case runs, in two different orders: every one green. Counts land within a few hundredths of a percent — the rest is the picture still settling, which moves just as much between two runs of one single order."
+        }
+      ]
+    },
+
+    {
+      "label": "The missing picture, added",
+      "lead": "The app can now show the blocked light it actually applies to a surface's colour. Switch it off and the picture goes white — nothing is shaded any more.",
+      "blocks": [
+        {
+          "kind": "compare",
+          "before": { "path": "render-test-rebuild/rep_ao_on.jpg", "caption": "Light blocking on" },
+          "after": { "path": "render-test-rebuild/rep_ao_off.jpg", "caption": "Light blocking off" }
+        },
+        {
+          "kind": "images",
+          "shots": [
+            { "path": "render-test-rebuild/rep_mesh.jpg", "caption": "How a case knows which pixels are the car — it never guesses from brightness" }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "It cost one line of the renderer's diagnostic code and no extra work per frame."
+        }
+      ]
+    },
+
+    {
+      "label": "Eight things the new instrument found",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            { "n": "1", "title": "Cars carry their own shading, painted in", "note": "Some cars ship a shading map baked into the paintwork — on the Miata, 6% of its pixels. It stays dark whatever the switch does, correctly, because it belongs to the material. So a check judges the switch by what it moves, never by what it leaves behind." },
+            { "n": "2", "title": "The switch changes two things at once", "note": "It scales one source and swaps another out entirely, so \"nothing is shaded once it is off\" is not a promise this renderer makes, and no test should demand it." },
+            { "n": "3", "title": "\"An untouched pixel cannot change\" is unprovable in a photograph", "note": "With the switch flipped, all six lighting channels are identical to the last bit on those pixels — at twelve frames and at forty-eight. The finished photograph still moves about fifteen shades out of 255, because the pictures are eight-bit and the final image amplifies what they cannot show. That claim now lives on the channels, where it holds exactly." },
+            { "n": "4", "title": "With automatic exposure on, the settings are a readout, not a setting", "note": "The light meter writes the shutter, the aperture and the filter strength back into the panel on every single frame. So \"the panel came back to where it started\" can only be said with the meter switched off — which is now what the runner does between cases." },
+            { "n": "5", "title": "A picture keeps settling, so it never repeats exactly", "note": "The bounced-light and reflection buffers converge over frames and nothing empties them, so about one pixel in two thousand keeps moving no matter what. Any claim that something stayed put is now measured against unchanged snapshots taken in between — and their own spread is a hundred times the leftover being judged." },
+            { "n": "6", "title": "The lens diagnostics cannot show their own zero", "note": "Their colour scale starts at a quarter of a pixel, and a normal colour-fringe setting is already above that a tenth of the way out from the middle. The law is checked as an order — the edge bends more than the middle — and the exact zero at dead centre is left to the arithmetic, which has it." },
+            { "n": "7", "title": "Counting moved pixels measures the car, not the effect", "note": "The middle of the frame is full of car and the edge is empty sky, so counting what moved said the edge bends less — under a distortion that provably bends it more. The photograph is now only asked whether the knob reaches it at all." },
+            { "n": "8", "title": "Black means two different things in a diagnostic picture", "note": "It means \"none of this\" on a surface, and it also means \"there is no surface here\" in the sky. The tests already have to guess between them by throwing black away, which is a reading nobody checked. That is the only real defect the strip turned up." }
+          ]
+        }
+      ]
+    },
+
+    {
+      "label": "What it costs to run",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", { "name": "Old way", "align": "right" }, { "name": "Now", "align": "right" }],
+          "rows": [
+            ["One measurement", { "num": "3.45 s" }, { "num": "0.08 s" }],
+            ["Startup", { "num": "every measurement" }, { "num": "0.66 s, once" }],
+            ["All five cases, run twice", { "num": "about 13 min" }, { "num": "48 s" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Nothing else broke",
+          "text": "The app's own tests: 181 green, none red."
+        }
+      ]
+    },
+
+    {
+      "label": "What this does not cover",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            { "n": "—", "title": "One car, one lighting setup", "note": "No track, no showroom." },
+            { "n": "—", "title": "One case per subsystem", "note": "The first and most important claim in each, not the whole of it." },
+            { "n": "—", "title": "Two claims are stated as gaps, not quietly dropped", "note": "That an untouched pixel cannot change in the finished photograph, and that the lens does exactly nothing at dead centre. Neither is measurable at eight bits; both are recorded." }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "The old way is still alive",
+          "text": "About 350 render tests still run the duplicate frame driver. Until the last one moves, two ways of rendering exist, and that is exactly the drift the rebuild is meant to end."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    { "id": "D1", "title": "Render tests run the shipped app, in one long-lived process", "tag": "your call", "why": "What a test judges is what you see. The duplicate frame driver stops existing, so startup, settings and the final image are covered instead of being the untested last mile." },
+    { "id": "D2", "title": "No content ships — fixtures are cars and tracks on your machine, declared once as a capability list", "tag": "your call", "why": "A test asks for what it needs and the runner picks a car that has it. Adding a car widens coverage without editing a test." },
+    { "id": "D3", "title": "A missing fixture is a failure, never a skip", "tag": "your call", "why": "Kills the silent green. Green means it ran." },
+    { "id": "D4", "title": "The render suite is a local gate; the push check runs the rest and says what it did not run", "tag": "your call", "why": "No false confidence from a tick that rendered nothing." },
+    { "id": "D5", "title": "Every render test isolates its quantity and compares it against something that cannot move", "tag": "your call", "why": "A physical law, or the same scene with one switch flipped. Never the average brightness of a photograph — so a failure means the renderer changed, not the scene." },
+    { "id": "D6", "title": "Tests resting on a hand-measured magnitude are rewritten or deleted, never re-measured", "tag": "your call", "why": "Re-measuring reproduces the problem one release later." },
+    { "id": "D7", "title": "Framing comes from the app; no test aims a camera", "tag": "your call", "why": "A test names a subject and an angle. The wrongly-built camera helper and the tests riding on it disappear rather than being fixed." },
+    { "id": "D8", "title": "The blessed screenshot is deleted", "tag": "your call", "why": "It tested conformance to a previous wrong answer." },
+    { "id": "D9", "title": "Tests that assert nothing are deleted; the useful ones become named diagnostic tools", "tag": "your call", "why": "Run on purpose, never counted as a green tick. Six of them survive that way today." },
+    { "id": "D10", "title": "Speed leaves the correctness suite and is tracked as a trend through the profiler soak", "tag": "your call", "why": "A slowdown gets attributed to the stage of the frame that caused it instead of to a stopwatch." },
+    { "id": "D11", "title": "Unit tests stay as they are, minus the empty ones", "tag": "your call", "why": "Their expected values are published constants, not captured output. They are never read as evidence about the image." },
+    { "id": "D12", "title": "Order independence is proven on a schedule, not on every run", "tag": "your call", "why": "One process means state can leak between cases. A reordered run must produce identical numbers." },
+    { "id": "D13", "title": "The old way is deleted when the last case is migrated", "tag": "your call", "why": "Two ways of rendering drift, the way the duplicate driver already did." },
+    { "id": "D14", "title": "A switch is judged by what it moves, never by the level it leaves behind", "why": "Cars carry shading painted into their materials, which no switch owns. Judging the level would make a test go green or red on which car it picked." },
+    { "id": "D15", "title": "\"This cannot change\" is asserted on the isolated channel; the photograph is only ever asked which of two groups moved more", "why": "Proven necessary this turn: the channels are identical to the last bit while the finished photograph moves, because both are eight-bit and the final image amplifies." },
+    { "id": "D16", "title": "Every case is followed by a reset that is checked against the state the car loaded in", "why": "Order independence was promised on a schedule. This makes a leak name itself on the run that caused it, instead of waiting for the scheduled reordered run." },
+    { "id": "D17", "title": "The reflection case runs without bounce light", "why": "Bounce carries a change sideways to pixels that have none of the thing under test, so with it on nothing is isolated." },
+    { "id": "D18", "title": "\"This did not change\" is measured against unchanged snapshots taken in between, never against zero", "why": "The picture keeps settling, so something is always moving. The unchanged snapshots say how much, and their own spread is the allowance — nobody picks a number." },
+    { "id": "D19", "title": "The light meter is switched off before the runner checks that a case cleaned up", "why": "A running meter writes the shutter and the aperture back into the panel every frame, so with it on no case could ever be said to have restored anything." },
+    { "id": "D20", "title": "Order independence is claimed for the verdicts, not for the counts", "why": "Measured: twenty runs in two orders, all green, counts within a few hundredths of a percent. The residue is the picture settling, and it moves just as much between two runs of one single order — so it is not one case contaminating another." },
+    { "id": "D21", "title": "A cause is only a cause once switching it off removes the effect", "why": "The black strip was written down as a fault of the picture. Turning the camera moved it from 0% to 85% of the frame, which is what proved it was sky and not a broken edge. The sweep is a tool now, so the next claim like it gets checked the same way." }
+  ],
+
+  "next": {
+    "if_nothing": "I leave the empty area black and carry on through the remaining subsystems without stopping to report each one.",
+    "steps": [
+      { "step": "Materials, then the sky", "cost": "medium each", "starting": true },
+      { "step": "The remaining subsystems, one after another", "cost": "large" },
+      { "step": "Mark empty areas, once you have picked how", "cost": "tiny" },
+      { "step": "Move speed onto the profiler soak and drop the stopwatch budgets", "cost": "small" },
+      { "step": "Delete the old way of testing and the blessed screenshot", "cost": "small" }
+    ]
+  }
+}

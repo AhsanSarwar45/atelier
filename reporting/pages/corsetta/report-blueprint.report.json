@@ -1,0 +1,137 @@
+{
+  "title": "Report Page Blueprint",
+  "eyebrow": "Built — and this page is the first one made by the tool",
+  "url": "https://claude.ai/code/artifact/b31d3a0f-db5e-4148-a929-61d524304e43",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. The tools are in place and this page was made by them. Override any decision below if you disagree with one."
+  },
+
+  "status": {
+    "now": "Everything you asked for is built, and this page proves it by being the first one built.",
+    "next_up": "Nothing is queued. The next real result becomes the first working report made this way.",
+    "items": [
+      { "state": "done", "text": "Reviewed your seven slots" },
+      { "state": "done", "text": "The look lives in one place no agent may write" },
+      { "state": "done", "text": "The shape ships as a tool that refuses an incomplete page" },
+      { "state": "done", "text": "Pictures, charts, tables, notes and comparisons on the shelf" },
+      { "state": "done", "text": "Click to enlarge, scroll to zoom, drag to pan" },
+      { "state": "done", "text": "Contents rail, answer buttons, one-press reply" },
+      { "state": "done", "text": "Plain words checked — every term is named with what to say instead, and the page still builds" },
+      { "state": "done", "text": "A hand-written page cannot be published at all" },
+      { "state": "done", "text": "Duplicated rules deleted, one pointer left behind" },
+      { "state": "todo", "text": "The word list grows each time a term slips through" }
+    ]
+  },
+
+  "content": [
+    {
+      "label": "How this sticks",
+      "lead": "Agents no longer write a page. They fill one, and the tool draws it.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["If an agent…", { "name": "Outcome", "align": "right" }],
+          "rows": [
+            ["Writes the page by hand", { "pill": "Cannot publish", "tone": "red" }],
+            ["Edits a page after it was built", { "pill": "Cannot publish", "tone": "red" }],
+            ["Picks a typeface, a colour or a size", { "pill": "Not possible", "tone": "red" }],
+            ["Skips a slot", { "pill": "Does not build", "tone": "red" }],
+            ["Leaves a question pointing at a number", { "pill": "Does not build", "tone": "red" }],
+            ["Renumbers or withdraws a decision", { "pill": "Does not build", "tone": "red" }],
+            ["Writes a paragraph instead of showing it", { "pill": "Does not build", "tone": "red" }],
+            ["Leaves a word only a builder would use", { "pill": "Named, then let through", "tone": "amber" }],
+            ["Chooses how to show the result", { "pill": "Free", "tone": "green" }],
+            ["Writes what the result is", { "pill": "Free", "tone": "green" }],
+            ["Needs a graphic nobody has built yet", { "pill": "Builds it for everyone", "tone": "green" }],
+            ["Needs a colour or typeface that does not exist", { "pill": "Asks you, once", "tone": "amber" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "Teeth",
+          "text": "Each of those rules has a test that goes red when the rule is switched off — twenty-four of them, run with the rest of the suite."
+        }
+      ]
+    },
+
+    {
+      "label": "The shape",
+      "lead": "Six slots, always in this order, none of them optional.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            { "n": "1", "title": "Title", "note": "A short name, six words or fewer" },
+            { "n": "2", "title": "What I need from you", "tone": "hot", "note": "The questions themselves, answered by clicking — never a pointer to a number further down" },
+            { "n": "3", "title": "Where we are", "tone": "hot", "note": "One now line, the very next piece of work, then done and remaining" },
+            { "n": "4", "title": "Content", "note": "One card per section. How to show it is the agent's choice" },
+            { "n": "5", "title": "Decisions", "tone": "hot", "note": "Every call already made, each with a button to flag it for change" },
+            { "n": "6", "title": "Next", "note": "What happens if you say nothing, then the steps with a cost each" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "label": "On the shelf",
+      "lead": "Twelve ways to show a result, shared by every report.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Block", "Carries"],
+          "rows": [
+            ["Before and after", "Two pictures side by side, both opening full screen together"],
+            ["Wipe", "One frame, dragged between the two versions"],
+            ["Pictures", "One or many, click to enlarge, scroll to zoom, drag to pan"],
+            ["Table", "Coloured columns, one look everywhere"],
+            ["Big number", "The single figure that is the result"],
+            ["Bars", "Before against after on one measure"],
+            ["Trend", "A measure over time or over settings"],
+            ["Breakdown", "Where the time goes, in one bar"],
+            ["Note", "A warning, a caveat, a headline finding"],
+            ["Rows", "A short ordered list with a note on each"],
+            ["List", "Plain points"],
+            ["Sentence", "One line — a paragraph is refused"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Growing it",
+          "text": "A graphic nobody has built yet gets added to the shelf, so every later report has it too — never drawn into one page."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    { "id": "D1", "title": "The last-thing-I-did box is cut", "why": "Your call. It repeated the last ticked item; a single now line replaced it." },
+    { "id": "D2", "title": "The action slot holds real questions, never decision numbers", "why": "You should never hunt for what is being asked." },
+    { "id": "D3", "title": "A decision reaches the action slot only if your input is required", "why": "Everything else is decided and listed here." },
+    { "id": "D4", "title": "Decision numbers never change", "why": "The page updates in place, so a number you answered last week still means the same thing." },
+    { "id": "D5", "title": "Next always states the do-nothing outcome and a cost per item" },
+    { "id": "D6", "title": "How to show a result is the agent's choice", "why": "Table, chart, note, picture — whatever fits. The tool fixes the frame and the look, never the form of the content." },
+    { "id": "D7", "title": "The shape ships as a tool, not a written description", "tag": "your call" },
+    { "id": "D8", "title": "Plain words are enforced by a gate, not by a rule", "why": "The rule existed all along and builder-speak still arrived." },
+    { "id": "D9", "title": "One running page per piece of work", "why": "Same link, updated in place. A new link means new work." },
+    { "id": "D10", "title": "The look lives in one place agents cannot write", "why": "It fixes the colours, the sizes and the spacing — not a catalogue of graphics." },
+    { "id": "D11", "title": "New graphics are added to the shared shelf, never to one page", "why": "The shelf grows; the look never forks." },
+    { "id": "D12", "title": "A new graphic is free, a new colour or typeface is not", "why": "Widening the palette is a question for you, asked once rather than per page." },
+    { "id": "D13", "title": "Every report answers itself", "why": "Contents rail, answer buttons, override buttons, and one press that copies your reply ready to paste. A page cannot type into the session on its own — this is as close as the platform allows." },
+    { "id": "D14", "title": "Every picture opens full screen and zooms", "why": "Results are judged by looking closely. A pair moves together so the same detail stays side by side." },
+    { "id": "D15", "title": "Nothing counts as done until it holds without me", "why": "Work drawn once by hand shows amber, never ticked. Green means an agent who never saw this conversation gets it automatically." },
+    { "id": "D16", "title": "Builder-speak is named, not blocked", "why": "Your call. Every term is listed with what to say instead, and the count comes back with the link — but an unfamiliar word never costs you a report." }
+  ],
+
+  "next": {
+    "if_nothing": "Nothing to decide — the next result simply arrives as a page built this way.",
+    "steps": [
+      { "step": "Use it on the next real result", "cost": "small", "starting": true },
+      { "step": "Add each term that slips through to the word list", "cost": "tiny" },
+      { "step": "Add a graphic to the shelf the first time a result needs one", "cost": "tiny" }
+    ]
+  }
+}
