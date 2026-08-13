@@ -381,8 +381,10 @@ export default function KanbanBoard() {
         />
       </div>
 
-      {/* Kanban Columns */}
-      <main className="flex-1 overflow-hidden p-4">
+      {/* Kanban Columns. A column narrower than --column-min is unreadable, so
+          past that the board scrolls sideways instead of cramming every column
+          into the window. */}
+      <main className="flex-1 overflow-x-auto overflow-y-hidden p-4">
         {beadsLoading ? (
           <div className="flex items-center justify-center h-full">
             <div role="status" className="text-t-muted">Loading beads…</div>
@@ -392,7 +394,14 @@ export default function KanbanBoard() {
             <div role="alert" className="text-danger">Error loading beads: {beadsError.message}</div>
           </div>
         ) : (
-          <div className="grid grid-cols-6 h-full" style={{ gap: 'var(--column-gap)' }}>
+          <div
+            className="grid h-full"
+            style={{
+              gap: 'var(--column-gap)',
+              gridAutoFlow: 'column',
+              gridAutoColumns: 'minmax(var(--column-min), 1fr)',
+            }}
+          >
             {COLUMNS.map(({ status, title }) => (
               <KanbanColumn
                 key={status}
