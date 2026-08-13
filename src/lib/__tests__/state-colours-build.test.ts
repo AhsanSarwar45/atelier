@@ -12,6 +12,7 @@ import postcss from "postcss";
 import tailwind from "tailwindcss";
 import { describe, expect, it } from "vitest";
 
+import { getStatusDotColor } from "@/lib/bead-utils";
 import { classesFor } from "@/lib/state-styles";
 import { STATES } from "@/types";
 
@@ -43,6 +44,15 @@ describe("state colours reach the stylesheet", () => {
   it("builds every class every state asks for", async () => {
     const css = await build();
     const missing = STATES.flatMap((s) => classesOf(s.id))
+      .filter((c) => !css.includes(selector(c)));
+    expect(missing).toEqual([]);
+  }, 60_000);
+
+  it("builds the dot beside every piece listed under a card", async () => {
+    // The columns and the dots went grey together; they read the same file, so
+    // the dot is asked for by the name the card list actually calls.
+    const css = await build();
+    const missing = STATES.map((s) => getStatusDotColor(s.id))
       .filter((c) => !css.includes(selector(c)));
     expect(missing).toEqual([]);
   }, 60_000);
