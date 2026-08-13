@@ -1,51 +1,49 @@
 {
   "title": "Six Columns",
-  "eyebrow": "The board you asked for, designed and waiting on two answers",
+  "eyebrow": "Your ruling on what a review is for, built and running",
 
   "actions": {
-    "questions": [
-      {
-        "ask": "Work you have to judge — does it wait for you before it goes into the game, or go in first and wait for you after?",
-        "options": [
-          {
-            "label": "Goes in first, then waits",
-            "say": "Let it go into the game first, then hold the card in my column until I sign it.",
-            "pick": true,
-            "note": "You judge it by playing the game, which is where you look anyway. Nothing else is held up while it waits. If you turn it down, the fix is the next job rather than an undo"
-          },
-          {
-            "label": "Waits for me first",
-            "say": "Hold it out of the game until I have signed it.",
-            "note": "Nothing you have not seen ever reaches the game. Every other job queues behind it for as long as it waits, and you cannot judge it by playing until you release it"
-          }
-        ],
-        "note": "Either way the card is finished only when you sign it. This is about where the change is sitting while it waits."
-      },
-      {
-        "ask": "Which jobs land in your column — the ones that ask for you, or everything that changes what you see?",
-        "options": [
-          {
-            "label": "Every job answers when it opens",
-            "say": "Make every job say at the start whether I have to judge it, and hold it to that.",
-            "pick": true,
-            "note": "The same way a job already has to say which steps it runs. It cannot be left blank and it cannot be added at the end to dodge a review. You get the ones that genuinely need an eye"
-          },
-          {
-            "label": "Everything that changes what you see",
-            "say": "Send me every job that changes how the game looks.",
-            "note": "Nothing visual ever closes without you. Most of this project is visual, so expect the column to be long and to be the thing that sets the pace"
-          }
-        ]
-      }
-    ]
+    "none": true,
+    "fyi": "Your ruling is in. Only a job is read now, a piece of work never is, and every call it left is below, each one overridable by its number."
   },
 
   "status": { "card": "cor-zxy" },
 
   "content": [
     {
+      "label": "What your board told you, and what it does now",
+      "lead": "The thing you caught, and the four changes your ruling turned into.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "What you caught",
+              "note": "The fog job drawn under Agent Review with all forty-two pieces beneath it untouched. Two cards four levels down put it there, and the third column meant something else entirely: written, but not in the game yet. That is a landing, not a review, which is why an agent looked like it asked to be read after every small step."
+            },
+            {
+              "title": "A piece of work has three places",
+              "note": "Waiting, being worked, done. Work that is written but not yet in the game leaves a piece being worked, because it is still in somebody's hands. Asking for a piece to be read is refused, and the refusal names the rule."
+            },
+            {
+              "title": "A job is put in its column by its own pieces",
+              "note": "Picking one up moves the job to In Progress. It reaches Agent Review at the one moment nobody is building, and passes from there to your column. The three cards that were sitting in Agent Review as pieces have been put back where they belong."
+            },
+            {
+              "title": "The screen reads one level and no deeper",
+              "note": "A card and the list of pieces printed under it can no longer say different things. Fourteen cases hold that line, including the exact shape you caught."
+            },
+            {
+              "title": "Turning a job down does not start a new one",
+              "note": "What the reader objects to becomes more pieces of that same job, and the job goes back to the first column until someone picks one up. When they are all closed it returns to be read. Both directions are held by a check that touches no board."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "label": "The six columns",
-      "lead": "Your words, and what each one will mean to the board.",
+      "lead": "Your words, and what each one means to the board.",
       "blocks": [
         {
           "kind": "table",
@@ -53,8 +51,8 @@
           "rows": [
             ["Todo", "Nobody is on it", "Any agent, by picking it up"],
             ["In Progress", "Being worked, in its own copy of the project", "The agent working it"],
-            ["Agent Review", "Written, not in the game yet, waiting to be read by a second agent", "The second agent, once it has read it"],
-            ["Manager Review", "In your hands, because no agent can judge it", "You, and nobody else"],
+            ["Agent Review", "In the game, waiting to be read by a second agent", "The second agent, once it has read it"],
+            ["Manager Review", "In the game and read, in your hands because no agent can judge it", "You, and nobody else"],
             ["Done", "Finished, in the game, signed", "Nothing — it is final"],
             ["Cancelled", "Dropped, with the reason kept", "Nothing — it is final"]
           ]
@@ -62,6 +60,36 @@
         {
           "kind": "note",
           "text": "Paused and blocked cards keep sitting in Todo with a small badge, as they do today. Nobody is on them, which is what Todo means."
+        },
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "What being read means",
+              "note": "A second agent, one that did not write the change, opens the whole of it and judges it against what the card promised: does it do that, does it hold up, is anything wrong or missing. It either passes it or sends it back with its reasons, and those reasons start the next attempt. Nothing does this today — a job is closed by the agent that built it, and nothing anywhere checks that a second pair of eyes ever saw it."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Where a job shows when its pieces disagree",
+      "lead": "Your rule, as the board now runs it.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["A job whose pieces are", "Shows under"],
+          "rows": [
+            ["none of them started", "Todo"],
+            ["one being worked, the rest waiting", "In Progress"],
+            ["all of them closed and in the game", "Agent Review"],
+            ["read, and it needs you", "Manager Review"],
+            ["signed", "Done"]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "The column tells you where a job is stuck rather than how far its luckiest part got, and every card agrees with the list of pieces printed under it."
         }
       ]
     },
@@ -102,26 +130,6 @@
           ]
         }
       ]
-    },
-    {
-      "label": "Where a job shows when its pieces disagree",
-      "lead": "A job is many pieces at once, so it shows the earliest place work is still standing.",
-      "blocks": [
-        {
-          "kind": "table",
-          "columns": ["A job whose pieces are", "Shows under"],
-          "rows": [
-            ["one being written, one waiting on you", "In Progress"],
-            ["one waiting to be read, one waiting on you", "Agent Review"],
-            ["all read and in the game, one waiting on you", "Manager Review"],
-            ["all signed", "Done"]
-          ]
-        },
-        {
-          "kind": "text",
-          "text": "That way the column tells you where a job is actually stuck rather than the furthest any part of it has got."
-        }
-      ]
     }
   ],
 
@@ -143,8 +151,9 @@
     },
     {
       "id": "D4",
-      "title": "Agent Review keeps the meaning it already has: written, and not in the game yet",
-      "why": "That is already how the board decides it, from the work itself rather than from anyone remembering to move a card. Your description of the column matches it exactly."
+      "tag": "revised",
+      "title": "Agent Review means a job whose every piece is closed, waiting to be read",
+      "why": "Your ruling of 13 August. It used to mean written-but-not-in-the-game, which is a landing rather than a review, and that is what made a job ask to be read after each of its steps."
     },
     {
       "id": "D5",
@@ -155,16 +164,45 @@
       "id": "D6",
       "title": "The board tests of itself are gone, and the cards they left behind with them",
       "why": "Your ruling. Forty-seven throwaway cards were sitting on your board pretending to be work, and the checks that made them are deleted. What holds the rules now is that every agent hits them on every board command."
+    },
+    {
+      "id": "D7",
+      "title": "Work goes into the game first and then waits in your column",
+      "why": "Your answer to the first question this page asked. You judge it by playing the game, and nothing else queues behind it while it waits. Built and running."
+    },
+    {
+      "id": "D8",
+      "title": "Every job says when it opens whether you have to judge it",
+      "why": "Your answer to the second question this page asked. It cannot be left blank and it cannot be added at the end to dodge a read. Built and running."
+    },
+    {
+      "id": "D9",
+      "title": "A card reads only the pieces directly under it, never the whole tree below",
+      "why": "What put the fog job in the wrong column was a card four levels down. Reading one level is the only shape where a card and the list printed under it always agree. The cost: a folder of jobs reads as untouched while work runs inside one of them, because none of its own pieces has started. Say the word and it reads deeper."
+    },
+    {
+      "id": "D10",
+      "title": "A piece of work is never read on its own, and work not yet in the game is work still being done",
+      "why": "Your ruling. A piece asking to be read after each small step is what emptied the word review of meaning; unlanded work is work still in hand, not work waiting on anybody."
+    },
+    {
+      "id": "D11",
+      "title": "Turning a job down adds pieces to that same job rather than opening a new one",
+      "why": "Your ruling. A new job would leave the old one closed and honest-looking while the objection lived somewhere else; this way a job carries one list of what is left, and a reader's objection cannot be walked past by finishing around it."
+    },
+    {
+      "id": "D12",
+      "title": "A job sent back is read again once its new pieces close",
+      "why": "Your words: back to Todo, then Agent Review, then your column. A second reading costs one reader per round and stops when a round finds nothing."
     }
   ],
 
   "next": {
-    "if_nothing": "The design sits where it is. Your board keeps four columns, and work that needs your eye keeps being closed by the agent that built it.",
+    "if_nothing": "The board runs your ruling as it stands. Two pieces of the six columns are still to build, and neither needs you.",
     "steps": [
-      { "step": "Answer the two questions above", "cost": "small", "starting": true },
-      { "step": "Build the six columns on your screen", "cost": "small" },
-      { "step": "Hold the new column shut against every agent, and teach jobs to declare they need you", "cost": "medium" },
-      { "step": "Move the older jobs onto the new columns", "cost": "small" }
+      { "step": "Draw the six columns on your screen", "cost": "small", "starting": true },
+      { "step": "Show your column oldest first, with a count on it", "cost": "small" },
+      { "step": "Read the folders above a job one level deeper, if D9 bothers you", "cost": "small" }
     ]
   }
 }
