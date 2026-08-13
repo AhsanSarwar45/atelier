@@ -1,0 +1,110 @@
+{
+  "title": "Work that lands in two places",
+  "eyebrow": "Six points came back from the outside reader; all six are answered, checked and ticked off.",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. Override any decision below if you disagree with one."
+  },
+
+  "status": { "card": "cor-u7f" },
+
+  "content": [
+    {
+      "label": "What happened",
+      "lead": "Some of our work does not live in this project at all — the board screen you read and the tools that build these pages are their own projects — and the board could not see finished work that had gone there.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "Before", "After"],
+          "rows": [
+            ["Work finished in the other project", "stuck, could never be ticked off", "ticked off, once the job says it goes there"],
+            ["Any other job", "could be ticked off on a change it never made", "judged on this project alone"],
+            ["The outside reader", "handed pointers it could not follow", "told which project holds each one"],
+            ["Half-finished work split across both", "closed on the finished half", "refused until both halves are in"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "Unblocked",
+          "text": "Four jobs whose work is in the board screen were stuck behind this and can now be ticked off."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Written down",
+          "text": "The rule and the one gap it leaves are now in the board's own written rules, so the next person does not have to work it out."
+        }
+      ]
+    },
+    {
+      "label": "The six points, and what was done",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            { "n": "1", "title": "A third place still asked the old question", "note": "Already gone — the ruling of 13 August removed the only thing that asked it." },
+            { "n": "2", "title": "The reader could not follow what it was given", "note": "Every pointer now names the project holding it." },
+            { "n": "3", "title": "Any job could be closed on the other project's work", "note": "A job now says where its work goes, and is judged only against that." },
+            { "n": "4", "title": "The written rule said the opposite of the code", "note": "Rewritten, and the one gap left is written down." },
+            { "n": "5", "title": "Nothing showed the change actually working", "note": "Four checks run against live work, below." },
+            { "n": "6", "title": "The same list was fetched twice for no reason", "note": "Fetched once." }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "How we know it works",
+      "lead": "Run against real work on the board, not against made-up examples.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["The case", "What the board did"],
+          "rows": [
+            ["Finished only in the other project, and the job says it goes there", { "pill": "accepted", "tone": "green" }],
+            ["The same work, with the job no longer saying it goes there", { "pill": "refused", "tone": "amber" }],
+            ["Not finished anywhere", { "pill": "refused", "tone": "amber" }],
+            ["The job says it goes somewhere this machine cannot see", { "pill": "refused by name", "tone": "amber" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Why the second row matters",
+          "text": "Taking the job's own word away turns an accepted piece of work into a refused one, which is what shows the word is carrying it."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "A job says where its work goes; the board never assumes",
+      "why": "Trusting any project meant a page written about a piece of work counted as the work itself. A job that says nothing is judged here alone, so nothing on the board loosened."
+    },
+    {
+      "id": "D2",
+      "title": "One gap the reader wanted written down was closed instead",
+      "why": "It cost two lines to fix. Writing down a fault we can remove in the same sitting is how a list of known faults grows without anything getting better."
+    },
+    {
+      "id": "D3",
+      "title": "The job's own finish line was rewritten",
+      "why": "It named a file of checks that had already been deleted under your no-self-checks ruling, so it could never have been met as written."
+    },
+    {
+      "id": "D4",
+      "title": "Four jobs were marked as going to the board screen",
+      "why": "Without it they would have gone from stuck to more stuck. A fifth was deliberately left out: the only thing it has over there is a page about the work, not the work."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "Nothing waits on this one; the four stuck jobs are free to close.",
+    "steps": [
+      { "step": "The four board-screen jobs stop being stuck and start closing", "cost": "small", "starting": true }
+    ]
+  }
+}
