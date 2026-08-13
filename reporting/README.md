@@ -3,6 +3,24 @@
 A report is how a result reaches the manager. It is built from a spec, never
 written by hand.
 
+## When one is owed
+
+Two triggers, and nothing else:
+
+1. **A piece of work on the board finished** — a task, a subtask or a step
+   ticked off. The page is brought up to date as part of closing it.
+2. **A question for the manager** — any question, approval or choice between
+   two ways. It goes in the page's own slot for it, with what each answer
+   costs, before it is put to him.
+
+Turns spent building, reading, searching or answering him owe nothing. Neither
+does bookkeeping. Helpers an agent sends off owe nothing either: they answer to
+the agent that sent them, and that agent owes the page.
+
+Where a project's machinery can refuse, neither is a judgement call: closing a
+card is refused while its page is behind the work, and asking anything is
+refused until the page carrying it exists.
+
 This directory is shared by every project. A project keeps no report code and
 no report files of its own — it calls the command from here, and its reports
 are filed under its own name in `pages/`. That name is the project's main
