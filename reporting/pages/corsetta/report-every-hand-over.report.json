@@ -1,0 +1,176 @@
+{
+  "title": "Reports on Every Hand-Over",
+  "eyebrow": "Approved, and your last word made it cheaper and stronger at once",
+
+  "actions": {
+    "none": true,
+    "fyi": "Both questions answered, and you narrowed what counts as work to a finished piece on the list. That turned the weaker half of this into a genuine wall — see the third card."
+  },
+
+  "status": {
+    "card": "cor-z8k"
+  },
+
+  "content": [
+    {
+      "label": "What changes for you",
+      "lead": "Today you get told about work when an agent decides it was worth telling you about.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "Today", "After"],
+          "rows": [
+            ["An agent ticks something off your list", "Chat prose, if anything", "A page, and the link in chat"],
+            ["An agent wants your input", "A question in chat, on its own", "The question with what it costs behind it"],
+            ["Who decides it is worth telling you", "The agent that did it", "Nobody — it is not a judgement any more"],
+            ["What happens if it skips the page", "Nothing at all", "It cannot tick the item off, and it cannot ask you anything"],
+            ["Where it all lands", "Scrollback", "One page per piece of work, and on its card"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "Measured before designing anything",
+          "text": "Across every session this project has ever run: 16829 turns changed a file, and not one of them handed you a link. This is not agents forgetting. Nothing has ever asked them."
+        }
+      ]
+    },
+    {
+      "label": "What fires a report, and what does not",
+      "lead": "Two triggers, both things a machine can see without asking anyone's opinion.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "Something on your list got finished",
+              "note": "A piece of work, or a whole job, is ticked off. The page is brought up to date and the link goes to you as part of ticking it off — not afterwards, and not if the agent remembers."
+            },
+            {
+              "title": "The agent wants your input",
+              "note": "Any question, any approval, any pick between two ways. The question goes on the page with what each answer costs, and the chat line is the question itself so you can answer where you are."
+            },
+            {
+              "title": "Not: working, reading, answering you",
+              "note": "Turns spent building something owe nothing until the thing is finished. Neither does reading code, searching, answering a question of yours, or bookkeeping. You narrowed this yourself, and it is what keeps the pages worth opening."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Why your last word mattered so much",
+      "lead": "It moved the rule off the one place in the machinery that cannot hold anything.",
+      "blocks": [
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "A refusal at the end of a turn is worth exactly one push",
+          "text": "When a check refuses to let an agent finish, the harness lets it try again — and if the same check refuses a second time, the harness overrules the check and lets the agent stop anyway. That is deliberate, so a broken check cannot trap a session forever. Anything built on that refusal can nudge an agent once and never more."
+        },
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "Tying it to finishing a piece of work moves it somewhere that holds",
+              "note": "Ticking something off your list is an action the agent has to ask the machinery for, and the machinery can simply say no — with no limit and no second chance. So the report is not owed after the work is finished; it is part of finishing it. An agent with no page cannot tick anything off, which is the wall you asked for."
+            },
+            {
+              "title": "The same wall carries the question half",
+              "note": "Putting a question to you is also something the agent has to ask for, and it is refused the same way. No page, no question. Both halves are now absolute rather than one absolute and one hopeful."
+            },
+            {
+              "title": "The one soft edge left, named honestly",
+              "note": "The machinery can make sure the page exists and is current. Whether the link actually reaches your chat is the one part it can only push once. In practice the page is already written by then and pasting a link is nothing, so this is a nudge on the cheapest possible act — but it is a nudge, not a wall, and you should know which is which."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What it costs, honestly",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "Finishing something takes a little longer",
+              "note": "An agent that would have ticked an item off and moved on now brings its page up to date first. Everything between stays as fast as it is today — your narrowing took this from a tax on every turn to a tax on every finish."
+            },
+            {
+              "title": "You will get the same link several times over a job",
+              "note": "A job with several pieces in it pings you once per piece, always on the same link, each time opening a page that has moved on. Enough to catch an agent going the wrong way early; not so much that the link becomes noise you stop clicking."
+            },
+            {
+              "title": "The half that reads the board is free",
+              "note": "The tick list on every page is the work list's own answer, so nobody writes it and it cannot drift. Only the words and pictures cost anything."
+            },
+            {
+              "title": "The risk worth naming",
+              "note": "An agent that cannot write a page cannot finish anything, so a fault in the report machinery stops all work rather than just going unreported. Two things already found and waiting to be fixed first are exactly that kind of fault."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "One page per piece of work, updated in place",
+      "why": "A new page per hand-over buries the current state under history. Same page, same decision numbers, always current — which is also why the tenth ping costs you nothing to read."
+    },
+    {
+      "id": "D2",
+      "title": "A card is where the report also shows, never what fires it",
+      "why": "You asked for a report every step of the way, not on the board's schedule. Work with no card behind it owes you a page just the same."
+    },
+    {
+      "id": "D3",
+      "title": "Bookkeeping is not a piece of work",
+      "why": "Claiming a card, cutting a branch and writing notes change things without producing anything you would want to read. Counting them would bury the hand-overs that matter."
+    },
+    {
+      "id": "D4",
+      "title": "Helpers an agent sends off owe nothing",
+      "why": "They hand their answer back to the agent that sent them, not to you. The agent that talks to you is the one that owes you the page."
+    },
+    {
+      "id": "D5",
+      "title": "The rule is held here, and written down where every project can read it",
+      "why": "The report tools are already shared across projects; only this one has the machinery to refuse. Another project inherits the rule the day it adopts that machinery."
+    },
+    {
+      "id": "D6",
+      "title": "When the page exists to ask you something, the chat line is the question itself",
+      "why": "You answer in the terminal. Making you open a page to find out what is being asked adds a click to every decision you make."
+    },
+    {
+      "id": "D7",
+      "title": "A piece of work means one your list says is finished, not a turn that changed a file",
+      "why": "Your words: work is only when it completed a task, subtask or step on the list. It is cheaper for you to read, cheaper for an agent to produce, and it is the only version that can be held absolutely."
+    },
+    {
+      "id": "D8",
+      "title": "The page is part of finishing something, not a debt owed afterwards",
+      "why": "You asked that an agent owing a report cannot take its next move. Refusing the finish itself is that rule with no way round it: the item stays open, the job stays open, and nothing after it can start."
+    },
+    {
+      "id": "D9",
+      "title": "No page, no question",
+      "why": "Your words. An agent that wants your input hands you the page carrying it first, so every question you answer arrives with what it costs already attached."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "Approved, so this is what is being built now.",
+    "steps": [
+      { "step": "The dead button on the card, and reports landing in a folder named after a throwaway branch", "cost": "small", "starting": true },
+      { "step": "Finishing a piece of work is refused until its page is current", "cost": "medium" },
+      { "step": "Asking you anything is refused until the page carrying the question exists", "cost": "small" },
+      { "step": "Both refusals are switched off on purpose and watched fail before they are trusted", "cost": "small" },
+      { "step": "The rule is written where every agent and every project reads it", "cost": "small" }
+    ]
+  }
+}

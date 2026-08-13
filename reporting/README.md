@@ -5,7 +5,10 @@ written by hand.
 
 This directory is shared by every project. A project keeps no report code and
 no report files of its own — it calls the command from here, and its reports
-are filed under its own name in `pages/`.
+are filed under its own name in `pages/`. That name is the project's main
+checkout, so a job done in a worktree still files under the project rather than
+under the branch the worktree is named after, which is deleted when the job
+lands.
 
 ```
 report new <slug>                 # start a spec for the project you are in
@@ -18,6 +21,11 @@ report check                      # the gates, on their own
 A report is **never published anywhere**. The build prints a link to the file
 it wrote, and that link is the whole delivery; `tools/publish-gate.py` refuses
 a built page handed to the Artifact tool.
+
+**The link goes last in the message that hands it over** — the manager's
+standing instruction, so the thing they click is where their eye already is and
+they never scroll back up for it. Nothing follows it: no recap, no next steps,
+no sign-off.
 
 `report` is on the path as a link to `bin/report`. The project a report is
 about is the directory the command was run from: the pictures a spec names are

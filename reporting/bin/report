@@ -20,9 +20,7 @@ TOOLS="$HERE/tools"
 PAGES="$HERE/pages"
 
 project_name() {
-  local root
-  root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-  basename "$root"
+  python3 "$TOOLS/project.py"
 }
 
 # A slug, a file name or a path all reach the same spec.

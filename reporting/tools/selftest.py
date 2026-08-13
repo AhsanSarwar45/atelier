@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -251,6 +252,27 @@ def run() -> int:
         if "checklist" not in str(e) and "board" not in str(e):
             failures.append(f"a card with no work under it: unhelpful complaint — {e}")
 
+    # a report made in a worktree is filed under the project, whose name outlives
+    # the branch the worktree is named after
+    import project as project_mod
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    repo = tmp / "some-project"
+    (repo / "sub").mkdir(parents=True)
+    (tmp / "nowhere").mkdir()
+    subprocess.run(git + ["init", "-q", str(repo)], check=True, capture_output=True)
+    subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "x"],
+                   cwd=repo, check=True, capture_output=True)
+    subprocess.run(git + ["worktree", "add", "-q", "--detach", str(tmp / "a-branch-name")],
+                   cwd=repo, check=True, capture_output=True)
+    for where, said in [(repo, "the project itself"),
+                        (repo / "sub", "a directory inside the project"),
+                        (tmp / "a-branch-name", "a worktree"),
+                        (tmp / "nowhere", "a directory under no project")]:
+        want = "nowhere" if where.name == "nowhere" else "some-project"
+        got = project_mod.name(where)
+        if got != want:
+            failures.append(f"a report made in {said} would be filed under {got!r}")
+
     # ── the two status lines describe the whole board, not its first row ──
     # From here on the board is a fixture, so nothing below may reach `bd`.
     import board as board_mod
@@ -322,7 +344,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 19 - len(failures)}/{len(CASES) + 19} report gates hold")
+    print(f"{len(CASES) + 23 - len(failures)}/{len(CASES) + 23} report gates hold")
     return 1 if failures else 0
 
 
