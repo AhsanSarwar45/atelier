@@ -26,14 +26,16 @@ import websocket  # pip install websocket-client
 PORT = 9333
 
 # The column each board status answers to. A status named nowhere here is one the
-# screen deliberately folds into Open with a badge, and is not compared.
-COLUMN_OF = {"in_progress": "in_progress", "in_review": "inreview",
+# screen folds into Todo with a badge, and is compared as Todo.
+COLUMN_OF = {"open": "open", "in_progress": "in_progress", "in_review": "inreview",
              "manager_review": "manager_review", "closed": "closed"}
 
-# Live work pulls the card it belongs to along, the first of these that is found:
-# the earliest place work is still standing, so a job with one piece being written
-# and one waiting on the manager reads as being written.
-LIVE = ["in_progress", "in_review", "manager_review"]
+# A card in one of these was put there by the board itself, once nothing under it
+# was left standing, so its pieces are not consulted: corsetta docs/board.md#3a1.
+SETTLED = {"in_review", "manager_review", "closed"}
+
+# Nothing is still standing under a piece in one of these.
+DONE = {"closed"}
 
 # Dropped work is a closed card carrying this mark, never a status of its own.
 CANCELLED = "cancelled"
@@ -48,13 +50,15 @@ def bd_list(project, *args):
 
 
 def board_says(project):
-    """Which column each card of the board's own belongs in.
+    """Which column each card of the board's own belongs in, and when it opened.
 
-    The screen draws one card per job: a step is not a card of its own, so a
-    goal stands in for whatever is happening below it. A goal with live work
-    under it belongs in that work's column however open its own record still
-    says it is; with nothing live under it, its own status decides. The card's
-    own status is live work of the same kind and ranks alongside what is below.
+    The screen draws one card per job, and puts it where the pieces DIRECTLY
+    under it put it: all of them waiting and it waits, one being worked and it
+    is being worked, all of them closed and nothing is left standing. Nothing
+    deeper is read, so a card and the list of pieces printed under it can never
+    say different things. A card the board has already placed itself — read,
+    waiting on the manager, closed — keeps that place. Manager's ruling,
+    2026-08-13: corsetta docs/board.md#3a1.
     """
     cards = bd_list(project)
     kids = {}
@@ -63,27 +67,26 @@ def board_says(project):
             kids.setdefault(b["parent"], []).append(b["id"])
     status = {b["id"]: b["status"] for b in cards}
 
-    def live_below(card, seen=None):
-        seen = seen or set()
-        if card in seen:
-            return None
-        seen.add(card)
-        below = [status[k] for k in kids.get(card, [])]
-        below += [d for d in (live_below(k, seen) for k in kids.get(card, [])) if d]
-        return next((s for s in LIVE if s in below), None)
+    def column(b):
+        if b["status"] == "closed" and CANCELLED in (b.get("labels") or []):
+            return CANCELLED
+        if b["status"] in SETTLED:
+            return COLUMN_OF[b["status"]]
+        pieces = [status[k] for k in kids.get(b["id"], [])]
+        if not pieces:
+            return COLUMN_OF.get(b["status"], "open")
+        standing = [s for s in pieces if s not in DONE]
+        if not standing:
+            return "closed"
+        return "in_progress" if "in_progress" in standing else "open"
 
-    want = {}
+    want, opened = {}, {}
     for b in cards:
         if b.get("parent"):
             continue
-        here = [b["status"], live_below(b["id"])]
-        if b["status"] == "closed" and CANCELLED in (b.get("labels") or []):
-            want.setdefault(CANCELLED, set()).add(b["id"])
-            continue
-        column = COLUMN_OF.get(next((s for s in LIVE if s in here), b["status"]))
-        if column:
-            want.setdefault(column, set()).add(b["id"])
-    return want
+        opened[b["id"]] = b.get("created_at") or ""
+        want.setdefault(column(b), set()).add(b["id"])
+    return want, opened
 
 
 class Browser:
@@ -124,12 +127,20 @@ class Browser:
         self.proc.terminate()
 
 
+# A card drawn inside another card is that card's own piece, not a card of the
+# column, which is what the heading counts. Both are read in the order the screen
+# drew them, because the manager's column is the oldest first.
 READ_COLUMNS = """
 (() => {
   const out = {};
   for (const col of document.querySelectorAll('[data-column]')) {
-    out[col.dataset.column] =
-      [...col.querySelectorAll('[data-bead-id]')].map(e => e.dataset.beadId);
+    const badge = col.querySelector('.column-count-badge');
+    out[col.dataset.column] = {
+      cards: [...col.querySelectorAll('[data-bead-id]')]
+        .filter(e => !e.parentElement.closest('[data-bead-id]'))
+        .map(e => e.dataset.beadId),
+      heading: badge ? Number(badge.textContent.trim()) : null,
+    };
   }
   return out;
 })()
@@ -198,7 +209,7 @@ def main():
     if not match:
         sys.exit(f"the screen does not know a project at {args.project}")
 
-    before = board_says(args.project)
+    before, opened = board_says(args.project)
 
     b = Browser()
     try:
@@ -231,7 +242,7 @@ def main():
     # read when it loaded. A card that moved while this was looking is not
     # evidence of anything, so only cards the board placed the same way both
     # before and after the screen was read are compared.
-    after = board_says(args.project)
+    after, _ = board_says(args.project)
     steady = {c: ids & after.get(c, set()) for c, ids in before.items()}
     moved = sum(len(ids) for ids in before.values()) - sum(len(ids) for ids in steady.values())
     if moved:
@@ -241,8 +252,8 @@ def main():
     bad = []
     for column in list(COLUMN_OF.values()) + [CANCELLED]:
         want = steady.get(column, set())
-        here = set(drawn.get(column, []))
-        elsewhere = {c: set(ids) for c, ids in drawn.items() if c != column}
+        here = set(drawn.get(column, {}).get("cards") or [])
+        elsewhere = {c: set(d.get("cards") or []) for c, d in drawn.items() if c != column}
         for card in sorted(want - here):
             where = next((c for c, ids in elsewhere.items() if card in ids), None)
             bad.append(f"{card} belongs under {column} but is "
@@ -255,6 +266,38 @@ def main():
             print("  " + line)
         return 1
     print("\nevery card the board holds is drawn in its own column")
+
+    # The heading says how many are waiting in that column, so a column scrolled
+    # past its first screenful still reports its own size.
+    miscounted = [(c, d["heading"], len(d["cards"] or []))
+                  for c, d in sorted(drawn.items())
+                  if d["heading"] != len(d["cards"] or [])]
+    print(f"\ncolumns with a count on the heading "
+          f"{sum(1 for d in drawn.values() if d['heading'] is not None):>3}   "
+          f"headings that miscount {len(miscounted):>3}")
+    if any(d["heading"] is None for d in drawn.values()):
+        print("  a column heading carries no count at all")
+        return 1
+    for column, said, drew in miscounted:
+        print(f"  {column} says {said} and drew {drew}")
+    if miscounted:
+        return 1
+    print("every column heading counts the cards it drew")
+
+    # The manager is waited on, so his column is the oldest first: nothing sits in
+    # it quietly for a week. Every other column keeps the order the board gave.
+    waiting = drawn.get("manager_review", {}).get("cards") or []
+    order = [opened.get(c, "") for c in waiting]
+    print(f"\ncards waiting on the manager {len(waiting):>3}")
+    if len(waiting) < 2:
+        print("fewer than two are waiting, so their order says nothing today; "
+              "src/lib/__tests__/board-agreement.test.ts holds that rule")
+    elif order != sorted(order):
+        print("  his column is not the oldest first: "
+              + ", ".join(f"{c} ({o[:10]})" for c, o in zip(waiting, order)))
+        return 1
+    else:
+        print("his column is drawn oldest first")
 
     outside = [r for r in reports if not r["inside"]]
     print(f"\nreports on cards  {len(reports):>3}   drawn outside their card  {len(outside):>3}")

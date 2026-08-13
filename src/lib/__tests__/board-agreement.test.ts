@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { columnFor, drawnInColumns } from "@/lib/bead-utils";
+import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
 import { STATUS_MAP } from "@/types";
 
 /**
@@ -147,5 +147,49 @@ describe("a card sits where its own pieces put it", () => {
     const a = { id: "a", status: "open", children: ["b"] };
     const b = { id: "b", status: "open", children: ["a"] };
     expect(columnFor(a, board(a, b))).toBe("open");
+  });
+});
+
+/**
+ * The manager's column is the one nobody else can empty, so the card that has
+ * waited longest is the one he sees first. On the running screen this is read
+ * back by scripts/board-columns-agree.py, which needs two cards to be waiting
+ * before it can say anything.
+ */
+describe("the manager's column is the oldest first", () => {
+  const ids = (cards: { id: string }[]) => cards.map((c) => c.id);
+
+  it("the card that has waited longest is at the top", () => {
+    const cards = [
+      { id: "new", created_at: "2026-08-13T09:00:00Z" },
+      { id: "old", created_at: "2026-08-01T09:00:00Z" },
+      { id: "middle", created_at: "2026-08-07T09:00:00Z" },
+    ];
+    expect(ids(oldestFirst(cards))).toEqual(["old", "middle", "new"]);
+  });
+
+  it("two cards opened in the same second keep the order they came in", () => {
+    const cards = [
+      { id: "first", created_at: "2026-08-01T09:00:00Z" },
+      { id: "second", created_at: "2026-08-01T09:00:00Z" },
+    ];
+    expect(ids(oldestFirst(cards))).toEqual(["first", "second"]);
+  });
+
+  it("a card that cannot say when it opened does not claim to be the oldest", () => {
+    const cards = [
+      { id: "undated" },
+      { id: "old", created_at: "2026-08-01T09:00:00Z" },
+    ];
+    expect(ids(oldestFirst(cards))).toEqual(["old", "undated"]);
+  });
+
+  it("the column it was given is not reordered underneath it", () => {
+    const cards = [
+      { id: "new", created_at: "2026-08-13T09:00:00Z" },
+      { id: "old", created_at: "2026-08-01T09:00:00Z" },
+    ];
+    oldestFirst(cards);
+    expect(ids(cards)).toEqual(["new", "old"]);
   });
 });

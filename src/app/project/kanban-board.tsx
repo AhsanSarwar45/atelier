@@ -35,7 +35,7 @@ import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
 import { useTheme } from "@/hooks/use-theme";
 import { useWorktreeStatuses } from "@/hooks/use-worktree-statuses";
-import { columnFor, drawnInColumns, isBlocked } from "@/lib/bead-utils";
+import { columnFor, drawnInColumns, isBlocked, oldestFirst } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
@@ -201,11 +201,7 @@ export default function KanbanBoard() {
       const column = grouped[live] ? live : 'open';
       grouped[column].push(bead);
     }
-    // Oldest first where somebody is being waited on, so nothing sits in the
-    // manager's column for a week without him seeing it rise to the top.
-    grouped.manager_review.sort(
-      (a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''),
-    );
+    grouped.manager_review = oldestFirst(grouped.manager_review);
     return grouped;
   }, [topLevelBeads, beads]);
 

@@ -139,6 +139,28 @@ export function drawnInColumns<T extends { status: string; parent_id?: string; i
 }
 
 /**
+ * A card the board opened, at the far end of every date it could carry, so a
+ * card that cannot say when it opened cannot claim to be the oldest either.
+ */
+const NO_DATE = "￿";
+
+/**
+ * The cards of a column, oldest first.
+ *
+ * The manager is the one being waited on, so his column is drawn this way and no
+ * other is: nothing sits in it quietly for a week while newer work lands on top.
+ *
+ * @param beads - The column's cards. The caller's array is left as it was.
+ */
+export function oldestFirst<T extends { created_at?: string }>(
+  beads: ReadonlyArray<T>,
+): T[] {
+  return [...beads].sort((a, b) =>
+    (a.created_at || NO_DATE).localeCompare(b.created_at || NO_DATE),
+  );
+}
+
+/**
  * The column a card belongs in.
  *
  * Read from the pieces DIRECTLY under it and no deeper, so a card and the list
