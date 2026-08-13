@@ -1,11 +1,12 @@
 "use client";
 
-import { Check, Circle, Clock, FileCheck, GitPullRequest, GitMerge, Link2 } from "lucide-react";
+import { Ban, Check, Circle, Clock, Eye, FileCheck, GitPullRequest, GitMerge, Link2, type LucideIcon } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { truncate } from "@/lib/bead-utils";
+import { classesFor } from "@/lib/state-styles";
 import { cn } from "@/lib/utils";
-import type { Bead, BeadStatus } from "@/types";
+import { STATE_BY_ID, type Bead, type BeadStatus, type StateInfo } from "@/types";
 
 /**
  * PR status for a child task (used for icon display)
@@ -29,37 +30,32 @@ export interface SubtaskListProps {
 }
 
 /**
+ * The drawings behind the icon names the one list of states gives. A name it
+ * does not answer for falls back to the open circle rather than nothing.
+ */
+const ICONS: Record<StateInfo['icon'], LucideIcon> = {
+  circle: Circle,
+  clock: Clock,
+  'file-check': FileCheck,
+  eye: Eye,
+  check: Check,
+  ban: Ban,
+};
+
+/**
  * Get status icon based on bead status
  */
 function getStatusIcon(status: BeadStatus) {
-  switch (status) {
-    case 'closed':
-      return <Check className="h-3.5 w-3.5 text-status-closed" aria-hidden="true" />;
-    case 'in_progress':
-      return <Clock className="h-3.5 w-3.5 text-status-progress" aria-hidden="true" />;
-    case 'inreview':
-      return <FileCheck className="h-3.5 w-3.5 text-status-review" aria-hidden="true" />;
-    case 'open':
-    default:
-      return <Circle className="h-3.5 w-3.5 text-t-muted" aria-hidden="true" />;
-  }
+  const state = STATE_BY_ID[status];
+  const Icon = ICONS[state?.icon] ?? Circle;
+  return <Icon className={cn("h-3.5 w-3.5", getStatusColor(status))} aria-hidden="true" />;
 }
 
 /**
  * Get status text color
  */
 function getStatusColor(status: BeadStatus): string {
-  switch (status) {
-    case 'closed':
-      return "text-status-closed";
-    case 'in_progress':
-      return "text-status-progress";
-    case 'inreview':
-      return "text-status-review";
-    case 'open':
-    default:
-      return "text-t-muted";
-  }
+  return STATE_BY_ID[status] ? classesFor(status).text : "text-t-muted";
 }
 
 /**

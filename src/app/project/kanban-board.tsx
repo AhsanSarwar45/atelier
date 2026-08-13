@@ -40,22 +40,16 @@ import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
 import { isDoltProject, projectDir } from "@/lib/utils";
-import type { Bead, BeadStatus } from "@/types";
+import { STATES, type Bead, type BeadStatus } from "@/types";
 
 /**
- * Column configuration for the Kanban board. Names and meanings are the
- * manager's, 2026-08-13: nobody on it; being worked in its own tree; written and
- * waiting for a second agent to read it; landed and waiting for his own
- * signature; final; dropped.
+ * The columns, read off the one list of states. Their names and meanings are
+ * the manager's, 2026-08-13: nobody on it; being worked in its own tree;
+ * written and waiting for a second agent to read it; landed and waiting for his
+ * own signature; final; dropped.
  */
-const COLUMNS: { status: BeadStatus; title: string }[] = [
-  { status: "open", title: "Todo" },
-  { status: "in_progress", title: "In Progress" },
-  { status: "inreview", title: "Agent Review" },
-  { status: "manager_review", title: "Manager Review" },
-  { status: "closed", title: "Done" },
-  { status: "cancelled", title: "Cancelled" },
-];
+const COLUMNS: { status: BeadStatus; title: string }[] =
+  STATES.map((s) => ({ status: s.id, title: s.column }));
 
 /**
  * Main Kanban board component with 4 columns, search, filter, and keyboard navigation

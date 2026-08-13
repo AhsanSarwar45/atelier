@@ -6,23 +6,9 @@ import { BeadCard } from "@/components/bead-card";
 import { EpicCard } from "@/components/epic-card";
 import { CardReportLink, useCardReport } from "@/components/report-panel";
 import { Badge } from "@/components/ui/badge";
+import { classesFor, colorFor } from "@/lib/state-styles";
 import { cn } from "@/lib/utils";
 import type { Bead, BeadStatus, Epic } from "@/types";
-
-/**
- * Get the CSS color value for a column's accent (used as --column-accent)
- */
-function getColumnAccentColor(status: BeadStatus): string {
-  switch (status) {
-    case "open": return "hsl(var(--status-open))";
-    case "in_progress": return "hsl(var(--status-progress))";
-    case "inreview": return "hsl(var(--status-review))";
-    case "manager_review": return "hsl(var(--status-manager))";
-    case "closed": return "hsl(var(--status-closed))";
-    case "cancelled": return "hsl(var(--status-cancelled))";
-    default: return "hsl(var(--text-muted))";
-  }
-}
 
 export interface KanbanColumnProps {
   status: BeadStatus;
@@ -43,71 +29,6 @@ export interface KanbanColumnProps {
   onUpdate?: () => void;
 }
 
-/**
- * Get accent border class for column header based on status
- */
-function getColumnAccentBorder(status: BeadStatus): string {
-  switch (status) {
-    case "open":
-      return "border-t-2 border-t-status-open/60";
-    case "in_progress":
-      return "border-t-2 border-t-status-progress/60";
-    case "inreview":
-      return "border-t-2 border-t-status-review/60";
-    case "manager_review":
-      return "border-t-2 border-t-status-manager/60";
-    case "closed":
-      return "border-t-2 border-t-status-closed/60";
-    case "cancelled":
-      return "border-t-2 border-t-status-cancelled/60";
-    default:
-      return "border-t-2 border-t-t-muted/60";
-  }
-}
-
-/**
- * Get header text color based on status
- */
-function getHeaderTextColor(status: BeadStatus): string {
-  switch (status) {
-    case "open":
-      return "text-status-open";
-    case "in_progress":
-      return "text-status-progress";
-    case "inreview":
-      return "text-status-review";
-    case "manager_review":
-      return "text-status-manager";
-    case "closed":
-      return "text-status-closed";
-    case "cancelled":
-      return "text-status-cancelled";
-    default:
-      return "text-t-tertiary";
-  }
-}
-
-/**
- * Get badge color class for count badge based on status (dark theme)
- */
-function getBadgeVariant(status: BeadStatus): string {
-  switch (status) {
-    case "open":
-      return "bg-status-open/20 text-status-open border-status-open/30 hover:bg-status-open/20";
-    case "in_progress":
-      return "bg-status-progress/20 text-status-progress border-status-progress/30 hover:bg-status-progress/20";
-    case "inreview":
-      return "bg-status-review/20 text-status-review border-status-review/30 hover:bg-status-review/20";
-    case "manager_review":
-      return "bg-status-manager/20 text-status-manager border-status-manager/30 hover:bg-status-manager/20";
-    case "closed":
-      return "bg-status-closed/20 text-status-closed border-status-closed/30 hover:bg-status-closed/20";
-    case "cancelled":
-      return "bg-status-cancelled/20 text-status-cancelled border-status-cancelled/30 hover:bg-status-cancelled/20";
-    default:
-      return "bg-t-muted/20 text-t-tertiary border-t-muted/30 hover:bg-t-muted/20";
-  }
-}
 
 /**
  * Type guard to check if a bead is an epic
@@ -208,17 +129,17 @@ export function KanbanColumn({
         "bg-surface-raised/30 border border-b-default/50"
       )}
       data-column={status}
-      style={{ '--column-accent': getColumnAccentColor(status) } as React.CSSProperties}
+      style={{ '--column-accent': colorFor(status) } as React.CSSProperties}
     >
       {/* Column Header - fixed height with colored accent border */}
       <div className={cn(
         "flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-b-default/50 brutalist-column-header",
-        getColumnAccentBorder(status)
+        classesFor(status).borderTop
       )}>
-        <h2 className={cn("font-semibold text-sm column-title-text", getHeaderTextColor(status))}>{title}</h2>
+        <h2 className={cn("font-semibold text-sm column-title-text", classesFor(status).text)}>{title}</h2>
         <Badge
           variant="secondary"
-          className={cn("text-xs px-2 py-0.5 column-count-badge", getBadgeVariant(status))}
+          className={cn("text-xs px-2 py-0.5 column-count-badge", classesFor(status).badge)}
         >
           {beads.length}
         </Badge>

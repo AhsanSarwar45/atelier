@@ -27,7 +27,7 @@ import type { LabelNamespace } from '@/lib/bead-labels';
 import { ISSUE_TYPES, getIssueTypeMeta } from '@/lib/issue-types';
 import type { IssueTypeFilter } from '@/lib/issue-types';
 import { cn } from '@/lib/utils';
-import type { BeadStatus } from '@/types';
+import { STATES, type BeadStatus } from '@/types';
 
 type TypeFilter = IssueTypeFilter;
 type SortField = 'ticket_number' | 'created_at';
@@ -104,12 +104,8 @@ const SORT_OPTIONS: { value: string; label: string; field: SortField; direction:
   { value: 'created_at_asc', label: 'Updated (Oldest)', field: 'created_at', direction: 'asc' },
 ];
 
-const STATUS_OPTIONS: { value: BeadStatus; label: string }[] = [
-  { value: 'open', label: 'Open' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'inreview', label: 'In Review' },
-  { value: 'closed', label: 'Closed' },
-];
+const STATUS_OPTIONS: { value: BeadStatus; label: string }[] =
+  STATES.map((s) => ({ value: s.id, label: s.label }));
 
 /**
  * QuickFilterBar provides quick access to common filter and sort operations

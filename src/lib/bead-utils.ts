@@ -5,7 +5,8 @@
  * and subtask-list components.
  */
 
-import type { BeadStatus } from "@/types";
+import { classesFor } from "@/lib/state-styles";
+import { STATE_BY_ID, STATES, type BeadStatus } from "@/types";
 
 /**
  * Format bead ID for display, preserving the workspace prefix.
@@ -31,36 +32,14 @@ export function formatBeadId(id: string, maxLen = 6): string {
  * Format status for display (e.g., "in_progress" -> "In Progress")
  */
 export function formatStatus(status: BeadStatus): string {
-  switch (status) {
-    case "open":
-      return "Open";
-    case "in_progress":
-      return "In Progress";
-    case "inreview":
-      return "In Review";
-    case "closed":
-      return "Closed";
-    default:
-      return status;
-  }
+  return STATE_BY_ID[status]?.label ?? status;
 }
 
 /**
  * Get Tailwind color class for status indicator dot
  */
 export function getStatusDotColor(status: BeadStatus): string {
-  switch (status) {
-    case "open":
-      return "text-status-open";
-    case "in_progress":
-      return "text-status-progress";
-    case "inreview":
-      return "text-status-review";
-    case "closed":
-      return "text-status-closed";
-    default:
-      return "text-t-tertiary";
-  }
+  return classesFor(status).text;
 }
 
 /**
@@ -183,8 +162,10 @@ export function columnFor<T extends { id: string; status: string; children?: str
     .filter((k): k is T => k !== undefined)
     .map((k) => columnFor(k, byId, seen))];
 
-  for (const stage of ["in_progress", "inreview", "manager_review"]) {
-    if (here.includes(stage)) return stage;
+  // The live states in their own order, minus open: open is where a card sits
+  // when nobody is on it, which is the fallback rather than a stage to pull to.
+  for (const stage of STATES.filter((s) => s.live && s.id !== "open")) {
+    if (here.includes(stage.id)) return stage.id;
   }
   return bead.status;
 }

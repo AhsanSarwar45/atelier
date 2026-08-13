@@ -62,18 +62,61 @@ export interface Tag {
 }
 
 /**
- * Bead status types (the 6 kanban columns)
+ * The states a bead can be in, and everything the app needs to draw one.
+ *
+ * This list is the only place a state is declared. Menus, filters, shortcuts,
+ * labels, colours, icons and the columns are all derived from it, so a state
+ * added here appears everywhere at once — a copy of the list somewhere else is
+ * a place that silently keeps four states while the board holds six.
+ * `board-columns-agree.py` and `state-list.test.ts` are what hold that line.
+ *
+ * `column` is the heading on the board, `label` the state's own name on a card;
+ * they differ because the manager named the columns for what is happening in
+ * them. `tone` names a colour token (`--status-<tone>`), `key` the second press
+ * of the `g` shortcut, `live` whether work is still standing in this state.
+ */
+export const STATES = [
+  { id: 'open',           label: 'Open',           column: 'Todo',           tone: 'open',      icon: 'circle',     key: 'o', live: true  },
+  { id: 'in_progress',    label: 'In Progress',    column: 'In Progress',    tone: 'progress',  icon: 'clock',      key: 'p', live: true  },
+  { id: 'inreview',       label: 'In Review',      column: 'Agent Review',   tone: 'review',    icon: 'file-check', key: 'r', live: true  },
+  { id: 'manager_review', label: 'Manager Review', column: 'Manager Review', tone: 'manager',   icon: 'eye',        key: 'm', live: true  },
+  { id: 'closed',         label: 'Closed',         column: 'Done',           tone: 'closed',    icon: 'check',      key: 'c', live: false },
+  { id: 'cancelled',      label: 'Cancelled',      column: 'Cancelled',      tone: 'cancelled', icon: 'ban',        key: 'x', live: false },
+] as const;
+
+/**
+ * Bead status types (the 6 kanban columns), read off {@link STATES}.
  *
  * `cancelled` is a column but never a stored status: dropped work is closed and
  * marked, because a card that never closes blocks whatever waits on it forever.
+ * {@link SET_BY} says what writing each state actually means.
  */
-export type BeadStatus =
-  | 'open'
-  | 'in_progress'
-  | 'inreview'
-  | 'manager_review'
-  | 'closed'
-  | 'cancelled';
+export type BeadStatus = (typeof STATES)[number]['id'];
+
+/** A state, as {@link STATES} describes it. */
+export type StateInfo = (typeof STATES)[number];
+
+/** The state by its id, for the readers that have an id and want the rest. */
+export const STATE_BY_ID = Object.fromEntries(
+  STATES.map((s) => [s.id, s]),
+) as Record<BeadStatus, StateInfo>;
+
+/**
+ * What setting a state means to the board underneath.
+ *
+ * Every state but one is a status bd stores. Cancelled is not: the board keeps
+ * dropped work as a closed card carrying the `cancelled` label, so nothing
+ * waiting on it waits forever. Writing the word would be refused, so the screen
+ * writes what the board actually holds.
+ */
+export const SET_BY: Record<BeadStatus, { status: string; addLabel?: string }> = {
+  open:           { status: 'open' },
+  in_progress:    { status: 'in_progress' },
+  inreview:       { status: 'in_review' },   // what bd calls this column
+  manager_review: { status: 'manager_review' },
+  closed:         { status: 'closed' },
+  cancelled:      { status: 'closed', addLabel: 'cancelled' },
+};
 
 /**
  * All known statuses from the Beads CLI (bd v0.47.0+).

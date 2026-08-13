@@ -2,22 +2,18 @@
 
 import { useCallback, useEffect, useState, RefObject } from "react";
 
-import type { Bead, BeadStatus } from "@/types";
+import { STATES, type Bead, type BeadStatus } from "@/types";
 
 /**
  * Column order for navigation
  */
-const COLUMN_ORDER: BeadStatus[] = ["open", "in_progress", "inreview", "closed"];
+const COLUMN_ORDER: BeadStatus[] = STATES.map((s) => s.id);
 
 /**
  * Column shortcuts for 'g' prefix navigation
  */
-const COLUMN_SHORTCUTS: Record<string, BeadStatus> = {
-  o: "open",
-  p: "in_progress",
-  r: "inreview",
-  c: "closed",
-};
+const COLUMN_SHORTCUTS: Record<string, BeadStatus> =
+  Object.fromEntries(STATES.map((s) => [s.key, s.id]));
 
 export interface KeyboardNavigationOptions {
   beads: Bead[];
@@ -47,10 +43,7 @@ export interface KeyboardNavigationResult {
  * - Enter: Open selected bead detail
  * - Escape: Close detail sheet / clear selection
  * - /: Focus search input
- * - g then o: Go to Open column
- * - g then p: Go to In Progress column
- * - g then r: Go to In Review column
- * - g then d: Go to Done column
+ * - g then a column's key: jump to that column (the keys are in STATES)
  */
 export function useKeyboardNavigation({
   beads,
