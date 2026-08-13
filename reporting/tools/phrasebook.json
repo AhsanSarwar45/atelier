@@ -1,6 +1,5 @@
 {
   "_comment": "Left: a word only a builder of this thing would use. Right: what the manager would say. Every key is BANNED from a report page unless the page glosses it inline (docs/reporting.md#jargon).",
-
   "shader": "the code that colours a surface — usually say what changed instead",
   "pass": "step",
   "render pass": "drawing step",
@@ -76,5 +75,7 @@
   "stub": "a placeholder",
   "hardcoded": "fixed in place",
   "deprecated": "on the way out",
-  "wip": "unfinished"
+  "wip": "unfinished",
+  "branch": "a separate copy of the work — usually say nothing, it is housekeeping",
+  "worktree": "a separate copy of the work — usually say nothing, it is housekeeping"
 }

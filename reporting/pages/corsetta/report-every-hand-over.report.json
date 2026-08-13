@@ -201,7 +201,7 @@
     {
       "id": "D3",
       "title": "Bookkeeping is not a piece of work",
-      "why": "Claiming a card, cutting a branch and writing notes change things without producing anything you would want to read. Counting them would bury the hand-overs that matter."
+      "why": "Claiming a card, setting up a workspace and writing notes change things without producing anything you would want to read. Counting them would bury the hand-overs that matter."
     },
     {
       "id": "D4",
@@ -253,8 +253,7 @@
   "next": {
     "if_nothing": "The wall stays up and the rest of this job finishes without you.",
     "steps": [
-      { "step": "Tidy the branch away", "cost": "small", "starting": true },
-      { "step": "The next-up line says what the agent will do — you already said yes, and it is done", "cost": "small" }
+      { "step": "Every agent on this project is held to the wall from its next session", "cost": "small", "starting": true }
     ]
   }
 }

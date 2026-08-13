@@ -302,9 +302,10 @@ def action_card(spec: dict, ctx: Ctx) -> str:
 
 
 def starting_step(spec: dict) -> str:
-    """The step the plan says is being started, or "" when the plan has run out.
+    """The step the plan marks as starting, or "" when the plan has run out.
 
-    A plan marks one step as the one under way; without a mark the first is it.
+    Without a mark the first step is it. Why this line rather than the board's:
+    README, "Next-up is the exception".
     """
     steps = [s for s in ((spec.get("next") or {}).get("steps") or []) if s.get("step")]
     if not steps:
@@ -316,11 +317,11 @@ def status_card(spec: dict, ctx: Ctx) -> str:
     s = spec["status"]
     if s.get("card"):
         s = board_status(s["card"], ctx.project)
-        # What happens next is the agent's to say, not the work list's: the list
-        # can only name a stage, and it says nothing has started whenever the
-        # agent is behind on it. The ticks stay the list's answer — they are the
-        # one part of a page nobody writes.
-        s["next_up"] = starting_step(spec) or s["next_up"]
+        # README, "Next-up is the exception". A job with nothing left keeps the
+        # list's own last word: a plan step advertised under a full set of ticks
+        # reads as work still to come.
+        if any(i["state"] != "done" for i in s.get("items", [])):
+            s["next_up"] = starting_step(spec) or s["next_up"]
         # A card's title is written on the board and reaches the manager here
         # unedited, so it answers to the same phrasebook as the rest of the page.
         glossed = set(ctx.gloss)

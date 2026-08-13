@@ -42,7 +42,11 @@
           "rows": [
             {
               "title": "A page whose agent wrote no plan",
-              "note": "It falls back to the work list, exactly as today. The builder already refuses a page with no plan at all, so this only touches pages whose plan has run out of steps."
+              "note": "It falls back to the work list, exactly as today, and reads as a stage name again. Nothing stops an agent leaving the plan empty; if that turns out to be common, the builder can refuse it, but no page here does that today."
+            },
+            {
+              "title": "A job with nothing left",
+              "note": "It keeps the work list's own last word — everything is finished — rather than advertising a plan step under a full set of ticks."
             },
             {
               "title": "Pages that went stale before today",
@@ -75,9 +79,7 @@
   "next": {
     "if_nothing": "It goes in as described, and you see it on the next page you open.",
     "steps": [
-      { "step": "The line reads the plan, with the work list as the fallback", "cost": "small", "starting": true },
-      { "step": "A case that goes red if it ever reads the work list again", "cost": "small" },
-      { "step": "Someone who did not write it reads it, then it lands", "cost": "small" }
+      { "step": "Someone who did not write it reads it, then it lands", "cost": "small", "starting": true }
     ]
   }
 }

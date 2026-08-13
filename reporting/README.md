@@ -172,7 +172,7 @@ explains each inline. Past six, the page is written for the wrong reader.
 | A status is the board's or the spec's, never both | The builder refuses to emit a page |
 | Only shelf blocks appear | The builder, by name |
 | A report is never published | `tools/publish-gate.py` refuses a built page |
-| Every gate has teeth | `tools/selftest.py` — 26 faults, each of which must go red |
+| Every gate has teeth | `tools/selftest.py` — one fault per rule, each of which must go red |
 
 The gate recognises a page by the builder's hash of its own content, so a
 report cannot reach the cloud by being renamed or lightly edited.

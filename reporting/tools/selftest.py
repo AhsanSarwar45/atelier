@@ -355,8 +355,7 @@ def run() -> int:
     if said != ["Fix the button", "Refuse the close", "Write the rule down"]:
         failures.append(f"work items sharing a step read as {said}")
 
-    # what happens next is the agent's to say: the work list can only name a stage,
-    # and it reads as nothing-started whenever the agent is behind on ticking rows
+    # README, "Next-up is the exception"
     board_mod.children = lambda card, project: [
         {"id": "m.1", "status": "open", "labels": ["step:work", "of:x"], "title": "Build it"},
     ]
@@ -377,6 +376,15 @@ def run() -> int:
     if next_up_line(spec) != "Build it":
         failures.append("with the plan run out, next up did not fall back to the work list")
 
+    # a job with nothing left keeps the work list's last word, whatever the plan
+    # still advertises
+    board_mod.children = lambda card, project: [
+        {"id": "m.1", "status": "closed", "labels": ["step:work", "of:x"], "title": "Build it"},
+    ]
+    spec["next"]["steps"] = [{"step": "Fit the second mirror", "cost": "small", "starting": True}]
+    if "finished" not in next_up_line(spec):
+        failures.append(f"a finished job still advertised {next_up_line(spec)!r} as next")
+
     # a card's title reaches the manager unedited, so it answers to the phrasebook
     board_mod.children = lambda card, project: [
         {"id": "j", "status": "open", "labels": ["step:work", "of:x"],
@@ -395,7 +403,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 29 - len(failures)}/{len(CASES) + 29} report gates hold")
+    print(f"{len(CASES) + 30 - len(failures)}/{len(CASES) + 30} report gates hold")
     return 1 if failures else 0
 
 
