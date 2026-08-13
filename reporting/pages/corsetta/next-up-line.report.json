@@ -1,0 +1,83 @@
+{
+  "title": "The Next-Up Line",
+  "eyebrow": "You answered; this is the change going in",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing needed. You already made the call: the line says what the agent is about to do, not what the work list says."
+  },
+
+  "status": {
+    "card": "cor-ydpx"
+  },
+
+  "content": [
+    {
+      "label": "What changes at the top of every page",
+      "lead": "One line, on every report you open.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "Before", "After"],
+          "rows": [
+            ["What next-up says", "The name of a stage — \"Build it\"", "The thing about to happen, in the agent's words"],
+            ["Where it comes from", "The work list, and only that", "The plan the agent already wrote at the bottom of the page"],
+            ["When the work list is behind", "The line says nothing has started", "The line still says what is coming"],
+            ["The tick list underneath", "The work list's answer", "Unchanged — still the work list's answer"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Why the list stays as it is",
+          "text": "The tick list is the one part of a page nobody writes, so it is the one part that cannot flatter. Leaving it alone is what keeps the page something you can hold an agent to."
+        }
+      ]
+    },
+    {
+      "label": "What it does not fix",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "A page whose agent wrote no plan",
+              "note": "It falls back to the work list, exactly as today. The builder already refuses a page with no plan at all, so this only touches pages whose plan has run out of steps."
+            },
+            {
+              "title": "Pages that went stale before today",
+              "note": "The refusal that landed this morning keeps a page and its list moving together from now on. It does not go back and mend the ones already adrift; those mend the next time someone touches their job."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The next-up line comes from the agent's plan, not the work list",
+      "why": "Your words: take the next-up line from what the agent wrote, not from the work list. The line is the first thing you read and it was the least true thing on the page."
+    },
+    {
+      "id": "D2",
+      "title": "The line names the step the plan is starting on",
+      "why": "A plan marks whichever step is being started. That is what is happening next; the rest are further down the same page."
+    },
+    {
+      "id": "D3",
+      "title": "The now line and the tick list stay the work list's answer",
+      "why": "You asked about next-up only, and the value of the rest is that no agent writes it."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "It goes in as described, and you see it on the next page you open.",
+    "steps": [
+      { "step": "The line reads the plan, with the work list as the fallback", "cost": "small", "starting": true },
+      { "step": "A case that goes red if it ever reads the work list again", "cost": "small" },
+      { "step": "Someone who did not write it reads it, then it lands", "cost": "small" }
+    ]
+  }
+}
