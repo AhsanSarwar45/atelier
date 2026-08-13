@@ -278,14 +278,35 @@ def run() -> int:
     board_mod.children = lambda card, project: [
         {"id": "s", "status": "open", "labels": ["step:build", "of:x"],
          "title": "Build: the whole goal title again"},
+        {"id": "w", "status": "open", "labels": ["step:worktree", "of:x"],
+         "title": "Worktree: the whole goal title again"},
     ]
     st = board_mod.status("x", tmp)
-    if st["items"][0]["text"] != "Build it":
-        failures.append(f"a job's step reached the reader as {st['items'][0]['text']!r}")
+    said = [i["text"] for i in st["items"]]
+    if said != ["Build it", "Get a clean workspace"]:
+        failures.append(f"a job's steps reached the reader as {said}")
+
+    # a step nobody has given plain words to still reads as a name, not a label
+    board_mod.children = lambda card, project: [
+        {"id": "p", "status": "open", "labels": ["step:polish", "of:x"], "title": "Polish: x"},
+    ]
+    if board_mod.status("x", tmp)["items"][0]["text"] != "Polish":
+        failures.append("an unknown step name leaked its label into the checklist")
+
+    # many cards under one step ARE the work: each is told apart by its own title,
+    # and printing the step's name would print it once per card
+    board_mod.children = lambda card, project: [
+        {"id": "a", "status": "closed", "labels": ["step:work", "of:x"], "title": "Fix the button"},
+        {"id": "b", "status": "open", "labels": ["step:work", "of:x"], "title": "Refuse the close"},
+        {"id": "c", "status": "open", "labels": ["step:work", "of:x"], "title": "Write the rule down"},
+    ]
+    said = [i["text"] for i in board_mod.status("x", tmp)["items"]]
+    if said != ["Fix the button", "Refuse the close", "Write the rule down"]:
+        failures.append(f"work items sharing a step read as {said}")
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 15 - len(failures)}/{len(CASES) + 15} report gates hold")
+    print(f"{len(CASES) + 17 - len(failures)}/{len(CASES) + 17} report gates hold")
     return 1 if failures else 0
 
 

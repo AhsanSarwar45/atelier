@@ -31,24 +31,41 @@ ORDER = {"done": 0, "draft": 1, "todo": 2}
 # title after it. What the reader is owed is the step's purpose, in their words.
 STEP_LABEL = "step:"
 STEPS = {
+    "worktree": "Get a clean workspace",
+    "clarify": "Settle what is unclear",
     "prove": "Reproduce it",
     "ground": "Read the sources",
     "design": "Decide the shape",
+    "work": "Build it",
     "build": "Build it",
     "verify": "Check that it works",
+    "benchmark": "Measure before and after",
     "test": "Stop it coming back",
-    "record": "Write it up",
     "review": "Have someone else read it",
+    "record": "Write it up",
     "land": "Merge it",
 }
 
 
-def _title(kid: dict) -> str:
-    """What this row of the checklist is called."""
+def _step(kid: dict) -> str:
+    """The step this card belongs to, or "" for a card that is not one."""
     for label in kid.get("labels", []):
         if label.startswith(STEP_LABEL):
-            name = label[len(STEP_LABEL):]
-            return STEPS.get(name, name.capitalize())
+            return label[len(STEP_LABEL):]
+    return ""
+
+
+def _title(kid: dict, shared: set) -> str:
+    """What this row of the checklist is called.
+
+    A step's own title repeats the goal's, so a lone step reads better as its
+    purpose. A step that holds many cards is the job's work: they are told apart
+    only by their own titles, and printing the step's name would print it once
+    per card.
+    """
+    name = _step(kid)
+    if name and name not in shared:
+        return STEPS.get(name, name.capitalize())
     return kid.get("title", kid["id"])
 
 
@@ -103,12 +120,19 @@ def status(card: str, project: Path) -> dict:
     still has everything left to finish.
     """
     kids = children(card, project)
+    seen: dict[str, int] = {}
+    for k in kids:
+        name = _step(k)
+        if name:
+            seen[name] = seen.get(name, 0) + 1
+    shared = {name for name, n in seen.items() if n > 1}
+
     items = []
     for k in kids:
         state = STATE.get(k.get("status", "open"), "todo")
         if state != "done" and (state == "draft" or _under_way(k["id"], project)):
             state = "draft"
-        items.append({"state": state, "text": _title(k)})
+        items.append({"state": state, "text": _title(k, shared)})
     items.sort(key=lambda i: ORDER[i["state"]])
 
     doing = [i["text"] for i in items if i["state"] == "draft"]
