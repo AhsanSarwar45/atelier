@@ -98,9 +98,15 @@ for change.
 
 `"status": {"card": "<id>"}` and nothing else. The children of that card become
 the checklist — closed is a tick, claimed or part-finished is the half tick,
-the rest are empty — and the now and next-up lines are the first of each. A
-spec that names a card and also types a status is refused: the board owns all
-three or none of them.
+the rest are empty — and the now line is the first of those under way. A spec
+that names a card and also types a status is refused: the board owns them or
+none of them.
+
+**Next-up is the exception, and comes from the plan** — the step slot 6 marks
+as `starting`, or its first step. The list can only ever name a stage, and it
+reads as nothing-started whenever an agent is behind on ticking rows off; what
+happens next is the agent's to say. Manager's ruling, 2026-08-13. With no plan
+step left, the line falls back to the list.
 
 Only the card's direct children reach the page. Their own steps are internal.
 
