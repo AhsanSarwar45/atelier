@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -315,7 +316,7 @@ def run() -> int:
     board_mod.children = lambda card, project: [
         {"id": "k.1", "status": "in_review", "title": "Written"},
         {"id": "k.2", "status": "manager_review", "title": "Waiting on him"},
-        {"id": "k.3", "status": "cancelled", "title": "Dropped"},
+        {"id": "k.3", "status": "closed", "labels": ["cancelled"], "title": "Dropped"},
         {"id": "k.4", "status": "open", "title": "Untouched"},
     ]
     st = board_mod.status("x", tmp)
@@ -354,6 +355,28 @@ def run() -> int:
     if said != ["Fix the button", "Refuse the close", "Write the rule down"]:
         failures.append(f"work items sharing a step read as {said}")
 
+    # what happens next is the agent's to say: the work list can only name a stage,
+    # and it reads as nothing-started whenever the agent is behind on ticking rows
+    board_mod.children = lambda card, project: [
+        {"id": "m.1", "status": "open", "labels": ["step:work", "of:x"], "title": "Build it"},
+    ]
+    spec = copy.deepcopy(GOOD)
+    spec["status"] = {"card": "x"}
+    spec["next"]["steps"] = [{"step": "Drive the long circuit", "cost": "small"},
+                             {"step": "Fit the second mirror", "cost": "small", "starting": True}]
+    # the one line, not the whole page: the plan's words appear further down every
+    # page and the work list's words are in the ticks right beside it
+    def next_up_line(s):
+        got = re.search(r"Next up</b> <span>([^<]*)",
+                        build.status_card(s, build.Ctx([], tmp, tmp)))
+        return got.group(1) if got else ""
+
+    if next_up_line(spec) != "Fit the second mirror":
+        failures.append(f"next up said {next_up_line(spec)!r}, not what the agent is about to do")
+    spec["next"]["steps"] = []
+    if next_up_line(spec) != "Build it":
+        failures.append("with the plan run out, next up did not fall back to the work list")
+
     # a card's title reaches the manager unedited, so it answers to the phrasebook
     board_mod.children = lambda card, project: [
         {"id": "j", "status": "open", "labels": ["step:work", "of:x"],
@@ -372,7 +395,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 27 - len(failures)}/{len(CASES) + 27} report gates hold")
+    print(f"{len(CASES) + 29 - len(failures)}/{len(CASES) + 29} report gates hold")
     return 1 if failures else 0
 
 

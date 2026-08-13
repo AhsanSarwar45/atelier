@@ -81,6 +81,9 @@ interface ReportPanelProps {
 export function ReportPanel({ open, onOpenChange, fsPath, card }: ReportPanelProps) {
   const { reports, isLoading } = useReports();
   const [showing, setShowing] = useState<ReportEntry | null>(null);
+  // Every report here is built by running the report tools in the project, so
+  // with no directory there is nothing any of these rows could open.
+  const buildable = !!fsPath && !isDoltProject(fsPath);
 
   useEffect(() => {
     if (!open) return;
@@ -114,6 +117,11 @@ export function ReportPanel({ open, onOpenChange, fsPath, card }: ReportPanelPro
           <div className="flex items-center justify-center flex-1">
             <Loader2 className="size-5 animate-spin text-t-muted" aria-hidden="true" />
           </div>
+        ) : !buildable ? (
+          <p className="flex-1 mt-4 text-sm text-t-muted text-center py-12">
+            This board has no copy of the project on this machine, so there is
+            nowhere to build its reports.
+          </p>
         ) : showing ? (
           <div className="flex-1 mt-4 flex flex-col min-h-0">
             <div className="pb-2 flex items-center gap-3">

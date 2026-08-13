@@ -27,8 +27,10 @@ STATE = {
     "blocked": "todo",
     "deferred": "todo",
 }
-# Work that is not happening is not work waiting, so it leaves the list.
-DROPPED = ("cancelled",)
+# Work that is not happening is not work waiting, so it leaves the list. A board
+# may drop a card by status or by putting the word on it and closing it, and the
+# second reads as a finished tick unless both are watched for.
+DROPPED = ("cancelled", "dropped", "wontfix")
 
 def _order(kid: dict):
     """Where this row sits in the run of the job.
@@ -143,7 +145,7 @@ def status(card: str, project: Path) -> dict:
 
     items = []
     for k in sorted(kids, key=_order):
-        if k.get("status") in DROPPED:
+        if k.get("status") in DROPPED or set(k.get("labels") or []) & set(DROPPED):
             continue
         state = STATE.get(k.get("status", "open"), "todo")
         if state != "done" and (state == "draft" or _under_way(k["id"], project)):
