@@ -181,8 +181,9 @@ export default function KanbanBoard() {
   }, [filteredBeads, typeFilter]);
 
   /**
-   * Group the drawn beads into columns. A card follows the work happening under
-   * it (columnFor), so a goal whose steps are being worked is not left in Open.
+   * Group the drawn beads into columns. A card sits where the pieces directly
+   * under it put it (columnFor), so a started job is not left in Todo and an
+   * untouched one is never drawn as waiting on a reader.
    * Defensive: falls back to 'open' for any column not among the 6.
    */
   const filteredBeadsByStatus = useMemo(() => {

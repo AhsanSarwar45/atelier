@@ -73,14 +73,19 @@ export interface Tag {
  * they differ because the manager named the columns for what is happening in
  * them. `tone` names a colour token (`--status-<tone>`), `key` the second press
  * of the `g` shortcut, `live` whether work is still standing in this state.
+ *
+ * `settled` is a state only the board itself writes, and only once no piece is
+ * left standing: a card in one is drawn where its status says and its pieces
+ * are not consulted. Everywhere else the pieces decide — corsetta
+ * `docs/board.md#3a1`.
  */
 export const STATES = [
-  { id: 'open',           label: 'Open',           column: 'Todo',           tone: 'open',      icon: 'circle',     key: 'o', live: true  },
-  { id: 'in_progress',    label: 'In Progress',    column: 'In Progress',    tone: 'progress',  icon: 'clock',      key: 'p', live: true  },
-  { id: 'inreview',       label: 'In Review',      column: 'Agent Review',   tone: 'review',    icon: 'file-check', key: 'r', live: true  },
-  { id: 'manager_review', label: 'Manager Review', column: 'Manager Review', tone: 'manager',   icon: 'eye',        key: 'm', live: true  },
-  { id: 'closed',         label: 'Closed',         column: 'Done',           tone: 'closed',    icon: 'check',      key: 'c', live: false },
-  { id: 'cancelled',      label: 'Cancelled',      column: 'Cancelled',      tone: 'cancelled', icon: 'ban',        key: 'x', live: false },
+  { id: 'open',           label: 'Open',           column: 'Todo',           tone: 'open',      icon: 'circle',     key: 'o', live: true,  settled: false },
+  { id: 'in_progress',    label: 'In Progress',    column: 'In Progress',    tone: 'progress',  icon: 'clock',      key: 'p', live: true,  settled: false },
+  { id: 'inreview',       label: 'In Review',      column: 'Agent Review',   tone: 'review',    icon: 'file-check', key: 'r', live: true,  settled: true  },
+  { id: 'manager_review', label: 'Manager Review', column: 'Manager Review', tone: 'manager',   icon: 'eye',        key: 'm', live: true,  settled: true  },
+  { id: 'closed',         label: 'Closed',         column: 'Done',           tone: 'closed',    icon: 'check',      key: 'c', live: false, settled: true  },
+  { id: 'cancelled',      label: 'Cancelled',      column: 'Cancelled',      tone: 'cancelled', icon: 'ban',        key: 'x', live: false, settled: true  },
 ] as const;
 
 /**
@@ -99,6 +104,14 @@ export type StateInfo = (typeof STATES)[number];
 export const STATE_BY_ID = Object.fromEntries(
   STATES.map((s) => [s.id, s]),
 ) as Record<BeadStatus, StateInfo>;
+
+/**
+ * The three states a card can be put in by the pieces under it, named so that a
+ * reader working them out can say which it means without writing the word again.
+ */
+export const UNTOUCHED: BeadStatus = 'open';
+export const WORKING: BeadStatus = 'in_progress';
+export const FINISHED: BeadStatus = 'closed';
 
 /**
  * What setting a state means to the board underneath.

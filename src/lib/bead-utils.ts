@@ -6,7 +6,18 @@
  */
 
 import { classesFor } from "@/lib/state-styles";
-import { STATE_BY_ID, STATES, type BeadStatus } from "@/types";
+import {
+  FINISHED, STATE_BY_ID, STATES, UNTOUCHED, WORKING, type BeadStatus,
+} from "@/types";
+
+/** Nothing is still standing under a card in one of these. */
+const DONE: ReadonlySet<string> = new Set<string>(
+  STATES.filter((s) => !s.live).map((s) => s.id),
+);
+/** Places the board itself writes, which columnFor takes as final. */
+const SETTLED: ReadonlySet<string> = new Set<string>(
+  STATES.filter((s) => s.settled).map((s) => s.id),
+);
 
 /**
  * Format bead ID for display, preserving the workspace prefix.
@@ -128,44 +139,35 @@ export function drawnInColumns<T extends { status: string; parent_id?: string; i
 }
 
 /**
- * The column a card belongs in, which is the column of the work happening
- * under it.
+ * The column a card belongs in.
  *
- * A goal keeps its own status until somebody closes it, so a goal whose steps
- * are being worked still reads `open`. Grouping by the stored status alone
- * leaves every job in Open however many sessions are on it, and In Progress
- * empty. The live work wins: anything under way anywhere below the card pulls
- * the card into that column, in progress ahead of in review. The card's own
- * status is live work of the same kind, so it is ranked with its children
- * rather than only serving as the fallback. A card with nothing under it keeps
- * its own status.
+ * Read from the pieces DIRECTLY under it and no deeper, so a card and the list
+ * of pieces printed beneath it can never disagree — that mismatch is what made
+ * an untouched job read as waiting on a reader. All of them open and the card
+ * is open; one being worked and it is in progress; all closed and there is
+ * nothing left standing. A card with no pieces keeps its own status.
  *
- * The order is the earliest place work is still standing, so a job with one
- * piece being written and one waiting on the manager reads as being written —
- * the column says where the job is stuck, not how far its furthest part has got.
+ * A review column is the board's own answer, written once every piece has
+ * closed, so it is taken as final rather than recomputed here. Manager's
+ * ruling, 2026-08-13: corsetta docs/board.md#3a1.
  *
  * Derived for display only — the board's own record is never rewritten from here.
  *
  * @param bead - The card to place.
- * @param byId - Every bead on the board, by id, for walking children.
+ * @param byId - Every bead on the board, by id, for reading its pieces.
  */
 export function columnFor<T extends { id: string; status: string; children?: string[] | null }>(
   bead: T,
   byId: ReadonlyMap<string, T>,
-  seen: Set<string> = new Set(),
 ): string {
-  if (seen.has(bead.id)) return bead.status; // a cycle in the graph is not a reason to hang
-  seen.add(bead.id);
+  if (SETTLED.has(bead.status)) return bead.status;
 
-  const here = [bead.status, ...(bead.children ?? [])
+  const pieces = (bead.children ?? [])
     .map((id) => byId.get(id))
-    .filter((k): k is T => k !== undefined)
-    .map((k) => columnFor(k, byId, seen))];
+    .filter((k): k is T => k !== undefined && k.id !== bead.id);
+  if (pieces.length === 0) return bead.status;
 
-  // The live states in their own order, minus open: open is where a card sits
-  // when nobody is on it, which is the fallback rather than a stage to pull to.
-  for (const stage of STATES.filter((s) => s.live && s.id !== "open")) {
-    if (here.includes(stage.id)) return stage.id;
-  }
-  return bead.status;
+  const standing = pieces.filter((k) => !DONE.has(k.status));
+  if (standing.length === 0) return FINISHED;
+  return standing.some((k) => k.status === WORKING) ? WORKING : UNTOUCHED;
 }
