@@ -4,7 +4,7 @@
 
   "actions": {
     "none": true,
-    "fyi": "Your ruling is in. Only a job is read now, a piece of work never is, and every call it left is below, each one overridable by its number."
+    "fyi": "Your ruling is in and all six columns are live on your board. Every call it left is below, each one overridable by its number."
   },
 
   "status": { "card": "cor-zxy" },
@@ -32,6 +32,10 @@
             {
               "title": "The screen reads one level and no deeper",
               "note": "A card and the list of pieces printed under it can no longer say different things. Fourteen cases hold that line, including the exact shape you caught, and the fog job now draws under Todo where it belongs."
+            },
+            {
+              "title": "All six columns are on your screen",
+              "note": "Read back off the running board by a real browser, not off the source: every one of the 164 cards it holds is drawn in the column the board puts it in, each heading counts what its own column drew, and the one dropped card is under Cancelled instead of hidden in Done. Your column is empty today and drawn oldest first, so the longest wait is always the top card. Both of those last two were made to fail on purpose before they were believed — a heading told to lie is named, and a column ordered the other way up goes red."
             },
             {
               "title": "Turning a job down does not start a new one",
@@ -198,10 +202,9 @@
   ],
 
   "next": {
-    "if_nothing": "The board runs your ruling as it stands. Two pieces of the six columns are still to build, and neither needs you.",
+    "if_nothing": "Your board runs the ruling and draws all six columns. Nothing here is waiting on you.",
     "steps": [
-      { "step": "Draw the six columns on your screen", "cost": "small", "starting": true },
-      { "step": "Show your column oldest first, with a count on it", "cost": "small" },
+      { "step": "Fit the six columns in the window — the last two sit off the right edge on a 1500-pixel screen", "cost": "small", "starting": true },
       { "step": "Read the folders above a job one level deeper, if D9 bothers you", "cost": "small" }
     ]
   }
