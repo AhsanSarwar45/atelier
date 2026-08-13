@@ -86,6 +86,11 @@ three or none of them.
 
 Only the card's direct children reach the page. Their own steps are internal.
 
+**The list is in the order the job runs**, never sorted by state: when the card
+was made, then its own number. Ticks fall where the work fell. Grouping the
+finished ones at the top reads as two lists running in opposite directions,
+which is what a checklist must never be.
+
 A row is named by the step it belongs to when exactly one child wears that
 step, because a step's own title only repeats the goal's. When several children
 share a step — they are the job's work, and that is the normal shape — each is

@@ -9,23 +9,37 @@ spine steps are internal and never reach a report.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
 from blocks import ReportError
 
-# closed is a tick, claimed work is the half-tick, everything else is unticked.
+# closed is a tick, work that has started is the half-tick, everything else is
+# unticked. Written but not yet merged, and waiting for the manager's own
+# signature, are both started: a row nobody has touched is the only empty one.
 STATE = {
     "closed": "done",
     "in_progress": "draft",
+    "in_review": "draft",
+    "manager_review": "draft",
     "open": "todo",
     "blocked": "todo",
     "deferred": "todo",
 }
+# Work that is not happening is not work waiting, so it leaves the list.
+DROPPED = ("cancelled",)
 
-# Finished first, then what is moving, then what nobody has touched: a reader
-# runs down the list once and stops where the work stops.
-ORDER = {"done": 0, "draft": 1, "todo": 2}
+def _order(kid: dict):
+    """Where this row sits in the run of the job.
+
+    When the card was made, then its own number: a job's steps are made one at a
+    time as each opens, and its work items are poured in a single second, so the
+    number is what tells those apart. Sorting by state instead reads as two lists
+    running in opposite directions, which is what a checklist must never be.
+    """
+    return (kid.get("created_at") or "",
+            re.sub(r"\d+", lambda m: m.group().zfill(6), kid.get("id", "")))
 
 # A job's own steps are titled in this system's vocabulary and repeat the goal's
 # title after it. What the reader is owed is the step's purpose, in their words.
@@ -128,12 +142,13 @@ def status(card: str, project: Path) -> dict:
     shared = {name for name, n in seen.items() if n > 1}
 
     items = []
-    for k in kids:
+    for k in sorted(kids, key=_order):
+        if k.get("status") in DROPPED:
+            continue
         state = STATE.get(k.get("status", "open"), "todo")
         if state != "done" and (state == "draft" or _under_way(k["id"], project)):
             state = "draft"
         items.append({"state": state, "text": _title(k, shared)})
-    items.sort(key=lambda i: ORDER[i["state"]])
 
     doing = [i["text"] for i in items if i["state"] == "draft"]
     waiting = [i["text"] for i in items if i["state"] == "todo"]

@@ -284,8 +284,8 @@ def run() -> int:
 
     board_mod.children = lambda card, project: full
     st = board_mod.status("x", tmp)
-    if [i["state"] for i in st["items"]] != ["done", "draft", "draft", "todo"]:
-        failures.append("the checklist is not ordered finished, then moving, then untouched")
+    if [i["state"] for i in st["items"]] != ["done", "todo", "draft", "draft"]:
+        failures.append("the checklist is not in the order the job runs")
     if st["next_up"] != "Bravo":
         failures.append(f"next up did not name the one unstarted item — {st['next_up']!r}")
     if "1 more" not in st["now"]:
@@ -295,6 +295,34 @@ def run() -> int:
     st = board_mod.status("x", tmp)
     if "under way" not in st["next_up"]:
         failures.append(f"with nothing unstarted, next up reads as finished — {st['next_up']!r}")
+
+    # the run of the job, not the state of each row: a checklist sorted by state
+    # reads as two lists running in opposite directions
+    board_mod.children = lambda card, project: [
+        {"id": "j.10", "status": "open", "title": "Tenth", "created_at": "2026-08-13T05:17:07"},
+        {"id": "j.9", "status": "closed", "title": "Ninth", "created_at": "2026-08-13T05:17:07"},
+        {"id": "j.2", "status": "closed", "title": "Second", "created_at": "2026-08-13T04:57:55"},
+        {"id": "j.11", "status": "open", "title": "Eleventh", "created_at": "2026-08-13T05:17:07"},
+    ]
+    said = [i["text"] for i in board_mod.status("x", tmp)["items"]]
+    if said != ["Second", "Ninth", "Tenth", "Eleventh"]:
+        failures.append(f"the checklist came out as {said}")
+    if board_mod.status("x", tmp)["next_up"] != "Tenth":
+        failures.append("next up is not the earliest row nobody has started")
+
+    # written and waiting to merge is work under way, not work nobody has started;
+    # work that was dropped is neither, and leaves the list
+    board_mod.children = lambda card, project: [
+        {"id": "k.1", "status": "in_review", "title": "Written"},
+        {"id": "k.2", "status": "manager_review", "title": "Waiting on him"},
+        {"id": "k.3", "status": "cancelled", "title": "Dropped"},
+        {"id": "k.4", "status": "open", "title": "Untouched"},
+    ]
+    st = board_mod.status("x", tmp)
+    if [i["state"] for i in st["items"]] != ["draft", "draft", "todo"]:
+        failures.append(f"unmerged work read as {[i['state'] for i in st['items']]}")
+    if any(i["text"] == "Dropped" for i in st["items"]):
+        failures.append("work that was dropped is still on the checklist")
 
     # a job's own steps reach the reader by purpose, not by this system's name
     board_mod.children = lambda card, project: [
@@ -344,7 +372,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 23 - len(failures)}/{len(CASES) + 23} report gates hold")
+    print(f"{len(CASES) + 27 - len(failures)}/{len(CASES) + 27} report gates hold")
     return 1 if failures else 0
 
 
