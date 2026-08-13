@@ -114,27 +114,42 @@
       ]
     },
     {
-      "label": "One correction, and what is actually outstanding",
+      "label": "What fog costs",
       "blocks": [
         {
-          "kind": "note",
-          "tone": "bad",
-          "label": "I had this wrong",
-          "text": "I told you nothing in the game had ever rendered fog. Not true \u2014 there is a full picker for fog, mist, haze, smog and dust with a visibility slider, and it works. You caught it."
+          "kind": "bars",
+          "alt": "cost per frame of the stage fog lives in",
+          "series": [
+            {
+              "label": "Clear",
+              "value": 0.095,
+              "tone": "green"
+            },
+            {
+              "label": "Dense fog, 100 m visibility",
+              "value": 0.199,
+              "tone": "amber"
+            }
+          ]
         },
         {
-          "kind": "note",
-          "tone": "info",
-          "label": "What was actually true",
-          "text": "None of the saved scenes we measure against has fog switched on, so the measuring rig starts clear. That is one scene file, not a missing feature."
+          "kind": "text",
+          "text": "Milliseconds per frame in the stage that draws the air between you and the car. Dense fog doubles it, and costs a tenth of a millisecond a frame \u2014 against a frame budget of about 16."
         },
         {
           "kind": "note",
           "tone": "warn",
-          "label": "The one number still outstanding",
-          "text": "What fog costs per frame. It needs a saved scene with fog on, which is the next thing I do."
+          "label": "Read only that one line",
+          "text": "The whole-frame figure came out as 1% \u2014 near enough to free. It is not a result: work that runs on a rota lands at a different point in its cycle in each of the two runs, so those rows compare schedules, not fog. Filed."
+        },
+        {
+          "kind": "note",
+          "tone": "bad",
+          "label": "Two things had to be fixed before any number existed",
+          "text": "Every performance measurement this project has ever taken was run behind an unthrottled build \u2014 the profiler bypassed the limiter that stops this machine freezing. And the comparison tool only ever reported the frame total, never the individual stages, despite our own playbook citing it as the stage-by-stage tool. Fog's cost was invisible to it."
         }
-      ]
+      ],
+      "lead": "Measured six times over, fog on against fog off, same place, alternating so both see the same machine."
     },
     {
       "label": "Found on the way, now owned",
@@ -237,26 +252,18 @@
     },
     {
       "id": "D13",
-      "title": "The measuring rig gets a saved scene with fog on, before the cost is measured",
-      "why": "Revised 13 Aug on your correction. I had written this as fog needing a switch built; it does not \u2014 the game has had a fog picker all along. What is missing is only that no saved scene we measure against has fog turned on, so the cost would have been measured on clear air.",
+      "title": "The measuring rig got a saved scene with fog on, and the cost is measured",
+      "why": "Revised 13 Aug on your correction \u2014 I had written this as fog needing a switch built; it does not, the game has had a fog picker all along. What was missing was only a saved scene with fog turned on. Done: dense fog doubles the stage it lives in, for a tenth of a millisecond a frame.",
       "tag": "revised"
     }
   ],
   "next": {
-    "if_nothing": "I save a scene with fog on, take the cost number, get the first fog pictures in front of you, then have someone who did not write it review the change and land it.",
+    "if_nothing": "I get the first fog pictures in front of you, then have someone who did not write it review the change and land it.",
     "steps": [
       {
-        "step": "Save a measuring scene with fog on",
-        "cost": "tiny",
-        "starting": true
-      },
-      {
-        "step": "Measure what fog costs per frame, and what it costs on a clear day",
-        "cost": "small"
-      },
-      {
         "step": "First pictures: the same place with fog on and off, near and far",
-        "cost": "small"
+        "cost": "small",
+        "starting": true
       },
       {
         "step": "Review by someone who did not write it, then land",
