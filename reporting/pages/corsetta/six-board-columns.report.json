@@ -1,0 +1,170 @@
+{
+  "title": "Six Columns",
+  "eyebrow": "The board you asked for, designed and waiting on two answers",
+
+  "actions": {
+    "questions": [
+      {
+        "ask": "Work you have to judge — does it wait for you before it goes into the game, or go in first and wait for you after?",
+        "options": [
+          {
+            "label": "Goes in first, then waits",
+            "say": "Let it go into the game first, then hold the card in my column until I sign it.",
+            "pick": true,
+            "note": "You judge it by playing the game, which is where you look anyway. Nothing else is held up while it waits. If you turn it down, the fix is the next job rather than an undo"
+          },
+          {
+            "label": "Waits for me first",
+            "say": "Hold it out of the game until I have signed it.",
+            "note": "Nothing you have not seen ever reaches the game. Every other job queues behind it for as long as it waits, and you cannot judge it by playing until you release it"
+          }
+        ],
+        "note": "Either way the card is finished only when you sign it. This is about where the change is sitting while it waits."
+      },
+      {
+        "ask": "Which jobs land in your column — the ones that ask for you, or everything that changes what you see?",
+        "options": [
+          {
+            "label": "Every job answers when it opens",
+            "say": "Make every job say at the start whether I have to judge it, and hold it to that.",
+            "pick": true,
+            "note": "The same way a job already has to say which steps it runs. It cannot be left blank and it cannot be added at the end to dodge a review. You get the ones that genuinely need an eye"
+          },
+          {
+            "label": "Everything that changes what you see",
+            "say": "Send me every job that changes how the game looks.",
+            "note": "Nothing visual ever closes without you. Most of this project is visual, so expect the column to be long and to be the thing that sets the pace"
+          }
+        ]
+      }
+    ]
+  },
+
+  "status": { "card": "cor-zxy" },
+
+  "content": [
+    {
+      "label": "The six columns",
+      "lead": "Your words, and what each one will mean to the board.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Column", "What it means", "Who moves it out"],
+          "rows": [
+            ["Todo", "Nobody is on it", "Any agent, by picking it up"],
+            ["In Progress", "Being worked, in its own copy of the project", "The agent working it"],
+            ["Agent Review", "Written, not in the game yet, waiting to be read by a second agent", "The second agent, once it has read it"],
+            ["Manager Review", "In your hands, because no agent can judge it", "You, and nobody else"],
+            ["Done", "Finished, in the game, signed", "Nothing — it is final"],
+            ["Cancelled", "Dropped, with the reason kept", "Nothing — it is final"]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "Paused and blocked cards keep sitting in Todo with a small badge, as they do today. Nobody is on them, which is what Todo means."
+        }
+      ]
+    },
+    {
+      "label": "What changes for you",
+      "lead": "Three things you cannot do today.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "See what is waiting on you",
+              "note": "Today a job that needs your eye is either closed by the agent that built it or sits in the first column looking unstarted. There are 157 finished cards on your board and not one of them carries your signature."
+            },
+            {
+              "title": "Stop a card being ticked off behind you",
+              "note": "No agent can move a card out of your column. Not to finished, not back to the start. That is enforced, not agreed."
+            },
+            {
+              "title": "Tell dropped work from delivered work",
+              "note": "Cancelled becomes its own column with the reason kept, instead of joining everything else under finished."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Four suggestions on top of your six",
+      "lead": "You asked what would make it better. These are the four worth having.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "A job declares at the start that you have to judge it, not at the end. The agent then owes you something to look at from its first day, instead of reconstructing one after the work is done — and it cannot quietly decide at the finish line that you do not need to see it.",
+            "Nothing reaches your column without the thing you are meant to look at. A picture, or a page like this one. A column full of cards you cannot act on is worse than no column.",
+            "Turning something down sends it back to the start carrying your words, and those words become the brief for the next attempt. The old job stays finished and honest; the new one starts from what you actually said.",
+            "Your column is shown oldest first with a count on it, so nothing sits there quietly for a week."
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Where a job shows when its pieces disagree",
+      "lead": "A job is many pieces at once, so it shows the earliest place work is still standing.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["A job whose pieces are", "Shows under"],
+          "rows": [
+            ["one being written, one waiting on you", "In Progress"],
+            ["one waiting to be read, one waiting on you", "Agent Review"],
+            ["all read and in the game, one waiting on you", "Manager Review"],
+            ["all signed", "Done"]
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "That way the column tells you where a job is actually stuck rather than the furthest any part of it has got."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Cancelled is a finished card that says it was cancelled, not a new kind of open card",
+      "why": "Anything waiting on a cancelled card would wait forever otherwise. It has to count as finished to the board, and read as dropped to you."
+    },
+    {
+      "id": "D2",
+      "title": "Manager Review is a real column on the board, not a tag on a card",
+      "why": "A tag can be taken off by whoever put it on. A column can be held shut."
+    },
+    {
+      "id": "D3",
+      "title": "No agent can move a card out of your column in either direction",
+      "why": "Sending it back would be as good as closing it. Only you decide it is finished, and only you decide it needs another go."
+    },
+    {
+      "id": "D4",
+      "title": "Agent Review keeps the meaning it already has: written, and not in the game yet",
+      "why": "That is already how the board decides it, from the work itself rather than from anyone remembering to move a card. Your description of the column matches it exactly."
+    },
+    {
+      "id": "D5",
+      "title": "Paused, blocked and pinned cards stay in Todo with a badge",
+      "why": "Nobody is on them, which is what Todo means. Three more columns for three states you rarely act on would cost more than they tell you."
+    },
+    {
+      "id": "D6",
+      "title": "The board tests of itself are gone, and the cards they left behind with them",
+      "why": "Your ruling. Forty-seven throwaway cards were sitting on your board pretending to be work, and the checks that made them are deleted. What holds the rules now is that every agent hits them on every board command."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "The design sits where it is. Your board keeps four columns, and work that needs your eye keeps being closed by the agent that built it.",
+    "steps": [
+      { "step": "Answer the two questions above", "cost": "small", "starting": true },
+      { "step": "Build the six columns on your screen", "cost": "small" },
+      { "step": "Hold the new column shut against every agent, and teach jobs to declare they need you", "cost": "medium" },
+      { "step": "Move the older jobs onto the new columns", "cost": "small" }
+    ]
+  }
+}
