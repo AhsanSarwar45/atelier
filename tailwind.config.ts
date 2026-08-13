@@ -2,11 +2,12 @@ import type { Config } from 'tailwindcss';
 
 const config: Config = {
   darkMode: ['class'],
-  content: [
-    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
-  ],
+  // The whole of src, not the three folders that used to hold every class.
+  // A class only reaches the stylesheet if Tailwind read the file spelling it,
+  // so a colour moved out of a component — as the state colours were, into
+  // `src/lib/state-styles.ts` — silently stops being built. Held by
+  // `src/lib/__tests__/state-colours-build.test.ts` (corsetta cor-oio5).
+  content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       colors: {
