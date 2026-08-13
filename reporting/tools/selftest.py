@@ -304,9 +304,25 @@ def run() -> int:
     if said != ["Fix the button", "Refuse the close", "Write the rule down"]:
         failures.append(f"work items sharing a step read as {said}")
 
+    # a card's title reaches the manager unedited, so it answers to the phrasebook
+    board_mod.children = lambda card, project: [
+        {"id": "j", "status": "open", "labels": ["step:work", "of:x"],
+         "title": "Refactor the shader in render.rs"},
+        {"id": "k", "status": "open", "labels": ["step:work", "of:x"],
+         "title": "Make the mirrors read clearly"},
+    ]
+    spec = copy.deepcopy(GOOD)
+    spec["status"] = {"card": "x"}
+    ctx = build.Ctx([], tmp, tmp)
+    build.build(spec, ctx)
+    if not any("shader" in w for w in ctx.warnings):
+        failures.append("a card titled in our own words reached the manager unflagged")
+    if any("mirrors" in w for w in ctx.warnings):
+        failures.append("a plainly titled card was flagged")
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 17 - len(failures)}/{len(CASES) + 17} report gates hold")
+    print(f"{len(CASES) + 19 - len(failures)}/{len(CASES) + 19} report gates hold")
     return 1 if failures else 0
 
 

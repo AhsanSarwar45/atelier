@@ -94,6 +94,8 @@ class Ctx:
         self.gloss = {g["term"]: g["plain"] for g in glossary}
         self.bytes = 0
         self._cache: dict[str, str] = {}
+        # Plain-words hits found while building, from text the spec does not hold.
+        self.warnings: list[str] = []
 
     def text(self, s: str) -> str:
         out = html.escape(str(s))
@@ -303,6 +305,13 @@ def status_card(spec: dict, ctx: Ctx) -> str:
     s = spec["status"]
     if s.get("card"):
         s = board_status(s["card"], ctx.project)
+        # A card's title is written on the board and reaches the manager here
+        # unedited, so it answers to the same phrasebook as the rest of the page.
+        glossed = set(ctx.gloss)
+        for where, text in [("now", s["now"]), ("next up", s["next_up"])] + \
+                [("a checklist row", i["text"]) for i in s.get("items", [])]:
+            for problem in jargon(text, glossed):
+                ctx.warnings.append(f"{where} {text[:44]!r}: {problem}")
     items = s.get("items", [])
     n = max(len(items), 1)
     done = sum(1 for i in items if i["state"] == "done") / n * 100
@@ -460,18 +469,19 @@ def main() -> int:
             print(f"  · {p}", file=sys.stderr)
         return 1
 
-    if warnings:
-        print(f"WORDS THE MANAGER WOULD HAVE TO DECODE — {len(warnings)}:", file=sys.stderr)
-        for w in warnings:
-            print(f"  · {w}", file=sys.stderr)
-        print("  Rewrite them, or gloss the ones that must stay.", file=sys.stderr)
-
     ctx = Ctx(spec.get("glossary", []), args.spec.resolve().parent, args.project.resolve())
     try:
         page = stamped(build(spec, ctx))
     except ReportError as e:
         print(f"this report does not build: {e}", file=sys.stderr)
         return 1
+
+    warnings += ctx.warnings
+    if warnings:
+        print(f"WORDS THE MANAGER WOULD HAVE TO DECODE — {len(warnings)}:", file=sys.stderr)
+        for w in warnings:
+            print(f"  · {w}", file=sys.stderr)
+        print("  Rewrite them, or gloss the ones that must stay.", file=sys.stderr)
 
     if len(page.encode("utf-8")) > MAX_BYTES:
         print(f"the page is {len(page) / 1e6:.1f} MB — shrink the pictures", file=sys.stderr)

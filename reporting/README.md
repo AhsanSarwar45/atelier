@@ -78,6 +78,15 @@ three or none of them.
 
 Only the card's direct children reach the page. Their own steps are internal.
 
+A row is named by the step it belongs to when exactly one child wears that
+step, because a step's own title only repeats the goal's. When several children
+share a step — they are the job's work, and that is the normal shape — each is
+named by its own title instead, or the page would print one word many times.
+
+**So a card's title is manager-facing.** It reaches the page unedited and is
+held to the same phrasebook as everything else; a title written in our own
+words costs the report a plain-words warning, naming the card.
+
 Typing the status by hand still works for a report with no card behind it, and
 then it is only as true as whoever typed it.
 
