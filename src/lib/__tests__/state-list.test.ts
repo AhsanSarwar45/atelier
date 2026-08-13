@@ -95,6 +95,16 @@ describe("one list decides the states", () => {
     expect(new Set(keys).size, `duplicate key in ${keys.join(", ")}`).toBe(keys.length);
   });
 
+  it("no two states share a column heading or a name on screen", () => {
+    // Two columns with one heading is a board nobody can read, and the screen
+    // gives no hint which of them a card fell into.
+    for (const field of ["column", "label"] as const) {
+      const seen: string[] = STATES.map((s) => s[field]);
+      expect(new Set(seen).size, `two states share a ${field}: ${seen.join(", ")}`)
+        .toBe(seen.length);
+    }
+  });
+
   it("every state says what writing it means", () => {
     for (const s of STATES) {
       expect(SET_BY[s.id], `${s.id} has no entry in SET_BY`).toBeTruthy();
