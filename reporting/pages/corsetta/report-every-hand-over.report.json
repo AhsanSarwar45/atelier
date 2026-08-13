@@ -1,10 +1,10 @@
 {
   "title": "Reports on Every Hand-Over",
-  "eyebrow": "Approved, and your last word made it cheaper and stronger at once",
+  "eyebrow": "Both faults you hit are fixed; the wall itself is next",
 
   "actions": {
     "none": true,
-    "fyi": "Both questions answered, and you narrowed what counts as work to a finished piece on the list. That turned the weaker half of this into a genuine wall — see the third card."
+    "fyi": "The button you clicked opens its report again, and a report written inside a job now files under the project instead of a folder named after a branch that gets deleted. Your rule that the link goes last in the message is written down where every agent reads it."
   },
 
   "status": {
@@ -32,6 +32,12 @@
           "tone": "warn",
           "label": "Measured before designing anything",
           "text": "Across every session this project has ever run: 16829 turns changed a file, and not one of them handed you a link. This is not agents forgetting. Nothing has ever asked them."
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "The two faults you ran into are gone",
+          "text": "The button on a card was sending the report somewhere with no work list in it, so it opened an error instead of a page. It now opens. A button with nowhere to build a page no longer appears at all, since it could only ever open an error. And a report written while working in a side copy was filing itself under that copy's throwaway name; it now files under the project."
         }
       ]
     },
@@ -160,14 +166,18 @@
       "id": "D9",
       "title": "No page, no question",
       "why": "Your words. An agent that wants your input hands you the page carrying it first, so every question you answer arrives with what it costs already attached."
+    },
+    {
+      "id": "D10",
+      "title": "A report button with nowhere to build its page is not shown",
+      "why": "It could only ever open an error, which is what you hit. Nothing there says truthfully that this card has no report you can open from here; a button that fails says something false."
     }
   ],
 
   "next": {
     "if_nothing": "Approved, so this is what is being built now.",
     "steps": [
-      { "step": "The dead button on the card, and reports landing in a folder named after a throwaway branch", "cost": "small", "starting": true },
-      { "step": "Finishing a piece of work is refused until its page is current", "cost": "medium" },
+      { "step": "Finishing a piece of work is refused until its page is current", "cost": "medium", "starting": true },
       { "step": "Asking you anything is refused until the page carrying the question exists", "cost": "small" },
       { "step": "Both refusals are switched off on purpose and watched fail before they are trusted", "cost": "small" },
       { "step": "The rule is written where every agent and every project reads it", "cost": "small" }
