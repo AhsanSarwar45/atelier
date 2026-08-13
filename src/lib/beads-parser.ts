@@ -28,6 +28,13 @@ function isKnownStatus(status: string): status is KnownRawStatus {
 function mapBeadStatus(bead: Bead): Bead | null {
   const rawStatus = bead.status as string;
 
+  // Dropped work is closed and marked, never parked in a status of its own — a
+  // card that never closes blocks whatever waits on it forever. The mark is what
+  // keeps it out of Done, where it would read as something delivered.
+  if (rawStatus === 'closed' && (bead.labels ?? []).includes('cancelled')) {
+    return { ...bead, status: 'cancelled' as BeadStatus, _originalStatus: rawStatus };
+  }
+
   // Known status — look up mapping
   if (isKnownStatus(rawStatus)) {
     const mapping = STATUS_MAP[rawStatus];
@@ -158,11 +165,13 @@ export function groupBeadsByStatus(beads: Bead[]): Record<BeadStatus, Bead[]> {
     open: [],
     in_progress: [],
     inreview: [],
+    manager_review: [],
     closed: [],
+    cancelled: [],
   };
 
   for (const bead of beads) {
-    // Defensive: if status is somehow not one of the 4 columns, fall back to open
+    // Defensive: if status is somehow not one of the 6 columns, fall back to open
     const column = grouped[bead.status] ? bead.status : 'open';
     grouped[column].push(bead);
   }

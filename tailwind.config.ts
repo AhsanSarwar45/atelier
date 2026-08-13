@@ -80,7 +80,9 @@ const config: Config = {
           open: 'hsl(var(--status-open))',
           progress: 'hsl(var(--status-progress))',
           review: 'hsl(var(--status-review))',
+          manager: 'hsl(var(--status-manager))',
           closed: 'hsl(var(--status-closed))',
+          cancelled: 'hsl(var(--status-cancelled))',
         },
 
         // Semantic feedback

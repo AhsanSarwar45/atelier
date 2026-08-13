@@ -62,9 +62,18 @@ export interface Tag {
 }
 
 /**
- * Bead status types (the 4 kanban columns)
+ * Bead status types (the 6 kanban columns)
+ *
+ * `cancelled` is a column but never a stored status: dropped work is closed and
+ * marked, because a card that never closes blocks whatever waits on it forever.
  */
-export type BeadStatus = 'open' | 'in_progress' | 'inreview' | 'closed';
+export type BeadStatus =
+  | 'open'
+  | 'in_progress'
+  | 'inreview'
+  | 'manager_review'
+  | 'closed'
+  | 'cancelled';
 
 /**
  * All known statuses from the Beads CLI (bd v0.47.0+).
@@ -73,6 +82,7 @@ export type BeadStatus = 'open' | 'in_progress' | 'inreview' | 'closed';
 export type KnownRawStatus =
   | BeadStatus
   | 'in_review'
+  | 'manager_review'
   | 'pinned'
   | 'blocked'
   | 'deferred'
@@ -102,8 +112,10 @@ export const STATUS_MAP: Record<KnownRawStatus, { column: BeadStatus; badge?: St
   in_progress: { column: 'in_progress' },
   inreview:    { column: 'inreview' },
   closed:      { column: 'closed' },
+  cancelled:   { column: 'cancelled' },
   // Synonyms
   in_review:   { column: 'inreview' },   // what bd writes for this column
+  manager_review: { column: 'manager_review' },
   done:        { column: 'closed' },
   resolved:    { column: 'closed' },
   pending:     { column: 'open' },

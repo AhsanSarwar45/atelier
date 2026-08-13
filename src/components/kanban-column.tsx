@@ -17,7 +17,9 @@ function getColumnAccentColor(status: BeadStatus): string {
     case "open": return "hsl(var(--status-open))";
     case "in_progress": return "hsl(var(--status-progress))";
     case "inreview": return "hsl(var(--status-review))";
+    case "manager_review": return "hsl(var(--status-manager))";
     case "closed": return "hsl(var(--status-closed))";
+    case "cancelled": return "hsl(var(--status-cancelled))";
     default: return "hsl(var(--text-muted))";
   }
 }
@@ -52,8 +54,12 @@ function getColumnAccentBorder(status: BeadStatus): string {
       return "border-t-2 border-t-status-progress/60";
     case "inreview":
       return "border-t-2 border-t-status-review/60";
+    case "manager_review":
+      return "border-t-2 border-t-status-manager/60";
     case "closed":
       return "border-t-2 border-t-status-closed/60";
+    case "cancelled":
+      return "border-t-2 border-t-status-cancelled/60";
     default:
       return "border-t-2 border-t-t-muted/60";
   }
@@ -70,8 +76,12 @@ function getHeaderTextColor(status: BeadStatus): string {
       return "text-status-progress";
     case "inreview":
       return "text-status-review";
+    case "manager_review":
+      return "text-status-manager";
     case "closed":
       return "text-status-closed";
+    case "cancelled":
+      return "text-status-cancelled";
     default:
       return "text-t-tertiary";
   }
@@ -88,8 +98,12 @@ function getBadgeVariant(status: BeadStatus): string {
       return "bg-status-progress/20 text-status-progress border-status-progress/30 hover:bg-status-progress/20";
     case "inreview":
       return "bg-status-review/20 text-status-review border-status-review/30 hover:bg-status-review/20";
+    case "manager_review":
+      return "bg-status-manager/20 text-status-manager border-status-manager/30 hover:bg-status-manager/20";
     case "closed":
       return "bg-status-closed/20 text-status-closed border-status-closed/30 hover:bg-status-closed/20";
+    case "cancelled":
+      return "bg-status-cancelled/20 text-status-cancelled border-status-cancelled/30 hover:bg-status-cancelled/20";
     default:
       return "bg-t-muted/20 text-t-tertiary border-t-muted/30 hover:bg-t-muted/20";
   }

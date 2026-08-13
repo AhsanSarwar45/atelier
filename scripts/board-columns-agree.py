@@ -27,10 +27,16 @@ PORT = 9333
 
 # The column each board status answers to. A status named nowhere here is one the
 # screen deliberately folds into Open with a badge, and is not compared.
-COLUMN_OF = {"in_progress": "in_progress", "in_review": "inreview", "closed": "closed"}
+COLUMN_OF = {"in_progress": "in_progress", "in_review": "inreview",
+             "manager_review": "manager_review", "closed": "closed"}
 
-# Live work pulls the card it belongs to along, the first of these that is found.
-LIVE = ["in_progress", "in_review"]
+# Live work pulls the card it belongs to along, the first of these that is found:
+# the earliest place work is still standing, so a job with one piece being written
+# and one waiting on the manager reads as being written.
+LIVE = ["in_progress", "in_review", "manager_review"]
+
+# Dropped work is a closed card carrying this mark, never a status of its own.
+CANCELLED = "cancelled"
 
 
 def bd_list(project, *args):
@@ -71,6 +77,9 @@ def board_says(project):
         if b.get("parent"):
             continue
         here = [b["status"], live_below(b["id"])]
+        if b["status"] == "closed" and CANCELLED in (b.get("labels") or []):
+            want.setdefault(CANCELLED, set()).add(b["id"])
+            continue
         column = COLUMN_OF.get(next((s for s in LIVE if s in here), b["status"]))
         if column:
             want.setdefault(column, set()).add(b["id"])
@@ -196,7 +205,7 @@ def main():
               f"and {'they are' if moved > 1 else 'it is'} left out)")
 
     bad = []
-    for column in COLUMN_OF.values():
+    for column in list(COLUMN_OF.values()) + [CANCELLED]:
         want = steady.get(column, set())
         here = set(drawn.get(column, []))
         elsewhere = {c: set(ids) for c, ids in drawn.items() if c != column}

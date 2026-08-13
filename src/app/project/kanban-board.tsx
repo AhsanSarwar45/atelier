@@ -43,14 +43,18 @@ import { isDoltProject, projectDir } from "@/lib/utils";
 import type { Bead, BeadStatus } from "@/types";
 
 /**
- * Column configuration for the Kanban board
- * Note: Cancelled status is hidden per requirements
+ * Column configuration for the Kanban board. Names and meanings are the
+ * manager's, 2026-08-13: nobody on it; being worked in its own tree; written and
+ * waiting for a second agent to read it; landed and waiting for his own
+ * signature; final; dropped.
  */
 const COLUMNS: { status: BeadStatus; title: string }[] = [
-  { status: "open", title: "Open" },
+  { status: "open", title: "Todo" },
   { status: "in_progress", title: "In Progress" },
-  { status: "inreview", title: "In Review" },
-  { status: "closed", title: "Closed" },
+  { status: "inreview", title: "Agent Review" },
+  { status: "manager_review", title: "Manager Review" },
+  { status: "closed", title: "Done" },
+  { status: "cancelled", title: "Cancelled" },
 ];
 
 /**
@@ -185,14 +189,16 @@ export default function KanbanBoard() {
   /**
    * Group the drawn beads into columns. A card follows the work happening under
    * it (columnFor), so a goal whose steps are being worked is not left in Open.
-   * Defensive: falls back to 'open' for any column not among the 4.
+   * Defensive: falls back to 'open' for any column not among the 6.
    */
   const filteredBeadsByStatus = useMemo(() => {
     const grouped: Record<BeadStatus, Bead[]> = {
       open: [],
       in_progress: [],
       inreview: [],
+      manager_review: [],
       closed: [],
+      cancelled: [],
     };
     const byId = new Map(beads.map(b => [b.id, b]));
     for (const bead of topLevelBeads) {
@@ -200,6 +206,11 @@ export default function KanbanBoard() {
       const column = grouped[live] ? live : 'open';
       grouped[column].push(bead);
     }
+    // Oldest first where somebody is being waited on, so nothing sits in the
+    // manager's column for a week without him seeing it rise to the top.
+    grouped.manager_review.sort(
+      (a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''),
+    );
     return grouped;
   }, [topLevelBeads, beads]);
 
@@ -381,7 +392,7 @@ export default function KanbanBoard() {
             <div role="alert" className="text-danger">Error loading beads: {beadsError.message}</div>
           </div>
         ) : (
-          <div className="grid grid-cols-4 h-full" style={{ gap: 'var(--column-gap)' }}>
+          <div className="grid grid-cols-6 h-full" style={{ gap: 'var(--column-gap)' }}>
             {COLUMNS.map(({ status, title }) => (
               <KanbanColumn
                 key={status}

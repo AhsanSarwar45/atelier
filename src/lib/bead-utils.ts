@@ -155,6 +155,10 @@ export function drawnInColumns<T extends { status: string; parent_id?: string }>
  * rather than only serving as the fallback. A card with nothing under it keeps
  * its own status.
  *
+ * The order is the earliest place work is still standing, so a job with one
+ * piece being written and one waiting on the manager reads as being written —
+ * the column says where the job is stuck, not how far its furthest part has got.
+ *
  * Derived for display only — the board's own record is never rewritten from here.
  *
  * @param bead - The card to place.
@@ -173,7 +177,8 @@ export function columnFor<T extends { id: string; status: string; children?: str
     .filter((k): k is T => k !== undefined)
     .map((k) => columnFor(k, byId, seen))];
 
-  if (here.includes("in_progress")) return "in_progress";
-  if (here.includes("inreview")) return "inreview";
+  for (const stage of ["in_progress", "inreview", "manager_review"]) {
+    if (here.includes(stage)) return stage;
+  }
   return bead.status;
 }

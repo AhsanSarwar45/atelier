@@ -46,7 +46,9 @@ const EMPTY_GROUPED: Record<BeadStatus, Bead[]> = {
   open: [],
   in_progress: [],
   inreview: [],
+  manager_review: [],
   closed: [],
+  cancelled: [],
 };
 
 /**
