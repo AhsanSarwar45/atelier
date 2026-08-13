@@ -83,7 +83,9 @@ pub struct CachedCounts {
     pub open: i64,
     pub in_progress: i64,
     pub inreview: i64,
+    pub manager_review: i64,
     pub closed: i64,
+    pub cancelled: i64,
     pub data_source: Option<String>,
     pub updated_at: String,
 }
@@ -241,6 +243,8 @@ impl Database {
                     updated_at TEXT NOT NULL
                 )",
             ),
+            (4, "ALTER TABLE project_bead_counts ADD COLUMN manager_review INTEGER NOT NULL DEFAULT 0"),
+            (5, "ALTER TABLE project_bead_counts ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0"),
         ];
 
         let now = Utc::now().to_rfc3339();
@@ -492,7 +496,8 @@ impl Database {
     pub fn get_cached_counts(&self, project_id: &str) -> Result<Option<CachedCounts>, DbError> {
         let conn = self.conn.lock().unwrap();
         let row = conn.query_row(
-            "SELECT open, in_progress, inreview, closed, data_source, updated_at
+            "SELECT open, in_progress, inreview, manager_review, closed, cancelled,
+                    data_source, updated_at
              FROM project_bead_counts WHERE project_id = ?1",
             params![project_id],
             |row| {
@@ -500,9 +505,11 @@ impl Database {
                     open: row.get(0)?,
                     in_progress: row.get(1)?,
                     inreview: row.get(2)?,
-                    closed: row.get(3)?,
-                    data_source: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    manager_review: row.get(3)?,
+                    closed: row.get(4)?,
+                    cancelled: row.get(5)?,
+                    data_source: row.get(6)?,
+                    updated_at: row.get(7)?,
                 })
             },
         );
@@ -526,13 +533,16 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO project_bead_counts
-                (project_id, open, in_progress, inreview, closed, data_source, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                (project_id, open, in_progress, inreview, manager_review, closed, cancelled,
+                 data_source, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(project_id) DO UPDATE SET
                 open = excluded.open,
                 in_progress = excluded.in_progress,
                 inreview = excluded.inreview,
+                manager_review = excluded.manager_review,
                 closed = excluded.closed,
+                cancelled = excluded.cancelled,
                 data_source = excluded.data_source,
                 updated_at = excluded.updated_at",
             params![
@@ -540,7 +550,9 @@ impl Database {
                 counts.open,
                 counts.in_progress,
                 counts.inreview,
+                counts.manager_review,
                 counts.closed,
+                counts.cancelled,
                 counts.data_source,
                 counts.updated_at,
             ],
@@ -954,7 +966,9 @@ mod tests {
             open: 3,
             in_progress: 1,
             inreview: 0,
+            manager_review: 2,
             closed: 7,
+            cancelled: 4,
             data_source: Some("cli".to_string()),
             updated_at: "2026-04-22T10:00:00Z".to_string(),
         };
@@ -964,7 +978,9 @@ mod tests {
         assert_eq!(fetched.open, 3);
         assert_eq!(fetched.in_progress, 1);
         assert_eq!(fetched.inreview, 0);
+        assert_eq!(fetched.manager_review, 2);
         assert_eq!(fetched.closed, 7);
+        assert_eq!(fetched.cancelled, 4);
         assert_eq!(fetched.data_source.as_deref(), Some("cli"));
         assert_eq!(fetched.updated_at, "2026-04-22T10:00:00Z");
     }
@@ -984,7 +1000,9 @@ mod tests {
             open: 10,
             in_progress: 2,
             inreview: 1,
+            manager_review: 0,
             closed: 0,
+            cancelled: 0,
             data_source: Some("jsonl".to_string()),
             updated_at: "2026-04-22T10:00:00Z".to_string(),
         };
@@ -994,7 +1012,9 @@ mod tests {
             open: 8,
             in_progress: 3,
             inreview: 2,
+            manager_review: 1,
             closed: 5,
+            cancelled: 6,
             data_source: Some("dolt-direct".to_string()),
             updated_at: "2026-04-22T11:00:00Z".to_string(),
         };
@@ -1004,7 +1024,9 @@ mod tests {
         assert_eq!(fetched.open, 8);
         assert_eq!(fetched.in_progress, 3);
         assert_eq!(fetched.inreview, 2);
+        assert_eq!(fetched.manager_review, 1);
         assert_eq!(fetched.closed, 5);
+        assert_eq!(fetched.cancelled, 6);
         assert_eq!(fetched.data_source.as_deref(), Some("dolt-direct"));
         assert_eq!(fetched.updated_at, "2026-04-22T11:00:00Z");
 
@@ -1037,7 +1059,9 @@ mod tests {
                 open: 1,
                 in_progress: 0,
                 inreview: 0,
+                manager_review: 0,
                 closed: 0,
+                cancelled: 0,
                 data_source: None,
                 updated_at: "2026-04-22T10:00:00Z".to_string(),
             },

@@ -167,7 +167,7 @@ export const beads = {
     body: JSON.stringify(data),
   }),
 
-  update: (data: { path: string; id: string; title?: string; description?: string; status?: string; issue_type?: string; priority?: number }) =>
+  update: (data: { path: string; id: string; title?: string; description?: string; status?: string; issue_type?: string; priority?: number; add_label?: string }) =>
     fetchApi<{ success: boolean }>('/api/beads/update', {
       method: 'PATCH',
       body: JSON.stringify(data),

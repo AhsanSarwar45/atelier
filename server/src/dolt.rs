@@ -229,6 +229,7 @@ impl DoltManager {
         status: Option<&str>,
         issue_type: Option<&str>,
         priority: Option<i32>,
+        add_label: Option<&str>,
     ) -> Result<(), DoltError> {
         let mut sets = Vec::new();
         let mut params: Vec<(Vec<u8>, mysql_async::Value)> = Vec::new();
@@ -254,7 +255,7 @@ impl DoltManager {
             params.push((b"priority".to_vec(), p.into()));
         }
 
-        if sets.is_empty() {
+        if sets.is_empty() && add_label.is_none() {
             return Ok(());
         }
 
@@ -274,6 +275,21 @@ impl DoltManager {
         conn.exec_drop(&query, mysql_async::Params::Named(params.into_iter().collect()))
             .await
             .map_err(|e| DoltError::QueryFailed(format!("update: {}", e)))?;
+
+        // Both columns are the key, so setting the same label twice is ignored.
+        if let Some(label) = add_label {
+            let query = format!(
+                "INSERT IGNORE INTO `{}`.labels (issue_id, label) VALUES (:id, :label)",
+                db_name
+            );
+            conn.exec_drop(&query, mysql_async::Params::Named(
+                vec![
+                    (b"id".to_vec(), id.into()),
+                    (b"label".to_vec(), label.into()),
+                ].into_iter().collect(),
+            )).await
+                .map_err(|e| DoltError::QueryFailed(format!("add_label: {}", e)))?;
+        }
 
         // Dolt commit — must USE the database first
         let use_query = format!("USE `{}`", db_name);

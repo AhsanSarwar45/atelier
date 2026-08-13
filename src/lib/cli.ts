@@ -5,7 +5,7 @@
  * through the backend API.
  */
 
-import type { BeadStatus } from "@/types";
+import { SET_BY, type BeadStatus } from "@/types";
 
 import * as api from './api';
 
@@ -70,7 +70,8 @@ export async function addComment(
 /**
  * Update the status of a bead
  *
- * Executes: bd update <beadId> --status <status>
+ * Writes what the board actually holds for that state, per SET_BY: a state the
+ * board stores under another name, or as a closed card carrying a mark.
  *
  * @param beadId - The ID of the bead to update
  * @param status - The new status value
@@ -87,8 +88,10 @@ export async function updateStatus(
   status: BeadStatus,
   cwd?: string
 ): Promise<void> {
+  const write = SET_BY[status];
   const result = await executeBdCommand(
-    ["update", beadId, "--status", status],
+    ["update", beadId, "--status", write.status,
+      ...(write.addLabel ? ["--add-label", write.addLabel] : [])],
     cwd
   );
 

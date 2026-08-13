@@ -328,13 +328,20 @@ fn upsert_counts_cache(
     let mut open = 0i64;
     let mut in_progress = 0i64;
     let mut inreview = 0i64;
+    let mut manager_review = 0i64;
     let mut closed = 0i64;
+    let mut cancelled = 0i64;
     for bead in beads {
+        // Dropped work is a closed bead carrying the mark, never a status of its own.
+        let is_cancelled = bead.labels.as_ref()
+            .is_some_and(|l| l.iter().any(|s| s == CANCELLED_LABEL));
         match bead.status.as_str() {
             "open" => open += 1,
             "in_progress" => in_progress += 1,
             // bd writes `in_review`; this screen has always called the column `inreview`.
             "inreview" | "in_review" => inreview += 1,
+            "manager_review" => manager_review += 1,
+            "closed" if is_cancelled => cancelled += 1,
             "closed" => closed += 1,
             _ => {}
         }
@@ -344,7 +351,9 @@ fn upsert_counts_cache(
         open,
         in_progress,
         inreview,
+        manager_review,
         closed,
+        cancelled,
         data_source: Some(data_source.to_string()),
         updated_at: Utc::now().to_rfc3339(),
     };
@@ -482,6 +491,16 @@ fn read_beads_from_jsonl(issues_path: &Path) -> Result<Vec<Bead>, String> {
 
 /// Dolt-only path prefix: `dolt://beads_dbname`
 const DOLT_PATH_PREFIX: &str = "dolt://";
+
+/// The mark a closed bead carries when the work was dropped rather than done.
+const CANCELLED_LABEL: &str = "cancelled";
+
+/// The live stages, earliest first, each with every spelling bd may write.
+const LIVE_STAGES: [(&str, &[&str]); 3] = [
+    ("in_progress", &["in_progress"]),
+    ("inreview", &["inreview", "in_review"]),
+    ("manager_review", &["manager_review"]),
+];
 
 /// GET /api/beads?path=/path/to/project
 /// GET /api/beads?path=dolt://beads_dbname
@@ -785,6 +804,8 @@ pub struct UpdateBeadRequest {
     pub issue_type: Option<String>,
     /// New priority 0-4 (optional)
     pub priority: Option<i32>,
+    /// A label to add, left in place if already there (optional)
+    pub add_label: Option<String>,
 }
 
 /// PATCH /api/beads/update
@@ -806,7 +827,8 @@ pub async fn update_bead_handler(
         || req.description.is_some()
         || req.status.is_some()
         || req.issue_type.is_some()
-        || req.priority.is_some();
+        || req.priority.is_some()
+        || req.add_label.is_some();
     if !has_changes {
         return (
             StatusCode::BAD_REQUEST,
@@ -840,6 +862,7 @@ pub async fn update_bead_handler(
             req.status.as_deref(),
             req.issue_type.as_deref(),
             req.priority,
+            req.add_label.as_deref(),
         ).await {
             Ok(()) => {
                 return (StatusCode::OK, Json(serde_json::json!({ "success": true })));
@@ -875,6 +898,9 @@ pub async fn update_bead_handler(
     }
     if let Some(p) = req.priority {
         args.push(format!("--priority={}", p));
+    }
+    if let Some(ref l) = req.add_label {
+        args.push(format!("--add-label={}", l));
     }
 
     let result = tokio::time::timeout(
@@ -1001,37 +1027,28 @@ fn post_process_beads(mut beads: Vec<Bead>) -> Vec<Bead> {
 
 /// Computes the appropriate status for an epic based on its children's statuses.
 ///
-/// State machine:
-/// - Any child `in_progress` -> Epic `in_progress`
-/// - All children `inreview` OR `closed` (with at least one `inreview`) -> Epic `inreview`
-/// - All children `open` -> Epic `open`
-/// - Note: We don't auto-close epics - user must close manually
+/// The first live stage any child still stands in, in LIVE_STAGES order, which
+/// is the order src/lib/bead-utils.ts places a card by; then all-closed reads as
+/// inreview and all-open as open. An epic is never auto-closed.
 fn compute_epic_status_from_children(child_statuses: &[&str]) -> Option<&'static str> {
     if child_statuses.is_empty() {
         return None;
     }
 
-    // Check if any child is in_progress
-    if child_statuses.contains(&"in_progress") {
-        return Some("in_progress");
+    for (stage, spellings) in LIVE_STAGES {
+        if child_statuses.iter().any(|s| spellings.contains(s)) {
+            return Some(stage);
+        }
     }
 
-    // Check if all children are either inreview or closed
-    let all_inreview_or_closed = child_statuses
-        .iter()
-        .all(|s| *s == "inreview" || *s == "closed");
-
-    if all_inreview_or_closed {
+    if child_statuses.iter().all(|s| *s == "closed") {
         return Some("inreview");
     }
 
-    // Check if all children are open
     if child_statuses.iter().all(|s| *s == "open") {
         return Some("open");
     }
 
-    // Mixed state (some open, some closed, no in_progress or inreview)
-    // Don't change the epic status
     None
 }
 

@@ -1,12 +1,11 @@
 /**
- * Bead counts by status for a project
+ * Bead counts by status for a project, one number per state in {@link STATES}.
  */
-export interface BeadCounts {
-  open: number;
-  in_progress: number;
-  inreview: number;
-  closed: number;
-}
+export type BeadCounts = Record<BeadStatus, number>;
+
+/** Every state at nought, for a project whose counts have not been read yet. */
+export const NO_COUNTS = (): BeadCounts =>
+  Object.fromEntries(STATES.map((s) => [s.id, 0])) as BeadCounts;
 
 /**
  * Cached per-project bead counts served by `GET /api/projects`.

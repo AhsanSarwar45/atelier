@@ -9,7 +9,11 @@ import {
   createProject,
   type CreateProjectInput,
 } from "@/lib/db";
-import type { Project, Tag, BeadCounts } from "@/types";
+import { NO_COUNTS, STATES, type Project, type Tag, type BeadCounts, type CachedCounts } from "@/types";
+
+/** The counts a cache row carries, one per state, dropping its other fields. */
+const countsOf = (cached: CachedCounts): BeadCounts =>
+  Object.fromEntries(STATES.map((s) => [s.id, cached[s.id] ?? 0])) as BeadCounts;
 
 interface UseProjectsResult {
   projects: Project[];
@@ -61,7 +65,7 @@ export function useProjects(): UseProjectsResult {
       //   3. `zeroCounts` as a last-resort empty state. In that case
       //      `countsLoaded` stays false so the card can render a dashed
       //      placeholder donut instead of misleading "0/0/0/0" values.
-      const zeroCounts: BeadCounts = { open: 0, in_progress: 0, inreview: 0, closed: 0 };
+      const zeroCounts: BeadCounts = NO_COUNTS();
       setProjects((prev) => {
         const prevMap = new Map(prev.map((p) => [p.id, p]));
         return data.map((p) => {
@@ -73,12 +77,7 @@ export function useProjects(): UseProjectsResult {
           const beadCounts: BeadCounts = hasPrev
             ? prevProject!.beadCounts!
             : cached
-              ? {
-                  open: cached.open,
-                  in_progress: cached.in_progress,
-                  inreview: cached.inreview,
-                  closed: cached.closed,
-                }
+              ? countsOf(cached)
               : zeroCounts;
 
           const dataSource = hasPrev
@@ -113,12 +112,9 @@ export function useProjects(): UseProjectsResult {
           const result = await loadProjectBeads(project.path, { withSource: true });
           if (beadsSignal.aborted) return null;
           const grouped = groupBeadsByStatus(result.beads);
-          const beadCounts: BeadCounts = {
-            open: grouped.open.length,
-            in_progress: grouped.in_progress.length,
-            inreview: grouped.inreview.length,
-            closed: grouped.closed.length,
-          };
+          const beadCounts: BeadCounts = Object.fromEntries(
+            STATES.map((s) => [s.id, grouped[s.id].length]),
+          ) as BeadCounts;
           return { id: project.id, beadCounts, dataSource: result.source, beadError: undefined };
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') return null;

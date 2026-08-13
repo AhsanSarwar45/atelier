@@ -32,7 +32,7 @@ import {
 import { updateTitle, updateDescription, updateStatus as cliUpdateStatus } from "@/lib/cli";
 import { ISSUE_TYPES, getIssueTypeMeta } from "@/lib/issue-types";
 import { cn, isDoltProject } from "@/lib/utils";
-import type { Bead, WorktreeStatus } from "@/types";
+import { SET_BY, STATES, type Bead, type BeadStatus, type WorktreeStatus } from "@/types";
 
 
 /** Priority levels 0–4, displayed P0 (critical) … P4 (backlog). Single source for the editor options. */
@@ -149,10 +149,14 @@ export function BeadDetail({
 
   const handleStatusChange = useCallback(async (e: React.ChangeEvent<HTMLSelectElement>) => {
     if (!projectPath) return;
-    const newStatus = e.target.value as import("@/types").BeadStatus;
+    const newStatus = e.target.value as BeadStatus;
+    const write = SET_BY[newStatus];
     try {
       if (isDolt) {
-        await api.beads.update({ path: projectPath, id: bead.id, status: newStatus });
+        await api.beads.update({
+          path: projectPath, id: bead.id,
+          status: write.status, add_label: write.addLabel,
+        });
       } else {
         await cliUpdateStatus(bead.id, newStatus, projectPath);
       }
@@ -333,10 +337,9 @@ export function BeadDetail({
                   onChange={handleStatusChange}
                   className="bg-transparent border-none text-sm text-t-tertiary cursor-pointer hover:text-t-secondary focus:outline-none appearance-none"
                 >
-                  <option value="open">Open</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="inreview">In Review</option>
-                  <option value="closed">Closed</option>
+                  {STATES.map((s) => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
                 </select>
               )}
             </span>

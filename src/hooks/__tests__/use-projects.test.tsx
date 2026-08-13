@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import type { Project } from '@/types';
+import { NO_COUNTS, type Project } from '@/types';
 
 // --- Mocks ------------------------------------------------------------------
 //
@@ -64,9 +64,9 @@ describe('useProjects — cached counts seeding', () => {
       lastOpened: '2026-04-22T00:00:00Z',
       createdAt: '2026-04-22T00:00:00Z',
       cachedCounts: {
+        ...NO_COUNTS(),
         open: 3,
         in_progress: 1,
-        inreview: 0,
         closed: 5,
         dataSource: 'dolt-direct',
         updatedAt: '2026-04-22T00:00:00Z',
@@ -86,9 +86,9 @@ describe('useProjects — cached counts seeding', () => {
     expect(result.current.projects).toHaveLength(1);
     const seeded = result.current.projects[0];
     expect(seeded.beadCounts).toEqual({
+      ...NO_COUNTS(),
       open: 3,
       in_progress: 1,
-      inreview: 0,
       closed: 5,
     });
     expect(seeded.countsLoaded).toBe(true);
@@ -118,11 +118,6 @@ describe('useProjects — cached counts seeding', () => {
     expect(seeded.countsLoaded).toBe(false);
     // Zero counts are a fallback — NOT a real "0 tasks" signal. The
     // dashed donut rendering in project-card distinguishes these.
-    expect(seeded.beadCounts).toEqual({
-      open: 0,
-      in_progress: 0,
-      inreview: 0,
-      closed: 0,
-    });
+    expect(seeded.beadCounts).toEqual(NO_COUNTS());
   });
 });

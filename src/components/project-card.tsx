@@ -23,7 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { Tag } from "@/lib/db";
 import { deriveBeadPrefix } from "@/lib/utils";
-import type { BeadCounts } from "@/types";
+import { NO_COUNTS, type BeadCounts } from "@/types";
 
 /**
  * Converts kebab-case, snake_case, camelCase to Title Case with spaces
@@ -75,7 +75,7 @@ export function ProjectCard({
   path,
   localPath,
   tags,
-  beadCounts = { open: 0, in_progress: 0, inreview: 0, closed: 0 },
+  beadCounts = NO_COUNTS(),
   countsLoaded = true,
   dataSource,
   beadError,
