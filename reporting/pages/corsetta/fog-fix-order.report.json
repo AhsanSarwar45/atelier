@@ -3,7 +3,7 @@
   "eyebrow": "Built and measured",
   "actions": {
     "none": true,
-    "fyi": "Nothing needed from you. The fix is built, measured and committed. One honest gap below, and I am closing it before I call this done."
+    "fyi": "Nothing needed from you. The fix is built and measured; you already corrected the one thing I had wrong on this page."
   },
   "status": {
     "card": "cor-d2o.3"
@@ -114,25 +114,25 @@
       ]
     },
     {
-      "label": "The honest gap",
+      "label": "One correction, and what is actually outstanding",
       "blocks": [
         {
           "kind": "note",
-          "tone": "warn",
-          "label": "Nothing in the game has ever rendered fog",
-          "text": "There is no scene with fog switched on, and no way to switch it on from outside a scene file. Everything above is measured, none of it is a picture. That is also why there is no fog test and no fog reference image."
+          "tone": "bad",
+          "label": "I had this wrong",
+          "text": "I told you nothing in the game had ever rendered fog. Not true \u2014 there is a full picker for fog, mist, haze, smog and dust with a visibility slider, and it works. You caught it."
         },
         {
           "kind": "note",
           "tone": "info",
-          "label": "What I am doing about it",
-          "text": "Adding the switch. It is small, and it unblocks three things at once: the cost measurement this job still owes you, the missing fog test, and the first pictures of fog you will actually get to look at."
+          "label": "What was actually true",
+          "text": "None of the saved scenes we measure against has fog switched on, so the measuring rig starts clear. That is one scene file, not a missing feature."
         },
         {
           "kind": "note",
           "tone": "warn",
-          "label": "One number still outstanding",
-          "text": "What fog costs per frame. I will not have it until the switch exists, and I would rather tell you that than hand you a number measured on the wrong thing."
+          "label": "The one number still outstanding",
+          "text": "What fog costs per frame. It needs a saved scene with fog on, which is the next thing I do."
         }
       ]
     },
@@ -237,16 +237,17 @@
     },
     {
       "id": "D13",
-      "title": "Fog gets a switch that works outside a scene file, before the cost is measured",
-      "why": "Fog can only be turned on by editing a scene file today, so it cannot be benchmarked, tested, or photographed. Measuring cost without it would mean measuring something adjacent and calling it fog."
+      "title": "The measuring rig gets a saved scene with fog on, before the cost is measured",
+      "why": "Revised 13 Aug on your correction. I had written this as fog needing a switch built; it does not \u2014 the game has had a fog picker all along. What is missing is only that no saved scene we measure against has fog turned on, so the cost would have been measured on clear air.",
+      "tag": "revised"
     }
   ],
   "next": {
-    "if_nothing": "I add the fog switch, take the cost number, get the first fog pictures in front of you, then have someone who did not write it review the change and land it.",
+    "if_nothing": "I save a scene with fog on, take the cost number, get the first fog pictures in front of you, then have someone who did not write it review the change and land it.",
     "steps": [
       {
-        "step": "Add the switch that turns fog on from outside a scene file",
-        "cost": "small",
+        "step": "Save a measuring scene with fog on",
+        "cost": "tiny",
         "starting": true
       },
       {
