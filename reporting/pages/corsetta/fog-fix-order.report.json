@@ -1,251 +1,138 @@
 {
   "title": "Fog Fix Order",
-  "eyebrow": "Design checkpoint — before build",
+  "eyebrow": "Built and measured",
   "actions": {
     "none": true,
-    "fyi": "Nothing needed from you. You caught the one bad call in this design and it is corrected; the next thing I bring you is pictures and a re-measure."
+    "fyi": "Nothing needed from you. The fix is built, measured and committed. One honest gap below, and I am closing it before I call this done."
   },
   "status": {
     "card": "cor-d2o.3"
   },
   "content": [
     {
-      "label": "The air was never the problem",
-      "lead": "Dense ground fog does not reach the sky at all. The assumption was that the sky is checked too coarsely; it is not.",
-      "blocks": [
-        {
-          "kind": "bars",
-          "alt": "how far the sky's dimming lands from the right answer",
-          "series": [
-            {
-              "label": "Air on its own",
-              "value": 0.002,
-              "tone": "green"
-            },
-            {
-              "label": "Air + 100 m of fog",
-              "value": 0.859,
-              "tone": "red"
-            }
-          ]
-        },
-        {
-          "kind": "text",
-          "text": "How far the sky's dimming lands from the truth, 0 being perfect — same sky, same coarseness, fog the only difference, 440 times worse."
-        },
-        {
-          "kind": "note",
-          "tone": "info",
-          "label": "Why",
-          "text": "The fog layer is a hundred metres thick and the sky is checked in kilometre strides, so the render steps clean over it."
-        }
-      ]
-    },
-    {
-      "label": "Re-measured today, and nothing has moved",
-      "lead": "Before designing anything I re-ran the yardstick on today's game. Every number came back identical to the ones this page was built on.",
+      "label": "It works, and here is the size of it",
+      "lead": "Same yardstick, same six kinds of fog, before and after. Lower is closer to the truth.",
       "blocks": [
         {
           "kind": "table",
           "columns": [
             "",
             {
-              "name": "How wrong the shipping fog is",
+              "name": "Before",
               "align": "right"
             },
             {
-              "name": "The exact formula, same test",
+              "name": "After",
               "align": "right"
-            }
+            },
+            "What you would see"
           ],
           "rows": [
             [
-              "Sky — dimming",
+              "Sky \u2014 dimming",
               {
                 "num": "0.86",
                 "tone": "red"
               },
               {
-                "num": "0.0003",
+                "num": "0.0006",
                 "tone": "green"
-              }
+              },
+              "Dense fog now reaches the sky instead of leaving it looking clear"
             ],
             [
-              "Sky — glow",
+              "Sky \u2014 glow",
               {
                 "num": "99%",
                 "tone": "red"
               },
               {
-                "num": "1.6%",
-                "tone": "green"
-              }
+                "num": "20%",
+                "tone": "amber"
+              },
+              "The lit haze overhead is roughly right rather than invented"
             ],
             [
-              "Near air — dimming",
+              "Near air \u2014 dimming",
               {
                 "num": "0.009",
                 "tone": "amber"
               },
               {
-                "num": "0.0003",
+                "num": "0.0002",
                 "tone": "green"
-              }
+              },
+              "Distance fades at the correct rate at every range"
             ],
             [
-              "Near air — glow",
+              "Near air \u2014 glow",
               {
                 "num": "24%",
                 "tone": "red"
               },
               {
-                "num": "1.6%",
+                "num": "under 2%",
                 "tone": "green"
-              }
+              },
+              "The air between you and the car carries the right amount of light"
             ]
           ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "What is left is not fog",
+          "text": "In three of those four measures the worst remaining error is now on the fog-free case \u2014 that is the air's own coarseness, with no fog in it at all. Fog itself contributes nothing measurable to the dimming any more."
+        }
+      ]
+    },
+    {
+      "label": "How I know it is accuracy and not a different sky",
+      "lead": "The easy way to fake this result is to change the answer and the yardstick together. Two guards stop that.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "The answer was frozen before a line of fog code moved",
+              "note": "Twelve reference values captured from the old code. They still hold, untouched, against the new code \u2014 so the fog lands where it always landed, it just gets there at real render settings now"
+            },
+            {
+              "n": "2",
+              "title": "Switching fog off at its one source collapses every case onto clear air, exactly",
+              "note": "To the last digit, for all five kinds of fog. If anything else in the game were still quietly producing fog, it could not have"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "And the wider net",
+          "text": "122 tests across sky, cloud, exposure, reflections, shadows and lens. Everything that was green stayed green; the five failures were already failing and already have their own jobs."
+        }
+      ]
+    },
+    {
+      "label": "The honest gap",
+      "blocks": [
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "Nothing in the game has ever rendered fog",
+          "text": "There is no scene with fog switched on, and no way to switch it on from outside a scene file. Everything above is measured, none of it is a picture. That is also why there is no fog test and no fog reference image."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "What I am doing about it",
+          "text": "Adding the switch. It is small, and it unblocks three things at once: the cost measurement this job still owes you, the missing fog test, and the first pictures of fog you will actually get to look at."
         },
         {
           "kind": "note",
           "tone": "warn",
-          "label": "The near air is not the easy half",
-          "text": "I had assumed only the sky was badly wrong. The air between you and the car is 24% out on the glow as well, over fifteen kilometres and sixty-four checks. Both halves need the fix."
-        }
-      ]
-    },
-    {
-      "label": "The fix, and it is smaller than the plan said",
-      "lead": "Fog stops being sampled at points along a line and starts being solved for the whole line at once. The air keeps being sampled — it is smooth, and that is what sampling is good at.",
-      "blocks": [
-        {
-          "kind": "table",
-          "columns": [
-            "",
-            "Today",
-            "After"
-          ],
-          "rows": [
-            [
-              "Fog is worked out by",
-              "Checking a point every kilometre and hoping the layer is there",
-              "Solving the whole line of sight in one go"
-            ],
-            [
-              "Places that have to change",
-              {
-                "num": "10 believed"
-              },
-              {
-                "num": "2 actual",
-                "tone": "green"
-              }
-            ],
-            [
-              "How much of the job was already done",
-              "—",
-              "The light coming through fog was already exact; only what you see of the fog itself was not"
-            ]
-          ]
-        },
-        {
-          "kind": "note",
-          "tone": "good",
-          "label": "Why it collapsed to two",
-          "text": "Nine of the ten places do not work fog out at all — they read a finished answer from the sky picture or from the near-air grid. Fix those two and everything downstream is fixed with them."
-        },
-        {
-          "kind": "note",
-          "tone": "info",
-          "label": "Patchy fog survives",
-          "text": "Fog banks drifting in patches still work. The exact answer is applied over each stretch of the line rather than the whole of it, so the patchiness is kept and the accuracy is still won."
-        }
-      ]
-    },
-    {
-      "label": "You caught a bad call, and it is corrected",
-      "lead": "I had the sky and the near air solving fog differently — the sky in one go, the near air stretch by stretch. You said that breaks the very thing the job is for. You were right.",
-      "blocks": [
-        {
-          "kind": "note",
-          "tone": "bad",
-          "label": "What I had wrong",
-          "text": "Today those two agree at the horizon because they run identical code — they cannot disagree. My version would have replaced that guarantee with a test watching for it to break, and then asked you which order to manage the risk in. Inventing the risk was the mistake."
-        },
-        {
-          "kind": "note",
-          "tone": "info",
-          "label": "It also bought nothing",
-          "text": "Solving the whole line at once and solving it stretch by stretch give the identical number — the formula is an exact answer read off the two ends of a stretch, so chopping the line changes nothing. The split was pure divergence for no gain."
-        },
-        {
-          "kind": "table",
-          "columns": [
-            "",
-            "What I showed you",
-            "Corrected"
-          ],
-          "rows": [
-            [
-              "Sky and near air can disagree",
-              {
-                "pill": "possible, needs watching",
-                "tone": "red"
-              },
-              {
-                "pill": "impossible",
-                "tone": "green"
-              }
-            ],
-            [
-              "Approximations left over",
-              {
-                "num": "2"
-              },
-              {
-                "num": "1, and smaller",
-                "tone": "green"
-              }
-            ],
-            [
-              "Patchy fog banks",
-              {
-                "pill": "kept",
-                "tone": "green"
-              },
-              {
-                "pill": "kept",
-                "tone": "green"
-              }
-            ],
-            [
-              "Decisions needed from you",
-              {
-                "num": "1"
-              },
-              {
-                "num": "0",
-                "tone": "green"
-              }
-            ]
-          ]
-        },
-        {
-          "kind": "note",
-          "tone": "good",
-          "label": "The guard that stays, regardless",
-          "text": "The yardstick currently checks the fog against a slower copy of itself. Change the fog and the yardstick changes with it, and it would go green however wrong the answer got. Today's fog is frozen as the thing to be judged against before a line of it moves."
-        }
-      ]
-    },
-    {
-      "label": "What this does not cover",
-      "blocks": [
-        {
-          "kind": "list",
-          "items": [
-            "The fog's own glow is not dimmed by the air it sits in, across a single stretch of the line. Small, and it gets a measured number rather than an argument.",
-            "The exact answer describes a flat fog layer on flat ground; a line of sight skimming the horizon is held at a shallow angle rather than curving with the planet. Every such line is already fully fogged, so it is invisible — but it is written down."
-          ]
+          "label": "One number still outstanding",
+          "text": "What fog costs per frame. I will not have it until the switch exists, and I would rather tell you that than hand you a number measured on the wrong thing."
         }
       ]
     },
@@ -258,17 +145,22 @@
             {
               "n": "1",
               "title": "A fog fault on the list was already fixed",
-              "note": "The sky's bounce off the ground ignored fog. The one-way-in-for-light work fixed it; that job is dead on arrival"
+              "note": "The sky's bounce off the ground ignored fog; earlier work fixed it. That job is dead on arrival"
             },
             {
               "n": "2",
-              "title": "A described feature that was never built",
-              "note": "Three comments explain how a reflection gets its haze from a route that nothing calls"
+              "title": "The benchmark's own worked example does not work",
+              "note": "It names a switch that was never built, so that arm silently measures the control against itself and reports no difference"
             },
             {
               "n": "3",
+              "title": "The documentation checks grade the wrong copy of the files",
+              "note": "When work happens on a side branch \u2014 which is always \u2014 they read the main copy instead, so they report fixed problems and miss new ones"
+            },
+            {
+              "n": "4",
               "title": "The 250 m rule is not what it was filed as",
-              "note": "Fog is not hand-drawn near the camera — it is switched off entirely, because the grid is too coarse there. This fix removes that reason"
+              "note": "Fog is not hand-drawn near the camera, it is switched off entirely because the grid is too coarse there. This fix removes that reason"
             }
           ]
         }
@@ -294,7 +186,7 @@
     },
     {
       "id": "D4",
-      "title": "There is no sunbeam feature — every light interacts with fog and air identically",
+      "title": "There is no sunbeam feature \u2014 every light interacts with fog and air identically",
       "tag": "your call",
       "why": "Ruled 12 Aug and binding on everything downstream: no light may be shadowed in the fog while another is not, and a beam is not a feature, it is what a blocked glow looks like."
     },
@@ -302,19 +194,19 @@
       "id": "D5",
       "title": "The fog's body privilege and the trackside lamps now have owners in the plan",
       "tag": "revised",
-      "why": "Was written as 'the moon has no shadows'. It has them — the gap is that the fog asks the sun's slot regardless of which body is lighting the scene."
+      "why": "Was written as 'the moon has no shadows'. It has them \u2014 the gap is that the fog asks the sun's slot regardless of which body is lighting the scene."
     },
     {
       "id": "D6",
-      "title": "There is no sun and no moon — one kind of body, the same rules for everything",
+      "title": "There is no sun and no moon \u2014 one kind of body, the same rules for everything",
       "tag": "your call",
-      "why": "Ruled 12 Aug. Which body it is may be data — its disc, its phase, its colour — never a rule that gives one of them something the other cannot have."
+      "why": "Ruled 12 Aug. Which body it is may be data \u2014 its disc, its phase, its colour \u2014 never a rule that gives one of them something the other cannot have."
     },
     {
       "id": "D7",
       "title": "The job is one way in for light, not a fix per kind of light",
       "tag": "your call",
-      "why": "Ruled 12 Aug. Fog is handed the lights and applies one physics to all of them, so a source built later works by turning up — there is no separate job to add it."
+      "why": "Ruled 12 Aug. Fog is handed the lights and applies one physics to all of them, so a source built later works by turning up \u2014 there is no separate job to add it."
     },
     {
       "id": "D8",
@@ -326,7 +218,7 @@
       "id": "D9",
       "title": "D3 is answered: fog is solved exactly over every stretch the render already walks, everywhere, with no exceptions",
       "tag": "revised",
-      "why": "Dimming from two causes multiplies, so fog and air separate exactly: fog is the thin sharp one and gets solved outright, air is the smooth one and stays sampled. Revised 13 Aug on your call — the first version let the sky and the near air solve fog at different granularities, which would have broken an agreement at the horizon that is currently free. One rule, both paths, no seam to police."
+      "why": "Dimming from two causes multiplies, so fog and air separate exactly: fog is the thin sharp one and gets solved outright, air is the smooth one and stays sampled. Revised 13 Aug on your call \u2014 the first version let the sky and the near air solve fog at different granularities, which would have broken an agreement at the horizon that is currently free. One rule, both paths, no seam to police."
     },
     {
       "id": "D10",
@@ -337,26 +229,40 @@
       "id": "D11",
       "title": "The two approximations the design leaves get measured, not argued",
       "why": "Both are small on paper. On paper is not a number, and this project does not ship one."
+    },
+    {
+      "id": "D12",
+      "title": "The sky's remaining glow error is accepted, and it is bounded by the render's coarseness rather than by fog",
+      "why": "At its worst it sits beside a fog-free case that is already a fifth as wrong on the same settings, and it shrinks with render quality rather than needing more fog work. Chasing it means turning the sky's step count down, which is its own job with its own number."
+    },
+    {
+      "id": "D13",
+      "title": "Fog gets a switch that works outside a scene file, before the cost is measured",
+      "why": "Fog can only be turned on by editing a scene file today, so it cannot be benchmarked, tested, or photographed. Measuring cost without it would mean measuring something adjacent and calling it fog."
     }
   ],
   "next": {
-    "if_nothing": "I freeze today's fog as the yardstick, then solve fog exactly in the sky and the near air with one rule, and come back with pictures and a re-measure.",
+    "if_nothing": "I add the fog switch, take the cost number, get the first fog pictures in front of you, then have someone who did not write it review the change and land it.",
     "steps": [
       {
-        "step": "Freeze today's fog as the thing to judge against, and prove the freeze changed no number",
+        "step": "Add the switch that turns fog on from outside a scene file",
         "cost": "small",
         "starting": true
       },
       {
-        "step": "Solve fog exactly over every stretch, in the sky and the near air alike; delete the sampled fog in the same change",
-        "cost": "medium"
-      },
-      {
-        "step": "Re-run the yardstick and the eight fog captures; report before and after, with the cost per frame",
+        "step": "Measure what fog costs per frame, and what it costs on a clear day",
         "cost": "small"
       },
       {
-        "step": "Decide on sample-spreading from that number, not from the plan",
+        "step": "First pictures: the same place with fog on and off, near and far",
+        "cost": "small"
+      },
+      {
+        "step": "Review by someone who did not write it, then land",
+        "cost": "small"
+      },
+      {
+        "step": "Decide on sample-spreading from the measured number, not from the plan",
         "cost": "tiny"
       }
     ]
