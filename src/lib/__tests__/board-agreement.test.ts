@@ -72,6 +72,12 @@ describe("the columns draw one card per job", () => {
     const drawn = drawnInColumns([goal, step("in_progress"), step("open")]).map((b) => b.id);
     expect(drawn).toEqual(["g"]);
   });
+
+  it("a gate is the board's own lock and is never drawn as work", () => {
+    const gate = { id: "gate-1", status: "open", issue_type: "gate" };
+    const drawn = drawnInColumns([goal, gate]).map((b) => b.id);
+    expect(drawn).toEqual(["g"]);
+  });
 });
 
 describe("a card sits in the column of the work under it", () => {

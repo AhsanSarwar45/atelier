@@ -130,16 +130,22 @@ export function isBlocked(
 }
 
 /**
+ * Card shapes that are mechanism rather than work. A gate is a lock the board
+ * puts on a step; it is never something a person picks up and does.
+ */
+const NOT_WORK = new Set(["gate"]);
+
+/**
  * The beads the kanban columns draw as cards of their own: the goals and the
  * standalone tasks. A step belongs inside the goal it is a step of, which is
  * where the goal card already lists it with its own state.
  *
  * @param beads - Beads whose status has already been mapped to a column.
  */
-export function drawnInColumns<T extends { status: string; parent_id?: string }>(
+export function drawnInColumns<T extends { status: string; parent_id?: string; issue_type?: string }>(
   beads: ReadonlyArray<T>,
 ): T[] {
-  return beads.filter((b) => !b.parent_id);
+  return beads.filter((b) => !b.parent_id && !NOT_WORK.has(b.issue_type ?? ""));
 }
 
 /**
