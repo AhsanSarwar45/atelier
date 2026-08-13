@@ -106,7 +106,13 @@ none of them.
 as `starting`, or its first step. The list can only ever name a stage, and it
 reads as nothing-started whenever an agent is behind on ticking rows off; what
 happens next is the agent's to say. Manager's ruling, 2026-08-13. With no plan
-step left, the line falls back to the list.
+step left, the line falls back to the list; with every row ticked, the list's
+own last word stands, because a plan step under a full set of ticks reads as
+work still to come.
+
+**So the starting step is the first thing the manager reads.** Write it as an
+effect he can judge, never as housekeeping — the words for that are in the
+phrasebook and the builder flags them here like anywhere else.
 
 Only the card's direct children reach the page. Their own steps are internal.
 

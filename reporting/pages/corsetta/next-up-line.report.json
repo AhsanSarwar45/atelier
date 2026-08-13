@@ -1,16 +1,13 @@
 {
   "title": "The Next-Up Line",
   "eyebrow": "You answered; this is the change going in",
-
   "actions": {
     "none": true,
     "fyi": "Nothing needed. You already made the call: the line says what the agent is about to do, not what the work list says."
   },
-
   "status": {
     "card": "cor-ydpx"
   },
-
   "content": [
     {
       "label": "What changes at the top of every page",
@@ -18,12 +15,32 @@
       "blocks": [
         {
           "kind": "table",
-          "columns": ["", "Before", "After"],
+          "columns": [
+            "",
+            "Before",
+            "After"
+          ],
           "rows": [
-            ["What next-up says", "The name of a stage — \"Build it\"", "The thing about to happen, in the agent's words"],
-            ["Where it comes from", "The work list, and only that", "The plan the agent already wrote at the bottom of the page"],
-            ["When the work list is behind", "The line says nothing has started", "The line still says what is coming"],
-            ["The tick list underneath", "The work list's answer", "Unchanged — still the work list's answer"]
+            [
+              "What next-up says",
+              "The name of a stage — \"Build it\"",
+              "The thing about to happen, in the agent's words"
+            ],
+            [
+              "Where it comes from",
+              "The work list, and only that",
+              "The plan the agent already wrote at the bottom of the page"
+            ],
+            [
+              "When the work list is behind",
+              "The line says nothing has started",
+              "The line still says what is coming"
+            ],
+            [
+              "The tick list underneath",
+              "The work list's answer",
+              "Unchanged — still the work list's answer"
+            ]
           ]
         },
         {
@@ -55,9 +72,31 @@
           ]
         }
       ]
+    },
+    {
+      "label": "What the outside reader found",
+      "lead": "Seven points, all real, all fixed in one round.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "A finished job was still advertising a next step",
+              "note": "With every tick filled in, the line kept naming a step from the plan instead of saying the work is finished. It now keeps the work list's own last word."
+            },
+            {
+              "title": "The line is a headline, so it answers to the same word list as the rest",
+              "note": "The first version of it was about tidying up our own workspace — housekeeping, not your result. Those words are now caught by the builder wherever they appear, which also flagged one of this page's own decisions and a card title on your board."
+            },
+            {
+              "title": "Two things this page said that were not quite true",
+              "note": "It claimed the builder refuses a page with no plan; it does not, and now says so plainly. And it listed something already finished as a future step with a cost."
+            }
+          ]
+        }
+      ]
     }
   ],
-
   "decisions": [
     {
       "id": "D1",
@@ -75,11 +114,14 @@
       "why": "You asked about next-up only, and the value of the rest is that no agent writes it."
     }
   ],
-
   "next": {
     "if_nothing": "It goes in as described, and you see it on the next page you open.",
     "steps": [
-      { "step": "Someone who did not write it reads it, then it lands", "cost": "small", "starting": true }
+      {
+        "step": "Someone who did not write it reads it, then it lands",
+        "cost": "small",
+        "starting": true
+      }
     ]
   }
 }
