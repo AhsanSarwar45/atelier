@@ -161,6 +161,31 @@ READ_REPORTS = """
 """
 
 
+# The menu that sets a card's state has to offer every state the board draws a
+# column for, or a card can be moved into a column by hand and never out of it.
+# The columns on screen are the expected set, so this holds no list of its own.
+OPEN_A_CARD = """
+(() => {
+  const card = document.querySelector('[data-bead-id]');
+  if (!card) return false;
+  card.click();
+  return true;
+})()
+"""
+
+READ_STATE_MENU = """
+(() => {
+  const columns = [...document.querySelectorAll('[data-column]')].map(c => c.dataset.column);
+  const menus = [...document.querySelectorAll('select')].filter(
+    s => [...s.options].some(o => columns.includes(o.value)));
+  return {
+    columns,
+    offered: menus.length ? [...menus[0].options].map(o => o.value) : null,
+  };
+})()
+"""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("project")
@@ -187,6 +212,15 @@ def main():
             import base64
             shot = b.send("Page.captureScreenshot", format="png")
             open(args.shot, "wb").write(base64.b64decode(shot["data"]))
+        menu = {"columns": [], "offered": None}
+        if b.js(OPEN_A_CARD):
+            time.sleep(3)
+            menu = b.js(READ_STATE_MENU) or menu
+            if args.shot:
+                import base64
+                shot = b.send("Page.captureScreenshot", format="png")
+                open(args.shot.replace(".png", "-card.png"), "wb").write(
+                    base64.b64decode(shot["data"]))
     finally:
         b.close()
 
@@ -232,6 +266,18 @@ def main():
             print(f"  a report is drawn outside its card ({r['id']}) — {r['why']}")
         return 1
     print("every card's report is drawn inside the card")
+
+    offered, columns = menu.get("offered"), menu.get("columns") or []
+    print(f"\nstates on the board {len(columns):>3}   offered by the menu  "
+          f"{len(offered) if offered else 0:>3}")
+    if offered is None:
+        print("no card opened a menu that sets its state, so that rule checked nothing")
+        return 1
+    missing = [c for c in columns if c not in offered]
+    if missing:
+        print("  the menu cannot set: " + ", ".join(missing))
+        return 1
+    print("the menu offers every state the board draws")
     return 0
 
 
