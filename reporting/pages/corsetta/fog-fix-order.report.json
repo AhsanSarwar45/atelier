@@ -3,12 +3,107 @@
   "eyebrow": "Built and measured",
   "actions": {
     "none": true,
-    "fyi": "Nothing needed from you. The fix is built and measured; you already corrected the one thing I had wrong on this page."
+    "fyi": "Nothing needed from you. Fog is built, measured, reviewed by someone who did not write it, and on the main line."
   },
   "status": {
     "card": "cor-d2o.3"
   },
   "content": [
+    {
+      "label": "What it looks like",
+      "lead": "The same pit lane at Highlands, same camera, same time of day. Drag the handle.",
+      "blocks": [
+        {
+          "kind": "wipe",
+          "before": {
+            "path": "fog-pics/clear.png",
+            "caption": "Clear"
+          },
+          "after": {
+            "path": "fog-pics/fog-100m.png",
+            "caption": "Fog, 100 m"
+          }
+        },
+        {
+          "kind": "text",
+          "text": "The cobbles at your feet keep their colour and their grain. The lane dissolves at about the distance you were promised, and the sky and clouds go with it."
+        },
+        {
+          "kind": "images",
+          "shots": [
+            {
+              "path": "fog-pics/fog-1km.png",
+              "caption": "Fog, 1 km — the far end of the lane comes back, the hills stay flat"
+            },
+            {
+              "path": "fog-pics/haze-10km.png",
+              "caption": "Haze, 10 km — a summer afternoon, distance softened rather than lost"
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            {
+              "name": "Colour left at your feet",
+              "align": "right"
+            },
+            {
+              "name": "Colour left in the hills",
+              "align": "right"
+            }
+          ],
+          "rows": [
+            [
+              "Haze, 10 km",
+              {
+                "num": "98%",
+                "tone": "green"
+              },
+              {
+                "num": "66%",
+                "tone": "green"
+              }
+            ],
+            [
+              "Fog, 1 km",
+              {
+                "num": "88%",
+                "tone": "green"
+              },
+              {
+                "num": "34%",
+                "tone": "amber"
+              }
+            ],
+            [
+              "Fog, 100 m",
+              {
+                "num": "80%",
+                "tone": "amber"
+              },
+              {
+                "num": "4%",
+                "tone": "red"
+              }
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "This is the whole point of the fix",
+          "text": "Near and far are hit by wildly different amounts, and the amounts line up in order with the weather you asked for. Fog that dimmed everything equally would be a grey filter, not weather."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The hilltops in the dense shot are not a mistake",
+          "text": "Fog is a layer with a top. Ground-level fog at 100 m still leaves a hill that rises out of it faintly visible, which is what you see on a real foggy morning from a valley floor."
+        }
+      ]
+    },
     {
       "label": "It works, and here is the size of it",
       "lead": "Same yardstick, same six kinds of fog, before and after. Lower is closer to the truth.",
@@ -152,6 +247,46 @@
       "lead": "Measured six times over, fog on against fog off, same place, alternating so both see the same machine."
     },
     {
+      "label": "What an outside reader found",
+      "lead": "Someone who did not write it was given the change and told to find the reason it should not land. Verdict: land, with five small fixes. All five are done.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "A safety check that was only right by luck",
+              "note": "Two guards a few lines apart were set independently, so a fog roughly three times thicker than the thickest we ship would have slipped between them and produced a wrong picture with no warning. They are now the same check"
+            },
+            {
+              "n": "2",
+              "title": "An approximation nobody had written down",
+              "note": "Looking within a thousandth of a degree of level from above the fog, one shortcut is worth up to a sixth of that sliver's glow. Too narrow to matter, too real to leave unsaid — it is in the debt list now"
+            },
+            {
+              "n": "3",
+              "title": "A calculation done every step and read by nobody"
+            },
+            {
+              "n": "4",
+              "title": "Two comments that repeated the design document instead of pointing at it"
+            },
+            {
+              "n": "5",
+              "title": "The same fog-through-the-sun formula has a second hand-written copy elsewhere",
+              "note": "Older than this work and outside it. Filed as its own job — two copies of one formula is exactly the fault this whole change was undoing"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "It was also honest about the new guard",
+          "text": "The guard added here catches drift; it cannot catch a wrong model, because someone who broke the physics could simply re-record it. That job belongs to the older test that checks the answer against a brute-force one, which this change left alone and which still has teeth."
+        }
+      ]
+    },
+    {
       "label": "Found on the way, now owned",
       "blocks": [
         {
@@ -170,12 +305,17 @@
             {
               "n": "3",
               "title": "The documentation checks grade the wrong copy of the files",
-              "note": "When work happens on a side branch \u2014 which is always \u2014 they read the main copy instead, so they report fixed problems and miss new ones"
+              "note": "While work is in progress \u2014 which is always \u2014 they read the finished copy instead, so they report fixed problems and miss new ones"
             },
             {
               "n": "4",
               "title": "The 250 m rule is not what it was filed as",
               "note": "Fog is not hand-drawn near the camera, it is switched off entirely because the grid is too coarse there. This fix removes that reason"
+            },
+            {
+              "n": "5",
+              "title": "Two of our own checks are failing on work that is nothing to do with fog",
+              "note": "One in the tree growing, one in the board's own document. Both were already broken before this landed; both now have owners"
             }
           ]
         }
@@ -255,23 +395,33 @@
       "title": "The measuring rig got a saved scene with fog on, and the cost is measured",
       "why": "Revised 13 Aug on your correction \u2014 I had written this as fog needing a switch built; it does not, the game has had a fog picker all along. What was missing was only a saved scene with fog turned on. Done: dense fog doubles the stage it lives in, for a tenth of a millisecond a frame.",
       "tag": "revised"
+    },
+    {
+      "id": "D14",
+      "title": "The review's findings were fixed in the same landing, not filed for later",
+      "why": "Four of the five are a few lines each and one is a sentence in the debt list. Filing them would have put the weakest version of this work on the main line and left the fixes to argue for themselves later."
+    },
+    {
+      "id": "D15",
+      "title": "The near-level shortcut is written down rather than fixed",
+      "why": "It needs a camera above the fog looking within a thousandth of a degree of level. Removing it means giving that one sliver its own maths, which buys a picture nobody will ever frame."
     }
   ],
   "next": {
-    "if_nothing": "I get the first fog pictures in front of you, then have someone who did not write it review the change and land it.",
+    "if_nothing": "Fog is done and on the main line. I say whether it needs any more work from the number we now have, then close the job out.",
     "steps": [
       {
-        "step": "First pictures: the same place with fog on and off, near and far",
-        "cost": "small",
+        "step": "Say whether fog needs more accuracy, from the number rather than the plan",
+        "cost": "tiny",
         "starting": true
       },
       {
-        "step": "Review by someone who did not write it, then land",
+        "step": "Fog costs nothing at all in clear weather, instead of a little",
         "cost": "small"
       },
       {
-        "step": "Decide on sample-spreading from the measured number, not from the plan",
-        "cost": "tiny"
+        "step": "A saved picture and a horizon check, so this cannot quietly break again",
+        "cost": "small"
       }
     ]
   }
