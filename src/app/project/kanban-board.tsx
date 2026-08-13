@@ -39,7 +39,7 @@ import { columnFor, drawnInColumns, isBlocked } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
-import { isDoltProject } from "@/lib/utils";
+import { isDoltProject, projectDir } from "@/lib/utils";
 import type { Bead, BeadStatus } from "@/types";
 
 /**
@@ -95,7 +95,7 @@ export default function KanbanBoard() {
   // Dolt project detection and filesystem path resolution
   const isDolt = isDoltProject(project?.path);
   const isDoltOnly = isDolt && !project?.localPath;
-  const fsPath = isDolt ? (project?.localPath ?? "") : (project?.path ?? "");
+  const fsPath = projectDir(project);
 
   // GitHub status check
   const { hasRemote, isAuthenticated, isLoading: githubStatusLoading } = useGitHubStatus(
@@ -395,6 +395,7 @@ export default function KanbanBoard() {
                 onChildClick={openBead}
                 onNavigateToDependency={navigateToBead}
                 projectPath={project?.path}
+                fsPath={fsPath}
                 onUpdate={refreshBeads}
               />
             ))}
@@ -438,7 +439,7 @@ export default function KanbanBoard() {
         <ReportPanel
           open={isReportsOpen}
           onOpenChange={setIsReportsOpen}
-          projectPath={fsPath ?? ""}
+          fsPath={fsPath ?? ""}
         />
       </ErrorBoundary>
 

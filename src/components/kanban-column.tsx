@@ -35,6 +35,8 @@ export interface KanbanColumnProps {
   onNavigateToDependency?: (beadId: string) => void;
   /** Project root path for fetching design docs */
   projectPath?: string;
+  /** The project's directory on disk, which a Dolt-backed board's path is not. */
+  fsPath?: string;
   /** Callback after data changes (to refresh board) */
   onUpdate?: () => void;
 }
@@ -109,6 +111,7 @@ interface ColumnCardProps {
   onChildClick?: (child: Bead) => void;
   onNavigateToDependency?: (beadId: string) => void;
   projectPath?: string;
+  fsPath?: string;
   onUpdate?: () => void;
 }
 
@@ -127,11 +130,12 @@ function ColumnCard({
   onChildClick,
   onNavigateToDependency,
   projectPath,
+  fsPath,
   onUpdate,
 }: ColumnCardProps) {
   const entry = useCardReport(bead.id);
   const report = entry
-    ? <CardReportLink entry={entry} projectPath={projectPath ?? ""} />
+    ? <CardReportLink entry={entry} fsPath={fsPath ?? ""} />
     : undefined;
 
   // The card itself carries `data-bead-id`, so it needs no wrapper to be found.
@@ -180,6 +184,7 @@ export function KanbanColumn({
   onChildClick,
   onNavigateToDependency,
   projectPath,
+  fsPath,
   onUpdate,
 }: KanbanColumnProps) {
   return (
@@ -219,6 +224,7 @@ export function KanbanColumn({
               onChildClick={onChildClick}
               onNavigateToDependency={onNavigateToDependency}
               projectPath={projectPath}
+              fsPath={fsPath}
               onUpdate={onUpdate}
             />
           ))}

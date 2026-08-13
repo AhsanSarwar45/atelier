@@ -20,6 +20,20 @@ export function isDoltProject(path: string | null | undefined): boolean {
 }
 
 /**
+ * The project's directory on disk, or "" when it has none.
+ *
+ * A Dolt-backed board's own path is a database address and no directory at all,
+ * so anything that runs a command in the project — the report tools, git, the
+ * board itself — needs this and never `project.path`.
+ */
+export function projectDir(
+  project: { path?: string | null; localPath?: string | null } | null | undefined,
+): string {
+  const path = project?.path ?? "";
+  return isDoltProject(path) ? (project?.localPath ?? "") : path;
+}
+
+/**
  * Derive a `bd init --prefix <slug>` slug from a project path (or name fallback).
  *
  * Rules:

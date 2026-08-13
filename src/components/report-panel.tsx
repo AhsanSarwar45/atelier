@@ -11,6 +11,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import { isDoltProject } from "@/lib/utils";
 
 export interface ReportEntry {
   project: string;
@@ -54,11 +55,17 @@ export function useReports() {
   return { reports, isLoading, reload };
 }
 
-export function reportUrl(entry: ReportEntry, projectPath: string): string {
+/**
+ * Where the page is fetched from. `fsPath` is the project's directory on disk:
+ * the server builds the report there, and the checklist is read by running the
+ * board in it. A Dolt-backed project's own path is a database address and no
+ * directory at all, which is why this is never that path.
+ */
+export function reportUrl(entry: ReportEntry, fsPath: string): string {
   const q = new URLSearchParams({
     project: entry.project,
     slug: entry.slug,
-    path: projectPath,
+    path: fsPath,
   });
   return `/api/reports/page?${q.toString()}`;
 }
@@ -66,12 +73,12 @@ export function reportUrl(entry: ReportEntry, projectPath: string): string {
 interface ReportPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projectPath: string;
+  fsPath: string;
   /** Opens straight onto this card's report when set. */
   card?: string | null;
 }
 
-export function ReportPanel({ open, onOpenChange, projectPath, card }: ReportPanelProps) {
+export function ReportPanel({ open, onOpenChange, fsPath, card }: ReportPanelProps) {
   const { reports, isLoading } = useReports();
   const [showing, setShowing] = useState<ReportEntry | null>(null);
 
@@ -118,7 +125,7 @@ export function ReportPanel({ open, onOpenChange, projectPath, card }: ReportPan
                 All reports
               </button>
               <a
-                href={reportUrl(showing, projectPath)}
+                href={reportUrl(showing, fsPath)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-sm text-t-tertiary hover:text-t-primary flex items-center gap-1"
@@ -131,7 +138,7 @@ export function ReportPanel({ open, onOpenChange, projectPath, card }: ReportPan
                 drawer's own wallpaper. */}
             <iframe
               title={showing.title}
-              src={reportUrl(showing, projectPath)}
+              src={reportUrl(showing, fsPath)}
               className="flex-1 w-full mb-6 rounded-lg border border-b-default/60
                          bg-white dark:bg-transparent"
             />
@@ -174,7 +181,7 @@ export function useCardReport(card: string): ReportEntry | null {
 
 interface CardReportLinkProps {
   entry: ReportEntry;
-  projectPath: string;
+  fsPath: string;
 }
 
 /**
@@ -182,8 +189,11 @@ interface CardReportLinkProps {
  * one of the card's own facts. Anything sitting outside the card's frame reads
  * as a separate object stuck underneath it, which is what this replaced.
  */
-export function CardReportLink({ entry, projectPath }: CardReportLinkProps) {
+export function CardReportLink({ entry, fsPath }: CardReportLinkProps) {
   const [open, setOpen] = useState(false);
+
+  // With no directory to build the page in, the button could only open an error.
+  if (!fsPath || isDoltProject(fsPath)) return null;
 
   return (
     <>
@@ -200,7 +210,7 @@ export function CardReportLink({ entry, projectPath }: CardReportLinkProps) {
         <FileText className="size-3 shrink-0" aria-hidden="true" />
         Manager report
       </button>
-      <ReportPanel open={open} onOpenChange={setOpen} projectPath={projectPath} card={entry.card} />
+      <ReportPanel open={open} onOpenChange={setOpen} fsPath={fsPath} card={entry.card} />
     </>
   );
 }

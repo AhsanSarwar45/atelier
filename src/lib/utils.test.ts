@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveBeadPrefix, isDoltProject } from './utils';
+import { deriveBeadPrefix, isDoltProject, projectDir } from './utils';
 
 describe('isDoltProject', () => {
   it('returns true for dolt:// paths', () => {
@@ -14,6 +14,26 @@ describe('isDoltProject', () => {
   it('returns false for null/undefined', () => {
     expect(isDoltProject(null)).toBe(false);
     expect(isDoltProject(undefined)).toBe(false);
+  });
+});
+
+describe('projectDir', () => {
+  it('is the path itself for a project kept on disk', () => {
+    expect(projectDir({ path: '/home/user/corsetta', localPath: null })).toBe('/home/user/corsetta');
+  });
+
+  it('is the checkout, not the address, for a Dolt-backed board', () => {
+    expect(projectDir({ path: 'dolt://corsetta', localPath: '/home/user/corsetta' }))
+      .toBe('/home/user/corsetta');
+  });
+
+  it('is empty for a Dolt board with no checkout, so nothing runs in a database', () => {
+    expect(projectDir({ path: 'dolt://corsetta', localPath: null })).toBe('');
+  });
+
+  it('is empty for no project at all', () => {
+    expect(projectDir(null)).toBe('');
+    expect(projectDir(undefined)).toBe('');
   });
 });
 
