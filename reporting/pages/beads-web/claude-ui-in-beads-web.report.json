@@ -23,6 +23,12 @@
             ["Every restart means bringing windows back one by one", "The app lists yesterday's conversations under each project. One click brings one back; one more brings back all of them."],
             ["Pictures do not show in the terminal", "Any picture the agent makes or names appears in the conversation as a picture."]
           ]
+        },
+        {
+          "kind": "images",
+          "shots": [
+            { "path": "reporting/pages/beads-web/agents-inside/before-no-chat.png", "caption": "Where it starts: the app today is a project list and a board — nowhere to talk, nothing linked. The after will stand beside this." }
+          ]
         }
       ]
     },
