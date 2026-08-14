@@ -1,0 +1,167 @@
+{
+  "title": "Agents Inside The Board",
+  "eyebrow": "Your four pains each have a confirmed fix, for both brands of agent. Waiting on your cuts and two answers.",
+
+  "actions": {
+    "questions": [
+      {
+        "ask": "The feature menu below is marked keep, later, or drop. Where do we cut?",
+        "options": [
+          { "label": "Cut as marked", "say": "Build the keep set first; later means later; drop means never.", "pick": true },
+          { "label": "Keep more", "say": "I want some of the later or drop rows — I will name them in chat." },
+          { "label": "Cut deeper", "say": "Even the keep set is too much — I will name my cuts in chat." }
+        ],
+        "note": "You asked me to list what the terminal offers and let you say what you do not want. The menu is the whole list, in plain words, with my recommendation on each row."
+      },
+      {
+        "ask": "Does the app drive agents on this computer only, or reach other machines too?",
+        "options": [
+          { "label": "This computer first", "say": "Start here; reaching other machines can come later.", "pick": true },
+          { "label": "Other machines now", "say": "I run agents elsewhere too — build the long arm from the start." }
+        ],
+        "note": "This computer first is cheaper and nothing is thrown away later. The long arm costs a connection layer of our own, because the standard way of doing it is itself not finished yet."
+      },
+      {
+        "ask": "Six additions of mine are listed below. Which go in?",
+        "options": [
+          { "label": "First three now", "say": "Take the waiting-on-you tray, chat-from-a-card, and the glance strip now; the rest later.", "pick": true },
+          { "label": "All six now", "say": "Take all six additions from the start." },
+          { "label": "None", "say": "Only what I described myself, nothing added." }
+        ]
+      }
+    ]
+  },
+
+  "status": { "card": "cor-0x7d" },
+
+  "content": [
+    {
+      "label": "Your four pains, and what fixes each",
+      "lead": "Each one is a separate mechanism, and each is confirmed to work — not assumed.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["The pain", "The fix"],
+          "rows": [
+            ["No way to see which card a chat worked on", "The app watches every move the agent makes and writes the link itself — chat to card, card to chat, report to both. Nobody has to remember anything."],
+            ["A report forces a trip to another tab", "The report appears inside the chat; a click opens it large in place — same page, still never leaving this machine."],
+            ["Every restart means bringing windows back one by one", "The app lists yesterday's conversations under each project. One click brings one back; one more brings back all of them."],
+            ["Pictures do not show in the terminal", "Any picture the agent makes or names appears in the conversation as a picture."]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Any brand of agent",
+      "lead": "Same window, same buttons, whichever brand does the work — checked against what each one actually supports today, not assumed.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["What the window must do", "Claude", "Codex"],
+          "rows": [
+            ["Pick up a conversation you started in a terminal", "works", "works"],
+            ["The answer arriving word by word", "works", "works"],
+            ["A permission ask answered by a click", "works", "works"],
+            ["A picture sent into the conversation", "works", "works"],
+            ["A live feed of every file it reads, edits or runs", "works", "works"],
+            ["Cost on screen", "in dollars", "a usage count only — dollars are not reported"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "How it stays brand-neutral",
+          "text": "Each brand is driven in its own official channel, behind one thin shared shape of ours — so a third brand is one new driver, not a rebuild. An open shared standard for this exists (several code editors use it), but for your two brands it has confirmed holes today exactly where you care: cost arrives empty for Codex through it, and picking up a terminal session through it is unproven. It stays on the shelf until a third brand matters."
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "One honest difference",
+          "text": "Only Claude asks you multiple-choice clarifying questions mid-work; Codex never does. Where a brand lacks an ability, its window simply does not show that button — it never imitates one."
+        }
+      ]
+    },
+    {
+      "label": "The feature menu",
+      "lead": "Everything the terminal offers, in plain words. Keep is the first build; later is after the joins work; drop is never.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["What you get", "My call"],
+          "rows": [
+            ["The answer arrives word by word, with a stop button that works mid-thought", "keep"],
+            ["Permission asks are buttons you press, not lines you type", "keep"],
+            ["Its multiple-choice questions are real choices you click", "keep"],
+            ["A plan you approve before it builds", "keep"],
+            ["Pictures shown as pictures", "keep"],
+            ["Changed lines side by side, in colour", "keep"],
+            ["Every file it reads, edits or runs, shown as it happens", "keep"],
+            ["Pick the model and how hard it thinks", "keep"],
+            ["Cost on screen as the conversation runs", "keep"],
+            ["Pick up any conversation, including one begun in a terminal", "keep"],
+            ["The agent's own running checklist, live", "keep"],
+            ["Its helper agents visible as they work", "keep"],
+            ["Mention a file by name and it completes itself", "keep"],
+            ["Trim or restart a conversation that has grown long", "keep"],
+            ["The typed-command menu the terminal opens with a slash", "later"],
+            ["Rewind the files to an earlier point in the conversation", "later"],
+            ["A side question that leaves no trace in the conversation", "later"],
+            ["Run a command yourself from inside the chat", "later"],
+            ["Edit the agent's standing instructions from the app", "later"],
+            ["Voice dictation", "drop"],
+            ["Typing tricks — vim keys, shortcuts, history search; the browser has its own", "drop"],
+            ["Sign-in screens — you sign in once in the terminal and the app reuses it", "drop"],
+            ["Appearance themes for the chat — the app already has a look", "drop"],
+            ["The greyed-out guess at your next message", "drop"],
+            ["The recap line when you step away — the waiting-on-you tray does this better", "drop"]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What I would add",
+      "lead": "Six additions, three of them worth building from the start.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Addition", "When"],
+          "rows": [
+            ["A waiting-on-you tray: one list, across every project, of chats stopped and waiting for you — a permission ask, a question, finished work — with a count on it", "first"],
+            ["Start a chat from a card: click a card, the conversation opens already briefed on it, and the link between them exists from birth", "first"],
+            ["A glance strip: every running chat's current line on one screen, like seeing all your terminals at once", "first"],
+            ["Answer from your phone: the same pages reachable from the sofa, on your home network only — approve a permission ask without walking over", "later"],
+            ["Search across every conversation ever had", "later"],
+            ["A spend line per project and per day", "later"]
+          ]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    { "id": "D1", "tag": "revised", "title": "Each brand of agent is driven in its own official channel, behind one thin shared shape of ours", "why": "Revised now that the tool must work with any brand. For your two brands, everything you asked for is confirmed on the direct path today; the open shared standard has confirmed holes exactly there and adds a third-party part that has already been archived and renamed once. A third brand later is one new driver — or the shared standard, by then matured." },
+    { "id": "D2", "title": "A small helper runs beside the board rather than rebuilding the board's engine", "why": "Fastest route, and it leaves the board's own program untouched so upstream updates still merge cleanly. It can be folded in later without changing what you see." },
+    { "id": "D3", "tag": "revised", "title": "A conversation and its cards are joined from both sides, not nested one inside the other", "why": "Revised to match your goal: chats live in their own tab with a sidebar, cards in theirs, and each shows the other — a chat lists the cards it touched, a card lists the chats that touched it, reports link to both." },
+    { "id": "D4", "title": "We stop at the features you named and do not chase the terminal", "why": "The terminal gains new behaviour every few weeks. Chasing it turns a one-month build into permanent maintenance." },
+    { "id": "D5", "title": "It signs in with your subscription, never with a pay-as-you-go key", "why": "This is the only decision that could turn a free conversation into a metered one, so it is written down rather than left to whoever sets it up. The same rule holds for every brand: the app reuses the sign-in you already did in the terminal." },
+    { "id": "D6", "title": "No outside tool services are plugged in unless you ask for one", "why": "Each one attaches its full instruction sheet to every message for the life of the session, used or not. That is the real cost you had heard about, and the way to not pay it is to not add them." },
+    { "id": "D7", "title": "The link between a chat and a card is written by the machine, never remembered by the agent", "why": "The app sees every tool the agent uses as it happens, so the link is recorded at the moment of touch. Asking the agent to remember is how links go missing." },
+    { "id": "D8", "title": "After a restart, yesterday's conversations come back as a list, never running on their own", "why": "One click resumes one, one more resumes all. An agent that wakes itself and starts working unattended is a bill and a surprise; a list is neither." },
+    { "id": "D9", "title": "Reports stay on this machine; the chat shows the same page inline and large on click", "why": "The report pages already exist and already refuse the cloud. The viewer is new; the report path and its refusal are untouched." },
+    { "id": "D10", "title": "Two tabs per project, chat and board, as you said — reports get no third tab", "why": "Reports appear inside the chats they came from and in the side lists. A third tab would be a second home for the same pages." },
+    { "id": "D11", "title": "A card being worked on shows its chat on the board, live", "why": "The board tile and the conversation are two views of the same work, so claiming a card and being its chat are the same fact." },
+    { "id": "D12", "title": "Cost is shown as the agent itself reports it, never computed by us", "why": "Claude reports dollars; Codex reports only a usage count. A price table of our own would rot and quietly lie; showing what the brand reports never does." },
+    { "id": "D13", "title": "Where a brand lacks an ability, the window hides that button rather than imitating it", "why": "A faked button is a promise the agent underneath cannot keep. The window stays honest about what each brand can do." }
+  ],
+
+  "next": {
+    "if_nothing": "Nothing is built; the terminal windows, the separate report tabs and the one-by-one restarts stay as they are.",
+    "steps": [
+      { "step": "A live conversation in the app: the answer arrives word by word and a permission ask is a button", "cost": "medium", "starting": true },
+      { "step": "Both brands behind the same window: Claude and Codex drive the same chat", "cost": "medium" },
+      { "step": "The joins: a chat shows its cards and reports, a card shows its chats, the report opens large in place", "cost": "medium" },
+      { "step": "The restart list and pictures: yesterday's conversations back with one click, images shown inline", "cost": "small" },
+      { "step": "The board tab beside the chat, and the waiting-on-you tray", "cost": "medium" }
+    ]
+  }
+}
