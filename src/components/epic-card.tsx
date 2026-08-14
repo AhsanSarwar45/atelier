@@ -160,8 +160,10 @@ export function EpicCard({
 
   const commentCount = (epic.comments ?? []).length;
 
-  // Show Close Epic button when all children are complete and epic is in review
-  const canCloseEpic = progressPercentage === 100 && epic.status === 'inreview';
+  // Manager Review is the one column a session may not move a card out of, so the
+  // screen is the only place a job there can be finished. Agent Review draws no
+  // such button: a job waiting to be read has not been signed by anyone yet.
+  const canCloseEpic = progressPercentage === 100 && epic.status === 'manager_review';
 
   /**
    * Handle closing the epic
@@ -240,7 +242,8 @@ export function EpicCard({
     </div>
   );
 
-  // Shared close button
+  // The manager's sign-off, named for what he is doing rather than for the card
+  // it acts on.
   const closeButton = canCloseEpic && (
     <div className="pt-2">
       <Button
@@ -251,7 +254,7 @@ export function EpicCard({
         className="w-full border-success/30 text-success hover:bg-success/10 hover:text-success/80"
       >
         {isClosing ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="size-3" aria-hidden="true" />}
-        {isClosing ? 'Closing…' : 'Close Epic'}
+        {isClosing ? 'Marking…' : 'Mark Done'}
       </Button>
     </div>
   );
