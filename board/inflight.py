@@ -21,11 +21,10 @@ import os
 import time
 
 # One attempt's ceiling, and how many a reader makes. board/review holds a reader
-# to these, and a claim is judged stale past both of them together: a reader
-# still out after that is not coming back, whatever its process says.
+# to these; they are here because a reader that has exhausted both is the longest
+# a job can legitimately be held.
 ATTEMPT_TIMEOUT = 3600
 ATTEMPTS = 2
-STALE_AFTER = ATTEMPT_TIMEOUT * ATTEMPTS
 
 # A claim is taken before the reader exists, so there is a moment with no process
 # to point at. Longer than a spawn, far shorter than a reading.
@@ -49,37 +48,42 @@ def _pid(goal_id):
         return None
 
 
-def _running(pid):
-    """Whether that process is still there. A signal of 0 asks without sending."""
+def _reading(pid, goal_id):
+    """Whether that process is still there AND is this job's reader.
+
+    Named rather than counted: a reader is legitimately out for as long as its
+    attempts take, and judging it by a clock declares a working reader dead and
+    sends a second at the same job (mch-m1t.10). What the clock is left guarding
+    is a number that now belongs to somebody else, so the command line is read
+    rather than trusted.
+    """
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        with open("/proc/%d/cmdline" % pid, "rb") as fh:
+            args = fh.read().decode("utf-8", "replace").split("\0")
+    except OSError:
         return False
-    except PermissionError:
-        return True
     except Exception:
         return True
-    return True
+    return any(a.endswith("review") for a in args) and goal_id in args
 
 
 def held(goal_id, now=None):
     """Whether a reader is genuinely out on this job.
 
-    Three ways it is not, and each of them has to be one of them or a dead
-    reader would hold a job shut for good: no claim at all, a claim older than
-    any reading can legitimately be, or a claim naming a process that is gone.
+    The reader itself is the answer wherever there is one to ask: a job is held
+    for exactly as long as its own reader is running, however long that takes.
+    The clock only decides the moment before the reader exists, so a sending that
+    died between claiming and spawning cannot hold a job shut for good.
     """
     path = where(goal_id)
     try:
         age = (now or time.time()) - os.path.getmtime(path)
     except OSError:
         return False
-    if age > STALE_AFTER:
-        return False
     pid = _pid(goal_id)
     if pid is None:
         return age <= UNNAMED_GRACE
-    return _running(pid)
+    return _reading(pid, goal_id)
 
 
 def take(goal_id, now=None):

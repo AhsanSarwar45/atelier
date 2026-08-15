@@ -213,6 +213,27 @@ def reading_due(goal_id, goal, order, rows, root):
                           reading.wrote(goal_id, root))
 
 
+def due_again(goal_id, root):
+    """Whether a reader that has just let go should be followed by one more.
+
+    Only ever for a commit no reading was shown — never for `wanted`'s other
+    half, a job no outsider has signed. That half is true of a job whose reader
+    counts among the hands that wrote it, and a reader answering it would send
+    the next, without end (mch-m1t.9). And the same test the run uses, so a job
+    that has moved past its reading, or has pieces open again because this very
+    reading filed some, is not sent anybody (mch-m1t.11).
+    """
+    goal = card(goal_id, root) or {}
+    meta = tags(goal)
+    order = spine.stored(meta.get("spine"))
+    rows = children(goal_id, root)
+    if "review" not in order or before_reading(order, rows):
+        return False
+    if steps_of(rows) & set(order[order.index("review") + 1:]):
+        return False
+    return bool(reading.unread(goal, reading.commits(goal_id, root)))
+
+
 def open_next(rest, have, goal_id, goal, meta, root):
     """Open the first position of `rest` this job has no card for.
 

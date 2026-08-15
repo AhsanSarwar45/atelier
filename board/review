@@ -431,10 +431,10 @@ def release():
     """Let the job go, and send one more reader if what stands is still unread.
 
     Every sending while this reader was out did nothing, so a change that landed
-    under it would otherwise go unread until something else closed. Asking again
-    here is what stops that, and it cannot run away with itself: a reading's
-    findings are cards rather than commits, so a job that was just read wants
-    nobody until answers to it actually land.
+    under it would otherwise go unread until something else closed. What may
+    follow it is decided by `run.due_again`, which is narrower than the test that
+    sends a reader in the first place, precisely because this one can send its own
+    successor.
 
     A reader that never signed sends nobody — that is the run that dies on the
     account's allowance, and refiring it is the storm this claim exists to stop.
@@ -444,9 +444,7 @@ def release():
         return
     if not SIGNED:
         return
-    goal = card(READING)
-    if reading.wanted(goal, reading.commits(READING, ROOT),
-                      reading.wrote(READING, ROOT)):
+    if running.due_again(READING, ROOT):
         running.fire(READING, ROOT)
 
 
