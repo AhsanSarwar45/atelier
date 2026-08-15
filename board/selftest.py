@@ -125,7 +125,7 @@ def pretend_reader(where, goal_id):
     return REAL_POPEN([sys.executable, stub, goal_id])
 
 
-def storm():
+def storm(claimed=False):
     """How many readers one command closing six cards of one job sends.
 
     The reader's launch is recorded rather than run — a real one is another
@@ -162,7 +162,8 @@ def storm():
     runner.bc.bd = recorder
     runner.reading.commits = lambda gid, root: ["a1c0ffee"]
     runner.reading.wrote = lambda gid, root: {"someone"}
-    inflight.clear("g")
+    if not claimed:
+        inflight.clear("g")
     try:
         for cid in CROWD:
             runner.advance(cid, ROOT)
@@ -174,7 +175,8 @@ def storm():
             p.kill()
             p.wait()
         shutil.rmtree(pretend, ignore_errors=True)
-        inflight.clear("g")
+        if not claimed:
+            inflight.clear("g")
     return len(fired)
 
 
@@ -2026,6 +2028,21 @@ def main():
     sent = storm()
     assert sent == 1, \
         "six cards of one job closed together sent %d readers, not one" % sent
+    # A reader somebody started by hand is still a reader out on that job
+    # (mch-m1t.15).
+    by_hand = tempfile.mkdtemp()
+    theirs = pretend_reader(by_hand, "g")
+    try:
+        inflight.clear("g")
+        inflight.take("g")
+        inflight.name("g", theirs.pid)
+        assert storm(claimed=True) == 0, \
+            "a job with a hand-started reader on it was sent another"
+    finally:
+        theirs.kill()
+        theirs.wait()
+        shutil.rmtree(by_hand, ignore_errors=True)
+        inflight.clear("g")
     assert release_sends(signed=True, shas=["a1", "b2"]) == 1, \
         "a commit that landed under a reader was never read by anyone"
     assert release_sends(signed=True, shas=["a1"]) == 0, \
@@ -2085,6 +2102,15 @@ def main():
         assert not inflight.held(HELD), \
             "a claim naming a process that is alive but is not this job's reader " \
             "held the job shut, which is how a reused number locks a card"
+        # Yes means the claim is held, every way round: a job answered as claimed
+        # with nothing taken is a whole reading unguarded (mch-m1t.16).
+        inflight.clear(HELD)
+        keep_home, inflight.home = inflight.home, lambda: "/proc/nowhere"
+        try:
+            assert not inflight.take(HELD), \
+                "a job was answered as claimed when no claim could be taken"
+        finally:
+            inflight.home = keep_home
     finally:
         if victim.poll() is None:
             victim.kill()

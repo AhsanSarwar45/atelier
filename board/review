@@ -363,6 +363,12 @@ def main():
     actor = "review-" + goal_id
     global READING
     READING = goal_id
+    # A reader started by hand is still a reader out on this job, so it claims
+    # the job like any other — otherwise the board sends a second one at it while
+    # this one works (mch-m1t.15). Claiming is not asking: a rerun goes ahead
+    # whether or not it got the claim, and only lets go of one it took.
+    if inflight.take(goal_id):
+        inflight.name(goal_id, os.getpid())
 
     shas = reading.commits(goal_id, ROOT)
     if not reading.wanted(goal, shas, reading.wrote(goal_id, ROOT)) and not a.rerun:

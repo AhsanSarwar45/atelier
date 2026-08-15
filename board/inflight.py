@@ -12,17 +12,18 @@ sides of it are two processes: the one that sends the reader, and the reader
 itself, which outlives its sender. `os.mkdir` asks and takes in a single call,
 so two sendings in the same second cannot both believe they won.
 
-It fails OPEN by construction — a claim that is lost, wiped with the temporary
-directory, or left by a reader that died costs one extra reader, never a job
-that can no longer be read.
+No failure leaves a job nobody can read: a claim lost, wiped with the temporary
+directory, or left behind by a reader that died is not held, and the next card
+to close sends a reader. What it will not do is answer that a job is claimed
+when it is not — an unguarded reading is the storm itself.
 See docs/board.md#4b-review-is-done-by-someone-who-did-not-write-the-change.
 """
 import os
 import time
 
-# One attempt's ceiling, and how many a reader makes. board/review holds a reader
-# to these; they are here because a reader that has exhausted both is the longest
-# a job can legitimately be held.
+# One attempt's ceiling, and how many a reader makes — board/review holds a
+# reader to both. They live here rather than there because board/review carries
+# no suffix to import by, and a number written out in two files is two numbers.
 ATTEMPT_TIMEOUT = 3600
 ATTEMPTS = 2
 
@@ -67,7 +68,7 @@ def _reading(pid, goal_id):
     return any(a.endswith("review") for a in args) and goal_id in args
 
 
-def held(goal_id, now=None):
+def held(goal_id):
     """Whether a reader is genuinely out on this job.
 
     The reader itself is the answer wherever there is one to ask: a job is held
@@ -77,7 +78,7 @@ def held(goal_id, now=None):
     """
     path = where(goal_id)
     try:
-        age = (now or time.time()) - os.path.getmtime(path)
+        age = time.time() - os.path.getmtime(path)
     except OSError:
         return False
     pid = _pid(goal_id)
@@ -86,28 +87,33 @@ def held(goal_id, now=None):
     return _reading(pid, goal_id)
 
 
-def take(goal_id, now=None):
+def take(goal_id):
     """Claim this job, or answer no because a reader is already out.
 
     A claim nobody is behind any more is cleared and the claim retaken, so the
     job does not wait out a reader that has already died.
+
+    ⛔ Yes means the claim is held. Answering yes without one leaves the job
+    unguarded for a whole reading, which is the storm this exists to stop
+    (mch-m1t.16) — so every way of not holding it answers no, and the job waits
+    for the next closed card instead.
     """
     path = where(goal_id)
     try:
         os.makedirs(home(), exist_ok=True)
     except OSError:
-        return True
+        return False
     for _ in (1, 2):
         try:
             os.mkdir(path)
             return True
         except FileExistsError:
-            if held(goal_id, now):
+            if held(goal_id):
                 return False
             clear(goal_id)
         except OSError:
-            return True
-    return True
+            return False
+    return False
 
 
 def name(goal_id, pid):
@@ -131,14 +137,14 @@ def clear(goal_id):
         pass
 
 
-def drop(goal_id, pid=None):
+def drop(goal_id):
     """Let go of a claim this process holds, and say whether it held one.
 
     A reader run by hand holds nothing, and must not clear the claim of a reader
     that is genuinely out: the pid is what tells the two apart.
     """
     mine = _pid(goal_id)
-    if mine is not None and mine != (os.getpid() if pid is None else pid):
+    if mine is not None and mine != os.getpid():
         return False
     if mine is None and not os.path.isdir(where(goal_id)):
         return False
