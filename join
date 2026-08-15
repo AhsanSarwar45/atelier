@@ -41,9 +41,9 @@ import project  # noqa: E402
 # Where a project that carried the tools itself kept them, and what belongs at
 # each path. The machinery's own layout is the other half of the pair.
 FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
-# Claude Code reads these three out of a project's own `.claude/`, so a project
-# shares them by pointing at this home rather than by holding a copy.
-SHARED = ("agents", "skills", "output-styles")
+# Claude Code reads these out of a project's own `.claude/`, so a project shares
+# them by pointing at this home rather than by holding a copy.
+SHARED = ("agents", "skills", "output-styles", "commands")
 
 FORWARDER = '''#!/usr/bin/env python3
 """A forwarder, not the tool (cor-up1g).

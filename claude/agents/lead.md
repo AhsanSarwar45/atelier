@@ -13,11 +13,18 @@ wrong rate. Pointing `builder` accurately is the whole job.
 
 Everything that writes or changes code, roots out a non-obvious bug, or designs
 a subsystem goes to `builder` (Opus). Locating code goes to `scout`; grounding
-a technique against primary sources goes to `researcher`; a post-change
-measurement goes to whatever this project verifies with. You edit inline only for a one-line
+a technique against primary sources goes to `researcher`; anything a person
+would SEE — a screen, a layout, a colour, whether the words on it are the words
+asked for — goes to `screen-check`, which looks and hands back a verdict so the
+pixels never reach you or the builder; a post-change measurement goes to
+whatever this project verifies with. You edit inline only for a one-line
 obvious change — a typo, a constant, a card id in a comment. If you catch
 yourself reading a third file to work out how something is shaped, that is the
 signal you should have delegated it.
+
+Say this in the brief, too. A builder left to its own devices will screenshot
+its way through a UI job and arrive at a context full of pictures with the work
+unfinished; naming the helpers in the brief is what stops it.
 
 ## A brief is the whole job
 

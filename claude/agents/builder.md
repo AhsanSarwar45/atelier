@@ -26,6 +26,24 @@ message.
 - **Verify by exercising.** Run the affected path, look at the real output or
   the real numbers, then the suite. A clean build or a passing typecheck is
   not verification, and neither is re-reading your own diff.
+- **Send the looking out; keep the building in.** Your context is the scarce
+  thing, and the four ways it is spent are pictures, page dumps, search sweeps
+  and long build logs — none of which is your work. Each has a helper that does
+  the looking somewhere else and hands back a verdict:
+  - anything a person would SEE — a screen after a UI change, a layout, a
+    colour, a state, whether the text on screen says what was asked → `screen-check`.
+    Never take a screenshot yourself, never load a page's markup to guess at it.
+  - "where does X live / what calls Y / which files touch Z" past about two
+    files → `scout`.
+  - the project's own proof run, when it is verbose — a build plus a render, a
+    long suite → the verify helper the project declares. Ask it for the numbers
+    and the verdict, not the log.
+  - how a library, format or technique actually behaves → `researcher`.
+
+  Send them off in parallel when they do not depend on each other, and give each
+  one a brief it can act on alone. Reading a helper's verdict costs you a
+  paragraph; doing its job yourself costs you the job. A builder that has filled
+  its own context with pictures has stopped being able to build.
 - **No unproven causes.** A cause is a cause only if switching it off removes
   the defect. If you cannot show that, say the cause is still unknown.
 - **Your final message IS the deliverable.** It is the only thing that reaches

@@ -19,14 +19,39 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(ROOT, "scripts", "hooks"))
-sys.path.insert(0, os.path.join(ROOT, "scripts", "board"))
+HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HOME)
+sys.path.insert(0, os.path.join(HOME, "hooks"))
+sys.path.insert(0, os.path.join(HOME, "board"))
+import project  # noqa: E402
+import sections as bars  # noqa: E402
+
+# The project whose declaration this run answers for. Every case below that
+# touches a card's shape, a pour or a commit is that project's own; the rest are
+# the machinery's and are the same everywhere. Named rather than assumed, so the
+# suite can be run against each declaration in turn.
+WHICH = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
+ROOT = project.registry().get(WHICH) or os.path.abspath(WHICH or os.getcwd())
+DECL = bars.use(ROOT)
+AREA = DECL.areas[0] if DECL.areas else "board"
+LAST_AREA = DECL.areas[-1] if DECL.areas else AREA
+
+
+def pin():
+    """Point the bars back at the project this run is for.
+
+    They answer for one declaration at a time, which is right for a gate or a
+    tool — one process, one checkout. This run is the only place that is not
+    true: every gate it exercises and every tool it loads switches them to the
+    checkout it was handed. Unpinned, a case afterwards is written against
+    somebody else's prefix and refuses a line that is in fact correct.
+    """
+    bars.use(ROOT)
 
 
 def hook(name):
     spec = importlib.util.spec_from_file_location(
-        name.replace("-", "_"), os.path.join(ROOT, "scripts", "hooks", name + ".py"))
+        name.replace("-", "_"), os.path.join(HOME, "hooks", name + ".py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -39,11 +64,14 @@ reading = hook("habit-reading")
 runner = touch.run
 spine = runner.spine
 
-# Every fixture here carries a `cor-` id, and the gates read a command's cards out
-# of this. Pinned rather than asked: by the time a case runs, the board is a
-# recorder answering fixtures, and a state directory with no cached answer would
-# learn one from it and keep it for the real hooks.
-status.bc.prefix = lambda root: "cor"
+# Every fixture here carries a `tst-` id — a prefix no project issues, because a
+# fixture is the machinery's and not any project's. The gates read a command's
+# cards out of this. Pinned rather than asked: by the time a case runs the board
+# is a recorder answering fixtures, and a state directory with no cached answer
+# would learn one from it and keep it for the real hooks.
+FIXTURE = "tst"
+status.bc.prefix = lambda root: FIXTURE
+status.bc.prefixes = lambda root: [FIXTURE]
 
 # What the child run below is told, so it does not spawn one of its own.
 CHILD = "--switched-off"
@@ -399,7 +427,7 @@ def suite_with_switch(by_file):
 # card without touching this one. The step was claimed in 2010: the history the
 # repo starts with is older, and every commit made under a card is newer.
 BEGAN = datetime.datetime(2010, 1, 1, tzinfo=datetime.timezone.utc).timestamp()
-STEP = "cor-x.9"
+STEP = "tst-x.9"
 
 
 def scratch_repo(tmp, unmerged=False):
@@ -427,10 +455,10 @@ def scratch_repo(tmp, unmerged=False):
     g("commit", "-m", "the files this case starts from", when="2000-01-01T00:00:00Z")
     for name, message in (
             ("landed-here", "work(x): %s written under the step's own card" % STEP),
-            ("landed-elsewhere", "work(x): cor-x.4 under a work item of this job"),
-            ("landed-lookalike", "work(x): cor-x.91 under an item whose id starts the same"),
-            ("landed-other-job", "work(y): cor-y.2 under a card of some other job"),
-            ("landed-under-both", "work(x): cor-x.4 under a work item of this job")):
+            ("landed-elsewhere", "work(x): tst-x.4 under a work item of this job"),
+            ("landed-lookalike", "work(x): tst-x.91 under an item whose id starts the same"),
+            ("landed-other-job", "work(y): tst-y.2 under a card of some other job"),
+            ("landed-under-both", "work(x): tst-x.4 under a work item of this job")):
         open(os.path.join(tmp, name), "w").write("changed\n")
         g("add", "-A")
         g("commit", "-m", message)
@@ -447,7 +475,7 @@ def scratch_repo(tmp, unmerged=False):
     if unmerged:
         open(os.path.join(second, "committed-not-merged"), "w").write("changed\n")
         g("add", "-A", cwd=second)
-        g("commit", "-m", "work(x): cor-x.4 written but not merged yet", cwd=second)
+        g("commit", "-m", "work(x): tst-x.4 written but not merged yet", cwd=second)
 
     # A repository checked out inside this one. Its files belong to no index
     # entry of the tree around it, so the outer repository answers nothing.
@@ -468,15 +496,15 @@ def scratch_repo(tmp, unmerged=False):
 # A job at its teardown, whose one copy of the work is the scratch repo's own.
 # `assignee` is what says which copy the job worked in: a board name opens with
 # the tree it was claimed from (board_common.actor).
-TEARDOWN = {"id": "cor-x.9", "status": "in_progress", "issue_type": "task",
+TEARDOWN = {"id": "tst-x.9", "status": "in_progress", "issue_type": "task",
             "started_at": "2020-01-01T00:00:00Z",
-            "labels": ["step:land", "of:cor-x", "no-code", "area:board",
+            "labels": ["step:land", "of:tst-x", "no-code", "area:board",
                        "kind:feature"],
             "notes": "Teardown: the merge slot is released and the job is finished."}
 
 
 def teardown(tmp, answers=True, closed_only=True):
-    """What the gate says to `bd close cor-x.9` with the scratch copy on disk.
+    """What the gate says to `bd close tst-x.9` with the scratch copy on disk.
 
     `closed_only` is the shape a real board has at this moment: every step the
     session claimed inside the copy is already closed, so a query that does not
@@ -485,8 +513,8 @@ def teardown(tmp, answers=True, closed_only=True):
     """
     def recorder(args, root=None):
         if args[0] == "show":
-            return True, json.dumps(TEARDOWN if args[1] == "cor-x.9"
-                                    else {"id": "cor-x", "issue_type": "epic",
+            return True, json.dumps(TEARDOWN if args[1] == "tst-x.9"
+                                    else {"id": "tst-x", "issue_type": "epic",
                                           "labels": ["job"], "metadata": {},
                                           "notes": "a page: http://x/y"})
         if args[0] == "list":
@@ -494,7 +522,7 @@ def teardown(tmp, answers=True, closed_only=True):
                 return False, ""
             if closed_only and "all" not in args:
                 return True, "[]"
-            return True, json.dumps([{"id": "cor-x.1", "assignee": "second-selftest"}])
+            return True, json.dumps([{"id": "tst-x.1", "assignee": "second-selftest"}])
         return True, "[]"
 
     status.bc.bd = recorder
@@ -504,7 +532,7 @@ def teardown(tmp, answers=True, closed_only=True):
     status.page_stale = lambda cid, card, session, root: False
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": tmp,
-         "tool_input": {"command": 'bd close cor-x.9 --reason="done"'}}))
+         "tool_input": {"command": 'bd close tst-x.9 --reason="done"'}}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
     # The gate prefers the environment's project directory over the command's own
@@ -532,31 +560,31 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False):
     be concluded about it, and concluding 'finished' refuses its owner the next
     job for no reason at all.
     """
-    goal = {"id": "cor-old", "issue_type": "epic", "labels": ["job"],
+    goal = {"id": "tst-old", "issue_type": "epic", "labels": ["job"],
             "metadata": {"spine": order} if order else {}}
-    parented = [{"id": "cor-old.1", "status": "closed", "labels": ["step:worktree"]}]
+    parented = [{"id": "tst-old.1", "status": "closed", "labels": ["step:worktree"]}]
     if not work_left:
-        parented.append({"id": "cor-old.2", "status": "closed", "labels": ["step:work"]})
+        parented.append({"id": "tst-old.2", "status": "closed", "labels": ["step:work"]})
     elif half:
         # A step holds many cards at once, and a reader's objections arrive under
         # one whose earlier cards are all closed: the first to close must not
         # speak for the rest (cor-bqca.5).
-        parented += [{"id": "cor-old.2", "status": "closed", "labels": ["step:work"]},
-                     {"id": "cor-old.3", "status": "open", "labels": ["step:work"]}]
+        parented += [{"id": "tst-old.2", "status": "closed", "labels": ["step:work"]},
+                     {"id": "tst-old.3", "status": "open", "labels": ["step:work"]}]
 
     def recorder(args, root=None):
         if args[0] == "show":
-            return True, json.dumps(goal if args[1] == "cor-old" else
+            return True, json.dumps(goal if args[1] == "tst-old" else
                                     {"id": args[1], "issue_type": "task",
-                                     "labels": ["step:worktree", "of:cor-new"]})
+                                     "labels": ["step:worktree", "of:tst-new"]})
         if args[:2] == ["list", "--parent"]:
             # Only the old job has pieces; the card being claimed is a step, and
             # answering for it too would make it read as a container.
-            return True, json.dumps(parented if args[2] == "cor-old" else [])
+            return True, json.dumps(parented if args[2] == "tst-old" else [])
         if args[0] == "list" and "--assignee" in args:
             held = args[args.index("--assignee") + 1]
             return True, json.dumps(
-                [{"id": "cor-old.1", "labels": ["of:cor-old"]}]
+                [{"id": "tst-old.1", "labels": ["of:tst-old"]}]
                 if held == "second-selftest" else [])
         return True, "[]"
 
@@ -566,7 +594,7 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False):
     status.unfinished_spine = REAL_SPINE
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": tmp,
-         "tool_input": {"command": "bd update cor-new.1 --claim"}}))
+         "tool_input": {"command": "bd update tst-new.1 --claim"}}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
     here = os.environ.pop("CLAUDE_PROJECT_DIR", None)
@@ -584,7 +612,7 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False):
 READING = runner.GATE_TITLE
 
 
-def excused(deps, cid="cor-j.1", answers=True):
+def excused(deps, cid="tst-j.1", answers=True):
     """Whether this card is waiting only on the reading of a job it belongs to.
 
     `deps` is the board's answer to "what is in the way", keyed by card; `answers`
@@ -611,19 +639,19 @@ def claim_of(tmp, deps):
     """
     def board(args, root=None):
         if args[0] == "blocked":
-            return True, json.dumps([{"id": "cor-j.1"}])
+            return True, json.dumps([{"id": "tst-j.1"}])
         if args[0] == "dep":
             return True, json.dumps(deps.get(args[2], []))
         if args[0] == "show":
             return True, json.dumps({"id": args[1], "issue_type": "task",
-                                     "labels": ["step:work", "of:cor-j"]})
+                                     "labels": ["step:work", "of:tst-j"]})
         return True, "[]"
 
     status.bc.bd = board
     status.bc.reviewing = lambda: ""
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": tmp,
-         "tool_input": {"command": "bd update cor-j.1 --claim"}}))
+         "tool_input": {"command": "bd update tst-j.1 --claim"}}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
     here = os.environ.pop("CLAUDE_PROJECT_DIR", None)
@@ -646,15 +674,15 @@ def census(tmp, busy):
     whose sessions happen to be alive — which is the whole point of it
     (cor-futg.16).
     """
-    os.environ["CORSETTA_COPIES_ROOT"] = tmp
+    os.environ["MACHINERY_COPIES_ROOT"] = tmp
     try:
         spec = importlib.util.spec_from_loader(
             "copies", importlib.machinery.SourceFileLoader(
-                "copies", os.path.join(ROOT, "scripts", "board", "copies")))
+                "copies", os.path.join(HOME, "board", "copies")))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
     finally:
-        os.environ.pop("CORSETTA_COPIES_ROOT", None)
+        os.environ.pop("MACHINERY_COPIES_ROOT", None)
     out, err = io.StringIO(), io.StringIO()
     keep_out, keep_err = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = out, err
@@ -738,7 +766,7 @@ def standing(root, edited_in, second):
     edits.append({"p": os.path.join(second, "committed-not-merged"), "t": BEGAN + 10})
     edits.append({"p": os.path.join(edited_in, "vendor", "vendored"), "t": BEGAN + 10})
     status.bc.load = lambda sid: {"edits": edits}
-    card = {"labels": ["of:cor-x"],
+    card = {"labels": ["of:tst-x"],
             "started_at": datetime.datetime.fromtimestamp(
                 BEGAN, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     return sorted(os.path.basename(p)
@@ -855,9 +883,9 @@ def main():
         "nothing recorded anywhere but the session"
     assert "job under" in refused and "job find" in refused, \
         "the refusal named only one of the two ways a fault is recorded: %s" % refused
-    assert reporting(PUT_DOWN, made=["cor-x.7"]) == "", \
+    assert reporting(PUT_DOWN, made=["tst-x.7"]) == "", \
         "a turn that did record the fault was refused anyway: %s" \
-        % reporting(PUT_DOWN, made=["cor-x.7"])
+        % reporting(PUT_DOWN, made=["tst-x.7"])
 
     # The net narrowed to what it caught before the two-way rule — the one phrasing
     # of 'separate'. The case above stays green under it only if it is proving
@@ -914,13 +942,15 @@ def main():
         assert "how you work" in said and NAMED in said, \
             "the manager pointed at a habit and the reply ended with nothing on the " \
             "board naming what produced it: %s" % (said or "ALLOWED")
-        assert "scripts/board/job find" in said and "--kind bug" in said, \
+        # The pour by the name THIS project's session types it: a project carrying a
+        # forwarder is told its own path, one without is told the machinery's.
+        assert "%s find" % project.tool(DECL, "job") in said and "--kind bug" in said, \
             "the refusal did not name the command that files the cause: %s" % said
         assert fired == ["habit-cause"], \
             "the refusal fired without counting, so the manager's number stays a " \
             "guess: %s" % fired
 
-        filed, fired = pointed_at(YES, made=["cor-x.7"])
+        filed, fired = pointed_at(YES, made=["tst-x.7"])
         assert filed == "" and not fired, \
             "the turn filed the cause and was refused anyway: %s" % filed
 
@@ -1030,7 +1060,7 @@ def main():
 
     waiting = {"status": "manager_review", "labels": ["job"], "issue_type": "epic"}
     ordinary = {"status": "in_progress", "labels": ["job"], "issue_type": "epic"}
-    for cmd in ('bd close cor-t1 --reason="it is done"', "bd update cor-t1 -s open"):
+    for cmd in ('bd close tst-t1 --reason="it is done"', "bd update tst-t1 -s open"):
         assert "waiting on the manager" in refusal(cmd, waiting), \
             "a session was allowed to move a card out of his column: %s" % cmd
         assert "waiting on the manager" not in refusal(cmd, ordinary), \
@@ -1051,23 +1081,23 @@ def main():
                 "area": "board", "kind": kind}
         if why is not None:
             meta["skip.test"] = why
-        goal = {"id": "cor-bug", "issue_type": "epic", "status": "in_progress",
+        goal = {"id": "tst-bug", "issue_type": "epic", "status": "in_progress",
                 "created_at": poured, "metadata": meta,
                 "labels": ["job", "area:board", "kind:" + kind]}
         # `job` on a step is not a mistake in the fixture: creating with `--parent`
         # copies the goal's labels down, and a step is only stripped of them once
         # `spine.settle` has run. Read that label first and the step answers as its
         # own goal, which carries no order and so answers for nothing.
-        step = {"id": "cor-bug.1", "issue_type": "task", "status": "in_progress",
-                "notes": "", "labels": ["step:worktree", "of:cor-bug", "job",
+        step = {"id": "tst-bug.1", "issue_type": "task", "status": "in_progress",
+                "notes": "", "labels": ["step:worktree", "of:tst-bug", "job",
                                         "area:board", "kind:" + kind]}
         # The manager's count of what this gate costs, kept out of the real file:
         # a case that leaves rows behind inflates the number he is reading.
         fired, was = [], status.tally
         status.tally = fired.append
         try:
-            said = refusal('bd close cor-bug.1 --reason="the tree is cut"', step,
-                           {"cor-bug": goal, "cor-bug.1": step})
+            said = refusal('bd close tst-bug.1 --reason="the tree is cut"', step,
+                           {"tst-bug": goal, "tst-bug.1": step})
         finally:
             status.tally = was
         return said, fired
@@ -1080,7 +1110,7 @@ def main():
         "the refusal fired without counting, so the manager's number stays a " \
         "guess: %s" % fired
     route = [l.strip() for l in said.splitlines() if l.strip().startswith("bd update")]
-    assert route and route[0] == "bd update cor-bug --set-metadata spine=worktree," \
+    assert route and route[0] == "bd update tst-bug --set-metadata spine=worktree," \
                                 "clarify,prove,design,work,verify,test,review,record," \
                                 "land", \
         "the way out puts the guard somewhere other than its own place: %s" % route
@@ -1102,15 +1132,26 @@ def main():
         "the refusal promises the agent's own reasoning is stopped, and reading the " \
         "words does not stop it: %s" % said
 
-    # The two populations this must not touch: a job whose fault is not a bug, and
-    # one poured before the pour ever asked — 28 of them, which were never asked and
-    # so never refused (`python3 scripts/board/cost.py`).
-    for what, args in (("a chore", {"kind": "chore"}),
-                       ("a job poured before the pour asked",
-                        {"why": None, "poured": "2026-08-12T10:00:00Z"})):
-        spared, counted_it = guarded(**dict({"why": AGENT_SAID}, **args))
-        assert "dropped the Guard step" not in spared and not counted_it, \
-            "%s was held to the guard rule anyway: %s" % (what, spared)
+    # The population this must not touch: a job whose fault is not a bug.
+    spared, counted_it = guarded(why=AGENT_SAID, kind="chore")
+    assert "dropped the Guard step" not in spared and not counted_it, \
+        "a chore was held to the guard rule anyway: %s" % spared
+
+    # And the one a project may declare out of it: the jobs it had already poured
+    # when its pour began asking. A project that declared no such date has none —
+    # which is what joining after the question existed means — so the case is the
+    # other way round for it, and the rule reaching back to the board's first day
+    # is the thing being held.
+    OLD = "2000-01-01T00:00:00Z"
+    old, counted_old = guarded(why=None, poured=OLD)
+    if DECL.guard_asked_from:
+        assert "dropped the Guard step" not in old and not counted_old, \
+            "a job poured before this project's pour asked was held to the guard " \
+            "rule anyway: %s" % old
+    else:
+        assert "dropped the Guard step" in old, \
+            "this project declared no date its pour began asking, so every job it " \
+            "has is held to the guard rule — and an old one was let through: %s" % old
 
     print("ok: a bug job cannot start while the only thing standing where its guard "
           "should be is the agent's own reasoning, the words of a yes are what let it "
@@ -1207,7 +1248,7 @@ def main():
         scratch_repo(tmp)
         os.makedirs(os.path.join(tmp, ".beads"), exist_ok=True)
         spent = next_job(tmp, work_left=False)
-        assert "nothing left to build in it" in spent and "cor-old" in spent, \
+        assert "nothing left to build in it" in spent and "tst-old" in spent, \
             "a session started a new job while its finished one's copy stood: %s" \
             % (spent or "ALLOWED")
         building = next_job(tmp, work_left=True)
@@ -1227,15 +1268,15 @@ def main():
             "so its owner was refused the next job: %s" % part
 
         under_reading = claim_of(tmp, {
-            "cor-j.1": [{"id": "cor-j", "status": "open", "issue_type": "epic",
+            "tst-j.1": [{"id": "tst-j", "status": "open", "issue_type": "epic",
                          "dependency_type": "parent-child"}],
-            "cor-j": [{"id": "cor-g", "status": "open", "issue_type": "gate",
+            "tst-j": [{"id": "tst-g", "status": "open", "issue_type": "gate",
                        "title": runner.GATE_TITLE}]})
         assert under_reading == "", \
             "the refusal itself still turns away a piece held only by its own " \
             "job's reading: %s" % under_reading
         ordinary = claim_of(tmp, {
-            "cor-j.1": [{"id": "cor-k", "status": "open", "issue_type": "task",
+            "tst-j.1": [{"id": "tst-k", "status": "open", "issue_type": "task",
                          "dependency_type": "blocks"}]})
         assert "waiting on something else" in ordinary, \
             "a piece waiting on an ordinary card was let through by the refusal " \
@@ -1255,27 +1296,27 @@ def main():
           "one's copy, is left alone while that copy is still being built in, and "
           "a stage with one piece closed and one open still counts as building")
 
-    UNDER = [{"id": "cor-j", "status": "open", "issue_type": "epic",
+    UNDER = [{"id": "tst-j", "status": "open", "issue_type": "epic",
               "dependency_type": "parent-child"}]
-    SHUT = {"cor-j.1": UNDER,
-            "cor-j": [{"id": "cor-g", "status": "open", "issue_type": "gate",
+    SHUT = {"tst-j.1": UNDER,
+            "tst-j": [{"id": "tst-g", "status": "open", "issue_type": "gate",
                        "title": READING}]}
     assert excused(SHUT), \
         "a piece of a job its own reading shut is still waiting, so the answers " \
         "that reading asked for can never be started"
-    assert not excused(SHUT, cid="cor-j"), \
+    assert not excused(SHUT, cid="tst-j"), \
         "the shut job itself was excused: its reading waits for a reader, not " \
         "for the job to be picked up"
-    assert not excused({"cor-j.1": UNDER, "cor-j": [
-        {"id": "cor-g", "status": "open", "issue_type": "gate",
+    assert not excused({"tst-j.1": UNDER, "tst-j": [
+        {"id": "tst-g", "status": "open", "issue_type": "gate",
          "title": "Gate: the manager has not said yes"}]}), \
         "a job held by a gate that is not a reading was excused anyway"
-    assert not excused({"cor-j.1": [{"id": "cor-k", "status": "open",
+    assert not excused({"tst-j.1": [{"id": "tst-k", "status": "open",
                                      "issue_type": "task",
                                      "dependency_type": "blocks"}]}), \
         "a piece waiting on an ordinary card was let through"
-    assert not excused({"cor-j.1": UNDER, "cor-j": [
-        {"id": "cor-g", "status": "closed", "issue_type": "gate",
+    assert not excused({"tst-j.1": UNDER, "tst-j": [
+        {"id": "tst-g", "status": "closed", "issue_type": "gate",
          "title": READING}]}), \
         "a reading already passed still excused the piece, so nothing is left " \
         "holding the job"
@@ -1334,13 +1375,15 @@ def main():
     print("ok: git refuses `worktree remove` for a copy carrying a submodule, and "
           "the route the refusal prints removes it anyway")
 
+    pin()
+
     # The words a card reaches the manager in. Every pour below runs with `bd`
     # taken off the path, so a refusal that fires proves the check ran BEFORE the
     # board was touched — the cases leave nothing behind, and a check that had been
     # dropped would fail on a missing `bd` instead, which reads differently.
     def pour(args):
-        env = dict(os.environ, PATH=os.path.join(ROOT, "no-such-bin"))
-        run = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "board", "job")]
+        env = dict(os.environ, PATH=os.path.join(HOME, "no-such-bin"))
+        run = subprocess.run([sys.executable, os.path.join(HOME, "board", "job")]
                              + args, capture_output=True, text=True, env=env, cwd=ROOT)
         return run.returncode, (run.stdout or "") + (run.stderr or "")
 
@@ -1349,10 +1392,10 @@ def main():
     WORDS = "words of whoever built the thing"
     WHERE = "scripts/board/job prints the same sentence into every card"
     DONE = "`cargo test` reports 0 failures"
-    NOT_IN = "the words a card is written in (cor-stbf)"
+    NOT_IN = "the words a card is written in (%s)" % bars.EG_CARD
 
     code, said = pour(["find", UNREADABLE, WHERE,
-                       "--area", "shading", "--kind", "bug"])
+                       "--area", AREA, "--kind", "bug"])
     assert code != 0 and WORDS in said, \
         "a find whose title only its author can read was not refused: %s" % said
     for term, plain_word in (("shader", "colours a surface"), ("pass", "step"),
@@ -1361,7 +1404,7 @@ def main():
             "the refusal named %r without saying what to write instead: %s" % (term, said)
 
     code, said = pour(["find", READABLE, WHERE,
-                       "--area", "board", "--kind", "bug"])
+                       "--area", LAST_AREA, "--kind", "bug"])
     assert WORDS not in said, "a find anyone can read was refused anyway: %s" % said
 
     # The shapes code leaves behind carry no banned word at all, and they are how
@@ -1372,17 +1415,17 @@ def main():
                         ("close_gate() never fires", "call syntax"),
                         ("The GPU budget is never read", "shouted initials")):
         code, said = pour(["find", line, WHERE,
-                           "--area", "board", "--kind", "bug"])
+                           "--area", LAST_AREA, "--kind", "bug"])
         assert code != 0 and shape in said, \
             "a title written as %s was accepted: %s" % (shape, said)
 
     for shape in (["new", "--what", UNREADABLE, "--evidence", "x" * 40,
-                   "--done", DONE, "--not", NOT_IN, "--area", "shading",
+                   "--done", DONE, "--not", NOT_IN, "--area", AREA,
                    "--kind", "bug", "--judge", "agent", "--steps", "design",
                    "--skip", "ground=nothing outside this tree defines it here",
                    "--skip", "test=the check below is itself the guard for this"],
                   ["epic", "--what", UNREADABLE, "--evidence", "x" * 40,
-                   "--done", DONE, "--area", "shading", "--kind", "bug"],
+                   "--done", DONE, "--area", AREA, "--kind", "bug"],
                   ["under", "g", "--do", "%s|%s" % (UNREADABLE, DONE)]):
         code, said = pour(shape)
         assert code != 0 and WORDS in said, \
@@ -1412,7 +1455,7 @@ def main():
     # path, so a refusal proves the bar ran before anything was written.
     def job_new(**over):
         args = {"--what": READABLE, "--evidence": "x" * 40, "--done": DONE,
-                "--not": NOT_IN, "--area": "board", "--kind": "bug",
+                "--not": NOT_IN, "--area": LAST_AREA, "--kind": "bug",
                 "--judge": "agent", "--steps": "design"}
         args.update(over)
         flat = ["new"]
@@ -1455,7 +1498,7 @@ def main():
             ("a find that says where it is but not how it shows",
              "scripts/board/job, on every pour", "not HOW IT SHOWS"),
             ("a find that says neither", "over there", "must say WHERE it is")):
-        code, said = pour(["find", READABLE, where, "--area", "board", "--kind", "bug"])
+        code, said = pour(["find", READABLE, where, "--area", LAST_AREA, "--kind", "bug"])
         assert code != 0 and wanted in said, "%s was accepted: %s" % (name, said)
 
     code, said = job_new()
@@ -1472,11 +1515,10 @@ def main():
     # held to the same list: the pour, which keeps a bad card off the board, and the
     # measurement, which says whether the cards already on it would be accepted.
     import inspect
-    import sections as bars
-    poured = open(os.path.join(ROOT, "scripts", "board", "job")).read()
+    poured = open(os.path.join(HOME, "board", "job")).read()
     measured = inspect.getsource(bars.faults)
     public = [n for n in dir(bars) if not n.startswith("_") and n not in ("part", "faults",
-              "kind_of") and callable(getattr(bars, n))
+              "kind_of", "use") and callable(getattr(bars, n))
               and getattr(bars, n).__module__ == "sections"]
     assert sorted(public) == sorted(bars.BARS), \
         "a bar exists that the list of bars does not name, so nothing holds it to " \
@@ -1500,7 +1542,8 @@ def main():
                 "description": "## What is wrong\nThe lamp draws black at dusk\n\n"
                                "## Evidence it is real\nThe dusk render came back at "
                                "0.0 in the lamp's own window\n\n## Not in this job\n"
-                               "the words a card is written in (cor-stbf)\n"}
+                               "the words a card is written in (%s)\n"
+                               % bars.EG_CARD}
     assert not bars.faults(GOOD_JOB), \
         "a job with every section filled properly was called below the bar: %s" \
         % bars.faults(GOOD_JOB)
@@ -1511,7 +1554,7 @@ def main():
                 "The dusk render came back at 0.0 in the lamp's own window", "it is")}),
             ("done", {"metadata": {"done": "it works"}}),
             ("not_in", {"description": GOOD_JOB["description"].replace(
-                "the words a card is written in (cor-stbf)",
+                "the words a card is written in (%s)" % bars.EG_CARD,
                 "Anything found on the way becomes its own card.")})):
         assert section in bars.faults(dict(GOOD_JOB, **broken)), \
             "a job below the bar on %s was measured as being at it" % section
@@ -1534,12 +1577,13 @@ def main():
     def loaded(name, path):
         spec = importlib.util.spec_from_loader(
             name, importlib.machinery.SourceFileLoader(name, os.path.join(
-                ROOT, "scripts", "board", path)))
+                HOME, "board", path)))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
 
     sweeper = loaded("board_sweep", "sweep")
+    pin()
     for kind, new, wanted in (
             ("job", {"done": "it works"}, "names nothing anyone can run"),
             ("job", {"not_in": "Anything found on the way becomes its own card."},
@@ -1555,7 +1599,7 @@ def main():
     assert not sweeper.refusals("c", "job", {
         "what": "The lamp draws black at dusk",
         "done": "`cargo test` reports 0 failures",
-        "not_in": "the words a card is written in (cor-stbf)"}), \
+        "not_in": "the words a card is written in (%s)" % bars.EG_CARD}), \
         "a rewrite that clears every bar was refused anyway"
 
     print("ok: the sweep refuses to write a section that the pour would have refused "
@@ -1565,7 +1609,7 @@ def main():
     # on calls it lets through proves nothing, so it is driven from both ends: the
     # case the manager caught, the case that must keep working, and everything the
     # rule must not touch.
-    fence = os.path.join(ROOT, "scripts", "hooks", "agent-fence.py")
+    fence = os.path.join(HOME, "hooks", "agent-fence.py")
 
     def asks(subagent, caller=None, tool="Agent"):
         payload = {"tool_name": tool, "tool_input": {"subagent_type": subagent}}
@@ -1632,7 +1676,7 @@ def main():
     # The reader files its objections through the same pour, so the bars apply to
     # it too. Its own pour is replaced here: the board is never touched, and what
     # is under test is what the reader does when the pour says no.
-    where = os.path.join(ROOT, "scripts", "board", "review")
+    where = os.path.join(HOME, "board", "review")
     spec = importlib.util.spec_from_loader(
         "board_review", importlib.machinery.SourceFileLoader("board_review", where))
     reviewer = importlib.util.module_from_spec(spec)

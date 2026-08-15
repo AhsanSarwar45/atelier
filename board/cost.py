@@ -61,6 +61,9 @@ FIRES = [
     ("carry-on-spent", "hooks/board-gate.py",
      "cor-etbo gave up sending a session back — seven refusals in a row and it still "
      "had not carried on"),
+    ("landing-gated", "hooks/board-status-gate.py",
+     "refused a close that said the work landed while a reading somebody is owed "
+     "was still held shut"),
     ("turns-seen", "hooks/habit-reading.py",
      "one row per turn the reply gate looked at — the exact denominator the count "
      "above only estimates"),
