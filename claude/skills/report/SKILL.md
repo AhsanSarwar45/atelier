@@ -6,7 +6,9 @@ description: Build and publish the manager report page for a result — write th
 # Report — fill a page, never write one
 
 **When a page is owed** — the two triggers and what is exempt — is written in
-`~/dev/beads-web/reporting/README.md`, "When one is owed", and nowhere else.
+the shared report tools' own README, "When one is owed", and nowhere else.
+`report` is on your path and the tools sit beside it (`dirname $(readlink -f
+$(which report))/..`), so the README is always one hop away.
 Both triggers are refused without a page: `bd close` while the page is behind
 the work, and any question until it exists.
 
@@ -14,17 +16,17 @@ You supply words, numbers and pictures. The builder supplies the page. Slot
 order, look and interaction are not yours to choose, and publishing a
 hand-written page is blocked.
 
-Reports do not belong to this project. The tools, the rules and every spec live
-in `~/dev/beads-web/reporting/`, shared by every project; `report` is on the
-path. Nothing about a report is ever copied back into this repo.
+Reports do not belong to any one project. The tools, the rules and every spec
+live in the shared report home, and nothing about a report is ever copied back
+into a project's own repository.
 
 ## Steps
 
 1. **Find the running spec** for this piece of work: `report list`. One spec per
    piece of work, updated in place; a new spec means new work.
    Starting fresh: `report new <slug>` from this repo.
-2. **Edit the spec.** Format and rules:
-   `~/dev/beads-web/reporting/README.md`. Pictures go in as a `path`; it is
+2. **Edit the spec.** Format and rules: the shared README above. Pictures go in
+   as a `path`; it is
    resolved against this repo first, so point at a picture where it already
    lives.
 3. **Build**, from this repo so its pictures resolve: `report <slug>`.
@@ -48,6 +50,6 @@ The rules are in the doc above; these are the calls it cannot make for you.
   lifted to the next-up line (README, "Next-up is the exception"), so write it
   as an effect he can judge, never as housekeeping.
 - **Need a graphic that does not exist?** Add it to the shelf in
-  `~/dev/beads-web/reporting/tools/blocks.py` — never style one page by hand.
+  the shared shelf of blocks — never style one page by hand.
 - **Prove a rule you add.** A new gate gets a case in
-  `~/dev/beads-web/reporting/tools/selftest.py` that goes red without it.
+  the report tools' own suite that goes red without it.

@@ -9,9 +9,12 @@ place, out of this one home, and joining is four things:
   the register         one line in `projects.toml` here, so `lands:<name>` on a
                        goal means something and a commit in one checkout may name
                        the ids of a project whose work lands there
-  the shared .claude    Claude Code reads agents, skills and output styles out of
-                       each project's own `.claude/`, so those are symlinks into
-                       `claude/` here — a link, never a copy
+  the shared .claude    Claude Code reads agents, skills and output styles out
+                       of the machine-wide `~/.claude/`, so the canonical copies
+                       are versioned here and that home holds symlinks at them —
+                       a link, never a copy. One install serves every project; a
+                       project that wants a subject-flavoured variant keeps its
+                       own beside it, which overrides the shared one by name.
   the board's own role  a fork infers a contributor and routes `bd list` at a
                        planning store; a project that pours work is a maintainer
 
@@ -24,8 +27,10 @@ sessions are not disturbed. They are one line of pointing and no logic.
     machinery/join --check                say where every registered project stands
 """
 import argparse
+import filecmp
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -95,18 +100,41 @@ def forwarders(root, say):
             say("point  %s -> %s" % (out, os.path.join(mine, name)))
 
 
-def shared_claude(root, say):
-    """Link the agents, skills and output styles every project shares.
+MACHINE = os.path.expanduser("~/.claude")
+
+
+def same(here, there):
+    """Whether two definitions are the same thing, file or folder.
+
+    A skill is a folder and an agent is a file, and both arrive in the machine
+    home the same way — written there first, taken in here after — so both have
+    to be recognised as already-identical before a link may replace one.
+    """
+    if os.path.isdir(here) != os.path.isdir(there):
+        return False
+    if os.path.isdir(here):
+        left = filecmp.dircmp(here, there)
+        return not (left.left_only or left.right_only or left.diff_files
+                    or left.funny_files or left.subdirs)
+    return open(here, errors="replace").read() == open(there, errors="replace").read()
+
+
+def install(say):
+    """Point the machine-wide Claude home at the definitions kept here.
 
     One link per item rather than one for the whole directory, so a project keeps
-    its own alongside — the renderer's researchers are its own, the lead and the
-    report skill are everyone's.
+    its own beside them — a subject-flavoured locator or researcher overrides the
+    shared one by name, and the craft definitions stay one file for everybody.
+
+    A link and not a copy, because a copy is the thing this whole home exists to
+    stop: `machinery/copies` reads exactly this and refuses a home that has
+    stopped pointing.
     """
     for kind in SHARED:
         mine = os.path.join(HOME, "claude", kind)
         if not os.path.isdir(mine):
             continue
-        where = os.path.join(root, ".claude", kind)
+        where = os.path.join(MACHINE, kind)
         os.makedirs(where, exist_ok=True)
         for name in sorted(os.listdir(mine)):
             link, target = os.path.join(where, name), os.path.join(mine, name)
@@ -115,8 +143,13 @@ def shared_claude(root, say):
                     continue
                 os.remove(link)
             elif os.path.exists(link):
-                say("kept   %s — a file of this project's own stands there" % link)
-                continue
+                # Identical content is the ordinary case: a definition written
+                # into the machine home first and taken in here afterwards. One
+                # that differs is somebody's own and is left exactly where it is.
+                if not same(link, target):
+                    say("kept   %s — it is not what this home keeps; compare them" % link)
+                    continue
+                shutil.rmtree(link) if os.path.isdir(link) else os.remove(link)
             os.symlink(target, link)
             say("link   %s -> %s" % (link, target))
 
@@ -161,17 +194,6 @@ def standing(root):
         said.append("git config beads.role is %r — a fork infers a contributor and "
                     "routes `bd list` at a planning store rather than at this board; "
                     "`git -C %s config beads.role maintainer`" % (role or "unset", root))
-    for kind in SHARED:
-        where = os.path.join(root, ".claude", kind)
-        mine = os.path.join(HOME, "claude", kind)
-        if not os.path.isdir(mine):
-            continue
-        want = {n for n in os.listdir(mine) if not n.startswith(".")}
-        have = {n for n in os.listdir(where)} if os.path.isdir(where) else set()
-        missing = sorted(want - have)
-        if missing:
-            said.append("%s is not shared into .claude/%s: %s"
-                        % (", ".join(missing), kind, "run join again"))
     said += unwired(root)
     return said, decl
 
@@ -233,7 +255,7 @@ def main():
     register(root, decl, said.append)
     project._DECLS.clear()
     project._ROOTS.clear()
-    shared_claude(root, said.append)
+    install(said.append)
     if a.forward:
         forwarders(root, said.append)
     code, role = git(["config", "--get", "beads.role"], root)

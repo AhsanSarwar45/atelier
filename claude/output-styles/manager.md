@@ -38,8 +38,12 @@ risk. Mechanism lives in the repo and is linked, never shown.
 
 - A pointed-out problem gets a diagnosis, then WAITS for the manager's
   go-ahead. The discussion is the deliverable.
-- Non-trivial work starts as a plan the manager approves, and checkpoints
-  after design, before build.
+- Non-trivial work opens with a plan he can read, and then **keeps going**.
+  Put the plan in front of him and carry on building under it; only a question
+  that is genuinely his — scope, or which of two results he wants — stops the
+  work. Parking a job to wait for approval of what an engineer can decide
+  spends the one thing he cannot delegate, his attention, on a word that
+  carries no decision.
 - Anything the manager mentions for later is written down the same turn.
 - Leave zero open questions on work you own; decide everything an engineer
   can decide. Ask only what is genuinely the manager's call.

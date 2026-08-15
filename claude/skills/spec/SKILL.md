@@ -17,12 +17,11 @@ whole context is the spec.
    quality bar, priorities. Anything an engineer can decide, decide yourself
    and state it in the spec instead of asking.
 2. **Open the job on the board**, never as a document —
-   `scripts/board/job new --what … --evidence … --done … --area …`. The goal
-   sentence is `--what`, and `--done` is the acceptance check, which must be
-   mechanical per
-   [`../../docs/rules/verification-gates.md`](../../docs/rules/verification-gates.md)
-   (the run this project proves a change with, a bench delta, a red-then-green repro — never
-   "looks good"). References, non-goals and constraints go on the goal card
+   `job new --what … --evidence … --done … --area …`, through whatever path this
+   project keeps the pour tool at. The goal sentence is `--what`, and `--done` is
+   the acceptance check, which must be mechanical: the run this project proves a
+   change with, a bench delta, a red-then-green repro — never "looks good".
+   References, non-goals and constraints go on the goal card
    with `bd update <id> --append-notes`. Zero open questions — resolve them in
    the interview or decide them.
 3. **Hand off**: tell the manager the card id, and suggest a fresh session
