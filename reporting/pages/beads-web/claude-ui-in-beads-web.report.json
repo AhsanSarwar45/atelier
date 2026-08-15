@@ -25,10 +25,31 @@
           ]
         },
         {
+          "kind": "compare",
+          "before": { "path": "reporting/pages/beads-web/agents-inside/before-no-chat.png", "caption": "Before: a project list and a board — nowhere to talk, nothing linked" },
+          "after": { "path": "reporting/pages/beads-web/agents-inside/permission-ask.png", "caption": "Now: a conversation in the app — the answer streamed in, the tool feed underneath, and the agent stopped on a permission ask with three buttons" }
+        }
+      ]
+    },
+    {
+      "label": "The first piece, live",
+      "lead": "Built and proved on screen, twice over: you type, the answer arrives word by word, the agent stops on a permission card, one click releases it.",
+      "blocks": [
+        {
           "kind": "images",
           "shots": [
-            { "path": "reporting/pages/beads-web/agents-inside/before-no-chat.png", "caption": "Where it starts: the app today is a project list and a board — nowhere to talk, nothing linked. The after will stand beside this." }
+            { "path": "reporting/pages/beads-web/agents-inside/permission-allowed.png", "caption": "After the click: the ask collapsed to Allowed, the tool row turned green, the file was written, and the turn's cost — five and a half cents — sits in the corner" }
           ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "Your screen rule earned its keep on day one",
+          "text": "One bug slipped every check behind the screen: every signal said working while the window showed an empty bubble, because the streamed words were being filed under the wrong name. Only looking at the picture caught it — which is exactly the rule you set."
+        },
+        {
+          "kind": "note",
+          "text": "One thing waits on you, with no hurry: when the build reaches the Codex piece, that tool has to be installed on this machine and signed in once with your account. Nothing before it waits."
         }
       ]
     },
