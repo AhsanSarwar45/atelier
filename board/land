@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Put a step's finished work on the main line, in one command.
+
+    python3 board/land <card>          land the branch this tree is on
+    python3 board/land <card> --dry    say what it would do and stop
+
+Landing was four turns of a session's own — catch up, take the slot, merge, give
+the slot back — around sixteen times a working day, and the slot came back four
+times fewer than it went out in each of the two sessions measured (mch-aa9).
+Four turns a session cannot skip is four turns that are not the work.
+
+⛔ This runs the ritual; it does not replace it. The merge is the same
+`git merge --ff-only` from the same slot holder that
+`hooks/board-merge-gate.py` watches for, so a landing that would not
+fast-forward is refused here exactly as it is refused by hand. The slot goes
+back in a `finally`: the one thing worse than four turns is a slot nobody holds
+and nobody can take.
+"""
+import argparse
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+import board_common as bc  # noqa: E402
+import project  # noqa: E402
+
+ROOT = project.root(os.getcwd())
+HERE_TREE = os.getcwd()
+GIT_TIMEOUT = 300
+
+
+def git(args, where, must=True):
+    run = subprocess.run(["git"] + args, cwd=where, capture_output=True,
+                         text=True, timeout=GIT_TIMEOUT)
+    if must and run.returncode != 0:
+        raise SystemExit("git %s: %s%s" % (args[0], run.stdout or "", run.stderr or ""))
+    return (run.stdout or "").strip(), run.returncode
+
+
+def tree():
+    """The checkout this command is standing in, and the branch it is on."""
+    top, _ = git(["rev-parse", "--show-toplevel"], HERE_TREE)
+    branch, _ = git(["rev-parse", "--abbrev-ref", "HEAD"], top)
+    return top, branch
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("card", help="the card whose work this branch carries")
+    ap.add_argument("--dry", action="store_true", help="say what it would do")
+    a = ap.parse_args()
+
+    top, branch = tree()
+    main_tree, trunk = bc.landings(ROOT, a.card)[0]
+    if os.path.realpath(top) == os.path.realpath(main_tree):
+        sys.exit("land is run from the tree holding the work, not from %s itself"
+                 % main_tree)
+    if branch == trunk:
+        sys.exit("%s is the main line: land is run from the branch carrying the work"
+                 % branch)
+
+    # A branch that never names the card is somebody else's work, and landing it
+    # under this card is how a card closes on a change nobody wrote for it.
+    named, _ = git(["log", "--format=%H", "-E", "--grep", r"\b%s\b" % a.card,
+                    "%s..%s" % (trunk, branch)], top)
+    if not named.split():
+        sys.exit("no commit on %s names %s: land the card whose work this branch "
+                 "carries" % (branch, a.card))
+
+    if a.dry:
+        print("would land %d commit(s) of %s from %s onto %s in %s"
+              % (len(named.split()), a.card, branch, trunk, main_tree))
+        return
+
+    git(["rebase", trunk], top)
+    ok, out = bc.bd(["merge-slot", "acquire", "--wait"], ROOT)
+    if not ok:
+        sys.exit("could not take the merge slot: %s" % out)
+    try:
+        _, code = git(["merge", "--ff-only", branch], main_tree, must=False)
+        if code != 0:
+            sys.exit("%s would not fast-forward onto %s even after catching up; "
+                     "the slot is free again" % (branch, trunk))
+    finally:
+        bc.bd(["merge-slot", "release"], ROOT)
+
+    head, _ = git(["rev-parse", "--short", "HEAD"], main_tree)
+    print("landed %d commit(s) of %s: %s is now %s"
+          % (len(named.split()), a.card, trunk, head))
+
+
+if __name__ == "__main__":
+    main()

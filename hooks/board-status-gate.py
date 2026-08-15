@@ -47,6 +47,11 @@ CREATE = re.compile(VERB + r"(?:create|create-form|q|todo\s+add)\b", re.M)
 RESOLVE = re.compile(VERB + r"gate\s+resolve\b", re.M)
 RESTATUS = re.compile(VERB + r"(?:update\b[^|;&\n]*(?:-s|--status)[= ]|reopen\b)", re.M)
 REVIEWING = re.compile(r"(?:-s|--status)[= ]in_review\b")
+# What a close is already carrying. `bd close` stores this as a field of its own
+# rather than in the card's notes, so a step judged only by its notes has to be
+# written to twice with the same substance (mch-aa9). Both quotings, because the
+# reason is prose and routinely holds the other one.
+REASON = re.compile(r"""(?:-r|--reason)[= ]\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)""")
 # Closing without a commit is legitimate only for cards that produce no code.
 NO_CODE = ("no-code", "find", "question", "decision")
 UNREPORTED = bc.UNREPORTED
@@ -582,6 +587,21 @@ def open_children(cid, root):
     return any(r.get("id") != cid and r.get("status") != "closed" for r in rows)
 
 
+def said(card, cmd):
+    """What this step has said about itself, wherever it said it.
+
+    A step is proved by a note or by the reason the close is carrying, and the
+    two are held to the same bar: the second exists only because `bd close`
+    stores its reason outside the notes, which cost every close of every step a
+    turn of its own (mch-aa9).
+    """
+    hit = REASON.search(cmd or "")
+    reason = hit.group(1) if hit else ""
+    if len(reason) > 1 and reason[0] in "\"'" and reason[-1] == reason[0]:
+        reason = reason[1:-1]
+    return max((card.get("notes") or "").strip(), reason.strip(), key=len)
+
+
 def main():
     data = json.load(sys.stdin)
     # What a shell was handed comes back onto the line as commands first. Every
@@ -728,13 +748,15 @@ def main():
                 )
                 return
             step = next((l for l in card.get("labels") or [] if l.startswith("step:")), None)
-            notes = (card.get("notes") or "").strip()
+            notes = said(card, cmd)
             if step and len(notes) < 30:
                 deny(
                     "%s is the %s step and has not said what it did here. Every step of "
                     "every job says the same thing otherwise, which is what made the last "
-                    "board unreadable: `bd update %s --append-notes=\"<what you actually "
-                    "ran, decided or found>\"`." % (cid, step[5:], cid)
+                    "board unreadable: say it in the close itself, `bd close %s "
+                    "--reason=\"<what you actually ran, decided or found>\"`, or on the "
+                    "card with `bd update %s --append-notes=\"…\"`."
+                    % (cid, step[5:], cid, cid)
                 )
                 return
             if step:
