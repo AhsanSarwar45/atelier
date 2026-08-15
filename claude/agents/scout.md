@@ -13,7 +13,11 @@ for every token you return, so be terse and structured.
 ## How to search (cheap-first)
 1. Any repo map / architecture doc first (`README`, `docs/`, an index).
 2. If a code-graph MCP is available, reach it via ToolSearch and use it for
-   structural questions (symbols, callers, importers) before full-text grep.
+   structural questions (symbols, callers, importers) before full-text grep —
+   `codegraph_explore` where there is one, otherwise
+   `mcp__code-review-graph__semantic_search_nodes_tool` to find a symbol and
+   `mcp__code-review-graph__query_graph_tool` with `callers_of` / `callees_of` /
+   `importers_of` / `file_summary` for how it connects.
 3. Fall back to Grep/Glob/Read for what the graph doesn't cover.
 4. Never full-scan the tree for a structural question.
 
