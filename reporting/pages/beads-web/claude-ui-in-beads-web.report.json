@@ -55,6 +55,19 @@
       ]
     },
     {
+      "label": "The joins, live",
+      "lead": "The links you asked for are working: chat to card, card to chat, report to both — recorded by the app watching the work, read back from the board itself.",
+      "blocks": [
+        {
+          "kind": "images",
+          "shots": [
+            { "path": "reporting/pages/beads-web/agents-inside/link-b.png", "caption": "The card's own panel: its pieces ticked as they close, its timeline, and the chat that touched it listed at the bottom — click it and you land back in that exact conversation" },
+            { "path": "reporting/pages/beads-web/agents-inside/link-c.png", "caption": "A report the chat made, opened large over the dimmed conversation — its checklist is read live from the card's pieces, and it closes with its own button" }
+          ]
+        }
+      ]
+    },
+    {
       "label": "Any brand of agent",
       "lead": "Same window, same buttons, whichever brand does the work — checked against what each one actually supports today, not assumed.",
       "blocks": [
@@ -157,7 +170,8 @@
     { "id": "D14", "title": "The chat ships the keep set plus the typed-command menu; everything else on the menu is out", "why": "Your answer: the typed commands are very important, the rest is fine to drop. The menu above records the final state of every row." },
     { "id": "D15", "title": "Agents run on this computer only; reaching other machines is its own later job, on the board", "why": "Your answer: start here, reaching other machines can come later. It is a card now, so it cannot be forgotten or quietly grow into this build." },
     { "id": "D16", "title": "All six additions are in from the start", "why": "Your answer, verbatim: take all six additions from the start." },
-    { "id": "D17", "title": "Every piece of this job is judged by looking at the screen it produces, and behaviour is proved by driving the app like a user", "why": "Your standing rule for this work: check the screen output to make sure it works nice, and exercise behaviour through the browser's own developer tools rather than reasoning about code. The browser-driving service is wired into the repo so every session can obey this." }
+    { "id": "D17", "title": "Every piece of this job is judged by looking at the screen it produces, and behaviour is proved by driving the app like a user", "why": "Your standing rule for this work: check the screen output to make sure it works nice, and exercise behaviour through the browser's own developer tools rather than reasoning about code. The browser-driving service is wired into the repo so every session can obey this." },
+    { "id": "D18", "title": "A card is linked when the chat acted on it, never when something merely mentioned it", "why": "A board command naming the card, or a file written under its name, counts. A mention in the agent's prose, in tool output, or in your own message does not — reading a document that cites a card is not working on it. A wrong chip is worse than a missing one." }
   ],
 
   "next": {
