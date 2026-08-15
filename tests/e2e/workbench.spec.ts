@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { makeFixtureProject, PARENT_CARD, REPORT_SLUG } from './fixture-board';
 import { quadrantPng } from './fixture-png';
 
 /**
@@ -209,5 +210,103 @@ test.describe('workbench', () => {
       el.scrollTop = el.scrollHeight;
     });
     await page.screenshot({ path: join(SHOTS, 'transcript.png'), fullPage: false });
+  });
+
+  /**
+   * The interconnection: chat to card, card back to chat, and a report that
+   * opens large. Runs against a throwaway board the fixture builds — never a
+   * live one — with permissions bypassed so the screens stay uncluttered.
+   */
+  test('links a chat to the card it touched, and shows the report it made', async ({ page, request }) => {
+    test.setTimeout(600_000);
+
+    const FIXTURE = fixtureFor('links');
+    const reportsDir = join(FIXTURE, 'reporting');
+    makeFixtureProject(FIXTURE, reportsDir);
+    mkdirSync(SHOTS, { recursive: true });
+
+    const project = await projectAt(request, FIXTURE);
+
+    const started = await request.post('/api/workbench/command', {
+      data: {
+        type: 'session.start',
+        projectId: project.id,
+        projectPath: FIXTURE,
+        brand: 'claude',
+        permissionMode: 'bypassPermissions',
+      },
+    });
+    expect(started.status(), await started.text()).toBe(200);
+    const session = (await started.json()) as { id: string };
+
+    await page.goto(`/project?id=${project.id}&chat=${session.id}`);
+    await page.getByTestId('tab-chat').click();
+    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
+
+    // Nothing here names the card to the app: the agent is told to run a bd
+    // command, and the app has to notice that by itself.
+    await page.getByTestId('composer').fill(
+      [
+        `Run this exact shell command and show me its output: bd note ${PARENT_CARD} "looked at by the workbench"`,
+        '',
+        `Then use the Edit tool on reporting/pages/linkdemo/${REPORT_SLUG}.report.json to change its`,
+        '"eyebrow" line to say: Written from the chat that made it.',
+        '',
+        'Do nothing else.',
+      ].join('\n'),
+    );
+    await page.getByTestId('send-button').click();
+
+    // ---- (a) the chip nobody typed --------------------------------------
+    const chip = page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`);
+    await expect(chip).toBeVisible({ timeout: 300_000 });
+    await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 300_000 });
+    await page.screenshot({ path: join(SHOTS, 'link-a.png'), fullPage: false });
+
+    // The board is the record, so the edge must be readable straight from bd.
+    const onBoard = await request.get(
+      `/api/workbench/links/bead/${PARENT_CARD}?path=${encodeURIComponent(FIXTURE)}`,
+    );
+    expect(onBoard.status()).toBe(200);
+    const chats = (await onBoard.json()) as { sessionId: string }[];
+    expect(chats.map((c) => c.sessionId)).toContain(session.id);
+
+    // ---- (c) the report, inline then large ------------------------------
+    const inline = page.getByTestId('report-inline');
+    await expect(inline).toBeVisible({ timeout: 60_000 });
+    await inline.scrollIntoViewIfNeeded();
+    await page.setViewportSize({ width: 1440, height: 1400 });
+    await page.screenshot({ path: join(SHOTS, 'link-c-inline.png'), fullPage: false });
+
+    await inline.click();
+    const modal = page.getByTestId('report-modal');
+    await expect(modal).toBeVisible({ timeout: 30_000 });
+    // The page inside really is the built report, not an error.
+    const framed = page.frameLocator('[data-testid="report-modal-frame"]');
+    await expect(framed.locator('text=Linked From The Chat').first()).toBeVisible({ timeout: 60_000 });
+    await page.screenshot({ path: join(SHOTS, 'link-c.png'), fullPage: false });
+    await page.getByTestId('report-modal-close').click();
+    await expect(modal).toBeHidden({ timeout: 15_000 });
+
+    // ---- (b) the card's own side of the join ----------------------------
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`/project?id=${project.id}`);
+    await page.getByTestId('tab-board').click();
+    await page.getByText('The card this chat works on').first().click();
+
+    const chatList = page.getByTestId('card-chats');
+    await expect(chatList).toBeVisible({ timeout: 60_000 });
+    const entry = chatList.locator(`[data-session-id="${session.id}"]`);
+    await expect(entry).toBeVisible();
+    await page.screenshot({ path: join(SHOTS, 'link-b.png'), fullPage: false });
+
+    // Clicking it lands back on that very chat.
+    await entry.click();
+    await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', session.id, {
+      timeout: 60_000,
+    });
+    await expect(
+      page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`),
+    ).toBeVisible({ timeout: 60_000 });
   });
 });

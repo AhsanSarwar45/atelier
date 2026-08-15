@@ -32,7 +32,7 @@ export function ReportCard({ project, slug, fsPath }: ReportCardProps) {
         data-testid="report-inline"
         data-report-slug={slug}
         onClick={() => setOpen(true)}
-        className="block w-full max-w-[80ch] overflow-hidden rounded-lg border border-border/60 bg-muted/20 text-left transition hover:border-primary/60"
+        className="block w-[640px] max-w-full overflow-hidden rounded-lg border border-border/60 bg-muted/20 text-left transition hover:border-primary/60"
       >
         <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5 text-xs">
           <span className="font-medium text-foreground">Manager report</span>
@@ -40,7 +40,7 @@ export function ReportCard({ project, slug, fsPath }: ReportCardProps) {
           <span className="ml-auto shrink-0 text-muted-foreground">click to open</span>
         </div>
         {/* Inert: the preview is a picture of the page, not a place to click about in. */}
-        <div className="pointer-events-none h-[220px] overflow-hidden bg-white">
+        <div className="pointer-events-none h-[220px] w-[640px] overflow-hidden">
           <iframe
             data-testid="report-preview-frame"
             src={src}
@@ -54,10 +54,24 @@ export function ReportCard({ project, slug, fsPath }: ReportCardProps) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           data-testid="report-modal"
-          className="h-[92vh] w-[94vw] max-w-[94vw] gap-0 overflow-hidden p-0"
+          // Explicit rows: the base dialog is a grid, and auto rows stretch, which
+          // would give the title half the modal and push the report down.
+          className="grid h-[92vh] w-[94vw] max-w-[94vw] grid-rows-[auto_1fr] gap-0 overflow-hidden p-0"
         >
-          <DialogTitle className="border-b border-border/60 px-4 py-2 text-sm">
-            Manager report · <span className="font-mono text-muted-foreground">{slug}</span>
+          <DialogTitle className="flex items-center gap-3 border-b border-border/60 px-4 py-2 text-sm">
+            <span>
+              Manager report · <span className="font-mono text-muted-foreground">{slug}</span>
+            </span>
+            {/* Its own button: the page fills the window in an iframe, so a
+                keypress lands in the report rather than on the dialog. */}
+            <button
+              type="button"
+              data-testid="report-modal-close"
+              onClick={() => setOpen(false)}
+              className="ml-auto mr-6 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Close
+            </button>
           </DialogTitle>
           <iframe
             data-testid="report-modal-frame"

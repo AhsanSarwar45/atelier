@@ -15,6 +15,8 @@ export BEADS_WEB_PORT="${BEADS_WEB_PORT:-3018}"
 export BEADS_WORKBENCH_PORT="${BEADS_WORKBENCH_PORT:-3019}"
 export XDG_DATA_HOME="$RUN/xdg"
 export BEADS_E2E_URL="http://$BEADS_WEB_HOST:$BEADS_WEB_PORT"
+# The links test builds its own reporting tree; the real one is never written to.
+export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
 
 mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results"
 

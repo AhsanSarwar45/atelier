@@ -100,23 +100,29 @@ const server = createServer((req, res) => {
         const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
         streamEvents(req, res, sessionId, Number.isFinite(since) ? since : 0);
       } else if (path.startsWith('/links/bead/') && req.method === 'GET') {
-        // Read the board first: it is the record, ours is a cache. A chat
-        // recorded by another machine or an earlier database still shows up.
+        // The board decides WHICH chats are listed — it is the record. Our own
+        // rows only supply the title and the time, and a chat the board has
+        // forgotten must not linger here just because we cached it. If the
+        // board cannot be read at all, the cache stands in rather than the
+        // card losing its chats entirely.
         const beadId = decodeURIComponent(path.slice('/links/bead/'.length));
         const cwd = url.searchParams.get('path') ?? process.cwd();
+        const cached = new Map(store.sessionsForBead(beadId).map((s) => [s.id, s]));
         const onBoard = await sessionsForIssue(beadId, cwd);
-        const known = new Map(store.sessionsForBead(beadId).map((s) => [s.id, s]));
-        for (const id of onBoard) if (!known.has(id)) known.set(id, null as never);
+        const ids = onBoard.length > 0 ? onBoard : [...cached.keys()];
         json(
           res,
           200,
-          [...known.entries()].map(([sessionId, s]) => ({
-            sessionId,
-            title: s?.title ?? null,
-            brand: s?.brand ?? null,
-            lastActiveAt: s?.lastActiveAt ?? null,
-            projectId: s?.projectId ?? null,
-          })),
+          ids.map((sessionId) => {
+            const s = cached.get(sessionId);
+            return {
+              sessionId,
+              title: s?.title ?? null,
+              brand: s?.brand ?? null,
+              lastActiveAt: s?.lastActiveAt ?? null,
+              projectId: s?.projectId ?? null,
+            };
+          }),
         );
       } else if (path.startsWith('/links/session/') && req.method === 'GET') {
         const sessionId = decodeURIComponent(path.slice('/links/session/'.length));
