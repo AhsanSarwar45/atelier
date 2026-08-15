@@ -44,6 +44,50 @@ def bar(problem):
         sys.exit(problem)
 
 
+def others():
+    """Every registered project that is not this one, by name."""
+    mine = os.path.realpath(ROOT)
+    return {n: project.of(p) for n, p in project.registry().items()
+            if os.path.realpath(p) != mine}
+
+
+def go_there(name, why):
+    decl = project.named(name)
+    sys.exit("%s — file it there:\n  cd %s && %s"
+             % (why, decl.path, project.tool(decl, "job")))
+
+
+def area_arg(value):
+    """This project's own systems, and where a card belongs when it names another's.
+
+    A subject a project does not own is the shape the leak took: 172 cards about
+    the shared tools sat on the racing board because filing them there was legal
+    and free, and draining the board once did not stop the next hour refilling it.
+    """
+    if value in AREAS:
+        return value
+    owner = next((n for n, d in sorted(others().items()) if value in d.areas), "")
+    if owner:
+        go_there(owner, "%r is a system of the %s project, not this one" % (value, owner))
+    sys.exit("%r is not one of this project's systems: %s"
+             % (value, ", ".join(AREAS)))
+
+
+def not_elsewhere(*said):
+    """Refused when the evidence names a place inside another registered project.
+
+    The subject check alone cannot catch this half: a card about the shared tools
+    arrives tagged `tooling`, and this project has real tooling of its own, so
+    that word can never be refused. What cannot be argued with is the path — a
+    fix that changes files in another checkout has its card on that board.
+    """
+    for name, decl in sorted(others().items()):
+        where = os.path.realpath(decl.path)
+        if any(where in (t or "") for t in said):
+            go_there(name, "this names %s, which is the %s project's own checkout"
+                     % (where, name))
+
+
 def bd(args, capture=True, must=True):
     env = dict(os.environ, BEADS_ACTOR=os.environ.get("BEADS_ACTOR", "") or "")
     run = subprocess.run(["bd"] + args, cwd=ROOT, text=True, env=env,
@@ -130,6 +174,7 @@ def judge(a):
 
 
 def new(a):
+    not_elsewhere(a.what, a.evidence, a.done, a.not_in)
     plain.refuse(a.what, "This job's --what")
     bar(sections.what_is_wrong(a.what))
     if len(a.evidence) < 20:
@@ -184,6 +229,7 @@ def epic(a):
     carries no spine of its own — and one poured with `new` would grow a run of
     steps nobody can ever work.
     """
+    not_elsewhere(a.what, a.evidence, a.done)
     plain.refuse(a.what, "This container's --what")
     bar(sections.what_is_wrong(a.what))
     if len(a.evidence) < 20:
@@ -263,6 +309,7 @@ def under(a):
 def find(a):
     """A find is one line and no plan: it exists so nothing noticed evaporates.
     It cannot be claimed — promoting it into a job is what makes it workable."""
+    not_elsewhere(a.title, a.where)
     plain.refuse(a.title, "This find's title")
     bar(sections.what_is_wrong(a.title))
     bar(sections.where_it_is(a.where))
@@ -371,7 +418,8 @@ p.add_argument("--done", required=True, help="the command and the number or imag
 # the shape, and "the following arguments are required" teaches nothing.
 p.add_argument("--not", dest="not_in", default="", metavar="WHAT IT LEAVES OUT",
                help="the card, the system or the file this job does not touch")
-p.add_argument("--area", required=True, choices=AREAS)
+p.add_argument("--area", required=True, type=area_arg,
+               help="one of this project's systems: " + ", ".join(AREAS))
 p.add_argument("--kind", required=True, choices=KINDS)
 p.add_argument("--size", default="medium", choices=["small", "medium", "large"],
                help="how much work this is; it does not decide which steps exist")
@@ -392,7 +440,8 @@ p = sub.add_parser("epic", help="a container for a system: jobs underneath, no s
 p.add_argument("--what", required=True, help="one line, as an observable")
 p.add_argument("--evidence", required=True, help="what makes it real today")
 p.add_argument("--done", required=True, help="the command and the number or image")
-p.add_argument("--area", required=True, choices=AREAS)
+p.add_argument("--area", required=True, type=area_arg,
+               help="one of this project's systems: " + ", ".join(AREAS))
 p.add_argument("--kind", required=True, choices=KINDS)
 p.add_argument("-p", "--priority", type=int, default=2, choices=range(5))
 p.add_argument("--parent", help="a larger container this one sits under")
@@ -407,7 +456,8 @@ p.set_defaults(func=under)
 p = sub.add_parser("find", help="file something noticed, without a plan")
 p.add_argument("title")
 p.add_argument("where", help="where it is and how it shows")
-p.add_argument("--area", required=True, choices=AREAS)
+p.add_argument("--area", required=True, type=area_arg,
+               help="one of this project's systems: " + ", ".join(AREAS))
 p.add_argument("--kind", required=True, choices=KINDS)
 p.add_argument("-p", "--priority", type=int, default=2, choices=range(5))
 p.set_defaults(func=find)
