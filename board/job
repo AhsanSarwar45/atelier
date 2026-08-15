@@ -51,10 +51,18 @@ def others():
             if os.path.realpath(p) != mine}
 
 
-def go_there(name, why):
-    decl = project.named(name)
-    sys.exit("%s — file it there:\n  cd %s && %s"
-             % (why, decl.path, project.tool(decl, "job")))
+def go_there(names, why):
+    """Refuse, and hand over the command that files it where it belongs.
+
+    More than one project may declare the same subject — `board` is the screen in
+    one and the tools in another — and which of them owns a particular fault is
+    not something a word can settle. Both are named, and the choice is made by
+    whoever knows which files the fix changes.
+    """
+    where = ["  cd %s && %s" % (project.named(n).path,
+                                project.tool(project.named(n), "job"))
+             for n in names]
+    sys.exit("%s — file it there:\n%s" % (why, "\n".join(where)))
 
 
 def area_arg(value):
@@ -66,9 +74,10 @@ def area_arg(value):
     """
     if value in AREAS:
         return value
-    owner = next((n for n, d in sorted(others().items()) if value in d.areas), "")
-    if owner:
-        go_there(owner, "%r is a system of the %s project, not this one" % (value, owner))
+    owners = [n for n, d in sorted(others().items()) if value in d.areas]
+    if owners:
+        go_there(owners, "%r is a system of %s, not of this project"
+                 % (value, " and ".join(owners)))
     sys.exit("%r is not one of this project's systems: %s"
              % (value, ", ".join(AREAS)))
 
@@ -84,7 +93,7 @@ def not_elsewhere(*said):
     for name, decl in sorted(others().items()):
         where = os.path.realpath(decl.path)
         if any(where in (t or "") for t in said):
-            go_there(name, "this names %s, which is the %s project's own checkout"
+            go_there([name], "this names %s, which is the %s project's own checkout"
                      % (where, name))
 
 

@@ -1489,6 +1489,42 @@ def main():
           "built the thing is refused at every pour, told which plain word to use, "
           "and refused too when the word list itself cannot be read")
 
+    # Where a card belongs. Both halves are needed: 198 cards about the shared
+    # tools reached one project's board because a subject it did not own was still
+    # accepted, and 52 of those arrived under a subject it does own, which is why
+    # the second half reads the evidence for a place instead of reading the tag.
+    elsewhere = {n: project.of(p) for n, p in project.registry().items()
+                 if os.path.realpath(p) != os.path.realpath(ROOT)}
+    theirs = sorted((a, n) for n, d in elsewhere.items() for a in d.areas
+                    if a not in DECL.areas)
+    if theirs:
+        area, owner = theirs[0]
+        code, said = pour(["find", READABLE, WHERE, "--area", area, "--kind", "bug"])
+        assert code != 0 and owner in said and elsewhere[owner].path in said, \
+            "a card filed here under %r, which is %s's subject and not this " \
+            "project's, was not routed there: %s" % (area, owner, said)
+
+    for owner, decl in sorted(elsewhere.items()):
+        code, said = pour(["find", READABLE,
+                           "%s, in %s" % (WHERE, os.path.realpath(decl.path)),
+                           "--area", LAST_AREA, "--kind", "bug"])
+        assert code != 0 and owner in said, \
+            "a card whose evidence names %s's own checkout was filed here: %s" \
+            % (owner, said)
+
+    # And a card that belongs here is not caught by either half — a router that
+    # refuses everything routes nothing.
+    code, said = pour(["find", READABLE, WHERE, "--area", LAST_AREA, "--kind", "bug"])
+    assert "file it there" not in said, \
+        "a card about this project's own %s was sent somewhere else: %s" \
+        % (LAST_AREA, said)
+    assert "No such file or directory: 'bd'" in said, \
+        "a card that belongs here never reached the board: %s" % said
+
+    print("ok: a card is refused and routed when its subject belongs to another "
+          "project and when its evidence names another project's checkout, and a "
+          "card that belongs here reaches the board")
+
     # What each section of a card has to carry. Same arrangement: `bd` is off the
     # path, so a refusal proves the bar ran before anything was written.
     def job_new(**over):

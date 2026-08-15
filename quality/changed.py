@@ -33,6 +33,13 @@ def base(root: str, against: str = "main") -> str | None:
     return got or None
 
 
+def renamed(root: str, since: str) -> set[str]:
+    """Both names of every file this change only gave a new name to."""
+    fresh = [row[3:].strip() for row in _git(root, "status", "--porcelain").splitlines()
+             if row.startswith("??")]
+    return _renamed(root, since, fresh)
+
+
 def _renamed(root: str, since: str, fresh: list[str]) -> set[str]:
     """Both names of every file that only changed name, old and new.
 
@@ -104,6 +111,38 @@ def lines(root: str, since: str, to: str | None = None,
             n = 1 if count is None else int(count)
             touched[path].append((at, at + n - 1) if n else (at, at + 1))
     return dict(touched)
+
+
+def shrunk(root: str, since: str) -> dict[str, list[tuple[int, int]]]:
+    """Path -> earlier line ranges this change put back fewer lines than it took.
+
+    An edit leaves a stretch the same length; taking a stretch out, or replacing it
+    with a call to somewhere the code now lives once, does not. That is the
+    difference between abandoning one copy of a pair and removing it.
+    """
+    out: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    path = None
+    for row in _git(root, "diff", "--unified=0", "--find-renames", since).splitlines():
+        if row.startswith("--- a/"):
+            path = row[6:]
+        elif row.startswith("--- /dev/null"):
+            path = None
+        elif path and (m := HUNK.match(row)):
+            at = int(m.group(1))
+            took = 1 if m.group(2) is None else int(m.group(2))
+            gave = 1 if m.group(4) is None else int(m.group(4))
+            if took and gave < took:
+                out[path].append((at, at + took - 1))
+    return dict(out)
+
+
+def covers(ranges: dict[str, list[tuple[int, int]]],
+           path: str, first: int, last: int) -> bool:
+    """Whether these ranges hold every line between `first` and `last`."""
+    left = set(range(first, last + 1))
+    for a, b in ranges.get(path, ()):
+        left -= set(range(a, b + 1))
+    return not left
 
 
 def within(touched: dict[str, list[tuple[int, int]]],

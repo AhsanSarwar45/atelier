@@ -6,8 +6,9 @@ checkout with a `.git` directory, so a search for the directory walks straight p
 the copy the caller is in and lands on the main tree — every gate then reads files
 belonging to whoever is working there. The search is for either kind of entry.
 
-The walk starts from this file, not from the current directory, so a gate reads the
-copy it was installed in whatever directory it was invoked from.
+The walk starts from where the caller is standing, because this file is shared by
+every project: a tool that walked up from its own path would measure the machinery
+itself whichever project asked.
 """
 from __future__ import annotations
 
@@ -16,8 +17,9 @@ import sys
 
 
 def root(start: str | None = None) -> str:
-    """The top of the copy `start` lives in; this file's own copy by default."""
-    d = os.path.dirname(os.path.abspath(start or __file__))
+    """The top of the copy `start` lives in; the caller's own copy by default."""
+    d = os.path.abspath(start) if start else os.getcwd()
+    d = d if os.path.isdir(d) else os.path.dirname(d)
     while not os.path.exists(os.path.join(d, ".git")):
         parent = os.path.dirname(d)
         if parent == d:

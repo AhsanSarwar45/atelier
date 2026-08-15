@@ -10,8 +10,8 @@ Exit 1 means a rule refused something. `--against` exits 1 only for a place
 refused now and not before, named by file and by rule: a run already red stays
 red, and this says whether THIS change is what made it so.
 
-The rules, and the measurement each threshold came from, are in each project's
-own `docs/code-quality.md`.
+The rules, and the measurement each threshold came from, are in
+`docs/code-quality.md`.
 """
 from __future__ import annotations
 
@@ -47,8 +47,8 @@ def load_rules(root: str) -> None:
     """
     decl = project.of(root)
     if not decl.rules:
-        print(f"quality: {decl.name} declares no rules directory; running "
-              f"with the shared measures only", file=sys.stderr)
+        print("quality: %s declares no rules directory; running with the shared "
+              "measures only" % decl.name, file=sys.stderr)
         return
     for path in sorted(glob.glob(os.path.join(root, decl.rules, "*.py"))):
         name = os.path.splitext(os.path.basename(path))[0]
@@ -60,7 +60,7 @@ def load_rules(root: str) -> None:
         spec.loader.exec_module(module)
 
 
-load_rules(repo_root(__file__))
+load_rules(repo_root())
 
 
 def collect(root: str, since: str | None = None) -> dict[str, Result]:
@@ -114,15 +114,22 @@ def compare(before: dict[str, Result], after: dict[str, Result], sha: str) -> in
     """
     was_all, now_all = numbers(before), numbers(after)
     print(f"\n── against {sha[:8]}")
-    for key in sorted(set(was_all) | set(now_all)):
-        was, now = was_all.get(key), now_all.get(key)
-        if was == now:
-            continue
-        delta = "new" if was is None else ("gone" if now is None else f"{now - was:+,}")
-        print(f"   {key:<34} {was!s:>12} -> {now!s:>12}  {delta:>10}")
+    # A number only one side could answer is not a movement. Some of these say what
+    # a change did, and an earlier point of the tree has no change to be asked about.
+    silent = sorted(set(was_all) ^ set(now_all))
+    for key in sorted(set(was_all) & set(now_all)):
+        was, now = was_all[key], now_all[key]
+        if was != now:
+            print(f"   {key:<34} {was:>12,} -> {now:>12,}  {now - was:>+10,}")
+    for key in silent:
+        print(f"   {key:<34} {'not readable at both points':>38}")
 
-    stood = set(refusals(before))
-    fresh = [r for r in refusals(after) if r not in stood]
+    # Recognised by rule and file, never by the sentence: a rule that writes a size
+    # into its words would otherwise report the same standing refusal as fresh every
+    # time that size moved. The price is that a second refusal from the same rule in
+    # an already-refused file is not called out — `docs/code-quality.md#9-debt`.
+    stood = {(rid, at.split(":")[0]) for rid, at, _ in refusals(before)}
+    fresh = [r for r in refusals(after) if (r[0], r[1].split(":")[0]) not in stood]
     if fresh:
         print(f"\n{len(fresh)} place(s) refused now and not at {sha[:8]}:")
         for rid, at, says in fresh:
@@ -146,7 +153,7 @@ def main() -> int:
                     help="what counts as this change; default is where this branch left main")
     args = ap.parse_args()
 
-    root = repo_root(__file__)
+    root = repo_root()
 
     if args.list_drift:
         ranked, counted = drift_pairs(Corpus(root))
@@ -166,7 +173,10 @@ def main() -> int:
             results = collect(where)
         label = f"{args.at} ({asked.sha[:8]})"
     else:
-        since = args.since or changed.base(root)
+        # What a change is measured from is what was asked for. Judging against the
+        # merge-base whatever `--against` says makes a worsening that is already
+        # committed compare the tree with itself and read as clean.
+        since = args.since or args.against or changed.base(root)
         results = collect(root, since)
         label = "the working tree"
 

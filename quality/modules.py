@@ -1,8 +1,9 @@
 """What reaches what, read from the import lines rather than from anyone's memory.
 
-An import line is the one place a dependency has to be written down, so a graph
-built from those is the graph the compiler enforces. Nothing here is inferred: a
-path that cannot be resolved to a module of this workspace is reported as
+An import line is where a dependency is normally written down, so a graph built
+from those is most of the graph the compiler enforces — but not all of it, and the
+difference is declared in `docs/code-quality.md#9-debt`. Nothing here is inferred:
+a path that cannot be resolved to a module of this workspace is reported as
 unresolved rather than guessed at, because a guessed edge is worse than a missing
 one — it accuses code of a dependency it does not have.
 """
@@ -26,7 +27,7 @@ ROOT_FILES = ("lib.rs", "main.rs")
 
 
 def crate_name(path: str) -> str:
-    """`crates/foo-core/src/…` -> `foo_core`, as an import spells it."""
+    """`crates/corsetta-core/src/…` -> `corsetta_core`, as an import spells it."""
     parts = path.split(os.sep)
     return parts[1].replace("-", "_") if len(parts) > 2 else ""
 

@@ -5,7 +5,7 @@ that is not drift: the two still agree. What predicts a fault is a copy changed
 INCONSISTENTLY — a rename applied in some places and not others, or a line
 present in one copy and absent in its twin. Only those are counted here. Why this
 is gated and the sheer quantity of duplication is not:
-`docs/code-quality.md#12-why-the-amount-of-duplication-is-not-one-of-them-either`.
+`docs/code-quality.md#1-what-earns-the-right-to-refuse-a-change`.
 """
 from __future__ import annotations
 
@@ -193,6 +193,19 @@ def drift(scope: Scope) -> Result:
     )
 
 
+def _still_there(scope: Scope, side: Side, gone: dict) -> bool:
+    """Whether that copy is still in the tree, as against having been taken out.
+
+    Removing one of two copies, or lifting its body somewhere they can share, is the
+    ordinary way to fix duplication — and read as an edit it looks exactly like
+    abandoning a twin. What separates them is length: an edit leaves the stretch as
+    long as it was, and taking it out does not.
+    """
+    if scope.corpus.get(side.path) is None:
+        return False
+    return not changed.covers(gone, side.path, side.first, side.last)
+
+
 @measure("twin", "Copies edited on one side and not the other", gates=True)
 def twin(scope: Scope) -> Result:
     """Refuse a change that reaches into one copy of a pair and not into its twin.
@@ -201,13 +214,16 @@ def twin(scope: Scope) -> Result:
     from the tree afterwards would be missing exactly the ones an edit pushed
     apart, which are the ones this exists to catch.
     """
+    # These two say something about a change. Asked of a tree with no change to
+    # read, they have no answer, and answering zero would read as a fall to zero.
     if not scope.since or scope.earlier is None:
-        return Result(numbers={"pairs.watched": 0, "edited.on.one.side": 0})
+        return Result()
 
     touched = changed.lines(scope.root, scope.since, side=changed.BEFORE)
     if not touched:
         return Result(numbers={"pairs.watched": 0, "edited.on.one.side": 0})
 
+    gone = changed.shrunk(scope.root, scope.since)
     found, _ = pairs(scope.earlier)
     watched = [p for p in found if p.agreement >= TWINS]
 
@@ -218,6 +234,8 @@ def twin(scope: Scope) -> Result:
         if here == there:
             continue
         edited, left_alone = (pair.left, pair.right) if here else (pair.right, pair.left)
+        if not _still_there(scope, edited, gone):
+            continue
         refused.append(Refusal(
             f"{edited.path}:{edited.first}-{edited.last}",
             f"is {pair.tokens} tokens of the same code as "
