@@ -21,6 +21,9 @@ import run  # noqa: E402
 
 CLOSED = re.compile(r"\bbd\b[^|;&]*(?:\bclose\b|(?:-s|--status)[= ]closed\b)")
 CLAIMED = re.compile(r"\bbd\b[^|;&]*\bupdate\b[^|;&]*--claim\b")
+# A write to one card, whose answer is worth handing back rather than asked for
+# again in a turn of its own.
+WROTE = re.compile(r"\bbd\b[^|;&]*\b(?:update|close|reopen)\b")
 
 BEAT_EVERY = 90  # seconds of activity between lease refreshes; lease TTL is 300
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -55,6 +58,10 @@ def main():
     state = bc.load(sid)
     tool = data.get("tool_name") or ""
     tin = data.get("tool_input") or {}
+    # Without the move that got it there: a worktree named after the card it
+    # holds spells that card in every line run inside it, and the ids read here
+    # become claims and closes.
+    cmd = bc.said(data) if tool == "Bash" else ""
 
     # A helper that has come back stamps this; until then the session is waiting
     # on it, however many turns that takes.
@@ -82,10 +89,6 @@ def main():
                 {"p": path, "t": bc.now()}
             ]
     elif tool == "Bash":
-        # Without the move that got it there: a worktree named after the card it
-        # holds spells that card in every line run inside it, and the ids read
-        # here become claims and closes.
-        cmd = bc.said(data)
         if re.search(r"\bbd\b.*\bcreate\b|board/job\b", cmd):
             found = card_ids(response_text(data.get("tool_response")), bc.prefix(root))
             state["created"] = (state.get("created") or [])[-200:] + [
@@ -111,6 +114,17 @@ def main():
                     ]
                 run.advance(cid, root)
 
+    # A write answers with the card it made, so nothing has to ask again. Two
+    # sessions measured asked the board what they had just written to it 72 and
+    # 33 times in a day, purely because writing said nothing back (mch-aa9).
+    # Only ever for a write naming exactly one card: a line naming several is a
+    # line whose answer nobody could read anyway.
+    answer = None
+    if tool == "Bash" and WROTE.search(cmd):
+        named = set(card_ids(cmd, bc.prefix(root)))
+        if len(named) == 1:
+            answer = run.card(named.pop(), root) or None
+
     if bc.now() - (state.get("last_beat") or 0) > BEAT_EVERY:
         state["last_beat"] = bc.now()
         name = bc.actor(sid, data.get("cwd"))
@@ -119,6 +133,12 @@ def main():
             bc.bd(["heartbeat", "--actor", name] + mine, root)
 
     bc.save(sid, state)
+    if answer:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "%s is now %s: %s" % (
+                answer.get("id"), answer.get("status"), answer.get("title") or ""),
+        }}))
 
 
 if __name__ == "__main__":

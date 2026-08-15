@@ -590,6 +590,38 @@ def landed(merge_fails, release_fails=False):
     return dict(seen, asked=asked, said=out.getvalue())
 
 
+def answered(cmd):
+    """What the board hands back after a write, if anything.
+
+    A session that has to ask what it just wrote spends a turn on the answer;
+    two sessions measured did it 105 times in a day (mch-aa9).
+    """
+    card = {"id": "tst-j.4", "status": "closed", "title": "the work item",
+            "labels": ["step:work", "of:tst-j"], "metadata": {}}
+
+    def recorder(args, root=None):
+        if args[0] == "show":
+            return True, json.dumps(dict(card, id=args[1]))
+        return True, "[]"
+
+    touch.bc.bd = recorder
+    touch.run.advance = lambda cid, root: None
+    touch.run.started = lambda cid, root: None
+    sys.stdin = io.StringIO(json.dumps(
+        {"session_id": "selftest", "cwd": ROOT, "tool_name": "Bash",
+         "hook_event_name": "PostToolUse", "tool_input": {"command": cmd}}))
+    out = io.StringIO()
+    keep, sys.stdout = sys.stdout, out
+    try:
+        touch.main()
+    finally:
+        sys.stdout = keep
+    said = out.getvalue().strip()
+    if not said:
+        return ""
+    return json.loads(said)["hookSpecificOutput"]["additionalContext"]
+
+
 def refusal(cmd, card, family=None):
     """What the status gate says to `cmd`, with every card it names looking like this.
 
@@ -3854,6 +3886,18 @@ def main():
 
     print("ok: a step closes on the reason its own close carries, and a reason "
           "that says nothing is refused exactly as an empty note is")
+
+    # The third turn this job set out to save: a write answering with the card it
+    # made, so nothing has to ask the board what it has just told it.
+    assert "tst-j.4 is now closed" in answered('bd close tst-j.4 --reason="done well"'), \
+        "a write to one card said nothing back, so the session has to ask again"
+    assert not answered("bd close tst-j.4 tst-j.5 --reason=\"done\""), \
+        "a write naming several cards answered with one of them, which reads as all"
+    assert not answered("bd show tst-j.4"), \
+        "reading the board was answered as though something had been written"
+
+    print("ok: a write to one card answers with that card, a write naming several "
+          "answers with none, and reading the board answers with nothing")
 
     # The three answers the cost report has about a counter, which have to stay
     # three. Read against a counter file of its own: the real one is the number the
