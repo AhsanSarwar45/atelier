@@ -17,7 +17,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import project  # noqa: E402
 
 # A claim a machine can act on: something to run, in backticks or named outright.

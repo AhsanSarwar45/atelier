@@ -11,7 +11,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import sections  # noqa: E402
 
 # What proves a step, declared here once so the close gate reads it instead of

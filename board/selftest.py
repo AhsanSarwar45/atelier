@@ -19,7 +19,7 @@ import subprocess
 import sys
 import tempfile
 
-HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, HOME)
 sys.path.insert(0, os.path.join(HOME, "hooks"))
 sys.path.insert(0, os.path.join(HOME, "board"))
@@ -416,7 +416,7 @@ def suite_with_switch(by_file):
     else:
         env[gate.bc.HABIT_OFF_VAR] = "1"
     try:
-        ran = subprocess.run([sys.executable, os.path.abspath(__file__), CHILD],
+        ran = subprocess.run([sys.executable, os.path.realpath(__file__), CHILD],
                              capture_output=True, text=True, env=env, timeout=600)
         return ran.returncode, (ran.stdout + ran.stderr).strip()[-600:]
     finally:
@@ -771,6 +771,38 @@ def standing(root, edited_in, second):
                 BEGAN, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     return sorted(os.path.basename(p)
                   for p in status.wrote_code(STEP, card, "selftest", root))
+
+
+proof = hook("helper-proof")
+proof.bc.reviewing = lambda: ""
+proof.bc.board_root = lambda cwd=None: ROOT
+proof.bc.prefix = lambda root=None: FIXTURE
+
+
+def helper_return(said, did=(), where=None):
+    """What the helper gate says to a helper that did `did` in that order and
+    ended with `said`. Each step is a tool name, or a name and a command."""
+    lines = []
+    for step in did:
+        name, cmd = step if isinstance(step, tuple) else (step, "")
+        lines.append(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": name, "input": {"command": cmd}}]}}))
+    lines.append(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "text", "text": said}]}}))
+    path = os.path.join(where, "agent-case.jsonl")
+    with open(path, "w") as fh:
+        fh.write("\n".join(lines))
+    sys.stdin = io.StringIO(json.dumps(
+        {"hook_event_name": "SubagentStop", "cwd": ROOT,
+         "agent_transcript_path": path}))
+    out = io.StringIO()
+    keep, sys.stdout = sys.stdout, out
+    try:
+        proof.main()
+    finally:
+        sys.stdout = keep
+    said_back = out.getvalue().strip()
+    return json.loads(said_back)["reason"] if said_back else ""
 
 
 def main():
@@ -1725,6 +1757,58 @@ def main():
 
     print("ok: an objection the board turns away leaves the job shut instead of "
           "vanishing, and the reader's own fallback clears the bar it is held to")
+
+    tmp = tempfile.mkdtemp(prefix="helper-proof-")
+    try:
+        edit_then_say = ["Edit"]
+        assert "nothing ran" in helper_return(
+            "Fixed the lamp. Verified: the highlight is back.",
+            edit_then_say, where=tmp), \
+            "a helper claiming it verified its own change, with nothing run after it, was believed"
+        assert not helper_return(
+            "Fixed the lamp. Verified: the highlight is back.",
+            ["Edit", ("Bash", "cargo test")], where=tmp), \
+            "a helper that ran something after its change was refused anyway"
+        assert not helper_return(
+            "Fixed the lamp; I could not verify it, no GPU on this box.",
+            edit_then_say, where=tmp), \
+            "a helper that said outright it did not verify was refused for not verifying"
+        assert not helper_return("Changed the two call sites.", edit_then_say,
+                                 where=tmp), \
+            "a helper that claimed nothing was refused"
+
+        dump = "\n".join("line %d of a pasted build log" % i for i in range(200))
+        assert "transcript, not a verdict" in helper_return(dump, ["Edit"], where=tmp), \
+            "a helper that changed files and pasted a log back was let through"
+        assert not helper_return(dump, ["Read"], where=tmp), \
+            "a search helper was held to the cap measured for helpers that change files"
+        assert "transcript, not a verdict" in helper_return(
+            dump + "\nx" * 25_000, ["Read"], where=tmp), \
+            "a search helper's answer was allowed to be any length at all"
+
+        worked = [("Bash", "bd update tst-9k.2 --claim"), "Edit", ("Bash", "cargo test")]
+        assert "names no card" in helper_return(
+            "Done, all tests pass.", worked, where=tmp), \
+            "a helper that claimed a card handed back an answer naming no card"
+        assert not helper_return("tst-9k.2 done, all tests pass.", worked, where=tmp), \
+            "a helper that named the card it claimed was refused"
+
+        sys.stdin = io.StringIO(json.dumps({"hook_event_name": "SubagentStop",
+                                            "cwd": ROOT}))
+        out = io.StringIO()
+        keep, sys.stdout = sys.stdout, out
+        try:
+            proof.main()
+        finally:
+            sys.stdout = keep
+        assert not out.getvalue().strip(), \
+            "the gate refused a helper whose transcript it could not even find"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    print("ok: a helper is refused for claiming it verified with nothing run, for "
+          "handing back a transcript instead of a verdict, and for working a card "
+          "it never names — and passes silently otherwise")
 
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a

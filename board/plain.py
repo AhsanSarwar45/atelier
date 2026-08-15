@@ -14,7 +14,7 @@ each other. See docs/board.md#4d-the-words-a-card-is-written-in.
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks"))
 import board_common as bc  # noqa: E402
 
 

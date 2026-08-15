@@ -15,8 +15,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "board"))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "board"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import board_common as bc  # noqa: E402
 import project  # noqa: E402
 import reading  # noqa: E402
@@ -133,7 +133,7 @@ def tally(name):
     full disk must not turn a gate into a gate that lets things through.
     """
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                         "..", "board"))
         import cost
         cost.record(name)

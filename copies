@@ -67,7 +67,14 @@ def ours():
 
 
 def forwards(path):
-    """Whether this file is a pointer at the machinery rather than a copy of it."""
+    """Whether this file is a pointer at the machinery rather than a copy of it.
+
+    A link into this home is the plainest kind: there is only one file, and `ls`
+    says so. The written forwarder is the other kind, for a path that has to
+    survive somewhere links do not.
+    """
+    if os.path.realpath(path).startswith(os.path.realpath(HOME) + os.sep):
+        return True
     try:
         with open(path, errors="replace") as fh:
             return MARK in fh.read(600)

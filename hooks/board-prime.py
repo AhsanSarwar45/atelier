@@ -10,7 +10,7 @@ import os
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "board"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "board"))
 import board_common as bc  # noqa: E402
 import sections  # noqa: E402
 import spine  # noqa: E402

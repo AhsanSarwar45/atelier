@@ -89,7 +89,7 @@ Reply with one line of JSON and nothing else:
 def tally(name, value=1):
     """One row for the manager's count of what this costs (board/cost.py)."""
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                         "..", "board"))
         import cost
         cost.record(name, value)
@@ -163,7 +163,7 @@ def main():
     bc.habit_write(prompt_id, {"t": bc.now(), "state": "reading", "habit": False,
                                "word": hit.group(0), "said": said[:LIMIT]})
     subprocess.Popen(
-        [sys.executable, os.path.abspath(__file__), "--read", prompt_id],
+        [sys.executable, os.path.realpath(__file__), "--read", prompt_id],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, start_new_session=True, cwd=bc.STATE_DIR,
         env=dict(os.environ, **{BUSY: "1"}))

@@ -20,7 +20,7 @@ import re
 import subprocess
 import tomllib
 
-HOME = os.path.dirname(os.path.abspath(__file__))
+HOME = os.path.dirname(os.path.realpath(__file__))
 # Every project that runs this machinery, by the name its own declaration gives
 # it. `machinery/join` writes it; nothing else does.
 REGISTRY = os.path.join(HOME, "projects.toml")
