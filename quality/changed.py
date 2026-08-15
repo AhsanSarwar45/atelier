@@ -1,0 +1,112 @@
+"""Which lines this change touched, on whichever side of it the caller reasons about.
+
+A rule that acts on a change needs to know what the change was, and comparing file
+against file is too coarse: two copies can share a file with code nobody touched.
+Line ranges come from git's own diff so the answer is the same one the commit will
+carry.
+
+Which side matters. A rule that reads relationships out of the tree as it stood
+BEFORE the change has to ask in that tree's line numbers, or every answer is off by
+however far the change shifted the file.
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+from collections import defaultdict
+
+HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+WHOLE = (1, 1 << 30)
+
+BEFORE, AFTER = "before", "after"
+
+
+def _git(root: str, *args: str) -> str:
+    out = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True)
+    return out.stdout if out.returncode == 0 else ""
+
+
+def base(root: str, against: str = "main") -> str | None:
+    """The commit this branch left `against` at, which is what a change is measured from."""
+    got = _git(root, "merge-base", "HEAD", against).strip()
+    return got or None
+
+
+def _renamed(root: str, since: str, fresh: list[str]) -> set[str]:
+    """Both names of every file that only changed name, old and new.
+
+    Git pairs a deletion with an addition itself, but only for files it is tracking,
+    and a file just written under a new name is not tracked yet. Content settles it:
+    the same bytes, gone from one name and arrived at another.
+    """
+    if not fresh:
+        return set()
+    was: dict[str, str] = {}
+    for row in _git(root, "diff", "--name-status", "--find-renames", since).splitlines():
+        if row.startswith("D\t"):
+            path = row[2:].strip()
+            blob = _git(root, "rev-parse", f"{since}:{path}").strip()
+            if blob:
+                was.setdefault(blob, path)
+    moved = set()
+    for path in fresh:
+        blob = _git(root, "hash-object", path).strip()
+        if blob in was:
+            moved.add(was.pop(blob))
+            moved.add(path)
+    return moved
+
+
+def lines(root: str, since: str, to: str | None = None,
+          side: str = AFTER) -> dict[str, list[tuple[int, int]]]:
+    """Path -> the line ranges this change reaches, numbered on `side`.
+
+    A hunk that only adds lines occupies no lines on the earlier side, so it is
+    reported as the seam between the two lines it sits between: a rule asking
+    whether a change reached a stretch of the earlier tree has to be told yes.
+
+    Untracked files appear only on the later side. There is no earlier version of
+    one, so on the earlier side there is nothing for it to have touched.
+
+    Renames are followed. A file given a new name has had nothing done to it, and
+    read as a deletion it would look like one copy of a twinned pair being removed
+    while the other stayed — a refusal for tidying up.
+    """
+    touched: dict[str, list[tuple[int, int]]] = defaultdict(list)
+
+    fresh: list[str] = []
+    if to is None:
+        fresh = [row[3:].strip() for row in _git(root, "status", "--porcelain").splitlines()
+                 if row.startswith("??")]
+    moved = _renamed(root, since, fresh) if to is None else set()
+
+    if side == AFTER:
+        for path in fresh:
+            if path not in moved:
+                touched[path].append(WHOLE)
+
+    want = _git(root, "diff", "--unified=0", "--find-renames", since,
+                *([to] if to else []))
+    path = None
+    for row in want.splitlines():
+        if side == BEFORE and row.startswith("--- a/"):
+            path = row[6:]
+        elif side == BEFORE and row.startswith("--- /dev/null"):
+            path = None
+        elif side == AFTER and row.startswith("+++ b/"):
+            path = row[6:]
+        elif side == AFTER and row.startswith("+++ /dev/null"):
+            path = None
+        elif path and path not in moved and (m := HUNK.match(row)):
+            at, count = ((int(m.group(1)), m.group(2)) if side == BEFORE
+                         else (int(m.group(3)), m.group(4)))
+            n = 1 if count is None else int(count)
+            touched[path].append((at, at + n - 1) if n else (at, at + 1))
+    return dict(touched)
+
+
+def within(touched: dict[str, list[tuple[int, int]]],
+           path: str, first: int, last: int) -> bool:
+    """Whether this change reaches into `path` between `first` and `last`."""
+    return any(a <= last and first <= b for a, b in touched.get(path, ()))

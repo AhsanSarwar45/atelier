@@ -22,6 +22,9 @@ lands_elsewhere = []
 # before it was never asked and is not held to an answer. Leave it out if the
 # project joined after the question existed.
 # guard_asked_from = "2026-08-12T17:56:47Z"
+# Where this project's own quality-rule modules live, relative to its root.
+# Empty runs `quality.py` with the shared measures only.
+rules = ""
 
 [review]
 # What the outside reader is told it is reading for.
