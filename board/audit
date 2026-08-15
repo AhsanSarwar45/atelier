@@ -69,11 +69,24 @@ def words():
     return plain.problems
 
 
-def measure(only=None):
+# What a cancel writes onto a card besides shutting it. Reopening one puts the
+# status back and leaves these, and the screen draws its Cancelled column from
+# them — so the card is live to every tool and dead to the only reader who matters.
+DROPPED = ("cancelled", "resolution:cancelled", "dropped", "wontfix")
+
+
+def contradicting(cards):
+    """Cards the board calls live and their own tags call cancelled."""
+    return sorted(c["id"] for c in cards
+                  if c.get("status") in sections.LIVE
+                  and set(DROPPED) & set(c.get("labels") or []))
+
+
+def measure(cards, only=None):
     """Every standing card that is below a bar, with what each one earns."""
     check = words()
     below, standing = {}, collections.Counter()
-    for card in board():
+    for card in cards:
         kind = sections.kind_of(card)
         if card.get("status") not in sections.LIVE or kind == "step":
             continue
@@ -95,7 +108,9 @@ def main():
     ap.add_argument("--json", metavar="FILE", help="write what was found, for a tool")
     a = ap.parse_args()
 
-    standing, below = measure(a.only)
+    cards = board()
+    standing, below = measure(cards, a.only)
+    both_ways = contradicting(cards)
     if a.json:
         with open(a.json, "w") as fh:
             json.dump(below, fh, indent=1)
@@ -112,7 +127,12 @@ def main():
         print("    %-26s %d" % (SAID[name], count))
     print("%d of %d cards still standing are below the bar"
           % (len(below), sum(standing.values())))
-    sys.exit(1 if below else 0)
+    if both_ways:
+        print("\n%d card(s) the board calls live and their own tags call cancelled, "
+              "so your screen files open work as dropped:" % len(both_ways))
+        for cid in both_ways:
+            print("    %s" % cid)
+    sys.exit(1 if below or both_ways else 0)
 
 
 if __name__ == "__main__":
