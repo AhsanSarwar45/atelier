@@ -12,7 +12,28 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
-import type { Driver, DriverEvent, PermissionAnswer, StartOptions } from './types.ts';
+import type { ImagePayload, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
+
+/**
+ * This build has no `TodoWrite`. Its checklist is the TaskCreate/TaskGet/
+ * TaskUpdate/TaskList family, which carries the same
+ * pending | in_progress | completed vocabulary and hands back the task id in
+ * TaskCreate's result. `TodoWrite` is still read where an install has it.
+ */
+const CHECKLIST_CREATE = 'TaskCreate';
+const CHECKLIST_UPDATE = 'TaskUpdate';
+const CHECKLIST_WRITE_ALL = 'TodoWrite';
+
+/** The only picture formats the API accepts as an image block. */
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+type ImageMediaType = (typeof IMAGE_TYPES)[number];
+
+function mediaType(mime: string): ImageMediaType {
+  const found = IMAGE_TYPES.find((t) => t === mime);
+  if (!found) throw new Error(`${mime} cannot be sent as a picture; use ${IMAGE_TYPES.join(', ')}`);
+  return found;
+}
 
 /** A permission card the human has not answered yet. */
 interface PendingAsk {
@@ -37,7 +58,7 @@ export class ClaudeDriver implements Driver {
   private emit!: (e: DriverEvent) => void;
   private q: ReturnType<typeof query> | null = null;
   /** Turns queued by the browser, handed to the SDK as an async iterable. */
-  private inbox: string[] = [];
+  private inbox: PromptInput[] = [];
   private wake: (() => void) | null = null;
   private closed = false;
   private asks = new Map<string, PendingAsk>();
@@ -45,10 +66,81 @@ export class ClaudeDriver implements Driver {
   private liveTools = new Map<string, string>();
   /** The assistant message currently being streamed. */
   private streamingMessageId = '';
+  /** The agent's checklist, in the order the items were created. */
+  private todos: TodoItem[] = [];
+  /** TaskCreate calls awaiting the result that carries the task's id. */
+  private pendingTodo = new Map<string, { text: string }>();
 
   /** One transcript bubble per text block of one message. */
   private blockId(index: number): string {
     return `${this.streamingMessageId}:${index}`;
+  }
+
+  /** Folds one checklist tool call into `todos` and republishes the whole list. */
+  private applyChecklistCall(toolCallId: string, name: string, input: Record<string, unknown>): void {
+    if (name === CHECKLIST_CREATE) {
+      this.pendingTodo.set(toolCallId, { text: String(input.subject ?? input.description ?? '') });
+      return;
+    }
+    if (name === CHECKLIST_UPDATE) {
+      const id = String(input.taskId ?? '');
+      const item = this.todos.find((t) => t.id === id);
+      if (!item) return;
+      if (typeof input.subject === 'string') item.text = input.subject;
+      const status = input.status as TodoItem['status'] | 'deleted' | undefined;
+      if (status === 'deleted') this.todos = this.todos.filter((t) => t.id !== id);
+      else if (status) item.status = status;
+      this.emit({ type: 'todo', items: this.todos.map((t) => ({ ...t })) });
+      return;
+    }
+    if (name === CHECKLIST_WRITE_ALL && Array.isArray(input.todos)) {
+      this.todos = (input.todos as { content: string; status: TodoItem['status'] }[]).map((t, i) => ({
+        id: `todo-${i}`,
+        text: t.content,
+        status: t.status,
+      }));
+      this.emit({ type: 'todo', items: this.todos.map((t) => ({ ...t })) });
+    }
+  }
+
+  /**
+   * TaskCreate hands the new task's id back in its result, not its input.
+   *
+   * Two result shapes, because the SDK's declared TaskCreateOutput
+   * (`{task:{id,subject}}`) is not what arrives: measured, this build returns
+   * the sentence `Task #1 created successfully: <subject>`, and the number is
+   * the id TaskUpdate then refers to.
+   */
+  private absorbChecklistResult(toolCallId: string, output: string): void {
+    const pending = this.pendingTodo.get(toolCallId);
+    if (!pending) return;
+    this.pendingTodo.delete(toolCallId);
+
+    let id = '';
+    let text = pending.text;
+    try {
+      const parsed = JSON.parse(output) as { task?: { id?: string; subject?: string } };
+      id = parsed.task?.id ?? '';
+      if (parsed.task?.subject) text = parsed.task.subject;
+    } catch {
+      const m = /task\s*#\s*(\w+)/i.exec(output);
+      id = m?.[1] ?? '';
+    }
+    if (!id) return;
+
+    this.todos.push({ id, text, status: 'pending' });
+    this.emit({ type: 'todo', items: this.todos.map((t) => ({ ...t })) });
+  }
+
+  /** The before/after a change-viewer needs, taken from the tool's own arguments. */
+  private emitDiff(toolCallId: string, name: string, input: Record<string, unknown>): void {
+    const path = String(input.file_path ?? '');
+    if (!path) return;
+    if (name === 'Edit' && typeof input.old_string === 'string' && typeof input.new_string === 'string') {
+      this.emit({ type: 'diff', toolCallId, path, before: input.old_string, after: input.new_string });
+    } else if (name === 'Write' && typeof input.content === 'string') {
+      this.emit({ type: 'diff', toolCallId, path, before: '', after: input.content });
+    }
   }
 
   async start(opts: StartOptions): Promise<void> {
@@ -62,11 +154,27 @@ export class ClaudeDriver implements Driver {
           await new Promise<void>((r) => (self.wake = r));
           continue;
         }
+        // Pictures ride as base64 image blocks; a bare string is the text-only
+        // shape the API also accepts.
+        const content = next.images.length
+          ? [
+              ...next.images.map((img) => ({
+                type: 'image' as const,
+                source: {
+                  type: 'base64' as const,
+                  media_type: mediaType(img.mime),
+                  data: img.dataUrl.replace(/^data:[^,]*,/, ''),
+                },
+              })),
+              { type: 'text' as const, text: next.text },
+            ]
+          : next.text;
+
         yield {
           type: 'user' as const,
           session_id: '',
           parent_tool_use_id: null,
-          message: { role: 'user' as const, content: next },
+          message: { role: 'user' as const, content },
         };
       }
     }
@@ -139,8 +247,8 @@ export class ClaudeDriver implements Driver {
     this.emit({ type: 'session.state', state: 'thinking', label: 'Working' });
   }
 
-  async send(text: string): Promise<void> {
-    this.inbox.push(text);
+  async send(input: PromptInput): Promise<void> {
+    this.inbox.push(input);
     this.wake?.();
     this.wake = null;
     this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
@@ -207,15 +315,20 @@ export class ClaudeDriver implements Driver {
           case 'assistant':
             for (const b of m.message?.content ?? []) {
               if (b.type === 'tool_use') {
+                const input = b.input ?? {};
                 this.liveTools.set(b.id, b.name);
                 this.emit({
                   type: 'tool.started',
                   toolCallId: b.id,
                   name: b.name,
-                  input: b.input ?? {},
-                  title: toolTitle(b.name, b.input ?? {}),
+                  input,
+                  title: toolTitle(b.name, input),
+                  // Subagent attribution rides on the MESSAGE, not the block.
+                  parentToolCallId: m.parent_tool_use_id ?? null,
                 });
-                this.emit({ type: 'session.state', state: 'running_tool', label: toolTitle(b.name, b.input ?? {}) });
+                this.emitDiff(b.id, b.name, input);
+                this.applyChecklistCall(b.id, b.name, input);
+                this.emit({ type: 'session.state', state: 'running_tool', label: toolTitle(b.name, input) });
               }
             }
             break;
@@ -225,11 +338,14 @@ export class ClaudeDriver implements Driver {
             for (const b of m.message?.content ?? []) {
               if (b.type === 'tool_result') {
                 this.liveTools.delete(b.tool_use_id);
+                const output =
+                  typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
+                this.absorbChecklistResult(b.tool_use_id, output);
                 this.emit({
                   type: 'tool.completed',
                   toolCallId: b.tool_use_id,
                   ok: !b.is_error,
-                  output: typeof b.content === 'string' ? b.content.slice(0, 4000) : JSON.stringify(b.content).slice(0, 4000),
+                  output: output.slice(0, 4000),
                 });
               }
             }

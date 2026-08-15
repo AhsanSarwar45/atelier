@@ -7,7 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import type { Brand, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
+import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import { ClaudeDriver } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
@@ -65,18 +65,19 @@ export class Sessions {
     return summary;
   }
 
-  async send(sessionId: string, text: string): Promise<void> {
+  async send(sessionId: string, text: string, images: ImagePayload[] = []): Promise<void> {
     const driver = this.require(sessionId);
     // The user's own turn belongs in the transcript before the agent answers it.
     const messageId = randomUUID();
     this.publish(sessionId, { type: 'message.started', messageId, role: 'user' });
+    for (const image of images) this.publish(sessionId, { type: 'image', messageId, image });
     this.publish(sessionId, { type: 'text.delta', messageId, text });
     this.publish(sessionId, { type: 'message.completed', messageId });
 
     const s = this.store.getSession(sessionId);
     if (s && !s.title) this.store.updateSession(sessionId, { title: text.slice(0, 80) });
 
-    await driver.send(text);
+    await driver.send({ text, images });
   }
 
   answer(sessionId: string, askId: string, optionId: string): void {

@@ -283,7 +283,7 @@ It never greys it out with an excuse and never fakes parity.
 | multiple-choice question | yes | **no** → control hidden |
 | plan-then-approve | yes (`--permission-mode plan`) | **no** → hidden; `review/start` is offered as its own command instead |
 | images in | base64 blocks | `image`/`localImage` items |
-| todo checklist | yes | *confirm* |
+| todo checklist | yes, via the task tools — this build ships no `TodoWrite` | *confirm* |
 | subagents | yes (`parent_tool_use_id`) | **no** → panel hidden |
 | cost | dollars | tokens |
 | typed commands | the install's real slash commands | four fixed entries (§7) |
@@ -646,6 +646,12 @@ search, spend, report viewer), `tests/e2e/workbench.spec.ts`, this document.
 - The Claude terminal-session project guess reads the directory name as
   `cwd` with `/`→`-`. Observed on this machine, not documented; it degrades
   to "Unknown project", never to a wrong project silently.
+- A picture is inlined as a data URL in the event that carries it, so the
+  transcript stays self-contained. A habit of pasting large images would grow
+  the event log fast; the fix, when it is needed, is a blob beside the database
+  with the event holding a reference.
+- The side-by-side change view diffs the fragment the tool was handed
+  (`old_string` against `new_string`), not the whole file before and after.
 
 ---
 

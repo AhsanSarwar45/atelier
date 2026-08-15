@@ -19,7 +19,9 @@ function LoadingFallback() {
 }
 
 function ProjectTabs() {
-  const projectId = useSearchParams().get('id');
+  const params = useSearchParams();
+  const projectId = params.get('id');
+  const openChat = params.get('chat');
   const { project } = useProject(projectId);
 
   return (
@@ -33,7 +35,7 @@ function ProjectTabs() {
         </TabsTrigger>
       </TabsList>
       <TabsContent value="chat">
-        <ChatTab projectId={projectId} projectPath={project?.path ?? null} />
+        <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
       </TabsContent>
       {/* forceMount keeps the board mounted across tab switches, so its beads
           are not refetched every time the owner looks at the chat. */}

@@ -48,6 +48,20 @@ export type Cost =
   | { kind: 'usd'; usd: number }
   | { kind: 'tokens'; input: number; output: number; total: number };
 
+/** One line of the agent's live checklist. */
+export interface TodoItem {
+  id: string;
+  text: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+/** A picture, inline. `dataUrl` so it survives in the event log with the turn. */
+export interface ImagePayload {
+  mime: string;
+  dataUrl: string;
+  alt: string;
+}
+
 /** Fields every event carries. `seq` is per-session and monotone. */
 interface EventBase {
   seq: number;
@@ -63,8 +77,19 @@ export type WbpEvent = EventBase &
     | { type: 'message.started'; messageId: string; role: 'user' | 'assistant' }
     | { type: 'text.delta'; messageId: string; text: string }
     | { type: 'message.completed'; messageId: string }
-    | { type: 'tool.started'; toolCallId: string; name: string; input: Record<string, unknown>; title: string }
+    | {
+        type: 'tool.started';
+        toolCallId: string;
+        name: string;
+        input: Record<string, unknown>;
+        title: string;
+        /** Set when the call was made by a subagent; the id of the call that spawned it. */
+        parentToolCallId: string | null;
+      }
     | { type: 'tool.completed'; toolCallId: string; ok: boolean; output: string }
+    | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
+    | { type: 'todo'; items: TodoItem[] }
+    | { type: 'image'; messageId: string; image: ImagePayload }
     | { type: 'ask.permission'; askId: string; toolName: string; input: Record<string, unknown>; title: string; options: AskOption[] }
     | { type: 'ask.resolved'; askId: string; chosen: string }
     | { type: 'cost'; cost: Cost }
@@ -76,7 +101,7 @@ export type WbpEventType = WbpEvent['type'];
 /** Commands the browser POSTs to /api/workbench/command. */
 export type WbpCommand =
   | { type: 'session.start'; projectId: string; projectPath: string; brand: Brand; model?: string; permissionMode?: string }
-  | { type: 'prompt.send'; sessionId: string; text: string }
+  | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
   | { type: 'session.stop'; sessionId: string };
 

@@ -1,9 +1,9 @@
 /**
- * The Chat tab: the transcript, the composer, the Stop button and the
- * permission card.
+ * The Chat tab: transcript, composer, Stop button, permission cards, the tool
+ * feed with its diffs and subagent nesting, and the checklist.
  *
- * Design: docs/agent-workbench.md §8.2. This is work item 1's slice of it —
- * diffs, images, todos, subagents and the sidebar arrive with their own items.
+ * Design: docs/agent-workbench.md §8.2. The sidebar, the card rail and the
+ * report viewer arrive with their own work items.
  */
 'use client';
 
@@ -11,9 +11,11 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { AskOption, Cost } from '@/workbench/protocol';
+import { diffLines } from '@/workbench/line-diff';
+import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import {
   isBusy,
+  readImage,
   sendCommand,
   useSession,
   useStartSession,
@@ -23,6 +25,8 @@ import {
 interface ChatTabProps {
   projectId: string | null;
   projectPath: string | null;
+  /** Attach to this existing session instead of offering a new one. */
+  openSessionId?: string | null;
 }
 
 function costLabel(cost: Cost): string {
@@ -101,27 +105,99 @@ function PermissionCard({
   );
 }
 
-function ToolRow({ item }: { item: Extract<TranscriptItem, { kind: 'tool' }> }) {
-  const dot =
-    item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
+/** Before and after in two columns, with only the lines that differ marked. */
+function DiffView({ path, before, after }: { path: string; before: string; after: string }) {
+  const rows = diffLines(before, after);
   return (
-    <div
-      data-testid="tool-row"
-      data-tool-status={item.status}
-      data-tool-name={item.name}
-      className="flex items-center gap-2 rounded border border-border/40 bg-muted/20 px-2.5 py-1.5 font-mono text-xs text-muted-foreground"
-    >
-      <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
-      <span className="truncate">{item.title}</span>
-      <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
+    <div data-testid="diff-view" data-diff-path={path} className="mt-1.5 overflow-hidden rounded border border-border/50">
+      <div className="flex items-center justify-between bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+        <span className="truncate">{path}</span>
+        <span className="shrink-0">before → after</span>
+      </div>
+      <div className="max-h-64 overflow-auto">
+        <table className="w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed">
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} data-diff-kind={r.kind}>
+                <td
+                  className={cn(
+                    'w-1/2 whitespace-pre-wrap break-all border-r border-border/40 px-2 py-0.5 align-top',
+                    r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15 text-red-200' : 'text-muted-foreground',
+                  )}
+                >
+                  {r.left ?? ''}
+                </td>
+                <td
+                  className={cn(
+                    'w-1/2 whitespace-pre-wrap break-all px-2 py-0.5 align-top',
+                    r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15 text-emerald-200' : 'text-muted-foreground',
+                  )}
+                >
+                  {r.right ?? ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-export default function ChatTab({ projectId, projectPath }: ChatTabProps) {
-  const { sessionId, start, starting, error: startError } = useStartSession(projectId, projectPath);
+function ToolRow({ item, nested }: { item: Extract<TranscriptItem, { kind: 'tool' }>; nested: boolean }) {
+  const dot =
+    item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
+  return (
+    <div
+      data-testid={nested ? 'subagent-tool-row' : 'tool-row'}
+      data-tool-status={item.status}
+      data-tool-name={item.name}
+      className={cn(nested && 'ml-6 border-l-2 border-violet-500/50 pl-3')}
+    >
+      <div className="flex items-center gap-2 rounded border border-border/40 bg-muted/20 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
+        <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
+        <span className="truncate">{item.title}</span>
+        <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
+      </div>
+      {item.diff && <DiffView path={item.diff.path} before={item.diff.before} after={item.diff.after} />}
+    </div>
+  );
+}
+
+/** The agent's checklist, as it stands right now. */
+function TodoPanel({ items }: { items: TodoItem[] }) {
+  if (!items.length) return null;
+  return (
+    <div data-testid="todo-panel" className="rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+      <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Checklist</div>
+      <ul className="space-y-1">
+        {items.map((t) => (
+          <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="flex items-center gap-2 text-sm">
+            <span
+              className={cn(
+                'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border text-[10px]',
+                t.status === 'completed'
+                  ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
+                  : t.status === 'in_progress'
+                    ? 'animate-pulse border-amber-400 bg-amber-400/20 text-amber-300'
+                    : 'border-border text-transparent',
+              )}
+            >
+              {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '●' : ''}
+            </span>
+            <span className={cn(t.status === 'completed' && 'text-muted-foreground line-through')}>{t.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
+  const { sessionId, start, starting, error: startError } = useStartSession(projectId, projectPath, openSessionId);
   const view = useSession(sessionId);
   const [draft, setDraft] = useState('');
+  const [attached, setAttached] = useState<ImagePayload[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -133,8 +209,18 @@ export default function ChatTab({ projectId, projectPath }: ChatTabProps) {
   async function submit() {
     const text = draft.trim();
     if (!text || !sessionId) return;
+    const images = attached;
     setDraft('');
-    await sendCommand({ type: 'prompt.send', sessionId, text });
+    setAttached([]);
+    await sendCommand({ type: 'prompt.send', sessionId, text, images });
+  }
+
+  /** Pictures arrive by paste or by drop; both land in the same tray. */
+  async function absorb(files: FileList | File[] | null) {
+    const pictures = Array.from(files ?? []).filter((f) => f.type.startsWith('image/'));
+    if (!pictures.length) return;
+    const read = await Promise.all(pictures.map(readImage));
+    setAttached((prev) => [...prev, ...read]);
   }
 
   if (!projectId || !projectPath) {
@@ -163,7 +249,11 @@ export default function ChatTab({ projectId, projectPath }: ChatTabProps) {
         >
           {view.stateLabel}
         </span>
-        <span className="text-xs text-muted-foreground">claude · permission mode: default</span>
+        <span data-testid="session-meta" className="text-xs text-muted-foreground">
+          claude
+          {view.model ? ` · ${view.model}` : ''}
+          {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
+        </span>
         {view.cost && (
           <span data-testid="cost-chip" className="ml-auto rounded bg-muted px-2 py-0.5 font-mono text-xs">
             {costLabel(view.cost)}
@@ -171,9 +261,15 @@ export default function ChatTab({ projectId, projectPath }: ChatTabProps) {
         )}
       </div>
 
+      {view.todos.length > 0 && (
+        <div className="border-b border-border/60 px-4 py-2">
+          <TodoPanel items={view.todos} />
+        </div>
+      )}
+
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" data-testid="transcript">
         {view.items.map((item) => {
-          if (item.kind === 'tool') return <ToolRow key={item.id} item={item} />;
+          if (item.kind === 'tool') return <ToolRow key={item.id} item={item} nested={item.parentId !== null} />;
           if (item.kind === 'ask') {
             return (
               <PermissionCard
@@ -196,6 +292,16 @@ export default function ChatTab({ projectId, projectPath }: ChatTabProps) {
                 item.role === 'user' ? 'ml-auto bg-primary/15 text-foreground' : 'bg-muted/40 text-foreground',
               )}
             >
+              {item.images.map((img, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  data-testid="message-image"
+                  src={img.dataUrl}
+                  alt={img.alt}
+                  className="mb-2 max-h-64 max-w-full rounded border border-border/60"
+                />
+              ))}
               {item.text}
             </div>
           );
@@ -204,12 +310,40 @@ export default function ChatTab({ projectId, projectPath }: ChatTabProps) {
         <div ref={endRef} />
       </div>
 
-      <div className="flex items-end gap-2 border-t border-border/60 px-4 py-3">
+      <div className="border-t border-border/60 px-4 py-3">
+        {attached.length > 0 && (
+          <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
+            {attached.map((img, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={i}
+                src={img.dataUrl}
+                alt={img.alt}
+                title={img.alt}
+                className="h-12 w-12 rounded border border-border/60 object-cover"
+              />
+            ))}
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+        <input
+          data-testid="image-input"
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => void absorb(e.target.files)}
+        />
         <textarea
           data-testid="composer"
           rows={2}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={(e) => void absorb(Array.from(e.clipboardData.files))}
+          onDrop={(e) => {
+            e.preventDefault();
+            void absorb(e.dataTransfer.files);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
@@ -232,6 +366,7 @@ export default function ChatTab({ projectId, projectPath }: ChatTabProps) {
             Send
           </Button>
         )}
+        </div>
       </div>
     </div>
   );

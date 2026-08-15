@@ -69,7 +69,7 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       return;
     }
     case 'prompt.send':
-      await sessions.send(cmd.sessionId, cmd.text);
+      await sessions.send(cmd.sessionId, cmd.text, cmd.images ?? []);
       json(res, 200, { ok: true });
       return;
     case 'ask.answer':

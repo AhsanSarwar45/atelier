@@ -5,7 +5,13 @@
  * HTTP, never sees SQLite, and never knows about beads — which is why adding
  * a brand is one file (docs/agent-workbench.md §2.4).
  */
-import type { WbpEvent } from '../../../src/workbench/protocol.ts';
+import type { ImagePayload, WbpEvent } from '../../../src/workbench/protocol.ts';
+
+/** One user turn: what was typed, and any pictures attached to it. */
+export interface PromptInput {
+  text: string;
+  images: ImagePayload[];
+}
 
 /**
  * Everything but `seq`, `sessionId` and `at` — the runtime stamps those.
@@ -31,7 +37,7 @@ export interface Driver {
   /** Begin the session. Resolves once the channel is open, not when the turn ends. */
   start(opts: StartOptions): Promise<void>;
   /** Queue a user turn. */
-  send(text: string): Promise<void>;
+  send(input: PromptInput): Promise<void>;
   /** Answer an outstanding permission card. */
   answer(askId: string, choice: PermissionAnswer): void;
   /** Stop the turn in flight, leaving the session usable. */

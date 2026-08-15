@@ -11,13 +11,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
-import type { AskOption, Cost, SessionState, WbpCommand, WbpEvent } from '@/workbench/protocol';
+import type {
+  AskOption,
+  Cost,
+  ImagePayload,
+  SessionState,
+  TodoItem,
+  WbpCommand,
+  WbpEvent,
+} from '@/workbench/protocol';
 
 export interface TranscriptMessage {
   kind: 'message';
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  images: ImagePayload[];
   done: boolean;
 }
 
@@ -27,6 +36,9 @@ export interface TranscriptTool {
   name: string;
   title: string;
   status: 'running' | 'ok' | 'failed';
+  /** Set when a subagent made this call — the row nests under that call. */
+  parentId: string | null;
+  diff: { path: string; before: string; after: string } | null;
 }
 
 export interface TranscriptAsk {
@@ -45,6 +57,10 @@ export interface SessionView {
   state: SessionState;
   stateLabel: string;
   cost: Cost | null;
+  todos: TodoItem[];
+  /** What the session is actually pinned to, as the agent reported it. */
+  permissionMode: string | null;
+  model: string | null;
   error: string | null;
   lastSeq: number;
 }
@@ -54,6 +70,9 @@ const EMPTY: SessionView = {
   state: 'starting',
   stateLabel: 'Starting',
   cost: null,
+  todos: [],
+  permissionMode: null,
+  model: null,
   error: null,
   lastSeq: 0,
 };
@@ -64,13 +83,24 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
   const next: SessionView = { ...view, lastSeq: Math.max(view.lastSeq, e.seq) };
 
   switch (e.type) {
+    case 'session.started':
+      next.permissionMode = e.permissionMode || null;
+      next.model = e.model;
+      return next;
+
     case 'session.state':
       next.state = e.state;
       next.stateLabel = e.label;
       return next;
 
     case 'message.started':
-      next.items = [...items, { kind: 'message', id: e.messageId, role: e.role, text: '', done: false }];
+      next.items = [...items, { kind: 'message', id: e.messageId, role: e.role, text: '', images: [], done: false }];
+      return next;
+
+    case 'image':
+      next.items = items.map((it) =>
+        it.kind === 'message' && it.id === e.messageId ? { ...it, images: [...it.images, e.image] } : it,
+      );
       return next;
 
     case 'text.delta':
@@ -86,13 +116,36 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'tool.started':
-      next.items = [...items, { kind: 'tool', id: e.toolCallId, name: e.name, title: e.title, status: 'running' }];
+      next.items = [
+        ...items,
+        {
+          kind: 'tool',
+          id: e.toolCallId,
+          name: e.name,
+          title: e.title,
+          status: 'running',
+          parentId: e.parentToolCallId,
+          diff: null,
+        },
+      ];
       return next;
 
     case 'tool.completed':
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId ? { ...it, status: e.ok ? 'ok' : 'failed' } : it,
       );
+      return next;
+
+    case 'diff':
+      next.items = items.map((it) =>
+        it.kind === 'tool' && it.id === e.toolCallId
+          ? { ...it, diff: { path: e.path, before: e.before, after: e.after } }
+          : it,
+      );
+      return next;
+
+    case 'todo':
+      next.todos = e.items;
       return next;
 
     case 'ask.permission':
@@ -117,6 +170,17 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
     default:
       return next;
   }
+}
+
+/** Reads a picked or pasted file into the shape the protocol carries. */
+export function readImage(file: File): Promise<ImagePayload> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('could not read the picture'));
+    reader.onload = () =>
+      resolve({ mime: file.type, dataUrl: String(reader.result), alt: file.name });
+    reader.readAsDataURL(file);
+  });
 }
 
 export async function sendCommand<T = unknown>(cmd: WbpCommand): Promise<T> {
@@ -158,10 +222,22 @@ export function isBusy(state: SessionState): boolean {
   return state === 'thinking' || state === 'streaming' || state === 'running_tool' || state === 'waiting_permission';
 }
 
-export function useStartSession(projectId: string | null, projectPath: string | null) {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+/**
+ * `openSessionId` attaches to a session that already exists instead of opening
+ * a new one — how a link from a card, the tray or the sidebar lands on a chat.
+ */
+export function useStartSession(
+  projectId: string | null,
+  projectPath: string | null,
+  openSessionId?: string | null,
+) {
+  const [sessionId, setSessionId] = useState<string | null>(openSessionId ?? null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (openSessionId) setSessionId(openSessionId);
+  }, [openSessionId]);
 
   const start = useCallback(async () => {
     if (!projectId || !projectPath) return;
