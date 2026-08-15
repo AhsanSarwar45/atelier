@@ -31,6 +31,10 @@ import project  # noqa: E402
 ROOT = project.root(os.getcwd())
 HERE_TREE = os.getcwd()
 GIT_TIMEOUT = 300
+# Long enough to queue behind another landing rather than give up on it. The
+# hooks' own `bd` gives up after twenty seconds, which is right for a hook and
+# turns `--wait` into a lie here (mch-aa9.11).
+SLOT_TIMEOUT = 1800
 
 
 def git(args, where, must=True):
@@ -39,6 +43,27 @@ def git(args, where, must=True):
     if must and run.returncode != 0:
         raise SystemExit("git %s: %s%s" % (args[0], run.stdout or "", run.stderr or ""))
     return (run.stdout or "").strip(), run.returncode
+
+
+def me():
+    """The board name this session holds things under.
+
+    The same name `hooks/board-actor.py` stamps onto the session's own board
+    commands, so the merge gate recognises the hold as this session's. Taken
+    under bd's default instead, the slot would be held by a name every session
+    on this machine shares, and the guard that catches a slot left behind could
+    never fire (mch-aa9.12).
+    """
+    return bc.actor(os.environ.get("CLAUDE_CODE_SESSION_ID"), HERE_TREE)
+
+
+def slot(verb):
+    """Ask the board for the merge slot, under this session's own name."""
+    run = subprocess.run(["bd", "merge-slot", verb, "--actor", me()]
+                         + (["--wait"] if verb == "acquire" else []),
+                         cwd=ROOT, capture_output=True, text=True,
+                         timeout=SLOT_TIMEOUT)
+    return run.returncode == 0, (run.stdout or "") + (run.stderr or "")
 
 
 def tree():
@@ -77,16 +102,26 @@ def main():
         return
 
     git(["rebase", trunk], top)
-    ok, out = bc.bd(["merge-slot", "acquire", "--wait"], ROOT)
-    if not ok:
-        sys.exit("could not take the merge slot: %s" % out)
+    took, out = slot("acquire")
+    if not took:
+        sys.exit("could not take the merge slot: %s" % out.strip())
+    merged = False
     try:
         _, code = git(["merge", "--ff-only", branch], main_tree, must=False)
-        if code != 0:
-            sys.exit("%s would not fast-forward onto %s even after catching up; "
-                     "the slot is free again" % (branch, trunk))
+        merged = code == 0
     finally:
-        bc.bd(["merge-slot", "release"], ROOT)
+        gave, why = slot("release")
+
+    # Said in this order because a slot nobody can take stops every landing on
+    # this machine, and a landing that says it worked while holding it is how
+    # nobody finds out (mch-aa9.13).
+    if not gave:
+        sys.exit("⛔ the merge slot is STILL HELD and no other landing can run "
+                 "until it is freed — `bd merge-slot release --actor %s`: %s"
+                 % (me(), why.strip()))
+    if not merged:
+        sys.exit("%s would not fast-forward onto %s even after catching up; "
+                 "the slot is free again" % (branch, trunk))
 
     head, _ = git(["rev-parse", "--short", "HEAD"], main_tree)
     print("landed %d commit(s) of %s: %s is now %s"

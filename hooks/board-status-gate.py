@@ -51,7 +51,8 @@ REVIEWING = re.compile(r"(?:-s|--status)[= ]in_review\b")
 # rather than in the card's notes, so a step judged only by its notes has to be
 # written to twice with the same substance (mch-aa9). Both quotings, because the
 # reason is prose and routinely holds the other one.
-REASON = re.compile(r"""(?:-r|--reason)[= ]\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)""")
+REASON = (r"""\bbd\s+close\b[^|;&]*?\b%s\b[^|;&]*?"""
+          r"""(?:-r|--reason)[= ]\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)""")
 # Closing without a commit is legitimate only for cards that produce no code.
 NO_CODE = ("no-code", "find", "question", "decision")
 UNREPORTED = bc.UNREPORTED
@@ -587,15 +588,19 @@ def open_children(cid, root):
     return any(r.get("id") != cid and r.get("status") != "closed" for r in rows)
 
 
-def said(card, cmd):
+def said(card, cid, cmd):
     """What this step has said about itself, wherever it said it.
 
     A step is proved by a note or by the reason the close is carrying, and the
     two are held to the same bar: the second exists only because `bd close`
     stores its reason outside the notes, which cost every close of every step a
     turn of its own (mch-aa9).
+
+    Only the reason belonging to THIS card's own close counts. A line routinely
+    carries several commands and several ids, and text lifted off a neighbour is
+    a step proved by something written about a different card (mch-aa9.14).
     """
-    hit = REASON.search(cmd or "")
+    hit = re.search(REASON % re.escape(cid), cmd or "", re.S)
     reason = hit.group(1) if hit else ""
     if len(reason) > 1 and reason[0] in "\"'" and reason[-1] == reason[0]:
         reason = reason[1:-1]
@@ -748,7 +753,7 @@ def main():
                 )
                 return
             step = next((l for l in card.get("labels") or [] if l.startswith("step:")), None)
-            notes = said(card, cmd)
+            notes = said(card, cid, cmd)
             if step and len(notes) < 30:
                 deny(
                     "%s is the %s step and has not said what it did here. Every step of "

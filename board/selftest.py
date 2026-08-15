@@ -530,8 +530,8 @@ WORK_STEP = {"status": "in_progress", "notes": "", "assignee": "selftest",
              "labels": ["step:work", "of:tst-j"], "metadata": {}}
 
 
-def landed(merge_fails):
-    """What a landing asks of the merge slot, in the order it asks it.
+def landed(merge_fails, release_fails=False):
+    """What a landing asks of the merge slot, how it asks, and what it then says.
 
     Every git call is answered rather than run: the case is about the slot going
     back, and a case that merges for real needs two repositories to say so.
@@ -555,20 +555,39 @@ def landed(merge_fails):
             return ("would not fast-forward", 1) if merge_fails else ("", 0)
         return "", 0
 
-    def fake_bd(args, root=None):
-        if args[:1] == ["merge-slot"]:
-            asked.append(args[1])
-        return True, "{}"
+    seen = {"waited": False, "as_me": False}
+
+    class Ran:
+        def __init__(self, code, out=""):
+            self.returncode, self.stdout, self.stderr = code, out, ""
+
+    def fake_run(argv, **kw):
+        # The real `slot`, so what is checked is the command it actually issues:
+        # queueing rather than giving up, and under a name of this session's own.
+        asked.append(argv[2])
+        if argv[2] == "acquire":
+            seen["waited"] = "--wait" in argv
+            seen["as_me"] = "--actor" in argv and argv[argv.index("--actor") + 1] \
+                not in ("", None)
+            return Ran(0)
+        return Ran(1, "somebody else holds it") if release_fails else Ran(0)
 
     land.git = fake_git
-    land.bc.bd = fake_bd
+    land.subprocess = type("shim", (), {"run": staticmethod(fake_run)})
     land.bc.landings = lambda root, cid=None: [("/tmp/tst-main", "main")]
-    land.sys.argv = ["land", "tst-j.4"]
+    # Restored: this suite decides whether to run itself again by looking at its
+    # own arguments, and a case that leaves somebody else's there makes every run
+    # spawn two more, without end (mch-aa9.10).
+    keep, sys.argv = sys.argv, ["land", "tst-j.4"]
+    out = io.StringIO()
+    kept_out, sys.stdout = sys.stdout, out
     try:
         land.main()
-    except SystemExit:
-        pass
-    return asked
+    except SystemExit as stop:
+        out.write(str(stop))
+    finally:
+        sys.argv, sys.stdout = keep, kept_out
+    return dict(seen, asked=asked, said=out.getvalue())
 
 
 def refusal(cmd, card, family=None):
@@ -3795,13 +3814,22 @@ def main():
               "the name a board command is made under carries the copy it runs in")
     # Landing in one command, and the one thing worse than the four turns it
     # replaces: a slot nobody holds and nobody can take (mch-aa9).
-    assert landed(merge_fails=False) == ["acquire", "merge", "release"], \
+    assert landed(merge_fails=False)["asked"] == ["acquire", "merge", "release"], \
         "a landing did not take the slot, merge and give it back, in that order"
-    assert "release" in landed(merge_fails=True), \
+    assert "release" in landed(merge_fails=True)["asked"], \
         "a landing whose merge failed kept the merge slot, so nobody else can land"
+    # Three more the reader raised against the first landing (mch-aa9.11 .12 .13).
+    assert landed(merge_fails=False)["waited"], \
+        "a landing did not queue behind another one, so --wait meant nothing"
+    assert landed(merge_fails=False)["as_me"], \
+        "a landing took the slot under a name every session on this machine shares"
+    said_so = landed(merge_fails=False, release_fails=True)["said"]
+    assert "STILL HELD" in said_so and "landed" not in said_so, \
+        "a landing that could not give the slot back still said the work landed"
 
-    print("ok: landing is one command that takes the slot, merges and gives the "
-          "slot back, and gives it back when the merge fails as well")
+    print("ok: landing is one command that takes the slot under this session's own "
+          "name and queues for it, merges, and gives the slot back — when the merge "
+          "fails as well, and says so loudly when it cannot")
 
     # A step is proved by a note or by the reason its close is carrying, and the
     # two answer to the same bar: `bd close --reason` writes neither the notes nor
@@ -3818,6 +3846,11 @@ def main():
         "a step closed on a reason that says nothing"
     assert "has not said what it did" in refusal("bd close tst-j.4", WORK_STEP), \
         "a step closed having said nothing anywhere"
+    # A line carries several commands and several ids, so a reason has to belong
+    # to this card's own close — the reader's mch-aa9.14.
+    assert "has not said what it did" in refusal(
+        'bd close tst-j.4 && bd close tst-j.9 --reason="%s"' % full, WORK_STEP), \
+        "a step was proved by a reason written about a different card"
 
     print("ok: a step closes on the reason its own close carries, and a reason "
           "that says nothing is refused exactly as an empty note is")
