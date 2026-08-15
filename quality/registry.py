@@ -6,10 +6,13 @@ are about the tree in front of you.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Callable
 
 from .corpus import Corpus
+
+SITTING = re.compile(r":\d+(?:-\d+)?$")
 
 
 @dataclass(frozen=True)
@@ -17,6 +20,17 @@ class Refusal:
     """One place a rule says no, in the words the run prints."""
     where: str      # path, or path:line
     says: str
+
+
+def place(where: str) -> str:
+    """Where a refusal is, without the lines it happens to sit on.
+
+    Cutting at the first colon would do for a rule that names a file, and takes the
+    name off a rule that names a module: `crate::part::piece` becomes the crate, and
+    every fresh refusal anywhere in that crate then reads as one already standing.
+    Only a trailing line or line range comes off, from each place a rule lists.
+    """
+    return "; ".join(SITTING.sub("", part) for part in where.split("; "))
 
 
 @dataclass
@@ -39,6 +53,10 @@ class Scope:
     root: str                   # the tree being read
     since: str | None = None    # the commit this change is measured against
     earlier: Corpus | None = None
+    # Where the change ends. None is the working tree; a commit replays a change
+    # already made, which is how a rule is asked what it would have said to the
+    # history it claims never to fire on.
+    until: str | None = None
 
 
 @dataclass(frozen=True)

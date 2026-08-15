@@ -33,22 +33,61 @@ def base(root: str, against: str = "main") -> str | None:
     return got or None
 
 
-def renamed(root: str, since: str) -> set[str]:
-    """Both names of every file this change only gave a new name to."""
-    fresh = [row[3:].strip() for row in _git(root, "status", "--porcelain").splitlines()
-             if row.startswith("??")]
-    return _renamed(root, since, fresh)
+def renames(root: str, since: str, to: str | None = None) -> dict[str, str]:
+    """Old name -> new name, for every file this change moved, edited or not.
+
+    Two ways, because git can only do the first: it pairs a deletion with an
+    addition itself, but only among files it is tracking, and a file just written
+    under a new name is not tracked yet. Once the rename is staged or committed the
+    first way is the one that answers, so both are asked.
+    """
+    moved = _paired(root, since, to)
+    if to is None:
+        fresh = [row[3:].strip() for row in _git(root, "status", "--porcelain").splitlines()
+                 if row.startswith("??")]
+        moved.update(_by_content(root, since, fresh))
+    return moved
 
 
-def _renamed(root: str, since: str, fresh: list[str]) -> set[str]:
-    """Both names of every file that only changed name, old and new.
+def renamed(root: str, since: str, to: str | None = None) -> set[str]:
+    """Both names of every file this change gave a new name to and nothing else.
 
-    Git pairs a deletion with an addition itself, but only for files it is tracking,
-    and a file just written under a new name is not tracked yet. Content settles it:
-    the same bytes, gone from one name and arrived at another.
+    Only the untouched ones. A file renamed and edited in the same change still has
+    its edit read, or every rule would look away from whatever was done under cover
+    of the move.
+    """
+    moved = {old: new for old, new in renames(root, since, to).items()
+             if _same_bytes(root, since, old, new, to)}
+    return set(moved) | set(moved.values())
+
+
+def _same_bytes(root: str, since: str, old: str, new: str, to: str | None) -> bool:
+    was = _git(root, "rev-parse", f"{since}:{old}").strip()
+    now = (_git(root, "rev-parse", f"{to}:{new}").strip() if to
+           else _git(root, "hash-object", new).strip())
+    return bool(was) and was == now
+
+
+def _paired(root: str, since: str, to: str | None = None) -> dict[str, str]:
+    """Old name -> new name, for every rename git paired on its own."""
+    moved: dict[str, str] = {}
+    for row in _git(root, "diff", "--name-status", "--find-renames", since,
+                    *([to] if to else [])).splitlines():
+        if row.startswith("R"):
+            parts = row.split("\t")
+            if len(parts) >= 3:
+                moved[parts[1]] = parts[2]
+    return moved
+
+
+def _by_content(root: str, since: str, fresh: list[str]) -> dict[str, str]:
+    """Old name -> new name for what git will not pair: the same bytes, moved.
+
+    A file written under a new name is untracked, so git sees a deletion and an
+    unrelated new file. Content settles it.
     """
     if not fresh:
-        return set()
+        return {}
     was: dict[str, str] = {}
     for row in _git(root, "diff", "--name-status", "--find-renames", since).splitlines():
         if row.startswith("D\t"):
@@ -56,12 +95,11 @@ def _renamed(root: str, since: str, fresh: list[str]) -> set[str]:
             blob = _git(root, "rev-parse", f"{since}:{path}").strip()
             if blob:
                 was.setdefault(blob, path)
-    moved = set()
+    moved: dict[str, str] = {}
     for path in fresh:
         blob = _git(root, "hash-object", path).strip()
         if blob in was:
-            moved.add(was.pop(blob))
-            moved.add(path)
+            moved[was.pop(blob)] = path
     return moved
 
 
@@ -86,7 +124,7 @@ def lines(root: str, since: str, to: str | None = None,
     if to is None:
         fresh = [row[3:].strip() for row in _git(root, "status", "--porcelain").splitlines()
                  if row.startswith("??")]
-    moved = _renamed(root, since, fresh) if to is None else set()
+    moved = renamed(root, since, to)
 
     if side == AFTER:
         for path in fresh:
@@ -113,7 +151,7 @@ def lines(root: str, since: str, to: str | None = None,
     return dict(touched)
 
 
-def shrunk(root: str, since: str) -> dict[str, list[tuple[int, int]]]:
+def shrunk(root: str, since: str, to: str | None = None) -> dict[str, list[tuple[int, int]]]:
     """Path -> earlier line ranges this change put back fewer lines than it took.
 
     An edit leaves a stretch the same length; taking a stretch out, or replacing it
@@ -122,7 +160,8 @@ def shrunk(root: str, since: str) -> dict[str, list[tuple[int, int]]]:
     """
     out: dict[str, list[tuple[int, int]]] = defaultdict(list)
     path = None
-    for row in _git(root, "diff", "--unified=0", "--find-renames", since).splitlines():
+    for row in _git(root, "diff", "--unified=0", "--find-renames", since,
+                    *([to] if to else [])).splitlines():
         if row.startswith("--- a/"):
             path = row[6:]
         elif row.startswith("--- /dev/null"):

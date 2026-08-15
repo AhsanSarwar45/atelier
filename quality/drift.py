@@ -134,9 +134,15 @@ def _side(streams: "_Streams", path: str, start: int, run: int) -> Side:
 
 
 def pairs(corpus: Corpus, budget: int = BUDGET, run: int = RUN, gram: int = GRAM,
-          skip: int = SKIP, confirm: int = CONFIRM,
-          crowd: int = CROWD) -> tuple[list[Pair], dict[str, int]]:
-    """Every pair of copies that has drifted, most alike first, with what was skipped."""
+          skip: int = SKIP, confirm: int = CONFIRM, crowd: int = CROWD,
+          least_apart: int = 1) -> tuple[list[Pair], dict[str, int]]:
+    """Every pair of copies at least `least_apart` tokens apart, most alike first.
+
+    Reporting wants the ones that have already pulled apart, so it asks for at least
+    one token of disagreement. A rule guarding against a copy being edited alone
+    wants the opposite end: a pair still word for word the same is the strongest
+    case there is, and asking for disagreement is asking it to look away.
+    """
     seen, tokens = index(corpus, run, gram)
     streams = _Streams(corpus)
     crowded = 0
@@ -164,7 +170,7 @@ def pairs(corpus: Corpus, budget: int = BUDGET, run: int = RUN, gram: int = GRAM
                 if pa == pb and abs(start_a - start_b) < run_a:
                     continue
                 renamed, broken = inconsistent(swaps)
-                if broken + gaps == 0:
+                if broken + gaps < least_apart:
                     continue
                 one = _side(streams, pa, start_a, run_a)
                 two = _side(streams, pb, start_b, run_b)
@@ -177,8 +183,28 @@ def pairs(corpus: Corpus, budget: int = BUDGET, run: int = RUN, gram: int = GRAM
     # Worst first means most nearly identical first, not longest first. A long copy
     # that disagrees in one place is someone editing one of the two; a long copy
     # that disagrees in fifty is two routines that share a skeleton.
-    ranked = sorted(found.values(), key=lambda p: (p.apart / p.tokens, -p.tokens))
+    ranked = sorted(_maximal(found.values()), key=lambda p: (p.apart / p.tokens, -p.tokens))
     return ranked, {"tokens": tokens, "crowded": crowded}
+
+
+def _maximal(found) -> list[Pair]:
+    """One reading of each copy, the longest, in place of every alignment of it.
+
+    A fingerprint lands at every offset a stretch allows, so one copy arrives as a
+    dozen alignments of itself, each slightly shorter and slightly shifted. Together
+    they are noise — and worse than noise for a rule about what a change touched,
+    because a shifted alignment can begin after the line that was edited and so read
+    as a copy nobody has touched.
+    """
+    inside: dict[tuple[str, str], list[Pair]] = defaultdict(list)
+    for pair in sorted(found, key=lambda p: -p.tokens):
+        kept = inside[(pair.left.path, pair.right.path)]
+        if any(k.left.first <= pair.left.first and pair.left.last <= k.left.last
+               and k.right.first <= pair.right.first and pair.right.last <= k.right.last
+               for k in kept):
+            continue
+        kept.append(pair)
+    return [p for kept in inside.values() for p in kept]
 
 
 @measure("drift", "Copies that no longer say the same thing", gates=False)
@@ -219,12 +245,12 @@ def twin(scope: Scope) -> Result:
     if not scope.since or scope.earlier is None:
         return Result()
 
-    touched = changed.lines(scope.root, scope.since, side=changed.BEFORE)
+    touched = changed.lines(scope.root, scope.since, scope.until, side=changed.BEFORE)
     if not touched:
         return Result(numbers={"pairs.watched": 0, "edited.on.one.side": 0})
 
-    gone = changed.shrunk(scope.root, scope.since)
-    found, _ = pairs(scope.earlier)
+    gone = changed.shrunk(scope.root, scope.since, scope.until)
+    found, _ = pairs(scope.earlier, least_apart=0)
     watched = [p for p in found if p.agreement >= TWINS]
 
     refused = []

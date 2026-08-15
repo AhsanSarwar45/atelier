@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from quality import changed  # noqa: E402
 from quality.baseline import Extracted  # noqa: E402
 from quality.corpus import Corpus  # noqa: E402
-from quality.registry import MEASURES, Result, Scope, run_all  # noqa: E402
+from quality.registry import MEASURES, Result, Scope, place, run_all  # noqa: E402
 from repo import root as repo_root  # noqa: E402
 import project  # noqa: E402
 
@@ -124,12 +124,12 @@ def compare(before: dict[str, Result], after: dict[str, Result], sha: str) -> in
     for key in silent:
         print(f"   {key:<34} {'not readable at both points':>38}")
 
-    # Recognised by rule and file, never by the sentence: a rule that writes a size
+    # Recognised by rule and place, never by the sentence: a rule that writes a size
     # into its words would otherwise report the same standing refusal as fresh every
     # time that size moved. The price is that a second refusal from the same rule in
-    # an already-refused file is not called out — `docs/code-quality.md#9-debt`.
-    stood = {(rid, at.split(":")[0]) for rid, at, _ in refusals(before)}
-    fresh = [r for r in refusals(after) if (r[0], r[1].split(":")[0]) not in stood]
+    # an already-refused place is not called out — `docs/code-quality.md#9-debt`.
+    stood = {(rid, place(at)) for rid, at, _ in refusals(before)}
+    fresh = [r for r in refusals(after) if (r[0], place(r[1])) not in stood]
     if fresh:
         print(f"\n{len(fresh)} place(s) refused now and not at {sha[:8]}:")
         for rid, at, says in fresh:
