@@ -525,6 +525,52 @@ def landing(judge):
     return issued
 
 
+# A step card of a job, for the cases about what closing one has to carry.
+WORK_STEP = {"status": "in_progress", "notes": "", "assignee": "selftest",
+             "labels": ["step:work", "of:tst-j"], "metadata": {}}
+
+
+def landed(merge_fails):
+    """What a landing asks of the merge slot, in the order it asks it.
+
+    Every git call is answered rather than run: the case is about the slot going
+    back, and a case that merges for real needs two repositories to say so.
+    """
+    spec = importlib.util.spec_from_loader(
+        "board_land", importlib.machinery.SourceFileLoader(
+            "board_land", os.path.join(HOME, "board", "land")))
+    land = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(land)
+    asked = []
+
+    def fake_git(args, where, must=True):
+        if args[0] == "rev-parse" and "--show-toplevel" in args:
+            return "/tmp/tst-tree", 0
+        if args[0] == "rev-parse":
+            return ("work", 0) if "HEAD" in args else ("abc1234", 0)
+        if args[0] == "log":
+            return "c0ffee11", 0
+        if args[0] == "merge":
+            asked.append("merge")
+            return ("would not fast-forward", 1) if merge_fails else ("", 0)
+        return "", 0
+
+    def fake_bd(args, root=None):
+        if args[:1] == ["merge-slot"]:
+            asked.append(args[1])
+        return True, "{}"
+
+    land.git = fake_git
+    land.bc.bd = fake_bd
+    land.bc.landings = lambda root, cid=None: [("/tmp/tst-main", "main")]
+    land.sys.argv = ["land", "tst-j.4"]
+    try:
+        land.main()
+    except SystemExit:
+        pass
+    return asked
+
+
 def refusal(cmd, card, family=None):
     """What the status gate says to `cmd`, with every card it names looking like this.
 
@@ -3747,6 +3793,34 @@ def main():
               "unrecognised path leaves it with the session's own, the move is never "
               "part of what the command says, the commit gate acts on all three, and "
               "the name a board command is made under carries the copy it runs in")
+    # Landing in one command, and the one thing worse than the four turns it
+    # replaces: a slot nobody holds and nobody can take (mch-aa9).
+    assert landed(merge_fails=False) == ["acquire", "merge", "release"], \
+        "a landing did not take the slot, merge and give it back, in that order"
+    assert "release" in landed(merge_fails=True), \
+        "a landing whose merge failed kept the merge slot, so nobody else can land"
+
+    print("ok: landing is one command that takes the slot, merges and gives the "
+          "slot back, and gives it back when the merge fails as well")
+
+    # A step is proved by a note or by the reason its close is carrying, and the
+    # two answer to the same bar: `bd close --reason` writes neither the notes nor
+    # nothing, and a step judged only by notes costs every close a turn (mch-aa9).
+    full = ("the claim is taken before the reader is sent, and six cards of one "
+            "job closed together now send one reader where they sent six")
+    # What is asserted is the note bar and not the whole close: a step still
+    # answers to every other gate, and this fixture owes the manager a page.
+    assert "has not said what it did" not in refusal(
+        'bd close tst-j.4 --reason="%s"' % full, WORK_STEP), \
+        "a step closing on a full reason of its own was still told to write a note"
+    assert "has not said what it did" in refusal('bd close tst-j.4 --reason="done"',
+                                                 WORK_STEP), \
+        "a step closed on a reason that says nothing"
+    assert "has not said what it did" in refusal("bd close tst-j.4", WORK_STEP), \
+        "a step closed having said nothing anywhere"
+
+    print("ok: a step closes on the reason its own close carries, and a reason "
+          "that says nothing is refused exactly as an empty note is")
 
     # The three answers the cost report has about a counter, which have to stay
     # three. Read against a counter file of its own: the real one is the number the
