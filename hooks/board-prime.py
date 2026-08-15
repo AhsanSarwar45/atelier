@@ -58,10 +58,12 @@ Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --r
   nothing else: no TODO lines, no handoff files, no plan-in-a-doc.
 - Your history compacts itself at 200k tokens; let it take the old transcript when a step
   lands. The board and the tree carry the work state, and these rules arrive again after.
-- Merging is how a code step closes, once per step, not once per job:
-  `git rebase main` in your own tree, then `bd merge-slot acquire`,
-  `git merge --ff-only <branch>`, `bd merge-slot release`. A merge that is not a
-  fast-forward is refused whoever holds the slot.
+- Merging is how a code step closes, once per step, not once per job. One
+  command from your own tree does the whole of it — `{land} <card>` — and it
+  gives the slot back even when the merge fails. By hand it is four:
+  `git rebase main`, `bd merge-slot acquire`, `git merge --ff-only <branch>`,
+  `bd merge-slot release`. A merge that is not a fast-forward is refused whoever
+  holds the slot.
 - Every commit names its card; a commit that is not on main yet moves that card to
   in_review, which is what that column means. A card closes only once a commit
   naming it is on main.
@@ -107,7 +109,7 @@ def main():
 
     sections.use(root)
     out = [RULES.format(
-        name=name, pour=bc.tool(root, "job"),
+        name=name, pour=bc.tool(root, "job"), land=bc.tool(root, "land"),
         areas=", ".join(sections.AREAS) or "none declared yet",
         steps=", ".join(("[%s]" % s) if spine.tier(s) != spine.MUST else s
                         for s in spine.ORDER))]

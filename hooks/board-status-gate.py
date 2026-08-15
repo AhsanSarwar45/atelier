@@ -51,7 +51,7 @@ REVIEWING = re.compile(r"(?:-s|--status)[= ]in_review\b")
 # rather than in the card's notes, so a step judged only by its notes has to be
 # written to twice with the same substance (mch-aa9). Both quotings, because the
 # reason is prose and routinely holds the other one.
-REASON = (r"""\bbd\s+close\b[^|;&]*?\b%s\b[^|;&]*?"""
+REASON = (r"""\bbd\s+close\b[^|;&\n]*?\b%s\b[^|;&\n]*?"""
           r"""(?:-r|--reason)[= ]\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)""")
 # Closing without a commit is legitimate only for cards that produce no code.
 NO_CODE = ("no-code", "find", "question", "decision")

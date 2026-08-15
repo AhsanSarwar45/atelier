@@ -62,6 +62,7 @@ def main():
     # holds spells that card in every line run inside it, and the ids read here
     # become claims and closes.
     cmd = bc.said(data) if tool == "Bash" else ""
+    answer = None
 
     # A helper that has come back stamps this; until then the session is waiting
     # on it, however many turns that takes.
@@ -106,9 +107,12 @@ def main():
                 run.started(cid, root)
         if CLOSED.search(cmd):
             for cid in card_ids(cmd, bc.prefix(root)):
+                # Asked once and kept: the answer below is the same card, and a
+                # hook that asks the board twice for one thing pays twice.
+                answer = run.card(cid, root) or {}
                 # The same exemption the close gate applies: nothing was finished
                 # on these, so neither gate asks for a page or a link.
-                if not set((run.card(cid, root) or {}).get("labels") or []) & set(bc.UNREPORTED):
+                if not set(answer.get("labels") or []) & set(bc.UNREPORTED):
                     state["closed"] = (state.get("closed") or [])[-200:] + [
                         {"id": cid, "t": bc.now()}
                     ]
@@ -119,11 +123,14 @@ def main():
     # 33 times in a day, purely because writing said nothing back (mch-aa9).
     # Only ever for a write naming exactly one card: a line naming several is a
     # line whose answer nobody could read anyway.
-    answer = None
     if tool == "Bash" and WROTE.search(cmd):
         named = set(card_ids(cmd, bc.prefix(root)))
-        if len(named) == 1:
+        if len(named) != 1:
+            answer = None
+        elif not answer or answer.get("id") not in named:
             answer = run.card(named.pop(), root) or None
+    else:
+        answer = None
 
     if bc.now() - (state.get("last_beat") or 0) > BEAT_EVERY:
         state["last_beat"] = bc.now()

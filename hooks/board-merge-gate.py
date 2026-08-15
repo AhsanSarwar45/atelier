@@ -1321,8 +1321,10 @@ def main():
         return
     reason = (
         "Merges are serialised through the board's single slot and you are not "
-        "holding it. Run `bd merge-slot acquire` (add `--wait` to queue), merge, "
-        "then `bd merge-slot release`."
+        "holding it. `%s <card>` from your own tree does the whole landing and "
+        "gives the slot back even if the merge fails; by hand it is "
+        "`bd merge-slot acquire` (add `--wait` to queue), merge, then "
+        "`bd merge-slot release`." % bc.tool(root, "land")
     )
     if slot.get("holder"):
         reason += " Held right now by %s." % slot["holder"]

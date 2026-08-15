@@ -101,6 +101,15 @@ def main():
               % (len(named.split()), a.card, branch, trunk, main_tree))
         return
 
+    # The merge happens in the main checkout, into whatever that checkout is
+    # standing on — so a main tree left on somebody else's branch would be
+    # fast-forwarded instead, and this would report that the main line moved
+    # (mch-aa9.19).
+    standing, _ = git(["rev-parse", "--abbrev-ref", "HEAD"], main_tree)
+    if standing != trunk:
+        sys.exit("%s is standing on %s, not on %s: put it back before landing, or "
+                 "the wrong branch is what moves" % (main_tree, standing, trunk))
+
     git(["rebase", trunk], top)
     took, out = slot("acquire")
     if not took:

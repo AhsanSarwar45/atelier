@@ -530,7 +530,7 @@ WORK_STEP = {"status": "in_progress", "notes": "", "assignee": "selftest",
              "labels": ["step:work", "of:tst-j"], "metadata": {}}
 
 
-def landed(merge_fails, release_fails=False):
+def landed(merge_fails, release_fails=False, main_on="main"):
     """What a landing asks of the merge slot, how it asks, and what it then says.
 
     Every git call is answered rather than run: the case is about the slot going
@@ -541,13 +541,18 @@ def landed(merge_fails, release_fails=False):
             "board_land", os.path.join(HOME, "board", "land")))
     land = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(land)
+    # A board command reads its own project as it loads, which leaves the bars
+    # answering for whatever checkout this case was standing in (mch-m1t.19).
+    pin()
     asked = []
 
     def fake_git(args, where, must=True):
         if args[0] == "rev-parse" and "--show-toplevel" in args:
             return "/tmp/tst-tree", 0
         if args[0] == "rev-parse":
-            return ("work", 0) if "HEAD" in args else ("abc1234", 0)
+            if "--abbrev-ref" in args:
+                return (main_on, 0) if where == "/tmp/tst-main" else ("work", 0)
+            return "abc1234", 0
         if args[0] == "log":
             return "c0ffee11", 0
         if args[0] == "merge":
@@ -597,6 +602,7 @@ def counted(issued):
             "board_turns", os.path.join(HOME, "board", "turns")))
     turns = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(turns)
+    pin()
     turns.commands = lambda path: [("bash", c) for c in issued]
     return turns.count("a session")
 
@@ -615,6 +621,7 @@ def answered(cmd):
             return True, json.dumps(dict(card, id=args[1]))
         return True, "[]"
 
+    kept = (touch.bc.bd, touch.run.advance, touch.run.started)
     touch.bc.bd = recorder
     touch.run.advance = lambda cid, root: None
     touch.run.started = lambda cid, root: None
@@ -627,6 +634,9 @@ def answered(cmd):
         touch.main()
     finally:
         sys.stdout = keep
+        # Put back what this case stood in for: a stub left behind is a case
+        # after it passing on somebody else's answers (mch-aa9.22).
+        touch.bc.bd, touch.run.advance, touch.run.started = kept
     said = out.getvalue().strip()
     if not said:
         return ""
@@ -3869,6 +3879,12 @@ def main():
     said_so = landed(merge_fails=False, release_fails=True)["said"]
     assert "STILL HELD" in said_so and "landed" not in said_so, \
         "a landing that could not give the slot back still said the work landed"
+    # The merge happens in the main checkout, into whatever it is standing on
+    # (mch-aa9.19).
+    astray = landed(merge_fails=False, main_on="somebody-else")
+    assert "standing on somebody-else" in astray["said"] \
+        and "acquire" not in astray["asked"], \
+        "a landing moved whatever branch the main checkout happened to be on"
 
     print("ok: landing is one command that takes the slot under this session's own "
           "name and queues for it, merges, and gives the slot back — when the merge "
@@ -3894,6 +3910,9 @@ def main():
     assert "has not said what it did" in refusal(
         'bd close tst-j.4 && bd close tst-j.9 --reason="%s"' % full, WORK_STEP), \
         "a step was proved by a reason written about a different card"
+    assert "has not said what it did" in refusal(
+        'bd close tst-j.4\nbd close tst-j.9 --reason="%s"' % full, WORK_STEP), \
+        "a reason on the next line of the same block proved a step it was not written for"
 
     print("ok: a step closes on the reason its own close carries, and a reason "
           "that says nothing is refused exactly as an empty note is")
