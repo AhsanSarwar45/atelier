@@ -58,18 +58,11 @@ QUIET_LIMIT = 4  # turns of code changes a held card may go without a word writt
 # anyway. One short of the harness's own cap (CLAUDE_CODE_STOP_HOOK_BLOCK_CAP,
 # default 8), so the session is never overruled with a warning the manager has to
 # read. [SOURCED] docs/board.md#4f-when-a-session-may-stop
-PUSH_LIMIT = 7
+PUSH_LIMIT = 1
 
 CARRY_ON = (
-    "Your work is not finished and nothing is waiting on the manager, so the turn "
-    "does not end here: %s.\n\n"
-    "He owns the result, not the running of the job. A turn that reports where you "
-    "have got to and then waits costs him the one thing he cannot delegate — his "
-    "attention — to say a word that carries no decision. Carry on: claim the next "
-    "step if the last one closed, and run the job to its end.\n\n"
-    "The only ways this turn may end are that the work above is closed, that you "
-    "put a question to him, or that a helper you sent off is still running. If you "
-    "are genuinely stuck, that is a question: ask it, with the page that carries it."
+    "Work still open, nothing waiting on the manager: %s. Carry on, or ask "
+    "him. docs/board.md#4f-when-a-session-may-stop"
 )
 
 # The link a report build prints, however the board screen was reachable.
@@ -182,6 +175,16 @@ def block(reason):
     print(json.dumps({"decision": "block", "reason": reason}))
 
 
+def helper_busy(state, since):
+    """Whether a helper this session sent off is still out.
+
+    Sent off this turn, or sent off earlier and not yet reported back. What it
+    closes while it is out is its own, not the waiting session's.
+    """
+    helper = state.get("helper") or 0
+    return helper > since or helper > (state.get("helper_done") or 0)
+
+
 def carry_on(sid, state, mine, since, root):
     """Send the session back to its own unfinished work, or close the turn.
 
@@ -191,7 +194,7 @@ def carry_on(sid, state, mine, since, root):
     left = unfinished(state, mine, since, root)
     spent = state.get("pushes") or 0
     if left and (state.get("asked") or 0) <= since \
-            and (state.get("helper") or 0) <= since and spent < PUSH_LIMIT:
+            and not helper_busy(state, since) and spent < PUSH_LIMIT:
         state["pushes"] = spent + 1
         bc.save(sid, state)
         block(CARRY_ON % ", ".join(left[:6]))
@@ -286,7 +289,8 @@ def main():
             return
 
     ticked = [c["id"] for c in state.get("closed") or [] if c.get("t", 0) > since]
-    if ticked and not handed_over(data.get("last_assistant_message")):
+    if ticked and not helper_busy(state, since) \
+            and not handed_over(data.get("last_assistant_message")):
         block(HANDOVER % ", ".join(sorted(set(ticked))[:4]))
         return
 

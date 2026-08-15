@@ -30,7 +30,8 @@ EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 # a session writes when it stops early, so it cannot tell the two apart.
 # docs/board.md#4f-when-a-session-may-stop
 ASK_TOOLS = ("AskUserQuestion", "ExitPlanMode")
-HELPER_TOOLS = ("Agent", "Task")
+HELPER_TOOLS = ("Agent", "Task", "Monitor", "TaskCreate",
+                "SendMessage", "Workflow")
 
 
 def card_ids(text, prefix):
@@ -54,6 +55,21 @@ def main():
     state = bc.load(sid)
     tool = data.get("tool_name") or ""
     tin = data.get("tool_input") or {}
+
+    # A helper that has come back stamps this; until then the session is waiting
+    # on it, however many turns that takes.
+    if data.get("hook_event_name") == "SubagentStop":
+        state["helper_done"] = bc.now()
+        bc.save(sid, state)
+        return
+
+    # Anything sent off to run on its own is a helper: a background command, a
+    # watcher on one, an agent. A session waiting on one is not idling.
+    if tool == "Bash" and (tin.get("run_in_background")
+                           or re.search(r"(^|\s)(setsid|nohup)\b|&\s*$",
+                                        tin.get("command") or "")):
+        state["helper"] = bc.now()
+
 
     if tool in ASK_TOOLS:
         state["asked"] = bc.now()
