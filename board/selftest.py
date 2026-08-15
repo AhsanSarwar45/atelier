@@ -774,14 +774,15 @@ def standing(root, edited_in, second):
 
 
 proof = hook("helper-proof")
-proof.bc.reviewing = lambda: ""
-proof.bc.board_root = lambda cwd=None: ROOT
-proof.bc.prefix = lambda root=None: FIXTURE
 
 
 def helper_return(said, did=(), where=None):
     """What the helper gate says to a helper that did `did` in that order and
-    ended with `said`. Each step is a tool name, or a name and a command."""
+    ended with `said`. Each step is a tool name, or a name and a command.
+
+    Every stand-in is put back afterwards: `bc` is one module shared by every
+    hook here, so one left in place is another case's board.
+    """
     lines = []
     for step in did:
         name, cmd = step if isinstance(step, tuple) else (step, "")
@@ -797,10 +798,15 @@ def helper_return(said, did=(), where=None):
          "agent_transcript_path": path}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
+    was = (proof.bc.reviewing, proof.bc.board_root, proof.bc.prefix)
+    proof.bc.reviewing = lambda: ""
+    proof.bc.board_root = lambda cwd=None: ROOT
+    proof.bc.prefix = lambda root=None: FIXTURE
     try:
         proof.main()
     finally:
         sys.stdout = keep
+        proof.bc.reviewing, proof.bc.board_root, proof.bc.prefix = was
     said_back = out.getvalue().strip()
     return json.loads(said_back)["reason"] if said_back else ""
 
