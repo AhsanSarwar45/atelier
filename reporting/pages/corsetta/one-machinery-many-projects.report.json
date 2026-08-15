@@ -1,23 +1,32 @@
 {
   "title": "One Machinery, Many Projects",
   "eyebrow": "The plan for the machinery every project shares. Waiting on your go.",
-
   "actions": {
     "questions": [
       {
         "ask": "Build it as planned?",
         "options": [
-          { "label": "Go", "say": "Build it in this shape, in this order.", "pick": true },
-          { "label": "Adjust", "say": "The shape is close but I want something changed — I will say what in chat." },
-          { "label": "Not now", "say": "Leave the machinery where it is; the beads board keeps borrowing." }
+          {
+            "label": "Go",
+            "say": "Build it in this shape, in this order.",
+            "pick": true
+          },
+          {
+            "label": "Adjust",
+            "say": "The shape is close but I want something changed — I will say what in chat."
+          },
+          {
+            "label": "Not now",
+            "say": "Leave the machinery where it is; the beads board keeps borrowing."
+          }
         ],
         "note": "Going costs roughly two sittings before anything visible changes, and the visible part — the beads project running like the racing one — lands right after. Not going leaves every new project to borrow tools by hand."
       }
     ]
   },
-
-  "status": { "card": "cor-up1g" },
-
+  "status": {
+    "card": "cor-up1g"
+  },
   "content": [
     {
       "label": "What you get",
@@ -46,13 +55,31 @@
       "blocks": [
         {
           "kind": "table",
-          "columns": ["Shared, one home", "Each project declares its own"],
+          "columns": [
+            "Shared, one home",
+            "Each project declares its own"
+          ],
           "rows": [
-            ["The ticket standard: what a card must say before it exists", "Its board and its card prefix"],
-            ["The gates: what refuses a bad close, a silent question, a commit with no card", "Its vocabulary of subjects, in its own words"],
-            ["The run of steps a job walks, and the review by someone who did not write it", "How a change proves itself — the racing game renders and measures; the beads app drives its screen and photographs it"],
-            ["The plain-words rules and the report pages", "Where its finished work lands"],
-            ["The lead-and-worker arrangement", "Its specialist helpers and its machine guards"]
+            [
+              "The ticket standard: what a card must say before it exists",
+              "Its board and its card prefix"
+            ],
+            [
+              "The gates: what refuses a bad close, a silent question, a commit with no card",
+              "Its vocabulary of subjects, in its own words"
+            ],
+            [
+              "The run of steps a job walks, and the review by someone who did not write it",
+              "How a change proves itself — the racing game renders and measures; the beads app drives its screen and photographs it"
+            ],
+            [
+              "The plain-words rules and the report pages",
+              "Where its finished work lands"
+            ],
+            [
+              "The lead-and-worker arrangement",
+              "Its specialist helpers and its machine guards"
+            ]
           ]
         },
         {
@@ -82,34 +109,85 @@
       "blocks": [
         {
           "kind": "table",
-          "columns": ["What is running", "How it is protected"],
+          "columns": [
+            "What is running",
+            "How it is protected"
+          ],
           "rows": [
-            ["The chat build in the beads project, mid-piece", "The machinery lands between its pieces; its files and its cards are not touched."],
-            ["Every racing-project session, using today's paths", "The old paths keep answering through thin forwarders until each session restarts; behaviour is identical either side of the switch."],
-            ["The move of the 61 beads cards", "Queued behind this job on purpose — it runs under the new machinery, so the boards it writes already understand both checkouts."]
+            [
+              "The chat build in the beads project, mid-piece",
+              "The machinery lands between its pieces; its files and its cards are not touched."
+            ],
+            [
+              "Every racing-project session, using today's paths",
+              "The old paths keep answering through thin forwarders until each session restarts; behaviour is identical either side of the switch."
+            ],
+            [
+              "The move of the 61 beads cards, running alongside",
+              "Its agent moves card data only — no gate, no hook, nothing under the chat build — and skips any card a live session holds. This job's routing work never touches card data, so they cannot cross."
+            ]
           ]
         }
       ]
     }
   ],
-
   "decisions": [
-    { "id": "D1", "title": "The machinery moves to a home of its own and every project runs it in place — never a copy", "why": "One live copy is what makes an improvement land everywhere the same day. The report tools already prove the pattern; a copies check makes forking it impossible rather than impolite." },
-    { "id": "D2", "title": "The shared-versus-own line is drawn at the five declared things", "why": "Board and prefix, subject vocabulary, proof of change, where finished work lands, specialist helpers. Each is exactly what was found hard-wired today, and each would make the shared core lie if it stayed hard-wired." },
-    { "id": "D3", "title": "Every gate reads the board of the checkout the work lands in, never the session's home", "why": "This is the fix that closes the borrowed-address card and the commit-gate card, and it is what routes tomorrow's beads fault to the beads board with nobody watching." },
-    { "id": "D4", "title": "The racing project is unchanged through the switch", "why": "Thin forwarders keep every old path answering until sessions restart; its whole test run must come back green from the shared home before anything is removed." },
-    { "id": "D5", "title": "The card move waits for this job", "why": "Moving 61 cards onto a board whose gates cannot yet read them would recreate today's problem on the other side. The move job is queued behind this one on the beads board, split already written on its card." },
-    { "id": "D6", "title": "Domain guards and specialist helpers stay home", "why": "The render checks, the machine's build traps and the car, track and tree researchers are the racing project's subject knowledge, not machinery. The beads project grows its own equivalents — the screen-driving proof is already wired there." }
+    {
+      "id": "D1",
+      "title": "The machinery moves to a home of its own and every project runs it in place — never a copy",
+      "why": "One live copy is what makes an improvement land everywhere the same day. The report tools already prove the pattern; a copies check makes forking it impossible rather than impolite."
+    },
+    {
+      "id": "D2",
+      "title": "The shared-versus-own line is drawn at the five declared things",
+      "why": "Board and prefix, subject vocabulary, proof of change, where finished work lands, specialist helpers. Each is exactly what was found hard-wired today, and each would make the shared core lie if it stayed hard-wired."
+    },
+    {
+      "id": "D3",
+      "title": "Every gate reads the board of the checkout the work lands in, never the session's home",
+      "why": "This is the fix that closes the borrowed-address card and the commit-gate card, and it is what routes tomorrow's beads fault to the beads board with nobody watching."
+    },
+    {
+      "id": "D4",
+      "title": "The racing project is unchanged through the switch",
+      "why": "Thin forwarders keep every old path answering until sessions restart; its whole test run must come back green from the shared home before anything is removed."
+    },
+    {
+      "id": "D5",
+      "title": "The card move runs alongside, not behind",
+      "why": "Your ruling: the move runs now, in parallel, by its own narrow agent — it touches card data only, never a gate or a hook, and skips anything a live session holds. Checked for crossings: none — this job changes tools, that one moves cards, and the beads checkout's commits are not gated today anyway.",
+      "tag": "revised"
+    },
+    {
+      "id": "D6",
+      "title": "Domain guards and specialist helpers stay home",
+      "why": "The render checks, the machine's build traps and the car, track and tree researchers are the racing project's subject knowledge, not machinery. The beads project grows its own equivalents — the screen-driving proof is already wired there."
+    }
   ],
-
   "next": {
-    "if_nothing": "Nothing moves: the beads board keeps borrowing tools with an overridden address, and the 61-card move stays queued.",
+    "if_nothing": "Nothing moves into a shared home: the beads board keeps borrowing tools with an overridden address, and every new project starts by copying.",
     "steps": [
-      { "step": "The machinery stands in its own home and the racing project comes through its whole test run green from it, unchanged", "cost": "medium", "starting": true },
-      { "step": "The beads checkout pours its own cards and its commits are accepted by its own gate — no borrowed address anywhere", "cost": "medium" },
-      { "step": "The racing checkout runs from the shared home; nothing visibly different", "cost": "small" },
-      { "step": "The shared skills follow, and each project's declaration is written", "cost": "small" },
-      { "step": "The 61 beads cards move and both boards read clean", "cost": "medium" }
+      {
+        "step": "The machinery stands in its own home and the racing project comes through its whole test run green from it, unchanged",
+        "cost": "medium",
+        "starting": true
+      },
+      {
+        "step": "The beads checkout pours its own cards and its commits are accepted by its own gate — no borrowed address anywhere",
+        "cost": "medium"
+      },
+      {
+        "step": "The racing checkout runs from the shared home; nothing visibly different",
+        "cost": "small"
+      },
+      {
+        "step": "The shared skills follow, and each project's declaration is written",
+        "cost": "small"
+      },
+      {
+        "step": "An agent filing a beads fault from either checkout lands it on the beads board — shown by trying it, not by trusting it",
+        "cost": "small"
+      }
     ]
   }
 }
