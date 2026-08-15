@@ -31,6 +31,10 @@ EDIT = ("Edit", "Write", "NotebookEdit")
 # A note counts as that close's own only if it is the same card and nothing much
 # happened between: further apart they are two separate things to say.
 PAIR_WITHIN = 3
+# How far from taking or giving back the slot a catch-up or a merge still belongs
+# to that landing. Wide enough for the rebase before the slot and the merge after
+# it, narrow enough that a session's own merging is not counted as a landing.
+LANDING_WITHIN = 3
 
 
 def commands(path):
@@ -61,8 +65,20 @@ def count(path):
     board = sum(1 for kind, cmd in issued if kind == "bash" and BOARD.search(cmd))
     edits = sum(1 for kind, _ in issued if kind == "edit")
     slot = sum(1 for kind, cmd in issued if kind == "bash" and SLOT.search(cmd))
-    landing = sum(1 for kind, cmd in issued if kind == "bash"
-                  and (MERGE.search(cmd) or REBASE.search(cmd)))
+
+    # Only a catch-up or a merge that belongs to a landing is a turn the one
+    # command removes. A session rebases and merges for its own reasons all day,
+    # and counting those was what overstated the saving (mch-aa9.17): a landing
+    # is what happens around the slot, so the slot is what bounds it.
+    slot_at = [i for i, (kind, cmd) in enumerate(issued)
+               if kind == "bash" and SLOT.search(cmd)]
+    landing_git = sum(1 for i, (kind, cmd) in enumerate(issued)
+                      if kind == "bash" and (MERGE.search(cmd) or REBASE.search(cmd))
+                      and any(abs(i - at) <= LANDING_WITHIN for at in slot_at))
+    other_git = sum(1 for kind, cmd in issued
+                    if kind == "bash" and (MERGE.search(cmd) or REBASE.search(cmd))) \
+        - landing_git
+
     # A note that is answered by a close of the same card is one turn now.
     seen, pairs = {}, 0
     for i, (kind, cmd) in enumerate(issued):
@@ -74,12 +90,14 @@ def count(path):
         hit = CLOSE.search(cmd)
         if hit and hit.group(1) in seen and i - seen[hit.group(1)] <= PAIR_WITHIN:
             pairs += 1
-    # Landing is one command where it was the slot pair plus the git either side.
+
+    # Landing is one command where it was the slot pair plus the git around it.
     landings = slot // 2
-    saved = (slot + landing) - landings + pairs
-    return {"board": board, "edits": edits, "slot": slot, "git": landing,
+    saved = (slot + landing_git) - landings + pairs if landings else pairs
+    was = board + landing_git + other_git
+    return {"board": board, "edits": edits, "slot": slot, "git": landing_git,
             "landings": landings, "pairs": pairs,
-            "was": board + landing, "now": board + landing - saved}
+            "was": was, "now": was - saved}
 
 
 def main():

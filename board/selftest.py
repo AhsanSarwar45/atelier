@@ -590,6 +590,17 @@ def landed(merge_fails, release_fails=False):
     return dict(seen, asked=asked, said=out.getvalue())
 
 
+def counted(issued):
+    """What `board/turns` makes of a session that ran exactly these commands."""
+    spec = importlib.util.spec_from_loader(
+        "board_turns", importlib.machinery.SourceFileLoader(
+            "board_turns", os.path.join(HOME, "board", "turns")))
+    turns = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(turns)
+    turns.commands = lambda path: [("bash", c) for c in issued]
+    return turns.count("a session")
+
+
 def answered(cmd):
     """What the board hands back after a write, if anything.
 
@@ -3898,6 +3909,25 @@ def main():
 
     print("ok: a write to one card answers with that card, a write naming several "
           "answers with none, and reading the board answers with nothing")
+
+    # The number this job is judged by, and the tool that reads it. A session
+    # rebases and merges for its own reasons all day, and counting those as turns
+    # a landing removes overstated the saving (mch-aa9.17 .18).
+    plain = counted(["git rebase main", "git merge --ff-only work", "git rebase main"])
+    assert plain["now"] == plain["was"], \
+        "catching up and merging with no landing anywhere was counted as a saving"
+    one = counted(["git rebase main", "bd merge-slot acquire",
+                   "git merge --ff-only work", "bd merge-slot release"])
+    assert one["was"] - one["now"] == 3, \
+        "a landing of four turns was not counted as becoming one"
+    said = counted(['bd update tst-j.4 --append-notes="what it did"',
+                    'bd close tst-j.4 --reason="done"'])
+    assert said["was"] - said["now"] == 1, \
+        "a note answered by a close of the same card was not counted as one turn"
+
+    print("ok: the turns a session spends on the board are counted from the "
+          "commands it issued — a landing counts, a session's own merging does "
+          "not, and a note answered by its own close counts once")
 
     # The three answers the cost report has about a counter, which have to stay
     # three. Read against a counter file of its own: the real one is the number the
