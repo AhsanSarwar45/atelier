@@ -32,20 +32,21 @@
       ]
     },
     {
-      "label": "The first piece, live",
-      "lead": "Built and proved on screen, twice over: you type, the answer arrives word by word, the agent stops on a permission card, one click releases it.",
+      "label": "The first pieces, live",
+      "lead": "Built and proved on screen: the conversation streams and stops on a clickable permission ask, and one turn later the whole transcript vocabulary is there.",
       "blocks": [
         {
           "kind": "images",
           "shots": [
-            { "path": "reporting/pages/beads-web/agents-inside/permission-allowed.png", "caption": "After the click: the ask collapsed to Allowed, the tool row turned green, the file was written, and the turn's cost — five and a half cents — sits in the corner" }
+            { "path": "reporting/pages/beads-web/agents-inside/permission-allowed.png", "caption": "After the click: the ask collapsed to Allowed, the tool row turned green, the file was written, and the turn's cost — five and a half cents — sits in the corner" },
+            { "path": "reporting/pages/beads-web/agents-inside/transcript.png", "caption": "One finished turn showing the full vocabulary: every tool as a row, a helper's work nested under the call that made it, the changed lines side by side, your picture in the message — the answer names its colours, so it truly reached the agent — the running checklist, and the spend" }
           ]
         },
         {
           "kind": "note",
           "tone": "warn",
-          "label": "Your screen rule earned its keep on day one",
-          "text": "One bug slipped every check behind the screen: every signal said working while the window showed an empty bubble, because the streamed words were being filed under the wrong name. Only looking at the picture caught it — which is exactly the rule you set."
+          "label": "Your screen rule earned its keep twice in two days",
+          "text": "First: every signal behind the screen said working while the window showed an empty bubble — streamed words filed under the wrong name. Then: the header claimed a permission setting the session was not actually in — fixed text no test would ever catch. Both found only by looking at the picture, which is exactly the rule you set."
         },
         {
           "kind": "note",
