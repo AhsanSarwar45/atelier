@@ -2042,11 +2042,18 @@ def main():
                          rows=CROWDED[:2] + [dict(r, status="open")
                                              for r in CROWDED[2:]]) == 0, \
         "a job with work open again was sent a reader anyway"
+    # A clean reading opens the step after itself before it lets go, so the cards
+    # a letting-go really sees include that one — the reader's own mch-m1t.12.
+    assert release_sends(signed=True, shas=["a1", "b2"],
+                         rows=CROWDED + [{"id": "g.9", "status": "open",
+                                          "labels": ["step:record", "of:g"]}]) == 1, \
+        "a change that landed under a reader was read by nobody once it finished"
 
     print("ok: six cards of one job closed by one command send one reader and not "
-          "six, a change that landed under a reader is read when it lets go, and "
-          "nobody follows a reader that answered nothing, a job that counts its own "
-          "reader as a writer, or a job with work open again")
+          "six, a change that landed under a reader is read when it lets go — even "
+          "once the reading has opened the step after itself — and nobody follows a "
+          "reader that answered nothing, a job that counts its own reader as a "
+          "writer, or a job with work open again")
 
     pretend = tempfile.mkdtemp()
     victim = pretend_reader(pretend, HELD)

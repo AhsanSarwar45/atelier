@@ -194,6 +194,15 @@ def before_reading(order, rows):
     return [s for s in order[:order.index("review")] if s not in done]
 
 
+def at_reading(order, rows):
+    """Whether the job's run stands at its reading: it has one, and everything
+    before it has closed. Written once, because the run and a reader letting go
+    both ask it and two copies of it drift (mch-m1t.13)."""
+    if "review" not in order or before_reading(order, rows):
+        return False
+    return True
+
+
 def reading_due(goal_id, goal, order, rows, root):
     """Whether a reader should be sent to this job now.
 
@@ -205,7 +214,7 @@ def reading_due(goal_id, goal, order, rows, root):
     findings are the job's own items, so answering them empties the job exactly as
     finishing the work did, and the same test fires. No branch of its own.
     """
-    if "review" not in order or before_reading(order, rows):
+    if not at_reading(order, rows):
         return False
     if steps_of(rows) & set(order[order.index("review") + 1:]):
         return False
@@ -219,17 +228,16 @@ def due_again(goal_id, root):
     Only ever for a commit no reading was shown — never for `wanted`'s other
     half, a job no outsider has signed. That half is true of a job whose reader
     counts among the hands that wrote it, and a reader answering it would send
-    the next, without end (mch-m1t.9). And the same test the run uses, so a job
-    that has moved past its reading, or has pieces open again because this very
-    reading filed some, is not sent anybody (mch-m1t.11).
+    the next, without end (mch-m1t.9). Work open again because this very reading
+    filed some is not sent anybody either (mch-m1t.11); the step the reading has
+    just opened after itself is, because a clean reading opens one before it lets
+    go and the change that landed underneath still has to be read (mch-m1t.12).
     """
     goal = card(goal_id, root) or {}
-    meta = tags(goal)
-    order = spine.stored(meta.get("spine"))
-    rows = children(goal_id, root)
-    if "review" not in order or before_reading(order, rows):
+    if goal.get("status") == "closed":
         return False
-    if steps_of(rows) & set(order[order.index("review") + 1:]):
+    rows = children(goal_id, root)
+    if not at_reading(spine.stored(tags(goal).get("spine")), rows):
         return False
     return bool(reading.unread(goal, reading.commits(goal_id, root)))
 
