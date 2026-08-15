@@ -7,6 +7,7 @@
 # here.
 
 [projects]
+machinery = "/home/ahsan/dev/machinery"
 corsetta = "/home/ahsan/dev/corsetta"
 beads-web = "/home/ahsan/dev/beads-web"
 
