@@ -56,6 +56,50 @@ export class Sessions {
     };
     this.store.createSession({ ...summary, origin: 'app' });
 
+    await this.attach(summary, params.model);
+    return summary;
+  }
+
+  /**
+   * Brings a session back: the one the app ran, or one begun in a terminal.
+   * Only ever called from a click — nothing here runs on its own (decision 8).
+   */
+  async resume(params: {
+    sessionId?: string;
+    externalId?: string;
+    brand: Brand;
+    projectId: string;
+    projectPath: string;
+  }): Promise<SessionSummary> {
+    const existing = params.sessionId ? this.store.getSession(params.sessionId) : undefined;
+    if (existing && this.drivers.has(existing.id)) return existing;
+
+    const now = new Date().toISOString();
+    const summary: SessionSummary =
+      existing ??
+      {
+        id: randomUUID(),
+        brand: params.brand,
+        externalId: params.externalId ?? null,
+        projectId: params.projectId,
+        projectPath: params.projectPath,
+        cwd: params.projectPath,
+        model: null,
+        permissionMode: DEFAULT_PERMISSION_MODE,
+        title: null,
+        state: 'starting',
+        createdAt: now,
+        lastActiveAt: now,
+      };
+    if (!existing) this.store.createSession({ ...summary, origin: 'terminal' });
+
+    const resumeId = params.externalId ?? summary.externalId ?? undefined;
+    await this.attach(summary, summary.model ?? undefined, resumeId);
+    return summary;
+  }
+
+  /** Starts the driver for a session row and wires its linker. */
+  private async attach(summary: SessionSummary, model?: string, resume?: string): Promise<void> {
     const driver = new ClaudeDriver();
     this.drivers.set(summary.id, driver);
     this.linkers.set(
@@ -64,11 +108,11 @@ export class Sessions {
     );
     await driver.start({
       cwd: summary.cwd,
-      model: params.model,
+      model,
       permissionMode: summary.permissionMode,
+      resume,
       emit: (e) => this.publish(summary.id, e),
     });
-    return summary;
   }
 
   async send(sessionId: string, text: string, images: ImagePayload[] = []): Promise<void> {

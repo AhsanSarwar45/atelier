@@ -184,6 +184,11 @@ export class ClaudeDriver implements Driver {
       options: {
         cwd: opts.cwd,
         model: opts.model,
+        // Resuming by id works from any directory, for sessions started
+        // anywhere — including ones the owner began in a terminal.
+        resume: opts.resume,
+        // Keep the id: a fork would strand the transcript we already show.
+        forkSession: false,
         // Pinned explicitly every time: the CLI's defaults shift, and plan /
         // bypass are not restored on resume. 'default' is the mode that asks
         // about every tool — measured, see protocol.ts.

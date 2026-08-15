@@ -280,5 +280,5 @@ export function useStartSession(
     }
   }, [projectId, projectPath]);
 
-  return { sessionId, start, starting, error };
+  return { sessionId, open: setSessionId, start, starting, error };
 }

@@ -30,7 +30,9 @@ export type SessionState =
   | 'waiting_permission'
   | 'stopped'
   | 'errored'
-  | 'ended';
+  | 'ended'
+  /** Known, not running: nothing wakes it but a click. */
+  | 'dormant';
 
 /** A button on a permission card. */
 export interface AskOption {
@@ -105,7 +107,33 @@ export type WbpCommand =
   | { type: 'session.start'; projectId: string; projectPath: string; brand: Brand; model?: string; permissionMode?: string }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
-  | { type: 'session.stop'; sessionId: string };
+  | { type: 'session.stop'; sessionId: string }
+  | {
+      type: 'session.resume';
+      /** Ours when the app ran it; otherwise the brand's own id. */
+      sessionId?: string;
+      externalId?: string;
+      brand: Brand;
+      projectId: string;
+      projectPath: string;
+    };
+
+/**
+ * One offer in the restore list. `sessionId` is null for a chat this app never
+ * ran — a terminal session found by its transcript's file name, never by
+ * reading it.
+ */
+export interface RestoreRow {
+  sessionId: string | null;
+  externalId: string | null;
+  brand: Brand;
+  title: string | null;
+  lastActiveAt: string;
+  state: SessionState;
+  origin: 'app' | 'terminal';
+  projectId: string | null;
+  cwdHint: string | null;
+}
 
 /** A chat that touched a card, as the card's own side of the join lists it. */
 export interface LinkedChat {

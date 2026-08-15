@@ -11,12 +11,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
+import { restoreList } from './registry.ts';
 import { Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 
 const PORT = Number(process.env.BEADS_WORKBENCH_PORT ?? 3009);
 
 const store = new Store();
+// Nothing survives a restart except the record of it, so no row may claim to
+// be running until a click brings it back.
+store.markAllDormant();
 const sessions = new Sessions(store);
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -77,6 +81,11 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       sessions.answer(cmd.sessionId, cmd.askId, cmd.optionId);
       json(res, 200, { ok: true });
       return;
+    case 'session.resume': {
+      const s = await sessions.resume(cmd);
+      json(res, 200, s);
+      return;
+    }
     case 'session.stop':
       await sessions.stop(cmd.sessionId);
       json(res, 200, { ok: true });
@@ -129,6 +138,10 @@ const server = createServer((req, res) => {
         const s = store.getSession(sessionId);
         const onBoard = s ? await issuesForSession(sessionId, s.cwd) : [];
         json(res, 200, [...new Set([...store.beadsForSession(sessionId), ...onBoard])]);
+      } else if (path === '/restore' && req.method === 'GET') {
+        const id = url.searchParams.get('project');
+        const projectPath = url.searchParams.get('path');
+        json(res, 200, restoreList(store, id && projectPath ? { id, path: projectPath } : null));
       } else if (path === '/sessions' && req.method === 'GET') {
         json(res, 200, sessions ? store.listSessions(url.searchParams.get('project') ?? undefined) : []);
       } else if (path === '/command' && req.method === 'POST') {

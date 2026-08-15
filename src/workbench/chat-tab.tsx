@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { diffLines } from '@/workbench/line-diff';
+import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ReportCard } from '@/workbench/report-view';
 import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import {
@@ -195,7 +196,7 @@ function TodoPanel({ items }: { items: TodoItem[] }) {
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
-  const { sessionId, start, starting, error: startError } = useStartSession(projectId, projectPath, openSessionId);
+  const { sessionId, open, start, starting, error: startError } = useStartSession(projectId, projectPath, openSessionId);
   const view = useSession(sessionId);
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
@@ -228,20 +229,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     return <div className="p-8 text-muted-foreground">Pick a project to start a chat.</div>;
   }
 
+  const shell = (inner: React.ReactNode) => (
+    <div className="flex h-[calc(100vh-6rem)]">
+      <ChatSidebar projectId={projectId} projectPath={projectPath} openSessionId={sessionId} onOpen={open} />
+      <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
+    </div>
+  );
+
   if (!sessionId) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 py-24">
+    return shell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat open for this project.</p>
         <Button variant="primary" onClick={() => void start()} disabled={starting} data-testid="new-chat">
           {starting ? 'Starting…' : 'New chat'}
         </Button>
         {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}
-      </div>
+      </div>,
     );
   }
 
-  return (
-    <div className="flex h-[calc(100vh-6rem)] flex-col" data-testid="chat-tab" data-session-id={sessionId}>
+  return shell(
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
       <div className="flex items-center gap-3 border-b border-border/60 px-4 py-2 text-sm">
         <span
           data-testid="session-state"
@@ -386,6 +394,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
         </div>
       </div>
-    </div>
+    </div>,
   );
 }

@@ -145,6 +145,14 @@ export class Store {
       .run(e.sessionId, e.seq, e.at, e.type, JSON.stringify(e));
   }
 
+  /**
+   * On boot nothing is running, whatever the last write claimed. A row saying
+   * `streaming` after a restart would promise a process that does not exist.
+   */
+  markAllDormant(): void {
+    this.db.prepare("UPDATE session SET state = 'dormant' WHERE state NOT IN ('ended','dormant')").run();
+  }
+
   rememberBeadLink(sessionId: string, beadId: string, via: string): void {
     this.db
       .prepare('INSERT OR IGNORE INTO bead_link (session_id, bead_id, via, first_seen_at) VALUES (?,?,?,?)')
