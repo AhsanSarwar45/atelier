@@ -7,7 +7,9 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   use: {
-    baseURL: 'http://localhost:3008',
+    // Overridable so a worktree can drive its own instance without touching
+    // the one serving the owner's board on 3008.
+    baseURL: process.env.BEADS_E2E_URL ?? 'http://localhost:3008',
     viewport: { width: 1440, height: 900 },
     colorScheme: 'dark',
   },

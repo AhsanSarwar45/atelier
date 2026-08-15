@@ -1,0 +1,118 @@
+/**
+ * The workbench sidecar's HTTP surface.
+ *
+ * Binds loopback only, always: the browser reaches it through the axum
+ * server's /api/workbench/* proxy, so the workbench adds no port to the
+ * network (docs/agent-workbench.md §1.2).
+ *
+ * SSE down, POST up — the same shape server/src/routes/watch.rs already uses.
+ */
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+
+import type { WbpCommand } from '../../src/workbench/protocol.ts';
+import { Sessions } from './sessions.ts';
+import { Store } from './store.ts';
+
+const PORT = Number(process.env.BEADS_WORKBENCH_PORT ?? 3009);
+
+const store = new Store();
+const sessions = new Sessions(store);
+
+function json(res: ServerResponse, status: number, body: unknown): void {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) });
+  res.end(payload);
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * One session's stream: replay from `since`, then tail live. A browser that
+ * reconnects passes the last seq it saw and misses nothing.
+ */
+function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: string, since: number): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    // The axum proxy streams bytes through untouched; this tells any other
+    // hop in the chain not to sit on them.
+    'x-accel-buffering': 'no',
+  });
+
+  const write = (e: unknown) => {
+    res.write(`id: ${(e as { seq: number }).seq}\ndata: ${JSON.stringify(e)}\n\n`);
+  };
+
+  for (const e of sessions.replay(sessionId, since)) write(e);
+  const unsubscribe = sessions.subscribe(sessionId, write);
+
+  // Keeps intermediaries from reaping an idle stream, same 30s cadence as watch.rs.
+  const beat = setInterval(() => res.write(': keep-alive\n\n'), 30_000);
+  const done = () => {
+    clearInterval(beat);
+    unsubscribe();
+  };
+  req.on('close', done);
+  req.on('error', done);
+}
+
+async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void> {
+  switch (cmd.type) {
+    case 'session.start': {
+      const s = await sessions.start(cmd);
+      json(res, 200, s);
+      return;
+    }
+    case 'prompt.send':
+      await sessions.send(cmd.sessionId, cmd.text);
+      json(res, 200, { ok: true });
+      return;
+    case 'ask.answer':
+      sessions.answer(cmd.sessionId, cmd.askId, cmd.optionId);
+      json(res, 200, { ok: true });
+      return;
+    case 'session.stop':
+      await sessions.stop(cmd.sessionId);
+      json(res, 200, { ok: true });
+      return;
+    default:
+      json(res, 400, { error: `unknown command ${(cmd as { type: string }).type}` });
+  }
+}
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
+  const path = url.pathname.replace(/^\/api\/workbench/, '') || '/';
+
+  void (async () => {
+    try {
+      if (path === '/health') {
+        json(res, 200, { status: 'ok', sidecar: 'workbench' });
+      } else if (path === '/events' && req.method === 'GET') {
+        const sessionId = url.searchParams.get('session');
+        if (!sessionId) return json(res, 400, { error: 'session is required' });
+        const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
+        streamEvents(req, res, sessionId, Number.isFinite(since) ? since : 0);
+      } else if (path === '/sessions' && req.method === 'GET') {
+        json(res, 200, sessions ? store.listSessions(url.searchParams.get('project') ?? undefined) : []);
+      } else if (path === '/command' && req.method === 'POST') {
+        await handleCommand(res, JSON.parse(await readBody(req)) as WbpCommand);
+      } else {
+        json(res, 404, { error: `no route ${path}` });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!res.headersSent) json(res, 500, { error: message });
+      else res.end();
+    }
+  })();
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`[workbench] sidecar listening on http://127.0.0.1:${PORT}`);
+});

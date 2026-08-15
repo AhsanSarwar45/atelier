@@ -217,11 +217,11 @@ and hooks.
 
 Fixed at launch, every session:
 
-- **`--permission-mode` is always passed explicitly.** Defaults are shifting
+- **The permission mode is always passed explicitly.** Defaults are shifting
   and plan/bypass modes are *not* restored on resume, so the sidecar stores the
   mode per session and re-pins it on every resume. The header shows the pinned
-  mode. The observed modes on this install are `acceptEdits, auto,
-  bypassPermissions, manual, dontAsk, plan`.
+  mode. Which mode asks about *every* tool was settled by running one and
+  watching: a permission request arrived for `Read` and again for `Edit`.
 - **No MCP.** `--strict-mcp-config` with no `--mcp-config` — nothing attaches
   unless the owner asks (decision 6).
 - **Never `--bare`, never `ANTHROPIC_API_KEY`.** The CLI's own help states
@@ -617,13 +617,15 @@ cards all read. One connection for the whole app, not one per component.
 |---|---|
 | `server/src/routes/mod.rs` | `pub mod workbench;` — 1 line |
 | `server/src/main.rs` | one `.nest("/api/workbench", …)` + one `spawn_sidecar()` — 2 lines |
+| `server/Cargo.toml` | reqwest's `stream` feature — one word, and SSE cannot pass through the proxy without it |
 | `src/app/project/page.tsx` | 19-line file becomes a Tabs shell around the unchanged `<KanbanBoard/>` |
 | `src/app/layout.tsx` | one `<WorkbenchGlobals/>` — tray + strip |
 | `src/components/bead-card.tsx` | one `<CardLiveChat beadId=…/>` |
 | `package.json` | added dependency and script lines only; no existing line modified |
+| `tsconfig.json` | `workbench` added to `exclude` — the sidecar carries its own |
+| `playwright.config.ts` | `baseURL` reads `BEADS_E2E_URL`, so a worktree drives its own instance instead of the one serving the owner's board |
 
-Six files, four of them one line. `server/Cargo.toml` needs nothing — axum,
-reqwest, tokio and serde are all already there. `server/src/db.rs`,
+Nine files, six of them a single line or word. `server/src/db.rs`,
 `kanban-board.tsx`, `src/lib/api.ts` and everything under `reporting/` are not
 touched at all. If the build needs to exceed this list, that is a design
 change and it gets said out loud, not absorbed.
@@ -670,14 +672,10 @@ capability matrix or has a stated fallback.
 3. **`codex` is not installed on this machine.** No binary on `PATH` (only
    `~/.codex/` with memories/skills/tmp). The Codex driver cannot be exercised
    — and therefore cannot be signed off — until it is installed.
-4. **Which Claude permission mode asks about everything.** The install offers
-   `acceptEdits, auto, bypassPermissions, manual, dontAsk, plan`; the design
-   pins the ask-everything mode, and work item 1's screen test is what settles
-   which name that is.
-5. **`@playwright/test` is not a dependency.** `package.json` has `playwright`
-   only, yet `tests/themes.spec.ts` imports `@playwright/test` and the card's
-   acceptance criteria is `npx playwright test`. The runner has to be added
-   before the acceptance run can be trusted.
+4. ~~Which Claude permission mode asks about everything.~~ Settled by running
+   one — see [§3.1](#31-claude).
+5. ~~`@playwright/test` is not a dependency.~~ Added; the runner is in
+   `package.json`.
 6. **The raw control-frame shape of stream-json permissions.** Not known — and
    deliberately not needed, because the SDK owns it (§1.1). If we ever leave
    the SDK, this becomes a research task first.

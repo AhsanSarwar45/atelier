@@ -89,3 +89,12 @@ reporting/pages/**/*.html
 # Python bytecode from the report builder
 __pycache__/
 *.pyc
+
+# Agent workbench (docs/agent-workbench.md)
+/workbench/node_modules
+# E2E run artifacts: the isolated instance's data dir and its fixture project.
+# The screenshots at tests/results/*.png are evidence and stay tracked.
+/tests/.e2e-run/
+/tests/.workbench-run/
+/tests/results/*/
+/tests/results/.last-run.json

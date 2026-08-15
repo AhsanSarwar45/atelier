@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:fix": "next lint --fix",
-    "precommit:full": "npm run lint && npm run typecheck && npm run build && cd server && cargo clippy -- -D warnings && cargo test"
+    "precommit:full": "npm run lint && npm run typecheck && npm run build && cd server && cargo clippy -- -D warnings && cargo test",
+    "workbench": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON workbench/src/server.ts",
+    "workbench:install": "npm install --prefix workbench"
   },
   "dependencies": {
     "@base-ui/react": "^1.1.0",
@@ -56,6 +58,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@tailwindcss/typography": "^0.5.19",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",

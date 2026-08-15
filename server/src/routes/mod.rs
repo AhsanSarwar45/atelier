@@ -14,6 +14,7 @@ pub mod projects;
 pub mod reports;
 pub mod version;
 pub mod watch;
+pub mod workbench;
 pub mod worktree;
 
 pub use projects::project_routes;

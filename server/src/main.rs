@@ -159,6 +159,8 @@ async fn main() {
     // Initialize version check cache
     let version_cache = routes::version::new_cache();
 
+    routes::workbench::spawn_sidecar();
+
     // Build the router
     let app = Router::new()
         .route("/api/health", get(routes::health))
@@ -200,6 +202,7 @@ async fn main() {
                 .delete(routes::memory::delete_memory),
         )
         .route("/api/watch/beads", get(routes::watch_beads))
+        .nest("/api/workbench", routes::workbench::router())
         .route("/api/version/check", get(routes::version::version_check))
         .route("/api/update", post(routes::version::perform_update))
         .fallback(serve_static)
