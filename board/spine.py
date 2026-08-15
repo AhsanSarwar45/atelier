@@ -24,7 +24,7 @@ import sections  # noqa: E402
 #           container nobody can read
 #   read    no card of its own either: the goal is what is read, so the goal carries
 #           the signature. A card here would be a piece of the job that is open
-#           exactly while the job is meant to have none (scripts/board/reading.py)
+#           exactly while the job is meant to have none (board/reading.py)
 COMMIT, NOTE, FACT, WORK, READ = "commit", "note", "fact", "work", "read"
 
 # Whether a job may leave the step out.
@@ -58,16 +58,17 @@ STEPS = [
     ("design", "Design",
      "What will change and why that is the right shape, stated as effects. The manager "
      "approves before anyone builds, and the work items go under the goal itself "
-     "(`scripts/board/job under <goal>`).\n\n## Acceptance Criteria\nThe manager has said "
+     "(`%(pour)s under <goal>`).\n\n## Acceptance Criteria\nThe manager has said "
      "yes, the yes is on this card, and the job carries the items this design decided.",
      NOTE, REASON),
     ("work", "Work",
      "The change itself, as the items the design decided — poured under the goal by "
-     "`scripts/board/job under <goal>`, never behind a card called Build.\n\n"
+     "`%(pour)s under <goal>`, never behind a card called Build.\n\n"
      "## Acceptance Criteria\nEvery work item is closed and its commit is on main.",
      WORK, MUST),
     ("verify", "Verify",
-     "Run the thing and read the result. A build that compiles is not a verified change.\n\n"
+     "Run the thing and read the result. A build that compiles is not a verified change.\n"
+     "What that means here: %(proves)s.\n\n"
      "## Acceptance Criteria\n%(done)s\n\nThe run and its number or image are on this card.",
      NOTE, MUST),
     ("benchmark", "Benchmark",
@@ -239,15 +240,16 @@ def card(sid, goal, meta, priority):
     """The bd create arguments for one step of a job."""
     if evidence(sid) == WORK:
         raise ValueError("the work position has no card: its items are the job's own "
-                         "children, poured by `scripts/board/job under <goal>`")
+                         "children, poured by `%s under <goal>`" % sections.EG_POUR)
     if evidence(sid) == READ:
         raise ValueError("the reading position has no card: the goal is what is read, "
-                         "and it carries the signature (scripts/board/reading.py)")
+                         "and it carries the signature (board/reading.py)")
     _, verb, body, _, _ = BY_ID[sid]
     labels = step_labels(sid, goal, meta)
     args = ["create", "--title", "%s: %s" % (verb, meta.get("subject", "")),
             "--type", "task", "-p", str(priority), "--parent", goal,
-            "-d", body % {"done": meta.get("done", "")} if "%(done)s" in body else body]
+            "-d", body % {"done": meta.get("done", ""), "pour": sections.EG_POUR,
+                          "proves": sections.PROVES}]
     for lab in labels:
         args += ["-l", lab]
     return args

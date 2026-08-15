@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """The only way a job reaches the board.
 
-`bd create` is refused (scripts/hooks/board-status-gate.py): hand-made cards were
+`bd create` is refused (hooks/board-status-gate.py): hand-made cards were
 what filled the board with work nobody could confirm. The arguments below are the
 fields the shape requires — see docs/board.md#4-the-shape-of-a-job.
 
 A job opens with its goal and its first step only. The rest arrive as each step
-closes (scripts/hooks/board-touch.py), because a step created before the design
+closes (hooks/board-touch.py), because a step created before the design
 exists can carry nothing but the template's own words.
 
 A container (`epic`) is the other shape: a system whose every landing is a job in
@@ -18,12 +18,19 @@ import os
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
 import plain  # noqa: E402
+import project  # noqa: E402
 import sections  # noqa: E402
 import spine  # noqa: E402
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The board of the checkout this is being poured from, never a fixed one. A pour
+# tool hardwired to one project can only be borrowed by another with the board
+# address overridden by hand, which is what it was (cor-up1g).
+ROOT = project.root(os.getcwd())
+DECL = sections.use(ROOT)
 AREAS = sections.AREAS
 # What kind of work this is, kept to three so a manager reads a board at a glance.
 # It is a label rather than bd's own type, which this board uses for a card's
@@ -37,13 +44,27 @@ def bar(problem):
         sys.exit(problem)
 
 
-def bd(args, capture=True):
+def bd(args, capture=True, must=True):
     env = dict(os.environ, BEADS_ACTOR=os.environ.get("BEADS_ACTOR", "") or "")
     run = subprocess.run(["bd"] + args, cwd=ROOT, text=True, env=env,
                          capture_output=capture)
-    if run.returncode != 0:
+    if run.returncode != 0 and must:
         sys.exit("bd %s failed:\n%s%s" % (args[0], run.stdout or "", run.stderr or ""))
     return run.stdout or ""
+
+
+def rows(out):
+    """The cards a bd answer names. bd says `null` for an empty result, which json
+    turns into nothing at all rather than into no cards; and it answers a `show`
+    for an unknown id with an error body and an exit code of zero, so what comes
+    back is read rather than the code (cor-up1g)."""
+    try:
+        got = json.loads(out or "[]")
+    except Exception:
+        return []
+    if isinstance(got, dict):
+        got = [got]
+    return [r for r in (got or []) if isinstance(r, dict) and r.get("id")]
 
 
 def chosen(a):
@@ -181,7 +202,7 @@ def epic(a):
         args += ["--parent", a.parent]
     root = json.loads(bd(args))["id"]
     bd(spine.settle(root, ["container", "area:" + a.area, "kind:" + a.kind]))
-    # No `spine` key: scripts/hooks/board-touch.py opens a next step from it, and
+    # No `spine` key: hooks/board-touch.py opens a next step from it, and
     # a container has none to open.
     bd(["update", root, "--set-metadata", "area=" + a.area,
         "--set-metadata", "kind=" + a.kind, "--set-metadata", "done=" + a.done])
@@ -246,7 +267,7 @@ def find(a):
     bar(sections.what_is_wrong(a.title))
     bar(sections.where_it_is(a.where))
     body = ("## Where it is\n%s\n\n## Acceptance Criteria\nEither promoted into a job "
-            "(scripts/board/job new --source <this card>), or closed as not real.\n"
+            "(%s new --source <this card>), or closed as not real.\n" % sections.EG_POUR
             % a.where)
     out = bd(["create", "--title", a.title, "--type", "task", "-p", str(a.priority),
               "-d", body, "-l", "find", "-l", "area:" + a.area,
@@ -257,18 +278,86 @@ def find(a):
         print(out.strip())
 
 
+def gates_on(cid):
+    """Every gate still holding this card shut."""
+    return [r["id"] for r in rows(bd(["gate", "list", cid, "--json"], must=False))
+            if r.get("status") != "closed"]
+
+
+def open_under(cid, seen=None):
+    """This card and every piece of it that is still open, deepest first.
+
+    A job called off drops what is left of it too: a piece left open behind a
+    closed goal is work nobody will ever do, standing on the board as work
+    somebody might.
+    """
+    seen = seen if seen is not None else set()
+    if cid in seen:
+        return []
+    seen.add(cid)
+    out = []
+    for r in rows(bd(["list", "--parent", cid, "--status", "all", "--json"],
+                     must=False)):
+        if r["id"] != cid and r.get("status") != "closed" \
+                and r.get("issue_type") != "gate":
+            out += open_under(r["id"], seen)
+    return out + [cid]
+
+
+def drop(cid, reason, why_gate):
+    """Close one card as dropped, resolving whatever is holding it shut.
+
+    The gate goes first and in writing. A gate is a reading that is owed, and a
+    job being called off owes none — but "nobody read it" and "there was nothing
+    to read" are different facts, and the one that is true has to be the one left
+    on the card.
+    """
+    for gate in gates_on(cid):
+        bd(["update", gate, "--append-notes", why_gate], must=False)
+        bd(["gate", "resolve", gate], must=False)
+    bd(["update", cid, "--add-label", "cancelled"], must=False)
+    bd(["update", cid, "--append-notes", "Cancelled: " + reason], must=False)
+    bd(["set-state", cid, "resolution=cancelled", "--reason", reason], must=False)
+    bd(["close", cid, "--reason", "cancelled: " + reason])
+
+
 def cancel(a):
-    """Work dropped rather than delivered. It closes — anything waiting on a card
-    that never closes waits forever — and it carries a mark saying it was dropped,
-    so the manager's board never counts it as something he got."""
+    """Work dropped rather than delivered — the other half of finishing.
+
+    A job can be landed, and until now it could not be called off: what holds a
+    job shut while it waits to be read is a gate, no tool resolved one for a job
+    that is being dropped rather than delivered, and forcing the close is refused
+    outright (cor-0fhq). Re-firing the reader cannot clear it either — the reader
+    reads the same standing commits, files what it finds, and a job with findings
+    open is a job that stays shut.
+
+    So this resolves them, in writing, and marks the job never delivered: the
+    close carries `cancelled`, the manager's board counts it as nothing he got,
+    and the LANDING path is untouched — a close that says the work landed is
+    still refused while a gate stands (hooks/board-status-gate.py).
+    """
     if len(a.reason) < 25:
         sys.exit("--reason must say why this is being dropped. A card cancelled "
                  "without one comes back as somebody's next idea.")
-    bd(["update", a.id, "--add-label", "cancelled"])
-    bd(["update", a.id, "--append-notes", "Cancelled: " + a.reason])
-    bd(["set-state", a.id, "resolution=cancelled", "--reason", a.reason])
-    bd(["close", a.id, "--reason", "cancelled: " + a.reason])
-    print("%s cancelled" % a.id)
+    card = next(iter(rows(bd(["show", a.id, "--json"], must=False))), None)
+    if not card:
+        sys.exit("no card %s on this board (%s)" % (a.id, ROOT))
+    if card.get("issue_type") == "gate":
+        sys.exit("%s is a gate, not work. A gate is resolved by the reading it "
+                 "waits for, or by cancelling the job it holds." % a.id)
+    if card.get("status") == "closed":
+        sys.exit("%s is already closed. Cancelling is for work that is being "
+                 "dropped, not for work that is finished." % a.id)
+
+    why_gate = ("Resolved without a reading: %s was called off rather than "
+                "delivered, so no reading was ever owed. %s" % (a.id, a.reason))
+    dropped = []
+    for cid in open_under(a.id):
+        drop(cid, a.reason, why_gate)
+        dropped.append(cid)
+    print("%s cancelled%s" % (a.id,
+                              " with " + ", ".join(dropped[:-1]) if len(dropped) > 1
+                              else ""))
 
 
 parser = argparse.ArgumentParser(description=__doc__)

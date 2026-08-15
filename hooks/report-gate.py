@@ -30,7 +30,7 @@ def main():
     data = json.load(sys.stdin)
     if (data.get("tool_name") or "") not in ASKS or bc.reviewing():
         return
-    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd"))
+    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
     if not os.path.isdir(os.path.join(root, ".beads")):
         return
     # This session's own page, not any page anywhere: another session building

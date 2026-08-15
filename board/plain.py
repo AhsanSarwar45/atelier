@@ -39,6 +39,20 @@ def problems(text):
     return _jargon()(text or "", set())
 
 
+def words():
+    """The list itself: what to say instead of each term, and the shapes that are
+    not words at all.
+
+    Handed out so a writer can compose through the list rather than be judged by
+    it afterwards — the outside reader does exactly that (`board/review`). Loaded
+    the same way `problems` loads it, so the check and the repair can never come
+    apart into two lists.
+    """
+    _jargon()
+    from jargon import BANNED, SHAPES, SHAPE_EXEMPT
+    return BANNED, SHAPES, SHAPE_EXEMPT
+
+
 # A card carries its own id in a note often enough, and an id is not a word.
 def refuse(text, what):
     """Exit with the rewrite to make, or return having found nothing.

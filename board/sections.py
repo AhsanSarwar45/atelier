@@ -71,6 +71,10 @@ AREAS, CARD, PLACE = [], None, None
 # project's card ids and another project's systems teaches nothing here. Both are
 # read off the declaration with the rest.
 EG_CARD, EG_AREA, EG_POUR, EG_SUITE = "bd-1a2b", "another system", "job", "selftest.py"
+# What a change in this project has to do before it counts as proved. Written
+# into the Verify step of every job poured here and told to the outside reader,
+# so the one sentence answers in both places.
+PROVES = "run the thing and read what it produced"
 
 
 def use(root=None):
@@ -80,7 +84,7 @@ def use(root=None):
     tool that has to answer for a different one — the reader of a job, or the
     suite running each project's declaration in turn.
     """
-    global AREAS, CARD, PLACE, EG_CARD, EG_AREA, EG_POUR, EG_SUITE
+    global AREAS, CARD, PLACE, EG_CARD, EG_AREA, EG_POUR, EG_SUITE, PROVES
     decl = project.of(root)
     AREAS = decl.areas
     known = project.prefixes(decl)
@@ -91,6 +95,7 @@ def use(root=None):
     EG_AREA = AREAS[0] if AREAS else "another system"
     EG_POUR = project.tool(decl, "job")
     EG_SUITE = project.tool(decl, "selftest.py")
+    PROVES = decl.proves or PROVES
     return decl
 
 
@@ -154,11 +159,11 @@ def finish_line(text, what="--done"):
     if not _runnable(text):
         return ("%s names nothing anyone can run, so closing against it is an opinion. "
                 "Name the command and what it must produce:\n  not \"it works\"\n  but "
-                "\"python3 scripts/board/selftest.py reports 0 failures\"" % what)
+                "\"python3 %s reports 0 failures\"" % (what, EG_SUITE))
     if not _measurable(text):
         return ("%s names a command but nothing it must produce, so any outcome "
-                "satisfies it. Add the number or the image:\n  not \"cargo test runs\"\n"
-                "  but \"cargo test reports 0 failures\"" % what)
+                "satisfies it. Add the number or the image:\n  not \"the suite runs\"\n"
+                "  but \"the suite reports 0 failures\"" % what)
     return ""
 
 
@@ -169,17 +174,17 @@ def left_out(text):
         return ("--not must say what this job deliberately leaves out, or the job has "
                 "no edge. Name the card, the system or the file it will not touch:\n  "
                 "not \"other stuff\"\n  but \"the words a card is written in "
-                "(cor-stbf), and nothing under shading\"")
+                "(%s), and nothing under %s\"" % (EG_CARD, EG_AREA))
     if TEMPLATE in text.lower():
         return ("--not is the sentence the pour used to print into every card. Say what "
                 "THIS job leaves out:\n  not \"anything found on the way becomes its "
-                "own card\"\n  but \"the words a card is written in (cor-stbf), and "
-                "nothing under shading\"")
+                "own card\"\n  but \"the words a card is written in (%s), and "
+                "nothing under %s\"" % (EG_CARD, EG_AREA))
     if not _names_something(text):
         return ("--not names nothing anyone could check the job against. Name the card, "
                 "the system or the file this job does not touch:\n  not \"other stuff\"\n"
-                "  but \"the words a card is written in (cor-stbf), and nothing under "
-                "shading\"")
+                "  but \"the words a card is written in (%s), and nothing under "
+                "%s\"" % (EG_CARD, EG_AREA))
     return ""
 
 
@@ -189,7 +194,7 @@ def where_it_is(text):
     if not _names_something(text):
         return ("A find's second argument must say WHERE it is — the file, the command, "
                 "the system or the card. Without it the card is a rumour:\n  not \"over "
-                "there\"\n  but \"scripts/board/job, on every pour that names no --not\"")
+                "there\"\n  but \"%s, on every pour that names no --not\"" % EG_POUR)
     if not (SHOWS.search(text) or _measurable(text) or '"' in text or "'" in text):
         return ("A find's second argument says where it is but not HOW IT SHOWS, so "
                 "nobody can tell whether it is still true. Add what it does — what it "
@@ -207,7 +212,7 @@ BARS = ("what_is_wrong", "finish_line", "left_out", "where_it_is")
 # words it was written in — the sweep's own decision, cor-dlby.
 LIVE = {"open", "in_progress", "manager_review", "blocked", "deferred"}
 # What the pour writes above each part of a card's body, so a card can be read
-# back apart the same way it was written (`scripts/board/job`).
+# back apart the same way it was written (`board/job`).
 HEADINGS = {"what": "What is wrong", "evidence": "Evidence it is real",
             "done": "Success Criteria", "not_in": "Not in this job",
             "where": "Where it is"}

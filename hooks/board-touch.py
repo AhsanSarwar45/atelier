@@ -6,7 +6,7 @@ and `bd reclaim` hands the card back. Tool activity is the liveness signal, so
 nothing has to be remembered by the agent.
 
 Closing a card is also what moves a job's run on, but the rule for that is not
-here: scripts/board/run.py owns it, because the board's own reader has to drive
+here: board/run.py owns it, because the board's own reader has to drive
 the same rule from outside any session.
 """
 import json
@@ -47,7 +47,7 @@ def response_text(resp):
 
 def main():
     data = json.load(sys.stdin)
-    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd"))
+    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
     if bc.reviewing():
         return
     sid = data.get("session_id")
@@ -67,7 +67,7 @@ def main():
             ]
     elif tool == "Bash":
         cmd = tin.get("command") or ""
-        if re.search(r"\bbd\b.*\bcreate\b|scripts/board/job\b", cmd):
+        if re.search(r"\bbd\b.*\bcreate\b|board/job\b", cmd):
             found = card_ids(response_text(data.get("tool_response")), bc.prefix(root))
             state["created"] = (state.get("created") or [])[-200:] + [
                 {"id": i, "t": bc.now()} for i in found

@@ -42,7 +42,7 @@ def main():
     cmd = (data.get("tool_input") or {}).get("command") or ""
     if not MERGE.search(cmd) or PASSIVE.search(cmd):
         return
-    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd"))
+    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
     if not os.path.isdir(os.path.join(root, ".beads")):
         return
     # Before the slot, and whoever holds it: a merge that rewrites main is refused

@@ -16,9 +16,12 @@ import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "board"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import board_common as bc  # noqa: E402
+import project  # noqa: E402
 import reading  # noqa: E402
 import run  # noqa: E402
+import sections  # noqa: E402
 import spine  # noqa: E402
 
 # Anchored twice over: at a command start, so a document that merely quotes one
@@ -46,7 +49,7 @@ UNREPORTED = bc.UNREPORTED
 UNREAD = (
     " The reading is not one of them — it has no card. The board sends a reader when "
     "a job's last piece closes and it signs the goal itself; if that one died, "
-    "`scripts/board/review %s --rerun` sends another."
+    "`%s --rerun` sends another."
 )
 
 # The step a bug job may not drop on its own say-so, and the one test for the
@@ -56,16 +59,17 @@ UNREAD = (
 GUARD = "test"
 MANAGER_SAID, MANAGER_WANTS = spine.NOTE_SHAPE["design"]
 
-# When the pour began asking a job to say why it drops a step: commit e273bb5a,
-# `scripts/board/job`. A job poured before that was never asked, and a job cannot
-# answer a question nobody put to it — every job on this board with no guard-step
-# reason at all is older than this, and every stated one is newer
-# (`python3 scripts/board/cost.py`).
+# When this project's pour began asking a job to say why it drops a step. A job
+# poured before that was never asked, and a job cannot answer a question nobody
+# put to it. The moment differs by project — one that joined the machinery after
+# the question existed has no such jobs at all — so it is declared rather than
+# written here (`machinery.toml`, `guard_asked_from`).
 #
 # The pour time is what is asked, not whether a reason is stored, because a stored
 # reason comes off again in one command and the refusal would be a formality.
-ASKED_FROM = datetime.datetime(2026, 8, 12, 17, 56, 47,
-                               tzinfo=datetime.timezone.utc).timestamp()
+def asked_from(root):
+    return stamp(project.of(root).guard_asked_from) or 0.0
+
 
 WAIVER = (
     "%(cid)s belongs to a bug job that dropped the Guard step, and what stands on "
@@ -123,7 +127,7 @@ def stamp(text):
 
 
 def tally(name):
-    """One row for the manager's count of what a refusal costs (scripts/board/cost.py).
+    """One row for the manager's count of what a refusal costs (board/cost.py).
 
     Counted after the refusal is already printed, and never at the cost of it: a
     full disk must not turn a gate into a gate that lets things through.
@@ -194,7 +198,7 @@ def guard_waived(cid, card, root):
     # board will not say is judged on the reason after all rather than waved past.
     why = meta.get("skip." + GUARD)
     poured = stamp(goal.get("created_at"))
-    asked = poured >= ASKED_FROM if poured is not None else why is not None
+    asked = poured >= asked_from(root) if poured is not None else why is not None
     if not asked or MANAGER_SAID(why or ""):
         return None
     return goal_id, goal, why or ""
@@ -589,6 +593,21 @@ def spent(goal, root):
     return "work" not in unfinished_spine(card, root)
 
 
+def open_gates(cid, root):
+    """Every gate still holding this card shut.
+
+    Asked here rather than left to the board's own refusal, because the two ways
+    on are not the same thing and the board cannot tell them apart: a job that is
+    being LANDED owes a reading, and a job that is being CALLED OFF owes none. A
+    refusal that only says "blocked" sends an agent looking for a reader it does
+    not need (cor-0fhq).
+    """
+    rows = rows_of(["gate", "list", cid, "--json"], root)
+    if rows is UNREADABLE:
+        return []
+    return [r["id"] for r in rows if r.get("id") and r.get("status") != "closed"]
+
+
 def open_children(cid, root):
     ok, out = bc.bd(["list", "--parent", cid, "--brief", "--json"], root)
     if not ok:
@@ -603,10 +622,17 @@ def open_children(cid, root):
 def main():
     data = json.load(sys.stdin)
     cmd = (data.get("tool_input") or {}).get("command") or ""
-    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd"))
+    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
     if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
         return
-    card_id = re.compile(r"\b%s-[0-9a-z.-]{2,16}\b" % re.escape(bc.prefix(root)))
+    sections.use(root)
+    # Every card the board of THIS checkout answers for. A commit is judged by the
+    # project it is being made in, so one made here while the session's home is
+    # another project is still a commit here (cor-up1g) — and a job whose own
+    # declaration says its change lands here may name its own board's ids, because
+    # a change split across two repositories is one job.
+    card_id = re.compile(r"\b(?:%s)-[0-9a-z.-]{2,16}\b"
+                         % "|".join(re.escape(p) for p in bc.prefixes(root)))
     ids = card_id.findall(cmd)
     # A quoted value is a card's own words, and a card's words are about commands
     # as often as not: a note that quotes one, in brackets, reads exactly like the
@@ -619,20 +645,23 @@ def main():
     if CREATE.search(bare):
         deny(
             "Cards are not written by hand — that is how the board filled up with work "
-            "nobody could confirm. A job: scripts/board/job new --what … --evidence … "
+            "nobody could confirm. A job: %(pour)s new --what … --evidence … "
             "--done … --area … --kind …, which pours the goal and its steps together. "
-            "A fault this job's own change would touch: scripts/board/job under <goal> "
+            "A fault this job's own change would touch: %(pour)s under <goal> "
             "--do \"<what to do>|<how we know it is done>\". "
-            "Something you noticed and are not doing now: scripts/board/job find "
+            "Something you noticed and are not doing now: %(pour)s find "
             "\"<what>\" \"<where it is, how it shows>\" --area … --kind …."
+            % {"pour": bc.tool(root, "job")}
         )
         return
 
     if COMMIT.search(bare) and not AMEND.search(bare) and not ids:
         deny(
             "A commit has to name the card it belongs to, because that is what lets "
-            "the board tell a written change from a landed one. Put the card id in "
-            "the commit message."
+            "the board tell a written change from a landed one. This commit is being "
+            "made in %s, whose board issues %s — put one of those ids in the message. "
+            "A card from another project's board does not land a change here."
+            % (root, " or ".join(p + "-…" for p in bc.prefixes(root)))
         )
         return
 
@@ -641,7 +670,7 @@ def main():
             "A gate is not opened from the session it is holding — that is the whole "
             "of its value. The board's own reader opens the one on a job when it has "
             "read the change; if it died, fire another: "
-            "`scripts/board/review <the goal> --rerun`."
+            "`%s <the goal> --rerun`." % bc.tool(root, "review")
         )
         return
 
@@ -692,6 +721,24 @@ def main():
                     "it where it is." % cid
                 )
                 return
+            shut = open_gates(cid, root)
+            if shut:
+                deny(
+                    "%s is held shut by %s, and this close says the work landed. A "
+                    "gate is a reading somebody is owed: it opens when a reader that "
+                    "did not write the job has read it, and there is no other way to "
+                    "land.\n\nIf this job is not being delivered at all, that is a "
+                    "different thing and has its own route — it resolves the gate in "
+                    "writing and marks the job as never delivered, so the manager's "
+                    "board never counts it as something he got:\n  %s cancel %s "
+                    "--reason=\"<why this is being dropped>\"\n\nIf it is being "
+                    "delivered, let the reader finish; if the reader died, "
+                    "`%s %s --rerun` sends another."
+                    % (cid, " and ".join(shut), bc.tool(root, "job"), cid,
+                       bc.tool(root, "review"), cid)
+                )
+                tally("landing-gated")
+                return
             # Asked at every close, which in practice is the first one: the job is
             # refused at its opening step, before a line of it is designed. Held
             # back to the last step it would arrive after the whole job had been
@@ -717,7 +764,8 @@ def main():
                     "closes early is how most of this board's work reached done without "
                     "ever being read: close the steps, and the next one opens itself.%s"
                     % (cid, " and ".join(left),
-                       UNREAD % cid if "review" in left else "")
+                       UNREAD % ("%s %s" % (bc.tool(root, "review"), cid))
+                       if "review" in left else "")
                 )
                 return
             step = next((l for l in card.get("labels") or [] if l.startswith("step:")), None)
@@ -897,9 +945,9 @@ def main():
             if "find" in (card.get("labels") or []):
                 deny(
                     "%s is something noticed, not yet a job: it has no proof, no "
-                    "definition of done and no steps. Promote it — scripts/board/job "
+                    "definition of done and no steps. Promote it — %s "
                     "new --source %s --what … --evidence … --done … --area … — or "
-                    "close it as not real." % (cid, cid)
+                    "close it as not real." % (cid, bc.tool(root, "job"), cid)
                 )
                 return
             if "step:worktree" in (card.get("labels") or []):

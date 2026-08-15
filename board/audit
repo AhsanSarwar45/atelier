@@ -7,10 +7,10 @@ and it stays afterwards as the board's own health check — run it any day.
 
 Reads the board and writes nothing to it.
 
-    python3 scripts/board/audit                 what is below the bar, and why
-    python3 scripts/board/audit --only done     one section
-    python3 scripts/board/audit --quiet         the counts alone
-    python3 scripts/board/audit --json FILE     the same, for the sweep to read
+    python3 board/audit                 what is below the bar, and why
+    python3 board/audit --only done     one section
+    python3 board/audit --quiet         the counts alone
+    python3 board/audit --json FILE     the same, for the sweep to read
 
 Exits non-zero while any card is below the bar, so it can stand in a check.
 See docs/board.md#4e-what-a-section-has-to-carry.
@@ -24,8 +24,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
 import plain  # noqa: E402
+import project  # noqa: E402
 import sections  # noqa: E402
+
+# The board of the checkout this is run from. Every bar below is that project's
+# own, read off its declaration.
+ROOT = project.root(os.getcwd())
+sections.use(ROOT)
 
 # What a card's section is called when it is spoken about rather than parsed.
 SAID = {"title": "the words it is written in", "what": "what is wrong",

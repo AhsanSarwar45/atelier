@@ -18,7 +18,8 @@ Free first — a word screen no model is paid for stands in front of the reading
 what gets past it is docs/board.md#habit.
 
 Switched off without touching settings, per docs/board.md#5:
-    CORSETTA_NO_HABIT_GATE=1        one session
+    MACHINERY_NO_HABIT_GATE=1       one session (a project's own brand
+                                    spelling of it works too)
     touch $CLAUDE_CODE_TMPDIR/board-sessions/no-habit-gate     every session here
 """
 import json
@@ -31,7 +32,7 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import board_common as bc  # noqa: E402
 
 # Set on the reading's own claude, so the hook cannot read the reading.
-BUSY = "CORSETTA_HABIT_READING"
+BUSY = "MACHINERY_HABIT_READING"
 MODEL = "haiku"
 READ_TIMEOUT = 120  # seconds; the reading runs detached, so nothing waits on this
 LIMIT = 8000  # characters of his message the reading is shown
@@ -86,7 +87,7 @@ Reply with one line of JSON and nothing else:
 
 
 def tally(name, value=1):
-    """One row for the manager's count of what this costs (scripts/board/cost.py)."""
+    """One row for the manager's count of what this costs (board/cost.py)."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                         "..", "board"))
@@ -148,7 +149,7 @@ def main():
     if os.environ.get(BUSY) or bc.reviewing() or bc.habit_off():
         return
     prompt_id = data.get("prompt_id")
-    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd"))
+    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
     if not prompt_id or not os.path.isdir(os.path.join(root, ".beads")):
         return
     bc.habit_sweep()

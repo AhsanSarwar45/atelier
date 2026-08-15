@@ -6,11 +6,11 @@ existed. Every one of those rewrites goes through here, because a sweep allowed
 to write whatever it likes finishes by putting 221 fresh sentences that mean
 nothing onto the board — which is the fault it was sent to fix.
 
-    python3 scripts/board/sweep rewrites.json          write them
-    python3 scripts/board/sweep rewrites.json --dry    say what it would write
+    python3 board/sweep rewrites.json          write them
+    python3 board/sweep rewrites.json --dry    say what it would write
 
 The file is {card id: {section: the new words}}, sections named as
-`scripts/board/sections.py` names them: what, evidence, done, not_in, where.
+`board/sections.py` names them: what, evidence, done, not_in, where.
 A job's `what` is its title as well — the pour writes one line into both, and a
 card whose title and first line disagree is a card nobody can search for.
 
@@ -25,10 +25,14 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
 import plain  # noqa: E402
+import project  # noqa: E402
 import sections  # noqa: E402
+
+ROOT = project.root(os.getcwd())
+sections.use(ROOT)
 
 # Which bar each section answers to, and which of them a card of that kind has.
 BAR = {"what": lambda t: sections.what_is_wrong(t),

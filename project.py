@@ -95,6 +95,10 @@ class Declaration:
         self.places = list(data.get("places") or [])
         self.brand = (data.get("brand") or "").upper()
         self.lands_elsewhere = list(data.get("lands_elsewhere") or [])
+        # When this project's pour began asking a job why it drops a step. A job
+        # poured before it was never asked and is not held to an answer; a project
+        # that joined afterwards has no such jobs and leaves this empty.
+        self.guard_asked_from = data.get("guard_asked_from") or ""
         review = data.get("review") or {}
         self.persona = review.get("persona") or self.name
         self.proves = review.get("proves") or ""

@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -24,8 +25,9 @@ import reading  # noqa: E402
 import spine  # noqa: E402
 
 GATE_TITLE = "Gate: read by someone who did not write it"
-GATE_WHY = ("A review is done by someone else; scripts/board/review resolves this "
-            "gate when one has read the change.")
+GATE_WHY = ("A review is done by someone else; the board's own reader resolves "
+            "this gate when one has read the change, and cancelling the job "
+            "resolves it as a reading that was never owed.")
 
 
 def card(cid, root):
@@ -122,15 +124,22 @@ def gated(goal_id, root):
 
 
 def fire(goal_id, root):
-    """Send a reader at a job, detached, and let it outlive the tool call."""
+    """Send a reader at a job, detached, and let it outlive the tool call.
+
+    The reader is the machinery's, standing in the project's own checkout: `cwd`
+    is what tells it whose job this is. Its console goes to a file of this run's
+    own — two readers fired at one job used to share a path, and the second wiped
+    the first (cor-987e).
+    """
     log_dir = os.path.join(os.environ.get("CLAUDE_CODE_TMPDIR") or "/tmp",
                            "board-reviews")
     try:
         os.makedirs(log_dir, exist_ok=True)
-        log = open(os.path.join(log_dir, goal_id + ".run.log"), "a")
-        subprocess.Popen([os.path.join(root, "scripts/board/review"), goal_id],
-                         cwd=root, stdout=log, stderr=log,
+        fd, _ = tempfile.mkstemp(prefix=goal_id + ".", suffix=".run.log", dir=log_dir)
+        subprocess.Popen([os.path.join(HERE, "review"), goal_id],
+                         cwd=root, stdout=fd, stderr=fd,
                          stdin=subprocess.DEVNULL, start_new_session=True)
+        os.close(fd)
     except Exception:
         pass
 
@@ -141,7 +150,7 @@ def open_reading(goal_id, goal, root):
     The gate is bd's own refusal (`cannot close blocked issue`) and it is raised
     before any reader exists: a reader that never starts leaves the job visibly
     stuck, which is the failure someone notices, rather than one that quietly
-    closes itself. scripts/board/review is what resolves it.
+    closes itself. The board's own reader is what resolves it.
     """
     column(goal_id, goal, "review", root)
     if not gated(goal_id, root):
@@ -177,7 +186,7 @@ def reading_due(goal_id, goal, order, rows, root):
 
     Three things at once: every piece before the reading has closed, the run has
     not already gone past it, and what stands has not been read — never, or not
-    since it was last written to (scripts/board/reading.py).
+    since it was last written to (board/reading.py).
 
     The last of those is what makes a job sent back come round again: the reader's
     findings are the job's own items, so answering them empties the job exactly as

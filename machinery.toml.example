@@ -1,0 +1,35 @@
+# The declaration every project that runs this machinery keeps at its own root,
+# as `machinery.toml`. It carries exactly what differs by project and nothing
+# else — the shared code holds no project's name, prefix, systems or branch.
+
+# What the manager and the outside reader call this project.
+name = "example"
+# The card ids this project's board issues, without the dash.
+prefix = "ex"
+# The branch finished work lands on here.
+lands_on = "main"
+# The systems a card may belong to. `--area` accepts these and nothing else, and
+# the first is the one a refusal shows as an example.
+areas = ["interface", "tests", "tooling", "docs", "board"]
+# The name this project's own environment switches open with, so a switch keeps
+# answering to the spelling written into its docs. The machinery's own spelling
+# (MACHINERY_…) always works as well.
+brand = "EXAMPLE"
+# Other registered projects a job here may say its change lands in
+# (`lands:<name>` on the goal).
+lands_elsewhere = []
+# When this project's pour began asking a job why it drops a step. A job poured
+# before it was never asked and is not held to an answer. Leave it out if the
+# project joined after the question existed.
+# guard_asked_from = "2026-08-12T17:56:47Z"
+
+[review]
+# What the outside reader is told it is reading for.
+persona = "the Example project — what it is, in one line"
+# What a change here has to do before it counts as proved. Written into the
+# Verify step of every job poured here and told to the reader.
+proves = "run the thing and read what it produced"
+
+# Ways this project names somewhere anyone can go and look that are not a file
+# path — a debug view in a renderer, a screen in an app. Python patterns.
+places = []

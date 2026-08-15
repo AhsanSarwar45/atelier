@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What the board's refusals cost, and how often they fire.
 
-    python3 scripts/board/cost.py
+    python3 board/cost.py
 
 Read-only: it reads the board and this machine's session records and writes to
 neither. A refusal with no number yet is printed rather than left out — the
@@ -32,12 +32,16 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import board_common as bc  # noqa: E402
+import project  # noqa: E402
 import spine  # noqa: E402
 
 COUNTERS = os.path.join(bc.STATE_DIR, "counters.jsonl")
-REPO = os.path.dirname(os.path.dirname(HERE))
+# The machinery's own home: the gates whose firings are counted here live in it,
+# not in any one project's checkout.
+REPO = os.path.dirname(HERE)
 
 # The counters the report has a row for: the name, the file that records it, and
 # what it means. Declared here so a number no gate has produced yet is still
@@ -45,23 +49,23 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 # than believed, so a gate deleted or renamed goes back to reading `not built yet`
 # instead of reading as a refusal that never fires.
 FIRES = [
-    ("guard-waiver", "scripts/hooks/board-status-gate.py",
+    ("guard-waiver", "hooks/board-status-gate.py",
      "cor-mx9d.7 refused a finish: nothing catches the fault, and no waiver in the "
      "manager's words"),
-    ("habit-cause", "scripts/hooks/board-gate.py",
+    ("habit-cause", "hooks/board-gate.py",
      "cor-mx9d.8 refused a reply: a habit pointed at, and no card naming what "
      "produced it"),
-    ("carry-on", "scripts/hooks/board-gate.py",
+    ("carry-on", "hooks/board-gate.py",
      "cor-etbo sent a session back to work: its own job still running, and nothing "
      "asked of the manager"),
-    ("carry-on-spent", "scripts/hooks/board-gate.py",
+    ("carry-on-spent", "hooks/board-gate.py",
      "cor-etbo gave up sending a session back — seven refusals in a row and it still "
      "had not carried on"),
-    ("turns-seen", "scripts/hooks/habit-reading.py",
+    ("turns-seen", "hooks/habit-reading.py",
      "one row per turn the reply gate looked at — the exact denominator the count "
      "above only estimates"),
 ]
-SPEND = [("reading-tokens", "scripts/hooks/habit-reading.py",
+SPEND = [("reading-tokens", "hooks/habit-reading.py",
           "tokens the reply gate's reading of the manager spent")]
 
 # A counter's name where a gate records one: `tally("…")` in a hook, `record("…")`
@@ -134,7 +138,7 @@ def unlisted():
     name nobody wrote down would otherwise be counted and never reported."""
     listed = {n for n, _, _ in FIRES + SPEND}
     out = {}
-    for path in sorted(glob.glob(os.path.join(REPO, "scripts", "hooks", "*.py"))):
+    for path in sorted(glob.glob(os.path.join(REPO, "hooks", "*.py"))):
         for name in sorted(recorded(path) - listed):
             out.setdefault(name, os.path.relpath(path, REPO))
     return out
@@ -296,7 +300,7 @@ def future_section():
 
 
 def main():
-    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+    root = project.root(os.getcwd())
     if not os.path.isdir(os.path.join(root, ".beads")):
         sys.exit("no board under %s — run this from a checkout that has one." % root)
     rows = jobs(root)

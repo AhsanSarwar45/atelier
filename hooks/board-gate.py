@@ -84,15 +84,15 @@ HANDOVER = (
 
 
 # Seconds a reading still running is waited for. It is fired the moment his message
-# arrives (scripts/hooks/habit-reading.py) and takes 5-8s, so a turn of any length
+# arrives (hooks/habit-reading.py) and takes 5-8s, so a turn of any length
 # has long since paid for it; this covers a turn that ended almost immediately.
 HABIT_WAIT = 20
 HABIT = (
-    "He is pointing at how you work, not at one wrong answer: %s.\n\n"
+    "He is pointing at how you work, not at one wrong answer: %(what)s.\n\n"
     "Answering the examples he named leaves whatever produced them running, and it "
     "produces them again next week. Before this reply ends, the CAUSE goes on the "
     "board — one card naming the thing that let this happen, not the instances:\n"
-    '    scripts/board/job find "<what is wrong>" "<where it is, how it shows>" '
+    '    %(pour)s find "<what is wrong>" "<where it is, how it shows>" '
     "--area <system> --kind bug\n"
     "`--area board` for the way work runs, `tooling`, `docs` or `tests` when the "
     "cause lives there. Then answer him: fix the examples too if you like, but say "
@@ -101,7 +101,7 @@ HABIT = (
 
 
 def tally(name):
-    """One row for the manager's count of what a refusal costs (scripts/board/cost.py).
+    """One row for the manager's count of what a refusal costs (board/cost.py).
 
     Counted after the refusal is already printed, and never at the cost of it: a
     full disk must not turn a gate into a gate that lets things through.
@@ -208,7 +208,7 @@ def main():
     data = json.load(sys.stdin)
     sid = data.get("session_id")
     state = bc.load(sid)
-    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd"))
+    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
     if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
         return
     name = bc.actor(sid, data.get("cwd"))
@@ -244,7 +244,9 @@ def main():
         # else in that slot is a file half-written or edited by hand, and a gate that
         # refuses on those refuses on damage rather than on an answer.
         if habit.get("habit") is True:
-            block(HABIT % (habit.get("what") or "a way of working he has named before"))
+            block(HABIT % {"what": habit.get("what")
+                                       or "a way of working he has named before",
+                                       "pour": bc.tool(root, "job")})
             tally("habit-cause")
             return
 
@@ -255,11 +257,11 @@ def main():
             "You changed %d file(s) this turn with no card claimed: %s\n\n"
             "The board owns work state. Claim the card this work belongs to "
             "(`bd update <id> --claim`), or pour the job first "
-            "(`scripts/board/job new --what … --evidence … --done … --area …`) "
+            "(`%s new --what … --evidence … --done … --area …`) "
             "and claim its first step. "
             "Your board name is %s — it is stamped on automatically, so run "
             "board commands on their own rather than chained after another tool.%s"
-            % (len(orphan), ", ".join(orphan[:6]), name,
+            % (len(orphan), ", ".join(orphan[:6]), bc.tool(root, "job"), name,
                ("\n\nThese are claimed under the shared machine name and own "
                 "nothing: %s. Re-claim what is yours." % ", ".join(loose)) if loose else "")
         )
@@ -297,13 +299,13 @@ def main():
             "  RELATED — the same change would touch it, or it shares this job's "
             "cause. It is a work item on the current goal, and you fix it in this "
             "job rather than hand it on:\n"
-            '    scripts/board/job under <goal> --do "<what to do>|<how we know it is done>"\n'
+            '    %s under <goal> --do "<what to do>|<how we know it is done>"\n'
             "  SEPARATE — another system or another cause, or it would swell this job "
             "past the done it was poured with. It is its own card:\n"
-            '    scripts/board/job find "<what is wrong>" "<where it is, how it shows>"'
+            '    %s find "<what is wrong>" "<where it is, how it shows>"'
             " --area <system> --kind <bug|feature|chore>\n"
             "If nothing was actually left standing, say so without the phrase."
-            % found.group(0)
+            % (found.group(0), bc.tool(root, "job"), bc.tool(root, "job"))
         )
         return
 
@@ -325,8 +327,9 @@ def main():
                 "(`kind:` — bug, feature or chore). Without both, the board cannot be "
                 "read by system or by kind. `bd update <id> --add-label area:<system> "
                 "--add-label kind:<bug|feature|chore>`, or pour the card again through "
-                "`scripts/board/job`, which requires both."
-                % ", ".join("%s (%s)" % (c, w) for c, w in bare)
+                "`%s`, which requires both."
+                % (", ".join("%s (%s)" % (c, w) for c, w in bare),
+                   bc.tool(root, "job"))
             )
             return
 

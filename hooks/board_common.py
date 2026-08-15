@@ -184,7 +184,7 @@ def save(session_id, state):
 
 
 # Where the reading of the manager's own message leaves its answer, one file per
-# prompt (scripts/hooks/habit-reading.py writes it, board-gate.py reads it back).
+# prompt (hooks/habit-reading.py writes it, board-gate.py reads it back).
 # A directory of its own: cost.py counts every loose `*.json` here as a session
 # record it could not parse.
 HABIT_DIR = os.path.join(STATE_DIR, "habit")
@@ -358,6 +358,16 @@ def project_edit(path, root):
 
 def now():
     return time.time()
+
+
+def tool(root, name, where="board"):
+    """How a session standing in this project types one of the machinery's tools.
+
+    A refusal that names a command the agent cannot run teaches nothing, and the
+    tools live outside every project: one carrying a forwarder at the old path is
+    told that path, one without is told the tool's own (`project.tool`).
+    """
+    return project.tool(project.of(root), name, where)
 
 
 def prefixes(root):
