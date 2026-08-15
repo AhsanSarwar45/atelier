@@ -22,10 +22,12 @@ function ProjectTabs() {
   const params = useSearchParams();
   const projectId = params.get('id');
   const openChat = params.get('chat');
+  // A link from a card lands on the chat it names, not on the board.
+  const initialTab = params.get('tab') === 'chat' || openChat ? 'chat' : 'board';
   const { project } = useProject(projectId);
 
   return (
-    <Tabs defaultValue="board" className="w-full">
+    <Tabs defaultValue={initialTab} className="w-full">
       <TabsList className="mx-4 mt-3" data-testid="project-tabs">
         <TabsTrigger value="chat" data-testid="tab-chat">
           Chat

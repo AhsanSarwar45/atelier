@@ -93,6 +93,8 @@ export type WbpEvent = EventBase &
     | { type: 'ask.permission'; askId: string; toolName: string; input: Record<string, unknown>; title: string; options: AskOption[] }
     | { type: 'ask.resolved'; askId: string; chosen: string }
     | { type: 'cost'; cost: Cost }
+    | { type: 'link.bead'; beadId: string; via: 'tool' | 'brief' | 'manual' }
+    | { type: 'report.available'; project: string; slug: string }
     | { type: 'error'; message: string; fatal: boolean }
   );
 
@@ -104,6 +106,15 @@ export type WbpCommand =
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
   | { type: 'session.stop'; sessionId: string };
+
+/** A chat that touched a card, as the card's own side of the join lists it. */
+export interface LinkedChat {
+  sessionId: string;
+  title: string | null;
+  brand: Brand | null;
+  lastActiveAt: string | null;
+  projectId: string | null;
+}
 
 /** A row in the chat sidebar / restore list. */
 export interface SessionSummary {

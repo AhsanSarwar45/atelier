@@ -50,7 +50,14 @@ export interface TranscriptAsk {
   chosen: string | null;
 }
 
-export type TranscriptItem = TranscriptMessage | TranscriptTool | TranscriptAsk;
+export interface TranscriptReport {
+  kind: 'report';
+  id: string;
+  project: string;
+  slug: string;
+}
+
+export type TranscriptItem = TranscriptMessage | TranscriptTool | TranscriptAsk | TranscriptReport;
 
 export interface SessionView {
   items: TranscriptItem[];
@@ -58,6 +65,8 @@ export interface SessionView {
   stateLabel: string;
   cost: Cost | null;
   todos: TodoItem[];
+  /** Cards this chat has touched, as the machine recorded them. */
+  beads: string[];
   /** What the session is actually pinned to, as the agent reported it. */
   permissionMode: string | null;
   model: string | null;
@@ -71,6 +80,7 @@ const EMPTY: SessionView = {
   stateLabel: 'Starting',
   cost: null,
   todos: [],
+  beads: [],
   permissionMode: null,
   model: null,
   error: null,
@@ -147,6 +157,18 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'todo':
       next.todos = e.items;
       return next;
+
+    case 'link.bead':
+      next.beads = view.beads.includes(e.beadId) ? view.beads : [...view.beads, e.beadId];
+      return next;
+
+    case 'report.available': {
+      const id = `${e.project}/${e.slug}`;
+      next.items = items.some((it) => it.kind === 'report' && it.id === id)
+        ? items
+        : [...items, { kind: 'report', id, project: e.project, slug: e.slug }];
+      return next;
+    }
 
     case 'ask.permission':
       next.items = [

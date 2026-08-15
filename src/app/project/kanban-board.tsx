@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useBeadDetail } from "@/hooks/use-bead-detail";
+import { CardChats } from "@/workbench/card-chats";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
 import { useBeads } from "@/hooks/use-beads";
 import { useGitHubStatus } from "@/hooks/use-github-status";
@@ -441,6 +442,11 @@ export default function KanbanBoard() {
             childBeads={(detailBead.children || [])
               .map(id => beads.find(b => b.id === id))
               .filter((b): b is Bead => !!b)}
+          />
+          <CardChats
+            beadId={detailBead.id}
+            projectId={projectId}
+            projectPath={project?.path ?? ""}
           />
         </BeadDetail>
       )}

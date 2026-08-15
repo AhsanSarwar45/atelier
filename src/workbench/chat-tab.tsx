@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { diffLines } from '@/workbench/line-diff';
+import { ReportCard } from '@/workbench/report-view';
 import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import {
   isBusy,
@@ -254,6 +255,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {view.model ? ` · ${view.model}` : ''}
           {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
         </span>
+        {view.beads.length > 0 && (
+          <span data-testid="bead-chips" className="flex items-center gap-1">
+            {view.beads.map((id) => (
+              <span
+                key={id}
+                data-testid="bead-chip"
+                data-bead-id={id}
+                className="rounded-full border border-primary/50 bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-foreground"
+              >
+                {id}
+              </span>
+            ))}
+          </span>
+        )}
         {view.cost && (
           <span data-testid="cost-chip" className="ml-auto rounded bg-muted px-2 py-0.5 font-mono text-xs">
             {costLabel(view.cost)}
@@ -270,6 +285,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" data-testid="transcript">
         {view.items.map((item) => {
           if (item.kind === 'tool') return <ToolRow key={item.id} item={item} nested={item.parentId !== null} />;
+          if (item.kind === 'report') {
+            return <ReportCard key={item.id} project={item.project} slug={item.slug} fsPath={projectPath} />;
+          }
           if (item.kind === 'ask') {
             return (
               <PermissionCard

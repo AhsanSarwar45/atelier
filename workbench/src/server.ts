@@ -10,6 +10,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
+import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 
@@ -98,6 +99,30 @@ const server = createServer((req, res) => {
         if (!sessionId) return json(res, 400, { error: 'session is required' });
         const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
         streamEvents(req, res, sessionId, Number.isFinite(since) ? since : 0);
+      } else if (path.startsWith('/links/bead/') && req.method === 'GET') {
+        // Read the board first: it is the record, ours is a cache. A chat
+        // recorded by another machine or an earlier database still shows up.
+        const beadId = decodeURIComponent(path.slice('/links/bead/'.length));
+        const cwd = url.searchParams.get('path') ?? process.cwd();
+        const onBoard = await sessionsForIssue(beadId, cwd);
+        const known = new Map(store.sessionsForBead(beadId).map((s) => [s.id, s]));
+        for (const id of onBoard) if (!known.has(id)) known.set(id, null as never);
+        json(
+          res,
+          200,
+          [...known.entries()].map(([sessionId, s]) => ({
+            sessionId,
+            title: s?.title ?? null,
+            brand: s?.brand ?? null,
+            lastActiveAt: s?.lastActiveAt ?? null,
+            projectId: s?.projectId ?? null,
+          })),
+        );
+      } else if (path.startsWith('/links/session/') && req.method === 'GET') {
+        const sessionId = decodeURIComponent(path.slice('/links/session/'.length));
+        const s = store.getSession(sessionId);
+        const onBoard = s ? await issuesForSession(sessionId, s.cwd) : [];
+        json(res, 200, [...new Set([...store.beadsForSession(sessionId), ...onBoard])]);
       } else if (path === '/sessions' && req.method === 'GET') {
         json(res, 200, sessions ? store.listSessions(url.searchParams.get('project') ?? undefined) : []);
       } else if (path === '/command' && req.method === 'POST') {

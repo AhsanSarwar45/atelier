@@ -53,6 +53,23 @@ const MIGRATIONS: string[] = [
      PRIMARY KEY (session_id, seq)
    );
    CREATE INDEX event_by_session ON event(session_id, seq);`,
+
+  // A read cache only. The record of who touched what lives on the board, in
+  // bd's provenance log; these two tables must always be rebuildable from it.
+  `CREATE TABLE bead_link (
+     session_id TEXT NOT NULL,
+     bead_id TEXT NOT NULL,
+     via TEXT NOT NULL,
+     first_seen_at TEXT NOT NULL,
+     PRIMARY KEY (session_id, bead_id)
+   );
+   CREATE TABLE report_link (
+     session_id TEXT NOT NULL,
+     project TEXT NOT NULL,
+     slug TEXT NOT NULL,
+     at TEXT NOT NULL,
+     PRIMARY KEY (session_id, project, slug)
+   );`,
 ];
 
 export class Store {
@@ -126,6 +143,37 @@ export class Store {
     this.db
       .prepare('INSERT INTO event (session_id, seq, at, type, json) VALUES (?,?,?,?,?)')
       .run(e.sessionId, e.seq, e.at, e.type, JSON.stringify(e));
+  }
+
+  rememberBeadLink(sessionId: string, beadId: string, via: string): void {
+    this.db
+      .prepare('INSERT OR IGNORE INTO bead_link (session_id, bead_id, via, first_seen_at) VALUES (?,?,?,?)')
+      .run(sessionId, beadId, via, new Date().toISOString());
+  }
+
+  rememberReportLink(sessionId: string, project: string, slug: string): void {
+    this.db
+      .prepare('INSERT OR IGNORE INTO report_link (session_id, project, slug, at) VALUES (?,?,?,?)')
+      .run(sessionId, project, slug, new Date().toISOString());
+  }
+
+  beadsForSession(sessionId: string): string[] {
+    return (
+      this.db.prepare('SELECT bead_id FROM bead_link WHERE session_id = ? ORDER BY first_seen_at').all(sessionId) as {
+        bead_id: string;
+      }[]
+    ).map((r) => r.bead_id);
+  }
+
+  /** Sessions this bead is linked to, newest first — the cache side of the join. */
+  sessionsForBead(beadId: string): SessionSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.* FROM bead_link b JOIN session s ON s.id = b.session_id
+         WHERE b.bead_id = ? ORDER BY s.last_active_at DESC`,
+      )
+      .all(beadId) as Record<string, string>[];
+    return rows.map(rowToSummary);
   }
 
   /** Every event after `since`, in order — the replay half of the SSE stream. */

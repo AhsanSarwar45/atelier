@@ -11,12 +11,14 @@ import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import { ClaudeDriver } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
+import { Linker } from './linker.ts';
 import type { Store } from './store.ts';
 
 type Subscriber = (e: WbpEvent) => void;
 
 export class Sessions {
   private drivers = new Map<string, Driver>();
+  private linkers = new Map<string, Linker>();
   private subs = new Map<string, Set<Subscriber>>();
   // Declared, not a parameter property: Node's strip-only TypeScript mode
   // rejects `constructor(private store: Store)`.
@@ -56,6 +58,10 @@ export class Sessions {
 
     const driver = new ClaudeDriver();
     this.drivers.set(summary.id, driver);
+    this.linkers.set(
+      summary.id,
+      new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e)),
+    );
     await driver.start({
       cwd: summary.cwd,
       model: params.model,
@@ -104,6 +110,15 @@ export class Sessions {
     } as WbpEvent;
 
     this.store.appendEvent(full);
+
+    // The linker reads OUR vocabulary, not the brand's, so every driver feeds it.
+    if (full.type === 'tool.started') {
+      this.linkers.get(sessionId)?.observe(full.name, full.input);
+    } else if (full.type === 'link.bead') {
+      this.store.rememberBeadLink(sessionId, full.beadId, full.via);
+    } else if (full.type === 'report.available') {
+      this.store.rememberReportLink(sessionId, full.project, full.slug);
+    }
 
     if (full.type === 'session.state') {
       this.store.updateSession(sessionId, { state: full.state as SessionState });

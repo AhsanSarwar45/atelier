@@ -621,12 +621,13 @@ cards all read. One connection for the whole app, not one per component.
 | `src/app/project/page.tsx` | 19-line file becomes a Tabs shell around the unchanged `<KanbanBoard/>` |
 | `src/app/layout.tsx` | one `<WorkbenchGlobals/>` — tray + strip |
 | `src/components/bead-card.tsx` | one `<CardLiveChat beadId=…/>` |
+| `src/app/project/kanban-board.tsx` | one `<CardChats …/>`; a card's chats belong in its detail panel, whose extra sections are passed in from here |
 | `package.json` | added dependency and script lines only; no existing line modified |
 | `tsconfig.json` | `workbench` added to `exclude` — the sidecar carries its own |
 | `playwright.config.ts` | `baseURL` reads `BEADS_E2E_URL`, so a worktree drives its own instance instead of the one serving the owner's board |
 
-Nine files, six of them a single line or word. `server/src/db.rs`,
-`kanban-board.tsx`, `src/lib/api.ts` and everything under `reporting/` are not
+Ten files, seven of them a single line or word. `server/src/db.rs`,
+`bead-detail.tsx`, `src/lib/api.ts` and everything under `reporting/` are not
 touched at all. If the build needs to exceed this list, that is a design
 change and it gets said out loud, not absorbed.
 
