@@ -106,8 +106,9 @@ export const STATE_BY_ID = Object.fromEntries(
 ) as Record<BeadStatus, StateInfo>;
 
 /**
- * The three states a card can be put in by the pieces under it, named so that a
- * reader working them out can say which it means without writing the word again.
+ * The states a card can be put in by reading the pieces under it, named so that
+ * a reader working them out can say which it means without writing the word
+ * again. Other checkouts of this repo import these by name.
  */
 export const UNTOUCHED: BeadStatus = 'open';
 export const WORKING: BeadStatus = 'in_progress';
@@ -121,12 +122,15 @@ export const FINISHED: BeadStatus = 'closed';
  * waiting on it waits forever. Writing the word would be refused, so the screen
  * writes what the board actually holds.
  */
-export const SET_BY: Record<BeadStatus, { status: string; addLabel?: string }> = {
-  open:           { status: 'open' },
-  in_progress:    { status: 'in_progress' },
-  inreview:       { status: 'in_review' },   // what bd calls this column
-  manager_review: { status: 'manager_review' },
-  closed:         { status: 'closed' },
+export const SET_BY: Record<
+  BeadStatus,
+  { status: string; addLabel?: string; removeLabel?: string }
+> = {
+  open:           { status: 'open',            removeLabel: 'cancelled' },
+  in_progress:    { status: 'in_progress',     removeLabel: 'cancelled' },
+  inreview:       { status: 'in_review',       removeLabel: 'cancelled' },  // what bd calls this column
+  manager_review: { status: 'manager_review',  removeLabel: 'cancelled' },
+  closed:         { status: 'closed',          removeLabel: 'cancelled' },
   cancelled:      { status: 'closed', addLabel: 'cancelled' },
 };
 

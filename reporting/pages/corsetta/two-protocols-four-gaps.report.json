@@ -1,0 +1,146 @@
+{
+  "title": "Two Public Protocols, Five Gaps",
+  "eyebrow": "Both projects are a thinner version of what we already run. Five things they do that we do not — and every one of them sits where a helper hands work back.",
+  "actions": {
+    "none": true
+  },
+  "status": {
+    "card": "cor-5nxl"
+  },
+  "content": [
+    {
+      "label": "The short answer",
+      "lead": "Nothing to copy wholesale. Their whole idea is ours already — tickets that survive a restart, guards that refuse rather than ask, one job in its own copy of the work. We run all three harder.",
+      "blocks": [
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "Where we are ahead",
+          "text": "Their tickets are a title and a description; ours refuse to exist without the evidence, the success lines and the systems they touch. Their run of steps is four words in a document; ours is enforced, and a step closes only against a landed change, a note carrying its own proof, or an outside fact. Their review is a helper the same session sends off; ours is a separate reader that never saw the work being done. Their guards number eight; ours number twenty-one."
+        },
+        {
+          "kind": "note",
+          "label": "The one sentence worth stealing outright",
+          "text": "The second project rewrote itself from scratch and wrote down why. Its verdict: a rule nobody blocks is a rule that dies in a long session. Every gap below is the same shape — somewhere we ask for something in words and nothing refuses when it does not happen."
+        }
+      ]
+    },
+    {
+      "label": "What they do that we do not",
+      "lead": "Five. The first two are the same place: the moment a helper finishes and hands its answer back to the session that sent it.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["The gap", "What it costs today", "What closing it does"],
+          "rows": [
+            [
+              "A helper's answer is taken on trust",
+              "One thing runs when a helper finishes: the bookkeeping that keeps its card alive. Nothing reads what it said. A helper can answer 'built and verified' having built nothing, and the session that asked has no way to tell.",
+              "A helper cannot finish until it has ticked its card's own success lines one by one, left its note on the card, and its work is saved and pushed. Refused otherwise, in one line, naming what is missing."
+            ],
+            [
+              "A helper's answer has no length limit",
+              "A long answer lands whole in the session that asked, which is the context we spend the most care protecting. Nothing enforces the short form except the voice, and the voice drifts across a long session.",
+              "An over-long answer is refused and sent back short. The limit comes from measuring what our helpers actually return, not from their number."
+            ],
+            [
+              "The reader signs off on a measurement it never reproduced",
+              "The outside reader is handed the change and the job's own definition of done. It never re-runs the thing that produced the claimed number, so a wrong number survives whenever the change itself looks reasonable.",
+              "The reader re-runs one named proof and compares. A claim that does not reproduce fails the reading — the same way we already refuse a cause without switching it off."
+            ],
+            [
+              "Work already landed keeps its card open and nobody is told",
+              "Nineteen separate copies of the work stand here right now. The opening screen names what is ready, held and stale, and never names the ones whose change is already in.",
+              "The opening screen names them, with the one line that closes each. Housekeeping stops accumulating silently."
+            ],
+            [
+              "How big a job is, is a word with nothing behind it",
+              "Small, medium and large are picked by whoever pours the job and checked against nothing, so the same amount of work is filed three ways.",
+              "Criteria decide it — how many systems and how many files the job's own text implies — and a pour whose words and size disagree is refused."
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "label": "One more, small",
+          "text": "The checks that run before a change is saved can be turned off by a single flag, and nothing here looks for it. Both projects block that flag outright. Filed."
+        }
+      ]
+    },
+    {
+      "label": "What we should not copy",
+      "lead": "Three of their ideas are worse than what we do. One of them they deleted themselves, which is the most useful thing in either repository.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "Named characters and general-purpose helper roles — a searcher, a detective, an architect, a scribe. The second project deleted all of them and wrote down why: they repeat what the agent can already do and fill the context with introductions. Our helpers earn their place by knowing a subject — cars, tracks, plants, the renderer's own proof — which is the kind that survives.",
+            "Generated instructions per technology — hundreds of lines telling the agent what it already knows. Deleted for the same reason.",
+            "Forcing a question at you whenever a request is short. That is the opposite of your standing order: an engineer decides what an engineer can decide, and your attention is spent only on what is genuinely yours.",
+            "Their notebook of remembered lessons. They removed theirs in favour of the ticket system's own memory. Ours already lives on the board and in the documents, and your rule for the private notebook is stricter than either."
+          ]
+        }
+      ]
+    },
+    {
+      "label": "How the work reaches every project",
+      "lead": "All five land in the shared home, which every project now runs in place rather than copying. One change, everyone has it.",
+      "blocks": [
+        {
+          "kind": "note",
+          "tone": "good",
+          "text": "This is the payoff of the move that just landed: a guard added once is a guard the racing project and the board app both get the same day, and any project that joins later starts with it."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Take five, refuse four",
+      "why": "Everything taken is a place where we ask in words and nothing refuses. Everything refused either repeats what the agent can already do, or inverts your standing order about what reaches you."
+    },
+    {
+      "id": "D2",
+      "title": "The helper's answer is the first job, and the only one started now",
+      "why": "It is the one gap that lets a false claim into a session unchallenged, and it is the cheapest to hold with a test. The other four are filed and ready."
+    },
+    {
+      "id": "D3",
+      "title": "The length limit is measured here, not borrowed",
+      "why": "They picked twenty-five lines for their own helpers. Our rule is that a guard's threshold comes from a measured value, so the limit comes from what our helpers actually return and the test proves it bites."
+    },
+    {
+      "id": "D4",
+      "title": "Nothing is copied out of either repository",
+      "why": "Their code assumes their own ticket tool, their own naming and their own ticket format. What travels is the idea; the machinery is ours and already stricter."
+    },
+    {
+      "id": "D5",
+      "title": "Rewriting our rule documents as trigger lines was considered and dropped",
+      "why": "Their rules read 'when you do X, stop and do Y'. Ours mostly do already, and the ones that do not are enforced by a guard instead, which is strictly better than a better-worded sentence."
+    }
+  ],
+  "next": {
+    "if_nothing": "The helper-answer gate gets built and the other four stay filed, so a helper still hands back an unchecked answer in every project until then.",
+    "steps": [
+      {
+        "step": "A helper can no longer end by saying it is done — it ends by showing its card's success lines ticked, its note on the card and its work saved, or it is refused",
+        "cost": "medium",
+        "starting": true
+      },
+      {
+        "step": "The outside reader re-runs one named proof instead of reading the claim",
+        "cost": "medium"
+      },
+      {
+        "step": "The opening screen names work already landed whose card is still open, and the flag that skips the pre-save checks stops working",
+        "cost": "small"
+      },
+      {
+        "step": "How big a job is stops being a free choice",
+        "cost": "small"
+      }
+    ]
+  }
+}

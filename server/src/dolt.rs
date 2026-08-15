@@ -230,6 +230,7 @@ impl DoltManager {
         issue_type: Option<&str>,
         priority: Option<i32>,
         add_label: Option<&str>,
+        remove_label: Option<&str>,
     ) -> Result<(), DoltError> {
         let mut sets = Vec::new();
         let mut params: Vec<(Vec<u8>, mysql_async::Value)> = Vec::new();
@@ -255,7 +256,7 @@ impl DoltManager {
             params.push((b"priority".to_vec(), p.into()));
         }
 
-        if sets.is_empty() && add_label.is_none() {
+        if sets.is_empty() && add_label.is_none() && remove_label.is_none() {
             return Ok(());
         }
 
@@ -289,6 +290,22 @@ impl DoltManager {
                 ].into_iter().collect(),
             )).await
                 .map_err(|e| DoltError::QueryFailed(format!("add_label: {}", e)))?;
+        }
+
+        // A mark a state carries is not a mark the next state carries: leaving the
+        // column that wrote it takes it off, or dropped work reads as delivered.
+        if let Some(label) = remove_label {
+            let query = format!(
+                "DELETE FROM `{}`.labels WHERE issue_id = :id AND label = :label",
+                db_name
+            );
+            conn.exec_drop(&query, mysql_async::Params::Named(
+                vec![
+                    (b"id".to_vec(), id.into()),
+                    (b"label".to_vec(), label.into()),
+                ].into_iter().collect(),
+            )).await
+                .map_err(|e| DoltError::QueryFailed(format!("remove_label: {}", e)))?;
         }
 
         // Dolt commit — must USE the database first

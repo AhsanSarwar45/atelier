@@ -806,6 +806,8 @@ pub struct UpdateBeadRequest {
     pub priority: Option<i32>,
     /// A label to add, left in place if already there (optional)
     pub add_label: Option<String>,
+    /// A label to take off, ignored if it is not there (optional)
+    pub remove_label: Option<String>,
 }
 
 /// PATCH /api/beads/update
@@ -828,7 +830,8 @@ pub async fn update_bead_handler(
         || req.status.is_some()
         || req.issue_type.is_some()
         || req.priority.is_some()
-        || req.add_label.is_some();
+        || req.add_label.is_some()
+        || req.remove_label.is_some();
     if !has_changes {
         return (
             StatusCode::BAD_REQUEST,
@@ -863,6 +866,7 @@ pub async fn update_bead_handler(
             req.issue_type.as_deref(),
             req.priority,
             req.add_label.as_deref(),
+            req.remove_label.as_deref(),
         ).await {
             Ok(()) => {
                 return (StatusCode::OK, Json(serde_json::json!({ "success": true })));
@@ -901,6 +905,9 @@ pub async fn update_bead_handler(
     }
     if let Some(ref l) = req.add_label {
         args.push(format!("--add-label={}", l));
+    }
+    if let Some(ref l) = req.remove_label {
+        args.push(format!("--remove-label={}", l));
     }
 
     let result = tokio::time::timeout(

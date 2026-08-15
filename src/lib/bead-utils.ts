@@ -7,7 +7,7 @@
 
 import { classesFor } from "@/lib/state-styles";
 import {
-  FINISHED, STATE_BY_ID, STATES, UNTOUCHED, WORKING, type BeadStatus,
+  STATE_BY_ID, STATES, UNTOUCHED, WORKING, type BeadStatus,
 } from "@/types";
 
 /** Nothing is still standing under a card in one of these. */
@@ -145,10 +145,13 @@ export function drawnInColumns<T extends { status: string; parent_id?: string; i
 const NO_DATE = "￿";
 
 /**
- * The cards of a column, oldest first.
+ * The cards of a column, oldest job first.
  *
  * The manager is the one being waited on, so his column is drawn this way and no
- * other is: nothing sits in it quietly for a week while newer work lands on top.
+ * other is: nothing sits in it quietly while newer work lands on top. It orders
+ * by when each job was opened, not by how long it has been waiting on him — the
+ * board stamps that moment on the card, but the screen is handed no metadata to
+ * read it from (corsetta cor-lxwb).
  *
  * @param beads - The column's cards. The caller's array is left as it was.
  */
@@ -166,8 +169,10 @@ export function oldestFirst<T extends { created_at?: string }>(
  * Read from the pieces DIRECTLY under it and no deeper, so a card and the list
  * of pieces printed beneath it can never disagree — that mismatch is what made
  * an untouched job read as waiting on a reader. All of them open and the card
- * is open; one being worked and it is in progress; all closed and there is
- * nothing left standing. A card with no pieces keeps its own status.
+ * is open; one being worked and it is in progress. A card with no pieces, and a
+ * card with nothing left standing under it, keeps the status the board holds:
+ * finishing the last piece is not the same as being read or signed off, and
+ * those are the board's own to write.
  *
  * A review column is the board's own answer, written once every piece has
  * closed, so it is taken as final rather than recomputed here. Manager's
@@ -190,6 +195,9 @@ export function columnFor<T extends { id: string; status: string; children?: str
   if (pieces.length === 0) return bead.status;
 
   const standing = pieces.filter((k) => !DONE.has(k.status));
-  if (standing.length === 0) return FINISHED;
+  // Nothing left standing is not the same as finished: the board writes the
+  // card's own state when it is read and when it is signed off, and until it
+  // does, a card it still holds open belongs where it says it is.
+  if (standing.length === 0) return bead.status;
   return standing.some((k) => k.status === WORKING) ? WORKING : UNTOUCHED;
 }

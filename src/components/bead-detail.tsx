@@ -156,6 +156,7 @@ export function BeadDetail({
         await api.beads.update({
           path: projectPath, id: bead.id,
           status: write.status, add_label: write.addLabel,
+          remove_label: write.removeLabel,
         });
       } else {
         await cliUpdateStatus(bead.id, newStatus, projectPath);

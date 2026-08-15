@@ -127,10 +127,15 @@ describe("a card sits where its own pieces put it", () => {
     expect(columnFor(goal, board(goal, { id: "s1", status: "open" }))).toBe("manager_review");
   });
 
-  it("nothing left standing reads as finished", () => {
+  it("a card the board still holds open is not drawn as finished", () => {
     const goal = { id: "g", status: "open", children: ["s1", "s2"] };
     const map = board(goal, { id: "s1", status: "closed" }, { id: "s2", status: "cancelled" });
-    expect(columnFor(goal, map)).toBe("closed");
+    expect(columnFor(goal, map)).toBe("open");
+  });
+
+  it("a card being worked with nothing left standing is still being worked", () => {
+    const goal = { id: "g", status: "in_progress", children: ["s1"] };
+    expect(columnFor(goal, board(goal, { id: "s1", status: "closed" }))).toBe("in_progress");
   });
 
   it("a closed goal stays closed once its pieces are done", () => {

@@ -109,6 +109,12 @@ describe("one list decides the states", () => {
     for (const s of STATES) {
       expect(SET_BY[s.id], `${s.id} has no entry in SET_BY`).toBeTruthy();
       expect(SET_BY[s.id].status, `${s.id} must write some status`).toBeTruthy();
+      // A mark one state writes is not a mark the next one carries: work that
+      // was dropped and then genuinely finished must not still read as dropped.
+      if (s.id !== 'cancelled') {
+        expect(SET_BY[s.id].removeLabel, `${s.id} leaves the cancelled mark on`)
+          .toBe('cancelled');
+      }
     }
   });
 

@@ -30,8 +30,10 @@ Two more rules ride along with the columns:
 
 - **the heading counts the cards its own column drew**, so a column scrolled
   past its first screenful still says how much is in it
-- **the manager's column is the oldest first**, so nothing waits in it quietly
-  for a week. It needs two cards waiting before it can say anything; with fewer,
+- **the manager's column is the oldest job first**, so nothing waits in it
+  quietly while newer work lands on top. That is when each job was opened, not
+  how long it has waited on him — corsetta `cor-lxwb`. It needs two cards
+  waiting before it can say anything; with fewer,
   `src/lib/__tests__/board-agreement.test.ts` is what holds that rule.
 
 A second rule rides along, because it needs the same loaded screen: **a card's

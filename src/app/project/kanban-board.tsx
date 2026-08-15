@@ -52,7 +52,8 @@ const COLUMNS: { status: BeadStatus; title: string }[] =
   STATES.map((s) => ({ status: s.id, title: s.column }));
 
 /**
- * Main Kanban board component with 4 columns, search, filter, and keyboard navigation
+ * Main Kanban board component: one column per state in STATES, search, filter,
+ * and keyboard navigation
  */
 export default function KanbanBoard() {
   const searchParams = useSearchParams();

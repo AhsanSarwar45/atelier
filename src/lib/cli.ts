@@ -91,7 +91,8 @@ export async function updateStatus(
   const write = SET_BY[status];
   const result = await executeBdCommand(
     ["update", beadId, "--status", write.status,
-      ...(write.addLabel ? ["--add-label", write.addLabel] : [])],
+      ...(write.addLabel ? ["--add-label", write.addLabel] : []),
+      ...(write.removeLabel ? ["--remove-label", write.removeLabel] : [])],
     cwd
   );
 

@@ -54,8 +54,9 @@ def board_says(project):
 
     The screen draws one card per job, and puts it where the pieces DIRECTLY
     under it put it: all of them waiting and it waits, one being worked and it
-    is being worked, all of them closed and nothing is left standing. Nothing
-    deeper is read, so a card and the list of pieces printed under it can never
+    is being worked; with nothing left standing it keeps the status the board
+    holds, because being read and being signed off are the board's to write.
+    Nothing deeper is read, so a card and the list of pieces printed under it can never
     say different things. A card the board has already placed itself — read,
     waiting on the manager, closed — keeps that place. Manager's ruling,
     2026-08-13: corsetta docs/board.md#3a1.
@@ -76,8 +77,10 @@ def board_says(project):
         if not pieces:
             return COLUMN_OF.get(b["status"], "open")
         standing = [s for s in pieces if s not in DONE]
+        # Nothing left standing is not the same as finished: until the board
+        # writes the card's own state, it belongs where the board says it is.
         if not standing:
-            return "closed"
+            return COLUMN_OF.get(b["status"], "open")
         return "in_progress" if "in_progress" in standing else "open"
 
     want, opened = {}, {}
