@@ -1688,6 +1688,43 @@ def main():
     print("ok: the Opus worker is refused to everyone but the lead, and no other "
           "agent is touched")
 
+    # The slot is taken in one tree and the merge run from another, which is what a
+    # session doing this job actually does — so the hold is recognised by session
+    # and not by the name the tree gave it.
+    merge = hook("board-merge-gate")
+    SID = "abcd1234-0000-0000-0000-000000000000"
+
+    def merging(holder, here, cmd="git merge --ff-only work"):
+        merge.bc.board_root = lambda cwd=None: ROOT
+        merge.bc.actor = lambda sid, cwd: here
+        merge.bc.bd = lambda args, root=None: (True, json.dumps({"holder": holder}))
+        sys.stdin = io.StringIO(json.dumps({
+            "session_id": SID, "cwd": ROOT, "tool_input": {"command": cmd}}))
+        out = io.StringIO()
+        keep, sys.stdout = sys.stdout, out
+        try:
+            merge.main()
+        finally:
+            sys.stdout = keep
+        said = out.getvalue()
+        return json.loads(said)["hookSpecificOutput"]["permissionDecisionReason"] \
+            if said.strip() else ""
+
+    assert merging("main-abcd1234", "main-abcd1234") == "", \
+        "a session merging from the tree it took the slot in was refused its own hold"
+    assert merging("worktree-abcd1234", "main-abcd1234") == "", \
+        "a session that took the slot in its own copy was refused when it merged " \
+        "from the main tree, which is the shape every landing here has"
+    assert "not holding it" in merging("someone-99999999", "main-abcd1234"), \
+        "somebody else's hold was read as this session's"
+    assert "fast-forward" in merging("main-abcd1234", "main-abcd1234",
+                                     cmd="git merge work"), \
+        "a merge that is not a fast-forward was allowed to the slot's holder"
+
+    print("ok: the merge slot is recognised by the session holding it however many "
+          "trees it works in, somebody else's hold is not, and a merge that would "
+          "not fast-forward is refused to the holder as well")
+
     # The three answers the cost report has about a counter, which have to stay
     # three. Read against a counter file of its own: the real one is the number the
     # manager reads, and a case that appends to it inflates what he is told.

@@ -58,7 +58,10 @@ def main():
         slot = json.loads(out or "{}")
     except Exception:
         return
-    if slot.get("holder") == name:
+    # By session rather than by name: one session works in two trees, taking the
+    # slot in its own copy and merging from the main one, and a name carries the
+    # tree it was made in.
+    if bc.held_by(slot.get("holder"), data.get("session_id")):
         return
     reason = (
         "Merges are serialised through the board's single slot and you are not "
