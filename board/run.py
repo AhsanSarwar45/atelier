@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import board_common as bc  # noqa: E402
+import inflight  # noqa: E402
 import reading  # noqa: E402
 import spine  # noqa: E402
 
@@ -130,18 +131,30 @@ def fire(goal_id, root):
     is what tells it whose job this is. Its console goes to a file of this run's
     own — two readers fired at one job used to share a path, and the second wiped
     the first (cor-987e).
+
+    One command closing several cards of a job reaches here once per card, so the
+    job is claimed first and a sending that finds a reader already out does
+    nothing (board/inflight.py, mch-m1t). The claim is named after the reader as
+    soon as there is one to name.
     """
-    log_dir = os.path.join(os.environ.get("CLAUDE_CODE_TMPDIR") or "/tmp",
-                           "board-reviews")
+    if not inflight.take(goal_id):
+        return
+    reader = None
     try:
-        os.makedirs(log_dir, exist_ok=True)
-        fd, _ = tempfile.mkstemp(prefix=goal_id + ".", suffix=".run.log", dir=log_dir)
-        subprocess.Popen([os.path.join(HERE, "review"), goal_id],
-                         cwd=root, stdout=fd, stderr=fd,
-                         stdin=subprocess.DEVNULL, start_new_session=True)
+        os.makedirs(inflight.home(), exist_ok=True)
+        fd, _ = tempfile.mkstemp(prefix=goal_id + ".", suffix=".run.log",
+                                 dir=inflight.home())
+        reader = subprocess.Popen([os.path.join(HERE, "review"), goal_id],
+                                  cwd=root, stdout=fd, stderr=fd,
+                                  stdin=subprocess.DEVNULL, start_new_session=True)
+        inflight.name(goal_id, reader.pid)
         os.close(fd)
     except Exception:
-        pass
+        # Only a reader that never started leaves the claim behind: past this
+        # point one is out, and clearing would let the next closed card send a
+        # second at the same job.
+        if reader is None:
+            inflight.clear(goal_id)
 
 
 def open_reading(goal_id, goal, root):

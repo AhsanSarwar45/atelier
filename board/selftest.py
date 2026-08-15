@@ -92,6 +92,101 @@ ROWS = [
 ]
 SIGNED = "reviewed-by: review-g\nread-commits: %s"
 
+# The claim readers are sent under, and the fixture job the cases below claim. It
+# carries the fixture prefix like every other, so a real job can never collide
+# with it in the shared directory the claims live in.
+inflight = runner.inflight
+HELD = FIXTURE + "-reading"
+# The genuine sending, held from before any case runs: the cases above stand a
+# recorder in its place and leave it there, and this one is about the sending.
+REAL_FIRE = runner.fire
+# A job whose work is six cards rather than two: the shape one command closes at
+# once, and the shape that sent six readers at one goal.
+CROWD = ["g.%d" % n for n in range(10, 16)]
+CROWDED = ([{"id": "g.1", "status": "closed", "labels": ["step:worktree", "of:g"]}]
+           + [{"id": i, "status": "closed", "labels": ["step:work", "of:g"]}
+              for i in CROWD])
+
+
+def storm():
+    """How many readers one command closing six cards of one job sends.
+
+    The reader's launch is recorded rather than run — a real one is another
+    `claude` — but the claim itself is real, so what is counted is the guard and
+    not a stand-in for it.
+    """
+    goal = dict(GOAL, status="in_progress", notes="",
+                metadata=dict(GOAL["metadata"],
+                              spine="worktree,work,review,record,land"))
+    fired = []
+
+    def recorder(args, root=None):
+        if args[:2] == ["list", "--parent"]:
+            return True, json.dumps(CROWDED)
+        if args[0] == "show":
+            return True, json.dumps(goal if args[1] == "g"
+                                    else next(r for r in CROWDED if r["id"] == args[1]))
+        if args[:2] == ["gate", "list"]:
+            return True, "[]"
+        return True, "{}"
+
+    class Reader:
+        def __init__(self, cmd, **kw):
+            self.pid = os.getpid()      # a process that is genuinely still there
+            fired.append(cmd[-1])
+
+    was, runner.subprocess.Popen = runner.subprocess.Popen, Reader
+    keep_bd, keep_c, keep_w = runner.bc.bd, runner.reading.commits, runner.reading.wrote
+    keep_fire, runner.fire = runner.fire, REAL_FIRE
+    runner.bc.bd = recorder
+    runner.reading.commits = lambda gid, root: ["a1c0ffee"]
+    runner.reading.wrote = lambda gid, root: {"someone"}
+    inflight.clear("g")
+    try:
+        for cid in CROWD:
+            runner.advance(cid, ROOT)
+    finally:
+        runner.subprocess.Popen = was
+        runner.bc.bd, runner.reading.commits, runner.reading.wrote = keep_bd, keep_c, keep_w
+        runner.fire = keep_fire
+        inflight.clear("g")
+    return len(fired)
+
+
+def script(name):
+    """One of board's own commands, which carry no suffix to import by."""
+    spec = importlib.util.spec_from_loader(
+        "board_" + name, importlib.machinery.SourceFileLoader(
+            "board_" + name, os.path.join(HOME, "board", name)))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def release_sends(signed, shas):
+    """How many readers letting go of a claim sends, given what this one did."""
+    rv = script("review")
+    fired = []
+    inflight.clear("g")
+    inflight.take("g")
+    inflight.name("g", os.getpid())
+    keep = (rv.READING, rv.SIGNED, rv.card, rv.reading.commits, rv.reading.wrote,
+            rv.running.fire)
+    rv.READING, rv.SIGNED = "g", signed
+    # A reader that never signed left the goal exactly as it found it, which is
+    # what makes the job still want one — and what would send another at it.
+    rv.card = lambda cid, must=True: dict(GOAL, notes=SIGNED % "a1" if signed else "")
+    rv.reading.commits = lambda gid, root: list(shas)
+    rv.reading.wrote = lambda gid, root: {"someone"}
+    rv.running.fire = lambda gid, root: fired.append(gid)
+    try:
+        rv.release()
+    finally:
+        (rv.READING, rv.SIGNED, rv.card, rv.reading.commits, rv.reading.wrote,
+         rv.running.fire) = keep
+        inflight.clear("g")
+    return len(fired)
+
 
 def run(goal_status, rows=None, notes="", shas=("a1c0ffee", "b2deadbe"),
         wrote=("someone",)):
@@ -1888,6 +1983,55 @@ def main():
     print("ok: a helper is refused for claiming it verified with nothing run, for "
           "handing back a transcript instead of a verdict, and for working a card "
           "it never names — and passes silently otherwise")
+
+    # One command closing several cards of a job reaches `fire` once per card, and
+    # every reader it sends carries the same brief: on 15 Aug twelve of them went
+    # out at one goal and spent the account's allowance between them (mch-m1t).
+    # These stand on the claim, so they run against a real directory rather than a
+    # recorder — nothing here touches a board.
+    sent = storm()
+    assert sent == 1, \
+        "six cards of one job closed together sent %d readers, not one" % sent
+    assert release_sends(signed=True, shas=["a1", "b2"]) == 1, \
+        "a commit that landed under a reader was never read by anyone"
+    assert release_sends(signed=True, shas=["a1"]) == 0, \
+        "a job just read was sent another reader with nothing new to read"
+    assert release_sends(signed=False, shas=["a1"]) == 0, \
+        "a reader that never signed sent another at itself, which is the storm"
+
+    print("ok: six cards of one job closed by one command send one reader and not "
+          "six, a change that landed under a reader is read when it lets go, and a "
+          "reader that answered nothing sends nobody after it")
+
+    victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    try:
+        inflight.clear(HELD)
+        inflight.take(HELD)
+        inflight.name(HELD, victim.pid)
+        assert not inflight.take(HELD), "a job was sent a second reader while one was out"
+        old = datetime.datetime.now().timestamp() - inflight.STALE_AFTER - 60
+        os.utime(inflight.where(HELD), (old, old))
+        assert not inflight.held(HELD), \
+            "a claim older than every attempt a reader makes still held the job shut"
+        os.utime(inflight.where(HELD), None)
+        victim.kill()
+        victim.wait()
+        assert inflight.take(HELD), \
+            "a reader that died held its job shut, so nobody could ever read it"
+        inflight.clear(HELD)
+        inflight.take(HELD)
+        young = datetime.datetime.now().timestamp() - inflight.UNNAMED_GRACE - 5
+        os.utime(inflight.where(HELD), (young, young))
+        assert not inflight.held(HELD), \
+            "a claim taken for a reader that never appeared held the job for good"
+    finally:
+        if victim.poll() is None:
+            victim.kill()
+            victim.wait()
+        inflight.clear(HELD)
+
+    print("ok: a reader still running holds its job, and a claim left by a reader "
+          "that died, that outlived every attempt, or that never started does not")
 
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a
