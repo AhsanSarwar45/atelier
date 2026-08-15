@@ -37,9 +37,12 @@ NOT = re.compile(r"\b(not|never|cannot|can't|couldn't|could not|unable|"
 CLAIMED = re.compile(r"\bbd\b[^|;&]*\bupdate\b[^|;&]*--claim\b")
 
 
+class Refused(Exception):
+    """One refusal, in one line."""
+
+
 def block(reason):
-    print(json.dumps({"decision": "block", "reason": reason}))
-    sys.exit(0)
+    raise Refused(reason)
 
 
 def transcript(data):
@@ -101,7 +104,13 @@ def unproved(said):
 
 
 def main():
-    data = json.load(sys.stdin)
+    try:
+        judge(json.load(sys.stdin))
+    except Refused as no:
+        print(json.dumps({"decision": "block", "reason": str(no)}))
+
+
+def judge(data):
     if bc.reviewing():
         return
     path = transcript(data)
