@@ -187,6 +187,9 @@ def script(name):
             "board_" + name, os.path.join(HOME, "board", name)))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    # A board command reads its own project as it loads, which leaves the bars
+    # answering for whatever checkout this case was standing in (mch-m1t.19).
+    pin()
     return mod
 
 
