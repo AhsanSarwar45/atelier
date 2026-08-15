@@ -44,6 +44,9 @@ import project  # noqa: E402
 # — it is work put off, and it travels.
 HELD = ("in_progress", "in_review", "manager_review")
 
+# Every status that means the board still counts the card as work to be done.
+LIVE = HELD + ("open", "blocked", "deferred", "pinned", "hooked")
+
 
 def bd(args, root, feed=None):
     out = subprocess.run(["bd", *args], cwd=root, input=feed,
@@ -199,9 +202,26 @@ def main():
     # import lands is a card that exists nowhere.
     tool = project.tool(src, "job")
     for cid in going:
-        subprocess.run([sys.executable, tool, "cancel", cid,
-                        "--reason=moved to %s on the %s board" % (mapping[cid], dst.name)],
-                       cwd=src.path, capture_output=True, text=True)
+        why = "moved to %s on the %s board" % (mapping[cid], dst.name)
+        out = subprocess.run([sys.executable, tool, "cancel", cid, "--reason=" + why],
+                             cwd=src.path, capture_output=True, text=True)
+        if out.returncode:
+            # A card a dead session still has its name on refuses to close for
+            # anyone else. The session is gone — the hold is not somebody working.
+            subprocess.run(["bd", "update", cid, "--assignee", ""],
+                           cwd=src.path, capture_output=True, text=True)
+            subprocess.run([sys.executable, tool, "cancel", cid, "--reason=" + why],
+                           cwd=src.path, capture_output=True, text=True)
+
+    # A cancel that quietly did nothing leaves the card open on both boards, which
+    # is the one outcome a move must never have: two boards each say the work is
+    # theirs and neither knows about the other.
+    after = cards(src.path)
+    standing = sorted(c for c in going if after[c].get("status") in LIVE)
+    if standing:
+        sys.exit("%d card(s) landed on the %s board but would not close here, so "
+                 "they stand open on both: %s" % (len(standing), dst.name,
+                                                  ", ".join(standing)))
     print("\n%d card(s) are on the %s board and cancelled here, each carrying its new id."
           % (len(going), dst.name))
     return 0
