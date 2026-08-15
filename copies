@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Machinery found inside a project, which is a copy nobody will keep in step.
+
+Every project runs these tools IN PLACE. The moment one holds a copy, the two
+drift: a rule tightened here goes on being loose there, and the project that
+holds the stale one is the last to find out. The whole point of a home of its
+own is that there is exactly one of each file.
+
+Two things count as a copy, and both are decidable:
+
+  the same file          a file anywhere in a project whose bytes are one of
+                         these files' bytes — however it got there
+  a pointer that is not  a file sitting where a forwarder goes that does not
+                         point here: an edited forwarder is a copy that has
+                         begun to drift, and it is the shape drift actually
+                         takes
+
+A forwarder is not a copy. It is one line of pointing with no logic in it, and
+it is how a project keeps its old paths working (`machinery/join --forward`).
+
+    python3 machinery/copies              every registered project
+    python3 machinery/copies <project>    one of them
+
+Exits non-zero while any copy stands, so it can stand in a check.
+"""
+import argparse
+import hashlib
+import os
+import sys
+
+HOME = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HOME)
+import project  # noqa: E402
+
+# Not ours to police: another repository's files, build output, and the shared
+# report tools, which are their own thing and shared their own way.
+SKIP = {".git", "node_modules", "target", "vendor", "out", ".next", "__pycache__",
+        "reporting", ".beads", "worktrees", ".worktrees"}
+# What a forwarder says about itself in its own first lines. `machinery/join`
+# writes it; nothing else does.
+MARK = "A forwarder, not the tool"
+# Where the machinery's own files live, and where a project that used to carry
+# them keeps its pointers. The pair is the same one the join tool writes.
+MINE = ("board", "hooks")
+FORWARD = {"board": "scripts/board", "hooks": "scripts/hooks"}
+
+
+def digest(path):
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def ours():
+    """Every file of the machinery, by its content and by its name."""
+    by_hash, by_name = {}, {}
+    for where in MINE:
+        for name in sorted(os.listdir(os.path.join(HOME, where))):
+            full = os.path.join(HOME, where, name)
+            if name.startswith(".") or os.path.isdir(full):
+                continue
+            by_hash[digest(full)] = os.path.join(where, name)
+            by_name.setdefault(name, os.path.join(where, name))
+    return by_hash, by_name
+
+
+def forwards(path):
+    """Whether this file is a pointer at the machinery rather than a copy of it."""
+    try:
+        with open(path, errors="replace") as fh:
+            return MARK in fh.read(600)
+    except OSError:
+        return False
+
+
+def walk(root):
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP]
+        for name in files:
+            yield os.path.join(base, name)
+
+
+def found(root, by_hash, by_name):
+    """Every copy of the machinery standing inside this project."""
+    said = []
+    for full in walk(root):
+        rel = os.path.relpath(full, root)
+        mine = by_hash.get(digest(full))
+        if mine and not forwards(full):
+            said.append("%s is %s, byte for byte" % (rel, mine))
+            continue
+        # The forwarder positions, where drift actually happens: somebody edits
+        # the pointer instead of the tool, and the project quietly has its own.
+        holder = os.path.dirname(rel)
+        if holder in FORWARD.values() and os.path.basename(rel) in by_name \
+                and not forwards(full):
+            said.append("%s stands where a pointer at %s goes, and does not point at it"
+                        % (rel, by_name[os.path.basename(rel)]))
+    return said
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("project", nargs="?", help="one project; every registered one by default")
+    a = ap.parse_args()
+
+    known = project.registry()
+    roots = {a.project: os.path.abspath(os.path.expanduser(a.project))} if a.project \
+        else known
+    by_hash, by_name = ours()
+    total = 0
+    for name, root in sorted(roots.items()):
+        said = found(root, by_hash, by_name)
+        total += len(said)
+        print("%-12s %s — %s" % (name, root,
+                                 "%d copy(ies)" % len(said) if said else "runs in place"))
+        for line in said:
+            print("    " + line)
+    if total:
+        print("\n%d file(s) of this machinery are sitting inside a project. Every "
+              "project runs these in place: delete the copy, and leave a pointer if "
+              "the old path has to keep working — `machinery/join <project> "
+              "--forward`." % total, file=sys.stderr)
+    return 1 if total else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

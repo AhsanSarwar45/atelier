@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Put a project on this machinery, and say whether one already is.
+
+Nothing is ever copied into a project. A project runs the tools and the gates in
+place, out of this one home, and joining is four things:
+
+  the declaration      `machinery.toml` at the project root — the project writes
+                       it, this only checks it is there and is readable
+  the register         one line in `projects.toml` here, so `lands:<name>` on a
+                       goal means something and a commit in one checkout may name
+                       the ids of a project whose work lands there
+  the shared .claude    Claude Code reads agents, skills and output styles out of
+                       each project's own `.claude/`, so those are symlinks into
+                       `claude/` here — a link, never a copy
+  the board's own role  a fork infers a contributor and routes `bd list` at a
+                       planning store; a project that pours work is a maintainer
+
+Forwarders are the fifth and are optional (`--forward`): a project that already
+had the tools under `scripts/` keeps those paths working, so settings and running
+sessions are not disturbed. They are one line of pointing and no logic.
+
+    machinery/join <project>              join it, or say what is missing
+    machinery/join <project> --forward    and leave forwarders at the old paths
+    machinery/join --check                say where every registered project stands
+"""
+import argparse
+import os
+import re
+import subprocess
+import sys
+
+HOME = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HOME)
+import project  # noqa: E402
+
+# Where a project that carried the tools itself kept them, and what belongs at
+# each path. The machinery's own layout is the other half of the pair.
+FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
+# Claude Code reads these three out of a project's own `.claude/`, so a project
+# shares them by pointing at this home rather than by holding a copy.
+SHARED = ("agents", "skills", "output-styles")
+
+FORWARDER = '''#!/usr/bin/env python3
+"""A forwarder, not the tool (cor-up1g).
+
+The board tooling and the session gates live in a home of their own, so every
+project runs the same ones in place rather than carrying a copy that drifts:
+%(home)s. This file only points at `%(rel)s` there, and editing it
+changes nothing at all.
+"""
+import importlib.machinery
+import importlib.util
+import os
+import sys
+
+REAL = os.path.join(os.environ.get("MACHINERY_HOME") or %(home)r, %(rel)r)
+_spec = importlib.util.spec_from_loader(
+    __name__, importlib.machinery.SourceFileLoader(__name__, REAL))
+_mod = importlib.util.module_from_spec(_spec)
+sys.modules[__name__] = _mod
+_spec.loader.exec_module(_mod)
+'''
+# The first line of a forwarder's own docstring. What tells one from a copy, and
+# what the copies check reads (`machinery/copies`).
+MARK = "A forwarder, not the tool"
+
+
+def git(args, cwd):
+    run = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+    return run.returncode, run.stdout.strip()
+
+
+def forwarders(root, say):
+    """Leave a pointer at every path this project used to keep a tool at.
+
+    Only where the project already has the directory: a project that never
+    carried the tools has no old path to keep working, and inventing one would
+    put the machinery's names inside it for no reason.
+    """
+    for near, mine in FORWARD.items():
+        where = os.path.join(root, near)
+        if not os.path.isdir(where):
+            continue
+        for name in sorted(os.listdir(os.path.join(HOME, mine))):
+            full = os.path.join(HOME, mine, name)
+            if name.startswith(".") or name == "__pycache__" or os.path.isdir(full):
+                continue
+            out = os.path.join(where, name)
+            if os.path.exists(out) and MARK not in open(out, errors="replace").read(600):
+                say("kept   %s — this project's own, not the machinery's" % out)
+                continue
+            with open(out, "w") as fh:
+                fh.write(FORWARDER % {"home": HOME, "rel": os.path.join(mine, name)})
+            os.chmod(out, 0o755)
+            say("point  %s -> %s" % (out, os.path.join(mine, name)))
+
+
+def shared_claude(root, say):
+    """Link the agents, skills and output styles every project shares.
+
+    One link per item rather than one for the whole directory, so a project keeps
+    its own alongside — the renderer's researchers are its own, the lead and the
+    report skill are everyone's.
+    """
+    for kind in SHARED:
+        mine = os.path.join(HOME, "claude", kind)
+        if not os.path.isdir(mine):
+            continue
+        where = os.path.join(root, ".claude", kind)
+        os.makedirs(where, exist_ok=True)
+        for name in sorted(os.listdir(mine)):
+            link, target = os.path.join(where, name), os.path.join(mine, name)
+            if os.path.islink(link):
+                if os.path.realpath(link) == target:
+                    continue
+                os.remove(link)
+            elif os.path.exists(link):
+                say("kept   %s — a file of this project's own stands there" % link)
+                continue
+            os.symlink(target, link)
+            say("link   %s -> %s" % (link, target))
+
+
+def register(root, decl, say):
+    """One line in the register, written by hand-editing nothing.
+
+    The file is small and read by every tool call, so it is rewritten whole
+    rather than appended to — a torn append would be read as a project that no
+    longer exists.
+    """
+    text = open(project.REGISTRY).read() if os.path.exists(project.REGISTRY) else \
+        "[projects]\n"
+    if re.search(r"^%s\s*=" % re.escape(decl.name), text, re.M):
+        return
+    text = re.sub(r"^\[projects\]\s*$",
+                  '[projects]\n%s = "%s"' % (decl.name, root), text, count=1, flags=re.M)
+    with open(project.REGISTRY, "w") as fh:
+        fh.write(text)
+    say("listed %s as %s" % (root, decl.name))
+
+
+def standing(root):
+    """Every reason this project is not yet running the machinery."""
+    said = []
+    decl = project.of(root)
+    if not decl.declared:
+        said.append("no machinery.toml at %s — a project declares its own prefix, "
+                    "systems and branch before anything here can answer for it" % root)
+        return said, decl
+    for field, what in (("prefix", "the card ids its board issues"),
+                        ("areas", "the systems a card may belong to"),
+                        ("lands_on", "the branch finished work lands on")):
+        if not getattr(decl, field):
+            said.append("machinery.toml names no %s (%s)" % (field, what))
+    if not os.path.isdir(os.path.join(root, ".beads")):
+        said.append("no board at %s/.beads — `bd init --prefix %s`" % (root, decl.prefix))
+    if decl.name not in project.registry():
+        said.append("not in the register (%s)" % project.REGISTRY)
+    code, role = git(["config", "--get", "beads.role"], root)
+    if role != "maintainer":
+        said.append("git config beads.role is %r — a fork infers a contributor and "
+                    "routes `bd list` at a planning store rather than at this board; "
+                    "`git -C %s config beads.role maintainer`" % (role or "unset", root))
+    for kind in SHARED:
+        where = os.path.join(root, ".claude", kind)
+        mine = os.path.join(HOME, "claude", kind)
+        if not os.path.isdir(mine):
+            continue
+        want = {n for n in os.listdir(mine) if not n.startswith(".")}
+        have = {n for n in os.listdir(where)} if os.path.isdir(where) else set()
+        missing = sorted(want - have)
+        if missing:
+            said.append("%s is not shared into .claude/%s: %s"
+                        % (", ".join(missing), kind, "run join again"))
+    said += unwired(root)
+    return said, decl
+
+
+# The events a project has to wire, and the hook that answers each. Read here so
+# a project that joined before a hook existed is told about it rather than
+# quietly running without it.
+WIRING = {
+    "PreToolUse": ("agent-fence.py", "board-actor.py", "board-merge-gate.py",
+                   "board-status-gate.py", "report-gate.py"),
+    "PostToolUse": ("board-touch.py",),
+    "UserPromptSubmit": ("habit-reading.py",),
+    "SessionStart": ("board-prime.py",),
+    "SessionEnd": ("board-push.py",),
+    "Stop": ("completion-gate.py", "board-gate.py"),
+}
+
+
+def unwired(root):
+    """Hooks this project's settings do not run. A gate nobody wired is a gate
+    that is not there, and it fails silently — which is the whole reason to say
+    it out loud rather than to trust the file."""
+    where = os.path.join(root, ".claude", "settings.json")
+    try:
+        text = open(where).read()
+    except OSError:
+        return ["no .claude/settings.json at %s — nothing is wired" % root]
+    missing = [name for names in WIRING.values() for name in names if name not in text]
+    return ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
+        if missing else []
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("path", nargs="?", help="the project to join")
+    ap.add_argument("--forward", action="store_true",
+                    help="leave forwarders where this project used to keep the tools")
+    ap.add_argument("--check", action="store_true",
+                    help="say where every registered project stands, and change nothing")
+    a = ap.parse_args()
+
+    if a.check or not a.path:
+        bad = 0
+        for name, root in sorted(project.registry().items()):
+            said, _ = standing(root)
+            print("%-12s %s" % (name, root))
+            for line in said:
+                print("    " + line)
+            bad += bool(said)
+        sys.exit(1 if bad else 0)
+
+    root = os.path.abspath(os.path.expanduser(a.path))
+    decl = project.of(root)
+    if not decl.declared:
+        sys.exit("no machinery.toml at %s. A project says its own prefix, systems "
+                 "and branch before it can run these tools — %s/machinery.toml.example "
+                 "is the shape of it." % (root, HOME))
+    said = []
+    register(root, decl, said.append)
+    project._DECLS.clear()
+    project._ROOTS.clear()
+    shared_claude(root, said.append)
+    if a.forward:
+        forwarders(root, said.append)
+    code, role = git(["config", "--get", "beads.role"], root)
+    if role != "maintainer":
+        git(["config", "beads.role", "maintainer"], root)
+        said.append("role   %s is a maintainer of its own board" % root)
+    print("\n".join(said) or "nothing to do — %s was already joined" % decl.name)
+    left, _ = standing(root)
+    if left:
+        print("\nstill missing:")
+        for line in left:
+            print("    " + line)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
