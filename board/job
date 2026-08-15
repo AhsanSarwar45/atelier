@@ -267,8 +267,8 @@ def find(a):
     bar(sections.what_is_wrong(a.title))
     bar(sections.where_it_is(a.where))
     body = ("## Where it is\n%s\n\n## Acceptance Criteria\nEither promoted into a job "
-            "(%s new --source <this card>), or closed as not real.\n" % sections.EG_POUR
-            % a.where)
+            "(%s new --source <this card>), or closed as not real.\n"
+            % (a.where, sections.EG_POUR))
     out = bd(["create", "--title", a.title, "--type", "task", "-p", str(a.priority),
               "-d", body, "-l", "find", "-l", "area:" + a.area,
               "-l", "kind:" + a.kind, "--json"])

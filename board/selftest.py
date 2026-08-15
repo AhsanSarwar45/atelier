@@ -833,7 +833,7 @@ def main():
           "at that moment, and a turn under no card is still refused")
 
     sent_back, _ = carrying_on(["c"])
-    assert "c" in sent_back and "does not end here" in sent_back, \
+    assert "c" in sent_back and "4f-when-a-session-may-stop" in sent_back, \
         "a turn ending with its own work still open and nothing asked of the " \
         "manager was allowed to end: %s" % (sent_back or "ALLOWED")
     assert carrying_on([])[0] == "", \
@@ -1504,6 +1504,19 @@ def main():
     code, said = job_new()
     assert "must say" not in said and "names nothing" not in said, \
         "a job with every section filled properly was refused anyway: %s" % said
+
+    # Both kinds carried all the way past their bars, not only up to them: the cases
+    # above stop at the refusal, so a card the bars let through went to the board
+    # untried and a fault in what it writes there showed up on somebody's real find.
+    for kind, args in (("a job", []),
+                       ("a find", ["find", READABLE, WHERE,
+                                   "--area", LAST_AREA, "--kind", "bug"])):
+        _, said = (job_new() if not args else pour(args))
+        # `bd` is off the path for every case here, so reaching the board command is
+        # the pass — the card's whole body was built first. Stopping anywhere earlier
+        # is the fault this catches.
+        assert "No such file or directory: 'bd'" in said, \
+            "%s that cleared every bar never reached the board: %s" % (kind, said)
 
     print("ok: a card is refused unless what is wrong is observable, the finish line "
           "names a run and its outcome, the scope line was written for this job, a "
