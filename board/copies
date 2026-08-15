@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Every separate copy of the work on this machine, and which of them are spent.
+
+The two refusals in scripts/hooks/board-status-gate.py both need somebody
+present: one fires when a job reaches its last step, the other when its owner
+starts the next one. A session that simply ends triggers neither, and that is
+how the copies actually accumulated — the eleven cleared under cor-futg were
+from sessions long gone and jobs that never reached their end (cor-futg.16).
+
+So this asks nothing about sessions. A copy is SPENT when all three hold:
+its work is already on the main line, it holds nothing uncommitted, and no card
+is being worked in it. Nothing else qualifies — a copy with unlanded commits is
+somebody's work, and one being worked in is in use. Spent copies make this exit
+non-zero, which is what puts it in front of a push (scripts/check-all.sh).
+
+It prints and refuses. It never removes anything: five of the eleven held
+uncommitted work, and something that cannot tell whether that matters would
+have destroyed it.
+
+Run: python3 scripts/board/copies
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+def _git(args, cwd):
+    run = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+    return run.stdout.strip() if run.returncode == 0 else ""
+
+
+# The MAIN checkout, whichever copy this is run from: every copy holds this
+# script too, and one that took itself for the main tree would leave itself out
+# of its own census and print every removal against the wrong tree.
+HERE = os.environ.get("CORSETTA_COPIES_ROOT") or os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(_git(["rev-parse", "--path-format=absolute",
+                             "--git-common-dir"], HERE).rstrip("/")) or HERE
+
+
+def git(args, cwd=ROOT):
+    return _git(args, cwd)
+
+
+def registered():
+    """(path, branch) for every copy git knows about, the main tree aside."""
+    out = []
+    for block in git(["worktree", "list", "--porcelain"]).split("\n\n"):
+        path = branch = ""
+        for line in block.splitlines():
+            if line.startswith("worktree "):
+                path = line[len("worktree "):].rstrip("/")
+            elif line.startswith("branch "):
+                branch = re.sub(r"^refs/heads/", "", line[len("branch "):])
+        if path and path != ROOT:
+            out.append((path, branch))
+    return sorted(out)
+
+
+def worked_in():
+    """The copies some card is being worked in, read off the board's own claims.
+
+    A board name opens with the tree it was claimed in (board_common.actor), so
+    this needs no session to be alive to answer — only a card to be open.
+    """
+    run = subprocess.run(["bd", "list", "--status", "in_progress", "--json"],
+                         cwd=ROOT, capture_output=True, text=True)
+    if run.returncode != 0:
+        return None
+    try:
+        rows = json.loads(run.stdout or "[]")
+    except Exception:
+        return None
+    return {(r.get("assignee") or "").rsplit("-", 1)[0] for r in rows} - {"", "main"}
+
+
+def removal(path, branch):
+    """`git worktree remove` is refused for any copy carrying a submodule, and
+    every copy here carries vendor/iced — see scripts/hooks/board-status-gate.py."""
+    end = " && git -C %s branch -d %s" % (ROOT, branch) if branch else ""
+    return "rm -rf %s && git -C %s worktree prune%s" % (path, ROOT, end)
+
+
+def main(busy=None):
+    busy = worked_in() if busy is None else busy
+    if busy is None:
+        print("copies: the board did not answer, so which copies are in use is "
+              "unknown. Not judging any of them.", file=sys.stderr)
+        return 0
+
+    spent, kept = [], []
+    for path, branch in registered():
+        if os.path.basename(path) in busy:
+            kept.append((path, "a card is being worked in it"))
+            continue
+        if git(["status", "--porcelain"], path):
+            kept.append((path, "holds work nobody committed"))
+            continue
+        ahead = git(["rev-list", "--count", "main..HEAD"], path)
+        if ahead and ahead != "0":
+            kept.append((path, "holds %s change(s) that never reached main" % ahead))
+            continue
+        spent.append((path, branch))
+
+    for path, why in kept:
+        print("keep  %s — %s" % (path, why))
+    for path, _ in spent:
+        print("SPENT %s — its work is on main, it is clean, and nobody is in it" % path)
+
+    if not spent:
+        return 0
+    print("\n%d copy(ies) outlived their work. They are the whole of what this "
+          "project leaves behind — 59 GB of them before anyone counted. Remove "
+          "each, or take up its job again:" % len(spent), file=sys.stderr)
+    for path, branch in spent:
+        print("  " + removal(path, branch), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

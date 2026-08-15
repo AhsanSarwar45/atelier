@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""The only way a job reaches the board.
+
+`bd create` is refused (scripts/hooks/board-status-gate.py): hand-made cards were
+what filled the board with work nobody could confirm. The arguments below are the
+fields the shape requires — see docs/board.md#4-the-shape-of-a-job.
+
+A job opens with its goal and its first step only. The rest arrive as each step
+closes (scripts/hooks/board-touch.py), because a step created before the design
+exists can carry nothing but the template's own words.
+
+A container (`epic`) is the other shape: a system whose every landing is a job in
+its own right. It holds jobs and has no spine — see docs/board.md#4-the-shape-of-a-job.
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import plain  # noqa: E402
+import sections  # noqa: E402
+import spine  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+AREAS = sections.AREAS
+# What kind of work this is, kept to three so a manager reads a board at a glance.
+# It is a label rather than bd's own type, which this board uses for a card's
+# SHAPE — epic is a goal or a container, task is a step or a find.
+KINDS = ["bug", "feature", "chore"]
+
+
+def bar(problem):
+    """A section held to what it must carry, or the rewrite that would fix it."""
+    if problem:
+        sys.exit(problem)
+
+
+def bd(args, capture=True):
+    env = dict(os.environ, BEADS_ACTOR=os.environ.get("BEADS_ACTOR", "") or "")
+    run = subprocess.run(["bd"] + args, cwd=ROOT, text=True, env=env,
+                         capture_output=capture)
+    if run.returncode != 0:
+        sys.exit("bd %s failed:\n%s%s" % (args[0], run.stdout or "", run.stderr or ""))
+    return run.stdout or ""
+
+
+def chosen(a):
+    """Which steps this job runs. Nothing is guessed: every droppable step is either
+    taken or refused in writing, and the refusals stay on the goal where the manager
+    can count them."""
+    # A step is picked by its id, and its title is what a reader remembers, so the
+    # title is taken for the id too.
+    alias = {verb.lower(): sid for sid, verb, _, _, _ in spine.STEPS}
+    take = [alias.get(s.strip(), s.strip()) for s in (a.steps or "").split(",") if s.strip()]
+    skips = {}
+    for item in a.skip or []:
+        sid, _, why = item.partition("=")
+        sid = sid.strip()
+        skips[alias.get(sid, sid)] = why.strip()
+    for sid in take + list(skips):
+        if sid not in spine.BY_ID:
+            sys.exit("no step called %r. The playbook runs: %s"
+                     % (sid, ", ".join(spine.ORDER)))
+        if spine.tier(sid) == spine.MUST:
+            sys.exit("%s is mandatory — every job runs it, so it is neither picked nor "
+                     "skipped." % sid)
+    clash = sorted(set(take) & set(skips))
+    if clash:
+        sys.exit("%s is both taken and skipped." % ", ".join(clash))
+    owed = [s for s in spine.droppable() if s not in take and s not in skips]
+    if owed:
+        sys.exit("This job has not said which playbook steps it runs, and the board no "
+                 "longer guesses. Unanswered: %s. For each one, either --steps %s to run "
+                 "it, or --skip %s=\"why this job does not need it\"."
+                 % (", ".join(owed), ",".join(owed), owed[0]))
+    earned = spine.auto(a.done)
+    for sid, why in sorted(skips.items()):
+        if sid in earned:
+            sys.exit("%s cannot be skipped: this job's success criteria claim a "
+                     "performance win, and a claim without a before and an after is "
+                     "the thing the step exists to stop." % sid)
+        if len(why) < 25:
+            sys.exit("--skip %s= must say why THIS job does not need that step. A step "
+                     "dropped without a reason is a step nobody chose." % sid)
+    return spine.order(take + earned), skips
+
+
+def judge(a):
+    """Who signs this job off. Asked at the pour because a job that decides at the
+    end decides in its own favour, and the manager's column is for what an agent
+    cannot settle at all — not for what it would rather not answer for."""
+    who, _, why = (a.judge or "").partition("=")
+    who, why = who.strip(), why.strip()
+    if who not in ("agent", "manager"):
+        sys.exit("--judge must say who signs this job off: `--judge agent` when the "
+                 "success criteria settle it, or `--judge manager=\"what he has to "
+                 "look at\"` when nothing but his eye can.")
+    if who == "manager" and len(why) < 25:
+        sys.exit("--judge manager= must name what the manager has to look at — the "
+                 "render, the page, the thing he is being asked to sign. A card that "
+                 "reaches his column with nothing to look at is a card he cannot act on.")
+    if who == "agent" and spine.judged_by_eye(a.done):
+        sys.exit("This job's success criteria can only be settled by looking at it, so "
+                 "it is not the agent's to sign. Pour it with `--judge manager=\"what "
+                 "he has to look at\"`.")
+    return who, why
+
+
+def new(a):
+    plain.refuse(a.what, "This job's --what")
+    bar(sections.what_is_wrong(a.what))
+    if len(a.evidence) < 20:
+        sys.exit("--evidence must say what makes this real today: the check that went "
+                 "red and its number, the image, or the manager's words.")
+    bar(sections.finish_line(a.done))
+    bar(sections.left_out(a.not_in))
+    run, skips = chosen(a)
+    who, why = judge(a)
+    size = a.size
+    body = ("## What is wrong\n%s\n\n## Evidence it is real\n%s\n\n"
+            "## Success Criteria\n%s\n\n## Not in this job\n%s\n"
+            % (a.what, a.evidence, a.done, a.not_in.strip()))
+    tags = ["job", "area:" + a.area, "kind:" + a.kind, "size:" + size]
+    if who == "manager":
+        tags.append("judge:manager")
+    args = ["create", "--title", a.what, "--type", "epic", "-p", str(a.priority),
+            "-d", body, "--acceptance", a.done, "--json"]
+    args += sum([["-l", t] for t in tags], [])
+    if a.parent:
+        args += ["--parent", a.parent]
+    root = json.loads(bd(args))["id"]
+    bd(spine.settle(root, tags))
+
+    meta = {"subject": spine.subject(a.what), "area": a.area, "kind": a.kind,
+            "done": a.done, "spine": ",".join(run), "judge": who}
+    if who == "manager":
+        meta["judge_why"] = why
+    meta.update({"skip." + sid: why for sid, why in skips.items()})
+    bd(["update", root] + sum([["--set-metadata", "%s=%s" % kv] for kv in meta.items()], []))
+    if skips:
+        bd(["update", root, "--append-notes", "Steps this job does not run:\n"
+            + "\n".join("- %s: %s" % kv for kv in sorted(skips.items()))])
+    if who == "manager":
+        bd(["update", root, "--append-notes",
+            "The manager signs this job off. What he has to look at: " + why])
+    first = json.loads(bd(spine.card(run[0], root, meta, a.priority) + ["--json"]))["id"]
+    bd(spine.settle(first, spine.step_labels(run[0], root, meta)))
+    if a.source:
+        bd(["close", a.source, "--reason", "promoted into %s" % root])
+    print("%s  goal\n%s  first step — the rest arrive as each closes\nruns: %s\n"
+          "signed off by: %s"
+          % (root, first, " → ".join(run),
+             "the manager — " + why if who == "manager" else "an agent"))
+
+
+def epic(a):
+    """A system, not a job: it holds jobs and finishes when they do.
+
+    A job's steps are its spine, poured one at a time. A system's "steps" are
+    whole landings, each with its own proof and its own spine, so a container
+    carries no spine of its own — and one poured with `new` would grow a run of
+    steps nobody can ever work.
+    """
+    plain.refuse(a.what, "This container's --what")
+    bar(sections.what_is_wrong(a.what))
+    if len(a.evidence) < 20:
+        sys.exit("--evidence must say what makes this real today: the check that went "
+                 "red and its number, the image, or the manager's words.")
+    bar(sections.finish_line(a.done))
+    body = ("## What is wrong\n%s\n\n## Evidence it is real\n%s\n\n"
+            "## Success Criteria\n%s\n\n## How this one is worked\n"
+            "A container, not a job: it holds one job per landing and finishes when "
+            "they do. Claim one of its children — `bd list --parent <this>`.\n"
+            % (a.what, a.evidence, a.done))
+    args = ["create", "--title", a.what, "--type", "epic", "-p", str(a.priority),
+            "-d", body, "--acceptance", a.done, "--json",
+            "-l", "container", "-l", "area:" + a.area, "-l", "kind:" + a.kind]
+    if a.parent:
+        args += ["--parent", a.parent]
+    root = json.loads(bd(args))["id"]
+    bd(spine.settle(root, ["container", "area:" + a.area, "kind:" + a.kind]))
+    # No `spine` key: scripts/hooks/board-touch.py opens a next step from it, and
+    # a container has none to open.
+    bd(["update", root, "--set-metadata", "area=" + a.area,
+        "--set-metadata", "kind=" + a.kind, "--set-metadata", "done=" + a.done])
+    print("%s  container — pour its jobs with `job new --parent %s`" % (root, root))
+
+
+def under(a):
+    """The steps are the shape of a job, not its content. What the design decided to
+    build hangs under the GOAL, as the job's own children: a container card called
+    Build reads as one open row whatever is left inside it, which is how a board
+    stops saying where the work has got to."""
+    # Ahead of the board, so a batch is refused whole rather than half-poured:
+    # several items share one step, so the page names each by its own title
+    # (~/dev/beads-web/reporting/README.md, "Where we are") — manager-facing.
+    for item in a.do:
+        title, sep, done = item.partition("|")
+        plain.refuse(title.strip(), "A work item's title")
+        if not sep:
+            sys.exit("each item is '<what to do>|<how we know it is done>'; %r has no "
+                     "second half." % title.strip())
+        bar(sections.finish_line(done, "This work item's second half"))
+    parent = bd(["show", a.parent, "--json"])
+    try:
+        card = json.loads(parent)
+        card = card[0] if isinstance(card, list) else card
+    except Exception:
+        sys.exit("no card %s" % a.parent)
+    labels = [l for l in (card.get("labels") or [])
+              if l.startswith("area:") or l.startswith("kind:")]
+    if card.get("issue_type") == "epic":
+        if "container" in (card.get("labels") or []):
+            sys.exit("%s is a container of jobs, not a job. Pour a job under it with "
+                     "`job new --parent %s`." % (a.parent, a.parent))
+        # The work position: these items ARE the step, so they wear its label and the
+        # run moves on when the last of them closes.
+        labels += ["step:work", "of:" + a.parent]
+    made = []
+    for item in a.do:
+        title, _, done = item.partition("|")
+        if len(done.strip()) < 8:
+            sys.exit("each item is '<what to do>|<how we know it is done>'; %r has no "
+                     "second half." % title.strip())
+        args = ["create", "--title", title.strip(), "--type", "task",
+                "-p", str(card.get("priority", 2)), "--parent", a.parent,
+                "-d", "## Acceptance Criteria\n%s\n" % done.strip(), "--json"]
+        for lab in labels:
+            args += ["-l", lab]
+        out = bd(args)
+        try:
+            cid = json.loads(out)["id"]
+        except Exception:
+            cid = out.strip()
+        bd(spine.settle(cid, labels))
+        made.append(cid)
+    print("\n".join(made))
+
+
+def find(a):
+    """A find is one line and no plan: it exists so nothing noticed evaporates.
+    It cannot be claimed — promoting it into a job is what makes it workable."""
+    plain.refuse(a.title, "This find's title")
+    bar(sections.what_is_wrong(a.title))
+    bar(sections.where_it_is(a.where))
+    body = ("## Where it is\n%s\n\n## Acceptance Criteria\nEither promoted into a job "
+            "(scripts/board/job new --source <this card>), or closed as not real.\n"
+            % a.where)
+    out = bd(["create", "--title", a.title, "--type", "task", "-p", str(a.priority),
+              "-d", body, "-l", "find", "-l", "area:" + a.area,
+              "-l", "kind:" + a.kind, "--json"])
+    try:
+        print(json.loads(out)["id"])
+    except Exception:
+        print(out.strip())
+
+
+def cancel(a):
+    """Work dropped rather than delivered. It closes — anything waiting on a card
+    that never closes waits forever — and it carries a mark saying it was dropped,
+    so the manager's board never counts it as something he got."""
+    if len(a.reason) < 25:
+        sys.exit("--reason must say why this is being dropped. A card cancelled "
+                 "without one comes back as somebody's next idea.")
+    bd(["update", a.id, "--add-label", "cancelled"])
+    bd(["update", a.id, "--append-notes", "Cancelled: " + a.reason])
+    bd(["set-state", a.id, "resolution=cancelled", "--reason", a.reason])
+    bd(["close", a.id, "--reason", "cancelled: " + a.reason])
+    print("%s cancelled" % a.id)
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+sub = parser.add_subparsers(dest="cmd", required=True)
+
+p = sub.add_parser("new", help="pour a job: a goal, and the run of steps it chose")
+p.add_argument("--what", required=True, help="one line, as an observable")
+p.add_argument("--evidence", required=True, help="what makes it real today")
+p.add_argument("--done", required=True, help="the command and the number or image")
+# Required, but not by argparse: a refusal that says what to write instead teaches
+# the shape, and "the following arguments are required" teaches nothing.
+p.add_argument("--not", dest="not_in", default="", metavar="WHAT IT LEAVES OUT",
+               help="the card, the system or the file this job does not touch")
+p.add_argument("--area", required=True, choices=AREAS)
+p.add_argument("--kind", required=True, choices=KINDS)
+p.add_argument("--size", default="medium", choices=["small", "medium", "large"],
+               help="how much work this is; it does not decide which steps exist")
+p.add_argument("--steps", default="",
+               help="comma list of the droppable playbook steps this job runs: "
+                    + ",".join(spine.droppable()))
+p.add_argument("--skip", action="append", metavar="STEP=WHY",
+               help="repeatable; a droppable step this job does not run, and why")
+p.add_argument("--judge", required=True, metavar="agent|manager=WHAT HE LOOKS AT",
+               help="who signs this job off: `agent` when the success criteria settle "
+                    "it, `manager=\"…\"` when nothing but his eye can")
+p.add_argument("-p", "--priority", type=int, default=2, choices=range(5))
+p.add_argument("--parent", help="a larger goal this job sits under")
+p.add_argument("--source", help="a find card this job was promoted from; it is closed")
+p.set_defaults(func=new)
+
+p = sub.add_parser("epic", help="a container for a system: jobs underneath, no spine")
+p.add_argument("--what", required=True, help="one line, as an observable")
+p.add_argument("--evidence", required=True, help="what makes it real today")
+p.add_argument("--done", required=True, help="the command and the number or image")
+p.add_argument("--area", required=True, choices=AREAS)
+p.add_argument("--kind", required=True, choices=KINDS)
+p.add_argument("-p", "--priority", type=int, default=2, choices=range(5))
+p.add_argument("--parent", help="a larger container this one sits under")
+p.set_defaults(func=epic)
+
+p = sub.add_parser("under", help="hang the job's real work items under its goal")
+p.add_argument("parent", help="the goal, or the step they belong to")
+p.add_argument("--do", action="append", required=True, metavar="WHAT|HOW WE KNOW",
+               help="repeatable; one work item per flag")
+p.set_defaults(func=under)
+
+p = sub.add_parser("find", help="file something noticed, without a plan")
+p.add_argument("title")
+p.add_argument("where", help="where it is and how it shows")
+p.add_argument("--area", required=True, choices=AREAS)
+p.add_argument("--kind", required=True, choices=KINDS)
+p.add_argument("-p", "--priority", type=int, default=2, choices=range(5))
+p.set_defaults(func=find)
+
+p = sub.add_parser("cancel", help="drop a card: closed, marked, and never counted as delivered")
+p.add_argument("id")
+p.add_argument("--reason", required=True, help="why this is being dropped")
+p.set_defaults(func=cancel)
+
+args = parser.parse_args()
+args.func(args)

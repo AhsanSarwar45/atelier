@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""PreToolUse — a question reaches the manager only behind the page carrying it.
+
+The manager's rule: an agent may not put a question to him until it has handed
+him the page that carries it. A question in chat costs him a decision with none
+of what it turns on; the page is where the cost of each answer already is.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, __file__.rsplit("/", 1)[0])
+import board_common as bc  # noqa: E402
+
+# Leaving plan mode is not here: plan mode forbids writing files, so an agent in
+# it cannot build the page this would demand. A plan reaches the manager as a
+# page by the same rule, written before the mode is entered.
+ASKS = ("AskUserQuestion",)
+
+REASON = (
+    "A question reaches the manager behind the page that carries it, and this turn "
+    "has not built one. Put the question in the page's own slot for it — every "
+    "answer with what it costs — build it (`report list` finds the one for this "
+    "job, `report <slug>` brings it up to date), then ask, with the link last in "
+    "the message so he does not scroll for it."
+)
+
+
+def main():
+    data = json.load(sys.stdin)
+    if (data.get("tool_name") or "") not in ASKS or bc.reviewing():
+        return
+    root = bc.board_root(os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd"))
+    if not os.path.isdir(os.path.join(root, ".beads")):
+        return
+    # This session's own page, not any page anywhere: another session building
+    # its own report is not this agent putting its question in writing.
+    state = bc.load(data.get("session_id"))
+    mine = bc.held(bc.actor(data.get("session_id"), data.get("cwd")), root) or []
+    cards = set().union(*(bc.page_names(c, {}) for c in mine)) if mine else None
+    if bc.page_built(cards, bc.project_name(root)) > (state.get("last_stop") or 0):
+        return
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": REASON,
+    }}))
+
+
+if __name__ == "__main__":
+    main()

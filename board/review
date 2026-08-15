@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""The outside reader of a job, run by the board rather than by the session.
+
+A review is only a review if whoever did it did not write the change, so this
+runs as its own process under its own board identity: a headless `claude` that
+never saw the work being done, reading the diff and the job's own definition of
+done. What it found becomes the job's own pieces, it signs the goal with the
+commits it was shown, and it opens the gate holding the job shut — see
+docs/board.md#4b-review-is-done-by-someone-who-did-not-write-the-change.
+
+Read-only by construction: the edit tools are refused to it, so a review can
+never touch the shared working tree. It is fired detached by
+scripts/board/run.py the moment a job's last piece closes.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+import board_common as bc  # noqa: E402
+import reading  # noqa: E402
+import run as running  # noqa: E402
+import sections  # noqa: E402
+LOG_DIR = os.path.join(os.environ.get("CLAUDE_CODE_TMPDIR") or "/tmp", "board-reviews")
+# A diff past this goes to the reviewer as a file list; it has Read and Grep and
+# reads what it needs, rather than being handed a prompt nothing can attend to.
+DIFF_LIMIT = 300_000
+FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+
+
+def bd(args, actor=None, must=True):
+    env = dict(os.environ)
+    if actor:
+        env["BEADS_ACTOR"] = actor
+    run = subprocess.run(["bd"] + args, cwd=ROOT, capture_output=True, text=True,
+                         env=env, timeout=60)
+    if must and run.returncode != 0:
+        sys.exit("bd %s failed: %s%s" % (args[0], run.stdout or "", run.stderr or ""))
+    return run.stdout or ""
+
+
+def card(cid, must=True):
+    out = bd(["show", cid, "--json"], must=must)
+    try:
+        got = json.loads(out or "{}")
+        return got[0] if isinstance(got, list) else got
+    except Exception:
+        if must:
+            sys.exit("no card %s" % cid)
+        return {}
+
+
+def git(args, where=None):
+    run = subprocess.run(["git"] + args, cwd=where or ROOT, capture_output=True,
+                         text=True, timeout=120)
+    return run.stdout if run.returncode == 0 else ""
+
+
+def label(c, prefix):
+    return next((l[len(prefix):] for l in c.get("labels") or []
+                 if l.startswith(prefix)), None)
+
+
+def whose(sha, goal_id):
+    """The checkout a commit is in. The reader stands in this one, where a foreign
+    hash resolves to nothing and a foreign path resolves to nothing or to a
+    same-named file that is not the change."""
+    for where, _ in bc.landings(ROOT, goal_id):
+        if git(["cat-file", "-t", sha], where).strip() == "commit":
+            return where
+    return ROOT
+
+
+def changes(shas, goal_id):
+    """The diff these commits add up to, oldest first.
+
+    Pinned to hashes: the tree is shared, and a diff taken against a moving branch
+    would show a colleague's work as this job's.
+    """
+    if not shas:
+        return [], ""
+    dated = [(whose(sha, goal_id), sha) for sha in shas]
+    body = "".join("in %s\n" % where + git(["show", "--format=commit %H%n%s%n", sha], where)
+                   for where, sha in dated)
+    if len(body) > DIFF_LIMIT:
+        files = sorted({os.path.join(where, f) for where, sha in dated for f in
+                        git(["show", "--name-only", "--format=", sha], where).split()})
+        body = ("The change is too large to quote here. Read these files yourself:\n"
+                + "\n".join(files))
+    return ["%s in %s" % (sha, where) for where, sha in dated], body
+
+
+def ask(goal, shas, diff):
+    return """You are reviewing a change you did not write, for the Corsetta project.
+You know nothing about who wrote it and it does not matter. One round.
+
+Read %(root)s/CLAUDE.md and the rules under %(root)s/docs/rules/ first: this
+project's own rules are as much a source of findings as correctness is.
+
+You are READ-ONLY. Do not edit any file. Do not run cargo, any build, or any
+test — other sessions share this working tree and a build here would stall them.
+
+# The job under review
+%(what)s
+
+## Why it was opened
+%(desc)s
+
+## How the job says it is done
+%(done)s
+
+## The commits it wrote
+A job may land in more than one repository, so each line names the checkout that
+holds the commit; read one with `git -C <checkout> show <hash>`. Any file path
+below is absolute for the same reason.
+%(shas)s
+
+## The change
+%(diff)s
+
+# What to report
+Findings only. Something is a finding when it is wrong, unsafe, dead, duplicated,
+or breaks a rule this project states — not when you would have written it
+differently. For each one say where it is and what would prove it fixed.
+Say plainly if you found nothing.
+
+Each finding becomes a card the manager reads, and the board holds it to the same
+bars as any other (docs/board.md#4e-what-a-section-has-to-carry). A finding the
+board turns away leaves the job shut and has to be filed by hand, so write the
+title as one plain sentence saying what is wrong — no file names, no symbols, no
+instruction to do something; those belong in `where` and `why`. Write `fixed_when`
+as something anyone can run and what it must produce, never "it works".
+
+Answer with one fenced json block and nothing after it:
+
+```json
+{"verdict": "<one sentence: what you read and what you conclude>",
+ "checked": ["<a thing you checked and found correct>", "..."],
+ "findings": [{"title": "<one plain line: what is wrong, not what to do>",
+               "where": "<file, and the symbol or heading>",
+               "why": "<why it is wrong, in one or two sentences>",
+               "fixed_when": "<a command and what it must produce>"}]}
+```
+""" % {"root": ROOT, "what": goal.get("title", ""), "desc": goal.get("description", ""),
+       "done": goal.get("acceptance_criteria") or goal.get("acceptance") or "",
+       "shas": "\n".join(shas) or "none found", "diff": diff or "no diff found"}
+
+
+def run_reviewer(prompt, actor, goal_id):
+    """A separate claude, with the edit tools withheld and this project's hooks
+    told to stand aside for it (scripts/hooks/board_common.py reads the same
+    variable)."""
+    env = dict(os.environ, CORSETTA_REVIEWER=goal_id, BEADS_ACTOR=actor)
+    cmd = ["claude", "-p",
+           "--allowedTools", "Read", "Grep", "Glob", "Bash(git:*)", "Bash(rg:*)",
+           "--disallowedTools", "Edit", "Write", "MultiEdit", "NotebookEdit",
+           "Bash(cargo:*)", "Bash(bd:*)"]
+    run = subprocess.run(cmd, input=prompt, cwd=ROOT, env=env, text=True,
+                         capture_output=True, timeout=3600)
+    return run.stdout or "", run.stderr or ""
+
+
+def parse(text):
+    blocks = FENCE.findall(text or "")
+    if not blocks:
+        blocks = re.findall(r"(\{[^{}]*\"findings\".*\})", text or "", re.S)
+    for block in reversed(blocks):
+        try:
+            got = json.loads(block)
+        except Exception:
+            continue
+        if isinstance(got, dict) and "findings" in got:
+            return got
+    return None
+
+
+def file_findings(goal_id, findings):
+    """What the reader sent back becomes the job's own work, not cards beside it.
+
+    Filed under the goal, so the job's pieces are the whole of what is left to do
+    and a reader's objection cannot be walked past by finishing around it. The job
+    goes back to the first column until someone picks one up — manager's ruling,
+    2026-08-13: docs/board.md#3a1.
+
+    Returns what was filed and what the pour turned away. A reader's objection is
+    held to the same bars as any other work item (docs/board.md#4e-what-a-section-
+    has-to-carry), and one the board will not take is the one case where losing it
+    is worse than anything: the caller leaves the job shut and says so.
+    """
+    made, turned = [], []
+    for f in findings:
+        title = (f.get("title") or "").strip()
+        proof = (f.get("fixed_when") or "").strip()
+        where = (f.get("where") or "").strip()
+        why = (f.get("why") or "").strip()
+        if not title:
+            continue
+        # An objection answered rather than fixed is proved by the answer being
+        # readable on the card, which is a run like any other.
+        if sections.finish_line(proof, "An objection's second half"):
+            proof = ("`bd show %s` prints the answer to this objection, or a commit "
+                     "on main names this card" % goal_id)
+        item = "%s (%s)|%s" % (title, where, proof) if where else "%s|%s" % (title, proof)
+        out = subprocess.run([os.path.join(HERE, "job"), "under", goal_id, "--do", item],
+                             cwd=ROOT, capture_output=True, text=True)
+        cid = (out.stdout or "").strip().splitlines()[-1] if out.stdout.strip() else ""
+        if out.returncode != 0 or not cid:
+            turned.append((f, ((out.stderr or "") + (out.stdout or "")).strip()))
+            continue
+        if why:
+            bd(["update", cid, "--append-notes", why], must=False)
+        made.append(cid)
+    if made:
+        bd(["update", goal_id, "-s", "open"], must=False)
+    return made, turned
+
+
+def gates_on(cid):
+    out = bd(["gate", "list", cid, "--json"], must=False)
+    try:
+        rows = json.loads(out or "[]")
+    except Exception:
+        return []
+    return [r["id"] for r in rows if r.get("status") != "closed"]
+
+
+def retire_legacy(goal_id, actor):
+    """Close a review card a job was poured with before the reading had no card.
+
+    Their jobs are stuck exactly where the fault was: the one piece that is open is
+    the reading itself, so the job can never show every piece closed. Each clears
+    itself the first time it is read, which is why no migration script exists.
+    """
+    out = bd(["list", "--parent", goal_id, "--status", "all", "--json"], must=False)
+    try:
+        rows = json.loads(out or "[]")
+    except Exception:
+        return []
+    gone = []
+    for r in rows:
+        if "step:review" not in (r.get("labels") or []) or r.get("status") == "closed":
+            continue
+        for gate in gates_on(r["id"]):
+            bd(["gate", "resolve", gate], actor=actor, must=False)
+        bd(["update", r["id"], "--assignee", actor, "--force"], actor=actor, must=False)
+        bd(["update", r["id"], "--append-notes",
+            "The reading is no longer a piece of the job: the goal carries the "
+            "signature and this card cannot be closed by anyone. Closed by the "
+            "reader that read %s." % goal_id], actor=actor, must=False)
+        bd(["close", r["id"], "--reason",
+            "the reading moved onto the goal; this card is what kept the job from "
+            "ever showing every piece closed"], actor=actor, must=False)
+        gone.append(r["id"])
+    return gone
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("job", help="the goal to read; a job's old review card also names it")
+    ap.add_argument("--rerun", action="store_true",
+                    help="read a job again that a dead reader left shut")
+    a = ap.parse_args()
+
+    asked = card(a.job)
+    # A job poured before the reading stopped being a piece still has its review
+    # card, and that is the id anyone reruns by hand.
+    goal_id = label(asked, "of:") if "step:review" in (asked.get("labels") or []) else a.job
+    goal = card(goal_id)
+    if "job" not in (goal.get("labels") or []):
+        sys.exit("%s is not a job: only a job is read (docs/board.md#3a1)" % goal_id)
+    actor = "review-" + goal_id
+
+    shas = reading.commits(goal_id, ROOT)
+    if not reading.wanted(goal, shas, reading.wrote(goal_id, ROOT)) and not a.rerun:
+        sys.exit("%s has already been read and nothing has been written since; "
+                 "--rerun to read it again" % goal_id)
+    named, diff = changes(shas, goal_id)
+    prompt = ask(goal, named, diff)
+    os.makedirs(LOG_DIR, exist_ok=True)
+    verdict = None
+    for attempt in (1, 2):
+        out, err = run_reviewer(prompt, actor, goal_id)
+        with open(os.path.join(LOG_DIR, "%s.%d.log" % (goal_id, attempt)), "w") as fh:
+            fh.write(out + "\n--- stderr ---\n" + err)
+        verdict = parse(out)
+        if verdict:
+            break
+        prompt += ("\n\nYour last answer carried no json block. Answer with the "
+                   "fenced json block described above and nothing else.\n")
+    if not verdict:
+        bd(["update", goal_id, "--append-notes",
+            "A reader was fired at this job twice and neither run answered in the "
+            "shape the board can read; the job stays shut. The runs are in %s. "
+            "Fire another with `scripts/board/review %s --rerun`."
+            % (LOG_DIR, goal_id)], actor=actor, must=False)
+        sys.exit("reader produced nothing readable; %s stays gated" % goal_id)
+
+    made, turned = file_findings(goal_id, verdict.get("findings") or [])
+    checked = verdict.get("checked") or []
+    # The commits go on with the name: a signature that does not say what it covers
+    # cannot expire, which is how a job answered its reader and closed on the
+    # reading that had turned it down (cor-dqth).
+    note = ("%s\n%s\n\nChecked and found correct: %s\n\nFindings filed: %s"
+            % (reading.SIGNATURE % (actor, " ".join(shas)),
+               verdict.get("verdict", "").strip(),
+               "; ".join(str(c) for c in checked) or "nothing listed",
+               ", ".join(made) or "none — nothing to answer"))
+    bd(["update", goal_id, "--append-notes", note], actor=actor)
+    gone = retire_legacy(goal_id, actor)
+    if turned:
+        bd(["update", goal_id, "--append-notes",
+            "The board would not take %d of this reading's findings, so they are "
+            "written here whole and the job stays shut:\n\n%s\n\nFile each one by "
+            "hand with `scripts/board/job under %s --do \"<what is wrong>|<how we "
+            "know it is fixed>\"`."
+            % (len(turned), "\n\n".join("%s (%s)\n  %s\n  refused: %s"
+                                        % (f.get("title", ""), f.get("where", ""),
+                                           f.get("why", ""), msg)
+                                        for f, msg in turned), goal_id)], actor=actor)
+        sys.exit("%s: %d finding(s) the board refused; they are on the goal and it "
+                 "stays gated" % (goal_id, len(turned)))
+    # A job turned down stays shut. Its answers are its own pieces, and closing the
+    # last of them brings it back here rather than past here.
+    if not made:
+        for gate in gates_on(goal_id):
+            bd(["gate", "resolve", gate], actor=actor, must=False)
+        running.after_reading(goal_id, ROOT)
+    print("%s read by %s: %d finding(s) %s%s"
+          % (goal_id, actor, len(made), ", ".join(made),
+             ("; retired " + ", ".join(gone)) if gone else ""))
+
+
+if __name__ == "__main__":
+    main()
