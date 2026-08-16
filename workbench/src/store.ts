@@ -124,11 +124,18 @@ export class Store {
     return r ? rowToSummary(r) : undefined;
   }
 
-  listSessions(projectId?: string): SessionSummary[] {
+  /**
+   * Carries `origin` as well: where a conversation began does not change
+   * because the app later took it over, and the restore list says so.
+   */
+  listSessions(projectId?: string): (SessionSummary & { origin: 'app' | 'terminal' })[] {
     const rows = projectId
       ? this.db.prepare('SELECT * FROM session WHERE project_id = ? ORDER BY last_active_at DESC').all(projectId)
       : this.db.prepare('SELECT * FROM session ORDER BY last_active_at DESC').all();
-    return (rows as Record<string, string>[]).map(rowToSummary);
+    return (rows as Record<string, string>[]).map((r) => ({
+      ...rowToSummary(r),
+      origin: r.origin === 'terminal' ? 'terminal' : 'app',
+    }));
   }
 
   /** Next seq for a session. The event log is the only place seq is allocated. */

@@ -96,5 +96,4 @@ __pycache__/
 # The screenshots at tests/results/*.png are evidence and stay tracked.
 /tests/.e2e-run/
 /tests/.workbench-run*/
-/tests/results/*/
-/tests/results/.last-run.json
+/tests/.artifacts/

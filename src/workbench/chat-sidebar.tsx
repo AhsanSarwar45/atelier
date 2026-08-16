@@ -25,6 +25,14 @@ export function dayHeading(iso: string, now = new Date()): string {
   return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
+/**
+ * The clock alone. The day is already the heading above the row, and a full
+ * date in a 288px rail is cut off mid-year, which tells the owner nothing.
+ */
+export function clockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
 /** Rows in the order given, split into day groups without reordering them. */
 export function groupByDay(rows: RestoreRow[], now = new Date()): { heading: string; rows: RestoreRow[] }[] {
   const groups: { heading: string; rows: RestoreRow[] }[] = [];
@@ -51,6 +59,7 @@ interface ChatSidebarProps {
 export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: ChatSidebarProps) {
   const [rows, setRows] = useState<RestoreRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const q = new URLSearchParams({ project: projectId, path: projectPath });
@@ -69,6 +78,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
   const resume = useCallback(
     async (row: RestoreRow) => {
       setBusy(rowKey(row));
+      setFailed(null);
       try {
         const s = await sendCommand<{ id: string }>({
           type: 'session.resume',
@@ -80,6 +90,9 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
         });
         await load();
         onOpen(s.id);
+      } catch (e) {
+        // A resume that fails silently leaves a row that looks merely slow.
+        setFailed(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(null);
       }
@@ -112,6 +125,12 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
         </Button>
       </div>
 
+      {failed && (
+        <p data-testid="restore-error" className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {failed}
+        </p>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.heading}>
@@ -129,46 +148,53 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                   key={key}
                   data-testid="restore-row"
                   data-row-key={key}
+                  // The conversation's own id, which a resume does not change:
+                  // the row a terminal session is offered on is the row it
+                  // comes back on.
+                  data-external-id={row.externalId ?? ''}
                   data-origin={row.origin}
                   data-state={row.state}
+                  // Title on its own line: a rail this narrow cannot hold a
+                  // sentence, a pill and a button side by side without cutting
+                  // the only part that says which chat this is.
                   className={cn(
-                    'flex items-center gap-2 px-3 py-2 text-sm',
+                    'px-3 py-2 text-sm',
                     row.sessionId && row.sessionId === openSessionId && 'bg-accent',
                   )}
                 >
                   <button
                     type="button"
-                    className="min-w-0 flex-1 text-left"
+                    className="block w-full min-w-0 truncate text-left text-foreground"
                     onClick={() => row.sessionId && onOpen(row.sessionId)}
                   >
-                    <div className="truncate text-foreground">
-                      {row.title ?? (row.origin === 'terminal' ? 'Started in a terminal' : 'Untitled chat')}
-                    </div>
-                    <div className="truncate font-mono text-[11px] text-muted-foreground">
-                      {row.brand} · {new Date(row.lastActiveAt).toLocaleString()}
-                    </div>
+                    {row.title ?? (row.origin === 'terminal' ? 'Started in a terminal' : 'Untitled chat')}
                   </button>
-                  <span
-                    data-testid="row-pill"
-                    data-pill={live ? 'ready' : row.state}
-                    className={cn(
-                      'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
-                      live ? 'bg-emerald-500/20 text-emerald-300' : 'bg-muted text-muted-foreground',
-                    )}
-                  >
-                    {live ? 'ready' : row.state}
-                  </span>
-                  {!live && (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      data-testid="resume-row"
-                      disabled={busy === key}
-                      onClick={() => void resume(row)}
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="truncate font-mono text-[11px] text-muted-foreground">
+                      {row.brand} · {clockTime(row.lastActiveAt)}
+                    </span>
+                    <span
+                      data-testid="row-pill"
+                      data-pill={live ? 'ready' : row.state}
+                      className={cn(
+                        'ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                        live ? 'bg-emerald-500/20 text-emerald-300' : 'bg-muted text-muted-foreground',
+                      )}
                     >
-                      {busy === key ? '…' : 'Resume'}
-                    </Button>
-                  )}
+                      {live ? 'ready' : row.state}
+                    </span>
+                    {!live && (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        data-testid="resume-row"
+                        disabled={busy === key}
+                        onClick={() => void resume(row)}
+                      >
+                        {busy === key ? '…' : 'Resume'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               );
             })}

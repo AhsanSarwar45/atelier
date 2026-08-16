@@ -93,9 +93,14 @@ export class Sessions {
       };
     if (!existing) this.store.createSession({ ...summary, origin: 'terminal' });
 
+    // A row the app already knows keeps whatever state it was left in — dormant,
+    // after a restart — and no driver event says otherwise until the owner types
+    // something. Saying so here is what makes the row stop offering itself.
+    this.publish(summary.id, { type: 'session.state', state: 'starting', label: 'Coming back' });
+
     const resumeId = params.externalId ?? summary.externalId ?? undefined;
     await this.attach(summary, summary.model ?? undefined, resumeId);
-    return summary;
+    return { ...summary, state: 'starting' };
   }
 
   /** Starts the driver for a session row and wires its linker. */

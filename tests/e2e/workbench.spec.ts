@@ -1,8 +1,11 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { makeFixtureProject, PARENT_CARD, REPORT_SLUG } from './fixture-board';
+import { restartInstance } from './restart';
 import { quadrantPng } from './fixture-png';
 
 /**
@@ -308,5 +311,125 @@ test.describe('workbench', () => {
     await expect(
       page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`),
     ).toBeVisible({ timeout: 60_000 });
+  });
+
+  /**
+   * Yesterday's sessions, back after a real restart.
+   *
+   * The terminal session is a genuine one: `claude -p` is run outside the app,
+   * and the app finds it the only way it is allowed to — by listing the
+   * transcript directory. Its file is then dated a day back, which is the same
+   * thing that would be true had it been run yesterday.
+   */
+  test('restore lists yesterday and brings a terminal session back', async ({ page, request }) => {
+    test.setTimeout(900_000);
+
+    const FIXTURE = fixtureFor('restore');
+    rmSync(FIXTURE, { recursive: true, force: true });
+    mkdirSync(FIXTURE, { recursive: true });
+    writeFileSync(join(FIXTURE, 'notes.txt'), 'a line\n');
+    mkdirSync(SHOTS, { recursive: true });
+
+    // A real session, started outside the app.
+    execFileSync('claude', ['-p', 'Reply with exactly: READY', '--permission-mode', 'bypassPermissions'], {
+      cwd: FIXTURE,
+      timeout: 240_000,
+      stdio: 'pipe',
+    });
+
+    const slug = FIXTURE.replace(/[^A-Za-z0-9]/g, '-');
+    const slugDir = join(homedir(), '.claude', 'projects', slug);
+    // The newest, not the first the directory happens to name: earlier runs
+    // leave their transcripts here, and resuming one of those would be testing
+    // last week's conversation.
+    const transcripts = readdirSync(slugDir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .map((f) => ({ f, at: statSync(join(slugDir, f)).mtimeMs }))
+      .sort((a, b) => b.at - a.at);
+    expect(transcripts.length, 'the terminal session left a transcript').toBeGreaterThan(0);
+    const newest = transcripts[0]!.f;
+    const terminalId = newest.replace(/\.jsonl$/, '');
+    // Dated a day back so it groups under Yesterday. The file is never opened.
+    const yesterday = new Date(Date.now() - 86_400_000);
+    utimesSync(join(slugDir, newest), yesterday, yesterday);
+
+    const project = await projectAt(request, FIXTURE);
+
+    // A chat of the app's own, so the list has both kinds in it.
+    const started = await request.post('/api/workbench/command', {
+      data: {
+        type: 'session.start',
+        projectId: project.id,
+        projectPath: FIXTURE,
+        brand: 'claude',
+        permissionMode: 'bypassPermissions',
+      },
+    });
+    const mine = (await started.json()) as { id: string };
+    await request.post('/api/workbench/command', {
+      data: { type: 'prompt.send', sessionId: mine.id, text: 'Reply with exactly: FIRST' },
+    });
+    // Not merely titled: waited on until the agent has said who it is. A chat
+    // killed before that has no conversation to come back to, and "yesterday's
+    // sessions" means ones that really happened.
+    await expect
+      .poll(
+        async () => {
+          const rows = (await (await request.get(`/api/workbench/restore?project=${project.id}&path=${encodeURIComponent(FIXTURE)}`)).json()) as {
+            sessionId: string | null;
+            externalId: string | null;
+            title: string | null;
+          }[];
+          const row = rows.find((r) => r.sessionId === mine.id);
+          return Boolean(row?.title && row.externalId);
+        },
+        { timeout: 300_000 },
+      )
+      .toBe(true);
+
+    // ---- the restart the whole item is about ----------------------------
+    await restartInstance({
+      binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'beads-server'),
+      serverPort: Number(process.env.BEADS_WEB_PORT ?? 3018),
+      sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT ?? 3019),
+      env: process.env,
+      healthUrl: `${process.env.BEADS_E2E_URL}/api/workbench/health`,
+      logFile: join(process.env.WORKBENCH_E2E_RUN ?? join(__dirname, '..', '.e2e-run'), 'server.log'),
+    });
+
+    await page.goto(`/project?id=${project.id}&tab=chat`);
+    await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: 60_000 });
+
+    // Both kinds are listed, and the day headings are real.
+    // By the conversation's own id, not by the row key: taking a terminal
+    // session over gives it one of our session ids, and it is still the row
+    // the owner clicked.
+    const terminalRow = page.locator(`[data-testid="restore-row"][data-external-id="${terminalId}"]`);
+    await expect(terminalRow).toBeVisible({ timeout: 60_000 });
+    await expect(terminalRow).toHaveAttribute('data-origin', 'terminal');
+    await expect(page.getByTestId('day-heading').filter({ hasText: 'Yesterday' })).toBeVisible();
+    await expect(page.locator('[data-testid="restore-row"][data-origin="app"]').first()).toBeVisible();
+    // Nothing woke itself up over the restart.
+    await expect(terminalRow.getByTestId('row-pill')).toHaveText('dormant');
+    await page.screenshot({ path: join(SHOTS, 'restore.png'), fullPage: false });
+
+    // ---- one click brings the terminal session back ---------------------
+    await terminalRow.getByTestId('resume-row').click();
+    await expect(page.getByTestId('restore-error')).toHaveCount(0);
+    await expect(terminalRow.getByTestId('row-pill')).toHaveText('ready', { timeout: 180_000 });
+    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
+
+    await page.getByTestId('composer').fill('Reply with exactly: RESUMED');
+    await page.getByTestId('send-button').click();
+    const answer = page.getByTestId('assistant-message').last();
+    await expect(answer).toContainText('RESUMED', { timeout: 300_000 });
+    await page.screenshot({ path: join(SHOTS, 'restore-resumed.png'), fullPage: false });
+
+    // ---- and one click brings back the rest -----------------------------
+    await page.getByTestId('resume-all').click();
+    await expect
+      .poll(async () => page.locator('[data-testid="row-pill"][data-pill="dormant"]').count(), { timeout: 300_000 })
+      .toBe(0);
+    await page.screenshot({ path: join(SHOTS, 'restore-all.png'), fullPage: false });
   });
 });

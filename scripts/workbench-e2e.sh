@@ -18,6 +18,10 @@ export BEADS_E2E_URL="http://$BEADS_WEB_HOST:$BEADS_WEB_PORT"
 # The links test builds its own reporting tree; the real one is never written to.
 export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
 
+# A run starts from nothing: sessions left in the store by the last one are
+# offered again by the restore list, and a test that resumes one of those is
+# testing last week.
+rm -rf "$XDG_DATA_HOME"
 mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results"
 
 SERVER_LOG="$RUN/server.log"
@@ -25,11 +29,18 @@ SERVER_LOG="$RUN/server.log"
 
 "$ROOT/server/target/debug/beads-server" >> "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
+# By port, never by name: another beads-web serves the owner's board on this
+# machine. A test may also have restarted the instance, so the pid we spawned
+# is not necessarily the one still listening.
+kill_port() {
+  local pid
+  pid=$(ss -lntpH "sport = :$1" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+}
 cleanup() {
   kill "$SERVER_PID" 2>/dev/null || true
-  # The sidecar is a child of the server; kill_on_drop only fires on a clean
-  # exit, so sweep the port explicitly.
-  pkill -f "workbench/src/server.ts" 2>/dev/null || true
+  kill_port "$BEADS_WEB_PORT"
+  kill_port "$BEADS_WORKBENCH_PORT"
 }
 trap cleanup EXIT
 

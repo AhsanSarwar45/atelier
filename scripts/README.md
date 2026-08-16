@@ -1,13 +1,18 @@
-# Checks against the running screen
+# Checks that run something real
 
-Two of the ways this screen has failed could not be seen by any test that stops
-at the code: the screen looked calm and simply showed the wrong thing. Both are
-now checked by driving a real browser at the running server and reading back
-what actually reached the page.
+Nothing here reads code. The screen checks drive a real browser at the running
+server, because the ways this screen has failed could not be seen by any test
+that stops at the code: it looked calm and simply showed the wrong thing. The
+probes run somebody else's tool and report what it actually did, so a failure
+can be pinned on their side or ours in a minute rather than a morning.
+
+Everything here exits non-zero when it fails and prints what it measured either
+way.
+
+## Screen checks
 
 Both need a screen already serving (`beads-web`, 127.0.0.1:3008 by default), a
 `google-chrome` on the path, and `websocket-client` in the Python running them.
-Both exit non-zero when they fail, and print what they measured either way.
 
 ## `board-columns-agree.py <project-path>`
 
@@ -63,6 +68,26 @@ about the page the drawer holds:
   is only sticky on a wide screen, and a drawer is not one
 - **the page never reaches wider than the drawer** — a sideways scrollbar means
   the right-hand column of every table is off the screen
+
+## Probes
+
+### `workbench/scripts/probe-claude-resume.ts`
+
+Answers one question the restore list rests on and that we do not own: does the
+Claude tool really bring back a conversation the owner began in a terminal? It
+starts one outside the app, resumes it by id through the software library
+alone, and asks it to repeat a word only the first half could know — no helper
+process, no server, no browser. Run it whenever the restore end-to-end test
+fails, before reading any of our own code:
+
+```
+node --experimental-strip-types --disable-warning=ExperimentalWarning \
+     --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+     workbench/scripts/probe-claude-resume.ts
+```
+
+It lives beside the helper rather than here because the library it drives is
+the helper's dependency, not the app's.
 
 ## Adding to these
 

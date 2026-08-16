@@ -74,7 +74,7 @@ export function terminalSessions(): TerminalSession[] {
  * (decision 8) — an agent that resumes itself is a bill and a surprise.
  */
 export function restoreList(store: Store, project: { id: string; path: string } | null): RestoreRow[] {
-  const mine: SessionSummary[] = store.listSessions(project?.id);
+  const mine: (SessionSummary & { origin: 'app' | 'terminal' })[] = store.listSessions(project?.id);
   const claimed = new Set(mine.map((s) => s.externalId).filter((x): x is string => !!x));
 
   const rows: RestoreRow[] = mine.map((s) => ({
@@ -84,7 +84,7 @@ export function restoreList(store: Store, project: { id: string; path: string } 
     title: s.title,
     lastActiveAt: s.lastActiveAt,
     state: s.state,
-    origin: 'app',
+    origin: s.origin,
     projectId: s.projectId,
     cwdHint: s.cwd,
   }));

@@ -2,7 +2,11 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  outputDir: './tests/results',
+  // Not tests/results: that folder holds the screenshots a run saves as
+  // evidence and they are committed, while this one is emptied before every
+  // run — pointing both at the same place destroys the proof of the last job
+  // whenever a single test is run on its own.
+  outputDir: './tests/.artifacts',
   snapshotDir: './tests/snapshots',
   fullyParallel: true,
   retries: 0,
