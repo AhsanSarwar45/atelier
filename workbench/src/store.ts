@@ -219,6 +219,14 @@ export class Store {
     return rows.map(rowToSummary);
   }
 
+  /** How much has been said in a chat — 0 is one that was opened and never used. */
+  messageCount(sessionId: string): number {
+    const r = this.db
+      .prepare('SELECT COUNT(*) AS n FROM message WHERE session_id = ?')
+      .get(sessionId) as { n: number };
+    return r.n;
+  }
+
   /** Starts a message, so the deltas that follow have something to grow. */
   openMessage(sessionId: string, messageId: string, role: string, at: string): void {
     this.db

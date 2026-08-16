@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
+import { CARDS_ON_A_ROW, cardsOnTheLine } from '@/workbench/cards-on-the-line';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { folderOf, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -80,6 +81,11 @@ export function withLive(rows: RestoreRow[], live: LiveSession[], projectId: str
   for (const session of live) {
     if (session.projectId !== projectId) continue;
     const known = byId.get(session.id);
+    // A chat that is awake is always worth seeing, whatever it is called. One
+    // that is asleep and not in the list is one the list deliberately left out
+    // (docs/agent-workbench.md §6.3.1).
+    const awake = session.state !== 'dormant' && session.state !== 'ended';
+    if (!known && !awake) continue;
     if (known) {
       merged[merged.indexOf(known)] = {
         ...known,
@@ -114,9 +120,11 @@ interface ChatSidebarProps {
   projectPath: string;
   openSessionId: string | null;
   onOpen: (sessionId: string) => void;
+  /** Also the chats an agent started for another chat, and the empty ones. */
+  everything?: boolean;
 }
 
-export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: ChatSidebarProps) {
+export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, everything = false }: ChatSidebarProps) {
   const router = useRouter();
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
@@ -126,19 +134,20 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
 
   const load = useCallback(async () => {
     const q = new URLSearchParams({ project: projectId, path: projectPath });
+    if (everything) q.set('all', '1');
     try {
       const res = await fetch(apiUrl(`/api/workbench/restore?${q}`));
       if (res.ok) setFetched((await res.json()) as RestoreRow[]);
     } catch {
       // The workbench may not be running; the board half is unaffected.
     }
-  }, [projectId, projectPath]);
+  }, [projectId, projectPath, everything]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const resume = useCallback(
+  const wake = useCallback(
     async (row: RestoreRow) => {
       setBusy(rowKey(row));
       setFailed(null);
@@ -161,6 +170,23 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
       }
     },
     [projectId, projectPath, load, onOpen],
+  );
+
+  /**
+   * One click is the whole way in: an attached chat opens, a sleeping one is
+   * woken and then opens. Nothing else in the list starts an agent, so the
+   * click is still the consent (docs/agent-workbench.md §6.3.3).
+   */
+  const enter = useCallback(
+    (row: RestoreRow) => {
+      const asleep = !row.sessionId || row.state === 'dormant' || row.state === 'ended';
+      if (!asleep && row.sessionId) {
+        onOpen(row.sessionId);
+        return;
+      }
+      void wake(row);
+    },
+    [onOpen, wake],
   );
 
   /**
@@ -241,7 +267,8 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                       type="button"
                       data-testid="row-name"
                       className="min-w-0 flex-1 truncate text-left text-foreground"
-                      onClick={() => row.sessionId && onOpen(row.sessionId)}
+                      disabled={busy === key}
+                      onClick={() => enter(row)}
                     >
                       {row.title ?? 'Untitled chat'}
                     </button>
@@ -250,7 +277,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                     </span>
                   </div>
                   <div className="mt-1 flex items-center gap-1 overflow-hidden">
-                    {row.beads.map((id) => (
+                    {cardsOnTheLine(row.beads, CARDS_ON_A_ROW).shown.map((id) => (
                       <Badge key={id} asChild variant="primary" appearance="outline" size="xs" shape="circle" className="shrink-0 font-mono">
                         <button
                           type="button"
@@ -263,6 +290,19 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                         </button>
                       </Badge>
                     ))}
+                    {cardsOnTheLine(row.beads, CARDS_ON_A_ROW).rest.length > 0 && (
+                      <Badge
+                        variant="secondary"
+                        appearance="light"
+                        size="xs"
+                        shape="circle"
+                        data-testid="row-bead-more"
+                        title={cardsOnTheLine(row.beads, CARDS_ON_A_ROW).rest.join(', ')}
+                        className="shrink-0 font-mono"
+                      >
+                        +{cardsOnTheLine(row.beads, CARDS_ON_A_ROW).rest.length}
+                      </Badge>
+                    )}
                     {row.folder && (
                       <Badge
                         hue={hueFor(row.folder)}
@@ -280,29 +320,32 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                         {row.folder}
                       </Badge>
                     )}
-                    {live ? (
+                    {busy === key ? (
                       <Badge
-                        variant="success"
+                        variant="warning"
                         appearance="light"
                         size="xs"
                         shape="circle"
                         data-testid="row-pill"
-                        data-pill="ready"
+                        data-pill="waking"
                         className="ml-auto shrink-0"
                       >
-                        ready
+                        waking
                       </Badge>
                     ) : (
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        data-testid="resume-row"
-                        className="ml-auto shrink-0"
-                        disabled={busy === key}
-                        onClick={() => void resume(row)}
-                      >
-                        {busy === key ? '…' : 'Resume'}
-                      </Button>
+                      live && (
+                        <Badge
+                          variant="success"
+                          appearance="light"
+                          size="xs"
+                          shape="circle"
+                          data-testid="row-pill"
+                          data-pill="ready"
+                          className="ml-auto shrink-0"
+                        >
+                          ready
+                        </Badge>
+                      )
                     )}
                   </div>
                 </div>

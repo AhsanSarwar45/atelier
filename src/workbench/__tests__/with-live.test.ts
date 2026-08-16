@@ -77,4 +77,14 @@ describe('the list keeps up', () => {
   it('another project\'s chats stay out of this one\'s list', () => {
     expect(withLive([], [session({ projectId: 'other' })], PROJECT)).toEqual([]);
   });
+
+  it('a sleeping chat the list left out does not come back through the live stream', () => {
+    expect(withLive([], [session({ state: 'dormant', title: null })], PROJECT)).toEqual([]);
+  });
+
+  it('a sleeping chat the list does hold keeps its place', () => {
+    const merged = withLive([row()], [session({ id: 's1', state: 'dormant' })], PROJECT);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.sessionId).toBe('s1');
+  });
 });

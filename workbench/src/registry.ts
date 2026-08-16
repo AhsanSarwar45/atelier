@@ -32,9 +32,17 @@ interface KnownSession {
  * With no project, every session on the machine — which is what the app-wide
  * screens ask for.
  */
-export async function knownSessions(projectPath: string | null): Promise<KnownSession[]> {
+export async function knownSessions(projectPath: string | null, everything = false): Promise<KnownSession[]> {
   try {
-    const found = await listSessions(projectPath ? { dir: projectPath, includeWorktrees: true } : {});
+    // `includeProgrammatic: false` is the filter the terminal's own /resume
+    // picker uses: it withholds the chats an agent started to do a piece of
+    // work for another chat. Measured on Corsetta: 306 offered, 218 a
+    // person's (docs/agent-workbench.md §6.3.1).
+    const found = await listSessions(
+      projectPath
+        ? { dir: projectPath, includeWorktrees: true, includeProgrammatic: everything }
+        : { includeProgrammatic: everything },
+    );
     return found.map((s) => ({
       externalId: s.sessionId,
       lastActiveAt: new Date(s.lastModified).toISOString(),
@@ -57,9 +65,13 @@ export async function knownSessions(projectPath: string | null): Promise<KnownSe
 export async function restoreList(
   store: Store,
   project: { id: string; path: string } | null,
+  everything = false,
 ): Promise<RestoreRow[]> {
-  const mine: (SessionSummary & { origin: 'app' | 'terminal' })[] = store.listSessions(project?.id);
-  const known = new Map((await knownSessions(project?.path ?? null)).map((s) => [s.externalId, s]));
+  const all: (SessionSummary & { origin: 'app' | 'terminal' })[] = store.listSessions(project?.id);
+  // A chat with nothing said in it is not an offer either: those are the ones
+  // that opened and were never typed into (docs/agent-workbench.md §6.3.1).
+  const mine = everything ? all : all.filter((s) => s.title !== null || store.messageCount(s.id) > 0);
+  const known = new Map((await knownSessions(project?.path ?? null, everything)).map((s) => [s.externalId, s]));
   const claimed = new Set(mine.map((s) => s.externalId).filter((x): x is string => !!x));
 
   const rows: RestoreRow[] = mine.map((s) => {

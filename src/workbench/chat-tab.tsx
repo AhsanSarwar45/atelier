@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { MessageSquarePlus, PanelLeft, Receipt, Search } from 'lucide-react';
+import { Bot, MessageSquarePlus, PanelLeft, Receipt, Search } from 'lucide-react';
 
 import { TabTools, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
 import { hueFor } from '@/lib/bead-labels';
+import { cardsOnTheLine } from '@/workbench/cards-on-the-line';
 import { cn } from '@/lib/utils';
 import { diffLines } from '@/workbench/line-diff';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
@@ -33,6 +34,9 @@ import {
   useStartSession,
   type TranscriptItem,
 } from '@/workbench/use-session';
+
+/** Where the "show me everything" switch is remembered between visits. */
+const EVERY_CHAT = 'workbench.every-chat';
 
 interface ChatTabProps {
   projectId: string | null;
@@ -212,12 +216,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const facts = useSessionFacts(sessionId);
   // What the board knows plus what this chat has been seen doing since.
   const cards = Array.from(new Set([...(facts?.beads ?? []), ...view.beads]));
+  const online = cardsOnTheLine(cards);
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
   const [railOpen, setRailOpen] = useState(false);
   /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
   const [showing, setShowing] = useState<'search' | 'spend' | null>(null);
+  /**
+   * Whether the list also holds the chats an agent started for another chat.
+   * Off unless he says otherwise, and remembered, because it is a way of
+   * looking rather than a thing to set again each visit.
+   */
+  const [everything, setEverything] = useState(false);
+
+  useEffect(() => {
+    setEverything(localStorage.getItem(EVERY_CHAT) === '1');
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(EVERY_CHAT, everything ? '1' : '0');
+  }, [everything]);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -266,6 +285,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={() => setShowing('search')} />
         <ToolButton icon={<Receipt />} label="What it cost" data-testid="open-spend" onClick={() => setShowing('spend')} />
         <ToolButton
+          icon={<Bot />}
+          label={everything ? 'Hide the agents’ own chats' : 'Show the agents’ own chats'}
+          emphasis={everything ? 'loud' : 'quiet'}
+          data-testid="toggle-everything"
+          data-showing-everything={everything}
+          onClick={() => setEverything((v) => !v)}
+        />
+        <ToolButton
           icon={<MessageSquarePlus />}
           label="New chat"
           emphasis="loud"
@@ -289,7 +316,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
         )}
       >
-        <ChatSidebar projectId={projectId} projectPath={projectPath} openSessionId={sessionId} onOpen={(id) => { setRailOpen(false); open(id); }} />
+        <ChatSidebar
+          projectId={projectId}
+          projectPath={projectPath}
+          openSessionId={sessionId}
+          everything={everything}
+          onOpen={(id) => { setRailOpen(false); open(id); }}
+        />
       </div>
       {railOpen && (
         <button
@@ -318,7 +351,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   return shell(
     <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
-      <div className="flex items-center gap-3 border-b border-border/60 px-4 py-2 text-sm">
+      {/* One line, whatever it carries: the words naming the agent never give
+          way to the cards it has touched (docs/agent-workbench.md §8.2.1). */}
+      <div className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/60 px-4 text-sm">
         <Badge
           variant={busy ? 'warning' : 'secondary'}
           appearance="light"
@@ -326,17 +361,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           shape="circle"
           data-testid="session-state"
           data-state={view.state}
+          className="shrink-0"
         >
           {view.stateLabel}
         </Badge>
-        <span data-testid="session-meta" className="text-xs text-muted-foreground">
+        <span data-testid="session-meta" className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
           claude
           {view.model ? ` · ${view.model}` : ''}
           {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
         </span>
         {cards.length > 0 && (
-          <span data-testid="bead-chips" className="flex items-center gap-1">
-            {cards.map((id) => (
+          <span data-testid="bead-chips" className="flex min-w-0 items-center gap-1 overflow-hidden">
+            {online.shown.map((id) => (
               <Badge
                 key={id}
                 variant="primary"
@@ -345,11 +381,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 shape="circle"
                 data-testid="bead-chip"
                 data-bead-id={id}
-                className="font-mono"
+                className="shrink-0 font-mono"
               >
                 {id}
               </Badge>
             ))}
+            {online.rest.length > 0 && (
+              <Badge
+                variant="secondary"
+                appearance="light"
+                size="sm"
+                shape="circle"
+                data-testid="bead-chip-more"
+                data-more={online.rest.length}
+                title={online.rest.join(', ')}
+                className="shrink-0 font-mono"
+              >
+                +{online.rest.length}
+              </Badge>
+            )}
           </span>
         )}
         {facts?.folder && (
@@ -385,6 +435,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" data-testid="transcript">
         {view.items.map((item) => {
           if (item.kind === 'tool') return <ToolRow key={item.id} item={item} nested={item.parentId !== null} />;
+          if (item.kind === 'notice') {
+            return (
+              <p key={item.id} data-testid="transcript-notice" className="text-center text-xs text-muted-foreground">
+                {item.text}
+              </p>
+            );
+          }
           if (item.kind === 'report') {
             return <ReportCard key={item.id} project={item.project} slug={item.slug} fsPath={projectPath} />;
           }

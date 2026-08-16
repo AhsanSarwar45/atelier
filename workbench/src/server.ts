@@ -209,7 +209,8 @@ const server = createServer((req, res) => {
       } else if (path === '/restore' && req.method === 'GET') {
         const id = url.searchParams.get('project');
         const projectPath = url.searchParams.get('path');
-        json(res, 200, await restoreList(store, id && projectPath ? { id, path: projectPath } : null));
+        const everything = url.searchParams.get('all') === '1';
+        json(res, 200, await restoreList(store, id && projectPath ? { id, path: projectPath } : null, everything));
       } else if (path === '/sessions' && req.method === 'GET') {
         json(res, 200, sessions ? store.listSessions(url.searchParams.get('project') ?? undefined) : []);
       } else if (path === '/command' && req.method === 'POST') {

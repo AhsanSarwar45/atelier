@@ -5,10 +5,12 @@
  * Every event is written to the log before it is broadcast, so a browser that
  * reconnects and replays sees exactly what a browser that stayed connected saw.
  */
+import { getSessionMessages, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
 import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
+import { IMPORTED_MESSAGES, saidByAnyone, textOf } from '../../src/workbench/imported-history.ts';
 import { ClaudeDriver } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -121,8 +123,54 @@ export class Sessions {
     this.publish(summary.id, { type: 'session.state', state: 'starting', label: 'Coming back' });
 
     const resumeId = params.externalId ?? summary.externalId ?? undefined;
+    // What was said before this app ever saw the chat, so opening it is not a
+    // blank screen (docs/agent-workbench.md §6.3.2).
+    await this.importPast({ ...summary, externalId: resumeId ?? null });
     await this.attach(summary, summary.model ?? undefined, resumeId);
     return { ...summary, state: 'starting' };
+  }
+
+  /**
+   * Reads what was already said in a chat out of the agent kit's own record and
+   * writes it into the event log as the events that would have carried it.
+   *
+   * Once only: the log is the transcript (§4), so importing twice would say
+   * everything twice. Text alone — the tool calls of a past chat are not
+   * replayable and a row saying one ran tells the reader nothing they can act
+   * on (docs/agent-workbench.md §6.3.2).
+   */
+  private async importPast(summary: SessionSummary): Promise<void> {
+    // Judged on what was SAID, not on what is in the log: a resume writes its
+    // own "coming back" line before this runs.
+    if (!summary.externalId) return;
+    if (this.store.messageCount(summary.id) > 0) return;
+
+    let messages: SessionMessage[];
+    try {
+      messages = await getSessionMessages(summary.externalId, { dir: summary.cwd });
+    } catch {
+      return; // No record to read: the chat simply starts where it is.
+    }
+
+    const said = messages
+      .filter((m): m is SessionMessage & { type: 'user' | 'assistant' } => m.type === 'user' || m.type === 'assistant')
+      .map((m) => ({ role: m.type, text: textOf(m.message) }))
+      .filter((m) => saidByAnyone(m.text));
+    if (said.length === 0) return;
+
+    const shown = said.slice(-IMPORTED_MESSAGES);
+    if (said.length > shown.length) {
+      this.publish(summary.id, {
+        type: 'notice',
+        text: `${said.length - shown.length} earlier messages are in this chat and are not drawn here.`,
+      });
+    }
+    for (const message of shown) {
+      const messageId = randomUUID();
+      this.publish(summary.id, { type: 'message.started', messageId, role: message.role });
+      this.publish(summary.id, { type: 'text.delta', messageId, text: message.text });
+      this.publish(summary.id, { type: 'message.completed', messageId });
+    }
   }
 
   /** Starts the driver for a session row and wires its linker. */

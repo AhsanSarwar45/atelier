@@ -98,6 +98,8 @@ export type WbpEvent = EventBase &
     | { type: 'link.bead'; beadId: string; via: 'tool' | 'brief' | 'manual' }
     | { type: 'report.available'; project: string; slug: string }
     | { type: 'error'; message: string; fatal: boolean }
+    /** A line the app says about the chat itself, not the agent's own words. */
+    | { type: 'notice'; text: string }
   );
 
 export type WbpEventType = WbpEvent['type'];

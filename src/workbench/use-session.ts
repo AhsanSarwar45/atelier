@@ -51,6 +51,12 @@ export interface TranscriptAsk {
   chosen: string | null;
 }
 
+export interface TranscriptNotice {
+  kind: 'notice';
+  id: string;
+  text: string;
+}
+
 export interface TranscriptReport {
   kind: 'report';
   id: string;
@@ -58,7 +64,12 @@ export interface TranscriptReport {
   slug: string;
 }
 
-export type TranscriptItem = TranscriptMessage | TranscriptTool | TranscriptAsk | TranscriptReport;
+export type TranscriptItem =
+  | TranscriptMessage
+  | TranscriptTool
+  | TranscriptAsk
+  | TranscriptReport
+  | TranscriptNotice;
 
 export interface SessionView {
   items: TranscriptItem[];
@@ -188,6 +199,10 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
 
     case 'error':
       next.error = e.message;
+      return next;
+
+    case 'notice':
+      next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text }];
       return next;
 
     default:
