@@ -177,6 +177,20 @@ npm install
 
 There are two workflows: **Dev Mode** (frontend hot-reload) and **Build from Source** (release binary).
 
+### Live preview (against the instance you already run)
+
+If a beads-web is already serving your real board — the installed service on
+:3008 — one command puts this checkout's screen on top of that data:
+
+```bash
+npm run dev:live       # http://127.0.0.1:3007, reading the board on :3008
+```
+
+Nothing is built, installed or restarted: a merge into this checkout shows on
+the next refresh. `BEADS_BOARD_URL` points it at a board elsewhere, `PORT` at a
+second preview (a worktree's own, say). It refuses to start if no board answers,
+because a preview with no data behind it looks like a broken app.
+
 ### Dev Mode (frontend hot-reload)
 
 The Next.js dev server (port 3007) serves the frontend with hot-reload; the Rust backend (port 3008) serves the API. They talk cross-origin — CORS is open on the backend.

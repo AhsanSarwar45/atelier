@@ -4,6 +4,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "next dev -p 3007",
+    "dev:live": "bash scripts/live-preview.sh",
     "build": "next build",
     "start": "next start -p 3007",
     "lint": "next lint",
