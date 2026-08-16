@@ -445,6 +445,10 @@ def carrying_on(held, closed=(), goals=(), asked=False, helper=False, pushes=0,
     finally:
         sys.stdout = keep
     printed = out.getvalue().strip()
+    # Everything the gate wrote back, for a case that has to read more of it than
+    # the push count — what a turn leaves behind is as much the gate's answer as
+    # what it says.
+    carrying_on.kept = kept
     return (json.loads(printed)["reason"] if printed else ""), kept.get("pushes")
 
 
@@ -1083,8 +1087,20 @@ def main():
         "a waiver still stood after it had expired, so one he gave for a one-line " \
         "change would carry a whole session"
 
+    # A waived turn is finished, not skipped. Left unfinished, its edits are still
+    # this turn's the moment the waiver lifts, and the session is handed a bill for
+    # work he had already excused.
+    carrying_on(["c"])
+    assert carrying_on.kept.get("last_stop") == T, \
+        "the case is proving nothing: a refused turn already moves the mark"
+    waiving("selftest")
+    assert carrying_on.kept.get("last_stop") == T + 50, \
+        "a waived turn left its mark where it was, so everything done under the " \
+        "waiver comes back as unclaimed work as soon as it lifts"
+
     print("ok: the manager's waiver takes the board off the session he gave it "
-          "to, and off no other session and no later work")
+          "to, off no other session and no later work, and closes the turn it "
+          "excused rather than leaving it to be billed afterwards")
 
     refused = reporting(PUT_DOWN)
     assert refused, "a fault the reply named and put down ended the turn with " \

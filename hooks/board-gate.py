@@ -212,8 +212,17 @@ def main():
     sid = data.get("session_id")
     state = bc.load(sid)
     root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
-    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing() \
-            or bc.waived(sid):
+    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
+        return
+    if bc.waived(sid):
+        # A waived turn is finished, not skipped. A reviewer may be stood down
+        # without a mark because it changes no file; a session working under his
+        # waiver does change files, and leaving the turn's mark where it was
+        # hands every one of them back as unclaimed work the moment the waiver
+        # lifts. A waiver that bills you afterwards is not a waiver.
+        state["pushes"] = 0
+        state["last_stop"] = bc.now()
+        bc.save(sid, state)
         return
     name = bc.actor(sid, data.get("cwd"))
     since = state.get("last_stop") or 0
