@@ -642,10 +642,19 @@ def api_call(rest):
     return (method or ("POST" if sends else "")).upper(), path
 
 
-def is_pull_merge(path):
-    """Whether a forge path is the one that lands a waiting piece of work."""
+def writes_a_line(path):
+    """Whether a forge path is one that puts work onto a line.
+
+    Three of them do, and they are three ways to the same place: the call that
+    lands a waiting piece of work, the one that folds a line into another with no
+    waiting piece at all, and the one that points a named line at any commit.
+    """
     parts = path.split("?")[0].strip("/").split("/")
-    return len(parts) >= 3 and parts[-1] == "merge" and parts[-3] == "pulls"
+    if len(parts) >= 3 and parts[-1] == "merge" and parts[-3] == "pulls":
+        return True
+    if parts and parts[-1] == "merges":
+        return True
+    return "git" in parts and "refs" in parts
 
 
 def forge_merge(argv):
@@ -662,7 +671,7 @@ def forge_merge(argv):
     if argv[1:2] != ["api"]:
         return False
     method, path = api_call(argv[2:])
-    return is_pull_merge(path) and method not in GH_READS
+    return writes_a_line(path) and method not in GH_READS
 
 
 def common_dir(where):
@@ -763,7 +772,7 @@ def routes(cmd, home):
     single line of shell, and so is changing into somebody else's checkout and
     pushing it. Reading only where the shell started lets both straight through.
     """
-    at, made, cwd = {}, [], home
+    at, made, cwd, been = {}, [], home, []
     todo, read = bc.segments(cmd), 0
 
     def line_of(where):
@@ -793,10 +802,19 @@ def routes(cmd, home):
             # What a shell is handed is a command line, and is read as one.
             todo = bc.segments(script) + todo
             continue
-        if argv[:1] == ["cd"]:
+        if argv[:1] in (["cd"], ["pushd"], ["popd"]):
             # Changing into a checkout is the ordinary spelling of the reach that
-            # `-C` spells as a switch, and the two must answer alike.
-            cwd = under(cwd, argv[1]) if len(argv) > 1 else home
+            # `-C` spells as a switch, and every spelling of it must answer alike
+            # — including the two that keep a stack, and the one that separates
+            # the path with a double dash.
+            named = [a for a in argv[1:] if a != "--"]
+            if argv[0] == "popd":
+                cwd = been[-1] if been else home
+                been = been[:-1]
+            else:
+                if argv[0] == "pushd":
+                    been = been + [cwd]
+                cwd = under(cwd, named[0]) if named else home
             continue
         if forge_merge(argv):
             made.append(("gh", cwd, argv, argv))

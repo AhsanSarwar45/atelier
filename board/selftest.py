@@ -508,6 +508,12 @@ ROUTES = (
     # The raw call that the everyday pull-request merge is built on lands the same
     # piece of work on the same line; asking whether it is merged does not.
     ("REFUSED", "gh api --method PUT repos/scratch/own/pulls/412/merge"),
+    # The forge folds one line into another with no waiting piece at all, and
+    # points a named line at any commit. Three ways to the same place.
+    ("REFUSED", "gh api --method POST repos/scratch/own/merges -f base=main"),
+    ("REFUSED", "gh api --method PATCH repos/scratch/own/git/refs/heads/main"),
+    ("ALLOWED", "gh api repos/scratch/own/git/refs/heads/main"),
+    ("ALLOWED", "gh api --method GET repos/scratch/own/merges"),
     ("REFUSED", "gh api -X PUT repos/scratch/own/pulls/412/merge"),
     ("REFUSED", "gh api -XPUT repos/scratch/own/pulls/412/merge"),
     ("REFUSED", "gh api repos/scratch/own/pulls/412/merge -f merge_method=squash"),
@@ -603,6 +609,16 @@ ROUTES = (
     # With the delimiter left unquoted the shell works substitutions out inside
     # the body, and those do run.
     ("REFUSED", "cat > s.sh <<EOF\n$(git push origin main)\nEOF"),
+    # An opener is only an opener outside quotes, and only when its closing word
+    # arrives. Read anywhere, ordinary text in a message makes every line after
+    # it data and the command on that line is judged by nobody.
+    ('REFUSED', 'git commit -m "shifted 1 << 2"\ngit push origin main'),
+    ('REFUSED', 'git commit -m "see <<EOF in the notes"\ngit push origin main'),
+    # With a closing word further down, an opener read inside the message would
+    # swallow the push whole rather than falling back to reading everything.
+    ('REFUSED', 'git commit -m "see <<EOF here"\ngit push origin main\nEOF'),
+    ("REFUSED", "cat <<< here-string\ngit push origin main"),
+    ("REFUSED", "cat > s.sh <<'NEVERCLOSED'\ngit push origin main"),
     # A command written behind one of the shell's own words is still that command.
     ("REFUSED", "if true; then git push origin main; fi"),
     ("REFUSED", "for b in main; do git push origin $b; done"),
@@ -685,6 +701,11 @@ ELSEWHERE = (
     ("REFUSED", "git -C {other} commit -m fix"),
     ("REFUSED", "cd {other} && git push origin main"),
     ("REFUSED", "cd {other} && git commit -m fix"),
+    # Every spelling of changing directory reaches the same checkout, including
+    # the two that keep a stack and the one that separates the path.
+    ("REFUSED", "pushd {other} && git push origin main"),
+    ("REFUSED", "cd -- {other} && git push origin main"),
+    ("REFUSED", "pushd {other} && git commit -m fix"),
     # The shortcut for a home directory is how a path is actually typed. Joined
     # before it is expanded it names nowhere, and a walk up from nowhere comes
     # back to the session's own project.

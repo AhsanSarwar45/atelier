@@ -158,7 +158,35 @@ SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
 
 # How a here-document opens, and the word that ends it. The body between is DATA
 # handed to a command, never shell.
-_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _openers(line):
+    """The here-document delimiters this line opens, and whether each is quoted.
+
+    Found with the quoting around the `<<` and never around the word after it:
+    the delimiter is quoted on purpose — that is how a body is kept literal — but
+    a shift operator inside a commit message is an argument, and reading it as an
+    opener makes every line after it data that nobody judges.
+    """
+    out, quote, i = [], "", 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            quote = "" if ch == quote else quote
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        got = _HEREDOC.match(line, i)
+        if got:
+            out.append((got.group(2), bool(got.group(1))))
+            i = got.end()
+            continue
+        i += 1
+    return out
 
 
 def _without_heredocs(cmd):
@@ -181,7 +209,12 @@ def _without_heredocs(cmd):
                 ran += grown_in(line)
             continue
         kept.append(line)
-        waiting += [(name, bool(mark)) for mark, name in _HEREDOC.findall(line)]
+        waiting += _openers(line)
+    if waiting:
+        # An opener whose closing word never arrives is not a here-document at
+        # all, and dropping the rest of the line for it is the one failure
+        # direction this guard must not have. Read the whole thing instead.
+        return cmd, []
     return "\n".join(kept), ran
 
 
