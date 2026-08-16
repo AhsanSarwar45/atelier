@@ -48,9 +48,27 @@ rather than each piece redrawing them. A chip and its round form the pill are
 one part (`Badge`); a boxed piece of content is another (`Panel`); a row of
 controls is a third (`Toolbar`).
 
-Constraint: on the project screen, no file may spell a chip or a panel out of
-utility classes. `src/lib/__tests__/one-set-of-parts.test.ts` reads those files
-and fails on one, because drift is invisible one class at a time.
+Constraint: no file under `src/` may spell a chip or a panel out of utility
+classes, in markup or in CSS. `src/lib/__tests__/one-set-of-parts.test.ts` reads
+them and fails on one, because drift is invisible one class at a time.
+
+### 1.5 Where a colour is spelled
+
+Constraint: a part names a colour only through the theme variables in
+`src/app/themes.css`. A hue belonging to the data rather than the theme enters
+as a number and is mixed against the live theme; a finished colour inside a
+component is a defect.
+
+External reality: the kit these parts came from is written for Tailwind v4,
+whose colour names do not exist on the v3 this app builds with, and resolve to
+nothing rather than to an error (bw-ccm).
+
+### 1.6 Only the tab in front is mounted
+
+Constraint: a tab that is not showing is not mounted, and a list that can outrun
+a screenful draws a screenful and grows as it is pulled. Day headings survive
+that because a group is cut from rows already drawn. Held by
+`tests/e2e/chat-shell.spec.ts`; the numbers behind it are in §3.
 
 ## 2. Deliberate drops
 
@@ -66,17 +84,25 @@ and fails on one, because drift is invisible one class at a time.
 
 ## 3. Measured, so it is not guessed at
 
-The chat list draws every row it is given. Measured on the project with the most
-of them — Corsetta, 319 chats, dev build at 1440x900: the first row is on screen
-1.7 s after the address is entered, all 319 are there 12 ms later, and pulling
-the list end to end in 30 steps costs 474 ms, about 16 ms a step.
+Measured on the project with the most of both — Corsetta, 320 chats and 411
+cards, installed build at 1600x1000, 2026-08-16 (bw-ccm.3):
 
-So it is not windowed. A list that draws in one paint and scrolls at frame rate
-has nothing to gain from it, and windowing costs the sticky day headings and the
-browser's own find-on-page. If a project ever arrives where those numbers turn,
-that is when it earns the machinery.
+| | |
+|---|---|
+| Click Chat, first chat row | 10.8 s |
+| Land on Chat directly, first chat row | 1.2 s |
+| Click Board again | 10.4 s |
+| Click Chat a second time | 0.3 s |
+| The sidecar answering with all 320 chats | 0.15 s |
+| Four of those answers at once | under 1 ms each |
+
+The wait is drawing, not answering: the same list costs 1.2 s alone and 10.8 s
+with the board alive behind it. An earlier reading of 1.7 s for the list on its
+own (bw-9is.4) was taken with the board absent and is not a reading of this
+screen; the ruling it carried — a long list left undivided — is reversed by the
+table above.
 
 ## 4. Not built yet
 
-- One chip, one toolbar, one panel and one pill, used by every screen and not
-  only the project page (`bw-l3s`).
+- Nothing tells a chat's row that the chat has begun touching a new card until
+  the row is opened; a row shows the cards already known for it (`bw-ccm.7`).
