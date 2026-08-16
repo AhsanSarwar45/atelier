@@ -48,7 +48,7 @@ def response_text(resp):
 
 def main():
     data = json.load(sys.stdin)
-    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
+    root = bc.board_root(bc.where(data))
     if bc.reviewing():
         return
     sid = data.get("session_id")

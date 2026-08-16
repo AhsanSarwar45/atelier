@@ -25,12 +25,56 @@ BD_TIMEOUT = 20  # seconds; a hook must never outlive a hung board
 IGNORED = ("/.beads/", "/scratchpad/", "/.git/", "/node_modules/", "/target/")
 
 
+# A command that starts by changing directory says where it runs. Anchored at
+# the start and absolute only, so a `cd` buried mid-pipeline or a relative hop
+# inside the session's own tree never re-points the whole command.
+_CD_FIRST = re.compile(r"^\s*(?:rtk\s+)?cd\s+(?:--\s+)?(?P<path>/[^\s;&|<>]+|'(?P<sq>/[^']+)'|\"(?P<dq>/[^\"]+)\")")
+
+
+def _hop(data):
+    """Split a command into the directory it opens by moving to, and the rest.
+
+    Some shells report the directory the session was started in whatever
+    directory the command names, and then every command looks like it belongs
+    to the session's own project. A command that opens by changing into another
+    checkout is telling us plainly where it runs, and that is taken at its word
+    — but only when the path is a checkout the machinery knows, so a typo or a
+    scratch directory falls back to the session's own tree rather than
+    silently answering for nobody.
+    """
+    cwd = data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    cmd = (data.get("tool_input") or {}).get("command") or ""
+    m = _CD_FIRST.match(cmd)
+    if not m:
+        return cwd, cmd
+    named = m.group("sq") or m.group("dq") or m.group("path")
+    if not os.path.isdir(named) or project.root(named) not in project.registry().values():
+        return cwd, cmd
+    return named, cmd[m.end():]
+
+
+def where(data):
+    """The directory a hook's own call runs in — see `_hop`."""
+    return _hop(data)[0]
+
+
+def said(data):
+    """What the command says, once the move that got it there is taken off.
+
+    A path is not a sentence: a worktree named after the card it holds spells
+    that card's id in every command run inside it, and a gate reading the whole
+    line would take the directory as the commit's own words.
+    """
+    return _hop(data)[1]
+
+
 def board_root(cwd):
     """The project whose board answers for work done here.
 
     The checkout the work lands in, never the directory the session was started
     from: a commit made in one project by a session whose home is another belongs
     to the first, and `CLAUDE_PROJECT_DIR` answers with the second (cor-up1g).
+    Which directory that is, for a hook judging a shell command, is `where`.
     """
     return project.root(cwd)
 

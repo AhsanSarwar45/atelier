@@ -39,10 +39,10 @@ def deny(reason):
 
 def main():
     data = json.load(sys.stdin)
-    cmd = (data.get("tool_input") or {}).get("command") or ""
+    cmd = bc.said(data)
     if not MERGE.search(cmd) or PASSIVE.search(cmd):
         return
-    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
+    root = bc.board_root(bc.where(data))
     if not os.path.isdir(os.path.join(root, ".beads")):
         return
     # Before the slot, and whoever holds it: a merge that rewrites main is refused

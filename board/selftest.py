@@ -1895,6 +1895,46 @@ def main():
           "trees it works in, somebody else's hold is not, and a merge that would "
           "not fast-forward is refused to the holder as well")
 
+    # Which checkout a command belongs to. Some shells report the directory the
+    # session was started in whatever directory the command names, so a command
+    # that opens by moving into another registered checkout is taken at its word
+    # — and the move itself is then not part of what the command says, because a
+    # worktree named after its card would otherwise spell that card in every line
+    # run inside it.
+    import board_common as common
+
+    registered = sorted(project.registry().values())
+    elsewhere = next((p for p in registered if p != ROOT), None)
+    assert elsewhere, "the machine has only one registered checkout; this case needs two"
+
+    def hopped(cmd, cwd=ROOT):
+        data = {"cwd": cwd, "tool_input": {"command": cmd}}
+        return common.where(data), common.said(data)
+
+    seen, rest = hopped("cd %s && git status" % elsewhere)
+    assert seen == elsewhere, \
+        "a command that moved into another checkout was judged against the session's own: %s" % seen
+    assert "cd" not in rest.split("&&")[0], \
+        "the move that got the command there is still part of what it says: %r" % rest
+
+    seen, rest = hopped("cd /nowhere-at-all && git status")
+    assert seen == ROOT, "a path that is no checkout re-pointed the whole command"
+    assert rest.startswith("cd "), "an unrecognised move was stripped anyway: %r" % rest
+
+    seen, _ = hopped("ls && cd %s && git status" % elsewhere)
+    assert seen == ROOT, \
+        "a move buried behind another command was read as where the command runs"
+
+    inside = os.path.join(elsewhere, "worktrees")
+    if os.path.isdir(inside):
+        seen, _ = hopped("cd %s && git status" % inside)
+        assert common.board_root(seen) == common.board_root(inside), \
+            "a tree inside another checkout answered to %s, not to that checkout" % seen
+
+    print("ok: a command is judged by the checkout it opens by moving into, an "
+          "unrecognised path leaves it with the session's own, and the move is "
+          "never part of what the command says")
+
     # The three answers the cost report has about a counter, which have to stay
     # three. Read against a counter file of its own: the real one is the number the
     # manager reads, and a case that appends to it inflates what he is told.

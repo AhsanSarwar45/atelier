@@ -621,8 +621,8 @@ def open_children(cid, root):
 
 def main():
     data = json.load(sys.stdin)
-    cmd = (data.get("tool_input") or {}).get("command") or ""
-    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
+    cmd = bc.said(data)
+    root = bc.board_root(bc.where(data))
     if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
         return
     sections.use(root)

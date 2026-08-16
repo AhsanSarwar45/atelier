@@ -15,7 +15,7 @@ import board_common as bc  # noqa: E402
 
 def main():
     data = json.load(sys.stdin)
-    root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
+    root = bc.board_root(bc.where(data))
     try:
         subprocess.Popen(
             ["bd", "dolt", "push"], cwd=root, start_new_session=True,
