@@ -514,12 +514,9 @@ ROUTES = (
     ("REFUSED", "gh api --method PATCH repos/scratch/own/git/refs/heads/main"),
     ("ALLOWED", "gh api repos/scratch/own/git/refs/heads/main"),
     ("ALLOWED", "gh api --method GET repos/scratch/own/merges"),
-    # The site's single query endpoint takes the instruction as a field value and
-    # spells nothing in its path; its file-writing path commits onto a named line.
-    ("REFUSED", "gh api graphql -f query=mutation{mergePullRequest(input:{a:b}){c}}"),
+    # The file-writing path of the raw call commits straight onto a named line.
     ("REFUSED", "gh api --method PUT repos/scratch/own/contents/README.md "
                 "-f branch=main -f message=x -f content=y"),
-    ("ALLOWED", "gh api graphql -f query=query{repository(name:x){id}}"),
     ("REFUSED", "gh api -X PUT repos/scratch/own/pulls/412/merge"),
     ("REFUSED", "gh api -XPUT repos/scratch/own/pulls/412/merge"),
     ("REFUSED", "gh api repos/scratch/own/pulls/412/merge -f merge_method=squash"),
@@ -746,6 +743,11 @@ FORGE = (
     ("ALLOWED", "gh pr merge --repo scratch/own 412 --squash"),
     ("ALLOWED", "gh api --method PUT repos/scratch/own/pulls/412/merge"),
     ("ALLOWED", "gh pr merge 412 --squash"),
+    # The query endpoint carries the instruction as a field and names no
+    # repository at all — so it names one this checkout is not, whatever this
+    # checkout is. Asking it a question still costs nothing.
+    ("REFUSED", "gh api graphql -f query=mutation{mergePullRequest(input:{a:b}){c}}"),
+    ("ALLOWED", "gh api graphql -f query=query{repository(name:x){id}}"),
 )
 
 # Somebody else's repository, checked out INSIDE a project whose agents land

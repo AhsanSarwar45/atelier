@@ -185,6 +185,9 @@ FAULTS = [
     ("the forge has only one way onto a line", GATE,
      lambda s: s.replace('    if parts and parts[-1] == "merges":\n        return True\n',
                          "")),
+    ("a query-endpoint instruction names this checkout's own repository", GATE,
+     lambda s: s.replace('    if parts and parts[-1] == "graphql":\n'
+                         "        return UNREADABLE\n", "")),
     ("the batch form of pointing a line names the line", GATE,
      lambda s: s.replace('        if "--stdin" in rest:\n            # The batch form carries every line it writes to in its own input,\n'
                          "            # so the command names none of them.\n"

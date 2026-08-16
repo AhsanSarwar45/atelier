@@ -732,7 +732,10 @@ def repo_named(argv):
     """The forge repository this command acts on, as owner/name, or "" for none.
 
     The everyday spelling names it with a switch, the raw call carries it in the
-    path — and either way it may be a repository this checkout is not.
+    path — and either way it may be a repository this checkout is not. The query
+    endpoint names none: it carries a piece of work by an id that means nothing
+    here, so the answer is UNREADABLE, which is a repository this checkout is
+    not whatever this checkout is.
     """
     if argv[1:3] == ["pr", "merge"]:
         rest = argv[3:]
@@ -744,6 +747,8 @@ def repo_named(argv):
                 return value
         return ""
     parts = api_call(argv[2:])[1].split("?")[0].strip("/").split("/")
+    if parts and parts[-1] == "graphql":
+        return UNREADABLE
     if "repos" in parts:
         at = parts.index("repos")
         if len(parts) > at + 2:
