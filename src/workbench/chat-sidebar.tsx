@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
+import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import type { RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -192,8 +193,8 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                     ))}
                     {row.folder && (
                       <Badge
-                        variant="secondary"
-                        appearance="outline"
+                        hue={hueFor(row.folder)}
+                        appearance="light"
                         size="xs"
                         shape="circle"
                         data-testid="row-folder-chip"

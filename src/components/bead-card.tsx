@@ -319,32 +319,32 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
 
         {/* Property tags row */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="theme-badge text-[11px] font-mono px-1.5 py-0.5 bg-surface-overlay text-t-muted">
+          <Badge variant="secondary" appearance="light" size="xs" className="theme-badge font-mono">
             {ticketNumber !== undefined && `#${ticketNumber} `}{formatBeadId(bead.id)}
-          </span>
+          </Badge>
           {blocked && (
-            <span className="theme-badge text-[10px] font-semibold px-1.5 py-0.5 bg-danger/15 text-danger">
+            <Badge variant="destructive" appearance="light" size="xs" className="theme-badge font-semibold">
               Blocked
-            </span>
+            </Badge>
           )}
           <BeadSystemTag bead={bead} />
           {tagFor(bead, "kind") ? (
             <BeadKindTag bead={bead} />
           ) : (
-            <span className="theme-badge inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 bg-surface-overlay text-t-tertiary">
+            <Badge variant="secondary" appearance="light" size="xs" className="theme-badge gap-1">
               <TypeIcon className={cn("size-3 shrink-0", typeMeta.colorClass)} aria-hidden="true" />
               {getTypeLabel(bead)}
-            </span>
+            </Badge>
           )}
           {bead.priority !== undefined && bead.priority <= 2 && (
-            <span className={cn(
-              "theme-badge text-[10px] font-medium px-1.5 py-0.5",
-              bead.priority === 0 ? "bg-danger/15 text-danger" :
-              bead.priority === 1 ? "bg-blocked-accent/15 text-blocked-accent" :
-              "bg-surface-overlay text-t-muted"
-            )}>
+            <Badge
+              size="xs"
+              appearance="light"
+              variant={bead.priority === 0 ? "destructive" : bead.priority === 1 ? "warning" : "secondary"}
+              className="theme-badge"
+            >
               P{bead.priority}
-            </span>
+            </Badge>
           )}
           {inlinePRBadge}
           {commentCount > 0 && (

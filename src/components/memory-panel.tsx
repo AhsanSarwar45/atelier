@@ -23,6 +23,7 @@ import {
   AlertDialogTitle,
   AlertDialogClose,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -33,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -204,9 +206,9 @@ export function MemoryPanel({ open, onOpenChange, projectPath }: MemoryPanelProp
                   >
                     {/* Key badge + actions row */}
                     <div className="flex items-center justify-between gap-2">
-                      <code className="text-xs font-mono text-t-muted bg-surface-overlay px-1.5 py-0.5 rounded truncate max-w-[calc(100%-2rem)]">
-                        {entry.key}
-                      </code>
+                      <Badge asChild variant="secondary" appearance="light" size="sm" className="min-w-0 max-w-[calc(100%-2rem)] font-mono">
+                        <code className="truncate">{entry.key}</code>
+                      </Badge>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
@@ -280,11 +282,11 @@ export function MemoryPanel({ open, onOpenChange, projectPath }: MemoryPanelProp
             >
               Content
             </label>
-            <textarea
+            <Textarea
               id="edit-content"
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
-              className="w-full h-32 rounded-md border border-b-strong bg-surface-overlay/50 px-3 py-2 text-sm text-t-primary placeholder:text-t-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+              className="h-32 resize-none bg-surface-overlay/50"
             />
           </div>
           <AlertDialogFooter>

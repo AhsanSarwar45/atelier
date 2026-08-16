@@ -9,6 +9,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { reportUrl } from '@/components/report-panel';
@@ -64,14 +65,16 @@ export function ReportCard({ project, slug, fsPath }: ReportCardProps) {
             </span>
             {/* Its own button: the page fills the window in an iframe, so a
                 keypress lands in the report rather than on the dialog. */}
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="xs"
               data-testid="report-modal-close"
               onClick={() => setOpen(false)}
-              className="ml-auto mr-6 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+              className="ml-auto mr-6"
             >
               Close
-            </button>
+            </Button>
           </DialogTitle>
           <iframe
             data-testid="report-modal-frame"

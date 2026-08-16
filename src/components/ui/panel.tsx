@@ -17,6 +17,8 @@ const panelVariants = cva('rounded-md border', {
     tone: {
       default: 'border-border/60 bg-muted/30',
       attention: 'border-amber-500/60 bg-amber-500/10',
+      /** Telling the reader something they did not ask about. */
+      info: 'border-info/40 bg-info/10',
       /** Sits above the page: opaque, and lifted off what it covers. */
       overlay: 'border-border/60 bg-background shadow-lg',
     },

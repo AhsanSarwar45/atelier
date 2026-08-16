@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -133,13 +134,13 @@ export function CreateBeadDialog({
             <label htmlFor="bead-desc" className="text-sm font-medium text-t-secondary">
               Description
             </label>
-            <textarea
+            <Textarea
               id="bead-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional details…"
               rows={8}
-              className="flex w-full rounded-md border border-b-strong bg-surface-overlay/50 px-3 py-2 text-sm text-t-primary placeholder:text-t-muted ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
+              className="resize-y bg-surface-overlay/50"
             />
           </div>
 

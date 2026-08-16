@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { Folder, Loader2, FolderSearch, Database, Server } from "lucide-react";
 
 import { FolderBrowser } from "@/components/folder-browser";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,10 +16,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { panelVariants } from "@/components/ui/panel";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { DoltDatabase, DoltServer } from "@/lib/api";
 import type { CreateProjectInput } from "@/lib/db";
+import { cn } from "@/lib/utils";
 
 
 interface AddProjectDialogProps {
@@ -282,15 +285,18 @@ export function AddProjectDialog({
                         type="button"
                         onClick={() => handleServerQuickAdd(server)}
                         disabled={isSubmitting}
-                        className="flex w-full items-center justify-between rounded-md border border-b-strong bg-surface-overlay/50 px-3 py-2 text-left text-sm transition-colors hover:bg-surface-overlay"
+                        className={cn(
+                          panelVariants({ inset: 'sm' }),
+                          "flex w-full items-center justify-between text-left text-sm transition-colors hover:bg-surface-overlay",
+                        )}
                       >
                         <div className="min-w-0 flex-1">
                           <span className="font-medium text-t-primary">{name}</span>
                           <span className="ml-2 truncate text-xs text-t-muted">{server.project_path}</span>
                         </div>
-                        <span className="ml-2 shrink-0 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
+                        <Badge variant="success" appearance="light" size="xs" shape="circle" className="ml-2 shrink-0">
                           :{server.port}
-                        </span>
+                        </Badge>
                       </button>
                     );
                   })}
@@ -314,7 +320,7 @@ export function AddProjectDialog({
                       type="button"
                       onClick={() => handleDoltQuickAdd(db)}
                       disabled={isSubmitting}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-b-strong bg-surface-overlay/50 px-3 py-1.5 text-sm text-t-secondary transition-colors hover:border-b-strong hover:bg-surface-overlay/50"
+                      className={cn(panelVariants({ inset: 'sm' }), "inline-flex items-center gap-1.5 py-1.5 text-sm transition-colors hover:bg-surface-overlay")}
                     >
                       {db.project_name}
                     </button>

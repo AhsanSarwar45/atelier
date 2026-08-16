@@ -104,6 +104,15 @@ export function tagHue(tag: BeadTag): number {
 }
 
 /**
+ * The same hashing for anything else a chip names and the theme has no opinion
+ * about — a folder, a machine — so one name keeps one colour wherever it is
+ * drawn, and two of them never read as the same thing.
+ */
+export function hueFor(name: string): number {
+  return AREA_HUES[hash(name) % AREA_HUES.length];
+}
+
+/**
  * Whether a bead passes a tag selection.
  *
  * Selections are raw labels (`area:board`). Within one namespace they widen the

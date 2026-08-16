@@ -200,17 +200,21 @@ export function ProjectCard({
             {path}
           </p>
           {archivedAt && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-overlay px-2 py-0.5 text-[10px] font-medium text-t-muted">
+            <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0 gap-1">
               <Archive className="h-3 w-3" aria-hidden="true" />
               Archived
-            </span>
+            </Badge>
           )}
           {!archivedAt && dataSource === 'jsonl' && (
             <TooltipProvider delayDuration={200}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/40 bg-warning/15 px-2 py-0.5 text-[10px] font-medium text-warning"
+                  <Badge
+                    variant="warning"
+                    appearance="outline"
+                    size="sm"
+                    shape="circle"
+                    className="shrink-0 gap-1"
                     onClick={(e) => e.stopPropagation()}
                     onKeyDown={(e) => e.stopPropagation()}
                     role="note"
@@ -219,28 +223,28 @@ export function ProjectCard({
                   >
                     <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                     Old format — migrate
-                  </span>
+                  </Badge>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-xs">
                   <div className="space-y-1">
                     <p className="text-xs">
                       This project uses the old JSONL beads format. Run this in the project directory to migrate to Dolt:
                     </p>
-                    <code className="block rounded bg-black/30 px-1.5 py-1 font-mono text-[11px]">
-                      bd init --prefix {deriveBeadPrefix(path, name)}
-                    </code>
+                    <Badge asChild variant="secondary" appearance="light" size="sm" className="w-full font-mono">
+                      <code>bd init --prefix {deriveBeadPrefix(path, name)}</code>
+                    </Badge>
                   </div>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
           {!archivedAt && dataSource && dataSource !== 'jsonl' && (
-            <span className="inline-flex shrink-0 items-center rounded-full bg-surface-overlay px-2 py-0.5 text-[10px] font-medium text-t-muted">
+            <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0">
               {dataSource === 'dolt-project' ? 'Dolt (project)' :
                dataSource === 'dolt-central' ? 'Dolt (central)' :
                dataSource === 'dolt-direct' ? 'Dolt (direct)' :
                dataSource === 'cli' ? 'CLI' : dataSource}
-            </span>
+            </Badge>
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">

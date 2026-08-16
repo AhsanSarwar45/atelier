@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 interface CreateMemoryDialogProps {
   open: boolean;
@@ -92,14 +93,14 @@ export function CreateMemoryDialog({
             <label htmlFor="memory-content" className="text-sm font-medium text-t-secondary">
               Content
             </label>
-            <textarea
+            <Textarea
               id="memory-content"
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="What should be remembered?"
               rows={5}
               autoFocus
-              className="flex w-full rounded-md border border-b-strong bg-surface-overlay/50 px-3 py-2 text-sm text-t-primary placeholder:text-t-muted ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
+              className="resize-y bg-surface-overlay/50"
             />
           </div>
 

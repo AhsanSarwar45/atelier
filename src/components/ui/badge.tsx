@@ -1,3 +1,10 @@
+/**
+ * The chip: every pill of text in the app, whatever it names.
+ *
+ * Its colours are the `--color-*` names spelled once in `src/app/globals.css`
+ * against whichever theme is live; a hue the data carries comes in as `hue`
+ * (docs/designs/app-shell.md §1.5). Nothing here writes a finished colour.
+ */
 import * as React from 'react';
 
 import { cva, type VariantProps } from 'class-variance-authority';
@@ -27,12 +34,14 @@ const badgeVariants = cva(
         primary: 'bg-primary text-primary-foreground',
         secondary: 'bg-secondary text-secondary-foreground',
         success:
-          'bg-[var(--color-success-accent,var(--color-green-500))] text-[var(--color-success-foreground,var(--color-white))]',
+          'bg-[var(--color-success-accent)] text-[var(--color-success-foreground,var(--color-white))]',
         warning:
-          'bg-[var(--color-warning-accent,var(--color-yellow-500))] text-[var(--color-warning-foreground,var(--color-white))]',
-        info: 'bg-[var(--color-info-accent,var(--color-violet-500))] text-[var(--color-info-foreground,var(--color-white))]',
+          'bg-[var(--color-warning-accent)] text-[var(--color-warning-foreground,var(--color-white))]',
+        info: 'bg-[var(--color-info-accent)] text-[var(--color-info-foreground,var(--color-white))]',
         outline: 'bg-transparent border border-border text-secondary-foreground',
         destructive: 'bg-destructive text-destructive-foreground',
+        // A card that holds other cards has its own colour in every theme.
+        epic: 'bg-[var(--color-epic-accent)] text-[var(--color-epic-foreground)]',
       },
       appearance: {
         default: '',
@@ -60,67 +69,83 @@ const badgeVariants = cva(
         variant: 'primary',
         appearance: 'light',
         className:
-          'text-[var(--color-primary-accent,var(--color-blue-700))] bg-[var(--color-primary-soft,var(--color-blue-50))] dark:bg-[var(--color-primary-soft,var(--color-blue-950))] dark:text-[var(--color-primary-soft,var(--color-blue-600))]',
+          'text-[var(--color-primary-accent)] bg-[var(--color-primary-soft)]',
       },
       {
         variant: 'secondary',
         appearance: 'light',
-        className: 'bg-secondary dark:bg-secondary/50 text-secondary-foreground',
+        className: 'bg-secondary text-secondary-foreground',
       },
       {
         variant: 'success',
         appearance: 'light',
         className:
-          'text-[var(--color-success-accent,var(--color-green-800))] bg-[var(--color-success-soft,var(--color-green-100))] dark:bg-[var(--color-success-soft,var(--color-green-950))] dark:text-[var(--color-success-soft,var(--color-green-600))]',
+          'text-[var(--color-success-accent)] bg-[var(--color-success-soft)]',
       },
       {
         variant: 'warning',
         appearance: 'light',
         className:
-          'text-[var(--color-warning-accent,var(--color-yellow-700))] bg-[var(--color-warning-soft,var(--color-yellow-100))] dark:bg-[var(--color-warning-soft,var(--color-yellow-950))] dark:text-[var(--color-warning-soft,var(--color-yellow-600))]',
+          'text-[var(--color-warning-accent)] bg-[var(--color-warning-soft)]',
       },
       {
         variant: 'info',
         appearance: 'light',
         className:
-          'text-[var(--color-info-accent,var(--color-violet-700))] bg-[var(--color-info-soft,var(--color-violet-100))] dark:bg-[var(--color-info-soft,var(--color-violet-950))] dark:text-[var(--color-info-soft,var(--color-violet-400))]',
+          'text-[var(--color-info-accent)] bg-[var(--color-info-soft)]',
+      },
+      {
+        variant: 'epic',
+        appearance: 'light',
+        className: 'text-[var(--color-epic-accent)] bg-[var(--color-epic-soft)]',
+      },
+      {
+        variant: 'epic',
+        appearance: 'outline',
+        className:
+          'text-[var(--color-epic-accent)] border-[var(--color-epic-soft)] bg-[var(--color-epic-soft)]',
+      },
+      {
+        variant: 'epic',
+        appearance: 'ghost',
+        className: 'text-[var(--color-epic-accent)]',
       },
       {
         variant: 'destructive',
         appearance: 'light',
         className:
-          'text-[var(--color-destructive-accent,var(--color-red-700))] bg-[var(--color-destructive-soft,var(--color-red-50))] dark:bg-[var(--color-destructive-soft,var(--color-red-950))] dark:text-[var(--color-destructive-soft,var(--color-red-600))]',
+          'text-[var(--color-destructive-accent)] bg-[var(--color-destructive-soft)]',
       },
       /* Outline */
       {
         variant: 'primary',
         appearance: 'outline',
         className:
-          'text-[var(--color-primary-accent,var(--color-blue-700))] border-[var(--color-primary-soft,var(--color-blue-100))] bg-[var(--color-primary-soft,var(--color-blue-50))] dark:bg-[var(--color-primary-soft,var(--color-blue-950))] dark:border-[var(--color-primary-soft,var(--color-blue-900))] dark:text-[var(--color-primary-soft,var(--color-blue-600))]',
+          'text-[var(--color-primary-accent)] border-[var(--color-primary-soft)] bg-[var(--color-primary-soft)]',
       },
       {
         variant: 'success',
         appearance: 'outline',
         className:
-          'text-[var(--color-success-accent,var(--color-green-700))] border-[var(--color-success-soft,var(--color-green-200))] bg-[var(--color-success-soft,var(--color-green-50))] dark:bg-[var(--color-success-soft,var(--color-green-950))] dark:border-[var(--color-success-soft,var(--color-green-900))] dark:text-[var(--color-success-soft,var(--color-green-600))]',
+          'text-[var(--color-success-accent)] border-[var(--color-success-soft)] bg-[var(--color-success-soft)]',
       },
       {
         variant: 'warning',
         appearance: 'outline',
         className:
-          'text-[var(--color-warning-accent,var(--color-yellow-700))] border-[var(--color-warning-soft,var(--color-yellow-200))] bg-[var(--color-warning-soft,var(--color-yellow-50))] dark:bg-[var(--color-warning-soft,var(--color-yellow-950))] dark:border-[var(--color-warning-soft,var(--color-yellow-900))] dark:text-[var(--color-warning-soft,var(--color-yellow-600))]',
+          'text-[var(--color-warning-accent)] border-[var(--color-warning-soft)] bg-[var(--color-warning-soft)]',
       },
       {
         variant: 'info',
         appearance: 'outline',
         className:
-          'text-[var(--color-info-accent,var(--color-violet-700))] border-[var(--color-info-soft,var(--color-violet-100))] bg-[var(--color-info-soft,var(--color-violet-50))] dark:bg-[var(--color-info-soft,var(--color-violet-950))] dark:border-[var(--color-info-soft,var(--color-violet-900))] dark:text-[var(--color-info-soft,var(--color-violet-400))]',
+          'text-[var(--color-info-accent)] border-[var(--color-info-soft)] bg-[var(--color-info-soft)]',
       },
       {
         variant: 'destructive',
         appearance: 'outline',
         className:
-          'text-[var(--color-destructive-accent,var(--color-red-700))] border-[var(--color-destructive-soft,var(--color-red-100))] bg-[var(--color-destructive-soft,var(--color-red-50))] dark:bg-[var(--color-destructive-soft,var(--color-red-950))] dark:border-[var(--color-destructive-soft,var(--color-red-900))] dark:text-[var(--color-destructive-soft,var(--color-red-600))]',
+          'text-[var(--color-destructive-accent)] border-[var(--color-destructive-soft)] bg-[var(--color-destructive-soft)]',
       },
       /* Ghost */
       {
@@ -136,17 +161,17 @@ const badgeVariants = cva(
       {
         variant: 'success',
         appearance: 'ghost',
-        className: 'text-[var(--color-success-accent,var(--color-green-500))]',
+        className: 'text-[var(--color-success-accent)]',
       },
       {
         variant: 'warning',
         appearance: 'ghost',
-        className: 'text-[var(--color-warning-accent,var(--color-yellow-500))]',
+        className: 'text-[var(--color-warning-accent)]',
       },
       {
         variant: 'info',
         appearance: 'ghost',
-        className: 'text-[var(--color-info-accent,var(--color-violet-500))]',
+        className: 'text-[var(--color-info-accent)]',
       },
       {
         variant: 'destructive',
@@ -189,14 +214,31 @@ function Badge({
   shape,
   asChild = false,
   disabled,
+  hue,
+  style,
   ...props
-}: React.ComponentProps<'span'> & VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+}: React.ComponentProps<'span'> &
+  VariantProps<typeof badgeVariants> & {
+    asChild?: boolean;
+    /**
+     * A hue in degrees the DATA carries — a tag hashed to its own colour. It
+     * overrides `variant`, and the rest of the chip is mixed against the live
+     * theme in `globals.css` (docs/designs/app-shell.md §1.5).
+     */
+    hue?: number;
+  }) {
   const Comp = asChild ? SlotPrimitive.Slot : 'span';
+  const hued = hue !== undefined;
 
   return (
     <Comp
       data-slot="badge"
-      className={cn(badgeVariants({ variant, size, appearance, shape, disabled }), className)}
+      className={cn(
+        badgeVariants({ variant: hued ? 'outline' : variant, size, appearance, shape, disabled }),
+        hued && (appearance === 'light' ? 'badge-hue' : 'badge-hue badge-hue-strong'),
+        className,
+      )}
+      style={hued ? ({ ...style, '--tag-h': String(hue) } as React.CSSProperties) : style}
       {...props}
     />
   );

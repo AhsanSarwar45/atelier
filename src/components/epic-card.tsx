@@ -316,15 +316,15 @@ export function EpicCard({
 
           {/* Property tags */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="theme-badge text-[11px] font-mono px-1.5 py-0.5 bg-surface-overlay text-t-muted">
+            <Badge variant="secondary" appearance="light" size="xs" className="theme-badge font-mono">
               {ticketNumber !== undefined && `#${ticketNumber} `}{formatBeadId(epic.id)}
-            </span>
-            <span className="theme-badge text-[10px] font-semibold px-1.5 py-0.5 bg-epic/15 text-epic">
+            </Badge>
+            <Badge variant="epic" appearance="light" size="xs" className="theme-badge font-semibold">
               Epic
-            </span>
-            <span className="theme-badge text-[10px] px-1.5 py-0.5 bg-surface-overlay text-t-tertiary">
+            </Badge>
+            <Badge variant="secondary" appearance="light" size="xs" className="theme-badge">
               {progressPercentage}% · {children.length} tasks
-            </span>
+            </Badge>
             <BeadTags bead={epic} />
             {commentCount > 0 && (
               <span className="text-[10px] text-t-faint">{commentCount} comments</span>

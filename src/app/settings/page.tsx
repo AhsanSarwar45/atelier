@@ -6,6 +6,7 @@ import { ColorPicker } from "@/components/color-picker";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Panel } from "@/components/ui/panel";
 import {
   usePRSettings,
   MIN_POLLING_INTERVAL,
@@ -201,10 +202,7 @@ export default function SettingsPage() {
                 <p className="text-sm text-t-tertiary">No tags yet. Create one to get started.</p>
               ) : (
                 tags.map((tag) => (
-                  <div
-                    key={tag.id}
-                    className="flex items-center justify-between rounded-md border border-b-default bg-surface-overlay/50 px-3 py-2"
-                  >
+                  <Panel key={tag.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span
                         className="size-4 rounded-full"
@@ -237,13 +235,13 @@ export default function SettingsPage() {
                         <line x1="14" x2="14" y1="11" y2="17" />
                       </svg>
                     </button>
-                  </div>
+                  </Panel>
                 ))
               )}
 
               {/* Add Tag Form */}
               {isAddingTag && (
-                <div className="mt-3 space-y-3 rounded-md border border-b-default bg-surface-raised/70 p-3">
+                <Panel inset="md" className="mt-3 space-y-3">
                   <div className="flex items-center gap-2">
                     <ColorPicker value={newTagColor} onChange={setNewTagColor} />
                     <Input
@@ -286,7 +284,7 @@ export default function SettingsPage() {
                       Create Tag
                     </Button>
                   </div>
-                </div>
+                </Panel>
               )}
             </div>
 
@@ -408,9 +406,9 @@ export default function SettingsPage() {
                   Remove all projects and tags from local storage
                 </p>
               </div>
-              <button className="rounded-md border border-danger/50 bg-danger/30 px-3 py-1.5 text-sm text-danger hover:bg-danger/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base">
+              <Button variant="destructive" size="sm">
                 Clear Data
-              </button>
+              </Button>
             </div>
           </div>
         </section>

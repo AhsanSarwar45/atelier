@@ -1,11 +1,9 @@
 "use client";
 
-import type { CSSProperties } from "react";
-
 import { Bug, Sparkles, Wrench, Tag as TagIcon } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { beadTags, tagFor, tagHue } from "@/lib/bead-labels";
-import type { BeadTag } from "@/lib/bead-labels";
 import { cn } from "@/lib/utils";
 import type { Bead } from "@/types";
 
@@ -15,24 +13,22 @@ const KIND_ICONS: Record<string, typeof Bug> = {
   chore: Wrench,
 };
 
-function chipStyle(tag: BeadTag): CSSProperties {
-  return { "--tag-h": `${tagHue(tag)}` } as CSSProperties;
-}
-
 /** The system this card belongs to; nothing when it names none. */
 export function BeadSystemTag({ bead, className }: { bead: Pick<Bead, "labels">; className?: string }) {
   const tag = tagFor(bead, "area");
   if (!tag) return null;
 
   return (
-    <span
-      className={cn("theme-badge bead-tag", className)}
-      style={chipStyle(tag)}
+    <Badge
+      size="xs"
+      appearance="light"
+      hue={tagHue(tag)}
+      className={cn("theme-badge font-semibold", className)}
       title={tag.raw}
       data-bead-tag={tag.raw}
     >
       {tag.value}
-    </span>
+    </Badge>
   );
 }
 
@@ -43,15 +39,17 @@ export function BeadKindTag({ bead, className }: { bead: Pick<Bead, "labels">; c
   const Icon = KIND_ICONS[tag.value] ?? TagIcon;
 
   return (
-    <span
-      className={cn("theme-badge bead-tag bead-tag-kind gap-1", className)}
-      style={chipStyle(tag)}
+    // The kind of work reads first, so it carries the stronger fill.
+    <Badge
+      size="xs"
+      hue={tagHue(tag)}
+      className={cn("theme-badge gap-1 font-semibold", className)}
       title={tag.raw}
       data-bead-tag={tag.raw}
     >
       <Icon className="size-3 shrink-0" aria-hidden="true" />
       {tag.value}
-    </span>
+    </Badge>
   );
 }
 

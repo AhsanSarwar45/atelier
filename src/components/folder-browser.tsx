@@ -6,6 +6,7 @@ import { Folder, FolderOpen, ChevronRight, Home } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import * as api from "@/lib/api";
 import type { FsEntry } from "@/lib/api";
@@ -218,7 +219,7 @@ export function FolderBrowser({
       aria-label="Folder browser"
     >
       {/* Breadcrumb navigation */}
-      <div className="flex items-center gap-1 overflow-x-auto rounded-md border border-b-strong bg-surface-overlay/50 px-2 py-1.5 text-sm">
+      <Panel inset="none" className="flex items-center gap-1 overflow-x-auto px-2 py-1.5 text-sm">
         <Button
           variant="ghost"
           size="xs"
@@ -235,20 +236,20 @@ export function FolderBrowser({
             <ChevronRight className="size-3 shrink-0 text-t-muted" />
             <div className="flex items-center gap-0.5 shrink-0">
               {driveRoots.map((root) => (
-                <button
+                <Badge
                   key={root}
-                  type="button"
-                  onClick={() => navigateToDirectory(root)}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-xs font-mono transition-colors hover:bg-surface-raised",
-                    currentPath.toUpperCase().startsWith(root.charAt(0).toUpperCase())
-                      ? "text-t-primary bg-surface-raised"
-                      : "text-t-muted"
-                  )}
-                  title={root}
+                  asChild
+                  size="sm"
+                  variant={
+                    currentPath.toUpperCase().startsWith(root.charAt(0).toUpperCase()) ? 'secondary' : 'outline'
+                  }
+                  appearance="light"
+                  className="font-mono"
                 >
-                  {root.charAt(0)}:
-                </button>
+                  <button type="button" onClick={() => navigateToDirectory(root)} title={root}>
+                    {root.charAt(0)}:
+                  </button>
+                </Badge>
               ))}
             </div>
           </>
@@ -277,18 +278,18 @@ export function FolderBrowser({
             </div>
           );
         })}
-      </div>
+      </Panel>
 
       {/* Current path beads indicator */}
       {currentPathHasBeads && (
-        <div className="flex items-center gap-2 rounded-md border border-info/30 bg-info/10 px-3 py-2">
+        <Panel tone="info" className="flex items-center gap-2">
           <Badge variant="info" size="sm">
             .beads found
           </Badge>
           <span className="text-xs text-t-tertiary">
             This folder contains a beads project
           </span>
-        </div>
+        </Panel>
       )}
 
       {/* Directory list */}

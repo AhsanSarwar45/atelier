@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, type CSSProperties } from "react";
 
 import { Bot, ChevronDown, Loader2, Wrench } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
@@ -13,6 +14,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { useAgents } from "@/hooks/use-agents";
+import { hueFor } from "@/lib/bead-labels";
 import { cn } from "@/lib/utils";
 import type { Agent, AgentModel } from "@/types";
 
@@ -24,31 +26,6 @@ export interface AgentsPanelProps {
   /** Absolute path to the project root */
   projectPath: string;
 }
-
-/**
- * Model badge color configuration.
- * Each model gets a distinct color for quick visual identification.
- */
-const MODEL_COLORS: Record<
-  AgentModel,
-  { bg: string; text: string; border: string }
-> = {
-  opus: {
-    bg: "bg-blocked-accent/15",
-    text: "text-blocked-accent",
-    border: "border-blocked-accent/25",
-  },
-  sonnet: {
-    bg: "bg-status-review/15",
-    text: "text-status-review",
-    border: "border-status-review/25",
-  },
-  haiku: {
-    bg: "bg-success/15",
-    text: "text-success",
-    border: "border-success/25",
-  },
-};
 
 /** All available model options */
 const MODEL_OPTIONS: AgentModel[] = ["haiku", "sonnet", "opus"];
@@ -67,18 +44,12 @@ function formatToolsSummary(tools: string[] | "*"): string {
  * Model badge component for displaying the current model.
  */
 function ModelBadge({ model }: { model: AgentModel }) {
-  const colors = MODEL_COLORS[model];
+  // The model's name is data, so it carries its own hue and keeps it wherever
+  // it is drawn (src/lib/bead-labels.ts).
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-sm px-1.5 py-0.5 text-[0.625rem] leading-none font-medium border",
-        colors.bg,
-        colors.text,
-        colors.border
-      )}
-    >
+    <Badge size="xs" appearance="light" hue={hueFor(model)}>
       {model}
-    </span>
+    </Badge>
   );
 }
 
@@ -155,7 +126,6 @@ function AgentCard({
             >
               {MODEL_OPTIONS.map((model) => {
                 const isSelected = agent.model === model;
-                const colors = MODEL_COLORS[model];
                 return (
                   <button
                     key={model}
@@ -167,9 +137,10 @@ function AgentCard({
                     className={cn(
                       "flex-1 h-7 rounded-md text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                       isSelected
-                        ? cn(colors.bg, colors.text, "border", colors.border)
+                        ? "badge-hue border"
                         : "bg-surface-overlay/50 text-t-muted hover:text-t-secondary hover:bg-surface-overlay border border-transparent"
                     )}
+                    style={isSelected ? ({ "--tag-h": String(hueFor(model)) } as CSSProperties) : undefined}
                   >
                     {model}
                   </button>
@@ -219,12 +190,9 @@ function AgentCard({
               </p>
               <div className="flex flex-wrap gap-1">
                 {agent.tools.map((tool) => (
-                  <span
-                    key={tool}
-                    className="inline-flex items-center rounded-sm px-1.5 py-0.5 text-[0.625rem] leading-none font-mono bg-surface-overlay text-t-muted border border-b-strong/50"
-                  >
+                  <Badge key={tool} variant="secondary" appearance="light" size="xs" className="font-mono">
                     {tool}
-                  </span>
+                  </Badge>
                 ))}
               </div>
             </div>

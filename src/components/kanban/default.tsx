@@ -17,6 +17,7 @@ import {
   KanbanItemHandle,
   KanbanOverlay,
 } from '@/components/ui/kanban';
+import { Panel } from '@/components/ui/panel';
 
 interface Task {
   id: string;
@@ -42,7 +43,7 @@ interface TaskCardProps extends Omit<React.ComponentProps<typeof KanbanItem>, 'v
 
 function TaskCard({ task, asHandle, ...props }: TaskCardProps) {
   const cardContent = (
-    <div className="rounded-md border bg-card p-3 shadow-xs">
+    <Panel inset="none" className="border bg-card p-3 shadow-xs">
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-2">
           <span className="line-clamp-1 font-medium text-sm">{task.title}</span>
@@ -67,7 +68,7 @@ function TaskCard({ task, asHandle, ...props }: TaskCardProps) {
           {task.dueDate && <time className="text-[10px] tabular-nums whitespace-nowrap">{task.dueDate}</time>}
         </div>
       </div>
-    </div>
+    </Panel>
   );
 
   return (
