@@ -12,7 +12,9 @@ import { useEffect, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Panel } from '@/components/ui/panel';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { isRunning, useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
@@ -75,15 +77,17 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
         onClick={() => setOpen((v) => !v)}
       >
         Waiting on you
-        <span className="ml-1.5 rounded-full bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
+        <Badge variant="warning" appearance="light" size="xs" shape="circle" className="ml-1.5">
           {waiting.length}
-        </span>
+        </Badge>
       </Button>
 
       {open && (
-        <div
+        <Panel
+          tone="overlay"
+          inset="none"
           data-testid="tray-panel"
-          className="absolute right-0 z-50 mt-1 w-96 overflow-hidden rounded-md border border-border/60 bg-background shadow-lg"
+          className="absolute right-0 z-50 mt-1 w-96 overflow-hidden"
         >
           {waiting.map((s) => (
             <button
@@ -108,7 +112,7 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
               </div>
             </button>
           ))}
-        </div>
+        </Panel>
       )}
     </div>
   );

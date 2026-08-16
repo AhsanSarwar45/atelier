@@ -5,6 +5,8 @@ import type { CSSProperties } from 'react';
 
 import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, FileText, Tag } from 'lucide-react';
 
+import { Toolbar } from '@/components/shell';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -165,13 +167,7 @@ export function QuickFilterBar({
   };
 
   return (
-    <div
-      role="toolbar"
-      aria-label="Quick filters"
-      // A row inside the shell's second bar, not a card of its own: the bar is
-      // the chrome, and what does not fit slides sideways rather than wrapping.
-      className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto"
-    >
+    <Toolbar label="Quick filters">
       {/* Search Input */}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-t-muted" aria-hidden="true" />
@@ -391,16 +387,13 @@ export function QuickFilterBar({
         <TooltipProvider delayDuration={200}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div
-                role="status"
-                className="flex items-center gap-1.5 h-8 px-2.5 text-sm font-medium rounded-md bg-blocked-accent/15 text-blocked-accent border border-blocked-accent/30"
-              >
+              <Badge variant="warning" appearance="outline" size="lg" role="status" className="gap-1.5">
                 <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
                 <span className="tabular-nums">{unknownStatusCount}</span>
                 <span className="sr-only">
                   {unknownStatusCount === 1 ? 'bead has an' : 'beads have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
                 </span>
-              </div>
+              </Badge>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-xs">
               <p className="font-medium">
@@ -508,7 +501,7 @@ export function QuickFilterBar({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </Toolbar>
   );
 }
 

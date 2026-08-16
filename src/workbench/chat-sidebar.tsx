@@ -15,9 +15,10 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import type { RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -177,39 +178,47 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                   </div>
                   <div className="mt-1 flex items-center gap-1 overflow-hidden">
                     {row.beads.map((id) => (
-                      <button
-                        key={id}
-                        type="button"
-                        data-testid="row-bead-chip"
-                        data-bead-id={id}
-                        title={`Open ${id}`}
-                        className="shrink-0 rounded-full border border-primary/50 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] text-foreground hover:bg-primary/25"
-                        onClick={() => openCard(id)}
-                      >
-                        {id}
-                      </button>
+                      <Badge key={id} asChild variant="primary" appearance="outline" size="xs" shape="circle" className="shrink-0 font-mono">
+                        <button
+                          type="button"
+                          data-testid="row-bead-chip"
+                          data-bead-id={id}
+                          title={`Open ${id}`}
+                          onClick={() => openCard(id)}
+                        >
+                          {id}
+                        </button>
+                      </Badge>
                     ))}
                     {row.folder && (
-                      <span
+                      <Badge
+                        variant="secondary"
+                        appearance="outline"
+                        size="xs"
+                        shape="circle"
                         data-testid="row-folder-chip"
                         data-folder={row.folder}
                         // The full path and the branch in the tooltip: the chip
                         // itself has room for the one word that tells two
                         // checkouts of the same project apart.
                         title={[row.cwdHint, row.branch].filter(Boolean).join(' · ')}
-                        className="shrink-0 truncate rounded-full border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        className="min-w-0 shrink truncate font-mono"
                       >
                         {row.folder}
-                      </span>
+                      </Badge>
                     )}
                     {live ? (
-                      <span
+                      <Badge
+                        variant="success"
+                        appearance="light"
+                        size="xs"
+                        shape="circle"
                         data-testid="row-pill"
                         data-pill="ready"
-                        className="ml-auto shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300"
+                        className="ml-auto shrink-0"
                       >
                         ready
-                      </span>
+                      </Badge>
                     ) : (
                       <Button
                         size="xs"

@@ -10,7 +10,10 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { TabTools } from '@/components/shell';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Panel } from '@/components/ui/panel';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { diffLines } from '@/workbench/line-diff';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
@@ -61,29 +64,30 @@ function PermissionCard({
   if (chosen) {
     const answered = chosen === 'deny' ? 'Denied' : 'Allowed';
     return (
-      <div
+      <Panel
         data-testid="permission-card"
         data-ask-state="resolved"
         data-ask-id={askId}
         data-tool-name={toolName}
-        className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+        className="text-sm text-muted-foreground"
       >
         <span data-testid="permission-resolved" className="font-medium text-foreground">
           {answered}
         </span>
         {' · '}
         {title}
-      </div>
+      </Panel>
     );
   }
 
   return (
-    <div
+    <Panel
+      tone="attention"
+      inset="md"
       data-testid="permission-card"
       data-ask-state="open"
       data-ask-id={askId}
       data-tool-name={toolName}
-      className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-3"
     >
       <div className="text-sm font-medium text-foreground">Allow {toolName}?</div>
       <div className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{title}</div>
@@ -106,7 +110,7 @@ function PermissionCard({
           </Button>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -159,11 +163,11 @@ function ToolRow({ item, nested }: { item: Extract<TranscriptItem, { kind: 'tool
       data-tool-name={item.name}
       className={cn(nested && 'ml-6 border-l-2 border-violet-500/50 pl-3')}
     >
-      <div className="flex items-center gap-2 rounded border border-border/40 bg-muted/20 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
+      <Panel inset="none" className="flex items-center gap-2 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
         <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
         <span className="truncate">{item.title}</span>
         <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
-      </div>
+      </Panel>
       {item.diff && <DiffView path={item.diff.path} before={item.diff.before} after={item.diff.after} />}
     </div>
   );
@@ -173,7 +177,7 @@ function ToolRow({ item, nested }: { item: Extract<TranscriptItem, { kind: 'tool
 function TodoPanel({ items }: { items: TodoItem[] }) {
   if (!items.length) return null;
   return (
-    <div data-testid="todo-panel" className="rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+    <Panel data-testid="todo-panel">
       <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Checklist</div>
       <ul className="space-y-1">
         {items.map((t) => (
@@ -194,7 +198,7 @@ function TodoPanel({ items }: { items: TodoItem[] }) {
           </li>
         ))}
       </ul>
-    </div>
+    </Panel>
   );
 }
 
@@ -301,13 +305,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   return shell(
     <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
       <div className="flex items-center gap-3 border-b border-border/60 px-4 py-2 text-sm">
-        <span
+        <Badge
+          variant={busy ? 'warning' : 'secondary'}
+          appearance="light"
+          size="sm"
+          shape="circle"
           data-testid="session-state"
           data-state={view.state}
-          className={cn('rounded-full px-2 py-0.5 text-xs font-medium', busy ? 'bg-amber-500/20 text-amber-200' : 'bg-muted text-muted-foreground')}
         >
           {view.stateLabel}
-        </span>
+        </Badge>
         <span data-testid="session-meta" className="text-xs text-muted-foreground">
           claude
           {view.model ? ` · ${view.model}` : ''}
@@ -316,21 +323,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         {view.beads.length > 0 && (
           <span data-testid="bead-chips" className="flex items-center gap-1">
             {view.beads.map((id) => (
-              <span
+              <Badge
                 key={id}
+                variant="primary"
+                appearance="outline"
+                size="sm"
+                shape="circle"
                 data-testid="bead-chip"
                 data-bead-id={id}
-                className="rounded-full border border-primary/50 bg-primary/15 px-2 py-0.5 font-mono text-[11px] text-foreground"
+                className="font-mono"
               >
                 {id}
-              </span>
+              </Badge>
             ))}
           </span>
         )}
         {view.cost && (
-          <span data-testid="cost-chip" className="ml-auto rounded bg-muted px-2 py-0.5 font-mono text-xs">
+          <Badge variant="secondary" appearance="light" size="sm" data-testid="cost-chip" className="ml-auto font-mono">
             {costLabel(view.cost)}
-          </span>
+          </Badge>
         )}
       </div>
 
@@ -410,7 +421,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           className="hidden"
           onChange={(e) => void absorb(e.target.files)}
         />
-        <textarea
+        <Textarea
           data-testid="composer"
           rows={2}
           value={draft}
@@ -427,7 +438,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             }
           }}
           placeholder="Ask the agent to do something…"
-          className="flex-1 resize-none rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+          className="flex-1 resize-none bg-background"
         />
         {busy ? (
           <Button

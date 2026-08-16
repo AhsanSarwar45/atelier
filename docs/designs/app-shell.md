@@ -41,6 +41,17 @@ Constraint: the board stays mounted behind the chat so its cards are not
 fetched twice, so a tab's tools must be tied to which tab is *showing*, not to
 whether the tab is mounted.
 
+### 1.4 One set of parts
+
+The manager's rule, 2026-08-16: the screen uses components defined in one place
+rather than each piece redrawing them. A chip and its round form the pill are
+one part (`Badge`); a boxed piece of content is another (`Panel`); a row of
+controls is a third (`Toolbar`).
+
+Constraint: on the project screen, no file may spell a chip or a panel out of
+utility classes. `src/lib/__tests__/one-set-of-parts.test.ts` reads those files
+and fails on one, because drift is invisible one class at a time.
+
 ## 2. Deliberate drops
 
 - The app-wide bar is gone. Its four pieces moved: the tray and the live strip

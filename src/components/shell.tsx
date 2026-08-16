@@ -77,5 +77,18 @@ export function Shell({
 export function TabTools({ tab, children }: { tab: string; children: ReactNode }) {
   const { node, activeTab } = useContext(ToolSlot);
   if (!node || activeTab !== tab) return null;
-  return createPortal(children, node);
+  return createPortal(<Toolbar>{children}</Toolbar>, node);
+}
+
+/**
+ * A row of controls. The bar around it is the chrome, so this draws none of its
+ * own; what does not fit slides sideways rather than wrapping and making the
+ * bar taller.
+ */
+export function Toolbar({ label = 'Tools', className, children }: { label?: string; className?: string; children: ReactNode }) {
+  return (
+    <div role="toolbar" aria-label={label} className={cn('flex min-w-0 flex-1 items-center gap-2 overflow-x-auto', className)}>
+      {children}
+    </div>
+  );
 }
