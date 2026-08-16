@@ -688,7 +688,11 @@ def main():
     # rule below reads quoted words as a card's own text, which is what keeps a
     # note quoting a close from being read as one — and is exactly what would hide
     # `sh -c "git commit -m x"` from all of them (board_common.unshelled).
-    cmd = bc.unshelled(bc.said(data))
+    # The line as typed, and the line as the shell would run it. The rules below
+    # read the second — but a card id is read from the FIRST, because a message
+    # written in a here-document is data to the reader and still names its card.
+    raw = bc.said(data)
+    cmd = bc.unshelled(raw)
     root = bc.board_root(bc.where(data))
     if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing() \
             or bc.waived(data.get("session_id")):
@@ -701,7 +705,7 @@ def main():
     # a change split across two repositories is one job.
     card_id = re.compile(r"\b(?:%s)-[0-9a-z.-]{2,16}\b"
                          % "|".join(re.escape(p) for p in bc.prefixes(root)))
-    ids = card_id.findall(cmd)
+    ids = card_id.findall(raw)
     if not ids:
         # A message written in a file names its card there.
         ids = card_id.findall(written_in(message_files(cmd, bc.where(data))))

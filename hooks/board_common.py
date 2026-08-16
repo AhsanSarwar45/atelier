@@ -133,6 +133,17 @@ def reviewing():
 WRAPPERS = ("env", "command", "exec", "nice", "setsid", "stdbuf", "time",
             "sudo", "timeout", "rtk", "proxy", "nohup", "ionice", "xargs")
 
+# Carriers that hand a command its arguments from somewhere else. What such a
+# command writes to cannot be read off the command at all — the same position a
+# name the shell works out leaves the reader in.
+FEEDERS = ("xargs",)
+
+
+def fed(seg):
+    """Whether this command's arguments are handed to it from somewhere else."""
+    return any(os.path.basename(w) in FEEDERS for w in words(seg))
+
+
 # The shell's own words, which a command can be written behind. The line is cut
 # at the separators, which leaves these standing in front of the command — and a
 # prefix a gate does not strip is a prefix that walks around it, exactly as a

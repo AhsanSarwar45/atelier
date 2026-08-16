@@ -514,6 +514,12 @@ ROUTES = (
     ("REFUSED", "gh api --method PATCH repos/scratch/own/git/refs/heads/main"),
     ("ALLOWED", "gh api repos/scratch/own/git/refs/heads/main"),
     ("ALLOWED", "gh api --method GET repos/scratch/own/merges"),
+    # The site's single query endpoint takes the instruction as a field value and
+    # spells nothing in its path; its file-writing path commits onto a named line.
+    ("REFUSED", "gh api graphql -f query=mutation{mergePullRequest(input:{a:b}){c}}"),
+    ("REFUSED", "gh api --method PUT repos/scratch/own/contents/README.md "
+                "-f branch=main -f message=x -f content=y"),
+    ("ALLOWED", "gh api graphql -f query=query{repository(name:x){id}}"),
     ("REFUSED", "gh api -X PUT repos/scratch/own/pulls/412/merge"),
     ("REFUSED", "gh api -XPUT repos/scratch/own/pulls/412/merge"),
     ("REFUSED", "gh api repos/scratch/own/pulls/412/merge -f merge_method=squash"),
@@ -619,6 +625,13 @@ ROUTES = (
     ('REFUSED', 'git commit -m "see <<EOF here"\ngit push origin main\nEOF'),
     ("REFUSED", "cat <<< here-string\ngit push origin main"),
     ("REFUSED", "cat > s.sh <<'NEVERCLOSED'\ngit push origin main"),
+    # The batch form of pointing a line carries every line it writes to in its
+    # own input, so the command names none of them.
+    ("REFUSED", "git update-ref --stdin <<EOF\nupdate refs/heads/main HEAD\nEOF"),
+    # A name fed in from the left of a pipe is the shell settling it at run time,
+    # exactly as a substitution is — and the command arrives holding neither.
+    ("REFUSED", "echo main | xargs git push origin"),
+    ("REFUSED", "git branch --show-current | xargs -I{} git push origin {}"),
     # A command written behind one of the shell's own words is still that command.
     ("REFUSED", "if true; then git push origin main; fi"),
     ("REFUSED", "for b in main; do git push origin $b; done"),
@@ -716,6 +729,10 @@ ELSEWHERE = (
     ("REFUSED", "git --git-dir={other}/.git --work-tree={other} push origin main"),
     ("REFUSED", "git --git-dir={other}/.git push origin main"),
     ("REFUSED", "GIT_DIR={other}/.git git push origin main"),
+    # A setting made on a command of its own stands for the commands after it.
+    ("REFUSED", "export GIT_DIR={other}/.git && git push origin main"),
+    ("REFUSED", "export GIT_WORK_TREE={other} && git commit -m fix"),
+    ("REFUSED", "GIT_WORK_TREE={other}\ngit commit -m fix"),
     ("REFUSED", "GIT_WORK_TREE={other} git commit -m fix"),
 )
 
@@ -1945,6 +1962,19 @@ def main():
         assert "name the card" in said, \
             "a commit written as %r walked past the rule that a commit names " \
             "its card: %s" % (hidden, said or "allowed")
+
+    # A message that arrives on standard input names its card there too. The
+    # reader drops a here-document body as data, which is right for deciding what
+    # RAN and wrong for deciding what a commit is called: the id is read off the
+    # line as typed.
+    named = "git commit -F - <<'EOF'\ntst-t1 what this lands\nEOF"
+    assert refusal(named, ordinary) == "", \
+        "a commit whose message arrives on standard input was refused for naming " \
+        "no card, while naming one: %s" % refusal(named, ordinary)
+    blank = "git commit -F - <<'EOF'\nwhat this lands, naming nothing\nEOF"
+    assert "name the card" in refusal(blank, ordinary), \
+        "a commit naming no card was let through because its message was on " \
+        "standard input: %s" % (refusal(blank, ordinary) or "allowed")
 
     # A commit whose message is in a file names its card there. Read only off the
     # line, every such commit is refused with no way through — the gate stopping

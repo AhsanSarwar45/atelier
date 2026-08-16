@@ -579,6 +579,10 @@ def written_by(verb, rest, here, where):
     if verb == "reset":
         return reset_targets(rest, here, where)
     if verb == "update-ref":
+        if "--stdin" in rest:
+            # The batch form carries every line it writes to in its own input,
+            # so the command names none of them.
+            return [UNREADABLE]
         args = positionals(rest, verb)
         return [line_named(args[0], here)] if args else []
     if verb == "rebase":
@@ -619,11 +623,13 @@ GH_READS = ("", "GET", "HEAD")
 
 
 def api_call(rest):
-    """The method and the path a raw forge call names.
+    """The method, the path and the field values a raw forge call carries.
 
-    The path is the first word that is neither a switch nor a switch's value.
+    The path is the first word that is neither a switch nor a switch's value. The
+    fields matter because one path — the site's single query endpoint — takes the
+    instruction itself as a field value and says nothing in the path at all.
     """
-    method, path, sends, i = "", "", False, 0
+    method, path, sends, i, fields = "", "", False, 0, []
     while i < len(rest):
         arg = rest[i]
         if arg.startswith("-"):
@@ -636,24 +642,37 @@ def api_call(rest):
                 method = name[2:]
             if name in GH_SENDS:
                 sends = True
+                fields.append(value)
         elif not path:
             path = arg
         i += 1
-    return (method or ("POST" if sends else "")).upper(), path
+    return (method or ("POST" if sends else "")).upper(), path, fields
 
 
-def writes_a_line(path):
-    """Whether a forge path is one that puts work onto a line.
+# What a written instruction to the query endpoint says when it changes something
+# rather than merely asking. The path says nothing at all there.
+MUTATION = "mutation"
 
-    Three of them do, and they are three ways to the same place: the call that
-    lands a waiting piece of work, the one that folds a line into another with no
-    waiting piece at all, and the one that points a named line at any commit.
+
+def writes_a_line(path, fields=()):
+    """Whether a forge call is one that puts work onto a line.
+
+    Five of them are, and every one is another way to the same place: the call
+    that lands a waiting piece of work, the one that folds a line into another
+    with no waiting piece at all, the one that points a named line at any commit,
+    the one that writes a file straight onto a named line, and the single query
+    endpoint — which carries the instruction as a field and spells nothing in its
+    path, so it is the fields that are read there.
     """
     parts = path.split("?")[0].strip("/").split("/")
     if len(parts) >= 3 and parts[-1] == "merge" and parts[-3] == "pulls":
         return True
     if parts and parts[-1] == "merges":
         return True
+    if "contents" in parts:
+        return True
+    if parts and parts[-1] == "graphql":
+        return any(MUTATION in (value or "") for value in fields)
     return "git" in parts and "refs" in parts
 
 
@@ -670,8 +689,8 @@ def forge_merge(argv):
         return True
     if argv[1:2] != ["api"]:
         return False
-    method, path = api_call(argv[2:])
-    return writes_a_line(path) and method not in GH_READS
+    method, path, fields = api_call(argv[2:])
+    return writes_a_line(path, fields) and method not in GH_READS
 
 
 def common_dir(where):
@@ -772,7 +791,7 @@ def routes(cmd, home):
     single line of shell, and so is changing into somebody else's checkout and
     pushing it. Reading only where the shell started lets both straight through.
     """
-    at, made, cwd, been = {}, [], home, []
+    at, made, cwd, been, standing = {}, [], home, [], {}
     todo, read = bc.segments(cmd), 0
 
     def line_of(where):
@@ -797,6 +816,18 @@ def routes(cmd, home):
         # What a substitution holds runs too, wherever on the line it stands.
         todo = bc.grown_in(seg) + todo
         put, argv = bc.plain(bc.words(seg))
+        if argv[:1] == ["export"]:
+            for word in argv[1:]:
+                name, eq, value = word.partition("=")
+                if eq:
+                    put[name] = value
+            argv = []
+        if not argv and put:
+            # A setting made on a command of its own stands for every command
+            # after it on the line, and two of them aim git at another checkout.
+            standing.update(put)
+            continue
+        put = dict(standing, **put)
         script = bc.handed_on(argv)
         if script is not None:
             # What a shell is handed is a command line, and is read as one.
@@ -860,7 +891,7 @@ def routes(cmd, home):
                      for line in remade_by(verb, rest, where)]
             stand(where, moved_to(verb, rest, where) or line_of(where))
         elif verb in WRITERS:
-            if names_its_target(verb, rest) and unknowable(seg):
+            if names_its_target(verb, rest) and (unknowable(seg) or bc.fed(seg)):
                 # A name the shell works out as it runs is a name nothing here can
                 # read. It is refused for being unreadable, not for being every
                 # line — the two want different things said back.
