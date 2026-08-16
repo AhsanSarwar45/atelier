@@ -326,6 +326,7 @@ TAKES_ARG = {
     "am": ("--patch-format", "--exclude", "--include", "--directory",
            "-p", "--whitespace"),
     "update-ref": ("-m",),
+    "worktree": ("--reason",),
 }
 
 
@@ -532,6 +533,23 @@ def remade_by(verb, rest, where):
     return [args[0]] if args and is_branch(args[0], where) else []
 
 
+def added_tree(rest, where):
+    """The second checkout a `worktree add` makes, and the line it will stand on.
+
+    Named right here, which is the only place it can be read: the directory does
+    not exist until the command runs. With no line named, git makes one called
+    after the directory.
+    """
+    args = positionals(rest[1:], "worktree")
+    if not args:
+        return None
+    path = under(where, args[0])
+    fresh = next((rest[i + 1] for i, a in enumerate(rest)
+                  if a in ("-b", "-B") and i + 1 < len(rest)), "")
+    return path, (fresh or (args[1] if len(args) > 1
+                            else os.path.basename(path.rstrip("/"))))
+
+
 def rebase_target(rest):
     """The line a rebase rewrites when it names one, else "" for the one stood on.
 
@@ -682,6 +700,46 @@ def nested_repository(where, root):
     return bool(mine and theirs and mine != theirs)
 
 
+def repo_named(argv):
+    """The forge repository this command acts on, as owner/name, or "" for none.
+
+    The everyday spelling names it with a switch, the raw call carries it in the
+    path — and either way it may be a repository this checkout is not.
+    """
+    if argv[1:3] == ["pr", "merge"]:
+        rest = argv[3:]
+        for i, arg in enumerate(rest):
+            name, eq, value = arg.partition("=")
+            if name in ("-R", "--repo"):
+                if not eq and i + 1 < len(rest):
+                    value = rest[i + 1]
+                return value
+        return ""
+    parts = api_call(argv[2:])[1].split("?")[0].strip("/").split("/")
+    if "repos" in parts:
+        at = parts.index("repos")
+        if len(parts) > at + 2:
+            return "/".join(parts[at + 1:at + 3])
+    return ""
+
+
+def repo_here(where):
+    """The forge repository this checkout sends to, as owner/name, or ""."""
+    try:
+        run = subprocess.run(["git", "remote", "get-url", "origin"], cwd=where,
+                             capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except Exception:
+        return ""
+    url = (run.stdout or "").strip()
+    if not url:
+        return ""
+    url = url.split("//")[-1].split(":")[-1]
+    if url.endswith(".git"):
+        url = url[:-4]
+    parts = url.strip("/").split("/")
+    return "/".join(parts[-2:]) if len(parts) >= 2 else ""
+
+
 def protected_by(where):
     """The lines the project holding this directory says an agent may not write to."""
     try:
@@ -715,7 +773,11 @@ def routes(cmd, home):
         # being stood on before the command moved.
         tree = tree_of(where)
         if tree not in at:
-            at[tree] = standing_on(where)
+            # A directory that is no checkout — most often one this very line is
+            # about to make — has a line nobody here can name, and reading that
+            # as "writes to nothing" lets everything aimed at it straight past.
+            at[tree] = standing_on(where) or (
+                None if common_dir(where) else UNREADABLE)
         return at[tree]
 
     def stand(where, line):
@@ -723,6 +785,8 @@ def routes(cmd, home):
 
     while todo and read < READ_CAP:
         seg, todo, read = todo[0], todo[1:], read + 1
+        # What a substitution holds runs too, wherever on the line it stands.
+        todo = bc.grown_in(seg) + todo
         put, argv = bc.plain(bc.words(seg))
         script = bc.handed_on(argv)
         if script is not None:
@@ -735,17 +799,33 @@ def routes(cmd, home):
             cwd = under(cwd, argv[1]) if len(argv) > 1 else home
             continue
         if forge_merge(argv):
-            made.append(("gh", cwd, None, argv))
+            made.append(("gh", cwd, argv, argv))
             continue
         call = git_call(argv, cwd)
         if not call:
             continue
+
         for name, resolve in POINTERS:
             if put.get(name):
                 call = (resolve(under(cwd, put[name])),) + call[1:]
                 break
         where, verb, rest = call
         if passive(verb, rest):
+            continue
+        if verb == "worktree" and rest[:1] == ["add"]:
+            # The second checkout does not exist until this runs, so asking git
+            # there answers nothing — but the line it will stand on is named
+            # right here, and what is committed in it next belongs to that line.
+            made_tree = added_tree(rest, where)
+            if made_tree:
+                stand(made_tree[0], made_tree[1])
+            continue
+        if verb == "symbolic-ref":
+            # Repointing the position by hand is stepping onto a line, spelled
+            # without either of the words that usually say so.
+            args = positionals(rest, verb)
+            if len(args) > 1 and args[0] in HERE_NAMES:
+                stand(where, line_named(args[1], line_of(where)))
             continue
         if verb in MOVE:
             if unknowable(seg):
@@ -790,6 +870,12 @@ def main():
             # Which line a waiting piece of work would land on is the forge's
             # answer, not this machine's, and asking costs a network call on every
             # command. A project that protects anything protects this.
+            named = repo_named(line)
+            if named and named.lower() != repo_here(where).lower():
+                # A repository this checkout is not. Nothing here declares for
+                # it, and the permission belongs to what is being written to —
+                # which is the whole of what this change moved.
+                guarded = frozenset(project.DEFAULT_PROTECTED)
             if guarded:
                 deny(refusal("The line a waiting piece of work lands on", "it", where))
                 return

@@ -257,7 +257,7 @@ def plain(argv):
             argv = argv[1:]
         elif head in WRAPPERS:
             argv, carried = argv[1:], True
-        elif carried and os.path.basename(head) not in ("git", "gh") + SHELLS:
+        elif carried and os.path.basename(head) not in ("git", "gh", "eval") + SHELLS:
             argv = argv[1:]
         else:
             break
@@ -269,9 +269,15 @@ def handed_on(argv):
 
     The switch is read out of a bundle rather than matched whole: `sh -euc …` and
     `bash -lc …` are the everyday spellings of what `sh -c` spells long-hand, and
-    a shell whose switches are bundled runs the same command.
+    a shell whose switches are bundled runs the same command. `eval` is the same
+    thing without a shell in front of it: what it is handed is a command line,
+    however many words it is typed in.
     """
-    if not argv or os.path.basename(argv[0]) not in SHELLS:
+    if not argv:
+        return None
+    if os.path.basename(argv[0]) == "eval":
+        return " ".join(argv[1:]) or None
+    if os.path.basename(argv[0]) not in SHELLS:
         return None
     for i, arg in enumerate(argv[1:], 1):
         if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:] \
@@ -311,6 +317,35 @@ def _unkeyed(seg):
             return seg
 
 
+def grown_in(cmd):
+    """Every command line written as a substitution inside this one.
+
+    A substitution RUNS what is inside it, wherever it stands: `$(git push origin
+    main)` pushes, and so does `echo $(git push origin main)`. The reader keeps a
+    substitution as one word so the count of arguments stays right, which is
+    exactly what would leave the command inside it read by nobody.
+    """
+    out, i = [], 0
+    while i < len(cmd):
+        if cmd[i:i + 2] == "$(":
+            depth, j = 1, i + 2
+            while j < len(cmd) and depth:
+                depth += 1 if cmd[j] == "(" else (-1 if cmd[j] == ")" else 0)
+                j += 1
+            out.append(cmd[i + 2:j - 1] if not depth else cmd[i + 2:j])
+            i = j
+            continue
+        if cmd[i] == "`":
+            j = cmd.find("`", i + 1)
+            if j < 0:
+                break
+            out.append(cmd[i + 1:j])
+            i = j + 1
+            continue
+        i += 1
+    return [t for t in (part.strip() for part in out) if t]
+
+
 # How deep a shell handed to a shell is followed. Each hop is a real spelling;
 # past a handful it is somebody testing the reader rather than running work.
 HANDS = 8
@@ -329,6 +364,9 @@ def unshelled(cmd, depth=0):
         script = handed_on(plain(words(seg))[1]) if depth < HANDS else None
         out.append(unshelled(script, depth + 1) if script is not None
                    else _unkeyed(seg))
+        if script is None and depth < HANDS:
+            # What a substitution holds runs too, wherever on the line it stands.
+            out += [unshelled(inside, depth + 1) for inside in grown_in(seg)]
     return "\n".join(out)
 
 

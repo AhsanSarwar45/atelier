@@ -171,6 +171,29 @@ FAULTS = [
                          "    if False:")),
     ("a rule about one command runs to the end of the next", CLOSE,
      lambda s: s.replace(r"[^|;&\n]*", r"[^|;&]*")),
+    ("what a substitution holds is read by nobody", COMMON,
+     lambda s: s.replace("    out, i = [], 0\n    while i < len(cmd):\n"
+                         '        if cmd[i:i + 2] == "$(":',
+                         "    out, i = [], 0\n    while False:\n"
+                         '        if cmd[i:i + 2] == "$(":')),
+    ("what eval is handed is not a command line", COMMON,
+     lambda s: s.replace('    if os.path.basename(argv[0]) == "eval":\n'
+                         '        return " ".join(argv[1:]) or None\n', "")),
+    ("a checkout that cannot be asked writes to nothing", GATE,
+     lambda s: s.replace("            at[tree] = standing_on(where) or (\n"
+                         "                None if common_dir(where) else UNREADABLE)",
+                         "            at[tree] = standing_on(where)")),
+    ("the line a second checkout will stand on is not named here", GATE,
+     lambda s: s.replace("            made_tree = added_tree(rest, where)\n"
+                         "            if made_tree:\n"
+                         "                stand(made_tree[0], made_tree[1])\n", "")),
+    ("repointing the position by hand is not stepping onto a line", GATE,
+     lambda s: s.replace('        if verb == "symbolic-ref":', "        if False:")),
+    ("a forge command is judged where the shell stands", GATE,
+     lambda s: s.replace("            named = repo_named(line)\n"
+                         "            if named and named.lower() != repo_here(where).lower():\n",
+                         "            named = repo_named(line)\n"
+                         "            if False:\n")),
     ("a switch that may take a value always takes one", GATE,
      lambda s: s.replace('    "push": ("-o", "--push-option", "--receive-pack", "--exec", "--repo"),',
                          '    "push": ("-o", "--push-option", "--receive-pack", "--exec", "--repo",\n'

@@ -507,13 +507,13 @@ ROUTES = (
     ("REFUSED", "git fetch origin +HEAD:main"),
     # The raw call that the everyday pull-request merge is built on lands the same
     # piece of work on the same line; asking whether it is merged does not.
-    ("REFUSED", "gh api --method PUT repos/o/r/pulls/412/merge"),
-    ("REFUSED", "gh api -X PUT repos/o/r/pulls/412/merge"),
-    ("REFUSED", "gh api -XPUT repos/o/r/pulls/412/merge"),
-    ("REFUSED", "gh api repos/o/r/pulls/412/merge -f merge_method=squash"),
-    ("ALLOWED", "gh api repos/o/r/pulls/412/merge"),
-    ("ALLOWED", "gh api repos/o/r/pulls/412"),
-    ("ALLOWED", "gh api --method GET repos/o/r/pulls"),
+    ("REFUSED", "gh api --method PUT repos/scratch/own/pulls/412/merge"),
+    ("REFUSED", "gh api -X PUT repos/scratch/own/pulls/412/merge"),
+    ("REFUSED", "gh api -XPUT repos/scratch/own/pulls/412/merge"),
+    ("REFUSED", "gh api repos/scratch/own/pulls/412/merge -f merge_method=squash"),
+    ("ALLOWED", "gh api repos/scratch/own/pulls/412/merge"),
+    ("ALLOWED", "gh api repos/scratch/own/pulls/412"),
+    ("ALLOWED", "gh api --method GET repos/scratch/own/pulls"),
     # A line worked out by the shell is a line nothing here can read, in every
     # spelling of working it out — the plain variable included. Working it out on
     # one command and pushing it on the next is the two-step form of the same.
@@ -575,6 +575,25 @@ ROUTES = (
     # long is the same rewrite, typed differently.
     ("REFUSED", "git switch --force-create main"),
     ("REFUSED", "git checkout --orphan main && git commit -m x"),
+    # A substitution RUNS what is inside it, wherever on the line it stands, and
+    # so does eval. Kept as one opaque word — which is what keeps the argument
+    # count right — the command inside is read by nobody.
+    ("REFUSED", "$(git push origin main)"),
+    ("REFUSED", "`git push origin main`"),
+    ('REFUSED', 'eval "git push origin main"'),
+    ("REFUSED", "eval git push origin main"),
+    ("REFUSED", "echo $(git push origin main)"),
+    ('REFUSED', 'nice -n 10 eval "git push origin main"'),
+    # The second checkout does not exist until the first half of the line runs,
+    # and the line it will stand on is named right there.
+    ("REFUSED", "git worktree add sub/copy main && git -C sub/copy commit -m x"),
+    ("REFUSED", "git worktree add -b hot sub/copy && git -C sub/copy push origin main"),
+    ("ALLOWED", "git worktree add sub/copy feature/mine && git -C sub/copy commit -m x"),
+    # A directory that is no checkout at all has a line nobody here can name.
+    ("REFUSED", "git -C sub/nowhere-at-all commit -m x"),
+    # Repointing the position by hand is stepping onto a line.
+    ("REFUSED", "git symbolic-ref HEAD refs/heads/main && git commit -m x"),
+    ("ALLOWED", "git symbolic-ref HEAD refs/heads/feature/other && git commit -m x"),
     # A command written behind one of the shell's own words is still that command.
     ("REFUSED", "if true; then git push origin main; fi"),
     ("REFUSED", "for b in main; do git push origin $b; done"),
@@ -670,6 +689,18 @@ ELSEWHERE = (
     ("REFUSED", "GIT_WORK_TREE={other} git commit -m fix"),
 )
 
+# A forge command names the repository it acts on, and that repository may not be
+# this one. The permission belongs to what is being written to — which is the
+# whole of what this change moved for every git route.
+FORGE = (
+    ("REFUSED", "gh pr merge --repo other/thing 412 --squash"),
+    ("REFUSED", "gh pr merge -R other/thing 412"),
+    ("REFUSED", "gh api --method PUT repos/other/thing/pulls/412/merge"),
+    ("ALLOWED", "gh pr merge --repo scratch/own 412 --squash"),
+    ("ALLOWED", "gh api --method PUT repos/scratch/own/pulls/412/merge"),
+    ("ALLOWED", "gh pr merge 412 --squash"),
+)
+
 # Somebody else's repository, checked out INSIDE a project whose agents land
 # their own work — a vendored dependency, a submodule, a nested clone. The
 # declaration is found by walking up, so without a check it is answered for by
@@ -712,6 +743,7 @@ def scratch_project(tmp, says=None, on="feature/mine", remote=()):
     which is what a shipping line looks like in a fresh clone before anybody has
     stepped onto it."""
     for args in (["init", "-q", "-b", "main", "."],
+                 ["remote", "add", "origin", "https://github.com/scratch/own.git"],
                  ["-c", "user.email=t@t", "-c", "user.name=t",
                   "commit", "-q", "--allow-empty", "-m", "base"],
                  ["branch", "staging"], ["checkout", "-q", "-B", on]):
@@ -1558,6 +1590,15 @@ def main():
         "allowed to write to an undeclared checkout's shipping line: %s" \
         % ", ".join(through)
 
+    # A forge command is judged by the repository it names. A session in one of
+    # the manager's own projects must not be able to land a waiting piece of work
+    # in the company's, which is the one thing this whole job is about.
+    forge = merge_routes('name = "scratch"\nagent_merges = true\n', rows=FORGE)
+    elsewhere = ["%s: %s, wanted %s" % (cmd, forge[cmd], want)
+                 for want, cmd in FORGE if forge[cmd] != want]
+    assert not elsewhere, "a forge command was judged by the checkout the shell " \
+        "stands in rather than the repository it names:\n  %s" % "\n  ".join(elsewhere)
+
     # Somebody else's repository checked out inside a project that lands its own
     # work. The declaration is found by walking up, so the enclosing project would
     # otherwise hand its permission to a repository that never asked for it — and
@@ -1864,6 +1905,16 @@ def main():
         assert "waiting on the manager" in said, \
             "a board command carried by %r walked past the close rule: %s" \
             % (carried, said or "allowed")
+
+    # And a commit written as a substitution or handed to eval is a commit. The
+    # pattern this rule replaced caught the bracket form; the shared reading has
+    # to catch it too, or the change traded one hole for another.
+    for hidden in ('$(git commit -m "x")', '`git commit -m "x"`',
+                   'eval "git commit -m x"', 'echo $(git commit -m "x")'):
+        said = refusal(hidden, ordinary)
+        assert "name the card" in said, \
+            "a commit written as %r walked past the rule that a commit names " \
+            "its card: %s" % (hidden, said or "allowed")
 
     # A commit whose message is in a file names its card there. Read only off the
     # line, every such commit is refused with no way through — the gate stopping
