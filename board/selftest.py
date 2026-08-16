@@ -411,7 +411,9 @@ ROUTES = (
     ("REFUSED", "gh pr merge 412 --squash"),
     # A card's own words about a fold are words. A bracket in prose reads as a
     # command separator, which is how a note describing these once refused itself.
-    ("ALLOWED", 'bd close x --reason="refused (git merge staging)"'),
+    # The quoted route is one that would be refused if it were read as a command,
+    # or the case would pass whether the words are read as words or not.
+    ("ALLOWED", 'bd close x --reason="refused (git push origin main)"'),
 )
 
 
