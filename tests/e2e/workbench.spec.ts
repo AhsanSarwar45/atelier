@@ -432,4 +432,72 @@ test.describe('workbench', () => {
       .toBe(0);
     await page.screenshot({ path: join(SHOTS, 'restore-all.png'), fullPage: false });
   });
+
+  /**
+   * The tray and the strip, across projects.
+   *
+   * Two projects with a real turn running in each, seen from the project list —
+   * a screen belonging to neither of them, which is the whole point: what is
+   * waiting on the owner follows him everywhere rather than living inside one
+   * chat.
+   */
+  test('tray counts what waits on you across projects, and the strip shows what runs', async ({ page, request }) => {
+    test.setTimeout(600_000);
+    mkdirSync(SHOTS, { recursive: true });
+
+    const started: { id: string; projectId: string }[] = [];
+    for (const name of ['tray-a', 'tray-b']) {
+      const dir = fixtureFor(name);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'notes.txt'), 'first line\n');
+      const project = await projectAt(request, dir);
+      // Permission mode 'default' on purpose: the edit in PROMPT then has to
+      // ask, which is what the tray is a list of.
+      const res = await request.post('/api/workbench/command', {
+        data: { type: 'session.start', projectId: project.id, projectPath: dir, brand: 'claude' },
+      });
+      const session = (await res.json()) as { id: string };
+      started.push({ id: session.id, projectId: project.id });
+      await request.post('/api/workbench/command', {
+        data: { type: 'prompt.send', sessionId: session.id, text: PROMPT },
+      });
+    }
+
+    // The project list — neither project's own screen.
+    await page.goto('/');
+
+    // While the two turns run, the strip names them both.
+    const strip = page.getByTestId('glance-strip');
+    await expect(strip).toBeVisible({ timeout: 120_000 });
+    await expect
+      .poll(async () => page.getByTestId('glance-row').count(), { timeout: 120_000 })
+      .toBeGreaterThanOrEqual(2);
+    await expect(page.getByTestId('glance-activity').first()).not.toBeEmpty();
+    await page.screenshot({ path: join(SHOTS, 'glance.png'), fullPage: false });
+
+    // Both turns reach their edit and stop for permission: the badge reads two.
+    const badge = page.getByTestId('tray-badge');
+    await expect(badge).toHaveAttribute('data-count', '2', { timeout: 300_000 });
+
+    await badge.click();
+    const rows = page.getByTestId('tray-row');
+    await expect(rows).toHaveCount(2);
+    for (const s of started) {
+      const row = page.locator(`[data-testid="tray-row"][data-session-id="${s.id}"]`);
+      await expect(row.getByTestId('tray-project')).not.toBeEmpty();
+      await expect(row.getByTestId('tray-waiting-for')).toContainText(/\S/);
+    }
+    await page.screenshot({ path: join(SHOTS, 'tray.png'), fullPage: false });
+
+    // A row lands on its own chat, with the ask on screen.
+    await page.locator(`[data-testid="tray-row"][data-session-id="${started[0]!.id}"]`).click();
+    await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', started[0]!.id, {
+      timeout: 60_000,
+    });
+    await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.screenshot({ path: join(SHOTS, 'tray-landed.png'), fullPage: false });
+  });
 });

@@ -20,6 +20,15 @@ export class Sessions {
   private drivers = new Map<string, Driver>();
   private linkers = new Map<string, Linker>();
   private subs = new Map<string, Set<Subscriber>>();
+  /** Listeners on every session at once — the app's single global stream. */
+  private watchers = new Set<Subscriber>();
+  /**
+   * The agent's own words for what each session is doing. Held here rather than
+   * in the store: it is true only while a driver is attached, and a screen
+   * opened later would otherwise be told a session is "Answering" when nothing
+   * has been running since the last restart.
+   */
+  private labels = new Map<string, string>();
   // Declared, not a parameter property: Node's strip-only TypeScript mode
   // rejects `constructor(private store: Store)`.
   private store: Store;
@@ -171,17 +180,35 @@ export class Sessions {
 
     if (full.type === 'session.state') {
       this.store.updateSession(sessionId, { state: full.state as SessionState });
+      this.labels.set(sessionId, full.label);
     } else if (full.type === 'session.started') {
       this.store.updateSession(sessionId, { externalId: full.externalId, model: full.model });
     }
 
     for (const sub of this.subs.get(sessionId) ?? []) sub(full);
+    for (const sub of this.watchers) sub(full);
   }
 
   subscribe(sessionId: string, fn: Subscriber): () => void {
     if (!this.subs.has(sessionId)) this.subs.set(sessionId, new Set());
     this.subs.get(sessionId)!.add(fn);
     return () => this.subs.get(sessionId)?.delete(fn);
+  }
+
+  /**
+   * Every session's events, for the one stream the whole app watches: the
+   * waiting-on-you tray, the glance strip and the live dot on a board card all
+   * read from it, so the browser holds one connection rather than one per
+   * component (docs/agent-workbench.md §8.6).
+   */
+  watch(fn: Subscriber): () => void {
+    this.watchers.add(fn);
+    return () => this.watchers.delete(fn);
+  }
+
+  /** What each attached session last said it was doing. */
+  activity(sessionId: string): string {
+    return this.labels.get(sessionId) ?? '';
   }
 
   replay(sessionId: string, since: number): WbpEvent[] {

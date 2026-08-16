@@ -135,6 +135,18 @@ export interface RestoreRow {
   cwdHint: string | null;
 }
 
+/**
+ * One frame of the app-wide stream (`GET /api/workbench/watch`).
+ *
+ * A snapshot first, so a browser that connects in the middle of the day knows
+ * every session's state without replaying its whole transcript, then the events
+ * themselves. One envelope rather than named SSE events, so a reader needs one
+ * handler (docs/agent-workbench.md §8.6).
+ */
+export type WatchFrame =
+  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string })[] }
+  | { kind: 'event'; event: WbpEvent };
+
 /** A chat that touched a card, as the card's own side of the join lists it. */
 export interface LinkedChat {
   sessionId: string;

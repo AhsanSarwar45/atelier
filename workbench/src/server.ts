@@ -66,6 +66,35 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: stri
   req.on('error', done);
 }
 
+/**
+ * Every session at once: a snapshot, then the live tail. The tray, the glance
+ * strip and the board's live dots all read this one stream, so a browser holds
+ * one connection however many of them are on screen.
+ */
+function streamAll(req: IncomingMessage, res: ServerResponse): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  });
+
+  const write = (frame: unknown) => res.write(`data: ${JSON.stringify(frame)}\n\n`);
+  write({
+    kind: 'snapshot',
+    sessions: store.listSessions().map((s) => ({ ...s, activity: sessions.activity(s.id) })),
+  });
+  const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
+
+  const beat = setInterval(() => res.write(': keep-alive\n\n'), 30_000);
+  const done = () => {
+    clearInterval(beat);
+    unsubscribe();
+  };
+  req.on('close', done);
+  req.on('error', done);
+}
+
 async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void> {
   switch (cmd.type) {
     case 'session.start': {
@@ -108,6 +137,8 @@ const server = createServer((req, res) => {
         if (!sessionId) return json(res, 400, { error: 'session is required' });
         const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
         streamEvents(req, res, sessionId, Number.isFinite(since) ? since : 0);
+      } else if (path === '/watch' && req.method === 'GET') {
+        streamAll(req, res);
       } else if (path.startsWith('/links/bead/') && req.method === 'GET') {
         // The board decides WHICH chats are listed — it is the record. Our own
         // rows only supply the title and the time, and a chat the board has
