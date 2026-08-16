@@ -212,7 +212,8 @@ def main():
     sid = data.get("session_id")
     state = bc.load(sid)
     root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
-    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
+    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing() \
+            or bc.waived(sid):
         return
     name = bc.actor(sid, data.get("cwd"))
     since = state.get("last_stop") or 0

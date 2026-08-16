@@ -115,6 +115,32 @@ def reviewing():
     return switch("REVIEWER")
 
 
+# Seconds a waiver stands before the board comes back on by itself. A waiver is
+# given for one piece of work, and a session still alive this long after is on
+# different work than the one he waived.
+WAIVER_KEEP = 4 * 3600
+
+
+def waiver_path(session_id):
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "nosession")
+    return os.path.join(STATE_DIR, "waived-" + safe + ".json")
+
+
+def waived(session_id):
+    """What the manager said when he took the board off this session, or None.
+
+    One session's and never the machine's: keyed on the session id, so a waiver
+    given here cannot strip the refusals off a session he never spoke to.
+    `board/waive` writes it and is the only thing that may.
+    """
+    try:
+        with open(waiver_path(session_id)) as fh:
+            row = json.load(fh)
+    except Exception:
+        return None
+    return None if now() - (row.get("t") or 0) > WAIVER_KEEP else row
+
+
 # Where a job waits for the manager's own signature. A custom board status rather
 # than a label, because a label can be taken off by whoever put it on.
 MANAGER_REVIEW = "manager_review"

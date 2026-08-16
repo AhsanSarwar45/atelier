@@ -623,7 +623,8 @@ def main():
     data = json.load(sys.stdin)
     cmd = bc.said(data)
     root = bc.board_root(bc.where(data))
-    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
+    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing() \
+            or bc.waived(data.get("session_id")):
         return
     sections.use(root)
     # Every card the board of THIS checkout answers for. A commit is judged by the

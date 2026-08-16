@@ -390,6 +390,26 @@ def stopping(claims, closed, held, asked=True):
     return not out.getvalue().strip()
 
 
+def waiving(sid, age=0):
+    """What the stop gate says to a turn it would otherwise send back to work,
+    run under a waiver `age` seconds old written against session `sid`.
+
+    The gate is always judging session `selftest`, so `sid` is what decides
+    whether the waiver is this session's or another's. A state directory of its
+    own: the real one is read by every live session on this machine.
+    """
+    tmp = tempfile.mkdtemp(prefix="board-waiver-")
+    was, gate.bc.STATE_DIR = gate.bc.STATE_DIR, tmp
+    try:
+        with open(gate.bc.waiver_path(sid), "w") as fh:
+            json.dump({"words": "no beads required for this",
+                       "t": T + 50 - age, "session": sid}, fh)
+        return carrying_on(["c"])[0]
+    finally:
+        gate.bc.STATE_DIR = was
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def carrying_on(held, closed=(), goals=(), asked=False, helper=False, pushes=0,
                 again=False):
     """What the stop gate says to a turn ending with `held` still claimed.
@@ -1049,6 +1069,22 @@ def main():
     print("ok: a turn ending with the job still running is sent back to work, a "
           "question or a running helper or a job waiting on someone else ends it, "
           "and the gate stands aside at its own ceiling rather than being overruled")
+
+    # His waiver, and the two things that stop it being a way round the board:
+    # it is the session's own or it is nobody's, and it does not outlive the piece
+    # of work he gave it for.
+    assert carrying_on(["c"])[0], "the case is proving nothing: this turn ends " \
+        "on its own without a waiver"
+    assert waiving("selftest") == "", \
+        "the board refused a turn the manager had waived: %r" % waiving("selftest")
+    assert waiving("another-session"), \
+        "a waiver written against one session took the board off a different one"
+    assert waiving("selftest", age=gate.bc.WAIVER_KEEP + 1), \
+        "a waiver still stood after it had expired, so one he gave for a one-line " \
+        "change would carry a whole session"
+
+    print("ok: the manager's waiver takes the board off the session he gave it "
+          "to, and off no other session and no later work")
 
     refused = reporting(PUT_DOWN)
     assert refused, "a fault the reply named and put down ended the turn with " \
