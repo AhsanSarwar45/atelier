@@ -38,7 +38,7 @@ FAULTS = [
      lambda s: s.replace("        if self.agent_merges:\n"
                          "            return frozenset()\n", "")),
     ("a command quoted in a card note is read as a command", GATE,
-     lambda s: s.replace("        elif ch in \"'\\\"\":", "        elif False:")),
+     lambda s: s.replace('        elif ch in "\'\\"`":', "        elif False:")),
     ("a line named in quotes is read as no line at all", GATE,
      lambda s: s.replace("        return shlex.split(seg)", "        return seg.split()")),
     ("a command sent into another checkout is judged where the session began",
@@ -64,7 +64,7 @@ FAULTS = [
      lambda s: s.replace("    return here if ref in HERE_NAMES else ref",
                          "    return ref")),
     ("pointing a line at your own work is not writing to it", GATE,
-     lambda s: s.replace(',\n           "branch", "reset", "update-ref")', ")")),
+     lambda s: s.replace('"pull", "branch", "reset", "update-ref")', '"pull")')),
     ("stepping onto a line by force does not reset it", GATE,
      lambda s: s.replace('    if not any(a in ("-B", "-C") for a in rest):\n'
                          "        return []\n", "    return []\n")),
