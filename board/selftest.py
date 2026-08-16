@@ -538,6 +538,7 @@ ELSEWHERE = (
     # A checkout is also named by its working tree and by its git directory, in a
     # switch or in a setting put in front of the command.
     ("REFUSED", "git --git-dir={other}/.git --work-tree={other} push origin main"),
+    ("REFUSED", "git --git-dir={other}/.git push origin main"),
     ("REFUSED", "GIT_DIR={other}/.git git push origin main"),
     ("REFUSED", "GIT_WORK_TREE={other} git commit -m fix"),
 )

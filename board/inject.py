@@ -42,8 +42,8 @@ FAULTS = [
     ("a line named in quotes is read as no line at all", GATE,
      lambda s: s.replace("        return shlex.split(seg)", "        return seg.split()")),
     ("a command sent into another checkout is judged where the session began",
-     GATE, lambda s: s.replace("                where = under(where, argv[i + 1])",
-                               "                pass")),
+     GATE, lambda s: s.replace('            if name == "-C" or name == "--work-tree":\n'
+                               "                where = under(where, value)\n", "")),
     ("one mid-fold switch stands the whole line down", GATE,
      lambda s: s.replace("        if any(a in PASSIVE for a in rest):",
                          "        if any(p in cmd for p in PASSIVE):")),
