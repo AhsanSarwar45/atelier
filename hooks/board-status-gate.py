@@ -36,14 +36,18 @@ START = r"(?:^|[;&|(]\s*|^\s*)"
 # spelling through.
 WRAP = r"(?:(?:%s)(?:\s+(?!(?:bd|git|rtk)\b)\S+)*\s+|\\)*" % "|".join(bc.WRAPPERS)
 VERB = START + WRAP + r"bd\s+(?:--?\S+(?:[= ]\S+)?\s+)*"
-CLOSE = re.compile(VERB + r"(?:close\b|update\b[^|;&]*(?:-s|--status)[= ]closed\b)", re.M)
-CLAIM = re.compile(VERB + r"update\b[^|;&]*--claim\b", re.M)
+# The newline belongs in these bounds as much as the separators do: unwrapping a
+# shell puts each command on a line of its own, so a pattern that ran to the next
+# `;` would otherwise run across two commands and judge a listing as a close.
+CLOSE = re.compile(VERB + r"(?:close\b|update\b[^|;&\n]*(?:-s|--status)[= ]closed\b)",
+                   re.M)
+CLAIM = re.compile(VERB + r"update\b[^|;&\n]*--claim\b", re.M)
 FORCE = re.compile(r"--force\b")
 COMMIT = re.compile(START + WRAP + r"(?:rtk\s+)?git\s+(?:-\S+\s+)*commit\b", re.M)
 AMEND = re.compile(r"--amend\b")
 CREATE = re.compile(VERB + r"(?:create|create-form|q|todo\s+add)\b", re.M)
 RESOLVE = re.compile(VERB + r"gate\s+resolve\b", re.M)
-RESTATUS = re.compile(VERB + r"(?:update\b[^|;&]*(?:-s|--status)[= ]|reopen\b)", re.M)
+RESTATUS = re.compile(VERB + r"(?:update\b[^|;&\n]*(?:-s|--status)[= ]|reopen\b)", re.M)
 REVIEWING = re.compile(r"(?:-s|--status)[= ]in_review\b")
 # Closing without a commit is legitimate only for cards that produce no code.
 NO_CODE = ("no-code", "find", "question", "decision")

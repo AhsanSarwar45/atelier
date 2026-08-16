@@ -57,3 +57,16 @@ if command -v bd >/dev/null 2>&1; then
   if [ "$_bd_exit" -ne 0 ]; then exit "$_bd_exit"; fi
 fi
 # --- END BEADS INTEGRATION v1.2.1 ---
+
+# Below the markers on purpose: beads rewrites everything between them on every
+# upgrade, and anything put inside would be silently gone.
+#
+# The machinery's own gate, and only when this commit changes what it guards.
+# A gate's refusals are held down by faults that have to turn a case red, and
+# nothing in here ran them: they stood while somebody remembered to type the
+# command (mch-mkp.55). Putting each fault back is a whole suite run apiece, so
+# it is asked for exactly when the source they patch is what is being committed.
+if git diff --cached --name-only | grep -qE '^(hooks/board-merge-gate\.py|hooks/board-status-gate\.py|hooks/board_common\.py|project\.py|board/selftest\.py|board/inject\.py)$'; then
+  echo "machinery: gate source changed — running the suite and every fault"
+  "$(git rev-parse --show-toplevel)/check" || exit 1
+fi

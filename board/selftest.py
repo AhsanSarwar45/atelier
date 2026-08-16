@@ -503,6 +503,24 @@ ROUTES = (
     ("ALLOWED", "gh api repos/o/r/pulls/412/merge"),
     ("ALLOWED", "gh api repos/o/r/pulls/412"),
     ("ALLOWED", "gh api --method GET repos/o/r/pulls"),
+    # A line worked out by the shell is a line nothing here can read, in every
+    # spelling of working it out — the plain variable included. Working it out on
+    # one command and pushing it on the next is the two-step form of the same.
+    ("REFUSED", "git push origin $BRANCH"),
+    ("REFUSED", "BRANCH=main && git push origin $BRANCH"),
+    ("REFUSED", "git push origin ${BRANCH}"),
+    ("REFUSED", "git push origin ${X:-main}"),
+    # A forced step does not only move: it points the line it lands on at where
+    # you were standing, so an unreadable name there is an unreadable write.
+    ('REFUSED', 'git checkout -B "$(printf main)"'),
+    ("REFUSED", "git checkout -B ${X:-main}"),
+    ("REFUSED", "git switch -C $LINE"),
+    # And a step onto a new line of its own is still a step onto a new line.
+    ("ALLOWED", "git checkout -b $NEW"),
+    # The brackets of a nested command belong to the command around them. Read as
+    # separators they cut this in three, and the piece carrying the verb is thrown
+    # away with them — so the push is never seen at all.
+    ("REFUSED", "git -C $(pwd)/sub push origin main"),
     # A line that abandons a fold and then writes to a shipping line is two
     # commands, and the first one's switch does not excuse the second.
     ("REFUSED", "git merge --abort && git push origin main"),
@@ -532,6 +550,11 @@ ON_MAIN = (
     ("REFUSED", "git reset --hard origin/main"),
     ("REFUSED", "git reset --soft HEAD~1"),
     ("ALLOWED", "git reset"),
+    # Naming the position you stand at moves the line nowhere: this throws the
+    # agent's own uncommitted work away and writes to nothing. The same rule the
+    # refspecs already read HEAD by.
+    ("ALLOWED", "git reset --hard HEAD"),
+    ("ALLOWED", "git reset --hard @"),
     # Naming a commit and a file takes the file out of what is staged and moves
     # no line at all, which is what the second name is there to say.
     ("ALLOWED", "git reset HEAD file.txt"),
@@ -1664,6 +1687,21 @@ def main():
                      ordinary)
     assert "name the card" not in quoted, \
         "a note quoting a commit was read as one: %s" % quoted
+
+    # Unwrapping a shell puts each command on a line of its own, and a rule that
+    # ran to the next separator would then run across two commands: a listing
+    # that merely mentions a status is judged as the status change beside it.
+    claimable = {"status": "open", "labels": ["area:board"], "issue_type": "task"}
+    listing = refusal("bd update tst-t1 --claim && bd list --status closed",
+                      claimable)
+    assert listing == "", \
+        "an ordinary listing was judged as a close because the claim beside it " \
+        "was on the same line: %s" % listing
+    still = refusal("bd update tst-t1 --claim && bd close tst-t1 --reason=done",
+                    waiting)
+    assert "waiting on the manager" in still, \
+        "a close on the second command of a line stopped being seen: %s" \
+        % (still or "allowed")
 
     print("ok: a commit names its card behind every word that merely carries it "
           "and behind a shell it is handed to, both gates read that list from one "

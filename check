@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# The machinery's own gate: its refusals, and whether they would notice their
+# own faults coming back.
+#
+# Every project that runs this board is held to `board/selftest.py` by its own
+# compile gate. Nothing held the machinery to the other half — putting each
+# fault back and watching a case go red — so thirty-odd faults stood only while
+# somebody remembered to type the command (mch-mkp.55). This is that command,
+# and `.beads/hooks/pre-commit` runs it whenever a commit touches the source the
+# faults are written against.
+set -euo pipefail
+
+cd "$(dirname "$(readlink -f "$0")")"
+
+# What is being judged is what a commit would contain — which, in front of a
+# commit, is what is staged and not the commit behind it. `git write-tree` names
+# that tree without touching the working tree or moving any ref.
+export TREE="${TREE:-$(git write-tree)}"
+
+python3 board/selftest.py
+
+# Each fault is a whole suite run in a copy of its own, so this is tens of
+# seconds rather than one. That is why the hook asks for it only when the gates
+# themselves are changing, and why another project's push runs the cheap half
+# (`--anchors`) instead.
+python3 board/inject.py

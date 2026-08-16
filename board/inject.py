@@ -31,6 +31,10 @@ import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.environ.get("SRC") or HERE
+# What gets exported. The last commit by default; a gate running before one is
+# made says which tree it means, because judging the commit behind the change
+# being committed proves nothing about the change.
+TREE = os.environ.get("TREE") or "HEAD"
 GATE = "hooks/board-merge-gate.py"
 COMMON = "hooks/board_common.py"
 CLOSE = "hooks/board-status-gate.py"
@@ -155,6 +159,17 @@ FAULTS = [
     ("asking whether a piece of work is merged is merging it", GATE,
      lambda s: s.replace("    return is_pull_merge(path) and method not in GH_READS",
                          "    return is_pull_merge(path)")),
+    ("a line named by a plain variable is a line spelled out", GATE,
+     lambda s: s.replace('GROWN = ("$", "`")', 'GROWN = ("$(", "`", "${")')),
+    ("a forced step onto an unreadable name rewrites nothing", GATE,
+     lambda s: s.replace('                if any(a in ("-B", "-C") for a in rest):\n'
+                         "                    made.append((verb, where, UNREADABLE, rest))\n",
+                         "")),
+    ("throwing your own work away moves the line you stand on", GATE,
+     lambda s: s.replace("    if all(a in HERE_NAMES for a in args):",
+                         "    if False:")),
+    ("a rule about one command runs to the end of the next", CLOSE,
+     lambda s: s.replace(r"[^|;&\n]*", r"[^|;&]*")),
     ("a fast-forward switch anywhere on the line answers for every fold", GATE,
      lambda s: s.replace("    if any(verb == \"merge\" and FF_ONLY not in rest "
                          "for verb, rest in folds):",
@@ -195,7 +210,7 @@ if "--anchors" in sys.argv:
 
 def export():
     tmp = tempfile.mkdtemp(prefix="inject-")
-    tar = subprocess.Popen(["git", "-C", SRC, "archive", "HEAD"],
+    tar = subprocess.Popen(["git", "-C", SRC, "archive", TREE],
                            stdout=subprocess.PIPE)
     subprocess.run(["tar", "-x", "-C", tmp], stdin=tar.stdout, check=True)
     tar.wait()
@@ -208,7 +223,7 @@ def run(tmp):
     return got.returncode, (got.stdout + got.stderr)
 
 
-head = subprocess.run(["git", "-C", SRC, "rev-parse", "--short", "HEAD"],
+head = subprocess.run(["git", "-C", SRC, "rev-parse", "--short", TREE],
                       capture_output=True, text=True).stdout.strip()
 print("source: %s at %s" % (SRC, head or "no commit"))
 

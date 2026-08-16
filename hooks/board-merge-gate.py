@@ -135,8 +135,11 @@ def deny(reason):
 
 
 # A value no reading of the text can settle, because a shell works it out at the
-# moment it runs. Anything carrying one names a line nobody here can name.
-GROWN = ("$(", "`", "${")
+# moment it runs. Anything carrying one names a line nobody here can name. The
+# bare dollar covers the plain variable as well as the braced and run-it forms:
+# working the line out on one command and pushing it on the next is the two-step
+# spelling of the very thing this refuses.
+GROWN = ("$", "`")
 
 
 def unknowable(seg):
@@ -381,6 +384,11 @@ def reset_targets(rest, here, where):
         return []
     if any(os.path.exists(os.path.join(where, a)) for a in args):
         return []
+    if all(a in HERE_NAMES for a in args):
+        # Naming the position you stand at moves the line nowhere. This throws
+        # the working tree away, which is the agent's own to throw away, and
+        # refusing it says the opposite of what it does.
+        return []
     if len(args) > 1 and not any(a in RESET_MODES for a in rest):
         return []
     return [here] if here else []
@@ -563,6 +571,13 @@ def routes(cmd, home):
             continue
         if verb in MOVE:
             if unknowable(seg):
+                # A forced step does not only move: it points the line it lands
+                # on at where you were standing. So a name nothing here can read
+                # is an unreadable WRITE, not merely an unreadable position —
+                # skipping the rest of the command hands back the same rewrite
+                # the spelled-out form is refused for.
+                if any(a in ("-B", "-C") for a in rest):
+                    made.append((verb, where, UNREADABLE, rest))
                 stand(where, UNREADABLE)
                 continue
             made += [(verb, where, line, rest) for line in remade_by(rest, where)]
