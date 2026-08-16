@@ -92,14 +92,16 @@ test.describe('shell', () => {
     await page.goto(`/project?id=${id}&tab=chat`);
     await expect(page.getByTestId('shell')).toBeVisible({ timeout: 30_000 });
 
-    // The case only says anything about a project big enough to be a problem.
+    // The case only says anything about a project with more chats than fit. The
+    // list draws a screenful and grows as it is pulled (docs/designs/app-shell.md
+    // §1.6), so what is counted is enough to overflow, not the whole project.
     await expect
       .poll(() => page.getByTestId('restore-row').count(), { timeout: 60_000 })
-      .toBeGreaterThan(300);
+      .toBeGreaterThan(20);
 
     const list = page.getByTestId('chat-list');
     const room = await list.evaluate((el) => ({ hidden: el.scrollHeight, shown: el.clientHeight }));
-    expect(room.hidden, 'a list this long has to overflow its pane').toBeGreaterThan(room.shown * 5);
+    expect(room.hidden, 'a list this long has to overflow its pane').toBeGreaterThan(room.shown * 1.5);
 
     const bars = page.locator('[data-shell-bar]');
     const before = await Promise.all([bars.first().boundingBox(), bars.last().boundingBox()]);
