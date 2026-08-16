@@ -36,7 +36,7 @@ GIT_TIMEOUT = 10
 # `update-ref` because pointing a line at your own work writes to it as surely as
 # folding into it does.
 WRITERS = ("merge", "rebase", "push", "commit", "cherry-pick", "revert", "am",
-           "branch", "reset", "update-ref")
+           "pull", "branch", "reset", "update-ref")
 MOVE = ("checkout", "switch")
 
 # The `branch` forms that move or destroy a line rather than list or make one,
@@ -128,16 +128,31 @@ def deny(reason):
 def segments(cmd):
     """Each command on the line, in the order the shell would run them.
 
-    Quoted stretches are stepped over rather than searched: a card note quoting a
-    fold is words, and a bracket in prose is not a separator.
+    Quoted stretches, escapes and nested commands are stepped over rather than
+    searched: a card note quoting a fold is words, a bracket in prose is not a
+    separator, and the brackets of a nested command belong to the command around
+    them. Reading any of those as a separator cuts a command in half and lets the
+    harmless-looking half stand for the whole.
     """
-    out, cur, quote = [], [], ""
-    for ch in cmd:
+    out, cur, quote, depth, i = [], [], "", 0, 0
+    while i < len(cmd):
+        ch = cmd[i]
+        if ch == "\\" and i + 1 < len(cmd) and quote != "'":
+            cur.append(cmd[i:i + 2])
+            i += 2
+            continue
         if quote:
             cur.append(ch)
             if ch == quote:
                 quote = ""
-        elif ch in "'\"":
+        elif depth:
+            cur.append(ch)
+            depth += 1 if ch == "(" else (-1 if ch == ")" else 0)
+        elif cmd[i:i + 2] == "$(":
+            cur.append("$(")
+            depth, i = 1, i + 2
+            continue
+        elif ch in "'\"`":
             quote = ch
             cur.append(ch)
         elif ch in ";&|()\n":
@@ -145,8 +160,25 @@ def segments(cmd):
             cur = []
         else:
             cur.append(ch)
+        i += 1
     out.append("".join(cur))
     return [s for s in (part.strip() for part in out) if s]
+
+
+# A value no reading of the text can settle, because a shell works it out at the
+# moment it runs. Anything carrying one names a line nobody here can name.
+GROWN = ("$(", "`", "${")
+
+
+def unknowable(seg):
+    """Whether this command's arguments are worked out as it runs."""
+    return any(mark in seg for mark in GROWN)
+
+
+# The commands that read their target out of their own arguments. Every other one
+# writes to whatever is being stood on, where a value the shell works out cannot
+# change the answer — and a commit message built from one is an ordinary command.
+NAMED_TARGET = ("push", "rebase", "branch", "update-ref")
 
 
 def words(seg):
@@ -284,7 +316,11 @@ def branch_targets(rest, here):
     if any(a in BRANCH_DELETES for a in rest):
         return [line_named(a, here) for a in args]
     if any(a in BRANCH_RENAMES for a in rest):
-        return [line_named(args[-1], here)]
+        # A rename writes to both ends: the new name is made and the old one stops
+        # existing. Given one name, the old one is the line being stood on — and
+        # renaming a shipping line away is deleting it by another word.
+        old = line_named(args[0], here) if len(args) > 1 else here
+        return [n for n in (old, line_named(args[-1], here)) if n]
     if any(a in BRANCH_FORCES for a in rest):
         return [line_named(args[0], here)]
     return []
@@ -293,9 +329,11 @@ def branch_targets(rest, here):
 def reset_targets(rest, here, where):
     """Whether a reset moves the line being stood on.
 
-    A reset naming paths only takes them out of what is staged. One naming a
-    commit moves the line, and discarding history on a protected line is a write
-    to it however gently it is spelled.
+    A reset naming paths only takes them out of what is staged, and it names a
+    commit as well as the paths — so a second name is what tells the two apart
+    where the switch does not. One naming a commit alone moves the line, and
+    discarding history on a protected line is a write to it however gently it is
+    spelled.
     """
     if "--" in rest:
         return []
@@ -303,7 +341,9 @@ def reset_targets(rest, here, where):
     if not args:
         # `git reset --hard` alone throws the working tree away and moves nothing.
         return []
-    if os.path.exists(os.path.join(where, args[0])):
+    if any(os.path.exists(os.path.join(where, a)) for a in args):
+        return []
+    if len(args) > 1 and not any(a in RESET_MODES for a in rest):
         return []
     return [here] if here else []
 
@@ -390,11 +430,19 @@ def routes(cmd, home):
         if any(a in PASSIVE for a in rest):
             continue
         if verb in MOVE:
+            if unknowable(seg):
+                at[where] = EVERY
+                continue
             made += [(verb, where, line) for line in remade_by(rest, where)]
             at[where] = moved_to(rest, where) or line_of(where)
         elif verb in WRITERS:
-            made += [(verb, where, line)
-                     for line in written_by(verb, rest, line_of(where), where)]
+            if verb in NAMED_TARGET and unknowable(seg):
+                # A name the shell works out as it runs is a name nothing here can
+                # read, so it stands for any of them.
+                made.append((verb, where, EVERY))
+            else:
+                made += [(verb, where, line)
+                         for line in written_by(verb, rest, line_of(where), where)]
     return made
 
 

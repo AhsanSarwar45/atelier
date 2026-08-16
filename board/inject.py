@@ -73,6 +73,19 @@ FAULTS = [
     ("the lines a project names are not taken at its word", DECL,
      lambda s: s.replace("        if self.data_protected is not None:\n"
                          "            return frozenset(self.data_protected)\n", "")),
+    ("bringing work in by pulling is not writing to a line", GATE,
+     lambda s: s.replace('           "pull", "branch"', '           "branch"')),
+    ("a rename is credited only with the name it ends at", GATE,
+     lambda s: s.replace("        old = line_named(args[0], here) if len(args) > 1 else here\n"
+                         "        return [n for n in (old, line_named(args[-1], here)) if n]",
+                         "        return [line_named(args[-1], here)]")),
+    ("the brackets of a nested command are separators", GATE,
+     lambda s: s.replace('        elif cmd[i:i + 2] == "$(":', "        elif False:")),
+    ("an escaped quote opens a quoted stretch", GATE,
+     lambda s: s.replace(' and quote != "\'":', " and False:")),
+    ("only a reset's first name is tested for being a path", GATE,
+     lambda s: s.replace("    if len(args) > 1 and not any(a in RESET_MODES for a in rest):\n"
+                         "        return []\n", "")),
 ]
 
 

@@ -430,6 +430,19 @@ ROUTES = (
     ("ALLOWED", "git branch -f mywork HEAD"),
     ("ALLOWED", "git checkout -B feature/other"),
     ("ALLOWED", "git reset --hard HEAD~1"),
+    # A rename destroys the name it starts from, so renaming a shipping line away
+    # is deleting it by another word.
+    ("REFUSED", "git branch -m main scratch"),
+    ("REFUSED", "git branch -M main scratch"),
+    ("ALLOWED", "git branch -m mywork other"),
+    # An escaped quote is a character, not the start of a quoted stretch. Read as
+    # one, it swallows everything after it — including the push.
+    ('REFUSED', 'git commit -m \\" && git push origin main'),
+    # A message the shell works out is an ordinary message: what a commit writes
+    # to is the line it stands on, whatever its arguments say.
+    ("ALLOWED", 'git commit -m "$(date)"'),
+    ("ALLOWED", "git pull"),
+    ("ALLOWED", "git pull --rebase origin main"),
     # The second line of a shell call is a command, not the first one's arguments.
     ("REFUSED", "git status\ngit push origin main"),
     # Finishing a fold and then writing to a shipping line is the moment the guard
@@ -470,7 +483,19 @@ ON_MAIN = (
     ("REFUSED", "git push origin HEAD"),
     ("REFUSED", "git cherry-pick abc1234"),
     ("REFUSED", "git reset --hard origin/main"),
+    ("REFUSED", "git reset --soft HEAD~1"),
     ("ALLOWED", "git reset"),
+    # Naming a commit and a file takes the file out of what is staged and moves
+    # no line at all, which is what the second name is there to say.
+    ("ALLOWED", "git reset HEAD file.txt"),
+    # Pulling into the line you stand on writes to it, in both spellings.
+    ("REFUSED", "git pull origin feature/mine"),
+    ("REFUSED", "git pull --rebase origin main"),
+    # A line the shell works out as it runs is a line nothing here can read.
+    ("REFUSED", "git push origin $(git branch --show-current)"),
+    ("REFUSED", "git push origin `git branch --show-current`"),
+    # Renaming away the line you stand on destroys it.
+    ("REFUSED", "git branch -M scratch"),
     ("ALLOWED", "git add -A"),
     ("ALLOWED", "git checkout -b feature/next"),
     ("ALLOWED", "git checkout -b feature/next && git commit -m fix"),
