@@ -413,7 +413,9 @@ ROUTES = (
     # command separator, which is how a note describing these once refused itself.
     # The quoted route is one that would be refused if it were read as a command,
     # or the case would pass whether the words are read as words or not.
-    ("ALLOWED", 'bd close x --reason="refused (git push origin main)"'),
+    ("ALLOWED",
+     'bd close x --reason="the fold (git checkout staging && git merge feature)'
+     ' is refused"'),
 )
 
 
