@@ -443,6 +443,18 @@ ROUTES = (
     ("ALLOWED", 'git commit -m "$(date)"'),
     ("ALLOWED", "git pull"),
     ("ALLOWED", "git pull --rebase origin main"),
+    # A word in front of a command carries it and is not it. A refusal a prefix
+    # walks around is not a refusal.
+    ("REFUSED", "env git push origin main"),
+    ("REFUSED", "command git push origin main"),
+    ("REFUSED", "exec git push origin main"),
+    ("REFUSED", "nice -n 10 git push origin main"),
+    ("REFUSED", "time git push origin main"),
+    ("REFUSED", "setsid git push origin main"),
+    ("REFUSED", "stdbuf -oL git push origin main"),
+    ("REFUSED", "sudo git push origin main"),
+    ("REFUSED", "timeout 60 git push origin main"),
+    ("REFUSED", "env GIT_SSH_COMMAND=ssh git push origin main"),
     # The second line of a shell call is a command, not the first one's arguments.
     ("REFUSED", "git status\ngit push origin main"),
     # Finishing a fold and then writing to a shipping line is the moment the guard
@@ -509,6 +521,11 @@ ELSEWHERE = (
     ("REFUSED", "git -C {other} commit -m fix"),
     ("REFUSED", "cd {other} && git push origin main"),
     ("REFUSED", "cd {other} && git commit -m fix"),
+    # The shortcut for a home directory is how a path is actually typed. Joined
+    # before it is expanded it names nowhere, and a walk up from nowhere comes
+    # back to the session's own project.
+    ("REFUSED", "git -C {tilde} push origin main"),
+    ("REFUSED", "cd {tilde} && git commit -m fix"),
 )
 
 # A team whose agents land on a line of their own, and whose manager alone moves
@@ -569,12 +586,17 @@ def merge_routes(says=None, on="feature/mine", rows=ROUTES):
         scratch_project(other, None, "main")
         got = {}
         for _, cmd in rows:
+            said = cmd.replace("{other}", other) \
+                      .replace("{tilde}", "~/" + os.path.basename(other))
+            env = dict(os.environ)
+            if "{tilde}" in cmd:
+                # So the shortcut resolves to the second checkout and nowhere else.
+                env["HOME"] = os.path.dirname(other)
             out = subprocess.run(
                 [sys.executable, MERGE_GATE], input=json.dumps({
-                    "tool_name": "Bash",
-                    "tool_input": {"command": cmd.replace("{other}", other)},
+                    "tool_name": "Bash", "tool_input": {"command": said},
                     "cwd": tmp, "session_id": "selftest-merge"}),
-                capture_output=True, text=True, timeout=120).stdout.strip()
+                capture_output=True, text=True, timeout=120, env=env).stdout.strip()
             got[cmd] = "REFUSED" if out else "ALLOWED"
         return got
     finally:
@@ -1346,6 +1368,15 @@ def main():
                for want, cmd in TEAM if team[cmd] != want]
     assert not ignored, "a project that named the lines it protects was not " \
         "taken at its word:\n  %s" % "\n  ".join(ignored)
+
+    # Sending up the line you are on, named by running something, is the ordinary
+    # spelling of an allowed command. It has to be told what it cannot be read as
+    # and what to type instead, not that it writes to every line there is.
+    unread = merge_says("git push origin $(git branch --show-current)")
+    assert "HEAD" in unread and "every line" not in unread, \
+        "the ordinary way of sending up the line you are on was refused with a " \
+        "message about every line at once and no spelling that works: %s" \
+        % (unread or "allowed")
 
     # And the project that says nothing while running a board is protected on the
     # very line its own cards close against, so the refusal has to name the way

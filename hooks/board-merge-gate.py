@@ -68,9 +68,19 @@ NOT_A_MOVE = ("--ours", "--theirs", "--patch", "-p", "--detach", "--")
 TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
                "--exec-path", "--super-prefix", "--config-env")
 
-# A push that names no line because it means every one of them. It cannot be a
-# line's own name: git refuses that spelling for a branch.
+# A push that names no line because it means every one of them, and a name only
+# the running shell can settle. Neither can be a line's own name: git refuses
+# both spellings for a branch.
 EVERY = "*"
+UNREADABLE = "?"
+
+UNREAD = (
+    "This names the line by running something, and which line that comes out as "
+    "is not settled until the shell runs it — so nothing here can tell whether it "
+    "is one this project ships from.\n\n"
+    "Spell it out, or name the position you are standing at: `git push origin "
+    "HEAD` pushes the line you are on and is read as that line."
+)
 
 FF_ONLY = "--ff-only"
 NOT_FF = (
@@ -193,15 +203,41 @@ def words(seg):
         return seg.split()
 
 
+# Words that run another command and are not the command. A refusal a prefix
+# walks around is not a refusal, and the close gate keeps the same list.
+WRAPPERS = ("env", "command", "exec", "nice", "setsid", "stdbuf", "time",
+            "sudo", "timeout", "rtk", "proxy", "nohup", "ionice")
+
+
 def plain(argv):
-    """The command itself, with what only decorates the call taken off."""
-    while argv and "=" in argv[0] and not argv[0].startswith("-"):
-        argv = argv[1:]  # FOO=bar git …
-    if argv[:2] == ["rtk", "proxy"]:
-        return argv[2:]
-    if argv[:1] == ["rtk"]:
-        return argv[1:]
+    """The command itself, with everything that only carries it taken off.
+
+    Once a carrier has been seen its own switches and values are carried too, so
+    `nice -n 10 git push …` reaches the same answer as `git push …`.
+    """
+    carried = False
+    while argv:
+        head = argv[0]
+        if "=" in head and not head.startswith("-"):
+            argv = argv[1:]  # FOO=bar git …
+        elif head in WRAPPERS:
+            argv, carried = argv[1:], True
+        elif carried and os.path.basename(head) not in ("git", "gh"):
+            argv = argv[1:]
+        else:
+            break
     return argv
+
+
+def under(here, named):
+    """A directory a command names, as this machine spells it.
+
+    The shortcut for a home directory is expanded before anything is joined onto
+    it — joined first it becomes a path that exists nowhere, and a walk up from
+    nowhere lands back on the session's own project.
+    """
+    named = os.path.expanduser(named)
+    return named if os.path.isabs(named) else os.path.join(here, named)
 
 
 def git_call(argv, here):
@@ -221,11 +257,11 @@ def git_call(argv, here):
             return where, arg, argv[i + 1:]
         if arg in TAKES_VALUE and i + 1 < len(argv):
             if arg == "-C":
-                where = os.path.join(where, argv[i + 1])
+                where = under(where, argv[i + 1])
             i += 2
             continue
         if arg.startswith("-C") and len(arg) > 2:
-            where = os.path.join(where, arg[2:])
+            where = under(where, arg[2:])
         i += 1
     return None
 
@@ -417,8 +453,7 @@ def routes(cmd, home):
         if argv[:1] == ["cd"]:
             # Changing into a checkout is the ordinary spelling of the reach that
             # `-C` spells as a switch, and the two must answer alike.
-            cwd = os.path.expanduser(os.path.join(cwd, argv[1])) if len(argv) > 1 \
-                else home
+            cwd = under(cwd, argv[1]) if len(argv) > 1 else home
             continue
         if argv[:3] == ["gh", "pr", "merge"]:
             made.append(("gh", cwd, None))
@@ -431,15 +466,16 @@ def routes(cmd, home):
             continue
         if verb in MOVE:
             if unknowable(seg):
-                at[where] = EVERY
+                at[where] = UNREADABLE
                 continue
             made += [(verb, where, line) for line in remade_by(rest, where)]
             at[where] = moved_to(rest, where) or line_of(where)
         elif verb in WRITERS:
             if verb in NAMED_TARGET and unknowable(seg):
                 # A name the shell works out as it runs is a name nothing here can
-                # read, so it stands for any of them.
-                made.append((verb, where, EVERY))
+                # read. It is refused for being unreadable, not for being every
+                # line — the two want different things said back.
+                made.append((verb, where, UNREADABLE))
             else:
                 made += [(verb, where, line)
                          for line in written_by(verb, rest, line_of(where), where)]
@@ -462,6 +498,10 @@ def main():
             # command. A project that protects anything protects this.
             if guarded:
                 deny(refusal("The line a waiting piece of work lands on", "it", where))
+                return
+        elif line == UNREADABLE:
+            if guarded:
+                deny(UNREAD)
                 return
         elif line == EVERY:
             # Sending every line at once sends the protected ones with them, and

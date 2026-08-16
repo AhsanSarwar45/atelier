@@ -86,6 +86,14 @@ FAULTS = [
     ("only a reset's first name is tested for being a path", GATE,
      lambda s: s.replace("    if len(args) > 1 and not any(a in RESET_MODES for a in rest):\n"
                          "        return []\n", "")),
+    ("a word carrying a command is read as the command", GATE,
+     lambda s: s.replace("        elif head in WRAPPERS:\n"
+                         "            argv, carried = argv[1:], True\n", "")),
+    ("the shortcut for a home directory is joined before it is expanded", GATE,
+     lambda s: s.replace("    named = os.path.expanduser(named)\n", "")),
+    ("a name only the shell can settle is refused as every line at once", GATE,
+     lambda s: s.replace("                made.append((verb, where, UNREADABLE))",
+                         "                made.append((verb, where, EVERY))")),
 ]
 
 
