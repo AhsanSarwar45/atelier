@@ -248,18 +248,95 @@ def standing_on(where):
 
 
 def is_branch(name, where):
-    """Whether a name is a line in this checkout, so a path is never read as one."""
+    """Whether a name is a line in this checkout, so a path is never read as one.
+
+    A line that so far exists only on the remote counts: `git checkout release`
+    in a fresh clone makes a local one of that name and steps onto it, and a
+    fresh clone is the ordinary case rather than the exception.
+    """
     try:
-        return subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + name],
-            cwd=where, capture_output=True, timeout=GIT_TIMEOUT).returncode == 0
+        if subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + name],
+                cwd=where, capture_output=True, timeout=GIT_TIMEOUT).returncode == 0:
+            return True
+        run = subprocess.run(
+            ["git", "for-each-ref", "--format=%(refname)", "refs/remotes/*/" + name],
+            cwd=where, capture_output=True, text=True, timeout=GIT_TIMEOUT)
+        return bool((run.stdout or "").strip())
     except Exception:
         return False
 
 
-def positionals(rest):
-    """The arguments of a git subcommand that are not switches."""
-    return [a for a in rest if not a.startswith("-")]
+# The switches whose next word is a value, by the verb that takes them. A value
+# does not start with a dash, so read as one of the command's own arguments it
+# moves every argument after it one place along — and which line a command writes
+# to is read by position. `-b`, `-B`, `-c`, `-C` and `--orphan` are deliberately
+# absent from the two move verbs: what follows those IS the line being written
+# to, and that is the argument this is asked for.
+TAKES_ARG = {
+    "commit": ("-m", "--message", "-F", "--file", "-C", "--reuse-message",
+               "-c", "--reedit-message", "--author", "--date", "--cleanup",
+               "-S", "--gpg-sign", "--fixup", "--squash", "--trailer",
+               "-t", "--template", "--pathspec-from-file"),
+    "merge": ("-m", "--message", "-F", "--file", "-s", "--strategy",
+              "-X", "--strategy-option", "-S", "--gpg-sign", "--into-name"),
+    "rebase": ("-s", "--strategy", "-X", "--strategy-option", "--onto",
+               "-S", "--gpg-sign", "-x", "--exec", "--whitespace"),
+    "push": ("-o", "--push-option", "--receive-pack", "--exec", "--repo",
+             "--force-with-lease", "--signed"),
+    "pull": ("-s", "--strategy", "-X", "--strategy-option", "-m", "--message",
+             "--upload-pack", "-S", "--gpg-sign"),
+    "fetch": ("--upload-pack", "--depth", "--deepen", "--shallow-since",
+              "--shallow-exclude", "--negotiation-tip", "-j", "--jobs",
+              "--refmap", "-o", "--server-option"),
+    "branch": ("-u", "--set-upstream-to", "--contains", "--no-contains",
+               "--merged", "--no-merged", "--points-at", "--format", "--sort"),
+    "checkout": ("--conflict", "-t", "--track", "--pathspec-from-file"),
+    "switch": ("--conflict", "-t", "--track"),
+    "reset": ("--pathspec-from-file",),
+    "cherry-pick": ("-S", "--gpg-sign", "-s", "--strategy", "-X",
+                    "--strategy-option", "-m", "--mainline"),
+    "revert": ("-S", "--gpg-sign", "-s", "--strategy", "-X",
+               "--strategy-option", "-m", "--mainline"),
+    "am": ("-S", "--gpg-sign", "--patch-format", "--exclude", "--include",
+           "--directory", "-p", "--whitespace"),
+    "update-ref": ("-m",),
+}
+
+
+def positionals(rest, verb=""):
+    """The arguments of a git subcommand that are neither switches nor the value
+    of one."""
+    out, skip = [], False
+    for arg in rest:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("-"):
+            skip = "=" not in arg and arg in TAKES_ARG.get(verb, ())
+            continue
+        out.append(arg)
+    return out
+
+
+def passive(verb, rest):
+    """Whether this command only finishes or abandons a fold already under way.
+
+    Asked of the switches alone. The word after `-m` is a message, and a message
+    that happens to read like one of these would otherwise stand the whole
+    command down: `git commit -m --abort` commits, on whatever line it stands on.
+    """
+    skip = False
+    for arg in rest:
+        if skip:
+            skip = False
+            continue
+        if not arg.startswith("-"):
+            continue
+        if arg in PASSIVE:
+            return True
+        skip = "=" not in arg and arg in TAKES_ARG.get(verb, ())
+    return False
 
 
 def previous(where):
@@ -280,13 +357,13 @@ def previous(where):
 BACK = ("-", "@{-1}")
 
 
-def moved_to(rest, where):
+def moved_to(verb, rest, where):
     """The line a move lands on, or None when it is not a move at all."""
     if any(a in NOT_A_MOVE for a in rest):
         return None
     if any(a in BACK for a in rest):
         return previous(where)
-    args = positionals(rest)
+    args = positionals(rest, verb)
     if not args:
         return None
     fresh = any(a in ("-b", "-c", "-B", "-C") for a in rest)
@@ -322,7 +399,7 @@ def push_targets(rest, here):
     """
     if any(a in ("--all", "--mirror") for a in rest):
         return [EVERY]
-    args = positionals(rest)
+    args = positionals(rest, "push")
     refs = args[1:] if args else []
     if not refs:
         return [here] if here else []
@@ -337,7 +414,7 @@ def pull_targets(rest, here):
     anywhere anyone else can see. Bringing a DIFFERENT line down folds that work
     into the one being stood on, which is landing it by another word.
     """
-    args = positionals(rest)
+    args = positionals(rest, "pull")
     came = [line_named(a, here) for a in args[1:]] if len(args) > 1 else []
     if not came or all(name == here for name in came):
         return []
@@ -354,7 +431,7 @@ def fetch_targets(rest, here):
     different one down onto it is landing that work by another word.
     """
     out = []
-    for ref in positionals(rest)[1:]:
+    for ref in positionals(rest, "fetch")[1:]:
         if ":" not in ref:
             continue
         came, _, onto = ref.partition(":")
@@ -369,7 +446,7 @@ def branch_targets(rest, here):
     Each form writes somewhere different: a forced one points its first name at a
     commit, a rename lands on the new name, a delete takes every name it is given.
     """
-    args = positionals(rest)
+    args = positionals(rest, "branch")
     if not args:
         return []
     if any(a in BRANCH_DELETES for a in rest):
@@ -401,7 +478,7 @@ def reset_targets(rest, here, where):
     """
     if "--" in rest:
         return []
-    args = positionals(rest)
+    args = positionals(rest, "reset")
     if not args:
         # `git reset --hard` alone throws the working tree away and moves nothing.
         return []
@@ -417,7 +494,7 @@ def reset_targets(rest, here, where):
     return [here] if here else []
 
 
-def remade_by(rest, where):
+def remade_by(verb, rest, where):
     """The line a move also resets, for the form that steps onto it by force.
 
     `checkout -B x` and `switch -C x` step onto x and point it at where you were
@@ -426,20 +503,19 @@ def remade_by(rest, where):
     """
     if not any(a in ("-B", "-C") for a in rest):
         return []
-    args = positionals(rest)
+    args = positionals(rest, verb)
     return [args[0]] if args and is_branch(args[0], where) else []
 
 
 def rebase_target(rest):
     """The line a rebase rewrites when it names one, else "" for the one stood on.
 
-    `--onto <newbase> <upstream> [<branch>]`, else `<upstream> [<branch>]`. The
-    last argument names the line being rewritten only when the form is full;
-    short of that it is whatever is being stood on.
+    `[--onto <newbase>] <upstream> [<branch>]`. The new base is a switch's value
+    and so is not one of these, which makes the branch the second argument in
+    both forms; a rebase naming only the upstream rewrites whatever is stood on.
     """
-    args = positionals(rest)
-    want = 3 if "--onto" in rest else 2
-    return args[want - 1] if len(args) >= want else ""
+    args = positionals(rest, "rebase")
+    return args[1] if len(args) >= 2 else ""
 
 
 def written_by(verb, rest, here, where):
@@ -460,7 +536,7 @@ def written_by(verb, rest, here, where):
     if verb == "reset":
         return reset_targets(rest, here, where)
     if verb == "update-ref":
-        args = positionals(rest)
+        args = positionals(rest, verb)
         return [line_named(args[0], here)] if args else []
     if verb == "rebase":
         named = rebase_target(rest)
@@ -480,7 +556,7 @@ def names_its_target(verb, rest):
     command the design says must always be allowed.
     """
     if verb == "fetch":
-        return any(":" in a for a in positionals(rest)[1:])
+        return any(":" in a for a in positionals(rest, "fetch")[1:])
     if verb == "branch":
         return any(a in BRANCH_WRITES for a in rest)
     if verb == "rebase":
@@ -644,7 +720,7 @@ def routes(cmd, home):
                 call = (resolve(under(cwd, put[name])),) + call[1:]
                 break
         where, verb, rest = call
-        if any(a in PASSIVE for a in rest):
+        if passive(verb, rest):
             continue
         if verb in MOVE:
             if unknowable(seg):
@@ -657,8 +733,9 @@ def routes(cmd, home):
                     made.append((verb, where, UNREADABLE, rest))
                 stand(where, UNREADABLE)
                 continue
-            made += [(verb, where, line, rest) for line in remade_by(rest, where)]
-            stand(where, moved_to(rest, where) or line_of(where))
+            made += [(verb, where, line, rest)
+                     for line in remade_by(verb, rest, where)]
+            stand(where, moved_to(verb, rest, where) or line_of(where))
         elif verb in WRITERS:
             if names_its_target(verb, rest) and unknowable(seg):
                 # A name the shell works out as it runs is a name nothing here can

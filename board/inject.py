@@ -60,7 +60,7 @@ FAULTS = [
      GATE, lambda s: s.replace('            if name == "-C" or name == "--work-tree":\n'
                                "                where = under(where, value)\n", "")),
     ("one mid-fold switch stands the whole line down", GATE,
-     lambda s: s.replace("        if any(a in PASSIVE for a in rest):",
+     lambda s: s.replace("        if passive(verb, rest):",
                          "        if any(p in cmd for p in PASSIVE):")),
     ("committing where you stand is not a route onto a line", GATE,
      lambda s: s.replace('"merge", "rebase", "push", "commit",',
@@ -171,6 +171,18 @@ FAULTS = [
                          "    if False:")),
     ("a rule about one command runs to the end of the next", CLOSE,
      lambda s: s.replace(r"[^|;&\n]*", r"[^|;&]*")),
+    ("a switch's value is read as a switch of its own", GATE,
+     lambda s: s.replace("        if passive(verb, rest):",
+                         "        if any(a in PASSIVE for a in rest):")),
+    ("a switch's value is one of the command's own arguments", GATE,
+     lambda s: s.replace('            skip = "=" not in arg and arg in TAKES_ARG.get(verb, ())\n'
+                         "            continue",
+                         "            continue")),
+    ("a line that exists only on the remote is no line at all", GATE,
+     lambda s: s.replace('            ["git", "for-each-ref", "--format=%(refname)", '
+                         '"refs/remotes/*/" + name],',
+                         '            ["git", "for-each-ref", "--format=%(refname)", '
+                         '"refs/remotes/nowhere/" + name],')),
     ("a run fired from a commit hook is aimed by that hook's own settings", SUITE,
      lambda s: s.replace("    os.environ.pop(_pointed, None)", "    pass")),
     ("a repository inside a project borrows that project's permission", GATE,

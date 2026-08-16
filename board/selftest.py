@@ -554,6 +554,16 @@ ROUTES = (
     # tail is where the refusal would have been, and padding with harmless
     # commands must not be a way around every rule on the line.
     ("REFUSED", " && ".join(["git status"] * 200 + ["git push origin main"])),
+    # A switch's value is not a switch. Read as one, a mid-fold word typed as a
+    # message stands the whole command down — and every rule on it with it.
+    ("REFUSED", "git push origin main -o --dry-run"),
+    # And a value is not one of the command's own arguments either: counted as
+    # one, every argument after it is read one place along, and the line a
+    # command writes to is read by position.
+    ("REFUSED", "git rebase -X ours upstream main"),
+    ("ALLOWED", "git rebase -X ours main"),
+    ("REFUSED", "git update-ref -m sync refs/heads/main HEAD"),
+    ("REFUSED", "git merge -m --abort feature/other && git push origin main"),
     # A line that abandons a fold and then writes to a shipping line is two
     # commands, and the first one's switch does not excuse the second.
     ("REFUSED", "git merge --abort && git push origin main"),
@@ -588,6 +598,11 @@ ON_MAIN = (
     # refspecs already read HEAD by.
     ("ALLOWED", "git reset --hard HEAD"),
     ("ALLOWED", "git reset --hard @"),
+    # `git commit -m --abort` commits, with the message `--abort`. Read as a
+    # mid-fold switch it stands the command down, on the very line the job was
+    # opened about.
+    ("REFUSED", "git commit -m --abort"),
+    ("REFUSED", "git commit --message --continue"),
     # Naming a commit and a file takes the file out of what is staged and moves
     # no line at all, which is what the second name is there to say.
     ("ALLOWED", "git reset HEAD file.txt"),
@@ -645,6 +660,16 @@ NESTED = (
     ("ALLOWED", "git -C {inner} push origin feature/mine"),
 )
 
+# A shipping line that so far exists only on the remote, which is how it looks in
+# a fresh clone. Stepping onto it makes a local one and lands there; a name that
+# is only checked against local lines is not seen as a step at all, and the write
+# behind it is credited to the line left behind.
+REMOTE_ONLY = (
+    ("REFUSED", "git checkout staging && git commit -m x"),
+    ("REFUSED", "git switch staging && git commit -m x"),
+    ("ALLOWED", "git checkout -b feature/next && git commit -m x"),
+)
+
 # A team whose agents land on a line of their own, and whose manager alone moves
 # that into what ships. Naming what is protected has to be taken at its word.
 TEAM = (
@@ -654,14 +679,22 @@ TEAM = (
 )
 
 
-def scratch_project(tmp, says=None, on="feature/mine"):
+def scratch_project(tmp, says=None, on="feature/mine", remote=()):
     """A checkout with a main and a staging line, standing on `on`, declaring
-    `says` — or nothing, for a project nobody has ever thought about."""
+    `says` — or nothing, for a project nobody has ever thought about.
+
+    `remote` names lines that are left existing ONLY as remote-tracking ones,
+    which is what a shipping line looks like in a fresh clone before anybody has
+    stepped onto it."""
     for args in (["init", "-q", "-b", "main", "."],
                  ["-c", "user.email=t@t", "-c", "user.name=t",
                   "commit", "-q", "--allow-empty", "-m", "base"],
                  ["branch", "staging"], ["checkout", "-q", "-B", on]):
         subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
+    for name in remote:
+        for args in (["update-ref", "refs/remotes/origin/" + name, "HEAD"],
+                     ["branch", "-D", name]):
+            subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
     # Somewhere further in, so a command that moves deeper into the same checkout
     # has somewhere real to move to.
     os.makedirs(os.path.join(tmp, "sub"), exist_ok=True)
@@ -705,7 +738,7 @@ def merge_says(cmd, says=None, on="feature/mine", board=False):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def merge_routes(says=None, on="feature/mine", rows=ROUTES):
+def merge_routes(says=None, on="feature/mine", rows=ROUTES, remote=()):
     """What the merge guard tells each route, run from a scratch project standing
     on `on` and declaring `says` — or nothing, for a project nobody has declared.
 
@@ -717,7 +750,7 @@ def merge_routes(says=None, on="feature/mine", rows=ROUTES):
     tmp = tempfile.mkdtemp(prefix="board-merge-")
     other = tempfile.mkdtemp(prefix="board-other-")
     try:
-        scratch_project(tmp, says, on)
+        scratch_project(tmp, says, on, remote)
         scratch_project(other, None, "main")
         # Somebody else's repository sitting inside the first one, which is what a
         # vendored dependency or a submodule is. Built always: it costs one `git
@@ -1509,6 +1542,15 @@ def main():
                 for want, cmd in NESTED if inside[cmd] != want]
     assert not borrowed, "a repository checked out inside a project that lands " \
         "its own work inherited that permission:\n  %s" % "\n  ".join(borrowed)
+
+    # A shipping line that so far exists only on the remote — a fresh clone, which
+    # is what the company checkout looks like on the day somebody makes it.
+    fresh = merge_routes(rows=REMOTE_ONLY, remote=("staging",))
+    missed = ["%s: %s, wanted %s" % (cmd, fresh[cmd], want)
+              for want, cmd in REMOTE_ONLY if fresh[cmd] != want]
+    assert not missed, "stepping onto a line that exists only on the remote was " \
+        "not seen as a step, so the write behind it was credited to the line " \
+        "left behind:\n  %s" % "\n  ".join(missed)
 
     # A team that lands its agents' work on a line of their own, and moves that
     # into what ships by hand. Adding `lands_on` back to whatever a project names
