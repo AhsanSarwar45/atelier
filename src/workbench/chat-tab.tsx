@@ -9,7 +9,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { TabTools } from '@/components/shell';
+import { MessageSquarePlus, PanelLeft, Receipt, Search } from 'lucide-react';
+
+import { TabTools, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
@@ -249,18 +251,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // The height is the shell's to give: this box fills what the bars left.
     <div className="relative flex min-h-0 flex-1">
       <TabTools tab="chat">
-        <Button size="xs" variant="outline" className="md:hidden" data-testid="chat-rail-toggle" onClick={() => setRailOpen((v) => !v)}>
-          Chats
-        </Button>
-        <Button size="xs" variant="ghost" data-testid="open-search" onClick={() => setShowing('search')}>
-          Search chats
-        </Button>
-        <Button size="xs" variant="ghost" data-testid="open-spend" onClick={() => setShowing('spend')}>
-          What it cost
-        </Button>
-        <Button size="xs" variant="primary" className="ml-auto" data-testid="new-chat-tool" onClick={() => void start()} disabled={starting}>
-          {starting ? 'Starting…' : 'New chat'}
-        </Button>
+        <ToolButton
+          icon={<PanelLeft />}
+          label="Chats"
+          className="md:hidden"
+          data-testid="chat-rail-toggle"
+          onClick={() => setRailOpen((v) => !v)}
+        />
+        <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={() => setShowing('search')} />
+        <ToolButton icon={<Receipt />} label="What it cost" data-testid="open-spend" onClick={() => setShowing('spend')} />
+        <ToolButton
+          icon={<MessageSquarePlus />}
+          label="New chat"
+          emphasis="loud"
+          className="ml-auto"
+          data-testid="new-chat-tool"
+          busy={starting}
+          disabled={starting}
+          onClick={() => void start()}
+        />
       </TabTools>
 
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}

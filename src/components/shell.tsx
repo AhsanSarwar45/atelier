@@ -13,8 +13,11 @@
 
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
+import { Loader2 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 interface Slot {
@@ -87,8 +90,56 @@ export function TabTools({ tab, children }: { tab: string; children: ReactNode }
  */
 export function Toolbar({ label = 'Tools', className, children }: { label?: string; className?: string; children: ReactNode }) {
   return (
-    <div role="toolbar" aria-label={label} className={cn('flex min-w-0 flex-1 items-center gap-2 overflow-x-auto', className)}>
-      {children}
-    </div>
+    <TooltipProvider delayDuration={250}>
+      <div role="toolbar" aria-label={label} className={cn('flex min-w-0 flex-1 items-center gap-2 overflow-x-auto', className)}>
+        {children}
+      </div>
+    </TooltipProvider>
+  );
+}
+
+/**
+ * One control on a bar: a picture, with its words in the tooltip and in the
+ * name a screen reader hears. A bar of sentences is a bar nobody reads, and the
+ * words are still there for whoever needs them (the manager's rule on
+ * descriptions, docs/designs/app-shell.md §1.4).
+ */
+export function ToolButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  busy,
+  emphasis = 'quiet',
+  className,
+  ...rest
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  /** Shown in place of the picture while the button's work is being done. */
+  busy?: boolean;
+  emphasis?: 'quiet' | 'loud';
+  className?: string;
+} & Omit<React.ComponentProps<typeof Button>, 'children' | 'onClick' | 'disabled' | 'className'>) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          mode="icon"
+          variant={emphasis === 'loud' ? 'primary' : 'ghost'}
+          aria-label={label}
+          disabled={disabled}
+          onClick={onClick}
+          className={className}
+          {...rest}
+        >
+          {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

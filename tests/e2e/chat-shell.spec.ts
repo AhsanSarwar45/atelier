@@ -47,6 +47,24 @@ function colourfulness([r, g, b]: number[]): number {
 }
 
 test.describe('the chat screen', () => {
+  test('its tools are icons, and every one of them still says what it is', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=chat`);
+    await page.getByTestId('tab-tools').getByRole('button').first().waitFor();
+
+    const tools = page.getByTestId('tab-tools').getByRole('button');
+    const count = await tools.count();
+    expect(count, 'the chat tab put no tools on the bar').toBeGreaterThan(2);
+
+    for (let i = 0; i < count; i++) {
+      const tool = tools.nth(i);
+      const name = (await tool.getAttribute('aria-label')) ?? '';
+      expect(name, `tool ${i} has no name for anyone who cannot see the picture`).not.toBe('');
+      expect(await tool.locator('svg').count(), `"${name}" is drawn as words, not a picture`).toBeGreaterThan(0);
+      expect((await tool.innerText()).trim(), `"${name}" still spells itself out on the bar`).toBe('');
+    }
+  });
+
   test('a chip on a chat is coloured, not the page\'s own grey', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=chat`);
