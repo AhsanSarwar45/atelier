@@ -496,6 +496,37 @@ Codex sessions we did not start are **not listed**, because the sessions
 directory is not first-party-confirmed. The Codex group simply does not appear
 rather than showing something we cannot stand behind (decision 13).
 
+#### 6.3.1 Which chats are offered
+
+Constraint: the list holds the chats a person began. A chat an agent started to
+do a piece of work for another chat is behind a switch, off by default, and so
+is one with nothing said in it yet.
+
+External reality: the agent kit's index separates the two itself —
+`listSessions({includeProgrammatic: false})` is the same filter the terminal's
+own `/resume` picker uses. Measured on Corsetta, 2026-08-16: 306 chats offered,
+218 of them a person's; the 88 it withholds are every "You are reviewing a
+change" review agent and every unnamed one (bw-p61.3).
+
+#### 6.3.2 What an open chat shows of what was said before
+
+Constraint: opening a chat shows what was said in it, whoever started it, and
+the transcript stays the event log's to serve (§4). A chat's past is therefore
+read once from the agent kit's own record (`getSessionMessages`) and written
+into the log as the events that would have carried it, only while the log holds
+nothing for that chat — read twice, it would say everything twice.
+
+Why the cap: those records reach 1002 messages (measured, bw-p61.3), and a
+screen that draws every one of them is the fault this app already paid for once
+(docs/designs/app-shell.md §3). The last 200 are imported and the count of what
+came before is said in a line, not drawn.
+
+#### 6.3.3 The way back in
+
+Constraint: a chat opens by being clicked, and a chat that is asleep is woken by
+the same click. Nothing else in the list starts an agent, so decision 8 holds:
+the click is the consent, and there is no second button to press.
+
 ---
 
 ## 7. Typed-command menus
@@ -551,6 +582,18 @@ No third tab: reports live inside the chat and inside the card (decision 10).
   `/` opens the typed-command menu, Stop replaces Send while a turn runs.
 - **Right rail** — cards this chat has touched (clicking one opens it on the
   Board tab), reports it produced, cost, pinned permission mode.
+
+#### 8.2.1 The open chat's own line
+
+Constraint: what an open chat says about itself is one line high whatever it
+carries, and the words that name the agent are never squeezed to make room for
+what it has touched. A long-running chat's cards are shown as the first few and
+a count; the count carries the rest.
+
+Why: measured 2026-08-16 (bw-p61.3), one chat's 26 card chips made a row 2277 px
+wide in a pane about 700 px wide, and the model and permission text was squeezed
+to 37 px — three words stacked in a column, which is the picture the manager
+sent back.
 
 ### 8.3 The board tab
 
