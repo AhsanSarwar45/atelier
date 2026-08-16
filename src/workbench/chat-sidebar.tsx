@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { CARDS_ON_A_ROW, cardsOnTheLine } from '@/workbench/cards-on-the-line';
+import { BeadChipRow } from '@/components/bead-chip-row';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { folderOf, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -189,16 +189,6 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
     [onOpen, wake],
   );
 
-  /**
-   * A card opens where cards live — the board, with its detail panel open on
-   * that one. The URL carries it, so the chip works from here, from a chat, and
-   * from a link someone pasted.
-   */
-  const openCard = useCallback(
-    (beadId: string) => router.push(`/project?id=${projectId}&tab=board&bead=${encodeURIComponent(beadId)}`),
-    [router, projectId],
-  );
-
   // A screenful, then more as it is pulled: a project with hundreds of chats
   // would otherwise draw every one of them before the first is on screen
   // (docs/designs/app-shell.md §1.6, §3).
@@ -277,32 +267,12 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                     </span>
                   </div>
                   <div className="mt-1 flex items-center gap-1 overflow-hidden">
-                    {cardsOnTheLine(row.beads, CARDS_ON_A_ROW).shown.map((id) => (
-                      <Badge key={id} asChild variant="primary" appearance="outline" size="xs" shape="circle" className="shrink-0 font-mono">
-                        <button
-                          type="button"
-                          data-testid="row-bead-chip"
-                          data-bead-id={id}
-                          title={`Open ${id}`}
-                          onClick={() => openCard(id)}
-                        >
-                          {id}
-                        </button>
-                      </Badge>
-                    ))}
-                    {cardsOnTheLine(row.beads, CARDS_ON_A_ROW).rest.length > 0 && (
-                      <Badge
-                        variant="secondary"
-                        appearance="light"
-                        size="xs"
-                        shape="circle"
-                        data-testid="row-bead-more"
-                        title={cardsOnTheLine(row.beads, CARDS_ON_A_ROW).rest.join(', ')}
-                        className="shrink-0 font-mono"
-                      >
-                        +{cardsOnTheLine(row.beads, CARDS_ON_A_ROW).rest.length}
-                      </Badge>
-                    )}
+                    <BeadChipRow
+                      ids={row.beads}
+                      projectId={projectId}
+                      place="row"
+                      className="flex min-w-0 items-center gap-1 overflow-hidden"
+                    />
                     {row.folder && (
                       <Badge
                         hue={hueFor(row.folder)}

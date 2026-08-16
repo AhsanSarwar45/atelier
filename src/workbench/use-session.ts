@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
 import type {
@@ -241,10 +241,9 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
   const [facts, setFacts] = useState<SessionFacts | null>(null);
 
   useEffect(() => {
-    if (!sessionId) {
-      setFacts(null);
-      return;
-    }
+    // Cleared first, so the line never names the chat before this one.
+    setFacts(null);
+    if (!sessionId) return;
     let live = true;
     void (async () => {
       try {
@@ -263,27 +262,29 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
 }
 
 export function useSession(sessionId: string | null): SessionView {
-  const [view, setView] = useState<SessionView>(EMPTY);
-  // Read inside the effect only, so a reconnect resumes without re-subscribing.
-  const seqRef = useRef(0);
+  // What has been drawn and which chat it was drawn from are one value. Held
+  // apart, a second chat folds onto the first chat's messages and its own
+  // opening events are skipped as already seen (docs/agent-workbench.md §4.1).
+  const [drawn, setDrawn] = useState<{ id: string | null; view: SessionView }>({ id: null, view: EMPTY });
 
   useEffect(() => {
-    if (!sessionId) {
-      setView(EMPTY);
-      seqRef.current = 0;
-      return;
-    }
-    const source = new EventSource(apiUrl(`/api/workbench/events?session=${encodeURIComponent(sessionId)}&since=${seqRef.current}`));
+    setDrawn({ id: sessionId, view: EMPTY });
+    if (!sessionId) return;
+    const source = new EventSource(apiUrl(`/api/workbench/events?session=${encodeURIComponent(sessionId)}&since=0`));
     source.onmessage = (msg) => {
       const event = JSON.parse(msg.data) as WbpEvent;
-      seqRef.current = Math.max(seqRef.current, event.seq);
-      setView((v) => reduce(v, event));
+      // Late events from the chat just left are dropped by the id, not by luck
+      // of ordering: the socket is closed on the way out, but a message already
+      // in flight still arrives.
+      setDrawn((d) => (d.id === sessionId ? { id: d.id, view: reduce(d.view, event) } : d));
     };
     source.onerror = () => source.close();
     return () => source.close();
   }, [sessionId]);
 
-  return view;
+  // Never the last chat's transcript under this chat's name, not even for the
+  // one paint between the id changing and the effect running.
+  return drawn.id === sessionId ? drawn.view : EMPTY;
 }
 
 /** True while the agent owes an answer — the Stop button's condition. */

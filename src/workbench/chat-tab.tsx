@@ -11,17 +11,19 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Bot, MessageSquarePlus, PanelLeft, Receipt, Search } from 'lucide-react';
 
+import { BeadChipRow } from '@/components/bead-chip-row';
+import { MarkdownBody } from '@/components/markdown-body';
+import { useReports } from '@/components/report-panel';
 import { TabTools, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
 import { hueFor } from '@/lib/bead-labels';
-import { cardsOnTheLine } from '@/workbench/cards-on-the-line';
 import { cn } from '@/lib/utils';
 import { diffLines } from '@/workbench/line-diff';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
-import { ReportCard } from '@/workbench/report-view';
+import { ReportCard, ReportChip } from '@/workbench/report-view';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
 import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
@@ -216,7 +218,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const facts = useSessionFacts(sessionId);
   // What the board knows plus what this chat has been seen doing since.
   const cards = Array.from(new Set([...(facts?.beads ?? []), ...view.beads]));
-  const online = cardsOnTheLine(cards);
+  // A report names the card it belongs to, so the reports of this chat's cards
+  // are this chat's reports — true for a chat this app never watched work. A
+  // report belongs to the goal while a chat works that goal's steps, so a step
+  // counts as its goal here: `cor-qrnj.43` finds the report on `cor-qrnj`.
+  const { reports } = useReports();
+  const owned = new Set(cards.flatMap((id) => [id, id.split('.')[0]!]));
+  const ours = reports.filter((r) => r.card !== null && owned.has(r.card));
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
@@ -370,38 +378,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {view.model ? ` · ${view.model}` : ''}
           {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
         </span>
-        {cards.length > 0 && (
-          <span data-testid="bead-chips" className="flex min-w-0 items-center gap-1 overflow-hidden">
-            {online.shown.map((id) => (
-              <Badge
-                key={id}
-                variant="primary"
-                appearance="outline"
-                size="sm"
-                shape="circle"
-                data-testid="bead-chip"
-                data-bead-id={id}
-                className="shrink-0 font-mono"
-              >
-                {id}
-              </Badge>
-            ))}
-            {online.rest.length > 0 && (
-              <Badge
-                variant="secondary"
-                appearance="light"
-                size="sm"
-                shape="circle"
-                data-testid="bead-chip-more"
-                data-more={online.rest.length}
-                title={online.rest.join(', ')}
-                className="shrink-0 font-mono"
-              >
-                +{online.rest.length}
-              </Badge>
-            )}
-          </span>
-        )}
+        <BeadChipRow
+          ids={cards}
+          projectId={projectId}
+          place="line"
+          className="flex min-w-0 items-center gap-1 overflow-hidden"
+        />
+        {ours.map((r) => (
+          <ReportChip key={`${r.project}/${r.slug}`} project={r.project} slug={r.slug} title={r.title} fsPath={projectPath} />
+        ))}
         {facts?.folder && (
           <Badge
             hue={hueFor(facts.folder)}
@@ -432,7 +417,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </div>
       )}
 
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4" data-testid="transcript">
+      <div
+        className="mx-auto flex w-full max-w-[110ch] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+        data-testid="transcript"
+      >
         {view.items.map((item) => {
           if (item.kind === 'tool') return <ToolRow key={item.id} item={item} nested={item.parentId !== null} />;
           if (item.kind === 'notice') {
@@ -462,9 +450,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             <div
               key={item.id}
               data-testid={item.role === 'assistant' ? 'assistant-message' : 'user-message'}
+              // The answer takes the column; what he typed stays narrower and to
+              // the right, which is what tells the two apart without a label.
               className={cn(
-                'max-w-[80ch] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-relaxed',
-                item.role === 'user' ? 'ml-auto bg-primary/15 text-foreground' : 'bg-muted/40 text-foreground',
+                'rounded-lg px-3 py-2 text-sm leading-relaxed',
+                item.role === 'user'
+                  ? 'ml-auto max-w-[75ch] bg-primary/15 text-foreground'
+                  : 'w-full bg-muted/40 text-foreground',
               )}
             >
               {item.images.map((img, i) => (
@@ -477,7 +469,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   className="mb-2 max-h-64 max-w-full rounded border border-border/60"
                 />
               ))}
-              {item.text}
+              <MarkdownBody className="text-sm">{item.text}</MarkdownBody>
             </div>
           );
         })}
@@ -486,61 +478,83 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </div>
 
       <div className="border-t border-border/60 px-4 py-3">
-        {attached.length > 0 && (
-          <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
-            {attached.map((img, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={i}
-                src={img.dataUrl}
-                alt={img.alt}
-                title={img.alt}
-                className="h-12 w-12 rounded border border-border/60 object-cover"
-              />
-            ))}
-          </div>
-        )}
-        <div className="flex items-end gap-2">
-        <input
-          data-testid="image-input"
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={(e) => void absorb(e.target.files)}
-        />
-        <Textarea
-          data-testid="composer"
-          rows={2}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onPaste={(e) => void absorb(Array.from(e.clipboardData.files))}
-          onDrop={(e) => {
-            e.preventDefault();
-            void absorb(e.dataTransfer.files);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+        {/* One frame holds the typing, the pictures waiting to go and the button
+            that sends them, so the whole thing reads as the place you write. */}
+        <div
+          data-testid="composer-frame"
+          className={cn(
+            'mx-auto w-full max-w-[110ch] rounded-xl border bg-surface-raised px-3 py-2 transition-colors',
+            'border-border focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
+          )}
+        >
+          {attached.length > 0 && (
+            <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
+              {attached.map((img, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={img.dataUrl}
+                  alt={img.alt}
+                  title={img.alt}
+                  className="h-12 w-12 rounded border border-border/60 object-cover"
+                />
+              ))}
+            </div>
+          )}
+          <input
+            data-testid="image-input"
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => void absorb(e.target.files)}
+          />
+          <Textarea
+            data-testid="composer"
+            rows={2}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onPaste={(e) => void absorb(Array.from(e.clipboardData.files))}
+            onDrop={(e) => {
               e.preventDefault();
-              void submit();
-            }
-          }}
-          placeholder="Ask the agent to do something…"
-          className="flex-1 resize-none bg-background"
-        />
-        {busy ? (
-          <Button
-            variant="destructive"
-            data-testid="stop-button"
-            onClick={() => void sendCommand({ type: 'session.stop', sessionId })}
-          >
-            Stop
-          </Button>
-        ) : (
-          <Button variant="primary" data-testid="send-button" onClick={() => void submit()} disabled={!draft.trim()}>
-            Send
-          </Button>
-        )}
+              void absorb(e.dataTransfer.files);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder="Ask the agent to do something…"
+            // The frame is the box; the typing area inside it carries no second
+            // edge, no shadow and no colour of its own.
+            className="max-h-64 min-h-[3.25rem] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+          />
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="select-none text-[11px] text-muted-foreground">
+              Enter sends · Shift+Enter starts a line · paste or drop a picture
+            </span>
+            {busy ? (
+              <Button
+                variant="destructive"
+                size="sm"
+                data-testid="stop-button"
+                onClick={() => void sendCommand({ type: 'session.stop', sessionId })}
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                data-testid="send-button"
+                onClick={() => void submit()}
+                disabled={!draft.trim()}
+              >
+                Send
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>,

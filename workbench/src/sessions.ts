@@ -10,7 +10,13 @@ import { randomUUID } from 'node:crypto';
 
 import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
-import { IMPORTED_MESSAGES, saidByAnyone, textOf } from '../../src/workbench/imported-history.ts';
+import {
+  IMPORTED_MESSAGES,
+  saidByAnyone,
+  textOf,
+  toolCallsOf,
+  withoutMachineChatter,
+} from '../../src/workbench/imported-history.ts';
 import { ClaudeDriver } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -135,15 +141,22 @@ export class Sessions {
    * writes it into the event log as the events that would have carried it.
    *
    * Once only: the log is the transcript (§4), so importing twice would say
-   * everything twice. Text alone — the tool calls of a past chat are not
-   * replayable and a row saying one ran tells the reader nothing they can act
-   * on (docs/agent-workbench.md §6.3.2).
+   * everything twice. Text alone becomes a row — the tool calls of a past chat
+   * are not replayable and a row saying one ran tells the reader nothing they
+   * can act on (docs/agent-workbench.md §6.3.2). The calls are still read, by
+   * the same rules the live watcher uses, for the cards and the reports they
+   * name; without that a chat this app never watched can never show either.
    */
   private async importPast(summary: SessionSummary): Promise<void> {
+    if (!summary.externalId) return;
     // Judged on what was SAID, not on what is in the log: a resume writes its
     // own "coming back" line before this runs.
-    if (!summary.externalId) return;
-    if (this.store.messageCount(summary.id) > 0) return;
+    const alreadySaid = this.store.messageCount(summary.id) > 0;
+    // A chat read in by an older build has its words but not its doings; the
+    // scan is what gives it back, so having said something is not enough to
+    // skip it.
+    const alreadyScanned = alreadySaid && this.store.beadsForSession(summary.id).length > 0;
+    if (alreadySaid && alreadyScanned) return;
 
     let messages: SessionMessage[];
     try {
@@ -151,6 +164,16 @@ export class Sessions {
     } catch {
       return; // No record to read: the chat simply starts where it is.
     }
+
+    // What it did, read before what it said, so the chat's cards and reports are
+    // already on the line by the time the first message is drawn.
+    if (!alreadyScanned) {
+      const past = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
+      for (const m of messages) {
+        for (const call of toolCallsOf(m.message)) past.observe(call.name, call.input);
+      }
+    }
+    if (alreadySaid) return;
 
     const said = messages
       .filter((m): m is SessionMessage & { type: 'user' | 'assistant' } => m.type === 'user' || m.type === 'assistant')
@@ -336,7 +359,13 @@ export class Sessions {
     });
   }
 
+  /**
+   * The log as a reader should see it. The harness's own messages are dropped
+   * here rather than at the point they were written, so a chat read in by an
+   * older build stops showing them without being read again — reading it again
+   * would say everything twice (§4).
+   */
   replay(sessionId: string, since: number): WbpEvent[] {
-    return this.store.eventsSince(sessionId, since);
+    return withoutMachineChatter(this.store.eventsSince(sessionId, since));
   }
 }
