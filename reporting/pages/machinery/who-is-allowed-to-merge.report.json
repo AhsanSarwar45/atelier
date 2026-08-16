@@ -1,6 +1,6 @@
 {
   "title": "Who Is Allowed To Merge",
-  "eyebrow": "Landed. An agent in the shared work project can no longer reach staging or main by any route, and your three own projects are untouched.",
+  "eyebrow": "Landed, after five readings that found twenty-three more ways through. Every one is now shut and held down by a check that goes red without it; your three own projects are untouched.",
   "actions": {
     "none": true
   },
@@ -10,7 +10,7 @@
   "content": [
     {
       "label": "What changed for the shared work project",
-      "lead": "Every route I found open is now shut. Checked against the guard as it is actually installed, not against the change on its own.",
+      "lead": "Every route found open is now shut. Each row was put to the guard as it is actually installed, in the real company checkout, not to the change on its own.",
       "blocks": [
         {
           "kind": "table",
@@ -18,17 +18,19 @@
           "rows": [
             ["Fold a piece of work into staging or main", "Allowed", "Refused"],
             ["Send either line up to the company copy", "Allowed", "Refused"],
+            ["Bring work in by pulling instead of folding", "Allowed", "Refused"],
             ["Accept a waiting piece of work from the command line", "Allowed", "Refused"],
             ["Write a change straight onto the line it is standing on", "Allowed", "Refused"],
-            ["Rewrite one of those lines underneath everyone", "Allowed", "Refused"],
-            ["Step onto staging and fold in, as one single command", "Allowed", "Refused"]
+            ["Point one of those lines at its own work, or rename it away", "Allowed", "Refused"],
+            ["Step onto staging and fold in, as one single command", "Allowed", "Refused"],
+            ["Do any of the above from inside another project's copy", "Allowed", "Refused"]
           ]
         },
         {
           "kind": "note",
           "tone": "good",
-          "label": "The last row is the one that would have got through",
-          "text": "A guard that reads the line an agent was standing on when the command started never sees this. It now walks the command in the order it runs, so stepping onto a protected line and writing to it is caught even though the two halves are innocent apart."
+          "label": "And in every way of typing it, which is where the work went",
+          "text": "The same push is refused with the line in quotes, with a plus in front, spelled as the position it is standing at, behind env or sudo or timeout, handed to a second shell, aimed by a directory switch or a setting, written with the tool's full path, or on the second line of the call. Five readings by someone who did not write it found twenty-three of these, one at a time."
         }
       ]
     },
@@ -53,23 +55,30 @@
       ]
     },
     {
-      "label": "Three faults found on the way, all fixed",
-      "lead": "None was in the plan. Two were found by checking rather than assuming, and one was found by the guard refusing my own writing.",
+      "label": "What the readings cost, and what they were worth",
+      "lead": "The change was read five times by someone who did not write it. Every reading sent it back.",
       "blocks": [
         {
           "kind": "table",
-          "columns": ["What was wrong", "Who it hurt"],
+          "columns": ["Round", "What it found", "Worst of it"],
           "rows": [
-            ["Your own projects refused the two things you named — bringing the shipping line into your work, and rebasing your work onto it — because the old guard treated staying current as landing", "Every agent in every one of your projects, every day, on the most routine thing it does"],
-            ["The moment the new guard went live it made every ordinary commit queue behind the token meant for folds, so no session could commit in its own main copy", "All three of your projects, for the few minutes between it landing and the check that caught it"],
-            ["The guard read a command quoted inside a written note as a command being run, and refused the note", "Found when it refused one of this job's own notes for describing the routes it had just closed"]
+            ["First", "7", "A line named in quotes was read as no line at all, so every refusal was one keystroke away"],
+            ["Second", "4", "A project joining with a board and no answer could never finish a piece of work"],
+            ["Third", "5", "Bringing work in by pulling — the spelling the session briefing itself tells an agent to use"],
+            ["Fourth", "3", "Any word in front of the command walked past the guard untouched"],
+            ["Fifth", "5", "Handing the command to a second shell opened every route again"]
           ]
         },
         {
           "kind": "note",
           "tone": "good",
-          "label": "And a fourth, in the test rather than the code",
-          "text": "The case meant to hold the third fault down passed whether the fault was there or not. Putting each fault back one at a time is what exposed it — that check is now a tool of its own, and it stops the run rather than reporting success if the code it breaks has moved."
+          "label": "Nothing was taken on trust",
+          "text": "Twenty-nine deliberate breakages are put back one at a time and each one has to turn a check red. The run fails rather than reporting a fault nothing noticed, and it stops rather than reporting success if the code it breaks has moved."
+        },
+        {
+          "kind": "note",
+          "label": "Three of the faults were in your own projects, not the shared one",
+          "text": "Staying current was being treated as landing; every ordinary commit briefly queued behind the token meant for folds; and a command quoted inside a written note was read as a command being run — found when the guard refused one of this job's own notes."
         }
       ]
     },
@@ -83,7 +92,8 @@
           "rows": [
             ["Your three own projects", "That an agent lands its own work here. Written once each, in the file where each project already describes itself"],
             ["The shared work project", "Nothing at all. It is protected because it has never said otherwise, which is the answer you picked"],
-            ["Anything you clone next", "Also nothing. Protected on arrival"]
+            ["Anything you clone next", "Also nothing. Protected on arrival"],
+            ["A team project that later runs a board", "One line naming which lines are off limits. It is told exactly that, in the refusal itself, rather than quietly never finishing a job"]
           ]
         }
       ]
@@ -102,8 +112,8 @@
     },
     {
       "id": "D3",
-      "title": "A protected project parks its work in your column instead of finishing it",
-      "why": "Otherwise forbidding the fold jams the board permanently. The column already exists for your signature, so this is a job taking a route that is already built rather than anything new.",
+      "title": "A protected project that runs a board names a line its agents may land on",
+      "why": "Forbidding the fold outright jams the board permanently, because a piece of work only counts as done once it reaches what the project ships. So a project is taken at its word about which lines are off limits, leaving one its agents can finish on, and a project that has joined without answering is told exactly that in the refusal rather than quietly never finishing anything.",
       "tag": "revised"
     },
     {
@@ -130,18 +140,28 @@
       "id": "D8",
       "title": "Nothing was run against the company copy to prove any of this",
       "why": "Every route was put to the guard the way the harness puts it, and the ones needing a real project were run against a scratch one built for the purpose. Proving a guard by tripping it on somebody's live work is not proof worth having."
+    },
+    {
+      "id": "D9",
+      "title": "A name only the running shell can settle is refused for being unreadable, not for being every line",
+      "why": "Sending up the line you are standing on is often typed by asking git which line that is, and nothing can read the answer before the command runs. Refusing it as though it wrote to everything, and offering the project-wide opt-out as the way out, teaches an agent to switch the guard off over an ordinary command. It is now told what it cannot be read as and the one-word spelling that works."
+    },
+    {
+      "id": "D10",
+      "title": "Every fix ships with a deliberate breakage that proves the check would catch it",
+      "why": "A check that passes proves the code passes it, not that it would notice the fault coming back. Twenty-nine breakages are put back one at a time; the run fails if any of them leaves everything green, and stops rather than reporting success if the code it breaks has moved."
     }
   ],
   "next": {
-    "if_nothing": "The protection stays exactly as it is. The shared work project is shut to agents on both its shipping lines and your own three are unchanged; the job finishes itself once it has been read.",
+    "if_nothing": "The protection stays exactly as it is. The shared work project is shut to agents on both its shipping lines and your own three are unchanged; the job finishes itself once a reading comes back with nothing.",
     "steps": [
       {
-        "step": "An outside reader checks the change — running now, and it can send the job back if it finds something",
+        "step": "The rule and its one-line opt-out are written into the document that owns how work runs, so the next project reads it rather than discovering it",
         "cost": "small",
         "starting": true
       },
       {
-        "step": "The rule and its one-line opt-out are written into the document that owns how work runs",
+        "step": "A reading comes back with nothing to send back — five in a row have found something",
         "cost": "small"
       },
       {
