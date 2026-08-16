@@ -156,6 +156,35 @@ SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
 # refuses is one the other lets straight through. Both read a line through these.
 
 
+# How a here-document opens, and the word that ends it. The body between is DATA
+# handed to a command, never shell.
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _without_heredocs(cmd):
+    """The line with every here-document body taken out, and the command lines
+    that still run from inside the unquoted ones.
+
+    A body is what a command is being HANDED, not what the shell runs: a script
+    written with `cat > x <<'EOF'` is full of text that reads like commands and
+    is none of them, and reading it as commands refuses the writing of any script
+    that mentions one. With the delimiter left unquoted the shell does still work
+    substitutions out inside the body, and those do run.
+    """
+    kept, ran, waiting = [], [], []
+    for line in cmd.split("\n"):
+        if waiting:
+            want, quoted = waiting[0]
+            if line.strip() == want:
+                waiting.pop(0)
+            elif not quoted:
+                ran += grown_in(line)
+            continue
+        kept.append(line)
+        waiting += [(name, bool(mark)) for mark, name in _HEREDOC.findall(line)]
+    return "\n".join(kept), ran
+
+
 def segments(cmd):
     """Each command on the line, in the order the shell would run them.
 
@@ -165,6 +194,7 @@ def segments(cmd):
     them. Reading any of those as a separator cuts a command in half and lets the
     harmless-looking half stand for the whole.
     """
+    cmd, ran = _without_heredocs(cmd)
     out, cur, quote, depth, i = [], [], "", 0, 0
     while i < len(cmd):
         ch = cmd[i]
@@ -193,6 +223,8 @@ def segments(cmd):
             cur.append(ch)
         i += 1
     out.append("".join(cur))
+    for inside in ran:
+        out += segments(inside)
     return [s for s in (part.strip() for part in out) if s]
 
 

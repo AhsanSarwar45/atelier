@@ -594,6 +594,15 @@ ROUTES = (
     # Repointing the position by hand is stepping onto a line.
     ("REFUSED", "git symbolic-ref HEAD refs/heads/main && git commit -m x"),
     ("ALLOWED", "git symbolic-ref HEAD refs/heads/feature/other && git commit -m x"),
+    # A here-document body is what a command is HANDED, not what the shell runs.
+    # Writing a script that merely mentions a fold is not folding, and reading it
+    # as one refuses the writing of any script that names a git command at all.
+    ("ALLOWED", "cat > s.sh <<'EOF'\ngit push origin main\nEOF"),
+    ("ALLOWED", "cat > s.sh <<'EOF'\n$(git push origin main)\nEOF"),
+    ("ALLOWED", "python3 - <<'PY'\nprint(\"git push origin main\")\nPY"),
+    # With the delimiter left unquoted the shell works substitutions out inside
+    # the body, and those do run.
+    ("REFUSED", "cat > s.sh <<EOF\n$(git push origin main)\nEOF"),
     # A command written behind one of the shell's own words is still that command.
     ("REFUSED", "if true; then git push origin main; fi"),
     ("REFUSED", "for b in main; do git push origin $b; done"),

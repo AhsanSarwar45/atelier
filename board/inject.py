@@ -171,6 +171,11 @@ FAULTS = [
                          "    if False:")),
     ("a rule about one command runs to the end of the next", CLOSE,
      lambda s: s.replace(r"[^|;&\n]*", r"[^|;&]*")),
+    ("a here-document body is a run of commands", COMMON,
+     lambda s: s.replace("    cmd, ran = _without_heredocs(cmd)\n", "    ran = []\n")),
+    ("a substitution inside an unquoted here-document runs unread", COMMON,
+     lambda s: s.replace("            elif not quoted:\n"
+                         "                ran += grown_in(line)\n", "")),
     ("what a substitution holds is read by nobody", COMMON,
      lambda s: s.replace("    out, i = [], 0\n    while i < len(cmd):\n"
                          '        if cmd[i:i + 2] == "$(":',
