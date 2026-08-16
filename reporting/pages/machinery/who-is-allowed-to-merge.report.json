@@ -1,130 +1,89 @@
 {
   "title": "Who Is Allowed To Merge",
-  "eyebrow": "Nothing stops an agent putting its own work straight onto staging or main in the shared work project today. The guards you have all switch themselves off there.",
+  "eyebrow": "Landed. An agent in the shared work project can no longer reach staging or main by any route, and your three own projects are untouched.",
   "actions": {
-    "questions": [
-      {
-        "ask": "Should a project be protected unless it says otherwise, or protected only when it says so?",
-        "options": [
-          {
-            "label": "Protected unless it says otherwise",
-            "say": "Protect the shipping lines everywhere by default. My own projects each say one line to opt out.",
-            "pick": true,
-            "note": "The shared work project is safe the moment this lands, and so is anything you clone next year with nobody remembering to set it up. Costs one line in each of your three personal projects, written once"
-          },
-          {
-            "label": "Protected only when it says so",
-            "say": "Leave everything as it is; the shared work project declares itself protected.",
-            "note": "Nothing changes in your own projects. The next work project you clone is unguarded until you remember it — and the failure it protects against is an agent writing onto a line other people ship from"
-          }
-        ],
-        "note": "Either way the shared work project ends up protected. The question is only what happens to a project nobody has spoken about."
-      }
-    ]
+    "none": true
   },
   "status": {
-    "now": "Nothing is built yet. I checked each of the four ways onto a protected line in the shared work project and all four are open, and I found the two traps that would have made an obvious fix look finished while jamming your board. This is the proposal, waiting on one answer from you.",
-    "next_up": "An agent in the shared work project is refused every route onto staging and main, shown by trying all four rather than by trusting the change.",
-    "items": [
-      {
-        "text": "Check what actually guards the shared work project today",
-        "state": "done"
-      },
-      {
-        "text": "Check whether the guards you already have would reach it",
-        "state": "done"
-      },
-      {
-        "text": "Find what else breaks if the fold is simply forbidden",
-        "state": "done"
-      },
-      {
-        "text": "Close every route onto a protected line",
-        "state": "todo"
-      },
-      {
-        "text": "Let each project state who folds its work in",
-        "state": "todo"
-      },
-      {
-        "text": "Park a protected project's finished job in your column",
-        "state": "todo"
-      }
-    ]
+    "card": "mch-mkp"
   },
   "content": [
     {
-      "label": "What actually stands between an agent and staging today",
-      "lead": "In the shared work project: nothing. I checked each way in rather than assuming.",
+      "label": "What changed for the shared work project",
+      "lead": "Every route I found open is now shut. Checked against the guard as it is actually installed, not against the change on its own.",
       "blocks": [
         {
           "kind": "table",
-          "columns": ["What an agent can do there right now", "What stops it"],
+          "columns": ["What an agent tries there", "Before", "Now"],
           "rows": [
-            ["Fold a piece of work into staging or main", "Nothing. The guard that would refuse this switches itself off in any project that does not run your board, and that project does not run it"],
-            ["Send work up to the company copy on either line", "Nothing"],
-            ["Accept and fold in a piece of work waiting for review, from the command line", "Nothing — that command is on the project's own allowed list"],
-            ["Write a change directly onto staging without starting a piece of work of its own", "Nothing, and that project is sitting on staging as its current line right now, so this is the default rather than the exception"],
-            ["Force work over the top of what is there, wipe local changes, or throw work away", "Refused. Those three were thought about and written down"]
-          ]
-        },
-        {
-          "kind": "note",
-          "tone": "bad",
-          "label": "The amplifier",
-          "text": "Every agent in every project runs without being asked for permission — that is your standing setting. So the only thing between an agent and any of the first four rows is the refusal list in that project's own file, and none of the four is on it."
-        },
-        {
-          "kind": "note",
-          "label": "Its written instructions do ask",
-          "text": "The project's own instructions tell an agent to check what a piece of work contains before offering it up, and to ask you if anything unrelated is in there. That is a request to the agent, not a refusal — it holds exactly as well as the agent's attention on the day, which is the thing you are trying not to depend on."
-        }
-      ]
-    },
-    {
-      "label": "Why the obvious fix does not work on its own",
-      "lead": "Two traps, and both would have bitten after the change looked finished.",
-      "blocks": [
-        {
-          "kind": "list",
-          "items": [
-            "The guard you already have is switched off wherever your board is not running. The shared work project is exactly that shape — no board, and no intention of running one. So a policy written into the board's own settings would never be read there. The guard has to stop asking whether the board is present.",
-            "In the projects that DO run your board, forbidding the fold alone would jam every job. The board refuses to tick a piece of work off until its change has reached what that project ships. Take the fold away and nothing can ever be ticked off again — every job parks at its last step forever. So the same change has to redefine finished for those projects: the job stops in the column that already exists for your signature, and your fold is what closes it."
-          ]
-        }
-      ]
-    },
-    {
-      "label": "What each project would say about itself",
-      "lead": "Two short statements, in the project's own file, next to the ones it already makes about itself.",
-      "blocks": [
-        {
-          "kind": "table",
-          "columns": ["The project says", "What it gets"],
-          "rows": [
-            ["Which lines are yours alone", "Staging and main in the shared work project. An agent is refused every way onto them — folding in, sending up, accepting a piece of work for review, and writing straight onto one while standing on it"],
-            ["Who folds work in", "You, in the shared work project. The agent's job ends with the work offered up and the piece parked for you; your fold is what finishes it. In your own projects, the agent, exactly as today"]
+            ["Fold a piece of work into staging or main", "Allowed", "Refused"],
+            ["Send either line up to the company copy", "Allowed", "Refused"],
+            ["Accept a waiting piece of work from the command line", "Allowed", "Refused"],
+            ["Write a change straight onto the line it is standing on", "Allowed", "Refused"],
+            ["Rewrite one of those lines underneath everyone", "Allowed", "Refused"],
+            ["Step onto staging and fold in, as one single command", "Allowed", "Refused"]
           ]
         },
         {
           "kind": "note",
           "tone": "good",
-          "label": "This is a path the machinery already walks",
-          "text": "Projects already declare things about themselves that the shared tools then obey — where finished work lands, what its subjects are called, what counts as proof. One of your projects already ships from a line that is not called main, and everything respects it without a single mention of that project by name. This is one more statement of the same kind."
+          "label": "The last row is the one that would have got through",
+          "text": "A guard that reads the line an agent was standing on when the command started never sees this. It now walks the command in the order it runs, so stepping onto a protected line and writing to it is caught even though the two halves are innocent apart."
         }
       ]
     },
     {
-      "label": "What it costs you",
-      "lead": "Small, and front-loaded.",
+      "label": "What an agent can still do there",
+      "lead": "The whole normal working day, unchanged. Seven for seven, run from the shared work project while it stands on staging.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "Start a line of its own, in either spelling, and commit onto it.",
+            "Bring staging into its own work, and rebase its own work onto staging — including all the conflict resolution that comes with either. Your explicit condition, and it is what a guard reading only the word would have blocked.",
+            "Stage, stash, and look at what changed against staging.",
+            "Open the work up for your review."
+          ]
+        },
+        {
+          "kind": "note",
+          "label": "So the only thing taken away",
+          "text": "Writing to what the team ships. Everything an agent does to prepare work, and every way it stays current with what other people have shipped, is exactly as it was."
+        }
+      ]
+    },
+    {
+      "label": "Three faults found on the way, all fixed",
+      "lead": "None was in the plan. Two were found by checking rather than assuming, and one was found by the guard refusing my own writing.",
       "blocks": [
         {
           "kind": "table",
-          "columns": ["Where", "What changes for you"],
+          "columns": ["What was wrong", "Who it hurt"],
           "rows": [
-            ["The shared work project", "Agents can no longer reach staging or main by any route. Your review-then-fold habit is unchanged — it is simply now the only way in"],
-            ["Your three personal projects", "One line each, saying the agent may keep folding work in. Written once; nothing else changes"],
-            ["Anything you clone next", "Safe on arrival, if you pick the recommended answer. Unguarded until you remember it, if you pick the other"]
+            ["Your own projects refused the two things you named — bringing the shipping line into your work, and rebasing your work onto it — because the old guard treated staying current as landing", "Every agent in every one of your projects, every day, on the most routine thing it does"],
+            ["The moment the new guard went live it made every ordinary commit queue behind the token meant for folds, so no session could commit in its own main copy", "All three of your projects, for the few minutes between it landing and the check that caught it"],
+            ["The guard read a command quoted inside a written note as a command being run, and refused the note", "Found when it refused one of this job's own notes for describing the routes it had just closed"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "And a fourth, in the test rather than the code",
+          "text": "The case meant to hold the third fault down passed whether the fault was there or not. Putting each fault back one at a time is what exposed it — that check is now a tool of its own, and it stops the run rather than reporting success if the code it breaks has moved."
+        }
+      ]
+    },
+    {
+      "label": "What it cost you",
+      "lead": "One line each in three files you own, and nothing anywhere else.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Where", "What it says"],
+          "rows": [
+            ["Your three own projects", "That an agent lands its own work here. Written once each, in the file where each project already describes itself"],
+            ["The shared work project", "Nothing at all. It is protected because it has never said otherwise, which is the answer you picked"],
+            ["Anything you clone next", "Also nothing. Protected on arrival"]
           ]
         }
       ]
@@ -144,7 +103,8 @@
     {
       "id": "D3",
       "title": "A protected project parks its work in your column instead of finishing it",
-      "why": "Otherwise forbidding the fold jams the board permanently. The column already exists for your signature, so this is a job taking a route that is already built rather than anything new."
+      "why": "Otherwise forbidding the fold jams the board permanently. The column already exists for your signature, so this is a job taking a route that is already built rather than anything new.",
+      "tag": "revised"
     },
     {
       "id": "D4",
@@ -155,23 +115,38 @@
       "id": "D5",
       "title": "Written instructions are not counted as protection",
       "why": "The shared work project already asks an agent to check before offering work up. It is a good instruction and it holds most of the time; the point of a guard is the day it does not."
+    },
+    {
+      "id": "D6",
+      "title": "What a command writes to is the only question asked",
+      "why": "Your two conditions — conflicts resolved while folding, and a line brought up to date from another — are not exceptions to the rule under this reading, they fall out of it. A guard that matched on the word instead would need a list of exceptions, and a list of exceptions is where the next hole comes from."
+    },
+    {
+      "id": "D7",
+      "title": "The one-at-a-time token still only queues folds, not every write",
+      "why": "Reading what a command writes to briefly made it queue ordinary commits as well, which stopped every session committing in its own copy. It is scoped back to folds and held there by a case that goes red if it ever widens again."
+    },
+    {
+      "id": "D8",
+      "title": "Nothing was run against the company copy to prove any of this",
+      "why": "Every route was put to the guard the way the harness puts it, and the ones needing a real project were run against a scratch one built for the purpose. Proving a guard by tripping it on somebody's live work is not proof worth having."
     }
   ],
   "next": {
-    "if_nothing": "The shared work project stays as it is: an agent there can put work onto staging or main, and the only thing in the way is whether it happens to read its instructions carefully that day.",
+    "if_nothing": "The protection stays exactly as it is. The shared work project is shut to agents on both its shipping lines and your own three are unchanged; the job finishes itself once it has been read.",
     "steps": [
       {
-        "step": "An agent in the shared work project is refused every route onto staging and main, shown by trying all four rather than by trusting the change",
+        "step": "An outside reader checks the change — running now, and it can send the job back if it finds something",
         "cost": "small",
         "starting": true
       },
       {
-        "step": "Each project states who folds its work in, and your own three keep today's behaviour by saying so",
+        "step": "The rule and its one-line opt-out are written into the document that owns how work runs",
         "cost": "small"
       },
       {
-        "step": "A job in a protected project stops in your column with the work offered up, so the board can still be finished without an agent folding anything",
-        "cost": "medium"
+        "step": "The copy this was built in is removed and the job closes",
+        "cost": "small"
       }
     ]
   }
