@@ -405,7 +405,25 @@ ROUTES = (
     ("ALLOWED", "git add -A"),
     ("ALLOWED", "git commit -m fix"),
     ("ALLOWED", "git push origin feature/mine"),
+    # A line whose name ends in a protected word is not that line. Cutting a
+    # refspec at its last slash makes both of these unpushable.
+    ("ALLOWED", "git push origin fix/main"),
+    ("ALLOWED", "git push origin chore/release"),
+    ("ALLOWED", "git push origin refs/heads/feature/mine"),
     ("REFUSED", "git checkout staging && git merge feature/mine"),
+    # Every line at once takes the protected ones with it, and neither of these
+    # spells one out.
+    ("REFUSED", "git push --all origin"),
+    ("REFUSED", "git push --mirror origin"),
+    # The second line of a shell call is a command, not the first one's arguments.
+    ("REFUSED", "git status\ngit push origin main"),
+    # Finishing a fold and then writing to a shipping line is the moment the guard
+    # is for, and every mid-fold switch offers the same way past it.
+    ("REFUSED", "git rebase --continue && git push origin main"),
+    # Stepping onto a shipping line and committing, with and without the quotes
+    # that once hid the name.
+    ("REFUSED", "git checkout main && git commit -m x"),
+    ('REFUSED', 'git checkout "staging" && git commit -m x'),
     ("REFUSED", "git rebase main staging"),
     ("REFUSED", "git push origin HEAD:staging"),
     ("REFUSED", "git push origin main"),

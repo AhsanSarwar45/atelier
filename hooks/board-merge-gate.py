@@ -52,6 +52,10 @@ NOT_A_MOVE = ("--ours", "--theirs", "--patch", "-p", "--detach", "--")
 TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
                "--exec-path", "--super-prefix", "--config-env")
 
+# A push that names no line because it means every one of them. It cannot be a
+# line's own name: git refuses that spelling for a branch.
+EVERY = "*"
+
 FF_ONLY = "--ff-only"
 NOT_FF = (
     "A merge into main has to be a fast-forward: a code step lands as it closes, so "
@@ -191,6 +195,19 @@ def moved_to(rest, where):
     return args[0] if fresh or is_branch(args[0], where) else None
 
 
+def line_named(ref):
+    """The line one end of a refspec names.
+
+    Only git's own prefix comes off. A working line called `fix/main` is not the
+    line called `main`, and cutting at the last slash makes every line whose name
+    happens to end in a protected word unpushable.
+    """
+    for lead in ("refs/heads/", "heads/"):
+        if ref.startswith(lead):
+            return ref[len(lead):]
+    return ref
+
+
 def push_targets(rest, here):
     """Every line a push would land on.
 
@@ -198,11 +215,13 @@ def push_targets(rest, here):
     both sides. With no refspec at all the line being stood on is the target,
     which is the form that walks past a guard reading only what was typed.
     """
+    if any(a in ("--all", "--mirror") for a in rest):
+        return [EVERY]
     args = positionals(rest)
     refs = args[1:] if args else []
     if not refs:
         return [here] if here else []
-    return [r.split(":")[-1].split("/")[-1] for r in refs]
+    return [line_named(r.split(":")[-1]) for r in refs]
 
 
 def written_by(verb, rest, here):
@@ -284,6 +303,14 @@ def main():
             if guarded:
                 deny(REFUSED % ("The line a waiting piece of work lands on",
                                 "it", project.DECLARATION))
+                return
+        elif line == EVERY:
+            # Sending every line at once sends the protected ones with them, and
+            # which lines exist is not worth a command to find out: a project
+            # protecting anything protects this.
+            if guarded:
+                deny(REFUSED % ("Every line in this checkout at once",
+                                "one of them", project.DECLARATION))
                 return
         elif line in guarded:
             deny(REFUSED % (line, line, project.DECLARATION))

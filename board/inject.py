@@ -50,6 +50,14 @@ FAULTS = [
     ("committing where you stand is not a route onto a line", GATE,
      lambda s: s.replace('"merge", "rebase", "push", "commit",',
                          '"merge", "rebase", "push",')),
+    ("a new line on the next line of the call is the first one's arguments", GATE,
+     lambda s: s.replace('        elif ch in ";&|()\\n":', '        elif ch in ";&|()":')),
+    ("sending every line at once names no line", GATE,
+     lambda s: s.replace('    if any(a in ("--all", "--mirror") for a in rest):\n'
+                         "        return [EVERY]\n", "")),
+    ("a line whose name ends in a protected word is that line", GATE,
+     lambda s: s.replace('    return [line_named(r.split(":")[-1]) for r in refs]',
+                         '    return [r.split(":")[-1].split("/")[-1] for r in refs]')),
 ]
 
 
@@ -80,6 +88,7 @@ try:
 finally:
     shutil.rmtree(base, ignore_errors=True)
 
+survived = []
 for label, path, break_it in FAULTS:
     tmp = export()
     try:
@@ -90,7 +99,15 @@ for label, path, break_it in FAULTS:
         open(full, "w").write(now)
         code, out = run(tmp)
         line = next((l for l in out.splitlines() if "AssertionError" in l), "")
+        if not code:
+            survived.append(label)
         print("%-58s exit %d  %s\n     %s"
               % (label, code, "RED" if code else "STILL GREEN", line.strip()[:140]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+# A fault nothing notices is the finding, not a line of the report. Printed and
+# walked past, it reads the same as teeth to whatever runs this.
+if survived:
+    sys.exit("%d fault(s) left the suite green, so nothing holds them down:\n  %s"
+             % (len(survived), "\n  ".join(survived)))
