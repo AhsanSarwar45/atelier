@@ -184,6 +184,35 @@ def segments(cmd):
     return [s for s in (part.strip() for part in out) if s]
 
 
+# Stands in for a space inside a stretch the shell works out, so the splitter
+# leaves that stretch whole. Never a character a command carries.
+HELD = "\x00"
+
+
+def _held(seg):
+    """The same text with the spaces inside `$(…)` and backquotes held.
+
+    A stretch the shell works out becomes ONE word when the shell runs it, so it
+    is one word here. Split into several, it inflates the count of arguments that
+    decides which line a command writes to — and the argument that decides then
+    comes out as a word from the middle of the substitution (mch-mkp.59).
+    """
+    out, depth, tick, i = [], 0, False, 0
+    while i < len(seg):
+        ch = seg[i]
+        if not tick and seg[i:i + 2] == "$(":
+            depth, i = depth + 1, i + 2
+            out.append("$(")
+            continue
+        if depth and ch in "()":
+            depth += 1 if ch == "(" else -1
+        elif ch == "`":
+            tick = not tick
+        out.append(HELD if (depth or tick) and ch.isspace() else ch)
+        i += 1
+    return "".join(out)
+
+
 def words(seg):
     """One command as the shell would hand it over, quotes taken off.
 
@@ -191,9 +220,10 @@ def words(seg):
     quoted spelling as no target at all is how every refusal is walked past.
     """
     try:
-        return shlex.split(seg)
+        split = shlex.split(_held(seg))
     except ValueError:
-        return seg.split()
+        split = _held(seg).split()
+    return [w.replace(HELD, " ") for w in split]
 
 
 def plain(argv):

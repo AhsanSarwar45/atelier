@@ -12,6 +12,15 @@ set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 
+# A commit hook exports these as absolute paths to the repository being committed
+# to — and a commit here is made from a worktree, so they point INTO one. Every
+# git command below would inherit them: the throwaway checkouts the cases build
+# would never be built, and their commits and branches would land on the real
+# repository instead (mch-mkp.56). The suite clears them for itself too; this is
+# the same answer given at the door, for everything else the script runs.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_PREFIX
+
 # What is being judged is what a commit would contain — which, in front of a
 # commit, is what is staged and not the commit behind it. `git write-tree` names
 # that tree without touching the working tree or moving any ref.

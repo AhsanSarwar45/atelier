@@ -19,6 +19,17 @@ import subprocess
 import sys
 import tempfile
 
+# A git hook exports these as absolute paths to the repository being committed
+# to, and every git command run below inherits them — so the throwaway checkouts
+# these cases build would never be built and their commits, branches and
+# checkouts would land on the real one instead. Cleared once, for the whole run,
+# before anything shells out (mch-mkp.56). The cases that test these settings
+# pass them in the command they are judging, not in this environment.
+for _pointed in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                 "GIT_NAMESPACE", "GIT_PREFIX", "GIT_CEILING_DIRECTORIES"):
+    os.environ.pop(_pointed, None)
+
 HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, HOME)
 sys.path.insert(0, os.path.join(HOME, "hooks"))
@@ -521,6 +532,28 @@ ROUTES = (
     # separators they cut this in three, and the piece carrying the verb is thrown
     # away with them — so the push is never seen at all.
     ("REFUSED", "git -C $(pwd)/sub push origin main"),
+    # Copying one line over another lands on the name copied TO, in two words and
+    # with none of the folding verbs. The long-hand form carries the force switch
+    # as well, which would otherwise credit the write to the name copied FROM.
+    ("REFUSED", "git branch -C feature/mine main"),
+    ("REFUSED", "git branch --copy --force feature/mine main"),
+    ("REFUSED", "git branch -c work staging"),
+    ("ALLOWED", "git branch -C main feature/other"),
+    # A branch command that only lists writes to nothing, so a value the shell
+    # works out cannot make it write to a line — and the refusal it used to get
+    # talked about pushing, which is not what was typed.
+    ("ALLOWED", "git branch --contains $(git rev-parse HEAD)"),
+    ("ALLOWED", "git branch --list"),
+    # Rebasing your own line onto a base worked out on the spot is the everyday
+    # command the design says is always allowed. Only the argument that names the
+    # line being REWRITTEN makes a rebase unreadable.
+    ("ALLOWED", "git rebase --onto main $(git merge-base main HEAD) feature/mine"),
+    ("REFUSED", "git rebase --onto $(echo x) upstream main"),
+    ("REFUSED", "git rebase main $(echo staging)"),
+    # A line longer than the walk reads is refused rather than half-read: the
+    # tail is where the refusal would have been, and padding with harmless
+    # commands must not be a way around every rule on the line.
+    ("REFUSED", " && ".join(["git status"] * 200 + ["git push origin main"])),
     # A line that abandons a fold and then writes to a shipping line is two
     # commands, and the first one's switch does not excuse the second.
     ("REFUSED", "git merge --abort && git push origin main"),
@@ -600,6 +633,18 @@ ELSEWHERE = (
     ("REFUSED", "GIT_WORK_TREE={other} git commit -m fix"),
 )
 
+# Somebody else's repository, checked out INSIDE a project whose agents land
+# their own work — a vendored dependency, a submodule, a nested clone. The
+# declaration is found by walking up, so without a check it is answered for by
+# the project around it and every one of its lines is open. `{other}` sits BESIDE
+# the project, so nothing in that table reaches this.
+NESTED = (
+    ("REFUSED", "git -C {inner} push origin main"),
+    ("REFUSED", "git -C {inner} commit -m fix"),
+    ("REFUSED", "cd {inner} && git push origin main"),
+    ("ALLOWED", "git -C {inner} push origin feature/mine"),
+)
+
 # A team whose agents land on a line of their own, and whose manager alone moves
 # that into what ships. Naming what is protected has to be taken at its word.
 TEAM = (
@@ -623,6 +668,21 @@ def scratch_project(tmp, says=None, on="feature/mine"):
     if says is not None:
         with open(os.path.join(tmp, project.DECLARATION), "w") as fh:
             fh.write(says)
+
+
+if "--door" in sys.argv:
+    # One throwaway checkout and nothing else, so a run can be started the way a
+    # commit hook starts one and the answer read from outside: `own` if it built
+    # its own repository, and otherwise whatever it did to somebody else's. This
+    # is the whole of what the clearing at the top of the file is for, and the
+    # only way to prove it is from a process that was started pointed elsewhere.
+    _door = tempfile.mkdtemp(prefix="board-door-")
+    try:
+        scratch_project(_door)
+        print("own" if os.path.isdir(os.path.join(_door, ".git")) else "elsewhere")
+    finally:
+        shutil.rmtree(_door, ignore_errors=True)
+    sys.exit(0)
 
 
 def merge_says(cmd, says=None, on="feature/mine", board=False):
@@ -659,9 +719,15 @@ def merge_routes(says=None, on="feature/mine", rows=ROUTES):
     try:
         scratch_project(tmp, says, on)
         scratch_project(other, None, "main")
+        # Somebody else's repository sitting inside the first one, which is what a
+        # vendored dependency or a submodule is. Built always: it costs one `git
+        # init` and it is the only way to reach the walk up from a nested checkout.
+        inner = os.path.join(tmp, "vendor", "dep")
+        os.makedirs(inner, exist_ok=True)
+        scratch_project(inner, None, "main")
         got = {}
         for _, cmd in rows:
-            said = cmd.replace("{other}", other) \
+            said = cmd.replace("{other}", other).replace("{inner}", inner) \
                       .replace("{tilde}", "~/" + os.path.basename(other))
             env = dict(os.environ)
             if "{tilde}" in cmd:
@@ -1434,6 +1500,16 @@ def main():
         "allowed to write to an undeclared checkout's shipping line: %s" \
         % ", ".join(through)
 
+    # Somebody else's repository checked out inside a project that lands its own
+    # work. The declaration is found by walking up, so the enclosing project would
+    # otherwise hand its permission to a repository that never asked for it — and
+    # the manager's largest project vendors one.
+    inside = merge_routes('name = "scratch"\nagent_merges = true\n', rows=NESTED)
+    borrowed = ["%s: %s, wanted %s" % (cmd, inside[cmd], want)
+                for want, cmd in NESTED if inside[cmd] != want]
+    assert not borrowed, "a repository checked out inside a project that lands " \
+        "its own work inherited that permission:\n  %s" % "\n  ".join(borrowed)
+
     # A team that lands its agents' work on a line of their own, and moves that
     # into what ships by hand. Adding `lands_on` back to whatever a project names
     # leaves it with no line its agents may reach, which is the same wedge.
@@ -1461,6 +1537,34 @@ def main():
     assert "agent_merges = true" in wedged and "closes only once" in wedged, \
         "a checkout running a board and declaring nothing was refused the only " \
         "route its own board accepts, with no way out named: %s" % (wedged or "allowed")
+
+    # And none of that touched the repository a commit hook would have pointed
+    # this run at. The cases build throwaway checkouts; a hook exports GIT_DIR and
+    # GIT_INDEX_FILE as absolute paths to the repository being committed to, and
+    # every git command here inherits them — so the throwaway is never built and
+    # its commits, branches and checkouts land on the real one instead.
+    victim = tempfile.mkdtemp(prefix="board-victim-")
+    try:
+        scratch_project(victim, None, "main")
+        lines = ["git", "branch", "--format=%(refname:short)"]
+        before = subprocess.run(lines, cwd=victim, capture_output=True, text=True,
+                                timeout=60).stdout.split()
+        door = subprocess.run(
+            [sys.executable, os.path.realpath(__file__), "--door"],
+            capture_output=True, text=True, timeout=120,
+            env=dict(os.environ, GIT_DIR=os.path.join(victim, ".git"),
+                     GIT_INDEX_FILE=os.path.join(victim, ".git", "index")))
+        after = subprocess.run(lines, cwd=victim, capture_output=True, text=True,
+                               timeout=60).stdout.split()
+        assert before == after, \
+            "a run started the way a commit hook starts one built its throwaway " \
+            "checkout in the repository being committed to: %s became %s" \
+            % (before, after)
+        assert door.stdout.strip() == "own", \
+            "the throwaway checkout was never built at all, because the settings " \
+            "sent every command somewhere else: %s" % (door.stdout + door.stderr)[:300]
+    finally:
+        shutil.rmtree(victim, ignore_errors=True)
 
     print("ok: a project nobody has declared refuses every route onto a line it "
           "ships from — including standing on one and committing, and including a "

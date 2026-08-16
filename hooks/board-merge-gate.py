@@ -43,6 +43,11 @@ MOVE = ("checkout", "switch")
 BRANCH_FORCES = ("-f", "--force")
 BRANCH_RENAMES = ("-m", "-M", "--move")
 BRANCH_DELETES = ("-d", "-D", "--delete")
+# A copy lands on the name it is copied TO, and the forced form lands on it even
+# when a line of that name is already there — which is pointing a shipping line
+# at any commit, in two words and with none of the folding verbs.
+BRANCH_COPIES = ("-c", "-C", "--copy")
+BRANCH_WRITES = BRANCH_DELETES + BRANCH_RENAMES + BRANCH_COPIES + BRANCH_FORCES
 
 # The `reset` forms that move the line you stand on. A reset naming paths only
 # takes them out of what is staged and moves nothing.
@@ -67,11 +72,24 @@ NOT_A_MOVE = ("--ours", "--theirs", "--patch", "-p", "--detach", "--")
 TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
                "--exec-path", "--super-prefix", "--config-env")
 
-# A push that names no line because it means every one of them, and a name only
-# the running shell can settle. Neither can be a line's own name: git refuses
-# both spellings for a branch.
+# A push that names no line because it means every one of them, a name only the
+# running shell can settle, and a line with more commands on it than the walk
+# reads. None can be a line's own name: git refuses all three spellings.
 EVERY = "*"
 UNREADABLE = "?"
+UNENDING = "!"
+
+# How many commands one line is read through. A line longer than this is refused
+# rather than half-read: letting the tail past is the one failure direction a
+# guard must not have, because padding a line with harmless commands would then
+# walk around every refusal on it.
+READ_CAP = 200
+
+TOO_MANY = (
+    "This line puts more than %d commands on one call, and what the ones past "
+    "that write to is not read — so nothing here can say whether it reaches a "
+    "line this project ships from.\n\nSplit it into separate calls."
+)
 
 UNREAD = (
     "This names the line by running something, and which line that comes out as "
@@ -356,6 +374,11 @@ def branch_targets(rest, here):
         return []
     if any(a in BRANCH_DELETES for a in rest):
         return [line_named(a, here) for a in args]
+    if any(a in BRANCH_COPIES for a in rest):
+        # A copy writes to the name it lands on and never to the one it reads
+        # from. Given one name, the source is the line being stood on. Asked
+        # before the force switch, which the long-hand form carries as well.
+        return [line_named(args[-1], here)]
     if any(a in BRANCH_RENAMES for a in rest):
         # A rename writes to both ends: the new name is made and the old one stops
         # existing. Given one name, the old one is the line being stood on — and
@@ -407,6 +430,18 @@ def remade_by(rest, where):
     return [args[0]] if args and is_branch(args[0], where) else []
 
 
+def rebase_target(rest):
+    """The line a rebase rewrites when it names one, else "" for the one stood on.
+
+    `--onto <newbase> <upstream> [<branch>]`, else `<upstream> [<branch>]`. The
+    last argument names the line being rewritten only when the form is full;
+    short of that it is whatever is being stood on.
+    """
+    args = positionals(rest)
+    want = 3 if "--onto" in rest else 2
+    return args[want - 1] if len(args) >= want else ""
+
+
 def written_by(verb, rest, here, where):
     """The lines this command writes to, given the line it is run from.
 
@@ -428,12 +463,8 @@ def written_by(verb, rest, here, where):
         args = positionals(rest)
         return [line_named(args[0], here)] if args else []
     if verb == "rebase":
-        args = positionals(rest)
-        # `--onto <newbase> <upstream> [<branch>]`, else `<upstream> [<branch>]`.
-        # The last positional names the line being rewritten only when the form
-        # is full; short of that it is whatever is being stood on.
-        want = 3 if "--onto" in rest else 2
-        return [args[want - 1]] if len(args) >= want else ([here] if here else [])
+        named = rebase_target(rest)
+        return [named] if named else ([here] if here else [])
     return [here] if here else []
 
 
@@ -441,12 +472,19 @@ def names_its_target(verb, rest):
     """Whether this command reads the line it writes to out of its own arguments.
 
     Everything else writes to whatever is being stood on, where a value the shell
-    works out cannot change the answer. A fetch is the in-between: it names a line
-    only when it carries a refspec, and reading every fetch as naming one would
-    refuse the everyday way of bringing a remote up to date.
+    works out cannot change the answer. Three are in-between, and each is asked
+    about the argument that actually decides: a fetch names a line only when it
+    carries a refspec, a branch command only in the forms that write, and a
+    rebase only when the line it rewrites is the one that was worked out —
+    rebasing your own line onto a base worked out on the spot is the everyday
+    command the design says must always be allowed.
     """
     if verb == "fetch":
         return any(":" in a for a in positionals(rest)[1:])
+    if verb == "branch":
+        return any(a in BRANCH_WRITES for a in rest)
+    if verb == "rebase":
+        return unknowable(rebase_target(rest) or "")
     return verb in NAMED_TARGET
 
 
@@ -508,9 +546,48 @@ def forge_merge(argv):
     return is_pull_merge(path) and method not in GH_READS
 
 
+def common_dir(where):
+    """The one git directory a checkout and all of its worktrees share, or None.
+
+    None for a directory that is no repository at all — including one that does
+    not exist, which is most of what this is asked about.
+    """
+    try:
+        run = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=where,
+                             capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except Exception:
+        return None
+    out = (run.stdout or "").strip()
+    if run.returncode or not out:
+        return None
+    return os.path.realpath(out if os.path.isabs(out) else os.path.join(where, out))
+
+
+def nested_repository(where, root):
+    """Whether this is a repository CHECKED OUT INSIDE the project the declaration
+    was walked up to, rather than that project itself.
+
+    A worktree of a project IS the project — it is where all the work is done —
+    and a vendored dependency, a submodule or a nested clone is not, though both
+    are a directory under the project root and the walk up finds the same
+    declaration for either. The one git directory a checkout shares with its own
+    worktrees tells them apart.
+
+    Answered only when both are readable. A path that is no repository has no line
+    to write to, and treating it as somebody else's would refuse commands that
+    write nowhere.
+    """
+    mine, theirs = common_dir(where), common_dir(root)
+    return bool(mine and theirs and mine != theirs)
+
+
 def protected_by(where):
     """The lines the project holding this directory says an agent may not write to."""
     try:
+        if nested_repository(where, project.root(where)):
+            # Somebody else's repository, sitting inside one of ours. It has said
+            # nothing about itself, and a permission it never gave is not its own.
+            return frozenset(project.DEFAULT_PROTECTED)
         return project.of(where).protected
     except Exception:
         # A declaration that cannot be read is not permission. The default set is
@@ -543,7 +620,7 @@ def routes(cmd, home):
     def stand(where, line):
         at[tree_of(where)] = line
 
-    while todo and read < 200:
+    while todo and read < READ_CAP:
         seg, todo, read = todo[0], todo[1:], read + 1
         put, argv = bc.plain(bc.words(seg))
         script = bc.handed_on(argv)
@@ -591,6 +668,9 @@ def routes(cmd, home):
             else:
                 made += [(verb, where, line, rest)
                          for line in written_by(verb, rest, line_of(where), where)]
+    if todo:
+        # The tail of the line is where the refusal would have been.
+        made.append(("read", cwd, UNENDING, []))
     return made
 
 
@@ -614,6 +694,10 @@ def main():
         elif line == UNREADABLE:
             if guarded:
                 deny(UNREAD)
+                return
+        elif line == UNENDING:
+            if guarded:
+                deny(TOO_MANY % READ_CAP)
                 return
         elif line == EVERY:
             # Sending every line at once sends the protected ones with them, and
