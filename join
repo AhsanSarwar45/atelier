@@ -187,6 +187,13 @@ def standing(root):
             said.append("machinery.toml names no %s (%s)" % (field, what))
     if not os.path.isdir(os.path.join(root, ".beads")):
         said.append("no board at %s/.beads — `bd init --prefix %s`" % (root, decl.prefix))
+    elif decl.lands_on in decl.protected:
+        said.append("machinery.toml does not say who lands work here, so %s is "
+                    "protected — and a card here closes only once a commit naming "
+                    "it reaches %s. Nothing can finish until this project answers: "
+                    "`agent_merges = true` if agents land their own work, or a line "
+                    "they may land on in `lands_on` with only what they may not in "
+                    "`protected`" % (decl.lands_on, decl.lands_on))
     if decl.name not in project.registry():
         said.append("not in the register (%s)" % project.REGISTRY)
     code, role = git(["config", "--get", "beads.role"], root)

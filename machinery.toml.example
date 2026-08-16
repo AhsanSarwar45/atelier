@@ -8,6 +8,15 @@ name = "example"
 prefix = "ex"
 # The branch finished work lands on here.
 lands_on = "main"
+# Whether an agent puts work onto the lines this project ships from. Left out, it
+# does not: a checkout that has said nothing is protected. A project running a
+# board has to answer, because a card here closes only once a commit naming it
+# reaches `lands_on` — say `true` if agents land their own work, or name a line
+# they may land on in `lands_on` and list only what they may not in `protected`.
+agent_merges = false
+# The lines an agent may never write to. Left out, it is main, master, staging,
+# production, release and whatever `lands_on` is called.
+# protected = ["main", "staging"]
 # The systems a card may belong to. `--area` accepts these and nothing else, and
 # the first is the one a refusal shows as an example.
 areas = ["interface", "tests", "tooling", "docs", "board"]

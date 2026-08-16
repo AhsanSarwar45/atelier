@@ -32,9 +32,25 @@ import project  # noqa: E402
 GIT_TIMEOUT = 10
 
 # What writes to a line. `commit` is here because standing on a protected line
-# and committing is the quietest way onto it of all.
-WRITERS = ("merge", "rebase", "push", "commit", "cherry-pick", "revert", "am")
+# and committing is the quietest way onto it of all, and `branch`, `reset` and
+# `update-ref` because pointing a line at your own work writes to it as surely as
+# folding into it does.
+WRITERS = ("merge", "rebase", "push", "commit", "cherry-pick", "revert", "am",
+           "branch", "reset", "update-ref")
 MOVE = ("checkout", "switch")
+
+# The `branch` forms that move or destroy a line rather than list or make one,
+# and which of their names each one writes to.
+BRANCH_FORCES = ("-f", "--force")
+BRANCH_RENAMES = ("-m", "-M", "--move")
+BRANCH_DELETES = ("-d", "-D", "--delete")
+
+# The `reset` forms that move the line you stand on. A reset naming paths only
+# takes them out of what is staged and moves nothing.
+RESET_MODES = ("--hard", "--soft", "--mixed", "--merge", "--keep")
+
+# What a command means by the position it is standing at, rather than by a name.
+HERE_NAMES = ("HEAD", "@")
 
 # Mid-operation and look-only forms. None of them decides anything new: they
 # finish or abandon a fold already under way, which is where conflicts are
@@ -72,6 +88,33 @@ REFUSED = (
     "If this project's work should land without asking, say so once in its "
     "%s: `agent_merges = true`."
 )
+
+
+WEDGED = (
+    "\n\nThis checkout also runs a board, and a card here closes only once a "
+    "commit naming it reaches %s — the line just refused. Until this project says "
+    "who lands its work, nothing here can finish: `agent_merges = true` if agents "
+    "land their own, or a line they may land on in `lands_on` with only what they "
+    "may not in `protected = [\"main\", \"staging\"]`."
+)
+
+
+def refusal(subject, name, where):
+    """What to tell a command that would write to a protected line.
+
+    A project running a board is told the rest of it: the same line its cards
+    close against is the one being refused, so a project that joined and said
+    nothing has no route at all until it answers.
+    """
+    said = REFUSED % (subject, name, project.DECLARATION)
+    try:
+        decl = project.of(where)
+        board = os.path.isdir(os.path.join(project.root(where), ".beads"))
+    except Exception:
+        return said
+    if board and decl.lands_on in decl.protected:
+        said += WEDGED % decl.lands_on
+    return said
 
 
 def deny(reason):
@@ -189,23 +232,28 @@ def moved_to(rest, where):
     args = positionals(rest)
     if not args:
         return None
-    fresh = any(a in ("-b", "-c", "-B") for a in rest)
+    fresh = any(a in ("-b", "-c", "-B", "-C") for a in rest)
     # A line being made does not exist to be verified; one being stepped onto
     # does, and a name that is no line at all is a file.
     return args[0] if fresh or is_branch(args[0], where) else None
 
 
-def line_named(ref):
+def line_named(ref, here):
     """The line one end of a refspec names.
 
-    Only git's own prefix comes off. A working line called `fix/main` is not the
-    line called `main`, and cutting at the last slash makes every line whose name
-    happens to end in a protected word unpushable.
+    Only git's own prefix comes off, and the leading plus that forces the write is
+    not part of a name. A working line called `fix/main` is not the line called
+    `main`, and cutting at the last slash makes every line whose name happens to
+    end in a protected word unpushable. A refspec that names the position rather
+    than the line means the line being stood on, which is the canonical way of
+    pushing what you are on.
     """
+    ref = ref.lstrip("+")
     for lead in ("refs/heads/", "heads/"):
         if ref.startswith(lead):
-            return ref[len(lead):]
-    return ref
+            ref = ref[len(lead):]
+            break
+    return here if ref in HERE_NAMES else ref
 
 
 def push_targets(rest, here):
@@ -221,10 +269,59 @@ def push_targets(rest, here):
     refs = args[1:] if args else []
     if not refs:
         return [here] if here else []
-    return [line_named(r.split(":")[-1]) for r in refs]
+    return [line_named(r.split(":")[-1], here) for r in refs]
 
 
-def written_by(verb, rest, here):
+def branch_targets(rest, here):
+    """The lines a `git branch` writes to, empty when it only lists or makes one.
+
+    Each form writes somewhere different: a forced one points its first name at a
+    commit, a rename lands on the new name, a delete takes every name it is given.
+    """
+    args = positionals(rest)
+    if not args:
+        return []
+    if any(a in BRANCH_DELETES for a in rest):
+        return [line_named(a, here) for a in args]
+    if any(a in BRANCH_RENAMES for a in rest):
+        return [line_named(args[-1], here)]
+    if any(a in BRANCH_FORCES for a in rest):
+        return [line_named(args[0], here)]
+    return []
+
+
+def reset_targets(rest, here, where):
+    """Whether a reset moves the line being stood on.
+
+    A reset naming paths only takes them out of what is staged. One naming a
+    commit moves the line, and discarding history on a protected line is a write
+    to it however gently it is spelled.
+    """
+    if "--" in rest:
+        return []
+    args = positionals(rest)
+    if not args:
+        # `git reset --hard` alone throws the working tree away and moves nothing.
+        return []
+    if os.path.exists(os.path.join(where, args[0])):
+        return []
+    return [here] if here else []
+
+
+def remade_by(rest, where):
+    """The line a move also resets, for the form that steps onto it by force.
+
+    `checkout -B x` and `switch -C x` step onto x and point it at where you were
+    standing, so a protected line is rewritten with no verb of the usual list
+    appearing anywhere on the command.
+    """
+    if not any(a in ("-B", "-C") for a in rest):
+        return []
+    args = positionals(rest)
+    return [args[0]] if args and is_branch(args[0], where) else []
+
+
+def written_by(verb, rest, here, where):
     """The lines this command writes to, given the line it is run from.
 
     Empty means it writes to nothing anyone is protecting — which is the answer
@@ -233,6 +330,13 @@ def written_by(verb, rest, here):
     """
     if verb == "push":
         return push_targets(rest, here)
+    if verb == "branch":
+        return branch_targets(rest, here)
+    if verb == "reset":
+        return reset_targets(rest, here, where)
+    if verb == "update-ref":
+        args = positionals(rest)
+        return [line_named(args[0], here)] if args else []
     if verb == "rebase":
         args = positionals(rest)
         # `--onto <newbase> <upstream> [<branch>]`, else `<upstream> [<branch>]`.
@@ -256,12 +360,12 @@ def protected_by(where):
 def routes(cmd, home):
     """Every write this command makes, as (verb, checkout, line), in running order.
 
-    Walked command by command because one may step onto a line before it writes to
-    one, and because each may be aimed at a checkout of its own: stepping onto what
-    a team ships from and folding into it is a single line of shell, and so is
-    reaching into somebody else's checkout to push it.
+    Walked command by command because one may step onto a line, or into a checkout,
+    before it writes: stepping onto what a team ships from and folding into it is a
+    single line of shell, and so is changing into somebody else's checkout and
+    pushing it. Reading only where the shell started lets both straight through.
     """
-    at, made = {}, []
+    at, made, cwd = {}, [], home
 
     def line_of(where):
         if where not in at:
@@ -270,19 +374,27 @@ def routes(cmd, home):
 
     for seg in segments(cmd):
         argv = plain(words(seg))
-        if argv[:3] == ["gh", "pr", "merge"]:
-            made.append(("gh", home, None))
+        if argv[:1] == ["cd"]:
+            # Changing into a checkout is the ordinary spelling of the reach that
+            # `-C` spells as a switch, and the two must answer alike.
+            cwd = os.path.expanduser(os.path.join(cwd, argv[1])) if len(argv) > 1 \
+                else home
             continue
-        call = git_call(argv, home)
+        if argv[:3] == ["gh", "pr", "merge"]:
+            made.append(("gh", cwd, None))
+            continue
+        call = git_call(argv, cwd)
         if not call:
             continue
         where, verb, rest = call
         if any(a in PASSIVE for a in rest):
             continue
         if verb in MOVE:
+            made += [(verb, where, line) for line in remade_by(rest, where)]
             at[where] = moved_to(rest, where) or line_of(where)
         elif verb in WRITERS:
-            made += [(verb, where, line) for line in written_by(verb, rest, line_of(where))]
+            made += [(verb, where, line)
+                     for line in written_by(verb, rest, line_of(where), where)]
     return made
 
 
@@ -301,19 +413,17 @@ def main():
             # answer, not this machine's, and asking costs a network call on every
             # command. A project that protects anything protects this.
             if guarded:
-                deny(REFUSED % ("The line a waiting piece of work lands on",
-                                "it", project.DECLARATION))
+                deny(refusal("The line a waiting piece of work lands on", "it", where))
                 return
         elif line == EVERY:
             # Sending every line at once sends the protected ones with them, and
             # which lines exist is not worth a command to find out: a project
             # protecting anything protects this.
             if guarded:
-                deny(REFUSED % ("Every line in this checkout at once",
-                                "one of them", project.DECLARATION))
+                deny(refusal("Every line in this checkout at once", "one of them", where))
                 return
         elif line in guarded:
-            deny(REFUSED % (line, line, project.DECLARATION))
+            deny(refusal(line, line, where))
             return
 
     # The slot, and the shape of what goes through it. Only where a board is

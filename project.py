@@ -124,14 +124,18 @@ class Declaration:
     def protected(self):
         """The lines an agent may not write to here, empty when it may.
 
-        `lands_on` is in the set whatever it is called, so a project shipping
-        from a line of its own name is covered without naming it twice.
+        A project that names them is taken at its word. A team whose agents land
+        on a line of their own, and whose manager alone moves that into what
+        ships, has to be able to say so — and cannot if `lands_on` is added to
+        whatever it names, because a card only closes once its change reaches
+        `lands_on`. Silence adds it, so a project shipping from a line of its own
+        name is covered without naming it twice.
         """
         if self.agent_merges:
             return frozenset()
-        named = self.data_protected if self.data_protected is not None \
-            else DEFAULT_PROTECTED
-        return frozenset(named) | {self.lands_on}
+        if self.data_protected is not None:
+            return frozenset(self.data_protected)
+        return frozenset(DEFAULT_PROTECTED) | {self.lands_on}
 
     @property
     def place_re(self):

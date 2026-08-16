@@ -56,8 +56,23 @@ FAULTS = [
      lambda s: s.replace('    if any(a in ("--all", "--mirror") for a in rest):\n'
                          "        return [EVERY]\n", "")),
     ("a line whose name ends in a protected word is that line", GATE,
-     lambda s: s.replace('    return [line_named(r.split(":")[-1]) for r in refs]',
+     lambda s: s.replace('    return [line_named(r.split(":")[-1], here) for r in refs]',
                          '    return [r.split(":")[-1].split("/")[-1] for r in refs]')),
+    ("changing into another checkout is not following the command there", GATE,
+     lambda s: s.replace('        if argv[:1] == ["cd"]:', "        if False:")),
+    ("naming the position you stand at names no line", GATE,
+     lambda s: s.replace("    return here if ref in HERE_NAMES else ref",
+                         "    return ref")),
+    ("pointing a line at your own work is not writing to it", GATE,
+     lambda s: s.replace(',\n           "branch", "reset", "update-ref")', ")")),
+    ("stepping onto a line by force does not reset it", GATE,
+     lambda s: s.replace('    if not any(a in ("-B", "-C") for a in rest):\n'
+                         "        return []\n", "    return []\n")),
+    ("a project running a board is not told why it can never finish", GATE,
+     lambda s: s.replace("        said += WEDGED % decl.lands_on", "        pass")),
+    ("the lines a project names are not taken at its word", DECL,
+     lambda s: s.replace("        if self.data_protected is not None:\n"
+                         "            return frozenset(self.data_protected)\n", "")),
 ]
 
 

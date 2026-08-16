@@ -415,6 +415,21 @@ ROUTES = (
     # spells one out.
     ("REFUSED", "git push --all origin"),
     ("REFUSED", "git push --mirror origin"),
+    # The plus that forces a write is not part of a name, and naming the position
+    # you stand at names the line you stand on — here a working one.
+    ("REFUSED", "git push origin +main"),
+    ("REFUSED", "git push origin +feature/mine:main"),
+    ("ALLOWED", "git push origin HEAD"),
+    # Pointing a shipping line at your own work, in the four spellings that use
+    # none of the folding words.
+    ("REFUSED", "git checkout -B main"),
+    ("REFUSED", "git branch -f main HEAD"),
+    ("REFUSED", "git branch -M main"),
+    ("REFUSED", "git branch -D staging"),
+    ("REFUSED", "git update-ref refs/heads/main HEAD"),
+    ("ALLOWED", "git branch -f mywork HEAD"),
+    ("ALLOWED", "git checkout -B feature/other"),
+    ("ALLOWED", "git reset --hard HEAD~1"),
     # The second line of a shell call is a command, not the first one's arguments.
     ("REFUSED", "git status\ngit push origin main"),
     # Finishing a fold and then writing to a shipping line is the moment the guard
@@ -452,17 +467,31 @@ ON_MAIN = (
     ("REFUSED", "git -c user.email=t@t commit -m fix"),
     ("REFUSED", "git -C . push origin main"),
     ("REFUSED", "git push"),
+    ("REFUSED", "git push origin HEAD"),
     ("REFUSED", "git cherry-pick abc1234"),
+    ("REFUSED", "git reset --hard origin/main"),
+    ("ALLOWED", "git reset"),
     ("ALLOWED", "git add -A"),
     ("ALLOWED", "git checkout -b feature/next"),
     ("ALLOWED", "git checkout -b feature/next && git commit -m fix"),
 )
 
 # A command aimed at a second checkout, which `{other}` names. The permission that
-# answers for it is that checkout's own, whatever the session's own project says.
+# answers for it is that checkout's own, whatever the session's own project says,
+# and changing into it must answer exactly as naming it with a switch does.
 ELSEWHERE = (
     ("REFUSED", "git -C {other} push origin main"),
     ("REFUSED", "git -C {other} commit -m fix"),
+    ("REFUSED", "cd {other} && git push origin main"),
+    ("REFUSED", "cd {other} && git commit -m fix"),
+)
+
+# A team whose agents land on a line of their own, and whose manager alone moves
+# that into what ships. Naming what is protected has to be taken at its word.
+TEAM = (
+    ("ALLOWED", "git checkout staging && git merge feature/mine"),
+    ("ALLOWED", "git push origin staging"),
+    ("REFUSED", "git push origin main"),
 )
 
 
@@ -477,6 +506,26 @@ def scratch_project(tmp, says=None, on="feature/mine"):
     if says is not None:
         with open(os.path.join(tmp, project.DECLARATION), "w") as fh:
             fh.write(says)
+
+
+def merge_says(cmd, says=None, on="feature/mine", board=False):
+    """What the merge guard tells one command, in words — for the cases that turn
+    on what a refusal has to teach rather than on whether it refuses."""
+    tmp = tempfile.mkdtemp(prefix="board-merge-")
+    try:
+        scratch_project(tmp, says, on)
+        if board:
+            os.makedirs(os.path.join(tmp, ".beads"), exist_ok=True)
+        out = subprocess.run(
+            [sys.executable, MERGE_GATE], input=json.dumps({
+                "tool_name": "Bash", "tool_input": {"command": cmd},
+                "cwd": tmp, "session_id": "selftest-merge"}),
+            capture_output=True, text=True, timeout=120).stdout.strip()
+        if not out:
+            return ""
+        return json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def merge_routes(says=None, on="feature/mine", rows=ROUTES):
@@ -1262,6 +1311,25 @@ def main():
     assert not through, "a session in a project that lands its own work was " \
         "allowed to write to an undeclared checkout's shipping line: %s" \
         % ", ".join(through)
+
+    # A team that lands its agents' work on a line of their own, and moves that
+    # into what ships by hand. Adding `lands_on` back to whatever a project names
+    # leaves it with no line its agents may reach, which is the same wedge.
+    team = merge_routes('name = "scratch"\nlands_on = "staging"\n'
+                        'protected = ["main"]\n', rows=TEAM)
+    ignored = ["%s: %s, wanted %s" % (cmd, team[cmd], want)
+               for want, cmd in TEAM if team[cmd] != want]
+    assert not ignored, "a project that named the lines it protects was not " \
+        "taken at its word:\n  %s" % "\n  ".join(ignored)
+
+    # And the project that says nothing while running a board is protected on the
+    # very line its own cards close against, so the refusal has to name the way
+    # out or the project can never finish anything.
+    wedged = merge_says("git checkout main && git merge --ff-only feature/mine",
+                        board=True)
+    assert "agent_merges = true" in wedged and "closes only once" in wedged, \
+        "a checkout running a board and declaring nothing was refused the only " \
+        "route its own board accepts, with no way out named: %s" % (wedged or "allowed")
 
     print("ok: a project nobody has declared refuses every route onto a line it "
           "ships from — including standing on one and committing, and including a "
