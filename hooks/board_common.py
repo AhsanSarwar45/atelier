@@ -30,6 +30,9 @@ IGNORED = ("/.beads/", "/scratchpad/", "/.git/", "/node_modules/", "/target/")
 # inside the session's own tree never re-points the whole command.
 _CD_FIRST = re.compile(r"^\s*(?:rtk\s+)?cd\s+(?:--\s+)?(?P<path>/[^\s;&|<>]+|'(?P<sq>/[^']+)'|\"(?P<dq>/[^\"]+)\")")
 
+# One hook process judges one call, so this never grows past a handful.
+_HOPPED = {}
+
 
 def _hop(data):
     """Split a command into the directory it opens by moving to, and the rest.
@@ -41,16 +44,23 @@ def _hop(data):
     — but only when the path is a checkout the machinery knows, so a typo or a
     scratch directory falls back to the session's own tree rather than
     silently answering for nobody.
+
+    Answered once per (directory, command): resolving the named path reads the
+    registry and runs git, and every Bash gate asks for both halves of this.
     """
     cwd = data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     cmd = (data.get("tool_input") or {}).get("command") or ""
+    if (cwd, cmd) in _HOPPED:
+        return _HOPPED[(cwd, cmd)]
+
+    answer = (cwd, cmd)
     m = _CD_FIRST.match(cmd)
-    if not m:
-        return cwd, cmd
-    named = m.group("sq") or m.group("dq") or m.group("path")
-    if not os.path.isdir(named) or project.root(named) not in project.registry().values():
-        return cwd, cmd
-    return named, cmd[m.end():]
+    if m:
+        named = m.group("sq") or m.group("dq") or m.group("path")
+        if os.path.isdir(named) and project.root(named) in project.registry().values():
+            answer = (named, cmd[m.end():])
+    _HOPPED[(cwd, cmd)] = answer
+    return answer
 
 
 def where(data):

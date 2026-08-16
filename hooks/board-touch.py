@@ -82,7 +82,10 @@ def main():
                 {"p": path, "t": bc.now()}
             ]
     elif tool == "Bash":
-        cmd = tin.get("command") or ""
+        # Without the move that got it there: a worktree named after the card it
+        # holds spells that card in every line run inside it, and the ids read
+        # here become claims and closes.
+        cmd = bc.said(data)
         if re.search(r"\bbd\b.*\bcreate\b|board/job\b", cmd):
             found = card_ids(response_text(data.get("tool_response")), bc.prefix(root))
             state["created"] = (state.get("created") or [])[-200:] + [

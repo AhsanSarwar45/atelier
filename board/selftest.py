@@ -1957,35 +1957,83 @@ def main():
 
     registered = sorted(project.registry().values())
     elsewhere = next((p for p in registered if p != ROOT), None)
-    assert elsewhere, "the machine has only one registered checkout; this case needs two"
 
     def hopped(cmd, cwd=ROOT):
         data = {"cwd": cwd, "tool_input": {"command": cmd}}
         return common.where(data), common.said(data)
 
-    seen, rest = hopped("cd %s && git status" % elsewhere)
-    assert seen == elsewhere, \
-        "a command that moved into another checkout was judged against the session's own: %s" % seen
-    assert "cd" not in rest.split("&&")[0], \
-        "the move that got the command there is still part of what it says: %r" % rest
+    # The two answers come off one reading of the command, because resolving the
+    # named path reads the registry and runs git, and every Bash gate wants both.
+    resolved = [0]
+    was_root, project.root = project.root, lambda p=None, _r=project.root: (
+        resolved.__setitem__(0, resolved[0] + 1) or _r(p))
+    try:
+        common._HOPPED.clear()
+        hopped("cd %s && git status" % (elsewhere or ROOT))
+    finally:
+        project.root = was_root
+    assert resolved[0] <= 1, \
+        "the checkout a command runs in was worked out %d times for one command" % resolved[0]
 
     seen, rest = hopped("cd /nowhere-at-all && git status")
     assert seen == ROOT, "a path that is no checkout re-pointed the whole command"
     assert rest.startswith("cd "), "an unrecognised move was stripped anyway: %r" % rest
 
-    seen, _ = hopped("ls && cd %s && git status" % elsewhere)
-    assert seen == ROOT, \
-        "a move buried behind another command was read as where the command runs"
+    # The rest of the rule needs a second checkout to move into. A machine with
+    # one is a machine, not a failure: the case says so and stands aside.
+    if not elsewhere:
+        print("ok: a command that names no checkout keeps the session's own "
+              "(only one checkout is registered here, so the rest of this case "
+              "has nowhere to move to)")
+    else:
+        seen, rest = hopped("cd %s && git status" % elsewhere)
+        assert seen == elsewhere, \
+            "a command that moved into another checkout was judged against the session's own: %s" % seen
+        assert "cd" not in rest.split("&&")[0], \
+            "the move that got the command there is still part of what it says: %r" % rest
 
-    inside = os.path.join(elsewhere, "worktrees")
-    if os.path.isdir(inside):
-        seen, _ = hopped("cd %s && git status" % inside)
-        assert common.board_root(seen) == common.board_root(inside), \
-            "a tree inside another checkout answered to %s, not to that checkout" % seen
+        seen, _ = hopped("ls && cd %s && git status" % elsewhere)
+        assert seen == ROOT, \
+            "a move buried behind another command was read as where the command runs"
 
-    print("ok: a command is judged by the checkout it opens by moving into, an "
-          "unrecognised path leaves it with the session's own, and the move is "
-          "never part of what the command says")
+        inside = os.path.join(elsewhere, "worktrees")
+        if os.path.isdir(inside):
+            seen, _ = hopped("cd %s && git status" % inside)
+            assert common.board_root(seen) == common.board_root(inside), \
+                "a tree inside another checkout answered to %s, not to that checkout" % seen
+
+        # End to end through the gate this job was opened to fix: a commit made
+        # in the other checkout, naming that project's own card.
+        other_prefix = project.of(elsewhere).prefix
+        commit = "git " + "commit -m "
+
+        # In its own process, because this case is the only one that needs the
+        # machine's real projects: the suite replaces the prefix pair with the
+        # fixture's for every other case, and a commit judged against a fixture
+        # prefix would prove nothing about the two checkouts in play here.
+        def gate_says(cmd, cwd=ROOT):
+            said = subprocess.run(
+                [os.path.join(HOME, "hooks", "board-status-gate.py")],
+                input=json.dumps({"session_id": "abcd1234", "cwd": cwd,
+                                  "tool_input": {"command": cmd}}),
+                capture_output=True, text=True).stdout
+            return json.loads(said)["hookSpecificOutput"]["permissionDecisionReason"] \
+                if said.strip() else ""
+
+        said_it = gate_says("cd %s && %s'fix(x): %s-1a2b something'"
+                            % (elsewhere, commit, other_prefix))
+        assert said_it == "", \
+            "a commit made in another checkout, naming that project's own card, was refused: %s" % said_it
+        assert "put one of those ids" in gate_says(
+            "cd /nowhere-at-all && %s'fix(x): %s-1a2b something'" % (commit, other_prefix)), \
+            "a commit opening with a move to a directory that does not exist was judged " \
+            "against the other project anyway"
+        assert gate_says("cd %s/worktrees && %s'chore: nothing named here'" % (elsewhere, commit)) != "", \
+            "a commit naming no card at all was let through by the path it was run from"
+
+        print("ok: a command is judged by the checkout it opens by moving into, an "
+              "unrecognised path leaves it with the session's own, the move is never "
+              "part of what the command says, and the commit gate acts on all three")
 
     # The three answers the cost report has about a counter, which have to stay
     # three. Read against a counter file of its own: the real one is the number the

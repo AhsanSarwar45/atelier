@@ -756,7 +756,7 @@ def main():
                 })
                 tally("guard-waiver")
                 return
-            me = bc.actor(data.get("session_id"), data.get("cwd"))
+            me = bc.actor(data.get("session_id"), bc.where(data))
             left = unfinished_spine(card, root, me) \
                 if "job" in (card.get("labels") or []) else []
             if left:
@@ -800,7 +800,7 @@ def main():
                             % (cid, which, len(wrote), wrote[0])
                         )
                         return
-                if which == "worktree" and "/worktrees/" not in (data.get("cwd") or ""):
+                if which == "worktree" and "/worktrees/" not in bc.where(data):
                     deny(
                         "%s is the worktree step and this session is not standing in "
                         "one. Cut it under worktrees/ and work there: two jobs editing "
@@ -819,7 +819,7 @@ def main():
                             "merged as it closed." % (cid, " and ".join(left))
                         )
                         return
-                    if "/worktrees/" in (data.get("cwd") or ""):
+                    if "/worktrees/" in bc.where(data):
                         deny(
                             "%s is the teardown and cannot be closed from inside the "
                             "tree it removes. Step out to the main tree, take the "
