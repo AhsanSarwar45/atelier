@@ -1,0 +1,80 @@
+/**
+ * The list of chats keeps up with what is happening.
+ *
+ * It is asked for once when the tab opens. Everything after that — a chat
+ * started here, from a card, or in another window — reaches it through the
+ * app's one live stream, and this is the join.
+ */
+import { describe, expect, it } from 'vitest';
+
+import { withLive } from '@/workbench/chat-sidebar';
+import type { LiveSession } from '@/workbench/live';
+import type { RestoreRow } from '@/workbench/protocol';
+
+const PROJECT = 'p1';
+
+function row(over: Partial<RestoreRow> = {}): RestoreRow {
+  return {
+    sessionId: 's1',
+    externalId: null,
+    brand: 'claude',
+    title: 'An older chat',
+    lastActiveAt: '2026-08-16T10:00:00.000Z',
+    state: 'dormant',
+    origin: 'app',
+    projectId: PROJECT,
+    cwdHint: '/home/me/project',
+    folder: 'project',
+    branch: null,
+    beads: [],
+    ...over,
+  };
+}
+
+function session(over: Partial<LiveSession> = {}): LiveSession {
+  return {
+    id: 's2',
+    brand: 'claude',
+    projectId: PROJECT,
+    projectPath: '/home/me/project/worktrees/fix-a-thing',
+    title: 'Just started',
+    state: 'starting',
+    activity: 'Starting',
+    waitingFor: null,
+    lastActiveAt: '2026-08-16T11:00:00.000Z',
+    startedAt: '2026-08-16T11:00:00.000Z',
+    beads: [],
+    ...over,
+  };
+}
+
+describe('the list keeps up', () => {
+  it('a chat that started after the list was fetched joins it, newest first', () => {
+    const merged = withLive([row()], [session()], PROJECT);
+    expect(merged.map((r) => r.sessionId)).toEqual(['s2', 's1']);
+    expect(merged[0]!.title).toBe('Just started');
+  });
+
+  it('the new row says where it is working', () => {
+    const [fresh] = withLive([], [session()], PROJECT);
+    expect(fresh!.folder).toBe('fix-a-thing');
+    expect(fresh!.cwdHint).toBe('/home/me/project/worktrees/fix-a-thing');
+  });
+
+  it('a chat already listed is not listed twice, and takes the newer state', () => {
+    const merged = withLive([row()], [session({ id: 's1', state: 'thinking', title: 'Renamed' })], PROJECT);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.state).toBe('thinking');
+    expect(merged[0]!.title).toBe('Renamed');
+  });
+
+  it('what the row already knew survives a live frame that knows less', () => {
+    const merged = withLive([row({ beads: ['bw-1'] })], [session({ id: 's1', title: null, beads: [] })], PROJECT);
+    expect(merged[0]!.beads).toEqual(['bw-1']);
+    expect(merged[0]!.title).toBe('An older chat');
+  });
+
+  it('another project\'s chats stay out of this one\'s list', () => {
+    expect(withLive([], [session({ projectId: 'other' })], PROJECT)).toEqual([]);
+  });
+});

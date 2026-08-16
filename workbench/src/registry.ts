@@ -12,6 +12,7 @@
  */
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 
+import { folderOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
 import type { Store } from './store.ts';
 
@@ -45,16 +46,6 @@ export async function knownSessions(projectPath: string | null): Promise<KnownSe
     // No index, or a version that cannot be read: the app's own rows still list.
     return [];
   }
-}
-
-/**
- * The folder a chat ran in, as a chip: the directory's own name, which for a
- * worktree is the worktree's name and for a checkout is the project's.
- */
-export function folderOf(cwd: string | null): string | null {
-  if (!cwd) return null;
-  const name = cwd.replace(/\/+$/, '').split('/').pop();
-  return name ? name : null;
 }
 
 /**

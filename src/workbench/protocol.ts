@@ -218,3 +218,15 @@ export const CLAUDE_PERMISSION_MODES = [
 
 /** The mode a workbench session is pinned to unless the owner picks another. */
 export const DEFAULT_PERMISSION_MODE = 'default';
+
+/**
+ * The folder a chat ran in, as a chip: the directory's own name, which for a
+ * separate copy of a project is that copy's name and otherwise the project's.
+ * Both sides read it — the sidecar when it builds a row, the screen when it
+ * builds one for a chat that has only just started.
+ */
+export function folderOf(cwd: string | null): string | null {
+  if (!cwd) return null;
+  const name = cwd.replace(/\/+$/, '').split('/').pop();
+  return name ? name : null;
+}

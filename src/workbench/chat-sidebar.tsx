@@ -11,7 +11,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
@@ -20,7 +20,8 @@ import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import type { RestoreRow } from '@/workbench/protocol';
+import { useLiveSessions, type LiveSession } from '@/workbench/live';
+import { folderOf, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
 /**
@@ -64,6 +65,50 @@ function rowKey(row: RestoreRow): string {
   return row.sessionId ?? `ext:${row.externalId}`;
 }
 
+/**
+ * The list as it stands, plus whatever has happened since it was asked for.
+ *
+ * The list is fetched once when the tab opens; a chat started after that —
+ * here, from a card, or in another window — is announced on the app's one live
+ * stream, and this is where it joins the list. Without it the owner starts a
+ * chat and does not see it.
+ */
+export function withLive(rows: RestoreRow[], live: LiveSession[], projectId: string): RestoreRow[] {
+  const byId = new Map(rows.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
+  const merged = [...rows];
+
+  for (const session of live) {
+    if (session.projectId !== projectId) continue;
+    const known = byId.get(session.id);
+    if (known) {
+      merged[merged.indexOf(known)] = {
+        ...known,
+        state: session.state,
+        title: session.title ?? known.title,
+        lastActiveAt: session.lastActiveAt,
+        beads: session.beads.length ? session.beads : known.beads,
+      };
+      continue;
+    }
+    merged.push({
+      sessionId: session.id,
+      externalId: null,
+      brand: session.brand,
+      title: session.title,
+      lastActiveAt: session.lastActiveAt,
+      state: session.state,
+      origin: 'app',
+      projectId: session.projectId,
+      cwdHint: session.projectPath,
+      folder: folderOf(session.projectPath),
+      branch: null,
+      beads: session.beads,
+    });
+  }
+
+  return merged.sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
+}
+
 interface ChatSidebarProps {
   projectId: string;
   projectPath: string;
@@ -73,7 +118,9 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: ChatSidebarProps) {
   const router = useRouter();
-  const [rows, setRows] = useState<RestoreRow[]>([]);
+  const [fetched, setFetched] = useState<RestoreRow[]>([]);
+  const live = useLiveSessions();
+  const rows = useMemo(() => withLive(fetched, live, projectId), [fetched, live, projectId]);
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
@@ -81,7 +128,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
     const q = new URLSearchParams({ project: projectId, path: projectPath });
     try {
       const res = await fetch(apiUrl(`/api/workbench/restore?${q}`));
-      if (res.ok) setRows((await res.json()) as RestoreRow[]);
+      if (res.ok) setFetched((await res.json()) as RestoreRow[]);
     } catch {
       // The workbench may not be running; the board half is unaffected.
     }

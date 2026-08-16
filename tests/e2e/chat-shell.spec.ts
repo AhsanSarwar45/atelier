@@ -74,12 +74,30 @@ test.describe('the chat screen', () => {
     expect(boardWait, `waited ${boardWait}ms for the board`).toBeLessThan(AT_ONCE_MS);
   });
 
+  test('a chat started here appears in the list while it is starting', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=chat`);
+    await page.getByTestId('restore-row').first().waitFor();
+    const before = await page.getByTestId('restore-row').count();
+
+    await page.getByTestId('new-chat-tool').click();
+
+    // The row is expected while the chat is still starting, so this waits on
+    // the list rather than on the conversation being ready to type into.
+    await expect
+      .poll(async () => page.getByTestId('restore-row').count(), { timeout: 10_000 })
+      .toBeGreaterThan(before);
+  });
+
   test('the rest of a long list arrives by scrolling to it', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=chat`);
     await page.getByTestId('restore-row').first().waitFor();
 
+    // The first rows can come from the live stream before the fetched list
+    // lands, so the marker is waited for rather than counted once.
     const more = page.getByTestId('chat-list-more');
+    await more.waitFor({ timeout: 10_000 }).catch(() => {});
     test.skip((await more.count()) === 0, 'this project has too few chats to grow the list');
 
     const first = await page.getByTestId('restore-row').count();
