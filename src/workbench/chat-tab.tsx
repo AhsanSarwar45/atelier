@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { Bot, MessageSquarePlus, PanelLeft, Receipt, Search } from 'lucide-react';
+import { ArrowUp, Bot, MessageSquarePlus, PanelLeft, Paperclip, Receipt, Search, Square } from 'lucide-react';
 
 import { BeadChipRow } from '@/components/bead-chip-row';
 import { MarkdownBody } from '@/components/markdown-body';
@@ -246,10 +246,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     localStorage.setItem(EVERY_CHAT, everything ? '1' : '0');
   }, [everything]);
   const endRef = useRef<HTMLDivElement>(null);
+  const typing = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' });
   }, [view.items]);
+
+  // One line at rest, growing to what is written. Measured from the content,
+  // because a textarea cannot shrink itself back down once it has been sized.
+  useEffect(() => {
+    const box = typing.current;
+    if (!box) return;
+    box.style.height = 'auto';
+    box.style.height = `${box.scrollHeight}px`;
+  }, [draft]);
 
   const busy = isBusy(view.state);
 
@@ -483,7 +494,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <div
           data-testid="composer-frame"
           className={cn(
-            'mx-auto w-full max-w-[110ch] rounded-xl border bg-surface-raised px-3 py-2 transition-colors',
+            'mx-auto w-full max-w-[110ch] rounded-2xl border bg-surface-raised px-4 py-3 shadow-sm transition-colors',
             'border-border focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
           )}
         >
@@ -502,6 +513,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </div>
           )}
           <input
+            ref={picker}
             data-testid="image-input"
             type="file"
             accept="image/*"
@@ -510,8 +522,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onChange={(e) => void absorb(e.target.files)}
           />
           <Textarea
+            ref={typing}
             data-testid="composer"
-            rows={2}
+            rows={1}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onPaste={(e) => void absorb(Array.from(e.clipboardData.files))}
@@ -527,31 +540,50 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             }}
             placeholder="Ask the agent to do something…"
             // The frame is the box; the typing area inside it carries no second
-            // edge, no shadow and no colour of its own.
-            className="max-h-64 min-h-[3.25rem] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+            // edge, no shadow and no colour of its own, and it grows with what
+            // is written until it would take the conversation's room.
+            className="max-h-56 w-full resize-none overflow-y-auto border-0 bg-transparent p-0 text-[15px] leading-6 shadow-none focus-visible:ring-0"
           />
-          <div className="mt-1 flex items-center justify-between gap-2">
-            <span className="select-none text-[11px] text-muted-foreground">
-              Enter sends · Shift+Enter starts a line · paste or drop a picture
-            </span>
+          <div className="mt-1.5 flex items-center gap-1">
+            {/* A plain button, not the toolbar's: that one speaks through a
+                tooltip and only works inside the bar that hosts one. */}
+            <Button
+              variant="ghost"
+              mode="icon"
+              size="sm"
+              aria-label="Attach a picture"
+              title="Attach a picture"
+              data-testid="attach-picture"
+              className="rounded-full text-muted-foreground"
+              onClick={() => picker.current?.click()}
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            <span className="ml-auto" />
             {busy ? (
               <Button
                 variant="destructive"
+                mode="icon"
                 size="sm"
+                aria-label="Stop"
                 data-testid="stop-button"
+                className="rounded-full"
                 onClick={() => void sendCommand({ type: 'session.stop', sessionId })}
               >
-                Stop
+                <Square className="h-4 w-4" />
               </Button>
             ) : (
               <Button
                 variant="primary"
+                mode="icon"
                 size="sm"
+                aria-label="Send"
                 data-testid="send-button"
+                className="rounded-full"
                 onClick={() => void submit()}
                 disabled={!draft.trim()}
               >
-                Send
+                <ArrowUp className="h-4 w-4" />
               </Button>
             )}
           </div>
