@@ -82,7 +82,7 @@ FAULTS = [
      lambda s: s.replace('"pull", "fetch", "branch", "reset", "update-ref")',
                          '"pull", "fetch")')),
     ("stepping onto a line by force does not reset it", GATE,
-     lambda s: s.replace('    if not any(a in ("-B", "-C") for a in rest):\n'
+     lambda s: s.replace("    if not any(a in REMAKES for a in rest):\n"
                          "        return []\n", "    return []\n")),
     ("a project running a board is not told why it can never finish", GATE,
      lambda s: s.replace("        said += WEDGED % decl.lands_on", "        pass")),
@@ -163,7 +163,7 @@ FAULTS = [
     ("a line named by a plain variable is a line spelled out", GATE,
      lambda s: s.replace('GROWN = ("$", "`")', 'GROWN = ("$(", "`", "${")')),
     ("a forced step onto an unreadable name rewrites nothing", GATE,
-     lambda s: s.replace('                if any(a in ("-B", "-C") for a in rest):\n'
+     lambda s: s.replace("                if any(a in REMAKES for a in rest):\n"
                          "                    made.append((verb, where, UNREADABLE, rest))\n",
                          "")),
     ("throwing your own work away moves the line you stand on", GATE,
@@ -171,6 +171,29 @@ FAULTS = [
                          "    if False:")),
     ("a rule about one command runs to the end of the next", CLOSE,
      lambda s: s.replace(r"[^|;&\n]*", r"[^|;&]*")),
+    ("a switch that may take a value always takes one", GATE,
+     lambda s: s.replace('    "push": ("-o", "--push-option", "--receive-pack", "--exec", "--repo"),',
+                         '    "push": ("-o", "--push-option", "--receive-pack", "--exec", "--repo",\n'
+                         '             "--force-with-lease", "--signed"),')),
+    ("only the short spelling makes a line, or points one at you", GATE,
+     lambda s: s.replace('MAKES = ("-b", "-c", "-B", "-C", "--create", "--force-create", "--orphan")\n'
+                         'REMAKES = ("-B", "-C", "--force-create")',
+                         'MAKES = ("-b", "-c", "-B", "-C")\nREMAKES = ("-B", "-C")')),
+    ("a remote-tracking name lands on itself", GATE,
+     lambda s: s.replace('    if "/" in name and ref_exists("refs/remotes/" + name, where):\n'
+                         '        return name.split("/", 1)[1]\n', "")),
+    ("a shell's own word in front of a command is part of the command", COMMON,
+     lambda s: s.replace("        elif head in KEYWORDS:\n            argv = argv[1:]\n", "")),
+    ("a shell's own word hides a command from the close gate", COMMON,
+     lambda s: s.replace("        if head in KEYWORDS and rest.strip():",
+                         "        if False:")),
+    ("a commit whose message is in a file can never name its card", CLOSE,
+     lambda s: s.replace("        ids = card_id.findall(written_in(message_files(cmd, bc.where(data))))",
+                         "        pass")),
+    ("the close gate reads a commit with a pattern of its own", CLOSE,
+     lambda s: s.replace("    if commits(cmd) and not AMEND.search(bare) and not ids:",
+                         '    if re.search(START + WRAP + r"(?:rtk\\s+)?git\\s+(?:-\\S+\\s+)*commit\\b",\n'
+                         "                 bare, re.M) and not AMEND.search(bare) and not ids:")),
     ("a switch's value is read as a switch of its own", GATE,
      lambda s: s.replace("        if passive(verb, rest):",
                          "        if any(a in PASSIVE for a in rest):")),

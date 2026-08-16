@@ -133,6 +133,18 @@ def reviewing():
 WRAPPERS = ("env", "command", "exec", "nice", "setsid", "stdbuf", "time",
             "sudo", "timeout", "rtk", "proxy", "nohup", "ionice", "xargs")
 
+# The shell's own words, which a command can be written behind. The line is cut
+# at the separators, which leaves these standing in front of the command — and a
+# prefix a gate does not strip is a prefix that walks around it, exactly as a
+# carrier word was before the list above existed.
+KEYWORDS = ("if", "then", "else", "elif", "while", "until", "do", "done", "fi",
+            "case", "esac", "!", "{", "}", "[[", "]]")
+
+# The git switches that swallow the word after them, so a value is never read as
+# the verb. `-C` is the one that decides which checkout a command is judged in.
+GIT_TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                   "--exec-path", "--super-prefix", "--config-env")
+
 # Shells that take a whole command line as an argument. What they are handed is
 # a command line and is read as one; anything less leaves every route open
 # behind four characters.
@@ -241,6 +253,8 @@ def plain(argv):
             name, _, value = head.partition("=")
             put[name] = value
             argv = argv[1:]
+        elif head in KEYWORDS:
+            argv = argv[1:]
         elif head in WRAPPERS:
             argv, carried = argv[1:], True
         elif carried and os.path.basename(head) not in ("git", "gh") + SHELLS:
@@ -266,6 +280,37 @@ def handed_on(argv):
     return None
 
 
+def git_verb(argv):
+    """The git subcommand this command is, or "" when it is not git.
+
+    Git's own switches come before the verb and several swallow the word after
+    them, so a verb picked out by pattern is a verb missed the moment one is
+    used. Both gates ask this, and asking it in two places is how they came to
+    disagree about what a commit is.
+    """
+    if not argv or os.path.basename(argv[0]) != "git":
+        return ""
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if not arg.startswith("-"):
+            return arg
+        if "=" not in arg and arg in GIT_TAKES_VALUE:
+            i += 1
+        i += 1
+    return ""
+
+
+def _unkeyed(seg):
+    """The same command with the shell's own words in front of it taken off."""
+    while True:
+        head, _, rest = seg.partition(" ")
+        if head in KEYWORDS and rest.strip():
+            seg = rest.lstrip()
+        else:
+            return seg
+
+
 # How deep a shell handed to a shell is followed. Each hop is a real spelling;
 # past a handful it is somebody testing the reader rather than running work.
 HANDS = 8
@@ -282,7 +327,8 @@ def unshelled(cmd, depth=0):
     out = []
     for seg in segments(cmd):
         script = handed_on(plain(words(seg))[1]) if depth < HANDS else None
-        out.append(unshelled(script, depth + 1) if script is not None else seg)
+        out.append(unshelled(script, depth + 1) if script is not None
+                   else _unkeyed(seg))
     return "\n".join(out)
 
 

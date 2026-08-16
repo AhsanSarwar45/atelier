@@ -564,6 +564,21 @@ ROUTES = (
     ("ALLOWED", "git rebase -X ours main"),
     ("REFUSED", "git update-ref -m sync refs/heads/main HEAD"),
     ("REFUSED", "git merge -m --abort feature/other && git push origin main"),
+    # An optional-value switch standing alone eats nothing. Read as always taking
+    # the next word, the remote is swallowed, the line is read as the remote, and
+    # a force-push over a shipping line comes out as a push to the agent's own.
+    ("REFUSED", "git push --force-with-lease origin main"),
+    ("REFUSED", "git push --signed origin main"),
+    ("REFUSED", "git rebase -S upstream main"),
+    ("REFUSED", "git commit -S -m x && git push origin main"),
+    # The long spelling of a switch is the same switch. Refused short and allowed
+    # long is the same rewrite, typed differently.
+    ("REFUSED", "git switch --force-create main"),
+    ("REFUSED", "git checkout --orphan main && git commit -m x"),
+    # A command written behind one of the shell's own words is still that command.
+    ("REFUSED", "if true; then git push origin main; fi"),
+    ("REFUSED", "for b in main; do git push origin $b; done"),
+    ("REFUSED", "while true; do git push origin main; done"),
     # A line that abandons a fold and then writes to a shipping line is two
     # commands, and the first one's switch does not excuse the second.
     ("REFUSED", "git merge --abort && git push origin main"),
@@ -603,6 +618,13 @@ ON_MAIN = (
     # opened about.
     ("REFUSED", "git commit -m --abort"),
     ("REFUSED", "git commit --message --continue"),
+    # And making a line of your own with the long spelling is making a line of
+    # your own: the commit behind it belongs there, not to the line left behind.
+    ("ALLOWED", "git switch --create feature/next && git commit -m fix"),
+    # A commit written behind one of the shell's own words is a commit, and here
+    # it lands on the line the project ships from.
+    ("REFUSED", "if ! git diff --quiet; then git commit -m x; fi"),
+    ("REFUSED", "for f in a b; do git commit -m x; done"),
     # Naming a commit and a file takes the file out of what is staged and moves
     # no line at all, which is what the second name is there to say.
     ("ALLOWED", "git reset HEAD file.txt"),
@@ -667,6 +689,9 @@ NESTED = (
 REMOTE_ONLY = (
     ("REFUSED", "git checkout staging && git commit -m x"),
     ("REFUSED", "git switch staging && git commit -m x"),
+    # And named by the remote it is tracked on, which lands on the line it tracks.
+    ("REFUSED", "git checkout --track origin/staging && git commit -m x"),
+    ("REFUSED", "git checkout origin/staging && git commit -m x"),
     ("ALLOWED", "git checkout -b feature/next && git commit -m x"),
 )
 
@@ -1816,6 +1841,50 @@ def main():
         assert "name the card" in said, \
             "a commit carried by %r walked past the close gate without naming " \
             "its card: %s" % (word, said or "allowed")
+
+    # A commit is read through the shared reader, so every way of writing one
+    # reaches the same rule: git's own leading switches in both spellings, and a
+    # command written behind one of the shell's own words.
+    for spelled in ('git -C . commit -m "x"', 'git -c user.email=t@t commit -m "x"',
+                    'git --work-tree=. commit -m "x"',
+                    'if true; then git commit -m "x"; fi',
+                    'if ! git diff --quiet; then git commit -m "x"; fi',
+                    'for f in a; do git commit -m "x"; done'):
+        said = refusal(spelled, ordinary)
+        assert "name the card" in said, \
+            "a commit written as %r walked past the rule that a commit names its " \
+            "card: %s" % (spelled, said or "allowed")
+
+    # And the board's own commands answer the same, behind a carrier word or
+    # behind one of the shell's: a prefix a gate does not strip is a prefix that
+    # walks around it, whichever gate and whichever prefix.
+    for carried in ("nice -n 10", "sudo -u me", "timeout 60",
+                    "if true; then", "while sleep 0; do", "for f in a; do", "!"):
+        said = refusal("%s bd close tst-t1 --reason=done" % carried, waiting)
+        assert "waiting on the manager" in said, \
+            "a board command carried by %r walked past the close rule: %s" \
+            % (carried, said or "allowed")
+
+    # A commit whose message is in a file names its card there. Read only off the
+    # line, every such commit is refused with no way through — the gate stopping
+    # correct work, which is worse than the work it was built to stop.
+    held = tempfile.mkdtemp(prefix="board-msg-")
+    try:
+        named = os.path.join(held, "msg.txt")
+        with open(named, "w") as fh:
+            fh.write("fix(x): tst-t1 what this lands\n")
+        blank = os.path.join(held, "empty.txt")
+        with open(blank, "w") as fh:
+            fh.write("fix(x): what this lands, naming nothing\n")
+        for spelled, want in ((["-F", named], ""), (["--file=" + named], ""),
+                              (["-F", blank], "name the card"),
+                              (["-F", os.path.join(held, "gone.txt")], "name the card")):
+            said = refusal("git commit " + " ".join(spelled), ordinary)
+            assert want in said and (want or not said), \
+                "a commit whose message is in a file was judged wrongly (%s): %s" \
+                % (" ".join(spelled), said or "allowed")
+    finally:
+        shutil.rmtree(held, ignore_errors=True)
 
     # A shell handed a command line is handed a command line. Everywhere else in
     # this gate a quoted word is a card's own text, which is what would hide this.

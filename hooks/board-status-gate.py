@@ -43,7 +43,6 @@ CLOSE = re.compile(VERB + r"(?:close\b|update\b[^|;&\n]*(?:-s|--status)[= ]close
                    re.M)
 CLAIM = re.compile(VERB + r"update\b[^|;&\n]*--claim\b", re.M)
 FORCE = re.compile(r"--force\b")
-COMMIT = re.compile(START + WRAP + r"(?:rtk\s+)?git\s+(?:-\S+\s+)*commit\b", re.M)
 AMEND = re.compile(r"--amend\b")
 CREATE = re.compile(VERB + r"(?:create|create-form|q|todo\s+add)\b", re.M)
 RESOLVE = re.compile(VERB + r"gate\s+resolve\b", re.M)
@@ -95,6 +94,62 @@ WAIVER = (
     "reason that never claims his yes; it cannot tell a claimed yes from a real one. "
     "If you have not asked him, take the first route."
 )
+
+
+def commits(cmd):
+    """Whether this line makes a commit, read the way both gates read a command.
+
+    Through the shared reader rather than by a pattern of its own: git's leading
+    switches, a carrier word, a shell keyword and a shell handed the line are all
+    ways of writing the same commit, and a rule with its own reading is a rule
+    that disagrees with the line guard about what a commit is. A commit quoted
+    inside a card's note stays words — it is an argument of `bd`, never the first
+    word of a command.
+    """
+    return any(bc.git_verb(bc.plain(bc.words(seg))[1]) == "commit"
+               for seg in bc.segments(cmd))
+
+
+# How much of a message file is read looking for a card id. A commit message is
+# a screenful; anything past this is not one.
+MESSAGE_CAP = 64 * 1024
+
+
+def message_files(cmd, root):
+    """The files a commit on this line takes its message from.
+
+    A commit written with `-F` carries its card id in the file and not on the
+    line, so a rule reading only the line refuses every one of them with no way
+    through — which is the gate stopping correct work rather than wrong work.
+    """
+    out = []
+    for seg in bc.segments(cmd):
+        argv = bc.plain(bc.words(seg))[1]
+        if bc.git_verb(argv) != "commit":
+            continue
+        i = 0
+        while i < len(argv):
+            name, eq, value = argv[i].partition("=")
+            if name in ("-F", "--file"):
+                if not eq and i + 1 < len(argv):
+                    value, i = argv[i + 1], i + 1
+                if value and value != "-":
+                    out.append(value if os.path.isabs(value)
+                               else os.path.join(root, value))
+            i += 1
+    return out
+
+
+def written_in(paths):
+    """What those files say, or "" for one that cannot be read."""
+    said = []
+    for path in paths:
+        try:
+            with open(path) as fh:
+                said.append(fh.read(MESSAGE_CAP))
+        except Exception:
+            continue
+    return "\n".join(said)
 
 
 def deny(reason):
@@ -647,6 +702,9 @@ def main():
     card_id = re.compile(r"\b(?:%s)-[0-9a-z.-]{2,16}\b"
                          % "|".join(re.escape(p) for p in bc.prefixes(root)))
     ids = card_id.findall(cmd)
+    if not ids:
+        # A message written in a file names its card there.
+        ids = card_id.findall(written_in(message_files(cmd, bc.where(data))))
     # A quoted value is a card's own words, and a card's words are about commands
     # as often as not: a note that quotes one, in brackets, reads exactly like the
     # command it describes. Every refusal below fires at what is left once the
@@ -668,7 +726,7 @@ def main():
         )
         return
 
-    if COMMIT.search(bare) and not AMEND.search(bare) and not ids:
+    if commits(cmd) and not AMEND.search(bare) and not ids:
         deny(
             "A commit has to name the card it belongs to, because that is what lets "
             "the board tell a written change from a landed one. This commit is being "

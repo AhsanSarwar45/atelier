@@ -47,6 +47,12 @@ BRANCH_DELETES = ("-d", "-D", "--delete")
 # when a line of that name is already there — which is pointing a shipping line
 # at any commit, in two words and with none of the folding verbs.
 BRANCH_COPIES = ("-c", "-C", "--copy")
+# The move switches that make a line rather than step onto one, and the two of
+# those that also point an EXISTING line at where you are standing. Both
+# spellings of each: the short one refused and the long one allowed is the same
+# rewrite, typed differently.
+MAKES = ("-b", "-c", "-B", "-C", "--create", "--force-create", "--orphan")
+REMAKES = ("-B", "-C", "--force-create")
 BRANCH_WRITES = BRANCH_DELETES + BRANCH_RENAMES + BRANCH_COPIES + BRANCH_FORCES
 
 # The `reset` forms that move the line you stand on. A reset naming paths only
@@ -69,8 +75,7 @@ NOT_A_MOVE = ("--ours", "--theirs", "--patch", "-p", "--detach", "--")
 
 # The git switches that swallow the word after them, so a value is never read as
 # the verb. `-C` is the one that decides which checkout the command is judged in.
-TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
-               "--exec-path", "--super-prefix", "--config-env")
+TAKES_VALUE = bc.GIT_TAKES_VALUE
 
 # A push that names no line because it means every one of them, a name only the
 # running shell can settle, and a line with more commands on it than the walk
@@ -247,6 +252,16 @@ def standing_on(where):
     return None if run.returncode or not name or name == "HEAD" else name
 
 
+def ref_exists(ref, where):
+    """Whether this checkout holds a ref of exactly this name."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", ref],
+            cwd=where, capture_output=True, timeout=GIT_TIMEOUT).returncode == 0
+    except Exception:
+        return False
+
+
 def is_branch(name, where):
     """Whether a name is a line in this checkout, so a path is never read as one.
 
@@ -254,17 +269,29 @@ def is_branch(name, where):
     in a fresh clone makes a local one of that name and steps onto it, and a
     fresh clone is the ordinary case rather than the exception.
     """
+    if ref_exists("refs/heads/" + name, where):
+        return True
     try:
-        if subprocess.run(
-                ["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + name],
-                cwd=where, capture_output=True, timeout=GIT_TIMEOUT).returncode == 0:
-            return True
         run = subprocess.run(
             ["git", "for-each-ref", "--format=%(refname)", "refs/remotes/*/" + name],
             cwd=where, capture_output=True, text=True, timeout=GIT_TIMEOUT)
         return bool((run.stdout or "").strip())
     except Exception:
         return False
+
+
+def steps_onto(name, where):
+    """The line this name steps onto, or None when it is no line at all.
+
+    A remote-tracking name lands on the line it TRACKS: `git checkout
+    origin/main` and `git checkout --track origin/main` both make a local `main`
+    and step onto it, and reading the name as written finds no line at all.
+    """
+    if is_branch(name, where):
+        return name
+    if "/" in name and ref_exists("refs/remotes/" + name, where):
+        return name.split("/", 1)[1]
+    return None
 
 
 # The switches whose next word is a value, by the verb that takes them. A value
@@ -276,30 +303,28 @@ def is_branch(name, where):
 TAKES_ARG = {
     "commit": ("-m", "--message", "-F", "--file", "-C", "--reuse-message",
                "-c", "--reedit-message", "--author", "--date", "--cleanup",
-               "-S", "--gpg-sign", "--fixup", "--squash", "--trailer",
-               "-t", "--template", "--pathspec-from-file"),
+               "--fixup", "--squash", "--trailer", "-t", "--template",
+               "--pathspec-from-file"),
     "merge": ("-m", "--message", "-F", "--file", "-s", "--strategy",
-              "-X", "--strategy-option", "-S", "--gpg-sign", "--into-name"),
+              "-X", "--strategy-option", "--into-name"),
     "rebase": ("-s", "--strategy", "-X", "--strategy-option", "--onto",
-               "-S", "--gpg-sign", "-x", "--exec", "--whitespace"),
-    "push": ("-o", "--push-option", "--receive-pack", "--exec", "--repo",
-             "--force-with-lease", "--signed"),
+               "-x", "--exec", "--whitespace"),
+    "push": ("-o", "--push-option", "--receive-pack", "--exec", "--repo"),
     "pull": ("-s", "--strategy", "-X", "--strategy-option", "-m", "--message",
-             "--upload-pack", "-S", "--gpg-sign"),
+             "--upload-pack"),
     "fetch": ("--upload-pack", "--depth", "--deepen", "--shallow-since",
               "--shallow-exclude", "--negotiation-tip", "-j", "--jobs",
               "--refmap", "-o", "--server-option"),
-    "branch": ("-u", "--set-upstream-to", "--contains", "--no-contains",
-               "--merged", "--no-merged", "--points-at", "--format", "--sort"),
-    "checkout": ("--conflict", "-t", "--track", "--pathspec-from-file"),
-    "switch": ("--conflict", "-t", "--track"),
+    "branch": ("-u", "--set-upstream-to", "--points-at", "--format", "--sort"),
+    "checkout": ("--conflict", "--pathspec-from-file"),
+    "switch": ("--conflict",),
     "reset": ("--pathspec-from-file",),
-    "cherry-pick": ("-S", "--gpg-sign", "-s", "--strategy", "-X",
-                    "--strategy-option", "-m", "--mainline"),
-    "revert": ("-S", "--gpg-sign", "-s", "--strategy", "-X",
-               "--strategy-option", "-m", "--mainline"),
-    "am": ("-S", "--gpg-sign", "--patch-format", "--exclude", "--include",
-           "--directory", "-p", "--whitespace"),
+    "cherry-pick": ("-s", "--strategy", "-X", "--strategy-option",
+                    "-m", "--mainline"),
+    "revert": ("-s", "--strategy", "-X", "--strategy-option",
+               "-m", "--mainline"),
+    "am": ("--patch-format", "--exclude", "--include", "--directory",
+           "-p", "--whitespace"),
     "update-ref": ("-m",),
 }
 
@@ -366,10 +391,10 @@ def moved_to(verb, rest, where):
     args = positionals(rest, verb)
     if not args:
         return None
-    fresh = any(a in ("-b", "-c", "-B", "-C") for a in rest)
+    fresh = any(a in MAKES for a in rest)
     # A line being made does not exist to be verified; one being stepped onto
     # does, and a name that is no line at all is a file.
-    return args[0] if fresh or is_branch(args[0], where) else None
+    return args[0] if fresh else steps_onto(args[0], where)
 
 
 def line_named(ref, here):
@@ -501,7 +526,7 @@ def remade_by(verb, rest, where):
     standing, so a protected line is rewritten with no verb of the usual list
     appearing anywhere on the command.
     """
-    if not any(a in ("-B", "-C") for a in rest):
+    if not any(a in REMAKES for a in rest):
         return []
     args = positionals(rest, verb)
     return [args[0]] if args and is_branch(args[0], where) else []
@@ -729,7 +754,7 @@ def routes(cmd, home):
                 # is an unreadable WRITE, not merely an unreadable position —
                 # skipping the rest of the command hands back the same rewrite
                 # the spelled-out form is refused for.
-                if any(a in ("-B", "-C") for a in rest):
+                if any(a in REMAKES for a in rest):
                     made.append((verb, where, UNREADABLE, rest))
                 stand(where, UNREADABLE)
                 continue
