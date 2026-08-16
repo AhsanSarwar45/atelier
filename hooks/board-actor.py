@@ -25,7 +25,10 @@ def main():
             or all("--actor" in line for line in cmd.splitlines()
                    if BD_CALL.search(line)):
         return
-    name = bc.actor(data.get("session_id"), data.get("cwd"))
+    # The directory the command runs in, not the one the session was started in:
+    # the name carries which copy the work is being done in, and both checks for
+    # an abandoned copy read that copy off the name a card was claimed under.
+    name = bc.actor(data.get("session_id"), bc.where(data))
     stamp = lambda m: "%sbd --actor %s%s" % (m.group(1), name, m.group(2))
     stamped = "\n".join(line if "--actor" in line else BD_CALL.sub(stamp, line)
                         for line in cmd.split("\n"))

@@ -2122,9 +2122,30 @@ def main():
         assert gate_says("cd %s/worktrees && %s'chore: nothing named here'" % (elsewhere, commit)) != "", \
             "a commit naming no card at all was let through by the path it was run from"
 
+        # The name a card is claimed under carries which copy the work is in,
+        # and both checks for an abandoned copy read the copy off that name. A
+        # session that reaches a copy by moving into it must be named for the
+        # copy, or the teardown closes without ever looking.
+        def stamped(cmd, cwd=ROOT):
+            out = subprocess.run(
+                [os.path.join(HOME, "hooks", "board-actor.py")],
+                input=json.dumps({"session_id": "abcd1234", "cwd": cwd,
+                                  "tool_input": {"command": cmd}}),
+                capture_output=True, text=True).stdout
+            if not out.strip():
+                return cmd
+            return json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"]
+
+        copy = os.path.join(elsewhere, "worktrees", "any-copy")
+        os.makedirs(copy, exist_ok=True)
+        said = stamped("cd %s && bd ready" % copy)
+        assert "--actor any-copy-" in said, \
+            "a command run inside a copy was stamped with the name of the tree it started in: %s" % said
+
         print("ok: a command is judged by the checkout it opens by moving into, an "
               "unrecognised path leaves it with the session's own, the move is never "
-              "part of what the command says, and the commit gate acts on all three")
+              "part of what the command says, the commit gate acts on all three, and "
+              "the name a board command is made under carries the copy it runs in")
 
     # The three answers the cost report has about a counter, which have to stay
     # three. Read against a counter file of its own: the real one is the number the
