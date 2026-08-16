@@ -28,6 +28,8 @@ export interface LiveSession {
   waitingFor: string | null;
   lastActiveAt: string;
   startedAt: string;
+  /** Cards this chat has touched, as the machine recorded them. */
+  beads: string[];
 }
 
 /**
@@ -44,6 +46,15 @@ export function isRunning(s: LiveSession): boolean {
   return s.state === 'thinking' || s.state === 'streaming' || s.state === 'running_tool';
 }
 
+/**
+ * Attached and alive — working, or stopped mid-turn waiting for you. What a
+ * board card means by "being worked on": a chat holding a permission card is
+ * the most alive thing on the board, not the least.
+ */
+export function isLive(s: LiveSession): boolean {
+  return isRunning(s) || s.state === 'waiting_permission' || s.state === 'idle' || s.state === 'starting';
+}
+
 const listeners = new Set<() => void>();
 let sessions: LiveSession[] = [];
 let source: EventSource | null = null;
@@ -55,7 +66,7 @@ function announce(): void {
   listeners.forEach((fn) => fn());
 }
 
-function fromSummary(s: SessionSummary & { activity: string }): LiveSession {
+function fromSummary(s: SessionSummary & { activity: string; beads: string[] }): LiveSession {
   return {
     id: s.id,
     brand: s.brand,
@@ -67,6 +78,7 @@ function fromSummary(s: SessionSummary & { activity: string }): LiveSession {
     waitingFor: null,
     lastActiveAt: s.lastActiveAt,
     startedAt: s.createdAt,
+    beads: s.beads,
   };
 }
 
@@ -80,6 +92,13 @@ function absorb(frame: WatchFrame): void {
   if (frame.kind === 'snapshot') {
     sessions = frame.sessions.map(fromSummary);
     announce();
+    return;
+  }
+  if (frame.kind === 'opened') {
+    if (!sessions.some((s) => s.id === frame.session.id)) {
+      sessions = [...sessions, fromSummary(frame.session)];
+      announce();
+    }
     return;
   }
   const e = frame.event;
@@ -99,6 +118,7 @@ function absorb(frame: WatchFrame): void {
         waitingFor: null,
         lastActiveAt: e.at,
         startedAt: e.at,
+        beads: [],
       },
     ];
   }
@@ -116,6 +136,12 @@ function absorb(frame: WatchFrame): void {
     case 'text.delta':
       patch(e.sessionId, { lastActiveAt: e.at });
       break;
+    case 'link.bead': {
+      const had = sessions.find((s) => s.id === e.sessionId)?.beads ?? [];
+      if (had.includes(e.beadId)) return;
+      patch(e.sessionId, { beads: [...had, e.beadId], lastActiveAt: e.at });
+      break;
+    }
     case 'error':
       patch(e.sessionId, { waitingFor: e.message, lastActiveAt: e.at });
       break;
@@ -127,6 +153,9 @@ function absorb(frame: WatchFrame): void {
 
 function connect(): void {
   if (source) return;
+  // A card is drawn in places with no live connection to be had at all — a
+  // server render, a test bench. Those simply see no sessions.
+  if (typeof EventSource === 'undefined') return;
   source = new EventSource(apiUrl('/api/workbench/watch'));
   source.onmessage = (msg) => absorb(JSON.parse(msg.data) as WatchFrame);
   // The workbench may not be running at all; the board half of the app is

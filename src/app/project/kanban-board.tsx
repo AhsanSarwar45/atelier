@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useBeadDetail } from "@/hooks/use-bead-detail";
 import { CardChats } from "@/workbench/card-chats";
+import { StartFromCard } from "@/workbench/start-from-card";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
 import { useBeads } from "@/hooks/use-beads";
 import { useGitHubStatus } from "@/hooks/use-github-status";
@@ -445,6 +446,11 @@ export default function KanbanBoard() {
           />
           <CardChats
             beadId={detailBead.id}
+            projectId={projectId}
+            projectPath={project?.path ?? ""}
+          />
+          <StartFromCard
+            bead={detailBead}
             projectId={projectId}
             projectPath={project?.path ?? ""}
           />

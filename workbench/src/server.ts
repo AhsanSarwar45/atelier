@@ -82,14 +82,22 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   const write = (frame: unknown) => res.write(`data: ${JSON.stringify(frame)}\n\n`);
   write({
     kind: 'snapshot',
-    sessions: store.listSessions().map((s) => ({ ...s, activity: sessions.activity(s.id) })),
+    sessions: store.listSessions().map((s) => ({
+      ...s,
+      activity: sessions.activity(s.id),
+      // The cards each chat has touched, so a board card can show its own live
+      // chat without asking about every card on the board.
+      beads: store.beadsForSession(s.id),
+    })),
   });
   const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
+  const unopen = sessions.watchOpen((s) => write({ kind: 'opened', session: { ...s, activity: '', beads: [] } }));
 
   const beat = setInterval(() => res.write(': keep-alive\n\n'), 30_000);
   const done = () => {
     clearInterval(beat);
     unsubscribe();
+    unopen();
   };
   req.on('close', done);
   req.on('error', done);
@@ -137,6 +145,11 @@ const server = createServer((req, res) => {
         if (!sessionId) return json(res, 400, { error: 'session is required' });
         const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
         streamEvents(req, res, sessionId, Number.isFinite(since) ? since : 0);
+      } else if (path === '/search' && req.method === 'GET') {
+        const q = (url.searchParams.get('q') ?? '').trim();
+        json(res, 200, q ? sessions.found(q) : []);
+      } else if (path === '/spend' && req.method === 'GET') {
+        json(res, 200, store.spend());
       } else if (path === '/watch' && req.method === 'GET') {
         streamAll(req, res);
       } else if (path.startsWith('/links/bead/') && req.method === 'GET') {

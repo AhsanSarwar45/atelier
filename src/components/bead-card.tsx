@@ -13,6 +13,7 @@ import { formatBeadId, formatWorktreePath, isBlocked, truncate } from "@/lib/bea
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import { cn } from "@/lib/utils";
 import type { Bead, WorktreeStatus, PRStatus, StatusBadgeInfo } from "@/types";
+import { CardLiveChat } from "@/workbench/card-live";
 
 export interface BeadCardProps {
   bead: Bead;
@@ -282,6 +283,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
           )}
           {report}
         </div>
+        <CardLiveChat beadId={bead.id} />
       </div>
     );
   }
@@ -352,6 +354,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
           )}
           {report}
         </div>
+        <CardLiveChat beadId={bead.id} />
       </div>
     );
   }
@@ -457,6 +460,9 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
             {report}
           </div>
         )}
+        <div className="px-3 pb-2">
+          <CardLiveChat beadId={bead.id} />
+        </div>
       </div>
     </div>
   );

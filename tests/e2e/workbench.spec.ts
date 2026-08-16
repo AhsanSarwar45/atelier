@@ -500,4 +500,151 @@ test.describe('workbench', () => {
     });
     await page.screenshot({ path: join(SHOTS, 'tray-landed.png'), fullPage: false });
   });
+
+  /**
+   * From the card, on the board, and on a phone.
+   *
+   * One chat serves all three: started from a card so it opens already knowing
+   * what the card says, which puts a live line on that card back on the board,
+   * and read once more at phone size.
+   */
+  test('from-card briefs the chat, marks the board, and reads on a phone', async ({ page, request }) => {
+    test.setTimeout(600_000);
+
+    const FIXTURE = fixtureFor('from-card');
+    const REPORTS = join(__dirname, '..', '.workbench-run-from-card-reports');
+    rmSync(REPORTS, { recursive: true, force: true });
+    makeFixtureProject(FIXTURE, REPORTS);
+    mkdirSync(SHOTS, { recursive: true });
+
+    const project = await projectAt(request, FIXTURE);
+    await page.goto(`/project?id=${project.id}`);
+
+    // Open the card, and start a chat from it.
+    await page.locator(`[data-bead-id="${PARENT_CARD}"]`).first().click();
+    const start = page.getByTestId('start-chat-from-card');
+    await expect(start).toBeVisible({ timeout: 60_000 });
+    await start.click();
+
+    // It lands on a chat that already quotes the card, with its chip in the header.
+    const tab = page.getByTestId('chat-tab');
+    await expect(tab).toBeVisible({ timeout: 120_000 });
+    const opened = await tab.getAttribute('data-session-id');
+    expect(opened, 'the button opened a chat').toBeTruthy();
+    await expect(page.getByTestId('user-message').first()).toContainText('The card this chat works on', {
+      timeout: 60_000,
+    });
+    await expect(page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`)).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.screenshot({ path: join(SHOTS, 'from-card.png'), fullPage: false });
+
+    // Back on the board, that card is the one showing a live line.
+    await page.getByTestId('tab-board').click();
+    const liveLine = page.locator(`[data-testid="card-live-chat"][data-bead-id="${PARENT_CARD}"]`);
+    await expect(liveLine).toBeVisible({ timeout: 120_000 });
+    await expect(liveLine).toHaveAttribute('data-session-id', opened!);
+    await expect(page.getByTestId('card-live-chat')).toHaveCount(1);
+    await page.screenshot({ path: join(SHOTS, 'board-dot.png'), fullPage: false });
+
+    // And the same chat on a phone: the list is a drawer, the composer is in reach.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${opened}`);
+    await expect(page.getByTestId('composer')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('chat-rail')).toHaveAttribute('data-open', 'false');
+
+    const composer = await page.getByTestId('composer').boundingBox();
+    expect(composer, 'the composer is on screen').toBeTruthy();
+    expect(composer!.y + composer!.height, 'the composer is within the screen').toBeLessThanOrEqual(844);
+
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflows, 'nothing pushes the page sideways').toBe(false);
+    await page.screenshot({ path: join(SHOTS, 'phone.png'), fullPage: false });
+
+    // The drawer opens over the conversation rather than beside it.
+    await page.getByTestId('chat-rail-toggle').click();
+    await expect(page.getByTestId('chat-rail')).toHaveAttribute('data-open', 'true');
+    await page.screenshot({ path: join(SHOTS, 'phone-drawer.png'), fullPage: false });
+  });
+
+  /**
+   * Everything ever said, and what it cost.
+   *
+   * Two chats in two projects, each told a word of its own, so a search has to
+   * reach across both and a matched sentence has to name which chat it came
+   * from. The turns they cost are what the two charts are drawn from.
+   */
+  test('search-spend finds words across chats and draws the two charts', async ({ page, request }) => {
+    test.setTimeout(600_000);
+    mkdirSync(SHOTS, { recursive: true });
+
+    const WORD = 'PERIWINKLE';
+    const started: { id: string; projectId: string; name: string }[] = [];
+    for (const name of ['spend-a', 'spend-b']) {
+      const dir = fixtureFor(name);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      const project = await projectAt(request, dir);
+      const res = await request.post('/api/workbench/command', {
+        data: {
+          type: 'session.start',
+          projectId: project.id,
+          projectPath: dir,
+          brand: 'claude',
+          permissionMode: 'bypassPermissions',
+        },
+      });
+      const session = (await res.json()) as { id: string };
+      started.push({ id: session.id, projectId: project.id, name });
+      await request.post('/api/workbench/command', {
+        data: {
+          type: 'prompt.send',
+          sessionId: session.id,
+          text: `Reply with exactly this sentence and nothing else: The word is ${WORD} in ${name}.`,
+        },
+      });
+    }
+
+    // Both turns have to finish: the cost only arrives when the turn is done.
+    await expect
+      .poll(
+        async () => {
+          const rows = (await (await request.get('/api/workbench/spend')).json()) as { usd: number }[];
+          return rows.filter((r) => r.usd > 0).length;
+        },
+        { timeout: 300_000 },
+      )
+      .toBeGreaterThanOrEqual(2);
+
+    await page.goto('/');
+    await page.getByTestId('open-search').click();
+    await page.getByTestId('search-input').fill(WORD);
+
+    // Matches from two different chats, each with the word marked.
+    await expect.poll(async () => page.getByTestId('search-hit').count(), { timeout: 60_000 })
+      .toBeGreaterThanOrEqual(2);
+    const ids = await page.getByTestId('search-hit').evaluateAll(
+      (nodes) => nodes.map((n) => n.getAttribute('data-session-id')),
+    );
+    expect(new Set(ids).size, 'the matches come from more than one chat').toBeGreaterThanOrEqual(2);
+    await expect(page.getByTestId('search-mark').first()).toHaveText(WORD);
+    await expect(page.getByTestId('search-project').first()).not.toBeEmpty();
+    await page.screenshot({ path: join(SHOTS, 'search.png'), fullPage: false });
+
+    // A hit lands on the chat that said it.
+    await page.getByTestId('search-hit').first().click();
+    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
+
+    // And the spend view: two charts, the money one with a bar in it.
+    await page.goto('/');
+    await page.getByTestId('open-spend').click();
+    await expect(page.getByTestId('spend-money')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('spend-tokens')).toBeVisible();
+    await expect
+      .poll(async () => Number(await page.getByTestId('spend-money').getAttribute('data-days')), { timeout: 60_000 })
+      .toBeGreaterThanOrEqual(1);
+    await page.screenshot({ path: join(SHOTS, 'spend.png'), fullPage: false });
+  });
 });

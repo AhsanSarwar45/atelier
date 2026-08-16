@@ -22,6 +22,8 @@ export class Sessions {
   private subs = new Map<string, Set<Subscriber>>();
   /** Listeners on every session at once — the app's single global stream. */
   private watchers = new Set<Subscriber>();
+  /** Listeners told when a session comes into existence, before it says anything. */
+  private openings = new Set<(s: SessionSummary) => void>();
   /**
    * The agent's own words for what each session is doing. Held here rather than
    * in the store: it is true only while a driver is attached, and a screen
@@ -44,6 +46,7 @@ export class Sessions {
     brand: Brand;
     model?: string;
     permissionMode?: string;
+    brief?: { beadId: string; text: string };
   }): Promise<SessionSummary> {
     if (params.brand !== 'claude') {
       throw new Error(`No driver for brand "${params.brand}" yet — see docs/agent-workbench.md §3.2`);
@@ -64,8 +67,17 @@ export class Sessions {
       lastActiveAt: now,
     };
     this.store.createSession({ ...summary, origin: 'app' });
+    this.openings.forEach((fn) => fn(summary));
 
     await this.attach(summary, params.model);
+
+    // Started FROM a card: the owner said so by pressing the button there, so
+    // the link is recorded now rather than waited for. The brief is the chat's
+    // own first turn, which is why it appears in the transcript like any other.
+    if (params.brief) {
+      this.publish(summary.id, { type: 'link.bead', beadId: params.brief.beadId, via: 'brief' });
+      await this.send(summary.id, params.brief.text);
+    }
     return summary;
   }
 
@@ -101,6 +113,7 @@ export class Sessions {
         lastActiveAt: now,
       };
     if (!existing) this.store.createSession({ ...summary, origin: 'terminal' });
+    this.openings.forEach((fn) => fn(summary));
 
     // A row the app already knows keeps whatever state it was left in — dormant,
     // after a restart — and no driver event says otherwise until the owner types
@@ -178,6 +191,26 @@ export class Sessions {
       this.store.rememberReportLink(sessionId, full.project, full.slug);
     }
 
+    // What was said and what it cost, folded out of the log as it goes by, so
+    // searching and totalling never re-read every event of every session.
+    if (full.type === 'message.started') {
+      this.store.openMessage(sessionId, full.messageId, full.role, full.at);
+    } else if (full.type === 'text.delta') {
+      this.store.growMessage(sessionId, full.messageId, full.text);
+    } else if (full.type === 'cost') {
+      const s = this.store.getSession(sessionId);
+      this.store.rememberTurn({
+        sessionId,
+        projectId: s?.projectId ?? '',
+        brand: s?.brand ?? 'claude',
+        at: full.at,
+        usd: full.cost.kind === 'usd' ? full.cost.usd : null,
+        input: full.cost.kind === 'tokens' ? full.cost.input : null,
+        output: full.cost.kind === 'tokens' ? full.cost.output : null,
+        total: full.cost.kind === 'tokens' ? full.cost.total : null,
+      });
+    }
+
     if (full.type === 'session.state') {
       this.store.updateSession(sessionId, { state: full.state as SessionState });
       this.labels.set(sessionId, full.label);
@@ -206,9 +239,53 @@ export class Sessions {
     return () => this.watchers.delete(fn);
   }
 
+  /**
+   * A session exists from the moment it is created, not from its first word.
+   * The card it was started from is linked before the agent has said anything,
+   * so a screen that only learned of sessions from their events would never
+   * hear about that link at all.
+   */
+  watchOpen(fn: (s: SessionSummary) => void): () => void {
+    this.openings.add(fn);
+    return () => this.openings.delete(fn);
+  }
+
   /** What each attached session last said it was doing. */
   activity(sessionId: string): string {
     return this.labels.get(sessionId) ?? '';
+  }
+
+  /**
+   * Matches with enough around them to read: the sentence the words fell in,
+   * and which chat and project it was said in.
+   */
+  found(q: string): {
+    sessionId: string;
+    messageId: string;
+    role: string;
+    sentence: string;
+    match: string;
+    at: string;
+    title: string | null;
+    projectId: string;
+  }[] {
+    return this.store.search(q).map((m) => {
+      const at = m.text.toLowerCase().indexOf(q.toLowerCase());
+      // The sentence it fell in: back to the last full stop, on to the next.
+      const from = Math.max(0, m.text.lastIndexOf('.', Math.max(0, at - 1)) + 1);
+      const stop = m.text.indexOf('.', at + q.length);
+      const s = this.store.getSession(m.sessionId);
+      return {
+        sessionId: m.sessionId,
+        messageId: m.messageId,
+        role: m.role,
+        sentence: m.text.slice(from, stop < 0 ? Math.min(m.text.length, at + 240) : stop + 1).trim(),
+        match: m.text.slice(at, at + q.length),
+        at: m.at,
+        title: s?.title ?? null,
+        projectId: s?.projectId ?? '',
+      };
+    });
   }
 
   replay(sessionId: string, since: number): WbpEvent[] {

@@ -200,6 +200,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const view = useSession(sessionId);
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
+  /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
+  const [railOpen, setRailOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -229,10 +231,41 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     return <div className="p-8 text-muted-foreground">Pick a project to start a chat.</div>;
   }
 
+  /**
+   * On a phone the conversation gets the whole screen and the list of chats
+   * becomes a drawer over it: a 288px rail beside a 390px screen leaves the
+   * transcript unreadable, and the composer is what must stay in reach.
+   */
   const shell = (inner: React.ReactNode) => (
-    <div className="flex h-[calc(100vh-6rem)]">
-      <ChatSidebar projectId={projectId} projectPath={projectPath} openSessionId={sessionId} onOpen={open} />
-      <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
+    <div className="relative flex h-[calc(100dvh-6rem)]">
+      <div
+        data-testid="chat-rail"
+        data-open={railOpen}
+        className={cn(
+          'z-30 h-full shrink-0 bg-background transition-transform md:relative md:translate-x-0',
+          'absolute inset-y-0 left-0',
+          railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
+        )}
+      >
+        <ChatSidebar projectId={projectId} projectPath={projectPath} openSessionId={sessionId} onOpen={(id) => { setRailOpen(false); open(id); }} />
+      </div>
+      {railOpen && (
+        <button
+          type="button"
+          aria-label="Close the chat list"
+          data-testid="chat-rail-scrim"
+          className="absolute inset-0 z-20 bg-black/40 md:hidden"
+          onClick={() => setRailOpen(false)}
+        />
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="border-b border-border/60 px-3 py-1.5 md:hidden">
+          <Button size="xs" variant="outline" data-testid="chat-rail-toggle" onClick={() => setRailOpen((v) => !v)}>
+            Chats
+          </Button>
+        </div>
+        {inner}
+      </div>
     </div>
   );
 

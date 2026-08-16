@@ -103,8 +103,28 @@ export type WbpEvent = EventBase &
 export type WbpEventType = WbpEvent['type'];
 
 /** Commands the browser POSTs to /api/workbench/command. */
+/**
+ * A card handed to a chat at birth. The link is recorded before the agent has
+ * done anything, because the owner starting a chat *from* a card is itself the
+ * statement that the two belong together — it is not waiting to be inferred
+ * from a tool call (docs/agent-workbench.md §8.3).
+ */
+export interface Brief {
+  beadId: string;
+  /** The opening prompt: the card's title, its body and what "done" means. */
+  text: string;
+}
+
 export type WbpCommand =
-  | { type: 'session.start'; projectId: string; projectPath: string; brand: Brand; model?: string; permissionMode?: string }
+  | {
+      type: 'session.start';
+      projectId: string;
+      projectPath: string;
+      brand: Brand;
+      model?: string;
+      permissionMode?: string;
+      brief?: Brief;
+    }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
   | { type: 'session.stop'; sessionId: string }
@@ -144,7 +164,9 @@ export interface RestoreRow {
  * handler (docs/agent-workbench.md §8.6).
  */
 export type WatchFrame =
-  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string })[] }
+  | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; beads: string[] })[] }
+  /** A chat that has just come into existence, before it has said anything. */
+  | { kind: 'opened'; session: SessionSummary & { activity: string; beads: string[] } }
   | { kind: 'event'; event: WbpEvent };
 
 /** A chat that touched a card, as the card's own side of the join lists it. */

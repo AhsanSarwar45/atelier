@@ -2,7 +2,7 @@
 
 import { Suspense } from 'react';
 
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
@@ -20,14 +20,28 @@ function LoadingFallback() {
 
 function ProjectTabs() {
   const params = useSearchParams();
+  const router = useRouter();
   const projectId = params.get('id');
   const openChat = params.get('chat');
-  // A link from a card lands on the chat it names, not on the board.
-  const initialTab = params.get('tab') === 'chat' || openChat ? 'chat' : 'board';
+  // The address decides which tab is showing, so a link from a card, a tray row
+  // or a live line on the board lands on the chat it names — a tab holding its
+  // own state would stay where it was and quietly ignore the link.
+  const tab = params.get('tab') === 'chat' || openChat ? 'chat' : 'board';
   const { project } = useProject(projectId);
 
   return (
-    <Tabs defaultValue={initialTab} className="w-full">
+    <Tabs
+      value={tab}
+      onValueChange={(next) => {
+        const q = new URLSearchParams(params.toString());
+        q.set('tab', next);
+        // The chat it was pointed at is not the tab's business once the owner
+        // has moved off it by hand.
+        if (next !== 'chat') q.delete('chat');
+        router.replace(`/project?${q}`);
+      }}
+      className="w-full"
+    >
       <TabsList className="mx-4 mt-3" data-testid="project-tabs">
         <TabsTrigger value="chat" data-testid="tab-chat">
           Chat

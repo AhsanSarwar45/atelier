@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { isRunning, useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
+import { SearchPanel } from '@/workbench/search-panel';
+import { SpendView } from '@/workbench/spend-view';
 
 /** Project ids to their names, fetched once — the tray names a project, not a path. */
 function useProjectNames(): Map<string, string> {
@@ -150,22 +152,33 @@ function GlanceStrip({ names }: { names: Map<string, string> }) {
   );
 }
 
-/** Both, mounted once. Takes no room at all when nothing is running or waiting. */
+/**
+ * All of it, mounted once. The two ways in — searching everything that was ever
+ * said, and what it cost — are always reachable; the tray and the strip take no
+ * room at all when nothing is waiting and nothing is running.
+ */
 export function WorkbenchGlobals() {
   const names = useProjectNames();
   const live = useLiveSessions();
   const waiting = live.filter(waitsOnYou).length;
   const running = live.filter(isRunning).length;
-  if (!waiting && !running) return null;
+  const [showing, setShowing] = useState<'search' | 'spend' | null>(null);
 
   return (
     <div data-testid="workbench-globals" className="border-b border-border/40 bg-background/80">
-      {waiting > 0 && (
-        <div className="flex items-center justify-end px-4 py-1">
-          <WaitingTray names={names} />
-        </div>
-      )}
-      <GlanceStrip names={names} />
+      <div className="flex items-center gap-2 px-4 py-1">
+        <Button size="xs" variant="ghost" data-testid="open-search" onClick={() => setShowing('search')}>
+          Search chats
+        </Button>
+        <Button size="xs" variant="ghost" data-testid="open-spend" onClick={() => setShowing('spend')}>
+          What it cost
+        </Button>
+        <div className="ml-auto">{waiting > 0 && <WaitingTray names={names} />}</div>
+      </div>
+      {running > 0 && <GlanceStrip names={names} />}
+
+      {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
+      {showing === 'spend' && <SpendView onClose={() => setShowing(null)} />}
     </div>
   );
 }

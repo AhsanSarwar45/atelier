@@ -27,20 +27,34 @@ mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results"
 SERVER_LOG="$RUN/server.log"
 : > "$SERVER_LOG"
 
+# By port, never by name: another beads-web serves the owner's board on this
+# machine. A run that leaves a helper behind, or a hand-started instance, keeps
+# its port — and the server we are about to start cannot bind it, so the browser
+# is served by yesterday's code while every log here says the run is fresh.
+free_port() {
+  local pid
+  # `|| true` on the assignment: nothing listening means grep exits non-zero,
+  # and this script runs under `set -e`.
+  pid=$(ss -lntpH "sport = :$1" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2) || true
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null && sleep 0.5 || true
+}
+free_port "$BEADS_WEB_PORT"
+free_port "$BEADS_WORKBENCH_PORT"
+for p in "$BEADS_WEB_PORT" "$BEADS_WORKBENCH_PORT"; do
+  if ss -lntH "sport = :$p" 2>/dev/null | grep -q .; then
+    echo "port $p is still held by something this run cannot stop"; exit 1
+  fi
+done
+
 "$ROOT/server/target/debug/beads-server" >> "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 # By port, never by name: another beads-web serves the owner's board on this
 # machine. A test may also have restarted the instance, so the pid we spawned
 # is not necessarily the one still listening.
-kill_port() {
-  local pid
-  pid=$(ss -lntpH "sport = :$1" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
-  [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-}
 cleanup() {
   kill "$SERVER_PID" 2>/dev/null || true
-  kill_port "$BEADS_WEB_PORT"
-  kill_port "$BEADS_WORKBENCH_PORT"
+  free_port "$BEADS_WEB_PORT"
+  free_port "$BEADS_WORKBENCH_PORT"
 }
 trap cleanup EXIT
 

@@ -70,6 +70,34 @@ const MIGRATIONS: string[] = [
      at TEXT NOT NULL,
      PRIMARY KEY (session_id, project, slug)
    );`,
+
+  // What was said, and what it cost. Both are folded from the event log rather
+  // than being a second source of truth: `message` is the deltas of one message
+  // joined up so a sentence split across twenty of them can still be found, and
+  // `turn` is the cost each turn reported, kept in the unit the brand reported
+  // it in — dollars and tokens are never added together (decision 12).
+  `CREATE TABLE message (
+     session_id TEXT NOT NULL,
+     message_id TEXT NOT NULL,
+     role TEXT NOT NULL,
+     text TEXT NOT NULL,
+     at TEXT NOT NULL,
+     PRIMARY KEY (session_id, message_id)
+   );
+   CREATE INDEX message_by_session ON message(session_id, at);
+   CREATE TABLE turn (
+     session_id TEXT NOT NULL,
+     project_id TEXT NOT NULL,
+     brand TEXT NOT NULL,
+     day TEXT NOT NULL,
+     at TEXT NOT NULL,
+     usd REAL,
+     input INTEGER,
+     output INTEGER,
+     total INTEGER,
+     PRIMARY KEY (session_id, at)
+   );
+   CREATE INDEX turn_by_day ON turn(day, project_id);`,
 ];
 
 export class Store {
@@ -189,6 +217,80 @@ export class Store {
       )
       .all(beadId) as Record<string, string>[];
     return rows.map(rowToSummary);
+  }
+
+  /** Starts a message, so the deltas that follow have something to grow. */
+  openMessage(sessionId: string, messageId: string, role: string, at: string): void {
+    this.db
+      .prepare('INSERT OR IGNORE INTO message (session_id, message_id, role, text, at) VALUES (?,?,?,?,?)')
+      .run(sessionId, messageId, role, '', at);
+  }
+
+  /** Grows a message by one delta. */
+  growMessage(sessionId: string, messageId: string, text: string): void {
+    this.db
+      .prepare('UPDATE message SET text = text || ? WHERE session_id = ? AND message_id = ?')
+      .run(text, sessionId, messageId);
+  }
+
+  /** What one turn cost, in the unit the brand reported. */
+  rememberTurn(row: {
+    sessionId: string;
+    projectId: string;
+    brand: string;
+    at: string;
+    usd: number | null;
+    input: number | null;
+    output: number | null;
+    total: number | null;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO turn (session_id, project_id, brand, day, at, usd, input, output, total)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(row.sessionId, row.projectId, row.brand, row.at.slice(0, 10), row.at,
+           row.usd, row.input, row.output, row.total);
+  }
+
+  /**
+   * Messages holding `q`, newest first. LIKE rather than a full-text index:
+   * the corpus is one owner's conversations, and this is revisited if it ever
+   * reaches tens of thousands (docs/agent-workbench.md §9.3).
+   */
+  search(q: string, limit = 100): { sessionId: string; messageId: string; role: string; text: string; at: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT session_id, message_id, role, text, at FROM message
+         WHERE text LIKE ? ESCAPE '\\' ORDER BY at DESC LIMIT ?`,
+      )
+      .all('%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%', limit) as Record<string, string>[];
+    return rows.map((r) => ({
+      sessionId: r.session_id as string,
+      messageId: r.message_id as string,
+      role: r.role as string,
+      text: r.text as string,
+      at: r.at as string,
+    }));
+  }
+
+  /** One row per project per day per brand — never summed across brands. */
+  spend(): { day: string; projectId: string; brand: string; usd: number; tokens: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT day, project_id, brand,
+                COALESCE(SUM(usd), 0) AS usd,
+                COALESCE(SUM(total), 0) AS tokens
+         FROM turn GROUP BY day, project_id, brand ORDER BY day`,
+      )
+      .all() as Record<string, string | number>[];
+    return rows.map((r) => ({
+      day: r.day as string,
+      projectId: r.project_id as string,
+      brand: r.brand as string,
+      usd: Number(r.usd),
+      tokens: Number(r.tokens),
+    }));
   }
 
   /** Every event after `since`, in order — the replay half of the SSE stream. */

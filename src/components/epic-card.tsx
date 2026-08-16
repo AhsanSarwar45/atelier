@@ -17,6 +17,7 @@ import { formatBeadId, isBlocked, truncate } from "@/lib/bead-utils";
 import { closeBead } from "@/lib/cli";
 import { computeEpicProgress } from "@/lib/epic-parser";
 import { cn, isDoltProject } from "@/lib/utils";
+import { CardLiveChat } from "@/workbench/card-live";
 import type { Bead, Epic, EpicProgress } from "@/types";
 
 export interface EpicCardProps {
@@ -284,6 +285,7 @@ export function EpicCard({
             {closeButton}
             {childrenSection}
             {report}
+            <CardLiveChat beadId={epic.id} />
           </div>
         </div>
       </div>
@@ -329,6 +331,7 @@ export function EpicCard({
             )}
             {report}
           </div>
+            <CardLiveChat beadId={epic.id} />
 
           {progressSection}
           {closeButton}
@@ -423,6 +426,9 @@ export function EpicCard({
             {report}
           </div>
         )}
+        <div className="px-3 pb-2">
+          <CardLiveChat beadId={epic.id} />
+        </div>
       </div>
     </div>
   );
