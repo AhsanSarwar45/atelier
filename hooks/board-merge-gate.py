@@ -234,6 +234,11 @@ def main():
     # every close against.
     if not os.path.isdir(os.path.join(root, ".beads")):
         return
+    # Folds only. The slot exists so two sessions never resolve conflicts in the
+    # same tree at once; an ordinary commit on the main line resolves nothing and
+    # was never what it queued.
+    if not any(v in ("merge", "rebase") for v in verbs):
+        return
     if project.of(root).lands_on not in written:
         return
     if "merge" in verbs and not FF_ONLY.search(said):

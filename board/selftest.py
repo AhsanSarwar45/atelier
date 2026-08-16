@@ -2028,6 +2028,11 @@ def main():
     assert "fast-forward" in merging("main-abcd1234", "main-abcd1234",
                                      cmd="git merge work"), \
         "a merge that is not a fast-forward was allowed to the slot's holder"
+    # The slot queues folds. An ordinary commit on the main line resolves no
+    # conflict with anybody and must not have to wait for one.
+    assert merging("someone-99999999", "main-abcd1234", cmd="git commit -m x") == "", \
+        "an ordinary commit on the main line was made to queue behind the merge " \
+        "slot, which would stop every session committing in its own main tree"
 
     print("ok: the merge slot is recognised by the session holding it however many "
           "trees it works in, somebody else's hold is not, and a merge that would "
