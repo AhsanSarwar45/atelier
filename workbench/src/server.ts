@@ -9,9 +9,10 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
+import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
-import { issuesForSession, sessionsForIssue } from './bd.ts';
-import { restoreList } from './registry.ts';
+import { issuesByActor, issuesForSession, sessionsForIssue } from './bd.ts';
+import { knownSessions, restoreList } from './registry.ts';
 import { Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 
@@ -182,6 +183,29 @@ const server = createServer((req, res) => {
         const s = store.getSession(sessionId);
         const onBoard = s ? await issuesForSession(sessionId, s.cwd) : [];
         json(res, 200, [...new Set([...store.beadsForSession(sessionId), ...onBoard])]);
+      } else if (path.startsWith('/session/') && req.method === 'GET') {
+        // What the open chat shows about itself. The cards are the board's
+        // answer, so a chat begun in a terminal has them from the first look;
+        // they are remembered here so its row carries them next time too.
+        const sessionId = decodeURIComponent(path.slice('/session/'.length));
+        const s = store.getSession(sessionId);
+        if (!s) return json(res, 404, { error: `no session ${sessionId}` });
+        const seen = (await knownSessions(s.projectPath)).find((k) => k.externalId === s.externalId);
+        const [linked, claimed] = await Promise.all([
+          issuesForSession(sessionId, s.cwd),
+          issuesByActor((s.externalId ?? '').slice(0, 8), s.cwd),
+        ]);
+        const onBoard = [...new Set([...linked, ...claimed])];
+        for (const beadId of onBoard) store.rememberBeadLink(sessionId, beadId, 'board');
+        const cwd = seen?.cwd ?? s.cwd;
+        json(res, 200, {
+          sessionId,
+          title: seen?.name ?? s.title,
+          cwd,
+          folder: folderOf(cwd),
+          branch: seen?.branch ?? null,
+          beads: [...new Set([...store.beadsForSession(sessionId), ...onBoard])],
+        });
       } else if (path === '/restore' && req.method === 'GET') {
         const id = url.searchParams.get('project');
         const projectPath = url.searchParams.get('path');

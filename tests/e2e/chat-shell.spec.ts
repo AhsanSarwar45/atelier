@@ -89,6 +89,26 @@ test.describe('the chat screen', () => {
       .toBeGreaterThan(before);
   });
 
+  test('an open chat says where it is working', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=chat`);
+    await page.getByTestId('restore-row').first().waitFor();
+
+    // A chat that is already attached opens by being clicked; a dormant one
+    // would have to be woken, and nothing here wakes an agent.
+    const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"])');
+    await ready.first().waitFor({ timeout: 10_000 }).catch(() => {});
+    test.skip((await ready.count()) === 0, 'no chat is attached to open');
+
+    await ready.first().getByTestId('row-name').click();
+    await page.getByTestId('chat-tab').waitFor();
+
+    const where = page.getByTestId('chat-folder-chip');
+    await expect(where).toBeVisible();
+    expect((await where.getAttribute('data-folder')) ?? '', 'the chip names no folder').not.toBe('');
+    expect(await where.getAttribute('title'), 'the whole path is not in the tooltip').toContain('/');
+  });
+
   test('the rest of a long list arrives by scrolling to it', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=chat`);

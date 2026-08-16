@@ -75,6 +75,32 @@ export async function issuesForSession(sessionId: string, cwd: string): Promise<
   }
 }
 
+/**
+ * The cards a chat worked on according to the board's own record of who
+ * touched what.
+ *
+ * The board stamps every card with the name of whoever claimed it, and that
+ * name ends in the first eight characters of the agent's session — `main-31397e3e`,
+ * `bw-ccm-31397e3e`. It is the only link a chat run in a terminal has, since
+ * nothing in this app watched it work. Measured: reading the whole board and
+ * matching the ending costs 0.14 s on a board of 1544 cards, which is why it
+ * is done in one pass rather than asked card by card.
+ */
+export async function issuesByActor(sessionShortId: string, cwd: string): Promise<string[]> {
+  if (sessionShortId.length < 8) return [];
+  const { stdout } = await run(['list', '--status', 'all', '--json'], cwd);
+  try {
+    const rows = JSON.parse(stdout) as { id?: string; assignee?: string }[];
+    if (!Array.isArray(rows)) return [];
+    const mine = rows.filter(
+      (r) => r.id && r.assignee && (r.assignee === sessionShortId || r.assignee.endsWith(`-${sessionShortId}`)),
+    );
+    return [...new Set(mine.map((r) => r.id!))];
+  } catch {
+    return [];
+  }
+}
+
 /** Every session bound to this issue — the card's own list of chats. */
 export async function sessionsForIssue(issue: string, cwd: string): Promise<string[]> {
   const { stdout } = await run(['provenance', 'log', issue, '--json'], cwd);

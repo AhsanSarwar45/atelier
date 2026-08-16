@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { diffLines } from '@/workbench/line-diff';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
@@ -28,6 +29,7 @@ import {
   readImage,
   sendCommand,
   useSession,
+  useSessionFacts,
   useStartSession,
   type TranscriptItem,
 } from '@/workbench/use-session';
@@ -207,6 +209,9 @@ function TodoPanel({ items }: { items: TodoItem[] }) {
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
   const { sessionId, open, start, starting, error: startError } = useStartSession(projectId, projectPath, openSessionId);
   const view = useSession(sessionId);
+  const facts = useSessionFacts(sessionId);
+  // What the board knows plus what this chat has been seen doing since.
+  const cards = Array.from(new Set([...(facts?.beads ?? []), ...view.beads]));
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
@@ -329,9 +334,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {view.model ? ` · ${view.model}` : ''}
           {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
         </span>
-        {view.beads.length > 0 && (
+        {cards.length > 0 && (
           <span data-testid="bead-chips" className="flex items-center gap-1">
-            {view.beads.map((id) => (
+            {cards.map((id) => (
               <Badge
                 key={id}
                 variant="primary"
@@ -346,6 +351,23 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               </Badge>
             ))}
           </span>
+        )}
+        {facts?.folder && (
+          <Badge
+            hue={hueFor(facts.folder)}
+            appearance="light"
+            size="sm"
+            shape="circle"
+            data-testid="chat-folder-chip"
+            data-folder={facts.folder}
+            data-branch={facts.branch ?? ''}
+            // The whole path and the branch in the tooltip: the chip has room
+            // for the one word that tells two copies of a project apart.
+            title={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}
+            className="font-mono"
+          >
+            {facts.folder}
+          </Badge>
         )}
         {view.cost && (
           <Badge variant="secondary" appearance="light" size="sm" data-testid="cost-chip" className="ml-auto font-mono">

@@ -15,6 +15,7 @@ import type {
   AskOption,
   Cost,
   ImagePayload,
+  SessionFacts,
   SessionState,
   TodoItem,
   WbpCommand,
@@ -213,6 +214,37 @@ export async function sendCommand<T = unknown>(cmd: WbpCommand): Promise<T> {
   });
   if (!res.ok) throw new Error(`${cmd.type} failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as T;
+}
+
+/**
+ * What the open chat says about itself: the cards it has worked on and where it
+ * is working. Asked once per chat — the cards come from the board, so a chat
+ * begun in a terminal carries them the first time it is opened, not only after
+ * this app has watched it work.
+ */
+export function useSessionFacts(sessionId: string | null): SessionFacts | null {
+  const [facts, setFacts] = useState<SessionFacts | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setFacts(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/workbench/session/${encodeURIComponent(sessionId)}`));
+        if (live && res.ok) setFacts((await res.json()) as SessionFacts);
+      } catch {
+        // The header falls back to what the stream itself carries.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [sessionId]);
+
+  return facts;
 }
 
 export function useSession(sessionId: string | null): SessionView {

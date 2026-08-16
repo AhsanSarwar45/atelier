@@ -161,6 +161,21 @@ export interface RestoreRow {
 }
 
 /**
+ * What an open chat says about itself beyond what it is saying right now
+ * (`GET /api/workbench/session/<id>`): which cards it has worked on, and where
+ * it is working. The cards come from the board, which is the record of who
+ * touched what, so a chat begun in a terminal carries them too.
+ */
+export interface SessionFacts {
+  sessionId: string;
+  title: string | null;
+  cwd: string | null;
+  folder: string | null;
+  branch: string | null;
+  beads: string[];
+}
+
+/**
  * One frame of the app-wide stream (`GET /api/workbench/watch`).
  *
  * A snapshot first, so a browser that connects in the middle of the day knows
