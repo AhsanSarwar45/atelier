@@ -12,14 +12,15 @@ One merge at a time. Where a board is running, merges into its main line are
 serialised through a single slot and must be fast-forwards, because a code step
 lands as it closes and the slot is taken many times a job.
 
-The question both rules ask is what a command WRITES TO, never which word it
-starts with. That is what lets an agent stay current: bringing a protected line
-into its own work, and rebasing its own work onto one, write to the agent's own
-line and are always allowed, conflicts and all.
+The question both rules ask is what a command WRITES TO: never which word it
+starts with, and never which project the session was started in. That is what
+lets an agent stay current — bringing a protected line into its own work, and
+rebasing its own work onto one, write to the agent's own line and are always
+allowed, conflicts and all.
 """
 import json
 import os
-import re
+import shlex
 import subprocess
 import sys
 
@@ -30,30 +31,42 @@ import project  # noqa: E402
 
 GIT_TIMEOUT = 10
 
-# A command start: the beginning, or past a separator. Matched against text whose
-# quoted parts have been blanked, so a card's own words describing a merge are
-# words. A literal bracket in prose reads as a separator, which is how a note
-# quoting one of these once refused itself.
-START = r"(?:^|[;&|(]+\s*)(?:rtk\s+)?"
-# The arguments stop at a separator, so a second command on the same line is a
-# second command rather than the first one's arguments.
-GIT = re.compile(START + r"git\s+((?:-\S+\s+)*)(\w[\w-]*)((?:\s+[^\s;&|]+)*)", re.M)
-GH_MERGE = re.compile(START + r"gh\s+pr\s+merge\b", re.M)
-
-# Mid-operation and look-only forms. None of them decides anything new: they
-# finish or abandon a fold already under way, which is where conflicts are
-# resolved.
-PASSIVE = re.compile(r"--(abort|continue|quit|skip|dry-run)\b")
-
 # What writes to a line. `commit` is here because standing on a protected line
 # and committing is the quietest way onto it of all.
 WRITERS = ("merge", "rebase", "push", "commit", "cherry-pick", "revert", "am")
+MOVE = ("checkout", "switch")
 
-FF_ONLY = re.compile(r"--ff-only\b")
+# Mid-operation and look-only forms. None of them decides anything new: they
+# finish or abandon a fold already under way, which is where conflicts are
+# resolved. Asked of one command and never of the whole line — abandoning a fold
+# and pushing a shipping line is two commands, and only the first is passive.
+PASSIVE = ("--abort", "--continue", "--quit", "--skip", "--dry-run")
+
+# `checkout` restores files as readily as it moves between lines, and these say it
+# is doing the first. A conflict is resolved with `--ours`/`--theirs`, which must
+# never read as stepping onto another line.
+NOT_A_MOVE = ("--ours", "--theirs", "--patch", "-p", "--detach", "--")
+
+# The git switches that swallow the word after them, so a value is never read as
+# the verb. `-C` is the one that decides which checkout the command is judged in.
+TAKES_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
+               "--exec-path", "--super-prefix", "--config-env")
+
+FF_ONLY = "--ff-only"
 NOT_FF = (
     "A merge into main has to be a fast-forward: a code step lands as it closes, so "
     "the slot is taken many times over a job and must come straight back. Rebase in "
     "your own tree first, then merge with --ff-only."
+)
+
+REFUSED = (
+    "%s is a line this project ships from, and putting work onto it is not the "
+    "agent's to do here.\n\n"
+    "Work on a line of your own and offer it up for review; the merge is the "
+    "manager's. Staying current is always allowed — bring %s into your own line, "
+    "or rebase your line onto it, and resolve the conflicts as usual.\n\n"
+    "If this project's work should land without asking, say so once in its "
+    "%s: `agent_merges = true`."
 )
 
 
@@ -65,18 +78,81 @@ def deny(reason):
     }}))
 
 
-def bare(cmd):
-    """The command with quoted values blanked, for deciding what it IS.
+def segments(cmd):
+    """Each command on the line, in the order the shell would run them.
 
-    A quoted value is somebody's words as often as it is an argument, and a card
-    note quoting a fold is not a fold. Targets are read off the original text,
-    never off this.
+    Quoted stretches are stepped over rather than searched: a card note quoting a
+    fold is words, and a bracket in prose is not a separator.
     """
-    return re.sub(r"(['\"]).*?\1", " ", cmd, flags=re.S)
+    out, cur, quote = [], [], ""
+    for ch in cmd:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif ch in ";&|()\n":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    out.append("".join(cur))
+    return [s for s in (part.strip() for part in out) if s]
+
+
+def words(seg):
+    """One command as the shell would hand it over, quotes taken off.
+
+    A line naming its target in quotes names the same target, and reading the
+    quoted spelling as no target at all is how every refusal is walked past.
+    """
+    try:
+        return shlex.split(seg)
+    except ValueError:
+        return seg.split()
+
+
+def plain(argv):
+    """The command itself, with what only decorates the call taken off."""
+    while argv and "=" in argv[0] and not argv[0].startswith("-"):
+        argv = argv[1:]  # FOO=bar git …
+    if argv[:2] == ["rtk", "proxy"]:
+        return argv[2:]
+    if argv[:1] == ["rtk"]:
+        return argv[1:]
+    return argv
+
+
+def git_call(argv, here):
+    """A git command split into where it runs, its verb, and the verb's own
+    arguments — or None when it is not git.
+
+    The switches before the verb are git's own, and one of them sends the whole
+    command into another checkout. Reading them as the verb, or not reading them
+    at all, leaves every route through that checkout open.
+    """
+    if not argv or os.path.basename(argv[0]) != "git":
+        return None
+    where, i = here, 1
+    while i < len(argv):
+        arg = argv[i]
+        if not arg.startswith("-"):
+            return where, arg, argv[i + 1:]
+        if arg in TAKES_VALUE and i + 1 < len(argv):
+            if arg == "-C":
+                where = os.path.join(where, argv[i + 1])
+            i += 2
+            continue
+        if arg.startswith("-C") and len(arg) > 2:
+            where = os.path.join(where, arg[2:])
+        i += 1
+    return None
 
 
 def standing_on(where):
-    """The line the command would write to by default, or None off any line."""
+    """The line a command would write to by default, or None off any line."""
     try:
         run = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
                              cwd=where, capture_output=True, text=True,
@@ -87,9 +163,32 @@ def standing_on(where):
     return None if run.returncode or not name or name == "HEAD" else name
 
 
+def is_branch(name, where):
+    """Whether a name is a line in this checkout, so a path is never read as one."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + name],
+            cwd=where, capture_output=True, timeout=GIT_TIMEOUT).returncode == 0
+    except Exception:
+        return False
+
+
 def positionals(rest):
     """The arguments of a git subcommand that are not switches."""
-    return [a for a in rest.split() if not a.startswith("-")]
+    return [a for a in rest if not a.startswith("-")]
+
+
+def moved_to(rest, where):
+    """The line a move lands on, or None when it is not a move at all."""
+    if any(a in NOT_A_MOVE for a in rest):
+        return None
+    args = positionals(rest)
+    if not args:
+        return None
+    fresh = any(a in ("-b", "-c", "-B") for a in rest)
+    # A line being made does not exist to be verified; one being stepped onto
+    # does, and a name that is no line at all is a file.
+    return args[0] if fresh or is_branch(args[0], where) else None
 
 
 def push_targets(rest, here):
@@ -106,37 +205,7 @@ def push_targets(rest, here):
     return [r.split(":")[-1].split("/")[-1] for r in refs]
 
 
-MOVE = ("checkout", "switch")
-# `checkout` restores files as readily as it moves between lines, and these say it
-# is doing the first. A conflict is resolved with `--ours`/`--theirs`, which must
-# never read as stepping onto another line.
-NOT_A_MOVE = re.compile(r"--(ours|theirs|patch|detach)\b|\s--\s|(?:^|\s)-p\b")
-
-
-def is_branch(name, where):
-    """Whether a name is a line in this checkout, so a path is never read as one."""
-    try:
-        return subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + name],
-            cwd=where, capture_output=True, timeout=GIT_TIMEOUT).returncode == 0
-    except Exception:
-        return False
-
-
-def moved_to(switches, rest, where):
-    """The line a move lands on, or None when it is not a move at all."""
-    if NOT_A_MOVE.search(switches + " " + rest):
-        return None
-    args = positionals(rest)
-    if not args:
-        return None
-    fresh = re.search(r"(?:^|\s)-[bcB]\b", switches + " " + rest)
-    # A line being made does not exist to be verified; one being stepped onto
-    # does, and a name that is no line at all is a file.
-    return args[0] if fresh or is_branch(args[0], where) else None
-
-
-def written_by(verb, switches, rest, here):
+def written_by(verb, rest, here):
     """The lines this command writes to, given the line it is run from.
 
     Empty means it writes to nothing anyone is protecting — which is the answer
@@ -150,98 +219,92 @@ def written_by(verb, switches, rest, here):
         # `--onto <newbase> <upstream> [<branch>]`, else `<upstream> [<branch>]`.
         # The last positional names the line being rewritten only when the form
         # is full; short of that it is whatever is being stood on.
-        want = 3 if "--onto" in switches + rest else 2
+        want = 3 if "--onto" in rest else 2
         return [args[want - 1]] if len(args) >= want else ([here] if here else [])
     return [here] if here else []
 
 
-def routes(said, here, where):
-    """Every line this command writes to, walking it in the order it runs.
-
-    A command may step onto a line before it writes to one: stepping onto what a
-    team ships from and folding into it is a single command, and reading only the
-    line the shell started on would let it straight through.
-    """
-    at, written = here, []
-    for m in GIT.finditer(said):
-        switches, verb, rest = m.group(1) or "", m.group(2), m.group(3) or ""
-        if verb in MOVE:
-            at = moved_to(switches, rest, where) or at
-        elif verb in WRITERS:
-            written += written_by(verb, switches, rest, at)
-    return written
-
-
-def protected_by(root):
-    """The lines this project says an agent may not write to."""
+def protected_by(where):
+    """The lines the project holding this directory says an agent may not write to."""
     try:
-        return project.of(root).protected
+        return project.of(where).protected
     except Exception:
         # A declaration that cannot be read is not permission. The default set is
         # what an undeclared project gets, and this is less known than that.
         return frozenset(project.DEFAULT_PROTECTED)
 
 
-REFUSED = (
-    "%s is a line this project ships from, and putting work onto it is not the "
-    "agent's to do here.\n\n"
-    "Work on a line of your own and offer it up for review; the merge is the "
-    "manager's. Staying current is always allowed — bring %s into your own line, "
-    "or rebase your line onto it, and resolve the conflicts as usual.\n\n"
-    "If this project's work should land without asking, say so once in its "
-    "%s: `agent_merges = true`."
-)
+def routes(cmd, home):
+    """Every write this command makes, as (verb, checkout, line), in running order.
+
+    Walked command by command because one may step onto a line before it writes to
+    one, and because each may be aimed at a checkout of its own: stepping onto what
+    a team ships from and folding into it is a single line of shell, and so is
+    reaching into somebody else's checkout to push it.
+    """
+    at, made = {}, []
+
+    def line_of(where):
+        if where not in at:
+            at[where] = standing_on(where)
+        return at[where]
+
+    for seg in segments(cmd):
+        argv = plain(words(seg))
+        if argv[:3] == ["gh", "pr", "merge"]:
+            made.append(("gh", home, None))
+            continue
+        call = git_call(argv, home)
+        if not call:
+            continue
+        where, verb, rest = call
+        if any(a in PASSIVE for a in rest):
+            continue
+        if verb in MOVE:
+            at[where] = moved_to(rest, where) or line_of(where)
+        elif verb in WRITERS:
+            made += [(verb, where, line) for line in written_by(verb, rest, line_of(where))]
+    return made
 
 
 def main():
     data = json.load(sys.stdin)
     cmd = bc.said(data)
-    said = bare(cmd)
-    where = bc.where(data)
-    root = bc.board_root(where)
-
-    gh = GH_MERGE.search(said)
-    # Every git in the command, not the first: one that steps onto a line before
-    # it writes leads with a verb that writes to nothing.
-    verbs = [m.group(2) for m in GIT.finditer(said)]
-    if not gh and not any(v in WRITERS for v in verbs):
-        return
-    if PASSIVE.search(said):
+    home = bc.where(data)
+    made = routes(cmd, home)
+    if not made:
         return
 
-    guarded = protected_by(root)
-    here = standing_on(where)
-
-    if gh:
-        # Which line a waiting piece of work would land on is the forge's answer,
-        # not this machine's, and asking costs a network call on every command. A
-        # project that protects anything protects this.
-        if guarded:
-            deny(REFUSED % ("The line a waiting piece of work lands on",
-                            "it", project.DECLARATION))
+    for verb, where, line in made:
+        guarded = protected_by(where)
+        if verb == "gh":
+            # Which line a waiting piece of work would land on is the forge's
+            # answer, not this machine's, and asking costs a network call on every
+            # command. A project that protects anything protects this.
+            if guarded:
+                deny(REFUSED % ("The line a waiting piece of work lands on",
+                                "it", project.DECLARATION))
+                return
+        elif line in guarded:
+            deny(REFUSED % (line, line, project.DECLARATION))
             return
-        return
-
-    written = routes(said, here, where)
-
-    onto = [w for w in written if w in guarded]
-    if onto:
-        deny(REFUSED % (onto[0], onto[0], project.DECLARATION))
-        return
 
     # The slot, and the shape of what goes through it. Only where a board is
     # running, and only for what actually writes to the line that board measures
     # every close against.
+    root = bc.board_root(home)
     if not os.path.isdir(os.path.join(root, ".beads")):
         return
+    lands_on = project.of(root).lands_on
     # Folds only. The slot exists so two sessions never resolve conflicts in the
     # same tree at once; an ordinary commit on the main line resolves nothing and
     # was never what it queued.
-    if not any(v in ("merge", "rebase") for v in verbs):
+    folds = [(verb, where, line) for verb, where, line in made
+             if verb in ("merge", "rebase") and line == lands_on
+             and bc.board_root(where) == root]
+    if not folds:
         return
-    if project.of(root).lands_on not in written:
-        return
-    if "merge" in verbs and not FF_ONLY.search(said):
+    if any(verb == "merge" for verb, _, _ in folds) and FF_ONLY not in words(cmd):
         deny(NOT_FF)
         return
     name = bc.actor(data.get("session_id"), data.get("cwd"))

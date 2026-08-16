@@ -400,6 +400,7 @@ ROUTES = (
     ("ALLOWED", "git rebase staging"),
     ("ALLOWED", "git rebase main"),
     ("ALLOWED", "git merge --continue"),
+    ("ALLOWED", "git merge --abort"),
     ("ALLOWED", "git checkout --ours a.ts"),
     ("ALLOWED", "git add -A"),
     ("ALLOWED", "git commit -m fix"),
@@ -409,6 +410,13 @@ ROUTES = (
     ("REFUSED", "git push origin HEAD:staging"),
     ("REFUSED", "git push origin main"),
     ("REFUSED", "gh pr merge 412 --squash"),
+    # A line that abandons a fold and then writes to a shipping line is two
+    # commands, and the first one's switch does not excuse the second.
+    ("REFUSED", "git merge --abort && git push origin main"),
+    # The same routes with the line named in quotes. A guard that reads its
+    # targets off text with the quoted stretches taken out sees no target here.
+    ("REFUSED", 'git push origin "main"'),
+    ("REFUSED", 'git checkout "staging" && git merge feature/mine'),
     # A card's own words about a fold are words. A bracket in prose reads as a
     # command separator, which is how a note describing these once refused itself.
     # The quoted route is one that would be refused if it were read as a command,
@@ -418,36 +426,68 @@ ROUTES = (
      ' is refused"'),
 )
 
+# The same question asked while standing on a shipping line, where a command that
+# names no line at all writes to one. Nothing in the table above stands there, so
+# nothing above exercises the rule that an ordinary commit is a route.
+ON_MAIN = (
+    ("REFUSED", "git commit -m fix"),
+    ("REFUSED", "git -c user.email=t@t commit -m fix"),
+    ("REFUSED", "git -C . push origin main"),
+    ("REFUSED", "git push"),
+    ("REFUSED", "git cherry-pick abc1234"),
+    ("ALLOWED", "git add -A"),
+    ("ALLOWED", "git checkout -b feature/next"),
+    ("ALLOWED", "git checkout -b feature/next && git commit -m fix"),
+)
 
-def merge_routes(says=None):
-    """What the merge guard tells each route, in a scratch project standing on a
-    working line. `says` is the project's declaration, or None for one nobody has
-    ever thought about.
+# A command aimed at a second checkout, which `{other}` names. The permission that
+# answers for it is that checkout's own, whatever the session's own project says.
+ELSEWHERE = (
+    ("REFUSED", "git -C {other} push origin main"),
+    ("REFUSED", "git -C {other} commit -m fix"),
+)
+
+
+def scratch_project(tmp, says=None, on="feature/mine"):
+    """A checkout with a main and a staging line, standing on `on`, declaring
+    `says` — or nothing, for a project nobody has ever thought about."""
+    for args in (["init", "-q", "-b", "main", "."],
+                 ["-c", "user.email=t@t", "-c", "user.name=t",
+                  "commit", "-q", "--allow-empty", "-m", "base"],
+                 ["branch", "staging"], ["checkout", "-q", "-B", on]):
+        subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
+    if says is not None:
+        with open(os.path.join(tmp, project.DECLARATION), "w") as fh:
+            fh.write(says)
+
+
+def merge_routes(says=None, on="feature/mine", rows=ROUTES):
+    """What the merge guard tells each route, run from a scratch project standing
+    on `on` and declaring `says` — or nothing, for a project nobody has declared.
 
     A project of its own on disk: the guard reads a declaration and the line being
-    stood on off the checkout it is handed, so neither can be faked in memory.
+    stood on off the checkout it is handed, so neither can be faked in memory. The
+    second checkout `{other}` names is undeclared and sits outside the first, so a
+    walk up from it can never reach the first one's declaration.
     """
     tmp = tempfile.mkdtemp(prefix="board-merge-")
+    other = tempfile.mkdtemp(prefix="board-other-")
     try:
-        for args in (["init", "-q", "-b", "main", "."],
-                     ["-c", "user.email=t@t", "-c", "user.name=t",
-                      "commit", "-q", "--allow-empty", "-m", "base"],
-                     ["branch", "staging"], ["checkout", "-q", "-b", "feature/mine"]):
-            subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
-        if says is not None:
-            with open(os.path.join(tmp, project.DECLARATION), "w") as fh:
-                fh.write(says)
+        scratch_project(tmp, says, on)
+        scratch_project(other, None, "main")
         got = {}
-        for _, cmd in ROUTES:
+        for _, cmd in rows:
             out = subprocess.run(
                 [sys.executable, MERGE_GATE], input=json.dumps({
-                    "tool_name": "Bash", "tool_input": {"command": cmd},
+                    "tool_name": "Bash",
+                    "tool_input": {"command": cmd.replace("{other}", other)},
                     "cwd": tmp, "session_id": "selftest-merge"}),
                 capture_output=True, text=True, timeout=120).stdout.strip()
             got[cmd] = "REFUSED" if out else "ALLOWED"
         return got
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(other, ignore_errors=True)
 
 
 def waiving(sid, age=0):
@@ -1180,10 +1220,36 @@ def main():
     assert not shut, "a project declaring agent_merges = true was still refused " \
         "these, so the refusal is not the protection: %s" % ", ".join(shut)
 
+    # Standing on a shipping line, where a command that names no line writes to
+    # one. The job was opened about exactly this route and nothing above stands
+    # where it happens.
+    home = merge_routes(on="main", rows=ON_MAIN)
+    wrong = ["%s: %s, wanted %s" % (cmd, home[cmd], want)
+             for want, cmd in ON_MAIN if home[cmd] != want]
+    assert not wrong, "standing on a line the project ships from, the guard " \
+        "answered %d routes wrongly:\n  %s" % (len(wrong), "\n  ".join(wrong))
+    opted = merge_routes('name = "scratch"\nagent_merges = true\n',
+                         on="main", rows=ON_MAIN)
+    shut = [cmd for want, cmd in ON_MAIN if want == "REFUSED"
+            and opted[cmd] == "REFUSED"]
+    assert not shut, "a project declaring agent_merges = true could not commit " \
+        "on its own main line: %s" % ", ".join(shut)
+
+    # Where a command is aimed decides whose rules answer for it. A session in a
+    # project of the manager's own reaches into a checkout nobody has declared and
+    # is refused there, because the permission belongs to what is being written to
+    # and never to the checkout the session was started in.
+    reached = merge_routes('name = "scratch"\nagent_merges = true\n', rows=ELSEWHERE)
+    through = [cmd for want, cmd in ELSEWHERE if reached[cmd] != want]
+    assert not through, "a session in a project that lands its own work was " \
+        "allowed to write to an undeclared checkout's shipping line: %s" \
+        % ", ".join(through)
+
     print("ok: a project nobody has declared refuses every route onto a line it "
-          "ships from and allows every way of staying current with one, a project "
-          "that says its agents land their own work is refused none of them, and "
-          "a card's own words about a fold are words")
+          "ships from — including standing on one and committing, and including a "
+          "second checkout reached from a project that lands its own work — allows "
+          "every way of staying current, a project that says its agents land their "
+          "own work is refused none of them, and a card's own words are words")
 
     refused = reporting(PUT_DOWN)
     assert refused, "a fault the reply named and put down ended the turn with " \
