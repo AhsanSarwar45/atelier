@@ -1,0 +1,178 @@
+{
+  "title": "Who Is Allowed To Merge",
+  "eyebrow": "Nothing stops an agent putting its own work straight onto staging or main in the shared work project today. The guards you have all switch themselves off there.",
+  "actions": {
+    "questions": [
+      {
+        "ask": "Should a project be protected unless it says otherwise, or protected only when it says so?",
+        "options": [
+          {
+            "label": "Protected unless it says otherwise",
+            "say": "Protect the shipping lines everywhere by default. My own projects each say one line to opt out.",
+            "pick": true,
+            "note": "The shared work project is safe the moment this lands, and so is anything you clone next year with nobody remembering to set it up. Costs one line in each of your three personal projects, written once"
+          },
+          {
+            "label": "Protected only when it says so",
+            "say": "Leave everything as it is; the shared work project declares itself protected.",
+            "note": "Nothing changes in your own projects. The next work project you clone is unguarded until you remember it — and the failure it protects against is an agent writing onto a line other people ship from"
+          }
+        ],
+        "note": "Either way the shared work project ends up protected. The question is only what happens to a project nobody has spoken about."
+      }
+    ]
+  },
+  "status": {
+    "now": "Nothing is built yet. I checked each of the four ways onto a protected line in the shared work project and all four are open, and I found the two traps that would have made an obvious fix look finished while jamming your board. This is the proposal, waiting on one answer from you.",
+    "next_up": "An agent in the shared work project is refused every route onto staging and main, shown by trying all four rather than by trusting the change.",
+    "items": [
+      {
+        "text": "Check what actually guards the shared work project today",
+        "state": "done"
+      },
+      {
+        "text": "Check whether the guards you already have would reach it",
+        "state": "done"
+      },
+      {
+        "text": "Find what else breaks if the fold is simply forbidden",
+        "state": "done"
+      },
+      {
+        "text": "Close every route onto a protected line",
+        "state": "todo"
+      },
+      {
+        "text": "Let each project state who folds its work in",
+        "state": "todo"
+      },
+      {
+        "text": "Park a protected project's finished job in your column",
+        "state": "todo"
+      }
+    ]
+  },
+  "content": [
+    {
+      "label": "What actually stands between an agent and staging today",
+      "lead": "In the shared work project: nothing. I checked each way in rather than assuming.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["What an agent can do there right now", "What stops it"],
+          "rows": [
+            ["Fold a piece of work into staging or main", "Nothing. The guard that would refuse this switches itself off in any project that does not run your board, and that project does not run it"],
+            ["Send work up to the company copy on either line", "Nothing"],
+            ["Accept and fold in a piece of work waiting for review, from the command line", "Nothing — that command is on the project's own allowed list"],
+            ["Write a change directly onto staging without starting a piece of work of its own", "Nothing, and that project is sitting on staging as its current line right now, so this is the default rather than the exception"],
+            ["Force work over the top of what is there, wipe local changes, or throw work away", "Refused. Those three were thought about and written down"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "bad",
+          "label": "The amplifier",
+          "text": "Every agent in every project runs without being asked for permission — that is your standing setting. So the only thing between an agent and any of the first four rows is the refusal list in that project's own file, and none of the four is on it."
+        },
+        {
+          "kind": "note",
+          "label": "Its written instructions do ask",
+          "text": "The project's own instructions tell an agent to check what a piece of work contains before offering it up, and to ask you if anything unrelated is in there. That is a request to the agent, not a refusal — it holds exactly as well as the agent's attention on the day, which is the thing you are trying not to depend on."
+        }
+      ]
+    },
+    {
+      "label": "Why the obvious fix does not work on its own",
+      "lead": "Two traps, and both would have bitten after the change looked finished.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "The guard you already have is switched off wherever your board is not running. The shared work project is exactly that shape — no board, and no intention of running one. So a policy written into the board's own settings would never be read there. The guard has to stop asking whether the board is present.",
+            "In the projects that DO run your board, forbidding the fold alone would jam every job. The board refuses to tick a piece of work off until its change has reached what that project ships. Take the fold away and nothing can ever be ticked off again — every job parks at its last step forever. So the same change has to redefine finished for those projects: the job stops in the column that already exists for your signature, and your fold is what closes it."
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What each project would say about itself",
+      "lead": "Two short statements, in the project's own file, next to the ones it already makes about itself.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["The project says", "What it gets"],
+          "rows": [
+            ["Which lines are yours alone", "Staging and main in the shared work project. An agent is refused every way onto them — folding in, sending up, accepting a piece of work for review, and writing straight onto one while standing on it"],
+            ["Who folds work in", "You, in the shared work project. The agent's job ends with the work offered up and the piece parked for you; your fold is what finishes it. In your own projects, the agent, exactly as today"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "This is a path the machinery already walks",
+          "text": "Projects already declare things about themselves that the shared tools then obey — where finished work lands, what its subjects are called, what counts as proof. One of your projects already ships from a line that is not called main, and everything respects it without a single mention of that project by name. This is one more statement of the same kind."
+        }
+      ]
+    },
+    {
+      "label": "What it costs you",
+      "lead": "Small, and front-loaded.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Where", "What changes for you"],
+          "rows": [
+            ["The shared work project", "Agents can no longer reach staging or main by any route. Your review-then-fold habit is unchanged — it is simply now the only way in"],
+            ["Your three personal projects", "One line each, saying the agent may keep folding work in. Written once; nothing else changes"],
+            ["Anything you clone next", "Safe on arrival, if you pick the recommended answer. Unguarded until you remember it, if you pick the other"]
+          ]
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The guard stops asking whether your board is running",
+      "why": "It is switched off in exactly the project that needs it most. Protecting a line other people ship from has nothing to do with whether work is being tracked on a board, and tying the two together is what left the gap."
+    },
+    {
+      "id": "D2",
+      "title": "Every way in is covered, not just the obvious one",
+      "why": "Today's guard watches only one of the four routes onto a line. Closing one and leaving three open reads as protection and is not, which is worse than no guard at all — you would stop checking."
+    },
+    {
+      "id": "D3",
+      "title": "A protected project parks its work in your column instead of finishing it",
+      "why": "Otherwise forbidding the fold jams the board permanently. The column already exists for your signature, so this is a job taking a route that is already built rather than anything new."
+    },
+    {
+      "id": "D4",
+      "title": "The policy is stated by each project, never by naming projects inside the shared tools",
+      "why": "A shared tool that knows the name of one project has stopped being shared. Every difference between your projects is already declared this way."
+    },
+    {
+      "id": "D5",
+      "title": "Written instructions are not counted as protection",
+      "why": "The shared work project already asks an agent to check before offering work up. It is a good instruction and it holds most of the time; the point of a guard is the day it does not."
+    }
+  ],
+  "next": {
+    "if_nothing": "The shared work project stays as it is: an agent there can put work onto staging or main, and the only thing in the way is whether it happens to read its instructions carefully that day.",
+    "steps": [
+      {
+        "step": "An agent in the shared work project is refused every route onto staging and main, shown by trying all four rather than by trusting the change",
+        "cost": "small",
+        "starting": true
+      },
+      {
+        "step": "Each project states who folds its work in, and your own three keep today's behaviour by saying so",
+        "cost": "small"
+      },
+      {
+        "step": "A job in a protected project stops in your column with the work offered up, so the board can still be finished without an agent folding anything",
+        "cost": "medium"
+      }
+    ]
+  }
+}
