@@ -14,6 +14,13 @@ import type { WorktreeStatus } from "@/types";
 const DEFAULT_POLLING_INTERVAL = 30_000;
 
 /**
+ * How many of these are allowed to be in the air at once. A browser opens six
+ * connections to a host; leaving four of them free is what keeps the rest of
+ * the app answering while a board full of worktrees is being read.
+ */
+const AT_A_TIME = 2;
+
+/**
  * Result type for the useWorktreeStatuses hook
  */
 export interface UseWorktreeStatusesResult {
@@ -76,6 +83,9 @@ export function useWorktreeStatuses(
   // Track if initial load has completed
   const hasLoadedRef = useRef(false);
 
+  /** The round in the air, so it can be dropped when the board goes away. */
+  const inflightRef = useRef<AbortController | null>(null);
+
   // Stabilize beadIds — only update ref when IDs actually change
   const beadIdsRef = useRef<string[]>(beadIds);
   const beadIdsKey = beadIds.join(",");
@@ -84,7 +94,13 @@ export function useWorktreeStatuses(
   }, [beadIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
-   * Load worktree statuses for all beads in parallel
+   * Load worktree statuses, a few at a time
+   *
+   * Each one is a git status on disk and takes seconds; a browser holds only
+   * six connections to a host, so asking for all of them at once starves
+   * everything else the screen needs — measured, it put the chat's own list
+   * eight seconds behind (bw-ccm.3). They are also dropped the moment this
+   * board leaves the screen.
    */
   const loadStatuses = useCallback(async () => {
     const ids = beadIdsRef.current;
@@ -99,19 +115,25 @@ export function useWorktreeStatuses(
       setIsLoading(true);
     }
 
+    inflightRef.current?.abort();
+    const run = new AbortController();
+    inflightRef.current = run;
+
     try {
-      // Fetch all worktree statuses in parallel (Promise.all pattern)
-      const results = await Promise.all(
-        ids.map(async (beadId) => {
+      const results: { beadId: string; status: WorktreeStatus }[] = [];
+      const queue = [...ids];
+      const worker = async () => {
+        for (let beadId = queue.shift(); beadId !== undefined; beadId = queue.shift()) {
           try {
-            const status = await api.git.worktreeStatus(projectPath, beadId);
-            return { beadId, status };
+            results.push({ beadId, status: await api.git.worktreeStatus(projectPath, beadId, run.signal) });
           } catch {
-            // If there's an error, return default status
-            return { beadId, status: DEFAULT_STATUS };
+            // A worktree that cannot be read has none as far as the card knows.
+            results.push({ beadId, status: DEFAULT_STATUS });
           }
-        })
-      );
+        }
+      };
+      await Promise.all(Array.from({ length: AT_A_TIME }, worker));
+      if (run.signal.aborted) return;
 
       // Build statuses map
       const beadStatuses: Record<string, WorktreeStatus> = {};
@@ -142,6 +164,7 @@ export function useWorktreeStatuses(
   useEffect(() => {
     hasLoadedRef.current = false;
     loadStatuses();
+    return () => inflightRef.current?.abort();
   }, [loadStatuses, beadIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Set up periodic refresh (polling)

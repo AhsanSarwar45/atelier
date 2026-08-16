@@ -11,7 +11,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
@@ -22,6 +22,13 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import type { RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
+
+/**
+ * How many rows are drawn before the reader asks for more. A 288px rail shows
+ * about a dozen at a time, so this is several screens deep — far enough that
+ * the growth is never what he is waiting for.
+ */
+const SCREENFUL = 40;
 
 /** Today, Yesterday, then the date itself. */
 export function dayHeading(iso: string, now = new Date()): string {
@@ -119,7 +126,25 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
     [router, projectId],
   );
 
-  const groups = groupByDay(rows);
+  // A screenful, then more as it is pulled: a project with hundreds of chats
+  // would otherwise draw every one of them before the first is on screen
+  // (docs/designs/app-shell.md §1.6, §3).
+  const [shown, setShown] = useState(SCREENFUL);
+  const foot = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => setShown(SCREENFUL), [projectId]);
+
+  useEffect(() => {
+    const mark = foot.current;
+    if (!mark || shown >= rows.length) return;
+    const watch = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setShown((n) => n + SCREENFUL);
+    });
+    watch.observe(mark);
+    return () => watch.disconnect();
+  }, [shown, rows.length]);
+
+  const groups = groupByDay(rows.slice(0, shown));
 
   return (
     <aside
@@ -239,6 +264,11 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
           </div>
         ))}
         {!rows.length && <p className="px-3 py-4 text-sm text-muted-foreground">No chats yet.</p>}
+        {shown < rows.length && (
+          <div ref={foot} data-testid="chat-list-more" className="px-3 py-3 text-xs text-muted-foreground">
+            {rows.length - shown} older
+          </div>
+        )}
       </div>
     </aside>
   );

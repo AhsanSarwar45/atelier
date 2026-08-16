@@ -103,11 +103,13 @@ function ProjectTabs() {
       {tab === 'chat' && (
         <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
       )}
-      {/* The board stays mounted behind the chat so its cards are not fetched
-          again every time the owner looks away; hidden, it draws no tools. */}
-      <div className={cn('flex min-h-0 flex-1 flex-col', tab !== 'board' && 'hidden')}>
-        <KanbanBoard />
-      </div>
+      {/* Only the tab in front is mounted: a board kept alive behind the chat is
+          paid for on every switch, both ways (docs/designs/app-shell.md §1.6). */}
+      {tab === 'board' && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <KanbanBoard />
+        </div>
+      )}
 
       {project && (
         <ProjectSettingsDialog

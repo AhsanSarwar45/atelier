@@ -59,6 +59,37 @@ export interface WatchEvent {
 }
 
 /**
+ * How many background chores may be in the air at once.
+ *
+ * A browser opens six connections to a host and hands them out first come,
+ * first served. Chores like reading a worktree or asking GitHub about a pull
+ * request take seconds each and there is one per card, so unbounded they take
+ * every connection and whatever the reader is actually waiting for queues
+ * behind them — measured at eight seconds for the chat list (bw-ccm.3).
+ */
+const CHORES_AT_A_TIME = 2;
+
+let choresRunning = 0;
+const choresWaiting: (() => void)[] = [];
+
+/**
+ * Runs a background chore once a slot is free. Anything a person is waiting on
+ * goes straight to `fetchApi` and is never queued behind these.
+ */
+async function chore<T>(run: () => Promise<T>): Promise<T> {
+  if (choresRunning >= CHORES_AT_A_TIME) {
+    await new Promise<void>((resume) => choresWaiting.push(resume));
+  }
+  choresRunning += 1;
+  try {
+    return await run();
+  } finally {
+    choresRunning -= 1;
+    choresWaiting.shift()?.();
+  }
+}
+
+/**
  * Helper for fetch with error handling
  */
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -276,10 +307,11 @@ export const git = {
   ),
 
   // Worktree endpoints
-  worktreeStatus: async (repoPath: string, beadId: string) => {
-    const data = await fetchApi<WorktreeStatus>(
-      `/api/git/worktree-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`
-    );
+  worktreeStatus: async (repoPath: string, beadId: string, signal?: AbortSignal) => {
+    const data = await chore(() => fetchApi<WorktreeStatus>(
+      `/api/git/worktree-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`,
+      signal ? { signal } : undefined
+    ));
     WorktreeStatusSchema.parse(data);
     return data;
   },
@@ -302,9 +334,9 @@ export const git = {
 
   // PR endpoints
   prStatus: async (repoPath: string, beadId: string) => {
-    const data = await fetchApi<PRStatus>(
+    const data = await chore(() => fetchApi<PRStatus>(
       `/api/git/pr-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`
-    );
+    ));
     PRStatusSchema.parse(data);
     return data;
   },

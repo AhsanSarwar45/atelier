@@ -46,7 +46,49 @@ function colourfulness([r, g, b]: number[]): number {
   return Math.max(r!, g!, b!) - Math.min(r!, g!, b!);
 }
 
+/** What "at once" means for a screen a person is waiting on. */
+const AT_ONCE_MS = 1000;
+
 test.describe('the chat screen', () => {
+  test('switching to it puts the chats on screen at once, and going back is immediate', async ({ page, request }) => {
+    const id = await projectId(request);
+    // Both tabs are visited once before the clock starts: against a dev server
+    // the first visit to a screen compiles it, which is not what the owner is
+    // waiting for when he switches.
+    await page.goto(`/project?id=${id}&tab=chat`);
+    await page.getByTestId('restore-row').first().waitFor();
+    await page.goto(`/project?id=${id}&tab=board`);
+    await page.getByTestId('board-scroll').waitFor();
+
+    const toChat = Date.now();
+    await page.getByTestId('tab-chat').click();
+    await page.getByTestId('restore-row').first().waitFor();
+    const chatWait = Date.now() - toChat;
+
+    const toBoard = Date.now();
+    await page.getByTestId('tab-board').click();
+    await page.getByTestId('board-scroll').waitFor();
+    const boardWait = Date.now() - toBoard;
+
+    expect(chatWait, `waited ${chatWait}ms for the chats`).toBeLessThan(AT_ONCE_MS);
+    expect(boardWait, `waited ${boardWait}ms for the board`).toBeLessThan(AT_ONCE_MS);
+  });
+
+  test('the rest of a long list arrives by scrolling to it', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=chat`);
+    await page.getByTestId('restore-row').first().waitFor();
+
+    const more = page.getByTestId('chat-list-more');
+    test.skip((await more.count()) === 0, 'this project has too few chats to grow the list');
+
+    const first = await page.getByTestId('restore-row').count();
+    await more.scrollIntoViewIfNeeded();
+    await expect
+      .poll(async () => page.getByTestId('restore-row').count(), { timeout: 5000 })
+      .toBeGreaterThan(first);
+  });
+
   test('its tools are icons, and every one of them still says what it is', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=chat`);
