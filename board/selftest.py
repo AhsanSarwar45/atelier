@@ -459,6 +459,13 @@ ROUTES = (
     # tool wherever it is typed from.
     ("REFUSED", 'bash -c "git push origin main"'),
     ("REFUSED", 'sh -c "git push origin main"'),
+    # And with the shell's switches bundled, which is how they are actually typed.
+    ("REFUSED", 'sh -euc "git push origin main"'),
+    ("REFUSED", 'bash -lc "git push origin main"'),
+    # Stepping back onto the line you were on before is a step. Read as a switch
+    # and dropped, the commit behind it lands on a line nobody looked at.
+    ("REFUSED", "git checkout - && git commit -m x"),
+    ("REFUSED", "git switch - && git commit -m x"),
     ("REFUSED", "/usr/bin/gh pr merge 412 --squash"),
     # Moving further into the same checkout does not forget which line was
     # stepped onto: a subdirectory of a checkout stands where the checkout does.
@@ -508,9 +515,13 @@ ON_MAIN = (
     # Naming a commit and a file takes the file out of what is staged and moves
     # no line at all, which is what the second name is there to say.
     ("ALLOWED", "git reset HEAD file.txt"),
-    # Pulling into the line you stand on writes to it, in both spellings.
+    # Bringing the same line down from the remote is staying current and sends
+    # nothing of the agent's anywhere; bringing a different one down folds that
+    # work into the line being stood on, which is landing it by another word.
+    ("ALLOWED", "git pull"),
+    ("ALLOWED", "git pull --ff-only"),
+    ("ALLOWED", "git pull --rebase origin main"),
     ("REFUSED", "git pull origin feature/mine"),
-    ("REFUSED", "git pull --rebase origin main"),
     # A line the shell works out as it runs is a line nothing here can read.
     ("REFUSED", "git push origin $(git branch --show-current)"),
     ("REFUSED", "git push origin `git branch --show-current`"),
@@ -1600,6 +1611,17 @@ def main():
             "an ordinary card was refused as if it were his: %s" % cmd
 
     print("ok: his column is shut in both directions, and only his")
+
+    # One list of carrier words, read by both gates. Kept twice they drift, and a
+    # prefix the line guard refuses the close gate lets straight through.
+    for word in status.bc.WRAPPERS:
+        said = refusal('%s git commit -m "x"' % word, ordinary)
+        assert "name the card" in said, \
+            "a commit carried by %r walked past the close gate without naming " \
+            "its card: %s" % (word, said or "allowed")
+
+    print("ok: a commit names its card behind every word that merely carries it, "
+          "and both gates read that list from one place")
 
     # A bug job that runs no guard step, closing the FIRST step of its order. The
     # words on the goal are the whole of the case: the same job is refused or let

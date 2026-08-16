@@ -28,9 +28,9 @@ import spine  # noqa: E402
 # of these is not one; and on the subcommand slot, so the same word appearing
 # later — inside a card's own text — is text.
 START = r"(?:^|[;&|(]\s*|^\s*)"
-# The wrappers that put a word in front of `bd` without changing what it does.
-# A refusal a prefix walks around is not a refusal.
-WRAP = r"(?:(?:env|command|exec|nice|setsid|stdbuf|time)\s+(?:\w+=\S+\s+)*|\\)*"
+# The wrappers that put a word in front of `bd` without changing what it does,
+# read from the one list every gate shares (`board_common.WRAPPERS`).
+WRAP = r"(?:(?:%s)\s+(?:\w+=\S+\s+)*|\\)*" % "|".join(bc.WRAPPERS)
 VERB = START + WRAP + r"bd\s+(?:--?\S+(?:[= ]\S+)?\s+)*"
 CLOSE = re.compile(VERB + r"(?:close\b|update\b[^|;&]*(?:-s|--status)[= ]closed\b)", re.M)
 CLAIM = re.compile(VERB + r"update\b[^|;&]*--claim\b", re.M)

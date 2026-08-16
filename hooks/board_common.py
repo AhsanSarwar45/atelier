@@ -125,6 +125,19 @@ def reviewing():
     return switch("REVIEWER")
 
 
+# The words that put something in front of a command without changing what the
+# command does. A refusal a prefix walks around is not a refusal, so every gate
+# that decides what a command IS reads this one list — kept twice, the two drift
+# and a prefix one gate refuses the other lets straight through.
+WRAPPERS = ("env", "command", "exec", "nice", "setsid", "stdbuf", "time",
+            "sudo", "timeout", "rtk", "proxy", "nohup", "ionice", "xargs")
+
+# Shells that take a whole command line as an argument. What they are handed is
+# a command line and is read as one; anything less leaves every route open
+# behind four characters.
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
 # Seconds a waiver stands before the board comes back on by itself. A waiver is
 # given for one piece of work, and a session still alive this long after is on
 # different work than the one he waived.

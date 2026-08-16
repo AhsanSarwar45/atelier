@@ -203,15 +203,7 @@ def words(seg):
         return seg.split()
 
 
-# Words that run another command and are not the command. A refusal a prefix
-# walks around is not a refusal, and the close gate keeps the same list.
-WRAPPERS = ("env", "command", "exec", "nice", "setsid", "stdbuf", "time",
-            "sudo", "timeout", "rtk", "proxy", "nohup", "ionice", "xargs")
-
-# Shells that take a whole command line as an argument. What they are handed is
-# a command line and is read as one; anything less leaves every route open
-# behind four characters.
-SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+WRAPPERS, SHELLS = bc.WRAPPERS, bc.SHELLS
 
 # The settings that send a git command at another checkout without a switch.
 POINTERS = ("GIT_DIR", "GIT_WORK_TREE")
@@ -242,11 +234,17 @@ def plain(argv):
 
 
 def handed_on(argv):
-    """The command line a shell was handed to run, or None if it was not one."""
+    """The command line a shell was handed to run, or None if it was not one.
+
+    The switch is read out of a bundle rather than matched whole: `sh -euc …` and
+    `bash -lc …` are the everyday spellings of what `sh -c` spells long-hand, and
+    a shell whose switches are bundled runs the same command.
+    """
     if not argv or os.path.basename(argv[0]) not in SHELLS:
         return None
     for i, arg in enumerate(argv[1:], 1):
-        if arg == "-c" and i + 1 < len(argv):
+        if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:] \
+                and i + 1 < len(argv):
             return argv[i + 1]
     return None
 
@@ -335,10 +333,30 @@ def positionals(rest):
     return [a for a in rest if not a.startswith("-")]
 
 
+def previous(where):
+    """The line stood on before this one, or None when there is not one."""
+    try:
+        run = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{-1}"],
+                             cwd=where, capture_output=True, text=True,
+                             timeout=GIT_TIMEOUT)
+    except Exception:
+        return None
+    name = (run.stdout or "").strip()
+    return None if run.returncode or not name or name == "HEAD" else name
+
+
+# How a move names the line it was standing on before. It reads as a switch and
+# would be dropped as one, which fails open — the commit behind it then lands on
+# a line nobody looked at.
+BACK = ("-", "@{-1}")
+
+
 def moved_to(rest, where):
     """The line a move lands on, or None when it is not a move at all."""
     if any(a in NOT_A_MOVE for a in rest):
         return None
+    if any(a in BACK for a in rest):
+        return previous(where)
     args = positionals(rest)
     if not args:
         return None
@@ -380,6 +398,21 @@ def push_targets(rest, here):
     if not refs:
         return [here] if here else []
     return [line_named(r.split(":")[-1], here) for r in refs]
+
+
+def pull_targets(rest, here):
+    """Whether a pull puts anything new onto the line being stood on.
+
+    Bringing the same line down from the remote is staying current: it takes
+    other people's work into this checkout and sends nothing of the agent's
+    anywhere anyone else can see. Bringing a DIFFERENT line down folds that work
+    into the one being stood on, which is landing it by another word.
+    """
+    args = positionals(rest)
+    came = [line_named(a, here) for a in args[1:]] if len(args) > 1 else []
+    if not came or all(name == here for name in came):
+        return []
+    return [here] if here else []
 
 
 def branch_targets(rest, here):
@@ -448,6 +481,8 @@ def written_by(verb, rest, here, where):
     """
     if verb == "push":
         return push_targets(rest, here)
+    if verb == "pull":
+        return pull_targets(rest, here)
     if verb == "branch":
         return branch_targets(rest, here)
     if verb == "reset":

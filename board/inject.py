@@ -15,6 +15,7 @@ and a fault that cannot be injected proves nothing.
     python3 board/inject.py            # against the tree this script is in
     SRC=<checkout> python3 board/inject.py
 """
+import concurrent.futures
 import os
 import shutil
 import subprocess
@@ -138,26 +139,48 @@ try:
 finally:
     shutil.rmtree(base, ignore_errors=True)
 
-survived = []
-for label, path, break_it in FAULTS:
+def put_back(fault):
+    """One fault, in a copy of its own, and what the suite said about it."""
+    label, path, break_it = fault
     tmp = export()
     try:
         full = os.path.join(tmp, path)
         was = open(full).read()
         now = break_it(was)
-        assert now != was, "fault %r did not apply — the code it patches moved" % label
+        if now == was:
+            return label, None, "the code it patches moved"
         open(full, "w").write(now)
         code, out = run(tmp)
-        line = next((l for l in out.splitlines() if "AssertionError" in l), "")
-        if not code:
-            survived.append(label)
-        print("%-58s exit %d  %s\n     %s"
-              % (label, code, "RED" if code else "STILL GREEN", line.strip()[:140]))
+        return label, code, next(
+            (l.strip()[:140] for l in out.splitlines() if "AssertionError" in l), "")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+
+# Each fault is a whole suite run in a copy of its own, so they are put back at
+# once rather than one after another: run in turn this is minutes, and a check
+# nobody can afford to run is a check nobody runs.
+WIDTH = min(8, (os.cpu_count() or 4))
+
+survived, moved = [], []
+with concurrent.futures.ThreadPoolExecutor(max_workers=WIDTH) as pool:
+    for label, code, line in pool.map(put_back, FAULTS):
+        if code is None:
+            moved.append(label)
+            print("%-58s %s" % (label, "MOVED — " + line))
+            continue
+        if not code:
+            survived.append(label)
+        print("%-58s exit %d  %s\n     %s"
+              % (label, code, "RED" if code else "STILL GREEN", line))
+
 # A fault nothing notices is the finding, not a line of the report. Printed and
 # walked past, it reads the same as teeth to whatever runs this.
-if survived:
-    sys.exit("%d fault(s) left the suite green, so nothing holds them down:\n  %s"
-             % (len(survived), "\n  ".join(survived)))
+if survived or moved:
+    sys.exit(
+        "".join(
+            ["%d fault(s) left the suite green, so nothing holds them down:\n  %s\n"
+             % (len(survived), "\n  ".join(survived)) if survived else "",
+             "%d fault(s) no longer apply — the code they patch moved, so they "
+             "prove nothing until they are rewritten against it:\n  %s"
+             % (len(moved), "\n  ".join(moved)) if moved else ""]))
