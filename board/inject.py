@@ -25,6 +25,7 @@ import tempfile
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.environ.get("SRC") or HERE
 GATE = "hooks/board-merge-gate.py"
+CLOSE = "hooks/board-status-gate.py"
 DECL = "project.py"
 SUITE = "board/selftest.py"
 
@@ -109,6 +110,20 @@ FAULTS = [
     ("the line stepped onto is remembered against the directory", GATE,
      lambda s: s.replace("        tree = tree_of(where)", "        tree = where")
                 .replace("        at[tree_of(where)] = line", "        at[where] = line")),
+    ("bringing your own line up to date is read as landing work on it", GATE,
+     lambda s: s.replace('    if verb == "pull":\n'
+                         "        return pull_targets(rest, here)\n", "")),
+    ("a shell is only a shell when its switch stands alone", GATE,
+     lambda s: s.replace('        if arg.startswith("-") and not arg.startswith("--") '
+                         'and "c" in arg[1:] \\\n                and i + 1 < len(argv):',
+                         '        if arg == "-c" and i + 1 < len(argv):')),
+    ("stepping back onto the line before is read as no step", GATE,
+     lambda s: s.replace("    if any(a in BACK for a in rest):\n"
+                         "        return previous(where)\n", "")),
+    ("each gate keeps its own list of the words that carry a command", CLOSE,
+     lambda s: s.replace('WRAP = r"(?:(?:%s)\\s+(?:\\w+=\\S+\\s+)*|\\\\)*" % "|".join(bc.WRAPPERS)',
+                         'WRAP = r"(?:(?:env|command|exec|nice|setsid|stdbuf|time)'
+                         '\\s+(?:\\w+=\\S+\\s+)*|\\\\)*"')),
 ]
 
 
