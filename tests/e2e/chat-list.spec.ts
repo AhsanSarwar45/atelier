@@ -78,9 +78,11 @@ test.describe('the list of chats', () => {
     await page.getByTestId('restore-row').first().waitFor();
     await page.waitForTimeout(1000);
 
-    const asleep = page.locator('[data-testid="restore-row"][data-state="dormant"]');
-    await asleep.first().waitFor({ timeout: 15_000 });
-    await asleep.first().getByTestId('row-name').click();
+    // A chat this app has never driven — its row is offered under the
+    // conversation's own id, so nothing about it can already be in our log.
+    const untouched = page.locator('[data-testid="restore-row"][data-state="dormant"][data-row-key^="ext:"]');
+    await untouched.first().waitFor({ timeout: 15_000 });
+    await untouched.first().getByTestId('row-name').click();
     await page.getByTestId('chat-tab').waitFor({ timeout: 120_000 });
 
     // Nothing has been typed, so anything in the transcript was said before.
@@ -96,11 +98,21 @@ test.describe('the list of chats', () => {
     await page.goto(`/project?id=${id}&tab=chat`);
     await page.getByTestId('restore-row').first().waitFor();
 
+    // The chat with the most cards on it, since that is the one that crowds:
+    // a row carrying a "+N" of its own is a chat with more cards than fit.
+    const crowded = page.locator(
+      '[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"]):has([data-testid="row-bead-more"])',
+    );
     const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"])');
     await ready.first().waitFor({ timeout: 20_000 });
-    await ready.first().getByTestId('row-name').click();
+    await page.waitForTimeout(1500);
+    const pick = (await crowded.count()) > 0 ? crowded.first() : ready.first();
+    await pick.getByTestId('row-name').click();
     await page.getByTestId('chat-tab').waitFor({ timeout: 60_000 });
     await page.waitForTimeout(1000);
+
+    const chips = await page.getByTestId('bead-chip').count();
+    expect(chips, `${chips} cards were drawn on the line`).toBeLessThanOrEqual(3);
 
     const line = await page.evaluate(() => {
       const state = document.querySelector('[data-testid="session-state"]');
