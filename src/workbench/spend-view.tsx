@@ -44,7 +44,43 @@ export function seriesOf(data: Record<string, number | string>[]): string[] {
   return Array.from(seen).sort();
 }
 
-const COLOURS = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#f87171'];
+/**
+ * The chart's colours are the theme's, read from it rather than spelled here:
+ * a chart with its own palette is the one thing on the screen that ignores the
+ * theme the owner picked.
+ *
+ * `read` is asked for a custom property and answers what the theme currently
+ * holds. Fewer colours than series means the palette repeats — the legend, not
+ * the colour, is what names a project.
+ */
+export function paletteFrom(read: (name: string) => string, tokens: number = CHART_TOKENS): string[] {
+  const found: string[] = [];
+  for (let i = 1; i <= tokens; i++) {
+    const value = read(`--chart-${i}`).trim();
+    if (value) found.push(value.startsWith('hsl') || value.startsWith('#') ? value : `hsl(${value})`);
+  }
+  return found;
+}
+
+/** How many `--chart-N` the themes define. */
+const CHART_TOKENS = 5;
+
+/** The palette as the theme holds it now, and again whenever the theme changes. */
+function useChartPalette(): string[] {
+  const [palette, setPalette] = useState<string[]>([]);
+  useEffect(() => {
+    const read = () => {
+      const style = getComputedStyle(document.documentElement);
+      setPalette(paletteFrom((name) => style.getPropertyValue(name)));
+    };
+    read();
+    // The theme is a data attribute on <html>; switching it repaints the chart.
+    const watch = new MutationObserver(read);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+    return () => watch.disconnect();
+  }, []);
+  return palette;
+}
 
 function Chart({ title, unit, data, testId }: {
   title: string;
@@ -53,6 +89,7 @@ function Chart({ title, unit, data, testId }: {
   testId: string;
 }) {
   const series = seriesOf(data);
+  const palette = useChartPalette();
   return (
     <div data-testid={testId} data-days={data.length} className="rounded-lg border border-border/60 p-3">
       <h3 className="mb-2 text-sm font-semibold text-foreground">{title}</h3>
@@ -60,7 +97,7 @@ function Chart({ title, unit, data, testId }: {
         <div style={{ width: '100%', height: 220 }}>
           <ResponsiveContainer>
             <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" />
               <XAxis dataKey="day" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={unit} width={70} />
               <Tooltip formatter={(v: number) => unit(v)} />
@@ -72,7 +109,7 @@ function Chart({ title, unit, data, testId }: {
                 <Bar
                   key={name}
                   dataKey={name}
-                  fill={COLOURS[i % COLOURS.length]}
+                  fill={palette.length ? palette[i % palette.length] : 'currentColor'}
                   maxBarSize={56}
                   isAnimationActive={false}
                 />
