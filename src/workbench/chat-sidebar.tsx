@@ -120,18 +120,17 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
   const groups = groupByDay(rows);
 
   return (
-    <aside data-testid="chat-sidebar" className="flex w-72 shrink-0 flex-col border-r border-border/60">
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Chats</span>
-      </div>
-
+    <aside
+      data-testid="chat-sidebar"
+      className="flex h-full min-h-0 w-72 shrink-0 flex-col border-r border-border/60"
+    >
       {failed && (
         <p data-testid="restore-error" className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {failed}
         </p>
       )}
 
-      <div className="flex-1 overflow-y-auto">
+      <div data-testid="chat-list" className="min-h-0 flex-1 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.heading}>
             <div

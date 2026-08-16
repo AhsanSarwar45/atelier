@@ -4,8 +4,6 @@ import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 
 import { useSearchParams, useRouter } from "next/navigation";
 
-import { ArrowLeft, EllipsisVertical } from "lucide-react";
-
 import { ActivityTimeline } from "@/components/activity-timeline";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BeadDetail } from "@/components/bead-detail";
@@ -14,9 +12,9 @@ import { CreateBeadDialog } from "@/components/create-bead-dialog";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { KanbanColumn } from "@/components/kanban-column";
 import { MemoryPanel } from "@/components/memory-panel";
-import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
 import { ReportPanel } from "@/components/report-panel";
+import { TabTools } from "@/components/shell";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -35,9 +33,8 @@ import { useBeads } from "@/hooks/use-beads";
 import { useGitHubStatus } from "@/hooks/use-github-status";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
-import { useTheme } from "@/hooks/use-theme";
 import { useWorktreeStatuses } from "@/hooks/use-worktree-statuses";
-import { columnFor, drawnInColumns, isBlocked, oldestFirst } from "@/lib/bead-utils";
+import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
@@ -67,7 +64,6 @@ export default function KanbanBoard() {
     project,
     isLoading: projectLoading,
     error: projectError,
-    refetch: refetchProject,
   } = useProject(projectId);
 
   // Fetch beads from project path
@@ -107,7 +103,6 @@ export default function KanbanBoard() {
   const [githubWarningDismissed, setGithubWarningDismissed] = useState(false);
 
   // Theme
-  const { theme } = useTheme();
 
   // Memory panel state
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
@@ -122,7 +117,6 @@ export default function KanbanBoard() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   // Project settings dialog state
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Show GitHub warning if project loaded, status checked, and either no remote or not authenticated
   const showGitHubWarning = !projectLoading &&
@@ -308,41 +302,9 @@ export default function KanbanBoard() {
   }
 
   return (
-    <div className="min-h-dvh bg-surface-base flex flex-col">
-      {/* Header — terminal variant for neo-brutalist, standard otherwise */}
-      {theme.headerVariant === 'terminal' ? (
-        <div className="flex items-center justify-between px-6 py-4 terminal-header">
-          <h1 className="font-mono text-xl font-bold tracking-wide">
-            <a href="/" className="hover:opacity-80">&gt;</a>{' '}
-            <span className="uppercase">{project.name}_</span>
-          </h1>
-          <span className="font-mono text-xs text-t-muted uppercase tracking-widest">
-            {beads.length} beads // {beads.filter(b => b.issue_type === 'epic').length} epics // {beads.filter(b => isBlocked(b, beads)).length} blocked
-          </span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 px-4 py-2">
-          <Button variant="ghost" size="icon" asChild>
-            <a href="/">
-              <ArrowLeft className="h-4 w-4" />
-              <span className="sr-only">Back to projects</span>
-            </a>
-          </Button>
-          <h1 className="text-lg font-semibold truncate">{project.name}</h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            aria-label="Project settings"
-            onClick={() => setIsSettingsOpen(true)}
-          >
-            <EllipsisVertical className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )}
-
-      {/* Quick Filter Bar */}
-      <div className="flex justify-center px-4 pb-3">
+    <div className="flex min-h-0 flex-1 flex-col bg-surface-base">
+      {/* The board's own tools, drawn in the shell's second bar. */}
+      <TabTools tab="board">
         <QuickFilterBar
           // Search
           search={filters.search}
@@ -386,12 +348,12 @@ export default function KanbanBoard() {
           unknownStatusNames={unknownStatusNames}
           onNewBead={() => setIsCreateOpen(true)}
         />
-      </div>
+      </TabTools>
 
       {/* Kanban Columns. A column narrower than --column-min is unreadable, so
           past that the board scrolls sideways instead of cramming every column
           into the window. */}
-      <main className="flex-1 overflow-x-auto overflow-y-hidden p-4">
+      <main data-testid="board-scroll" className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4">
         {beadsLoading ? (
           <div className="flex items-center justify-center h-full">
             <div role="status" className="text-t-muted">Loading beads…</div>
@@ -501,19 +463,6 @@ export default function KanbanBoard() {
         />
       )}
       </ErrorBoundary>
-
-      {/* Project Settings Dialog */}
-      {project && (
-        <ProjectSettingsDialog
-          open={isSettingsOpen}
-          onOpenChange={setIsSettingsOpen}
-          projectId={project.id}
-          projectName={project.name}
-          projectPath={project.path}
-          projectLocalPath={project.localPath}
-          onUpdated={refetchProject}
-        />
-      )}
 
       {/* Create Bead Dialog */}
       {project?.path && (

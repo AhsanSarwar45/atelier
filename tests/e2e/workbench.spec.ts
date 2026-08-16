@@ -631,7 +631,8 @@ test.describe('workbench', () => {
       )
       .toBeGreaterThanOrEqual(2);
 
-    await page.goto('/');
+    // The two ways in live in the chat tab's own toolbar (docs/designs/app-shell.md §1.1).
+    await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
     await page.getByTestId('open-search').click();
     await page.getByTestId('search-input').fill(WORD);
 
@@ -651,7 +652,7 @@ test.describe('workbench', () => {
     await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
 
     // And the spend view: two charts, the money one with a bar in it.
-    await page.goto('/');
+    await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
     await page.getByTestId('open-spend').click();
     await expect(page.getByTestId('spend-money')).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('spend-tokens')).toBeVisible();

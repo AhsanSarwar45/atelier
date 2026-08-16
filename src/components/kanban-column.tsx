@@ -146,7 +146,7 @@ export function KanbanColumn({
       </div>
 
       {/* Scrollable Bead List */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-3">
+      <div data-testid="column-scroll" className="flex-1 min-h-0 overflow-y-auto p-3">
         <div className="space-y-3">
           {beads.map((bead) => (
             <ColumnCard

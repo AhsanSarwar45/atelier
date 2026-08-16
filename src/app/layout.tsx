@@ -3,7 +3,6 @@ import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { ThemeInitScript } from '@/components/theme-init';
 import { Toaster } from '@/components/ui/toaster';
 import { UpdateBanner } from '@/components/update-banner';
-import { WorkbenchGlobals } from '@/workbench/globals';
 
 import type { Metadata } from 'next';
 import './globals.css';
@@ -25,7 +24,6 @@ export default function RootLayout({
         <ThemeInitScript />
       </head>
       <body className="flex min-h-screen flex-col bg-background antialiased transition-colors duration-300">
-        <WorkbenchGlobals />
         <div className="flex-1">{children}</div>
         <GlobalSettingsButton />
         <UpdateBanner />

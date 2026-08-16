@@ -8,12 +8,14 @@ import { Plus, Github, Search, X, Archive } from "lucide-react";
 
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { ProjectCard } from "@/components/project-card";
+import { Shell } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/hooks/use-projects";
 import { useToast } from "@/hooks/use-toast";
+import { WorkbenchStatus } from "@/workbench/globals";
 
 export default function ProjectsPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -85,7 +87,10 @@ export default function ProjectsPage() {
 
 
   return (
-    <div className="flex min-h-dvh flex-col bg-surface-base">
+    // One bar here too, and only the list beneath it scrolls: what is waiting
+    // on the owner has to be on the screen he starts from as well.
+    <Shell bar={<><span className="font-heading text-sm font-semibold">Beads</span><WorkbenchStatus /></>}>
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-base">
       {/* Hero Section - pushed down with padding */}
       <main className="flex flex-col items-center px-6 pt-32">
         {/* Centered Heading with Space Grotesk */}
@@ -309,5 +314,6 @@ export default function ProjectsPage() {
       />
 
     </div>
+    </Shell>
   );
 }

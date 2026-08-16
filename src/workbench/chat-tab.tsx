@@ -9,11 +9,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { TabTools } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { diffLines } from '@/workbench/line-diff';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { ReportCard } from '@/workbench/report-view';
+import { SearchPanel } from '@/workbench/search-panel';
+import { SpendView } from '@/workbench/spend-view';
 import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import {
   isBusy,
@@ -202,6 +205,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
   const [railOpen, setRailOpen] = useState(false);
+  /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
+  const [showing, setShowing] = useState<'search' | 'spend' | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -237,7 +242,26 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * transcript unreadable, and the composer is what must stay in reach.
    */
   const shell = (inner: React.ReactNode) => (
-    <div className="relative flex h-[calc(100dvh-6rem)]">
+    // The height is the shell's to give: this box fills what the bars left.
+    <div className="relative flex min-h-0 flex-1">
+      <TabTools tab="chat">
+        <Button size="xs" variant="outline" className="md:hidden" data-testid="chat-rail-toggle" onClick={() => setRailOpen((v) => !v)}>
+          Chats
+        </Button>
+        <Button size="xs" variant="ghost" data-testid="open-search" onClick={() => setShowing('search')}>
+          Search chats
+        </Button>
+        <Button size="xs" variant="ghost" data-testid="open-spend" onClick={() => setShowing('spend')}>
+          What it cost
+        </Button>
+        <Button size="xs" variant="primary" className="ml-auto" data-testid="new-chat-tool" onClick={() => void start()} disabled={starting}>
+          {starting ? 'Starting…' : 'New chat'}
+        </Button>
+      </TabTools>
+
+      {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
+      {showing === 'spend' && <SpendView onClose={() => setShowing(null)} />}
+
       <div
         data-testid="chat-rail"
         data-open={railOpen}
@@ -258,14 +282,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           onClick={() => setRailOpen(false)}
         />
       )}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b border-border/60 px-3 py-1.5 md:hidden">
-          <Button size="xs" variant="outline" data-testid="chat-rail-toggle" onClick={() => setRailOpen((v) => !v)}>
-            Chats
-          </Button>
-        </div>
-        {inner}
-      </div>
+      <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
     </div>
   );
 

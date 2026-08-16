@@ -168,7 +168,9 @@ export function QuickFilterBar({
     <div
       role="toolbar"
       aria-label="Quick filters"
-      className="flex items-center gap-3 rounded-xl bg-surface-raised/80 backdrop-blur border border-b-default px-3 py-2"
+      // A row inside the shell's second bar, not a card of its own: the bar is
+      // the chrome, and what does not fit slides sideways rather than wrapping.
+      className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto"
     >
       {/* Search Input */}
       <div className="relative">

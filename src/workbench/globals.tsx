@@ -2,9 +2,9 @@
  * The two things about agents that follow the owner around every screen: what
  * is waiting on him, and what is running.
  *
- * Mounted once in the app's layout, so both are on the project list, the board
- * and the chat alike. Both read the one live store (`live.ts`) — no view here
- * opens a connection of its own.
+ * They ride in the shell's first bar, which is on every screen, so both are on
+ * the project list, the board and the chat alike. Both read the one live store
+ * (`live.ts`) — no view here opens a connection of its own.
  */
 'use client';
 
@@ -16,8 +16,6 @@ import { Button } from '@/components/ui/button';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { isRunning, useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
-import { SearchPanel } from '@/workbench/search-panel';
-import { SpendView } from '@/workbench/spend-view';
 
 /** Project ids to their names, fetched once — the tray names a project, not a path. */
 function useProjectNames(): Map<string, string> {
@@ -128,8 +126,10 @@ function GlanceStrip({ names }: { names: Map<string, string> }) {
   const running = useLiveSessions().filter(isRunning);
   if (!running.length) return null;
 
+  // One line, in a bar: what does not fit is clipped rather than pushing the
+  // bar taller and taking the room the work is standing in.
   return (
-    <div data-testid="glance-strip" className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1">
+    <div data-testid="glance-strip" className="flex min-w-0 items-center gap-x-4 overflow-hidden">
       {running.map((s) => (
         <button
           key={s.id}
@@ -153,32 +153,20 @@ function GlanceStrip({ names }: { names: Map<string, string> }) {
 }
 
 /**
- * All of it, mounted once. The two ways in — searching everything that was ever
- * said, and what it cost — are always reachable; the tray and the strip take no
- * room at all when nothing is waiting and nothing is running.
+ * What follows the owner, drawn inline in the shell's first bar: the strip of
+ * chats running now, then the tray of chats waiting on him. Both take no room
+ * at all when there is nothing to say.
  */
-export function WorkbenchGlobals() {
+export function WorkbenchStatus() {
   const names = useProjectNames();
   const live = useLiveSessions();
   const waiting = live.filter(waitsOnYou).length;
   const running = live.filter(isRunning).length;
-  const [showing, setShowing] = useState<'search' | 'spend' | null>(null);
 
   return (
-    <div data-testid="workbench-globals" className="border-b border-border/40 bg-background/80">
-      <div className="flex items-center gap-2 px-4 py-1">
-        <Button size="xs" variant="ghost" data-testid="open-search" onClick={() => setShowing('search')}>
-          Search chats
-        </Button>
-        <Button size="xs" variant="ghost" data-testid="open-spend" onClick={() => setShowing('spend')}>
-          What it cost
-        </Button>
-        <div className="ml-auto">{waiting > 0 && <WaitingTray names={names} />}</div>
-      </div>
+    <div data-testid="workbench-globals" className="flex min-w-0 flex-1 items-center justify-end gap-3">
       {running > 0 && <GlanceStrip names={names} />}
-
-      {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
-      {showing === 'spend' && <SpendView onClose={() => setShowing(null)} />}
+      {waiting > 0 && <WaitingTray names={names} />}
     </div>
   );
 }
