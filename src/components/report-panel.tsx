@@ -11,6 +11,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import { apiUrl } from "@/lib/api-base";
 import { isDoltProject } from "@/lib/utils";
 
 export interface ReportEntry {
@@ -28,7 +29,7 @@ export interface ReportEntry {
 let inFlight: Promise<ReportEntry[]> | null = null;
 
 function fetchReports(): Promise<ReportEntry[]> {
-  inFlight ??= fetch("/api/reports")
+  inFlight ??= fetch(apiUrl("/api/reports"))
     .then(res => (res.ok ? res.json() : []))
     .catch(() => [])
     .finally(() => {
@@ -67,7 +68,7 @@ export function reportUrl(entry: ReportEntry, fsPath: string): string {
     slug: entry.slug,
     path: fsPath,
   });
-  return `/api/reports/page?${q.toString()}`;
+  return apiUrl(`/api/reports/page?${q.toString()}`);
 }
 
 interface ReportPanelProps {
