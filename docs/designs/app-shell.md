@@ -64,9 +64,19 @@ and fails on one, because drift is invisible one class at a time.
   Dropped: every column already counts what it drew, so the totals restated the
   board back to itself.
 
-## 3. Not built yet
+## 3. Measured, so it is not guessed at
 
-- A project with hundreds of chats — Corsetta has 319 — must open its chat tab
-  in one paint (`bw-9is.4`).
+The chat list draws every row it is given. Measured on the project with the most
+of them — Corsetta, 319 chats, dev build at 1440x900: the first row is on screen
+1.7 s after the address is entered, all 319 are there 12 ms later, and pulling
+the list end to end in 30 steps costs 474 ms, about 16 ms a step.
+
+So it is not windowed. A list that draws in one paint and scrolls at frame rate
+has nothing to gain from it, and windowing costs the sticky day headings and the
+browser's own find-on-page. If a project ever arrives where those numbers turn,
+that is when it earns the machinery.
+
+## 4. Not built yet
+
 - One chip, one toolbar, one panel and one pill, used by every screen and not
   only the project page (`bw-l3s`).

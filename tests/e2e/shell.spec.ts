@@ -87,6 +87,42 @@ test.describe('shell', () => {
     expect(await pageOverflow(page), 'the window scrolled with the board').toBeLessThanOrEqual(1);
   });
 
+  test('a long list of chats scrolls inside itself and moves nothing else', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=chat`);
+    await expect(page.getByTestId('shell')).toBeVisible({ timeout: 30_000 });
+
+    // The case only says anything about a project big enough to be a problem.
+    await expect
+      .poll(() => page.getByTestId('restore-row').count(), { timeout: 60_000 })
+      .toBeGreaterThan(300);
+
+    const list = page.getByTestId('chat-list');
+    const room = await list.evaluate((el) => ({ hidden: el.scrollHeight, shown: el.clientHeight }));
+    expect(room.hidden, 'a list this long has to overflow its pane').toBeGreaterThan(room.shown * 5);
+
+    const bars = page.locator('[data-shell-bar]');
+    const before = await Promise.all([bars.first().boundingBox(), bars.last().boundingBox()]);
+    const transcript = page.getByTestId('transcript');
+    const conversationAt = (await transcript.count()) > 0 ? await transcript.evaluate((el) => el.scrollTop) : null;
+
+    // All the way to the end, not one nudge: the bars have to hold at every
+    // position, and the last screenful is where a broken pane runs out of room.
+    const landed = await list.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      return el.scrollTop;
+    });
+    expect(landed, 'the list did not scroll').toBeGreaterThan(room.shown);
+
+    expect(await Promise.all([bars.first().boundingBox(), bars.last().boundingBox()]), 'a bar moved').toEqual(before);
+    if (conversationAt !== null) {
+      expect(await transcript.evaluate((el) => el.scrollTop), 'the conversation moved with the list').toBe(
+        conversationAt,
+      );
+    }
+    expect(await pageOverflow(page), 'the window scrolled with the list').toBeLessThanOrEqual(1);
+  });
+
   test('the chat list scrolls without moving the conversation', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=chat`);
