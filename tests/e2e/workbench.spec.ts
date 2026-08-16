@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { makeFixtureProject, PARENT_CARD, REPORT_SLUG } from './fixture-board';
 import { restartInstance } from './restart';
@@ -220,7 +220,7 @@ test.describe('workbench', () => {
    * opens large. Runs against a throwaway board the fixture builds — never a
    * live one — with permissions bypassed so the screens stay uncluttered.
    */
-  test('links a chat to the card it touched, and shows the report it made', async ({ page, request }) => {
+  test('links a chat to the card it touched, carries row chips both ways, and shows the report it made', async ({ page, request }) => {
     test.setTimeout(600_000);
 
     const FIXTURE = fixtureFor('links');
@@ -311,6 +311,15 @@ test.describe('workbench', () => {
     await expect(
       page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`),
     ).toBeVisible({ timeout: 60_000 });
+
+    // ---- and the chat list says the same thing, one line per chat -------
+    // The row carries the card as a chip, and the chip is the way back to it:
+    // clicking it leaves the chat and opens that card on the board.
+    const row = page.locator(`[data-testid="restore-row"][data-row-key="${session.id}"]`);
+    const rowChip = row.locator(`[data-testid="row-bead-chip"][data-bead-id="${PARENT_CARD}"]`);
+    await expect(rowChip).toBeVisible({ timeout: 60_000 });
+    await rowChip.click();
+    await expect(page.getByTestId('bead-detail')).toBeVisible({ timeout: 60_000 });
   });
 
   /**
@@ -321,7 +330,7 @@ test.describe('workbench', () => {
    * transcript directory. Its file is then dated a day back, which is the same
    * thing that would be true had it been run yesterday.
    */
-  test('restore lists yesterday and brings a terminal session back', async ({ page, request }) => {
+  test('restore lists yesterday under each row name, and brings a terminal session back', async ({ page, request }) => {
     test.setTimeout(900_000);
 
     const FIXTURE = fixtureFor('restore');
@@ -410,7 +419,14 @@ test.describe('workbench', () => {
     await expect(page.getByTestId('day-heading').filter({ hasText: 'Yesterday' })).toBeVisible();
     await expect(page.locator('[data-testid="restore-row"][data-origin="app"]').first()).toBeVisible();
     // Nothing woke itself up over the restart.
-    await expect(terminalRow.getByTestId('row-pill')).toHaveText('dormant');
+    await expect(terminalRow).toHaveAttribute('data-state', 'dormant');
+
+    // The row says what the conversation is: the name Claude holds for it,
+    // which for a session with no title of its own is what was asked of it —
+    // measured, and the same string this test typed into `claude -p`.
+    await expect(terminalRow.getByTestId('row-name')).toHaveText('Reply with exactly: READY');
+    // And where it ran, by the folder's own name.
+    await expect(terminalRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
     await page.screenshot({ path: join(SHOTS, 'restore.png'), fullPage: false });
 
     // ---- one click brings the terminal session back ---------------------
@@ -425,12 +441,9 @@ test.describe('workbench', () => {
     await expect(answer).toContainText('RESUMED', { timeout: 300_000 });
     await page.screenshot({ path: join(SHOTS, 'restore-resumed.png'), fullPage: false });
 
-    // ---- and one click brings back the rest -----------------------------
-    await page.getByTestId('resume-all').click();
-    await expect
-      .poll(async () => page.locator('[data-testid="row-pill"][data-pill="dormant"]').count(), { timeout: 300_000 })
-      .toBe(0);
-    await page.screenshot({ path: join(SHOTS, 'restore-all.png'), fullPage: false });
+    // ---- and the app's own chat is placed the same way ------------------
+    const appRow = page.locator('[data-testid="restore-row"][data-origin="app"]').first();
+    await expect(appRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
   });
 
   /**

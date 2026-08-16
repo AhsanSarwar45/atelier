@@ -4,10 +4,16 @@
  *
  * A row is an offer, never a wake-up. Nothing here starts an agent until the
  * owner clicks (decision 8) — see docs/agent-workbench.md §6.3.
+ *
+ * A row says three things and no more: what the conversation is called, which
+ * cards it worked on, and which folder it ran in. That is what tells two chats
+ * apart when a project has forty of them.
  */
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+
+import { useRouter } from 'next/navigation';
 
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
@@ -57,6 +63,7 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: ChatSidebarProps) {
+  const router = useRouter();
   const [rows, setRows] = useState<RestoreRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -100,29 +107,22 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
     [projectId, projectPath, load, onOpen],
   );
 
+  /**
+   * A card opens where cards live — the board, with its detail panel open on
+   * that one. The URL carries it, so the chip works from here, from a chat, and
+   * from a link someone pasted.
+   */
+  const openCard = useCallback(
+    (beadId: string) => router.push(`/project?id=${projectId}&tab=board&bead=${encodeURIComponent(beadId)}`),
+    [router, projectId],
+  );
+
   const groups = groupByDay(rows);
 
   return (
     <aside data-testid="chat-sidebar" className="flex w-72 shrink-0 flex-col border-r border-border/60">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Chats</span>
-        <Button
-          size="xs"
-          variant="outline"
-          data-testid="resume-all"
-          className="ml-auto"
-          disabled={!rows.length}
-          onClick={async () => {
-            // One deliberate act, then a fixed set — never a standing order.
-            for (const row of rows) {
-              if (row.state !== 'dormant') continue;
-              // eslint-disable-next-line no-await-in-loop
-              await resume(row);
-            }
-          }}
-        >
-          Resume all
-        </Button>
       </div>
 
       {failed && (
@@ -154,40 +154,69 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen }: C
                   data-external-id={row.externalId ?? ''}
                   data-origin={row.origin}
                   data-state={row.state}
-                  // Title on its own line: a rail this narrow cannot hold a
-                  // sentence, a pill and a button side by side without cutting
-                  // the only part that says which chat this is.
+                  // Two lines, never three: the name, then what it worked on and
+                  // where. Everything else — the time, the way back in — rides on
+                  // one of those two lines, because a rail this narrow turns a
+                  // third row into a wall of half-sentences.
                   className={cn(
                     'px-3 py-2 text-sm',
                     row.sessionId && row.sessionId === openSessionId && 'bg-accent',
                   )}
                 >
-                  <button
-                    type="button"
-                    className="block w-full min-w-0 truncate text-left text-foreground"
-                    onClick={() => row.sessionId && onOpen(row.sessionId)}
-                  >
-                    {row.title ?? (row.origin === 'terminal' ? 'Started in a terminal' : 'Untitled chat')}
-                  </button>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="truncate font-mono text-[11px] text-muted-foreground">
-                      {row.brand} · {clockTime(row.lastActiveAt)}
-                    </span>
-                    <span
-                      data-testid="row-pill"
-                      data-pill={live ? 'ready' : row.state}
-                      className={cn(
-                        'ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
-                        live ? 'bg-emerald-500/20 text-emerald-300' : 'bg-muted text-muted-foreground',
-                      )}
+                  <div className="flex items-baseline gap-2">
+                    <button
+                      type="button"
+                      data-testid="row-name"
+                      className="min-w-0 flex-1 truncate text-left text-foreground"
+                      onClick={() => row.sessionId && onOpen(row.sessionId)}
                     >
-                      {live ? 'ready' : row.state}
+                      {row.title ?? 'Untitled chat'}
+                    </button>
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                      {clockTime(row.lastActiveAt)}
                     </span>
-                    {!live && (
+                  </div>
+                  <div className="mt-1 flex items-center gap-1 overflow-hidden">
+                    {row.beads.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        data-testid="row-bead-chip"
+                        data-bead-id={id}
+                        title={`Open ${id}`}
+                        className="shrink-0 rounded-full border border-primary/50 bg-primary/15 px-1.5 py-0.5 font-mono text-[10px] text-foreground hover:bg-primary/25"
+                        onClick={() => openCard(id)}
+                      >
+                        {id}
+                      </button>
+                    ))}
+                    {row.folder && (
+                      <span
+                        data-testid="row-folder-chip"
+                        data-folder={row.folder}
+                        // The full path and the branch in the tooltip: the chip
+                        // itself has room for the one word that tells two
+                        // checkouts of the same project apart.
+                        title={[row.cwdHint, row.branch].filter(Boolean).join(' · ')}
+                        className="shrink-0 truncate rounded-full border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      >
+                        {row.folder}
+                      </span>
+                    )}
+                    {live ? (
+                      <span
+                        data-testid="row-pill"
+                        data-pill="ready"
+                        className="ml-auto shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300"
+                      >
+                        ready
+                      </span>
+                    ) : (
                       <Button
                         size="xs"
                         variant="outline"
                         data-testid="resume-row"
+                        className="ml-auto shrink-0"
                         disabled={busy === key}
                         onClick={() => void resume(row)}
                       >

@@ -1,111 +1,113 @@
 /**
- * What there is to come back to: sessions this app ran, plus Claude sessions
- * the owner started in a terminal.
+ * What there is to come back to: sessions this app ran, plus every Claude
+ * session on this machine that belongs to the project.
  *
- * ⛔ The transcripts under ~/.claude/projects are NEVER opened. Their line
- * format is documented as unstable, so only the directory listing is read: the
- * file name is the session id and its mtime is when the session was last
- * touched. Resuming goes through the id, which is the supported contract.
+ * The list comes from the SDK's own session index, never from a transcript we
+ * parse ourselves. It carries what the owner needs to tell one chat from
+ * another — the name Claude holds for it, the directory it ran in, the branch
+ * it was on — and its shape is the SDK's contract rather than a format we
+ * guessed at.
  *
  * Design: docs/agent-workbench.md §6.3.
  */
-import { readdirSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
 import type { Store } from './store.ts';
 
-function projectsRoot(): string {
-  return process.env.CLAUDE_PROJECTS_DIR ?? join(homedir(), '.claude', 'projects');
-}
-
-/**
- * The slug a directory carries is the working directory with every character
- * that is not a letter or a digit replaced by a dash — observed, not
- * documented. It is lossy, so it can only ever be a hint: `/a.b` and `/a-b`
- * both land on `a-b`. A path that matches nothing stays unattributed rather
- * than being attached to the wrong project.
- */
-export function slugFor(path: string): string {
-  return path.replace(/[^A-Za-z0-9]/g, '-');
-}
-
-interface TerminalSession {
+interface KnownSession {
   externalId: string;
   lastActiveAt: string;
-  slug: string;
-}
-
-/** Every Claude session on this machine, by directory listing alone. */
-export function terminalSessions(): TerminalSession[] {
-  const root = projectsRoot();
-  const out: TerminalSession[] = [];
-  let slugs: string[];
-  try {
-    slugs = readdirSync(root);
-  } catch {
-    return out;
-  }
-  for (const slug of slugs) {
-    let entries: string[];
-    try {
-      entries = readdirSync(join(root, slug));
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.endsWith('.jsonl')) continue;
-      try {
-        const at = statSync(join(root, slug, entry)).mtime.toISOString();
-        out.push({ externalId: entry.slice(0, -'.jsonl'.length), lastActiveAt: at, slug });
-      } catch {
-        // Vanished between listing and stat; nothing to restore.
-      }
-    }
-  }
-  return out;
+  /** What Claude calls this conversation: its title, or the first thing asked. */
+  name: string | null;
+  cwd: string | null;
+  branch: string | null;
 }
 
 /**
- * The restore list: ours first, then any terminal session we did not start.
+ * Every Claude session for a project, worktrees included: a chat run in
+ * `worktrees/x` is work on this project and belongs in its list.
+ *
+ * With no project, every session on the machine — which is what the app-wide
+ * screens ask for.
+ */
+export async function knownSessions(projectPath: string | null): Promise<KnownSession[]> {
+  try {
+    const found = await listSessions(projectPath ? { dir: projectPath, includeWorktrees: true } : {});
+    return found.map((s) => ({
+      externalId: s.sessionId,
+      lastActiveAt: new Date(s.lastModified).toISOString(),
+      name: s.customTitle ?? s.summary ?? s.firstPrompt ?? null,
+      cwd: s.cwd ?? null,
+      branch: s.gitBranch ?? null,
+    }));
+  } catch {
+    // No index, or a version that cannot be read: the app's own rows still list.
+    return [];
+  }
+}
+
+/**
+ * The folder a chat ran in, as a chip: the directory's own name, which for a
+ * worktree is the worktree's name and for a checkout is the project's.
+ */
+export function folderOf(cwd: string | null): string | null {
+  if (!cwd) return null;
+  const name = cwd.replace(/\/+$/, '').split('/').pop();
+  return name ? name : null;
+}
+
+/**
+ * The restore list: ours first, then any session we did not start.
  *
  * Nothing here starts a process. A row is an offer, never a wake-up
  * (decision 8) — an agent that resumes itself is a bill and a surprise.
  */
-export function restoreList(store: Store, project: { id: string; path: string } | null): RestoreRow[] {
+export async function restoreList(
+  store: Store,
+  project: { id: string; path: string } | null,
+): Promise<RestoreRow[]> {
   const mine: (SessionSummary & { origin: 'app' | 'terminal' })[] = store.listSessions(project?.id);
+  const known = new Map((await knownSessions(project?.path ?? null)).map((s) => [s.externalId, s]));
   const claimed = new Set(mine.map((s) => s.externalId).filter((x): x is string => !!x));
 
-  const rows: RestoreRow[] = mine.map((s) => ({
-    sessionId: s.id,
-    externalId: s.externalId,
-    brand: s.brand,
-    title: s.title,
-    lastActiveAt: s.lastActiveAt,
-    state: s.state,
-    origin: s.origin,
-    projectId: s.projectId,
-    cwdHint: s.cwd,
-  }));
+  const rows: RestoreRow[] = mine.map((s) => {
+    // The name Claude holds wins over the opening line we cut down ourselves:
+    // it is the one the owner sees everywhere else this conversation appears.
+    const seen = s.externalId ? known.get(s.externalId) : undefined;
+    return {
+      sessionId: s.id,
+      externalId: s.externalId,
+      brand: s.brand,
+      title: seen?.name ?? s.title,
+      lastActiveAt: s.lastActiveAt,
+      state: s.state,
+      origin: s.origin,
+      projectId: s.projectId,
+      cwdHint: s.cwd,
+      folder: folderOf(seen?.cwd ?? s.cwd),
+      branch: seen?.branch ?? null,
+      beads: store.beadsForSession(s.id),
+    };
+  });
 
-  // A terminal session belongs here only when its slug matches this project's
-  // path. One that matches nothing is left out rather than shown under a
-  // project it may have nothing to do with.
-  const wanted = project ? slugFor(project.path) : null;
-  for (const t of terminalSessions()) {
-    if (claimed.has(t.externalId)) continue;
-    if (wanted !== null && t.slug !== wanted) continue;
+  for (const s of known.values()) {
+    if (claimed.has(s.externalId)) continue;
     rows.push({
       sessionId: null,
-      externalId: t.externalId,
+      externalId: s.externalId,
       brand: 'claude',
-      title: null,
-      lastActiveAt: t.lastActiveAt,
+      title: s.name,
+      lastActiveAt: s.lastActiveAt,
       state: 'dormant',
       origin: 'terminal',
       projectId: project?.id ?? null,
-      cwdHint: project?.path ?? null,
+      cwdHint: s.cwd ?? project?.path ?? null,
+      folder: folderOf(s.cwd),
+      branch: s.branch,
+      // A chat the app has never driven has no confirmed cards yet: they arrive
+      // with its history, the first time it is opened.
+      beads: store.beadsForSession(s.externalId),
     });
   }
 

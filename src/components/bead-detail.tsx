@@ -255,6 +255,8 @@ export function BeadDetail({
       />
       {/* Slide-in panel */}
       <div
+        data-testid="bead-detail"
+        data-bead-id={bead.id}
         className={cn(
           "fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl overflow-y-auto bg-surface-base border-l border-b-default p-6 shadow-lg transition-transform ease-in-out",
           slid ? "translate-x-0" : "translate-x-full"

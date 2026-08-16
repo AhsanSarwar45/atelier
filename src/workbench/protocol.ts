@@ -140,19 +140,24 @@ export type WbpCommand =
 
 /**
  * One offer in the restore list. `sessionId` is null for a chat this app never
- * ran — a terminal session found by its transcript's file name, never by
- * reading it.
+ * ran — a session begun elsewhere, listed by the brand's own session index.
  */
 export interface RestoreRow {
   sessionId: string | null;
   externalId: string | null;
   brand: Brand;
+  /** What the conversation is called, in the brand's own words. */
   title: string | null;
   lastActiveAt: string;
   state: SessionState;
   origin: 'app' | 'terminal';
   projectId: string | null;
   cwdHint: string | null;
+  /** The directory it ran in, by its own name — a worktree's is the worktree. */
+  folder: string | null;
+  branch: string | null;
+  /** Cards this chat is known to have worked on. */
+  beads: string[];
 }
 
 /**

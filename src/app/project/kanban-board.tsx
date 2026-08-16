@@ -223,6 +223,19 @@ export default function KanbanBoard() {
     navigateToBead,
   } = useBeadDetail(beads);
 
+  // A card is addressable: ?bead=<id> opens the board with that one open, which
+  // is how a chip in a chat, or a pasted link, lands on a card. The parameter
+  // is an instruction, not a state — it is spent as soon as it is obeyed, or
+  // closing the panel would be undone by the next render.
+  const wantedBead = searchParams.get('bead');
+  useEffect(() => {
+    if (!wantedBead || beads.length === 0) return;
+    navigateToBead(wantedBead);
+    const q = new URLSearchParams(searchParams.toString());
+    q.delete('bead');
+    router.replace(`/project?${q.toString()}`);
+  }, [wantedBead, beads.length, navigateToBead, router, searchParams]);
+
   // Ref for search input (keyboard navigation)
   const searchInputRef = useRef<HTMLInputElement>(null);
 

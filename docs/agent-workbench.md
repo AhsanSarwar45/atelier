@@ -241,10 +241,10 @@ the SDK accepts `updatedInput`); the multiple-choice question tool →
 message's `total_cost_usd` → `cost{kind:"usd"}`.
 
 **Resume:** `--resume <session-id>`, which works from any directory on
-v2.1.223+ (this machine has 2.1.232). Transcript files under
-`~/.claude/projects/<slug>/<id>.jsonl` are **never opened** — their line format
-is documented unstable. We read the directory listing only: the filename stem
-is the session id, the mtime is last activity (§6.3).
+v2.1.223+ (this machine has 2.1.232). Which sessions exist, what they are
+called and what was said in them all come from the SDK's own session functions
+(`listSessions`, `getSessionInfo`, `getSessionMessages`) — we never parse a
+transcript file ourselves (§6.3).
 
 ### 3.2 Codex
 
@@ -290,7 +290,7 @@ It never greys it out with an excuse and never fakes parity.
 | model picker | `--model` | `model/list` + per-turn override |
 | effort picker | `--effort` | *confirm* |
 | resume | `--resume <id>`, any directory | `codex resume <id>` |
-| list sessions we did not start | yes (directory listing) | **no** → group hidden |
+| list sessions we did not start | yes (the SDK's session index) | **no** → group hidden |
 | compact | `/compact` | `thread/compact/start` |
 | clear | `/clear` | `thread/start` (new thread, same chat record) |
 
@@ -460,21 +460,37 @@ Nothing under `reporting/` is touched — it is out of scope by the card.
 ### 6.3 The restore list
 
 Decision 8: after a restart the app lists yesterday's sessions per project; one
-click resumes one, another resumes all; **nothing auto-runs**.
+click resumes one; **nothing auto-runs**. There is no "resume all": a button
+that starts forty agents at once is a bill nobody meant to sign, and the owner
+asked for it gone.
 
 At startup the sidecar marks every non-`ended` session `dormant`. A dormant
 session has no child process until it is clicked. The sidebar groups by day —
-Today, Yesterday, then dates — each row showing brand, title, state and last
-activity. "Resume all" is a button on the project header that starts each
-listed session, still one deliberate act.
+Today, Yesterday, then dates.
 
-Sessions the owner started in a terminal are listed too, for Claude only: we
-read the *directory listing* of `~/.claude/projects/*/*.jsonl` — filename stem
-is the session id, mtime is last activity — and **never open a file**, because
-the line format is documented unstable. The directory name is an opaque bucket;
-on this machine it is observably the cwd with `/` replaced by `-`, which is used
-as a hint to guess the project and falls back to "Unknown project" when it does
-not match. Resuming goes through `claude --resume <id>`, which is the contract.
+A row says three things and no more, because that is what tells two chats apart
+when a project has forty of them:
+
+| line | what it carries |
+|---|---|
+| first | the conversation's own **name** — the brand's title for it, not ours |
+| second | a **chip per card** it worked on, which opens that card, and a **chip naming the folder** it ran in |
+
+The folder is the whole point of the second chip: a worktree's directory is
+named after the worktree, so two chats on the same project in different trees
+are told apart at a glance. The full path and the branch are in its tooltip.
+
+Sessions the owner started in a terminal are listed too, for Claude only, and
+they come from **the SDK's own session index** (`listSessions({dir,
+includeWorktrees})`), not from a directory scan of ours. That index carries the
+name, the cwd and the branch, and its shape is the SDK's contract rather than a
+format we guessed at — which is why the earlier rule ("never open a transcript,
+the line format is unstable") is retired: we still never parse one, the SDK
+does. Resuming goes through `claude --resume <id>`, which is the contract.
+
+A card chip appears once the chat is known to have worked on that card, which
+means a tool call of its own acted on it (§6.1). A chat the app has never
+driven therefore carries no card chips until it is opened and its history read.
 
 Codex sessions we did not start are **not listed**, because the sessions
 directory is not first-party-confirmed. The Codex group simply does not appear
@@ -700,7 +716,7 @@ always a screen, per the owner's standing rule on this job.
 
 3. **The machine-recorded chat↔card link, both directions, plus reports inline and in a modal.** | Three screenshots: (a) the chat header grows a card chip nobody typed, right after the agent runs a `bd` command; (b) that card opened on the Board tab lists this chat under "Chats", and clicking it lands back on the chat; (c) a report rendered as an inline preview card in the transcript, and after a click the same report filling a modal over the app.
 
-4. **Session registry, the restore list, and resume — including a session started in a terminal.** | After killing and restarting the server, a screenshot of the chat sidebar shows sessions grouped with a "Yesterday" heading, each row carrying brand, title and last activity, and a terminal-started Claude session among them; clicking Resume on that row flips its pill to ready and a new prompt's answer streams into it; clicking "Resume all" flips every listed row's pill.
+4. **Session registry, the restore list, and resume — including a session started in a terminal.** | After killing and restarting the server, a screenshot of the chat sidebar shows sessions grouped with a "Yesterday" heading, each row carrying the conversation's own name, its card chips and the folder it ran in, and a terminal-started Claude session among them; clicking Resume on that row flips its pill to ready and a new prompt's answer streams into it.
 
 5. **The Codex driver behind the same protocol, with the capability matrix hiding what it lacks.** | Two screenshots at the same size, a Claude chat and a Codex chat: both stream text and show tool rows; the Codex one shows a token-count chip and has no plan-approve control and no subagent panel; the Claude one shows a dollar chip and has both. (Blocked until `codex` is installed — see §11.3.)
 
