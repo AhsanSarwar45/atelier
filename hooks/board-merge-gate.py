@@ -206,27 +206,55 @@ def words(seg):
 # Words that run another command and are not the command. A refusal a prefix
 # walks around is not a refusal, and the close gate keeps the same list.
 WRAPPERS = ("env", "command", "exec", "nice", "setsid", "stdbuf", "time",
-            "sudo", "timeout", "rtk", "proxy", "nohup", "ionice")
+            "sudo", "timeout", "rtk", "proxy", "nohup", "ionice", "xargs")
+
+# Shells that take a whole command line as an argument. What they are handed is
+# a command line and is read as one; anything less leaves every route open
+# behind four characters.
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+# The settings that send a git command at another checkout without a switch.
+POINTERS = ("GIT_DIR", "GIT_WORK_TREE")
 
 
 def plain(argv):
-    """The command itself, with everything that only carries it taken off.
+    """The command itself and the settings put in front of it.
 
     Once a carrier has been seen its own switches and values are carried too, so
-    `nice -n 10 git push …` reaches the same answer as `git push …`.
+    `nice -n 10 git push …` reaches the same answer as `git push …`. The settings
+    are handed back rather than dropped: two of them aim the command at a
+    checkout of their own, which is the whole question this gate asks.
     """
-    carried = False
+    put, carried = {}, False
     while argv:
         head = argv[0]
         if "=" in head and not head.startswith("-"):
-            argv = argv[1:]  # FOO=bar git …
+            name, _, value = head.partition("=")
+            put[name] = value
+            argv = argv[1:]
         elif head in WRAPPERS:
             argv, carried = argv[1:], True
-        elif carried and os.path.basename(head) not in ("git", "gh"):
+        elif carried and os.path.basename(head) not in ("git", "gh") + SHELLS:
             argv = argv[1:]
         else:
             break
-    return argv
+    return put, argv
+
+
+def handed_on(argv):
+    """The command line a shell was handed to run, or None if it was not one."""
+    if not argv or os.path.basename(argv[0]) not in SHELLS:
+        return None
+    for i, arg in enumerate(argv[1:], 1):
+        if arg == "-c" and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def repo_dir(named):
+    """The working tree a git directory belongs to."""
+    return os.path.dirname(named.rstrip("/")) \
+        if os.path.basename(named.rstrip("/")) == ".git" else named
 
 
 def under(here, named):
@@ -244,9 +272,10 @@ def git_call(argv, here):
     """A git command split into where it runs, its verb, and the verb's own
     arguments — or None when it is not git.
 
-    The switches before the verb are git's own, and one of them sends the whole
-    command into another checkout. Reading them as the verb, or not reading them
-    at all, leaves every route through that checkout open.
+    The switches before the verb are git's own, and three of them send the whole
+    command into another checkout — by name, by working tree, or by the git
+    directory itself. Reading one as the verb, or not reading it at all, leaves
+    every route through that checkout open.
     """
     if not argv or os.path.basename(argv[0]) != "git":
         return None
@@ -255,15 +284,28 @@ def git_call(argv, here):
         arg = argv[i]
         if not arg.startswith("-"):
             return where, arg, argv[i + 1:]
-        if arg in TAKES_VALUE and i + 1 < len(argv):
-            if arg == "-C":
-                where = under(where, argv[i + 1])
-            i += 2
-            continue
-        if arg.startswith("-C") and len(arg) > 2:
-            where = under(where, arg[2:])
+        name, _, value = arg.partition("=")
+        if not value and arg in TAKES_VALUE and i + 1 < len(argv):
+            name, value, i = arg, argv[i + 1], i + 1
+        elif not value and arg.startswith("-C") and len(arg) > 2:
+            name, value = "-C", arg[2:]
+        if value:
+            if name == "-C" or name == "--work-tree":
+                where = under(where, value)
+            elif name == "--git-dir":
+                where = repo_dir(under(where, value))
         i += 1
     return None
+
+
+def tree_of(where):
+    """The checkout a directory sits in, so a subdirectory of it is the same one."""
+    try:
+        run = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=where,
+                             capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except Exception:
+        return where
+    return (run.stdout or "").strip() or where
 
 
 def standing_on(where):
@@ -442,34 +484,54 @@ def routes(cmd, home):
     pushing it. Reading only where the shell started lets both straight through.
     """
     at, made, cwd = {}, [], home
+    todo, read = segments(cmd), 0
 
     def line_of(where):
-        if where not in at:
-            at[where] = standing_on(where)
-        return at[where]
+        # Remembered against the checkout, never the directory: a subdirectory of
+        # the same checkout stands on the same line, and looking it up under its
+        # own name misses and asks git — which answers with the line that was
+        # being stood on before the command moved.
+        tree = tree_of(where)
+        if tree not in at:
+            at[tree] = standing_on(where)
+        return at[tree]
 
-    for seg in segments(cmd):
-        argv = plain(words(seg))
+    def stand(where, line):
+        at[tree_of(where)] = line
+
+    while todo and read < 200:
+        seg, todo, read = todo[0], todo[1:], read + 1
+        put, argv = plain(words(seg))
+        script = handed_on(argv)
+        if script is not None:
+            # What a shell is handed is a command line, and is read as one.
+            todo = segments(script) + todo
+            continue
         if argv[:1] == ["cd"]:
             # Changing into a checkout is the ordinary spelling of the reach that
             # `-C` spells as a switch, and the two must answer alike.
             cwd = under(cwd, argv[1]) if len(argv) > 1 else home
             continue
-        if argv[:3] == ["gh", "pr", "merge"]:
+        if os.path.basename(argv[0] if argv else "") == "gh" \
+                and argv[1:3] == ["pr", "merge"]:
             made.append(("gh", cwd, None))
             continue
         call = git_call(argv, cwd)
         if not call:
             continue
+        if put.get("GIT_WORK_TREE"):
+            call = (under(cwd, put["GIT_WORK_TREE"]),) + call[1:]
+        elif put.get("GIT_DIR"):
+            call = (repo_dir(under(cwd, put["GIT_DIR"])),) + call[1:]
         where, verb, rest = call
         if any(a in PASSIVE for a in rest):
             continue
         if verb in MOVE:
             if unknowable(seg):
-                at[where] = UNREADABLE
+                stand(where, UNREADABLE)
                 continue
             made += [(verb, where, line) for line in remade_by(rest, where)]
-            at[where] = moved_to(rest, where) or line_of(where)
+            stand(where, moved_to(rest, where) or line_of(where))
         elif verb in WRITERS:
             if verb in NAMED_TARGET and unknowable(seg):
                 # A name the shell works out as it runs is a name nothing here can

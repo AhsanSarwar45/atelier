@@ -455,6 +455,14 @@ ROUTES = (
     ("REFUSED", "sudo git push origin main"),
     ("REFUSED", "timeout 60 git push origin main"),
     ("REFUSED", "env GIT_SSH_COMMAND=ssh git push origin main"),
+    # A shell handed a command line is handed a command line, and the tool is the
+    # tool wherever it is typed from.
+    ("REFUSED", 'bash -c "git push origin main"'),
+    ("REFUSED", 'sh -c "git push origin main"'),
+    ("REFUSED", "/usr/bin/gh pr merge 412 --squash"),
+    # Moving further into the same checkout does not forget which line was
+    # stepped onto: a subdirectory of a checkout stands where the checkout does.
+    ("REFUSED", "git checkout main && cd sub && git commit -m x"),
     # The second line of a shell call is a command, not the first one's arguments.
     ("REFUSED", "git status\ngit push origin main"),
     # Finishing a fold and then writing to a shipping line is the moment the guard
@@ -508,6 +516,7 @@ ON_MAIN = (
     ("REFUSED", "git push origin `git branch --show-current`"),
     # Renaming away the line you stand on destroys it.
     ("REFUSED", "git branch -M scratch"),
+    ("REFUSED", 'sh -c "git commit -m x"'),
     ("ALLOWED", "git add -A"),
     ("ALLOWED", "git checkout -b feature/next"),
     ("ALLOWED", "git checkout -b feature/next && git commit -m fix"),
@@ -526,6 +535,11 @@ ELSEWHERE = (
     # back to the session's own project.
     ("REFUSED", "git -C {tilde} push origin main"),
     ("REFUSED", "cd {tilde} && git commit -m fix"),
+    # A checkout is also named by its working tree and by its git directory, in a
+    # switch or in a setting put in front of the command.
+    ("REFUSED", "git --git-dir={other}/.git --work-tree={other} push origin main"),
+    ("REFUSED", "GIT_DIR={other}/.git git push origin main"),
+    ("REFUSED", "GIT_WORK_TREE={other} git commit -m fix"),
 )
 
 # A team whose agents land on a line of their own, and whose manager alone moves
@@ -545,6 +559,9 @@ def scratch_project(tmp, says=None, on="feature/mine"):
                   "commit", "-q", "--allow-empty", "-m", "base"],
                  ["branch", "staging"], ["checkout", "-q", "-B", on]):
         subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
+    # Somewhere further in, so a command that moves deeper into the same checkout
+    # has somewhere real to move to.
+    os.makedirs(os.path.join(tmp, "sub"), exist_ok=True)
     if says is not None:
         with open(os.path.join(tmp, project.DECLARATION), "w") as fh:
             fh.write(says)

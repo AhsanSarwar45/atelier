@@ -94,6 +94,20 @@ FAULTS = [
     ("a name only the shell can settle is refused as every line at once", GATE,
      lambda s: s.replace("                made.append((verb, where, UNREADABLE))",
                          "                made.append((verb, where, EVERY))")),
+    ("a checkout named by its git directory is not followed", GATE,
+     lambda s: s.replace('            elif name == "--git-dir":\n'
+                         "                where = repo_dir(under(where, value))\n", "")),
+    ("a setting put in front of the command is dropped", GATE,
+     lambda s: s.replace('        if put.get("GIT_WORK_TREE"):', "        if False:")),
+    ("a command line handed to a shell is not read as one", GATE,
+     lambda s: s.replace("        if script is not None:", "        if False:")),
+    ("the forge tool is only itself when typed by its bare name", GATE,
+     lambda s: s.replace('        if os.path.basename(argv[0] if argv else "") == "gh" \\\n'
+                         '                and argv[1:3] == ["pr", "merge"]:',
+                         '        if argv[:3] == ["gh", "pr", "merge"]:')),
+    ("the line stepped onto is remembered against the directory", GATE,
+     lambda s: s.replace("        tree = tree_of(where)", "        tree = where")
+                .replace("        at[tree_of(where)] = line", "        at[where] = line")),
 ]
 
 
