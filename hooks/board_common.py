@@ -200,6 +200,13 @@ def _openers(line):
     return out
 
 
+def _to_a_shell(line):
+    """Whether the command on this line is a shell, so what it is handed on its
+    own input is a command line rather than data."""
+    argv = plain(words(line))[1]
+    return bool(argv) and os.path.basename(argv[0]) in SHELLS
+
+
 def _without_heredocs(cmd):
     """The line with every here-document body taken out, and the command lines
     that still run from inside the unquoted ones.
@@ -213,14 +220,19 @@ def _without_heredocs(cmd):
     kept, ran, waiting = [], [], []
     for line in cmd.split("\n"):
         if waiting:
-            want, quoted = waiting[0]
+            want, quoted, shell = waiting[0]
             if line.strip() == want:
                 waiting.pop(0)
+            elif shell:
+                # What a SHELL is handed on its own input is a command line, and
+                # every route is open behind four characters if it is not read.
+                ran.append(line)
             elif not quoted:
                 ran += grown_in(line)
             continue
         kept.append(line)
-        waiting += _openers(line)
+        shell = _to_a_shell(line)
+        waiting += [(name, quoted, shell) for name, quoted in _openers(line)]
     if waiting:
         # An opener whose closing word never arrives is not a here-document at
         # all, and dropping the rest of the line for it is the one failure
@@ -229,17 +241,21 @@ def _without_heredocs(cmd):
     return "\n".join(kept), ran
 
 
-def segments(cmd):
-    """Each command on the line, in the order the shell would run them.
+def split(cmd):
+    """Each command on the line with the separator that came before it.
 
     Quoted stretches, escapes and nested commands are stepped over rather than
     searched: a card note quoting a fold is words, a bracket in prose is not a
     separator, and the brackets of a nested command belong to the command around
     them. Reading any of those as a separator cuts a command in half and lets the
     harmless-looking half stand for the whole.
+
+    The separator is kept because two questions need it: a command handed its
+    input by a pipe cannot be read at all, and a directory change made inside
+    brackets does not outlive them.
     """
     cmd, ran = _without_heredocs(cmd)
-    out, cur, quote, depth, i = [], [], "", 0, 0
+    out, cur, sep, quote, depth, i = [], [], "", "", 0, 0
     while i < len(cmd):
         ch = cmd[i]
         if ch == "\\" and i + 1 < len(cmd) and quote != "'":
@@ -261,15 +277,37 @@ def segments(cmd):
             quote = ch
             cur.append(ch)
         elif ch in ";&|()\n":
-            out.append("".join(cur))
-            cur = []
+            out.append((sep, "".join(cur).strip()))
+            cur, sep = [], ch
         else:
             cur.append(ch)
         i += 1
-    out.append("".join(cur))
+    out.append((sep, "".join(cur).strip()))
     for inside in ran:
-        out += segments(inside)
-    return [s for s in (part.strip() for part in out) if s]
+        out += split(inside)
+    return out
+
+
+def segments(cmd):
+    """Each command on the line, in the order the shell would run them."""
+    return [seg for _, seg in split(cmd) if seg]
+
+
+def piped_into_shell(cmd):
+    """Whether any pipeline on this line ends by handing a shell its commands.
+
+    What is piped in is whatever the left-hand side prints, and that is not
+    settled until it runs — so the commands that shell will run cannot be read
+    here at all. Saying so is the only honest answer; letting it past leaves
+    every route open behind a pipe and four characters.
+    """
+    for sep, seg in split(cmd):
+        if sep != "|" or not seg:
+            continue
+        argv = plain(words(seg))[1]
+        if argv and os.path.basename(argv[0]) in SHELLS and handed_on(argv) is None:
+            return True
+    return False
 
 
 # Stands in for a space inside a stretch the shell works out, so the splitter

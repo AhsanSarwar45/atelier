@@ -326,7 +326,7 @@ TAKES_ARG = {
     "am": ("--patch-format", "--exclude", "--include", "--directory",
            "-p", "--whitespace"),
     "update-ref": ("-m",),
-    "worktree": ("--reason",),
+    "worktree": ("--reason", "-b", "-B"),
 }
 
 
@@ -797,7 +797,10 @@ def routes(cmd, home):
     pushing it. Reading only where the shell started lets both straight through.
     """
     at, made, cwd, been, standing = {}, [], home, [], {}
-    todo, read = bc.segments(cmd), 0
+    todo, read, scope = bc.split(cmd), 0, []
+    if bc.piped_into_shell(cmd):
+        # A shell handed its commands by a pipe runs a line nobody here can read.
+        made.append(("read", home, UNREADABLE, []))
 
     def line_of(where):
         # Remembered against the checkout, never the directory: a subdirectory of
@@ -817,9 +820,17 @@ def routes(cmd, home):
         at[tree_of(where)] = line
 
     while todo and read < READ_CAP:
-        seg, todo, read = todo[0], todo[1:], read + 1
+        (sep, seg), todo, read = todo[0], todo[1:], read + 1
+        if sep == "(":
+            # A subshell has a directory of its own, and what it changes there
+            # does not outlive the brackets.
+            scope.append((cwd, been, dict(standing)))
+        elif sep == ")" and scope:
+            cwd, been, standing = scope.pop()
+        if not seg:
+            continue
         # What a substitution holds runs too, wherever on the line it stands.
-        todo = bc.grown_in(seg) + todo
+        todo = [("", inside) for inside in bc.grown_in(seg)] + todo
         put, argv = bc.plain(bc.words(seg))
         if argv[:1] == ["export"]:
             for word in argv[1:]:
@@ -836,7 +847,7 @@ def routes(cmd, home):
         script = bc.handed_on(argv)
         if script is not None:
             # What a shell is handed is a command line, and is read as one.
-            todo = bc.segments(script) + todo
+            todo = bc.split(script) + todo
             continue
         if argv[:1] in (["cd"], ["pushd"], ["popd"]):
             # Changing into a checkout is the ordinary spelling of the reach that

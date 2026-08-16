@@ -202,6 +202,18 @@ FAULTS = [
      lambda s: s.replace("            standing.update(put)\n            continue\n", "")),
     ("a card id is looked for in the line as the shell would run it", CLOSE,
      lambda s: s.replace("    ids = card_id.findall(raw)", "    ids = card_id.findall(cmd)")),
+    ("a shell handed its commands on its own input is not read", COMMON,
+     lambda s: s.replace("            elif shell:\n"
+                         "                # What a SHELL is handed on its own input is a command line, and\n"
+                         "                # every route is open behind four characters if it is not read.\n"
+                         "                ran.append(line)\n", "")),
+    ("a shell fed its commands by a pipe runs a line that is read", GATE,
+     lambda s: s.replace("    if bc.piped_into_shell(cmd):", "    if False:")),
+    ("a directory change made inside brackets outlives them", GATE,
+     lambda s: s.replace('        if sep == "(":', "        if False:")),
+    ("the place a second copy is made is the word after the switch", GATE,
+     lambda s: s.replace('    "worktree": ("--reason", "-b", "-B"),',
+                         '    "worktree": ("--reason",),')),
     ("a here-document body is a run of commands", COMMON,
      lambda s: s.replace("    cmd, ran = _without_heredocs(cmd)\n", "    ran = []\n")),
     ("a substitution inside an unquoted here-document runs unread", COMMON,

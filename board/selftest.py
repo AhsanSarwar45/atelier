@@ -597,6 +597,10 @@ ROUTES = (
     # and the line it will stand on is named right there.
     ("REFUSED", "git worktree add sub/copy main && git -C sub/copy commit -m x"),
     ("REFUSED", "git worktree add -b hot sub/copy && git -C sub/copy push origin main"),
+    # The word after the switch is the new line, not the place. Read as the
+    # place, the copy is registered nowhere and the ordinary commit that follows
+    # is refused for naming a line by running something.
+    ("ALLOWED", "git worktree add -b hot sub/copy && git -C sub/copy commit -m x"),
     ("ALLOWED", "git worktree add sub/copy feature/mine && git -C sub/copy commit -m x"),
     # A directory that is no checkout at all has a line nobody here can name.
     ("REFUSED", "git -C sub/nowhere-at-all commit -m x"),
@@ -629,6 +633,18 @@ ROUTES = (
     # exactly as a substitution is — and the command arrives holding neither.
     ("REFUSED", "echo main | xargs git push origin"),
     ("REFUSED", "git branch --show-current | xargs -I{} git push origin {}"),
+    # A shell handed its commands on its own input. Piped in, what it will run is
+    # not settled until the left-hand side runs, so nothing here can read it; in a
+    # here-document body it is right there and is read.
+    ("REFUSED", "echo 'git push origin main' | bash"),
+    ("REFUSED", "bash <<'EOF'\ngit push origin main\nEOF"),
+    ("REFUSED", "sh <<'EOF'\ngit push origin main\nEOF"),
+    ("ALLOWED", "bash <<'EOF'\ngit status\nEOF"),
+    # A subshell has a directory of its own, and `{loose}` is a checkout that
+    # lands its own work. Carried across the brackets, the push after them is
+    # judged by that checkout's permission while the shell runs it in this one.
+    ("REFUSED", "(cd {loose}) && git push origin main"),
+    ("ALLOWED", "(cd {loose} && git push origin main)"),
     # A command written behind one of the shell's own words is still that command.
     ("REFUSED", "if true; then git push origin main; fi"),
     ("REFUSED", "for b in main; do git push origin $b; done"),
@@ -679,6 +695,9 @@ ON_MAIN = (
     # it lands on the line the project ships from.
     ("REFUSED", "if ! git diff --quiet; then git commit -m x; fi"),
     ("REFUSED", "for f in a b; do git commit -m x; done"),
+    # And a commit after brackets that changed directory inside them lands on the
+    # line being stood on HERE, which is the one the project ships from.
+    ("REFUSED", "(cd {loose}) && git commit -m fix"),
     # Naming a commit and a file takes the file out of what is staged and moves
     # no line at all, which is what the second name is there to say.
     ("ALLOWED", "git reset HEAD file.txt"),
@@ -855,9 +874,13 @@ def merge_routes(says=None, on="feature/mine", rows=ROUTES, remote=()):
     """
     tmp = tempfile.mkdtemp(prefix="board-merge-")
     other = tempfile.mkdtemp(prefix="board-other-")
+    # A third checkout that lands its own work, so a command judged against the
+    # wrong one of the two comes out ALLOWED and the case can see it.
+    loose = tempfile.mkdtemp(prefix="board-loose-")
     try:
         scratch_project(tmp, says, on, remote)
         scratch_project(other, None, "main")
+        scratch_project(loose, 'name = "loose"\nagent_merges = true\n', "main")
         # Somebody else's repository sitting inside the first one, which is what a
         # vendored dependency or a submodule is. Built always: it costs one `git
         # init` and it is the only way to reach the walk up from a nested checkout.
@@ -867,6 +890,7 @@ def merge_routes(says=None, on="feature/mine", rows=ROUTES, remote=()):
         got = {}
         for _, cmd in rows:
             said = cmd.replace("{other}", other).replace("{inner}", inner) \
+                      .replace("{loose}", loose) \
                       .replace("{tilde}", "~/" + os.path.basename(other))
             env = dict(os.environ)
             if "{tilde}" in cmd:
@@ -882,6 +906,7 @@ def merge_routes(says=None, on="feature/mine", rows=ROUTES, remote=()):
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.rmtree(other, ignore_errors=True)
+        shutil.rmtree(loose, ignore_errors=True)
 
 
 def waiving(sid, age=0):
