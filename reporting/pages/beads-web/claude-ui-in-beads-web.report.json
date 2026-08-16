@@ -137,6 +137,43 @@
       ]
     },
     {
+      "label": "It follows you around, and it remembers",
+      "lead": "Four more pieces are on your copy: what is waiting on you wherever you are, a card that says it is being worked on, a chat you start from a card, and one search across everything ever said.",
+      "blocks": [
+        {
+          "kind": "images",
+          "shots": [
+            {
+              "path": "reporting/pages/beads-web/agents-inside/tray.png",
+              "caption": "Seen from the project list, which belongs to neither project: two chats stopped for your say-so, each naming its project and what it is asking about — click one and you land on it with the question on screen"
+            },
+            {
+              "path": "reporting/pages/beads-web/agents-inside/board-live.png",
+              "caption": "A card being worked on says so on the board, with a live line of what the chat is doing this second — and a Start chat button that opens a conversation already briefed on that card"
+            },
+            {
+              "path": "reporting/pages/beads-web/agents-inside/search.png",
+              "caption": "One word said in two chats in two projects, found from anywhere: the sentence it fell in, the word marked, and the project named"
+            },
+            {
+              "path": "reporting/pages/beads-web/agents-inside/spend.png",
+              "caption": "What it cost, per day, per project — two charts and never one, because one brand bills money and the other counts tokens"
+            },
+            {
+              "path": "reporting/pages/beads-web/agents-inside/phone.png",
+              "caption": "The same conversation on a phone: the list of chats becomes a drawer, the composer stays in reach"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "A day of it was one trap",
+          "text": "A test run started the app without first taking its ports, so a leftover from an earlier run kept answering — the browser was served yesterday's build while every log said the run was fresh. It now takes its ports first and stops if it cannot."
+        }
+      ]
+    },
+    {
       "label": "Any brand of agent",
       "lead": "Same window, same buttons, whichever brand does the work — checked against what each one actually supports today, not assumed.",
       "blocks": [
@@ -425,30 +462,23 @@
       "body": "A chat begun in a terminal becomes one of the app's own the moment you resume it. It stays the row you pressed rather than jumping somewhere else in the list, because it is the same conversation.",
       "id": "D19",
       "why": "A row that changes identity the moment you act on it reads as two different chats, and you would not know which one you had just woken."
+    },
+    {
+      "id": "D20",
+      "title": "A card is linked to a chat the moment you start one from it",
+      "why": "Pressing Start chat on a card is you saying the two belong together. Waiting to infer it from what the agent does would leave the board blank for the first minute of every conversation."
     }
   ],
   "next": {
-    "if_nothing": "The build carries on down this list; the four pieces above are on your copy now and you can try them by restarting the app.",
+    "if_nothing": "Six pieces are on your copy now — restart the app and they are there. The build carries on down this list.",
     "steps": [
       {
-        "step": "One list of every chat waiting on you, across all your projects, with a count you can see from any screen",
-        "cost": "medium",
+        "step": "The typed-command menu: a slash in the box opens your own commands",
+        "cost": "small",
         "starting": true
       },
       {
-        "step": "Search across every conversation, and what each project cost you per day",
-        "cost": "medium"
-      },
-      {
-        "step": "Start a chat from a card, watch it live on the board, and answer from your phone",
-        "cost": "medium"
-      },
-      {
-        "step": "The typed-command menu",
-        "cost": "small"
-      },
-      {
-        "step": "The second brand of agent, once it is installed",
+        "step": "The second brand of agent, once it is installed and signed in",
         "cost": "medium"
       },
       {
