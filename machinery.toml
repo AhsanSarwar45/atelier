@@ -5,6 +5,9 @@
 name = "machinery"
 prefix = "mch"
 lands_on = "main"
+
+# The manager's own project: an agent lands its work here without asking.
+agent_merges = true
 brand = "MACHINERY"
 
 # The systems a card may belong to. `--area` accepts these and nothing else.

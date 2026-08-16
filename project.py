@@ -27,6 +27,10 @@ REGISTRY = os.path.join(HOME, "projects.toml")
 DECLARATION = "machinery.toml"
 # The branch a project calls main when its declaration does not say.
 DEFAULT_LANDS_ON = "main"
+# The lines an agent may not write to in a project that has said nothing about
+# itself. A checkout nobody has declared is the one most likely to be somebody
+# else's, so silence means protected. Manager's ruling, 2026-08-16.
+DEFAULT_PROTECTED = ("main", "master", "staging", "production", "release")
 GIT_TIMEOUT = 10
 
 _ROOTS, _DECLS = {}, {}
@@ -102,10 +106,32 @@ class Declaration:
         # poured before it was never asked and is not held to an answer; a project
         # that joined afterwards has no such jobs and leaves this empty.
         self.guard_asked_from = data.get("guard_asked_from") or ""
+        # Whether an agent may put work onto this project's shipping lines itself.
+        # False everywhere it is not said, so a checkout that has never been
+        # thought about is protected rather than open.
+        self.agent_merges = bool(data.get("agent_merges"))
+        # A project whose shipping lines are not called the usual things says so
+        # here. Absent is not the same as empty: absent takes the default set,
+        # empty would mean nothing is protected, which is what `agent_merges` is
+        # for.
+        self.data_protected = data.get("protected")
         review = data.get("review") or {}
         self.persona = review.get("persona") or self.name
         self.proves = review.get("proves") or ""
         self.declared = bool(data)
+
+    @property
+    def protected(self):
+        """The lines an agent may not write to here, empty when it may.
+
+        `lands_on` is in the set whatever it is called, so a project shipping
+        from a line of its own name is covered without naming it twice.
+        """
+        if self.agent_merges:
+            return frozenset()
+        named = self.data_protected if self.data_protected is not None \
+            else DEFAULT_PROTECTED
+        return frozenset(named) | {self.lands_on}
 
     @property
     def place_re(self):

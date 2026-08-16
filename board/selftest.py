@@ -390,6 +390,62 @@ def stopping(claims, closed, held, asked=True):
     return not out.getvalue().strip()
 
 
+MERGE_GATE = os.path.join(HOME, "hooks", "board-merge-gate.py")
+
+# Every route onto a line, and what a project that has said nothing about itself
+# must be told. Standing on a working line throughout: which line the command
+# WRITES TO is the whole question, so the same word appears on both sides.
+ROUTES = (
+    ("ALLOWED", "git merge staging"),
+    ("ALLOWED", "git rebase staging"),
+    ("ALLOWED", "git rebase main"),
+    ("ALLOWED", "git merge --continue"),
+    ("ALLOWED", "git checkout --ours a.ts"),
+    ("ALLOWED", "git add -A"),
+    ("ALLOWED", "git commit -m fix"),
+    ("ALLOWED", "git push origin feature/mine"),
+    ("REFUSED", "git checkout staging && git merge feature/mine"),
+    ("REFUSED", "git rebase main staging"),
+    ("REFUSED", "git push origin HEAD:staging"),
+    ("REFUSED", "git push origin main"),
+    ("REFUSED", "gh pr merge 412 --squash"),
+    # A card's own words about a fold are words. A bracket in prose reads as a
+    # command separator, which is how a note describing these once refused itself.
+    ("ALLOWED", 'bd close x --reason="refused (git merge staging)"'),
+)
+
+
+def merge_routes(says=None):
+    """What the merge guard tells each route, in a scratch project standing on a
+    working line. `says` is the project's declaration, or None for one nobody has
+    ever thought about.
+
+    A project of its own on disk: the guard reads a declaration and the line being
+    stood on off the checkout it is handed, so neither can be faked in memory.
+    """
+    tmp = tempfile.mkdtemp(prefix="board-merge-")
+    try:
+        for args in (["init", "-q", "-b", "main", "."],
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-q", "--allow-empty", "-m", "base"],
+                     ["branch", "staging"], ["checkout", "-q", "-b", "feature/mine"]):
+            subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
+        if says is not None:
+            with open(os.path.join(tmp, project.DECLARATION), "w") as fh:
+                fh.write(says)
+        got = {}
+        for _, cmd in ROUTES:
+            out = subprocess.run(
+                [sys.executable, MERGE_GATE], input=json.dumps({
+                    "tool_name": "Bash", "tool_input": {"command": cmd},
+                    "cwd": tmp, "session_id": "selftest-merge"}),
+                capture_output=True, text=True, timeout=120).stdout.strip()
+            got[cmd] = "REFUSED" if out else "ALLOWED"
+        return got
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def waiving(sid, age=0):
     """What the stop gate says to a turn it would otherwise send back to work,
     run under a waiver `age` seconds old written against session `sid`.
@@ -1101,6 +1157,29 @@ def main():
     print("ok: the manager's waiver takes the board off the session he gave it "
           "to, off no other session and no later work, and closes the turn it "
           "excused rather than leaving it to be billed afterwards")
+
+    # A project nobody has declared is protected, and what it is protected from is
+    # writing to a line other people ship from — never the word merge, which is
+    # also how an agent stays current with one.
+    silent = merge_routes()
+    wrong = ["%s: %s, wanted %s" % (cmd, silent[cmd], want)
+             for want, cmd in ROUTES if silent[cmd] != want]
+    assert not wrong, "the guard answered %d routes wrongly in a project that has " \
+        "declared nothing:\n  %s" % (len(wrong), "\n  ".join(wrong))
+
+    # And the teeth, which are the manager's opt-out itself: the same routes in a
+    # project that says its agents land their own work are refused none of them,
+    # so it is the protection doing the refusing and not the shape of the command.
+    said = merge_routes('name = "scratch"\nagent_merges = true\n')
+    shut = [cmd for want, cmd in ROUTES if want == "REFUSED"
+            and said[cmd] == "REFUSED"]
+    assert not shut, "a project declaring agent_merges = true was still refused " \
+        "these, so the refusal is not the protection: %s" % ", ".join(shut)
+
+    print("ok: a project nobody has declared refuses every route onto a line it "
+          "ships from and allows every way of staying current with one, a project "
+          "that says its agents land their own work is refused none of them, and "
+          "a card's own words about a fold are words")
 
     refused = reporting(PUT_DOWN)
     assert refused, "a fault the reply named and put down ended the turn with " \
@@ -1919,6 +1998,13 @@ def main():
     def merging(holder, here, cmd="git merge --ff-only work"):
         merge.bc.board_root = lambda cwd=None: ROOT
         merge.bc.actor = lambda sid, cwd: here
+        # These cases are about the slot alone, so they stand on the line it
+        # guards and no line is protected. Which line a command writes to, and
+        # who may write to it, are their own questions and are answered by the
+        # routes cases below — against a project of their own, so neither case
+        # can be turned green or red by what this checkout happens to declare.
+        merge.standing_on = lambda where: project.of(ROOT).lands_on
+        merge.protected_by = lambda root: frozenset()
         merge.bc.bd = lambda args, root=None: (True, json.dumps({"holder": holder}))
         sys.stdin = io.StringIO(json.dumps({
             "session_id": SID, "cwd": ROOT, "tool_input": {"command": cmd}}))
