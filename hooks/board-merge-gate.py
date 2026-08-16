@@ -20,7 +20,6 @@ allowed, conflicts and all.
 """
 import json
 import os
-import shlex
 import subprocess
 import sys
 
@@ -32,11 +31,11 @@ import project  # noqa: E402
 GIT_TIMEOUT = 10
 
 # What writes to a line. `commit` is here because standing on a protected line
-# and committing is the quietest way onto it of all, and `branch`, `reset` and
-# `update-ref` because pointing a line at your own work writes to it as surely as
-# folding into it does.
+# and committing is the quietest way onto it of all, and `fetch`, `branch`,
+# `reset` and `update-ref` because pointing a line at your own work writes to it
+# as surely as folding into it does.
 WRITERS = ("merge", "rebase", "push", "commit", "cherry-pick", "revert", "am",
-           "pull", "branch", "reset", "update-ref")
+           "pull", "fetch", "branch", "reset", "update-ref")
 MOVE = ("checkout", "switch")
 
 # The `branch` forms that move or destroy a line rather than list or make one,
@@ -135,46 +134,6 @@ def deny(reason):
     }}))
 
 
-def segments(cmd):
-    """Each command on the line, in the order the shell would run them.
-
-    Quoted stretches, escapes and nested commands are stepped over rather than
-    searched: a card note quoting a fold is words, a bracket in prose is not a
-    separator, and the brackets of a nested command belong to the command around
-    them. Reading any of those as a separator cuts a command in half and lets the
-    harmless-looking half stand for the whole.
-    """
-    out, cur, quote, depth, i = [], [], "", 0, 0
-    while i < len(cmd):
-        ch = cmd[i]
-        if ch == "\\" and i + 1 < len(cmd) and quote != "'":
-            cur.append(cmd[i:i + 2])
-            i += 2
-            continue
-        if quote:
-            cur.append(ch)
-            if ch == quote:
-                quote = ""
-        elif depth:
-            cur.append(ch)
-            depth += 1 if ch == "(" else (-1 if ch == ")" else 0)
-        elif cmd[i:i + 2] == "$(":
-            cur.append("$(")
-            depth, i = 1, i + 2
-            continue
-        elif ch in "'\"`":
-            quote = ch
-            cur.append(ch)
-        elif ch in ";&|()\n":
-            out.append("".join(cur))
-            cur = []
-        else:
-            cur.append(ch)
-        i += 1
-    out.append("".join(cur))
-    return [s for s in (part.strip() for part in out) if s]
-
-
 # A value no reading of the text can settle, because a shell works it out at the
 # moment it runs. Anything carrying one names a line nobody here can name.
 GROWN = ("$(", "`", "${")
@@ -191,68 +150,17 @@ def unknowable(seg):
 NAMED_TARGET = ("push", "rebase", "branch", "update-ref")
 
 
-def words(seg):
-    """One command as the shell would hand it over, quotes taken off.
-
-    A line naming its target in quotes names the same target, and reading the
-    quoted spelling as no target at all is how every refusal is walked past.
-    """
-    try:
-        return shlex.split(seg)
-    except ValueError:
-        return seg.split()
-
-
-WRAPPERS, SHELLS = bc.WRAPPERS, bc.SHELLS
-
-# The settings that send a git command at another checkout without a switch.
-POINTERS = ("GIT_DIR", "GIT_WORK_TREE")
-
-
-def plain(argv):
-    """The command itself and the settings put in front of it.
-
-    Once a carrier has been seen its own switches and values are carried too, so
-    `nice -n 10 git push …` reaches the same answer as `git push …`. The settings
-    are handed back rather than dropped: two of them aim the command at a
-    checkout of their own, which is the whole question this gate asks.
-    """
-    put, carried = {}, False
-    while argv:
-        head = argv[0]
-        if "=" in head and not head.startswith("-"):
-            name, _, value = head.partition("=")
-            put[name] = value
-            argv = argv[1:]
-        elif head in WRAPPERS:
-            argv, carried = argv[1:], True
-        elif carried and os.path.basename(head) not in ("git", "gh") + SHELLS:
-            argv = argv[1:]
-        else:
-            break
-    return put, argv
-
-
-def handed_on(argv):
-    """The command line a shell was handed to run, or None if it was not one.
-
-    The switch is read out of a bundle rather than matched whole: `sh -euc …` and
-    `bash -lc …` are the everyday spellings of what `sh -c` spells long-hand, and
-    a shell whose switches are bundled runs the same command.
-    """
-    if not argv or os.path.basename(argv[0]) not in SHELLS:
-        return None
-    for i, arg in enumerate(argv[1:], 1):
-        if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:] \
-                and i + 1 < len(argv):
-            return argv[i + 1]
-    return None
-
-
 def repo_dir(named):
     """The working tree a git directory belongs to."""
     return os.path.dirname(named.rstrip("/")) \
         if os.path.basename(named.rstrip("/")) == ".git" else named
+
+
+# The settings that send a git command at another checkout without a switch, and
+# what each one names: the working tree itself, or the git directory inside it.
+# Read where a command is followed, so adding a third here is all adding a third
+# takes — a list nothing reads is the one that gets extended in that belief.
+POINTERS = (("GIT_WORK_TREE", lambda named: named), ("GIT_DIR", repo_dir))
 
 
 def under(here, named):
@@ -415,6 +323,25 @@ def pull_targets(rest, here):
     return [here] if here else []
 
 
+def fetch_targets(rest, here):
+    """The local lines a fetch writes to.
+
+    A refspec's right-hand side is a local ref, so a fetch moves a line without
+    ever standing on it and without a fold — the same quiet write as pointing a
+    line at a commit. Bringing a line down onto the line of the SAME name is
+    staying current and puts nothing of the agent's anywhere; bringing a
+    different one down onto it is landing that work by another word.
+    """
+    out = []
+    for ref in positionals(rest)[1:]:
+        if ":" not in ref:
+            continue
+        came, _, onto = ref.partition(":")
+        if line_named(came, here) != line_named(onto, here):
+            out.append(line_named(onto, here))
+    return out
+
+
 def branch_targets(rest, here):
     """The lines a `git branch` writes to, empty when it only lists or makes one.
 
@@ -483,6 +410,8 @@ def written_by(verb, rest, here, where):
         return push_targets(rest, here)
     if verb == "pull":
         return pull_targets(rest, here)
+    if verb == "fetch":
+        return fetch_targets(rest, here)
     if verb == "branch":
         return branch_targets(rest, here)
     if verb == "reset":
@@ -500,6 +429,77 @@ def written_by(verb, rest, here, where):
     return [here] if here else []
 
 
+def names_its_target(verb, rest):
+    """Whether this command reads the line it writes to out of its own arguments.
+
+    Everything else writes to whatever is being stood on, where a value the shell
+    works out cannot change the answer. A fetch is the in-between: it names a line
+    only when it carries a refspec, and reading every fetch as naming one would
+    refuse the everyday way of bringing a remote up to date.
+    """
+    if verb == "fetch":
+        return any(":" in a for a in positionals(rest)[1:])
+    return verb in NAMED_TARGET
+
+
+# The `gh api` switches that swallow the word after them, so a value is never
+# read as the path being called; and the ones that make the call a write with no
+# method typed at all, because the forge posts as soon as it is given a field to
+# send. A call that only reads answers "is it merged"; one that writes merges it.
+GH_TAKES_VALUE = ("--method", "-X", "--field", "-F", "--raw-field", "-f",
+                  "--header", "-H", "--hostname", "--input", "--jq", "-q",
+                  "--template", "-t", "--cache", "--preview", "-p")
+GH_SENDS = ("--field", "-F", "--raw-field", "-f", "--input")
+GH_READS = ("", "GET", "HEAD")
+
+
+def api_call(rest):
+    """The method and the path a raw forge call names.
+
+    The path is the first word that is neither a switch nor a switch's value.
+    """
+    method, path, sends, i = "", "", False, 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg.startswith("-"):
+            name, eq, value = arg.partition("=")
+            if not eq and name in GH_TAKES_VALUE and i + 1 < len(rest):
+                value, i = rest[i + 1], i + 1
+            if name in ("--method", "-X"):
+                method = value
+            elif name.startswith("-X") and len(name) > 2:
+                method = name[2:]
+            if name in GH_SENDS:
+                sends = True
+        elif not path:
+            path = arg
+        i += 1
+    return (method or ("POST" if sends else "")).upper(), path
+
+
+def is_pull_merge(path):
+    """Whether a forge path is the one that lands a waiting piece of work."""
+    parts = path.split("?")[0].strip("/").split("/")
+    return len(parts) >= 3 and parts[-1] == "merge" and parts[-3] == "pulls"
+
+
+def forge_merge(argv):
+    """Whether this forge command lands a waiting piece of work.
+
+    Two spellings reach the same line: the subcommand everyone types, and the raw
+    call it is built on. Refusing only the first hands an agent turned away from
+    it a second route to the same place.
+    """
+    if not argv or os.path.basename(argv[0]) != "gh":
+        return False
+    if argv[1:3] == ["pr", "merge"]:
+        return True
+    if argv[1:2] != ["api"]:
+        return False
+    method, path = api_call(argv[2:])
+    return is_pull_merge(path) and method not in GH_READS
+
+
 def protected_by(where):
     """The lines the project holding this directory says an agent may not write to."""
     try:
@@ -511,7 +511,8 @@ def protected_by(where):
 
 
 def routes(cmd, home):
-    """Every write this command makes, as (verb, checkout, line), in running order.
+    """Every write this command makes, as (verb, checkout, line, arguments), in
+    running order.
 
     Walked command by command because one may step onto a line, or into a checkout,
     before it writes: stepping onto what a team ships from and folding into it is a
@@ -519,7 +520,7 @@ def routes(cmd, home):
     pushing it. Reading only where the shell started lets both straight through.
     """
     at, made, cwd = {}, [], home
-    todo, read = segments(cmd), 0
+    todo, read = bc.segments(cmd), 0
 
     def line_of(where):
         # Remembered against the checkout, never the directory: a subdirectory of
@@ -536,28 +537,27 @@ def routes(cmd, home):
 
     while todo and read < 200:
         seg, todo, read = todo[0], todo[1:], read + 1
-        put, argv = plain(words(seg))
-        script = handed_on(argv)
+        put, argv = bc.plain(bc.words(seg))
+        script = bc.handed_on(argv)
         if script is not None:
             # What a shell is handed is a command line, and is read as one.
-            todo = segments(script) + todo
+            todo = bc.segments(script) + todo
             continue
         if argv[:1] == ["cd"]:
             # Changing into a checkout is the ordinary spelling of the reach that
             # `-C` spells as a switch, and the two must answer alike.
             cwd = under(cwd, argv[1]) if len(argv) > 1 else home
             continue
-        if os.path.basename(argv[0] if argv else "") == "gh" \
-                and argv[1:3] == ["pr", "merge"]:
-            made.append(("gh", cwd, None))
+        if forge_merge(argv):
+            made.append(("gh", cwd, None, argv))
             continue
         call = git_call(argv, cwd)
         if not call:
             continue
-        if put.get("GIT_WORK_TREE"):
-            call = (under(cwd, put["GIT_WORK_TREE"]),) + call[1:]
-        elif put.get("GIT_DIR"):
-            call = (repo_dir(under(cwd, put["GIT_DIR"])),) + call[1:]
+        for name, resolve in POINTERS:
+            if put.get(name):
+                call = (resolve(under(cwd, put[name])),) + call[1:]
+                break
         where, verb, rest = call
         if any(a in PASSIVE for a in rest):
             continue
@@ -565,16 +565,16 @@ def routes(cmd, home):
             if unknowable(seg):
                 stand(where, UNREADABLE)
                 continue
-            made += [(verb, where, line) for line in remade_by(rest, where)]
+            made += [(verb, where, line, rest) for line in remade_by(rest, where)]
             stand(where, moved_to(rest, where) or line_of(where))
         elif verb in WRITERS:
-            if verb in NAMED_TARGET and unknowable(seg):
+            if names_its_target(verb, rest) and unknowable(seg):
                 # A name the shell works out as it runs is a name nothing here can
                 # read. It is refused for being unreadable, not for being every
                 # line — the two want different things said back.
-                made.append((verb, where, UNREADABLE))
+                made.append((verb, where, UNREADABLE, rest))
             else:
-                made += [(verb, where, line)
+                made += [(verb, where, line, rest)
                          for line in written_by(verb, rest, line_of(where), where)]
     return made
 
@@ -587,7 +587,7 @@ def main():
     if not made:
         return
 
-    for verb, where, line in made:
+    for verb, where, line, _ in made:
         guarded = protected_by(where)
         if verb == "gh":
             # Which line a waiting piece of work would land on is the forge's
@@ -621,12 +621,15 @@ def main():
     # Folds only. The slot exists so two sessions never resolve conflicts in the
     # same tree at once; an ordinary commit on the main line resolves nothing and
     # was never what it queued.
-    folds = [(verb, where, line) for verb, where, line in made
+    folds = [(verb, rest) for verb, where, line, rest in made
              if verb in ("merge", "rebase") and line == lands_on
              and bc.board_root(where) == root]
     if not folds:
         return
-    if any(verb == "merge" for verb, _, _ in folds) and FF_ONLY not in words(cmd):
+    # Asked of the fold being judged and never of the whole line: a fast-forward
+    # switch on one command says nothing about the next one, and both of them land
+    # on the line every close here is measured against.
+    if any(verb == "merge" and FF_ONLY not in rest for verb, rest in folds):
         deny(NOT_FF)
         return
     name = bc.actor(data.get("session_id"), data.get("cwd"))

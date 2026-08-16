@@ -8,6 +8,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -136,6 +137,123 @@ WRAPPERS = ("env", "command", "exec", "nice", "setsid", "stdbuf", "time",
 # a command line and is read as one; anything less leaves every route open
 # behind four characters.
 SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
+# Reading a command line. One shared list of carrier words was not enough on its
+# own: the gates have to take them OFF the same way too, or a prefix one gate
+# refuses is one the other lets straight through. Both read a line through these.
+
+
+def segments(cmd):
+    """Each command on the line, in the order the shell would run them.
+
+    Quoted stretches, escapes and nested commands are stepped over rather than
+    searched: a card note quoting a fold is words, a bracket in prose is not a
+    separator, and the brackets of a nested command belong to the command around
+    them. Reading any of those as a separator cuts a command in half and lets the
+    harmless-looking half stand for the whole.
+    """
+    out, cur, quote, depth, i = [], [], "", 0, 0
+    while i < len(cmd):
+        ch = cmd[i]
+        if ch == "\\" and i + 1 < len(cmd) and quote != "'":
+            cur.append(cmd[i:i + 2])
+            i += 2
+            continue
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+        elif depth:
+            cur.append(ch)
+            depth += 1 if ch == "(" else (-1 if ch == ")" else 0)
+        elif cmd[i:i + 2] == "$(":
+            cur.append("$(")
+            depth, i = 1, i + 2
+            continue
+        elif ch in "'\"`":
+            quote = ch
+            cur.append(ch)
+        elif ch in ";&|()\n":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    out.append("".join(cur))
+    return [s for s in (part.strip() for part in out) if s]
+
+
+def words(seg):
+    """One command as the shell would hand it over, quotes taken off.
+
+    A line naming its target in quotes names the same target, and reading the
+    quoted spelling as no target at all is how every refusal is walked past.
+    """
+    try:
+        return shlex.split(seg)
+    except ValueError:
+        return seg.split()
+
+
+def plain(argv):
+    """The command itself and the settings put in front of it.
+
+    Once a carrier has been seen its own switches and values are carried too, so
+    `nice -n 10 git push …` and `sudo -u me git commit …` reach the same answer as
+    the bare command. The settings are handed back rather than dropped: two of
+    them aim a command at a checkout of its own.
+    """
+    put, carried = {}, False
+    while argv:
+        head = argv[0]
+        if "=" in head and not head.startswith("-"):
+            name, _, value = head.partition("=")
+            put[name] = value
+            argv = argv[1:]
+        elif head in WRAPPERS:
+            argv, carried = argv[1:], True
+        elif carried and os.path.basename(head) not in ("git", "gh") + SHELLS:
+            argv = argv[1:]
+        else:
+            break
+    return put, argv
+
+
+def handed_on(argv):
+    """The command line a shell was handed to run, or None if it was not one.
+
+    The switch is read out of a bundle rather than matched whole: `sh -euc …` and
+    `bash -lc …` are the everyday spellings of what `sh -c` spells long-hand, and
+    a shell whose switches are bundled runs the same command.
+    """
+    if not argv or os.path.basename(argv[0]) not in SHELLS:
+        return None
+    for i, arg in enumerate(argv[1:], 1):
+        if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:] \
+                and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+# How deep a shell handed to a shell is followed. Each hop is a real spelling;
+# past a handful it is somebody testing the reader rather than running work.
+HANDS = 8
+
+
+def unshelled(cmd, depth=0):
+    """The same line with what a shell was handed put back on it as commands.
+
+    Quoted words are a card's own text everywhere a gate looks, which is what
+    keeps a note quoting a close from being read as one — the word a shell is
+    handed is the single exception, because it is a command line and it runs. A
+    gate that reads the line as text unwraps it here before reading anything.
+    """
+    out = []
+    for seg in segments(cmd):
+        script = handed_on(plain(words(seg))[1]) if depth < HANDS else None
+        out.append(unshelled(script, depth + 1) if script is not None else seg)
+    return "\n".join(out)
 
 
 # Seconds a waiver stands before the board comes back on by itself. A waiver is

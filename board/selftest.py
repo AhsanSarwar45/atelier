@@ -483,6 +483,26 @@ ROUTES = (
     ("REFUSED", "git push origin HEAD:staging"),
     ("REFUSED", "git push origin main"),
     ("REFUSED", "gh pr merge 412 --squash"),
+    # A fetch writes to the line named on the right of a refspec, with no fold and
+    # without ever standing on it. Bringing a line down onto the line of the same
+    # name is staying current; bringing a different one down onto it is landing.
+    ("ALLOWED", "git fetch"),
+    ("ALLOWED", "git fetch origin"),
+    ("ALLOWED", "git fetch --all --prune"),
+    ("ALLOWED", "git fetch origin main:main"),
+    ("ALLOWED", "git fetch origin refs/heads/main:refs/heads/main"),
+    ("REFUSED", "git fetch . HEAD:main"),
+    ("REFUSED", "git fetch origin feature/mine:staging"),
+    ("REFUSED", "git fetch origin +HEAD:main"),
+    # The raw call that the everyday pull-request merge is built on lands the same
+    # piece of work on the same line; asking whether it is merged does not.
+    ("REFUSED", "gh api --method PUT repos/o/r/pulls/412/merge"),
+    ("REFUSED", "gh api -X PUT repos/o/r/pulls/412/merge"),
+    ("REFUSED", "gh api -XPUT repos/o/r/pulls/412/merge"),
+    ("REFUSED", "gh api repos/o/r/pulls/412/merge -f merge_method=squash"),
+    ("ALLOWED", "gh api repos/o/r/pulls/412/merge"),
+    ("ALLOWED", "gh api repos/o/r/pulls/412"),
+    ("ALLOWED", "gh api --method GET repos/o/r/pulls"),
     # A line that abandons a fold and then writes to a shipping line is two
     # commands, and the first one's switch does not excuse the second.
     ("REFUSED", "git merge --abort && git push origin main"),
@@ -522,6 +542,9 @@ ON_MAIN = (
     ("ALLOWED", "git pull --ff-only"),
     ("ALLOWED", "git pull --rebase origin main"),
     ("REFUSED", "git pull origin feature/mine"),
+    # And the same question of a fetch, from the line itself.
+    ("ALLOWED", "git fetch origin main:main"),
+    ("REFUSED", "git fetch origin feature/mine:main"),
     # A line the shell works out as it runs is a line nothing here can read.
     ("REFUSED", "git push origin $(git branch --show-current)"),
     ("REFUSED", "git push origin `git branch --show-current`"),
@@ -1612,16 +1635,39 @@ def main():
 
     print("ok: his column is shut in both directions, and only his")
 
-    # One list of carrier words, read by both gates. Kept twice they drift, and a
-    # prefix the line guard refuses the close gate lets straight through.
-    for word in status.bc.WRAPPERS:
+    # One list of carrier words, read by both gates, and taken off the same way.
+    # Kept twice they drift, and a prefix the line guard refuses the close gate
+    # lets straight through — which is what a carrier's OWN switches did.
+    CARRIED = tuple(status.bc.WRAPPERS) + (
+        "nice -n 10", "timeout 60", "sudo -u me", "stdbuf -oL",
+        "env GIT_AUTHOR_NAME=me nice -n 5", "timeout --signal=KILL 30",
+    )
+    for word in CARRIED:
         said = refusal('%s git commit -m "x"' % word, ordinary)
         assert "name the card" in said, \
             "a commit carried by %r walked past the close gate without naming " \
             "its card: %s" % (word, said or "allowed")
 
-    print("ok: a commit names its card behind every word that merely carries it, "
-          "and both gates read that list from one place")
+    # A shell handed a command line is handed a command line. Everywhere else in
+    # this gate a quoted word is a card's own text, which is what would hide this.
+    for handed in ('sh -c "git commit -m x"', 'bash -lc "git commit -m x"',
+                   'nice -n 10 sh -euc "git commit -m x"',
+                   'sh -c "cd /tmp && git commit -m x"'):
+        said = refusal(handed, ordinary)
+        assert "name the card" in said, \
+            "a commit handed to a shell as %r walked past the close gate: %s" \
+            % (handed, said or "allowed")
+
+    # And the words a card actually carries stay words: a note quoting a commit
+    # is not a commit, or the gate refuses every note that describes one.
+    quoted = refusal('bd update tst-t1 --append-notes="ran git commit -m x here"',
+                     ordinary)
+    assert "name the card" not in quoted, \
+        "a note quoting a commit was read as one: %s" % quoted
+
+    print("ok: a commit names its card behind every word that merely carries it "
+          "and behind a shell it is handed to, both gates read that list from one "
+          "place, and a card's own words are still words")
 
     # A bug job that runs no guard step, closing the FIRST step of its order. The
     # words on the goal are the whole of the case: the same job is refused or let
@@ -2280,6 +2326,17 @@ def main():
     assert "fast-forward" in merging("main-abcd1234", "main-abcd1234",
                                      cmd="git merge work"), \
         "a merge that is not a fast-forward was allowed to the slot's holder"
+    # And asked of the fold being judged rather than of the whole line: a switch
+    # on one command says nothing about the next one, and both land here.
+    assert "fast-forward" in merging(
+        "main-abcd1234", "main-abcd1234",
+        cmd="git pull --ff-only origin main && git merge work"), \
+        "a fast-forward switch typed on a different command excused a merge that " \
+        "carries none, on the line every close is measured against"
+    assert "fast-forward" in merging(
+        "main-abcd1234", "main-abcd1234",
+        cmd="git merge --ff-only one && git merge two"), \
+        "a second merge rode onto the main line behind the first one's switch"
     # The slot queues folds. An ordinary commit on the main line resolves no
     # conflict with anybody and must not have to wait for one.
     assert merging("someone-99999999", "main-abcd1234", cmd="git commit -m x") == "", \

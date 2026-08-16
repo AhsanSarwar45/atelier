@@ -13,7 +13,14 @@ the run rather than reporting green: the code it was written against has moved,
 and a fault that cannot be injected proves nothing.
 
     python3 board/inject.py            # against the tree this script is in
+    python3 board/inject.py --anchors  # only whether every fault still applies
     SRC=<checkout> python3 board/inject.py
+
+`--anchors` is the cheap half: it reads the live source and says which faults no
+longer patch it, without running the suite once. That is the half worth putting
+on another project's push gate — the source moving under a fault is this
+machinery's business, and a full run is thirty suites where the gate around it
+is one (mch-mkp.49).
 """
 import concurrent.futures
 import os
@@ -25,6 +32,7 @@ import tempfile
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.environ.get("SRC") or HERE
 GATE = "hooks/board-merge-gate.py"
+COMMON = "hooks/board_common.py"
 CLOSE = "hooks/board-status-gate.py"
 DECL = "project.py"
 SUITE = "board/selftest.py"
@@ -39,9 +47,9 @@ FAULTS = [
     ("a project cannot say its agents land their own work", DECL,
      lambda s: s.replace("        if self.agent_merges:\n"
                          "            return frozenset()\n", "")),
-    ("a command quoted in a card note is read as a command", GATE,
+    ("a command quoted in a card note is read as a command", COMMON,
      lambda s: s.replace('        elif ch in "\'\\"`":', "        elif False:")),
-    ("a line named in quotes is read as no line at all", GATE,
+    ("a line named in quotes is read as no line at all", COMMON,
      lambda s: s.replace("        return shlex.split(seg)", "        return seg.split()")),
     ("a command sent into another checkout is judged where the session began",
      GATE, lambda s: s.replace('            if name == "-C" or name == "--work-tree":\n'
@@ -52,7 +60,7 @@ FAULTS = [
     ("committing where you stand is not a route onto a line", GATE,
      lambda s: s.replace('"merge", "rebase", "push", "commit",',
                          '"merge", "rebase", "push",')),
-    ("a new line on the next line of the call is the first one's arguments", GATE,
+    ("a new line on the next line of the call is the first one's arguments", COMMON,
      lambda s: s.replace('        elif ch in ";&|()\\n":', '        elif ch in ";&|()":')),
     ("sending every line at once names no line", GATE,
      lambda s: s.replace('    if any(a in ("--all", "--mirror") for a in rest):\n'
@@ -66,7 +74,8 @@ FAULTS = [
      lambda s: s.replace("    return here if ref in HERE_NAMES else ref",
                          "    return ref")),
     ("pointing a line at your own work is not writing to it", GATE,
-     lambda s: s.replace('"pull", "branch", "reset", "update-ref")', '"pull")')),
+     lambda s: s.replace('"pull", "fetch", "branch", "reset", "update-ref")',
+                         '"pull", "fetch")')),
     ("stepping onto a line by force does not reset it", GATE,
      lambda s: s.replace('    if not any(a in ("-B", "-C") for a in rest):\n'
                          "        return []\n", "    return []\n")),
@@ -76,44 +85,46 @@ FAULTS = [
      lambda s: s.replace("        if self.data_protected is not None:\n"
                          "            return frozenset(self.data_protected)\n", "")),
     ("bringing work in by pulling is not writing to a line", GATE,
-     lambda s: s.replace('           "pull", "branch"', '           "branch"')),
+     lambda s: s.replace('           "pull", "fetch"', '           "fetch"')),
     ("a rename is credited only with the name it ends at", GATE,
      lambda s: s.replace("        old = line_named(args[0], here) if len(args) > 1 else here\n"
                          "        return [n for n in (old, line_named(args[-1], here)) if n]",
                          "        return [line_named(args[-1], here)]")),
-    ("the brackets of a nested command are separators", GATE,
+    ("the brackets of a nested command are separators", COMMON,
      lambda s: s.replace('        elif cmd[i:i + 2] == "$(":', "        elif False:")),
-    ("an escaped quote opens a quoted stretch", GATE,
+    ("an escaped quote opens a quoted stretch", COMMON,
      lambda s: s.replace(' and quote != "\'":', " and False:")),
     ("only a reset's first name is tested for being a path", GATE,
      lambda s: s.replace("    if len(args) > 1 and not any(a in RESET_MODES for a in rest):\n"
                          "        return []\n", "")),
-    ("a word carrying a command is read as the command", GATE,
+    ("a word carrying a command is read as the command", COMMON,
      lambda s: s.replace("        elif head in WRAPPERS:\n"
                          "            argv, carried = argv[1:], True\n", "")),
     ("the shortcut for a home directory is joined before it is expanded", GATE,
      lambda s: s.replace("    named = os.path.expanduser(named)\n", "")),
     ("a name only the shell can settle is refused as every line at once", GATE,
-     lambda s: s.replace("                made.append((verb, where, UNREADABLE))",
-                         "                made.append((verb, where, EVERY))")),
+     lambda s: s.replace("                made.append((verb, where, UNREADABLE, rest))",
+                         "                made.append((verb, where, EVERY, rest))")),
     ("a checkout named by its git directory is not followed", GATE,
      lambda s: s.replace('            elif name == "--git-dir":\n'
                          "                where = repo_dir(under(where, value))\n", "")),
     ("a setting put in front of the command is dropped", GATE,
-     lambda s: s.replace('        if put.get("GIT_WORK_TREE"):', "        if False:")),
+     lambda s: s.replace("        for name, resolve in POINTERS:\n"
+                         "            if put.get(name):\n", "        for name, resolve in ():\n"
+                         "            if put.get(name):\n")),
     ("a command line handed to a shell is not read as one", GATE,
      lambda s: s.replace("        if script is not None:", "        if False:")),
     ("the forge tool is only itself when typed by its bare name", GATE,
-     lambda s: s.replace('        if os.path.basename(argv[0] if argv else "") == "gh" \\\n'
-                         '                and argv[1:3] == ["pr", "merge"]:',
-                         '        if argv[:3] == ["gh", "pr", "merge"]:')),
+     lambda s: s.replace('    if not argv or os.path.basename(argv[0]) != "gh":\n'
+                         "        return False\n",
+                         '    if argv[:1] != ["gh"]:\n        return False\n')),
     ("the line stepped onto is remembered against the directory", GATE,
      lambda s: s.replace("        tree = tree_of(where)", "        tree = where")
                 .replace("        at[tree_of(where)] = line", "        at[where] = line")),
     ("bringing your own line up to date is read as landing work on it", GATE,
      lambda s: s.replace('    if verb == "pull":\n'
                          "        return pull_targets(rest, here)\n", "")),
-    ("a shell is only a shell when its switch stands alone", GATE,
+    ("a shell is only a shell when its switch stands alone", COMMON,
      lambda s: s.replace('        if arg.startswith("-") and not arg.startswith("--") '
                          'and "c" in arg[1:] \\\n                and i + 1 < len(argv):',
                          '        if arg == "-c" and i + 1 < len(argv):')),
@@ -121,10 +132,65 @@ FAULTS = [
      lambda s: s.replace("    if any(a in BACK for a in rest):\n"
                          "        return previous(where)\n", "")),
     ("each gate keeps its own list of the words that carry a command", CLOSE,
-     lambda s: s.replace('WRAP = r"(?:(?:%s)\\s+(?:\\w+=\\S+\\s+)*|\\\\)*" % "|".join(bc.WRAPPERS)',
+     lambda s: s.replace('WRAP = r"(?:(?:%s)(?:\\s+(?!(?:bd|git|rtk)\\b)\\S+)*\\s+|\\\\)*"'
+                         ' % "|".join(bc.WRAPPERS)',
                          'WRAP = r"(?:(?:env|command|exec|nice|setsid|stdbuf|time)'
                          '\\s+(?:\\w+=\\S+\\s+)*|\\\\)*"')),
+    ("a carrier is only a carrier when it has no switches of its own", CLOSE,
+     lambda s: s.replace('(?:\\s+(?!(?:bd|git|rtk)\\b)\\S+)*\\s+',
+                         '\\s+(?:\\w+=\\S+\\s+)*')),
+    ("the line a shell was handed stays quoted, so nothing reads it", CLOSE,
+     lambda s: s.replace("    cmd = bc.unshelled(bc.said(data))",
+                         "    cmd = bc.said(data)")),
+    ("bringing a line down onto a different one is not landing it", GATE,
+     lambda s: s.replace('    if verb == "fetch":\n'
+                         "        return fetch_targets(rest, here)\n", "")),
+    ("a fetch onto the line of the same name is landing work", GATE,
+     lambda s: s.replace("        if line_named(came, here) != line_named(onto, here):\n"
+                         "            out.append(line_named(onto, here))",
+                         "        out.append(line_named(onto, here))")),
+    ("a waiting piece of work is only merged by the subcommand for it", GATE,
+     lambda s: s.replace("    return is_pull_merge(path) and method not in GH_READS",
+                         "    return False")),
+    ("asking whether a piece of work is merged is merging it", GATE,
+     lambda s: s.replace("    return is_pull_merge(path) and method not in GH_READS",
+                         "    return is_pull_merge(path)")),
+    ("a fast-forward switch anywhere on the line answers for every fold", GATE,
+     lambda s: s.replace("    if any(verb == \"merge\" and FF_ONLY not in rest "
+                         "for verb, rest in folds):",
+                         "    if any(verb == \"merge\" for verb, rest in folds) "
+                         "and FF_ONLY not in bc.words(cmd):")),
 ]
+
+
+def stale():
+    """Faults whose patch no longer matches the live source, by name.
+
+    Read off the tree as it stands rather than off a commit: what a gate around
+    this wants to know is whether the code in front of it has moved, and which
+    branch the shared checkout happens to be standing on is not that question.
+    """
+    out = []
+    for label, path, break_it in FAULTS:
+        try:
+            with open(os.path.join(SRC, path)) as fh:
+                was = fh.read()
+        except OSError as why:
+            out.append("%s (%s)" % (label, why))
+            continue
+        if break_it(was) == was:
+            out.append(label)
+    return out
+
+
+if "--anchors" in sys.argv:
+    # The cheap half, and the only half worth putting on another project's push:
+    # whether every fault still patches the source, with no suite run at all.
+    gone = stale()
+    for label in gone:
+        print("MOVED  %s" % label)
+    print("%d of %d fault(s) no longer apply" % (len(gone), len(FAULTS)))
+    sys.exit(1 if gone else 0)
 
 
 def export():

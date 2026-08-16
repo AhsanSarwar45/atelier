@@ -29,8 +29,12 @@ import spine  # noqa: E402
 # later — inside a card's own text — is text.
 START = r"(?:^|[;&|(]\s*|^\s*)"
 # The wrappers that put a word in front of `bd` without changing what it does,
-# read from the one list every gate shares (`board_common.WRAPPERS`).
-WRAP = r"(?:(?:%s)\s+(?:\w+=\S+\s+)*|\\)*" % "|".join(bc.WRAPPERS)
+# read from the one list every gate shares (`board_common.WRAPPERS`) — and with
+# the carrier's OWN switches and their values eaten, up to the tool itself, so
+# `nice -n 10` and `sudo -u me` reach the same answer as the bare word. Consuming
+# only `NAME=value` covers `env` alone and leaves every other carrier's ordinary
+# spelling through.
+WRAP = r"(?:(?:%s)(?:\s+(?!(?:bd|git|rtk)\b)\S+)*\s+|\\)*" % "|".join(bc.WRAPPERS)
 VERB = START + WRAP + r"bd\s+(?:--?\S+(?:[= ]\S+)?\s+)*"
 CLOSE = re.compile(VERB + r"(?:close\b|update\b[^|;&]*(?:-s|--status)[= ]closed\b)", re.M)
 CLAIM = re.compile(VERB + r"update\b[^|;&]*--claim\b", re.M)
@@ -621,7 +625,11 @@ def open_children(cid, root):
 
 def main():
     data = json.load(sys.stdin)
-    cmd = bc.said(data)
+    # What a shell was handed comes back onto the line as commands first. Every
+    # rule below reads quoted words as a card's own text, which is what keeps a
+    # note quoting a close from being read as one — and is exactly what would hide
+    # `sh -c "git commit -m x"` from all of them (board_common.unshelled).
+    cmd = bc.unshelled(bc.said(data))
     root = bc.board_root(bc.where(data))
     if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing() \
             or bc.waived(data.get("session_id")):
