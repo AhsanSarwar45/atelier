@@ -144,12 +144,13 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 | `thinking.delta` | `messageId, text` — behind a toggle |
 | `message.completed` | `messageId` |
 | `image` | `messageId, mime, dataUrl \| path, alt` |
+| `note` | `noteId, rank: note \| detail, kind, text, body?` — anything the machine says about itself, and everything the mapping above has no name for (§8.2.4) |
 
 **Work**
 | event | payload |
 |---|---|
-| `tool.started` | `toolCallId, name, input, title, parentToolCallId?` |
-| `tool.completed` | `toolCallId, ok, output, error?` |
+| `tool.started` | `toolCallId, name, input, title, parentToolCallId?` — `input` is kept and drawn behind the row's own click (§8.2.4) |
+| `tool.completed` | `toolCallId, ok, output, error?` — `output` is kept and drawn the same way |
 | `tool.progress` | `toolCallId, seconds` — how long this call has been running, as the brand counts it (§8.2.2) |
 | `diff` | `toolCallId, path, before, after` — side-by-side changed lines |
 | `todo` | `items[{text,status}]` — the agent's live checklist |
@@ -241,6 +242,15 @@ Fixed at launch, every session:
   "no option to use skills. no option to use commands". Loading them is the
   whole feature. It follows that his `CLAUDE.md`, his hooks and his own
   commands apply inside this app exactly as they do in a terminal.
+- **Every mode the picker offers can actually be taken** —
+  `allowDangerouslySkipPermissions: true` at launch, while `permissionMode`
+  stays whatever the session is pinned to. The two are separate flags: the
+  first only *permits* the switch, the second *takes* it, so a session still
+  starts asking about every tool and nothing is bypassed until he picks bypass.
+  Without it the kit refuses the switch outright — measured 2026-08-17, "Cannot
+  set permission mode to bypassPermissions because the session was not launched
+  with --dangerously-skip-permissions" came back as a 500 to a picker that was
+  offering the mode (bw-1u1).
 - **Never `--bare`, never `ANTHROPIC_API_KEY`.** The CLI's own help states
   `--bare` forces API-key auth and never reads OAuth or the keychain. The
   sidecar launches `claude` in the owner's normal environment so the
@@ -255,7 +265,9 @@ Mapping: text/thinking deltas → `text.delta`/`thinking.delta`; `tool_use` and
 `parent_tool_use_id`; `canUseTool` → `ask.permission` (with `editable: true` —
 the SDK accepts `updatedInput`); the multiple-choice question tool →
 `ask.choice`; the plan-approval permission → `ask.plan`; the final result
-message's `total_cost_usd` → `cost{kind:"usd"}`.
+message's `total_cost_usd` → `cost{kind:"usd"}`. Everything the mapping does
+**not** name becomes a `note` and is drawn — see §8.2.4; the driver has no list
+of kinds it is willing to hear.
 
 **Resume:** `--resume <session-id>`, which works from any directory on
 v2.1.223+ (this machine has 2.1.232). Which sessions exist, what they are
@@ -538,6 +550,16 @@ screen that draws every one of them is the fault this app already paid for once
 (docs/designs/app-shell.md §3). The last 200 are imported and the count of what
 came before is said in a line, not drawn.
 
+**Its calls come with it.** An earlier build imported the words only, on the
+grounds that "a row saying one ran tells the reader nothing they can act on".
+That was true of a row with nothing inside it, and it is the fault the manager
+photographed on 2026-08-17: the same session drawn in his terminal showed every
+command and its output, and drawn here showed sentences alone. A past call is
+imported as the same `tool.started` / `tool.completed` pair a live one emits,
+its result included, so it opens on a click like any other (§8.2.4) — and the
+cap counts calls with the words, because 200 rows is 200 rows however they were
+made.
+
 #### 6.3.3 The way back in
 
 Constraint: a chat opens by being clicked, and a chat that is asleep is woken by
@@ -678,6 +700,67 @@ writing box, and they act on the chat that is open — not on the next one.
 The mode a session is pinned to is still stored per session and re-pinned on
 resume (§3.1); a live change updates that store, so it survives the chat going
 to sleep and coming back.
+
+#### 8.2.4 Everything the agent does, on one page (bw-1u1)
+
+Constraint: nothing the kit sends is dropped. What the agent *says* reads as
+speech; everything the machine says about itself is grey and out of the way; and
+the body of anything — a call's arguments and its output, a hook's stdout, a
+whole message the app had no name for — sits behind a click.
+
+**The driver has no whitelist.** `pump()` translates the kinds it knows and ends
+with an arm that catches every other message and turns it into a `note`. This is
+a rule about the shape of the code, not a list to keep up to date: measured
+2026-08-17 (bw-1u1), the switch had branches for 6 of the kit's 37 message kinds
+and silently dropped 31, and the manager's `/compact` answer was one of them —
+sent twice, as `system/status` (`compact_result: "failed"`, `compact_error:
+"Not enough messages to compact."`) and again as an assistant message with
+`model: "<synthetic>"` carrying that same sentence. A list would have lost the
+next one just as quietly.
+
+**Three ranks, and the kit names two of them itself.**
+
+| rank | what is in it | how it is drawn |
+|---|---|---|
+| `say` | the agent's answer, his own turn | a bubble, as now |
+| `note` | what the machine says about itself: compaction, retries, refusals, denials, mode changes, a hook that failed, a subagent starting | one grey line, its body behind a click |
+| `detail` | the machine's own breathing: `status: "requesting"`, hook starts, rate-limit pings, and any kind this app has no name for | nothing, until "show everything" is on |
+
+The kit's `system/informational` carries its own `level`, and its documentation
+already names the treatment the manager asked for — "'info' shows only in
+transcript mode; 'notice' renders in inactive gray". So `info` → `detail`, and
+`notice`/`suggestion`/`warning` → `note`. Where the kit ranks a message, that
+ranking is used rather than one of ours.
+
+**A call's body is on the call's own row.** `tool.completed` has always carried
+the output across the wire and the browser threw it away, keeping only a status
+word. It is kept now, with the arguments from `tool.started`, and the row opens
+on a click. That is the manager's "i don't get output in chat for that".
+
+**One control opens everything, and it is Ctrl+O**, because that is the key that
+does it in his terminal. It opens every call and every `detail` line at once,
+and the choice is remembered for the browser rather than the chat.
+
+**A message with no stream behind it is still drawn.** Text has only ever come
+from `stream_event` deltas, so a message the kit writes itself — a compaction
+refusal, an abort notice, a model refusal — arrived with its words in
+`message.content` and was drawn nowhere. The `assistant` arm now draws text
+blocks it has not already seen streamed, and the `user` arm draws text blocks
+when `isSynthetic` is set, which is the flag that separates a turn the kit wrote
+from one of his (his own turn is written to the log on send and must not be
+drawn twice).
+
+**A mode change says so.** Switching permission mode mid-chat writes a `note`.
+A chat that quietly stopped asking about tools is a trap, and bypass is now
+reachable from the picker (§3.1).
+
+#### 8.2.5 What this costs the log
+
+Every rank is stored; only the drawing differs (§4 — the log is the transcript,
+and a `detail` line hidden today must still be there when he presses Ctrl+O).
+Hook events are the volume risk, since an install with `PreToolUse`/`PostToolUse`
+hooks writes two per tool call; they are `detail`, they are small, and the number
+is measured on a real turn rather than assumed.
 
 ### 8.3 The board tab
 
