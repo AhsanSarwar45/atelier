@@ -1,0 +1,208 @@
+{
+  "title": "Dropped Work Does Not Count",
+  "eyebrow": "Landed and running on your board; the outside reader has not signed it off yet",
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. Override any decision below if you disagree with one."
+  },
+  "status": {
+    "card": "bw-4gk"
+  },
+  "content": [
+    {
+      "label": "What you asked",
+      "lead": "You saw bw-oio5 sitting under Cancelled and asked whether dropping a piece of work drags the whole job with it, and said dropped work should not count towards the total.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Your question",
+            "The answer"
+          ],
+          "rows": [
+            [
+              "Did cancelling a sub-task cancel the epic?",
+              "No. An agent cancelled that epic itself, as a duplicate. Cancelling a piece never moves the job."
+            ],
+            [
+              "Should dropped work count towards the total?",
+              "It no longer does. That was a real fault, and it ran deeper than the one number."
+            ],
+            [
+              "Were those sub-tasks cancelled in error?",
+              "The cancelling was right; the copying was not. Filed as its own card for the job that caused it."
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What it cost you",
+      "lead": "A job with nothing left to do could never reach a hundred, and the button that lets you sign one off appears at a hundred and nowhere else.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Job",
+            "Before",
+            "After",
+            "Pieces"
+          ],
+          "rows": [
+            [
+              "bw-oio5",
+              "10/14 · 71%",
+              "10/10 · 100%",
+              "14, four dropped"
+            ],
+            [
+              "bw-o3sh",
+              "11/16 · 69%",
+              "11/11 · 100%",
+              "16, five dropped"
+            ],
+            [
+              "bw-41l",
+              "6/11 · 55%",
+              "6/6 · 100%",
+              "11, five dropped"
+            ],
+            [
+              "bw-zxy",
+              "22/27 · 81%",
+              "22/27 · 81%",
+              "27, none dropped"
+            ]
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "The last row is the point: jobs with real work left read exactly as they did, so the number now means what it says."
+        }
+      ]
+    },
+    {
+      "label": "What the board looks like now",
+      "lead": "The same card, before and after.",
+      "blocks": [
+        {
+          "kind": "compare",
+          "before": {
+            "path": "reporting/pages/beads-web/dropped-work/before.png",
+            "caption": "10/14 and 71%, with nothing left standing"
+          },
+          "after": {
+            "path": "reporting/pages/beads-web/dropped-work/after.png",
+            "caption": "The counts that count, and what was dropped said out loud"
+          }
+        }
+      ]
+    },
+    {
+      "label": "What else was wrong behind it",
+      "lead": "An outside reader went over the change three times and turned it down twice; every point it raised was real.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "What it caught",
+            "Why it mattered"
+          ],
+          "rows": [
+            [
+              "A job with every piece dropped read as finished",
+              "It offered you the sign-off on a job where no work happened. It reads as nothing done now."
+            ],
+            [
+              "Dropped cards drawn as the live work",
+              "Five abandoned pieces looked like the outstanding work, under a count saying there was none."
+            ],
+            [
+              "The card and its panel gave one job two sizes",
+              "Two screens, two answers, same job."
+            ],
+            [
+              "Only one of eleven themes said what was dropped",
+              "On Linear Minimal and Notion Warm a full bar sat over a longer list with no explanation."
+            ],
+            [
+              "Three separate copies of what blocks a piece",
+              "All three had to be taught the same thing in step; the one that got missed would have gone quietly wrong."
+            ],
+            [
+              "Every card rebuilt a lookup of the whole board",
+              "A fresh 421-entry map of the whole board per card, for roughly 180 cards, every time the board redraws."
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What stops it coming back",
+      "lead": "The rule now lives on the one list of states, and two checks hold it.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Check",
+            "What it proves"
+          ],
+          "rows": [
+            [
+              "171 unit cases",
+              "Put the old rule back and eight go red, on numbers taken from bw-oio5's own shape."
+            ],
+            [
+              "A check that drives a real browser at your board",
+              "It compares every job card on screen with what the board holds. Green today; run with the old rule it names all three jobs that dropped anything."
+            ]
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "The screen check exists because no test that stops at the code could have caught this: the board looked calm and drew the wrong number."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Dropped work leaves the job's size entirely",
+      "why": "Your words. A job of fourteen with four dropped is a job of ten, and it finishes when those ten are done."
+    },
+    {
+      "id": "D2",
+      "title": "A job whose every piece was dropped reads as nothing done, not as finished",
+      "why": "The reader turned down my first answer here and was right: no work happened, so it is a job to drop, not one to sign off."
+    },
+    {
+      "id": "D3",
+      "title": "Your running app was rebuilt and restarted",
+      "why": "The fix is a number on your screen; it was not delivered until your own copy showed it."
+    },
+    {
+      "id": "D4",
+      "title": "The duplicated cards were left to the job that made them",
+      "why": "bw-oio5.11 to .14 sit here cancelled beside the fresh copies of themselves. That belongs to the move job, which is running."
+    }
+  ],
+  "next": {
+    "if_nothing": "The reader finishes its reading and the job closes, or it raises more points and I answer those the same way.",
+    "steps": [
+      {
+        "step": "The outside reader signs off and the job closes",
+        "cost": "small",
+        "starting": true
+      },
+      {
+        "step": "Rename the line all work lands on, so a job stops starting from a month-old copy and landing leaves your checkout stale (bw-axh)",
+        "cost": "small"
+      },
+      {
+        "step": "Clear the cards the move copied onto this board twice (bw-1o6)",
+        "cost": "small"
+      }
+    ]
+  }
+}
