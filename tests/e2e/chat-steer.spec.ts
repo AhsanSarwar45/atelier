@@ -108,6 +108,14 @@ test.describe('steering the chat you are in', () => {
     // A command whose whole point is the terminal cannot work from a browser.
     expect(names, 'a terminal-only command is offered').not.toContain('login');
     expect(names, 'a terminal-only command is offered').not.toContain('exit');
+    // His OWN commands, not merely the ones the tool ships with. A plugin's
+    // commands are namespaced, and they exist only when the session loads his
+    // settings: measured 2026-08-17, 40 commands and none namespaced without
+    // them, 77 with (bw-f1q).
+    expect(
+      names.filter((n) => n.includes(':')).length,
+      'the menu holds only the tool’s own commands — his settings were not loaded',
+    ).toBeGreaterThan(0);
 
     const wanted = names[0]!;
     await page.locator(`[data-testid="command-option"][data-command="${wanted}"]`).click();
