@@ -122,14 +122,25 @@ describe("one list decides the states", () => {
   });
 
   it("every state says whether a piece in it is part of the job", () => {
-    // Without this the counter has to name the dropped state itself, and a
-    // seventh state arrives counted as real work nobody asked for.
+    // Asserted against what the board IS, not against the same expression the
+    // readings are written from — restating the implementation gives a case
+    // that cannot go red whatever the list says.
     for (const s of STATES) {
       expect(typeof s.counts, `${s.id} does not say whether it counts`).toBe("boolean");
-      expect(finished(s.id), `${s.id} reads as finished work`).toBe(!s.live && s.counts);
-      expect(standing(s.id), `${s.id} reads as still standing`).toBe(s.live);
-      expect(counted(s.id), `${s.id} reads as part of the job`).toBe(s.counts);
     }
+
+    // Work still standing is always part of the job: dropping is something
+    // done to work, and a state cannot mean both at once.
+    const live = STATES.filter((s) => s.live).map((s) => s.id);
+    expect(live.filter((id) => !counted(id)), "a live state that counts for nothing")
+      .toEqual([]);
+    expect(live.filter((id) => !standing(id)), "a live state nobody is waiting on")
+      .toEqual([]);
+
+    // One state is finished work and one means dropped, and they are the two
+    // that are not live. A seventh of either is a board nobody can count.
+    expect(STATES.filter((s) => finished(s.id)).map((s) => s.id)).toEqual(["closed"]);
+    expect(STATES.filter((s) => !s.live && !s.counts).map((s) => s.id)).toEqual(["cancelled"]);
   });
 
   it("exactly one state means the work was dropped", () => {

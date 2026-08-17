@@ -374,6 +374,10 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
       className={cn(
         "theme-card cursor-pointer bg-card border border-border/40 flex",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        // The two denser shapes dimmed a card nobody is waiting on and this one
+        // never did, so on the default theme — the one actually being run —
+        // dropped and finished work was drawn exactly like live work.
+        isSettled && "opacity-45",
         blocked ? "border-l-4 border-l-danger" : "",
         isSelected && "ring-2 ring-ring ring-offset-2 ring-offset-background"
       )}
