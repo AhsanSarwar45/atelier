@@ -226,7 +226,7 @@ function Body({ label, text, testId }: { label: string; text: string; testId: st
  * rather than watched with an effect, so the row is right on the render that
  * shows it, never one frame late.
  */
-function useOpen(openAll: boolean): [boolean, (open: boolean) => void] {
+export function useOpen(openAll: boolean): [boolean, (open: boolean) => void] {
   const [byHand, setByHand] = useState<boolean | null>(null);
   const [lastAll, setLastAll] = useState(openAll);
   if (lastAll !== openAll) {
