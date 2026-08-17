@@ -70,6 +70,64 @@ a screenful draws a screenful and grows as it is pulled. Day headings survive
 that because a group is cut from rows already drawn. Held by
 `tests/e2e/chat-shell.spec.ts`; the numbers behind it are in §3.
 
+### 1.7 The address is the state (bw-m8o)
+
+Constraint: everything a reader could arrive at is in the address, and every
+move he makes by hand is pushed onto the history. One shape, on one route:
+
+```
+/project?id=<project>&tab=chat|board&chat=<sessionId>&card=<cardId>
+```
+
+`tab` is which half is mounted, `chat` is the conversation drawn in it, `card` is
+the card panel over the top of either. Nothing that a link could carry is held in
+a component's own state: a screen that keeps its own copy answers the address on
+the first paint and then quietly disagrees with it, which is what made Back do
+nothing and made an open chat unlinkable.
+
+Pushed, not replaced: `router.replace` leaves no history entry, so Back stepped
+straight out of the app. A tab switch, an opened chat and an opened card are all
+pushes; only spending a one-shot parameter is a replace.
+
+External reality: this app ships as a static export embedded in the binary
+(`next.config.js` `output: 'export'`), so a path segment holding an id that only
+exists at runtime — `/project/<id>/chat/<sid>` — cannot be pre-rendered, and a
+cold open of such a link is a 404 until the Rust server learns to serve the shell
+for unknown paths. Search parameters need no such fallback and carry the same
+three effects: a link that opens the same thing, a Back that goes back, and a
+state a second window agrees with. Prettier paths are their own job.
+
+`?bead=<id>` is still read, as the old spelling of `card`, so links already
+pasted into cards and chats keep working.
+
+### 1.8 One card panel, over whatever is showing
+
+Constraint: a card opens where the reader already is. The panel is mounted by the
+project screen, not by the board, and it is driven by `card` in the address —
+so a chip on a chat's line, a chip on a chat's row, and a card on the board all
+open the same panel over the tab that is showing. Closing it goes back.
+
+The panel reads the board's list itself and is mounted only while a card is open,
+which keeps the chat tab free of the board's cost (§1.6) — the price is one extra
+read of the card list while a card is open on the board tab.
+
+### 1.9 Opening a chat is a read
+
+Constraint: clicking a chat draws what was said and starts nothing. The agent is
+woken by the first message sent to it, and by nothing else — the manager's rule,
+2026-08-17: "clicking just opens it. it only resumes when we send another
+message."
+
+Two consequences in the sidecar. A chat is opened with `session.open`, which
+gives a conversation begun in a terminal an id and reads its past into the event
+log without attaching a driver. And `prompt.send` to a chat with no driver
+attached wakes it first and then sends, so a link into a sleeping chat is a
+working chat the moment he types.
+
+A row must not move for being read: `last_active_at` is stamped by every
+`updateSession`, so opening may write nothing to the session row. That stamp is
+what sent a clicked chat to the top of the list.
+
 ## 2. Deliberate drops
 
 - The app-wide bar is gone. Its four pieces moved: the tray and the live strip

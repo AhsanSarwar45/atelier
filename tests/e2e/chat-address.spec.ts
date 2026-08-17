@@ -1,0 +1,191 @@
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+
+/**
+ * The address is where you are: the chat you opened, the card you opened, and
+ * what Back means.
+ *
+ * Needs an instance with chats in it — the preview reading the owner's own
+ * board is enough (`PORT=3017 npm run dev:live`, then
+ * `BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3008`).
+ *
+ * Nothing here may wake an agent: opening a chat is a read, and the run asserts
+ * it by watching what the browser posts. Every case therefore picks a SLEEPING
+ * chat — the one case where waking used to happen.
+ */
+
+/** Reading a chat's past is a file read of a whole conversation. */
+const WAY_IN_MS = 120_000;
+
+interface Project {
+  id: string;
+  path: string;
+}
+
+interface RestoreRow {
+  sessionId: string | null;
+  externalId: string | null;
+  title: string | null;
+  state: string;
+  beads: string[];
+}
+
+function backend(): string {
+  return process.env.BEADS_E2E_BACKEND ?? '';
+}
+
+/** The row's own key, as the screen writes it on the row. */
+function keyOf(row: RestoreRow): string {
+  return row.sessionId ?? `ext:${row.externalId}`;
+}
+
+/** A chat this app has run before and is not running now. */
+function asleep(rows: RestoreRow[]): RestoreRow[] {
+  return rows.filter((r) => r.sessionId !== null && (r.state === 'dormant' || r.state === 'ended'));
+}
+
+/** The first project the instance lists that has sleeping chats to open. */
+async function withChats(request: APIRequestContext): Promise<{ project: Project; rows: RestoreRow[] }> {
+  const api = backend();
+  const projects = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
+  expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
+  const wanted = process.env.BEADS_E2E_PROJECT;
+  for (const project of wanted ? projects.filter((p) => p.id === wanted) : projects) {
+    const q = new URLSearchParams({ project: project.id, path: project.path });
+    const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as RestoreRow[];
+    if (asleep(rows).length >= 2) return { project, rows };
+  }
+  throw new Error('no project on this instance has two sleeping chats to open');
+}
+
+async function openChatTab(page: Page, project: Project): Promise<void> {
+  await page.goto(`/project?id=${project.id}&tab=chat`);
+  await page.getByTestId('restore-row').first().waitFor({ timeout: 60_000 });
+}
+
+/** The chat drawn right now, and how much of it. */
+async function drawn(page: Page): Promise<{ sessionId: string | null; messages: number }> {
+  return page.evaluate(() => ({
+    sessionId: document.querySelector('[data-testid="chat-tab"]')?.getAttribute('data-session-id') ?? null,
+    messages: document.querySelectorAll('[data-testid="assistant-message"],[data-testid="user-message"]').length,
+  }));
+}
+
+/** Opens one named row and waits until its own words are on the screen. */
+async function enter(page: Page, row: RestoreRow): Promise<string> {
+  const at = page.locator(`[data-testid="restore-row"][data-row-key="${keyOf(row)}"]`);
+  await at.scrollIntoViewIfNeeded();
+  await at.getByTestId('row-name').click();
+  await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+  await expect.poll(async () => (await drawn(page)).messages, { timeout: WAY_IN_MS }).toBeGreaterThan(0);
+  const id = (await drawn(page)).sessionId;
+  expect(id, 'the chat drew nothing it could be identified by').toBeTruthy();
+  return id!;
+}
+
+/** Every command the browser sent while `work` ran. */
+async function commandsDuring(page: Page, work: () => Promise<void>): Promise<string[]> {
+  const sent: string[] = [];
+  const watch = (request: { url(): string; method(): string; postData(): string | null }) => {
+    if (request.method() !== 'POST' || !request.url().includes('/api/workbench/command')) return;
+    try {
+      sent.push((JSON.parse(request.postData() ?? '{}') as { type?: string }).type ?? '?');
+    } catch {
+      sent.push('?');
+    }
+  };
+  page.on('request', watch);
+  try {
+    await work();
+  } finally {
+    page.off('request', watch);
+  }
+  return sent;
+}
+
+test.describe('the address says where you are', () => {
+  // Opening a chat reads a whole conversation off the disk; the default 30s is
+  // the harness's, not this screen's.
+  test.describe.configure({ timeout: 300_000 });
+
+  test('the chat you open is in the address, and opening it starts nothing', async ({ page, request }) => {
+    const { project, rows } = await withChats(request);
+    await openChatTab(page, project);
+
+    const sleeping = asleep(rows)[0]!;
+    let opened = '';
+    const sent = await commandsDuring(page, async () => {
+      opened = await enter(page, sleeping);
+    });
+
+    expect(opened, 'a sleeping chat opened under a different id').toBe(sleeping.sessionId);
+    expect(new URL(page.url()).searchParams.get('chat'), 'the address does not name the open chat').toBe(opened);
+    expect(
+      sent.filter((t) => t === 'session.resume' || t === 'session.start'),
+      `opening a sleeping chat sent ${sent.join(', ') || 'nothing'}`,
+    ).toEqual([]);
+  });
+
+  test('Back returns to the chat that was open before', async ({ page, request }) => {
+    const { project, rows } = await withChats(request);
+    await openChatTab(page, project);
+
+    const [one, two] = asleep(rows);
+    const first = await enter(page, one!);
+    const second = await enter(page, two!);
+    expect(second, 'the second row opened the same chat as the first').not.toBe(first);
+
+    await page.goBack();
+    await expect.poll(async () => (await drawn(page)).sessionId, { timeout: WAY_IN_MS }).toBe(first);
+    expect(new URL(page.url()).searchParams.get('chat')).toBe(first);
+  });
+
+  test('the address opens the same chat in a fresh tab', async ({ page, request, context }) => {
+    const { project, rows } = await withChats(request);
+    await openChatTab(page, project);
+    const opened = await enter(page, asleep(rows)[0]!);
+    const shared = page.url();
+
+    const other = await context.newPage();
+    await other.goto(shared);
+    await other.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+    await expect.poll(async () => (await drawn(other)).sessionId, { timeout: WAY_IN_MS }).toBe(opened);
+    await other.close();
+  });
+
+  test('a ticket on the chat opens the card over the chat, and Back closes it', async ({ page, request }) => {
+    const { project, rows } = await withChats(request);
+    const worked = rows.find((r) => r.sessionId !== null && r.beads.length > 0);
+    expect(worked, 'no chat on this instance names a card').toBeTruthy();
+    await openChatTab(page, project);
+
+    const opened = await enter(page, worked!);
+    const chip = page.getByTestId('bead-chip').first();
+    await chip.waitFor({ timeout: 60_000 });
+    const card = await chip.getAttribute('data-bead-id');
+    await chip.click();
+
+    await page.getByTestId('bead-detail').waitFor({ timeout: 60_000 });
+    const address = new URL(page.url());
+    expect(address.searchParams.get('card'), 'the open card is not in the address').toBe(card);
+    expect(address.searchParams.get('tab'), 'the card threw the reader off the chat').toBe('chat');
+    expect(address.searchParams.get('chat'), 'the chat was lost when the card opened').toBe(opened);
+    expect(await page.getByTestId('chat-tab').isVisible(), 'the chat is no longer drawn behind the card').toBe(true);
+
+    await page.goBack();
+    await expect(page.getByTestId('bead-detail')).toBeHidden({ timeout: 60_000 });
+    await expect.poll(async () => (await drawn(page)).sessionId, { timeout: WAY_IN_MS }).toBe(opened);
+  });
+
+  test('the tab you left is in the history', async ({ page, request }) => {
+    const { project, rows } = await withChats(request);
+    await openChatTab(page, project);
+    const opened = await enter(page, asleep(rows)[0]!);
+
+    await page.getByTestId('tab-board').click();
+    await page.getByTestId('board-scroll').waitFor({ timeout: 60_000 });
+
+    await page.goBack();
+    await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+    await expect.poll(async () => (await drawn(page)).sessionId, { timeout: WAY_IN_MS }).toBe(opened);
+  });
+});
