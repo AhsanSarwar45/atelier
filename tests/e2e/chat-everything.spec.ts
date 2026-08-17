@@ -54,16 +54,33 @@ async function freshChat(request: APIRequestContext, page: Page): Promise<{ proj
   return { project, id: started.id };
 }
 
-/** Sends one turn and waits for the agent to stop owing an answer. */
+/**
+ * Sends one turn and waits for it to be on the page.
+ *
+ * Escape first, because a line starting with `/` opens the command menu and
+ * Enter would pick an entry out of it rather than send anything (§7). What each
+ * case then waits for is its OWN evidence: waiting to SEE the chat busy races a
+ * local command, which answers before a screen can be sampled.
+ */
+/**
+ * Lets this chat run a command without stopping to ask.
+ *
+ * Through the picker, because that is the path the manager uses and the mode
+ * the kit refused outright before this job (§3.1) — a case that needs a command
+ * to have run is also the case that proves the switch took.
+ */
+async function letItRun(page: Page): Promise<void> {
+  const picker = page.getByTestId('mode-picker');
+  await picker.click();
+  await page.locator('[data-testid="mode-picker-option"][data-value="bypassPermissions"]').click();
+  await expect.poll(async () => picker.getAttribute('data-current'), { timeout: 60_000 }).toBe('bypassPermissions');
+}
+
 async function say(page: Page, text: string): Promise<void> {
   await page.getByTestId('composer').fill(text);
+  await page.getByTestId('composer').press('Escape');
   await page.getByTestId('composer').press('Enter');
-  // It must first become busy, or an assertion could pass on the state it was
-  // already in before the turn started.
-  await expect
-    .poll(async () => page.getByTestId('working-line').isVisible().catch(() => false), { timeout: 60_000 })
-    .toBe(true);
-  await expect(page.getByTestId('working-line')).toBeHidden({ timeout: TURN_MS });
+  await expect(page.getByTestId('user-message').filter({ hasText: text })).toBeVisible({ timeout: 60_000 });
 }
 
 test.describe('the chat draws everything the agent does', () => {
@@ -92,14 +109,17 @@ test.describe('the chat draws everything the agent does', () => {
     await freshChat(request, page);
     await say(page, '/compact');
 
-    // The sentence the kit sent twice and the chat drew neither time.
-    await expect(page.getByTestId('transcript')).toContainText(/compact/i, { timeout: 60_000 });
+    // The answer the kit sent twice and the chat drew neither time. A chat this
+    // short cannot be compacted, so what must appear is the reason.
+    await expect(page.getByTestId('note-row').filter({ hasText: /compact/i }).first()).toBeVisible({
+      timeout: TURN_MS,
+    });
   });
 
   test('a message with no stream behind it is drawn, and only once', async ({ page, request }) => {
     await freshChat(request, page);
     await say(page, '/compact');
-    await page.getByTestId('transcript').getByText(/compact/i).first().waitFor({ timeout: 60_000 });
+    await page.getByTestId('note-row').filter({ hasText: /compact/i }).first().waitFor({ timeout: TURN_MS });
 
     // The kit reports this in two shapes — a status and a message it wrote
     // itself. Both are kept; one is read. Text has only ever come off the
@@ -115,10 +135,11 @@ test.describe('the chat draws everything the agent does', () => {
 
   test('a command row opens onto what it ran and what it printed', async ({ page, request }) => {
     await freshChat(request, page);
+    await letItRun(page);
     await say(page, 'Run exactly this in the shell and say nothing else: echo beads-web-was-here');
 
     const row = page.getByTestId('tool-row').filter({ hasText: 'Bash' }).first();
-    await row.waitFor({ timeout: 60_000 });
+    await row.waitFor({ timeout: TURN_MS });
     // Shut to begin with: a transcript of open command bodies is unreadable.
     await expect(row).toHaveAttribute('data-open', 'false');
 
@@ -132,10 +153,11 @@ test.describe('the chat draws everything the agent does', () => {
 
   test('one control opens everything, and it is remembered', async ({ page, request }) => {
     const { project, id } = await freshChat(request, page);
+    await letItRun(page);
     await say(page, 'Run exactly this in the shell and say nothing else: echo opened-by-one-key');
 
     const row = page.getByTestId('tool-row').first();
-    await row.waitFor({ timeout: 60_000 });
+    await row.waitFor({ timeout: TURN_MS });
     await expect(row).toHaveAttribute('data-open', 'false');
 
     // Ctrl+O, because that is the key that does it in his terminal.
@@ -152,6 +174,40 @@ test.describe('the chat draws everything the agent does', () => {
     // Put back, so a later case does not inherit a transcript with everything open.
     await page.keyboard.press('Control+o');
     await expect(page.getByTestId('toggle-open-all')).toHaveAttribute('data-open-all', 'false');
+  });
+
+  test('putting the command list away keeps what he typed', async ({ page, request }) => {
+    await freshChat(request, page);
+
+    await page.getByTestId('composer').fill('/compact');
+    await page.getByTestId('command-menu').waitFor({ timeout: 60_000 });
+    await page.getByTestId('composer').press('Escape');
+
+    // The list goes; the line stays. Escape used to empty the box, so a command
+    // he meant to send exactly as typed could not be sent at all (bw-1u1.14).
+    await expect(page.getByTestId('command-menu')).toBeHidden();
+    await expect(page.getByTestId('composer')).toHaveValue('/compact');
+  });
+
+  test('a remembered way of reading survives a reload', async ({ page, request }) => {
+    const { project, id } = await freshChat(request, page);
+
+    // The sibling of the control above, and it had the same fault: a way of
+    // reading written back from an effect is overwritten by the value the
+    // screen started at, so it never survived a reload (bw-1u1.13).
+    const button = page.getByTestId('toggle-everything');
+    const before = await button.getAttribute('data-showing-everything');
+    await button.click();
+    const after = before === 'true' ? 'false' : 'true';
+    await expect(button).toHaveAttribute('data-showing-everything', after);
+
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${id}`);
+    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+    await expect(button).toHaveAttribute('data-showing-everything', after, { timeout: 30_000 });
+
+    // Put back, so a later case starts where a chat normally starts.
+    await button.click();
+    await expect(button).toHaveAttribute('data-showing-everything', before ?? 'false');
   });
 
   test('an imported chat draws its commands, not only its sentences', async ({ page, request }) => {

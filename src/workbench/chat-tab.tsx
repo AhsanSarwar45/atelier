@@ -630,6 +630,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [looking, setLooking] = useState<ImagePayload | null>(null);
   /** Which entry the `/` menu has under the cursor. */
   const [pick, setPick] = useState(0);
+  /** The `/` menu, put away by hand until the next keystroke. */
+  const [shut, setShut] = useState(false);
   /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
   const [railOpen, setRailOpen] = useState(false);
   /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
@@ -645,9 +647,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setEverything(localStorage.getItem(EVERY_CHAT) === '1');
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(EVERY_CHAT, everything ? '1' : '0');
-  }, [everything]);
+  /** Written where it is changed, for the reason spelled out on `flipOpenAll`. */
+  const flipEverything = useCallback(() => {
+    setEverything((was) => {
+      localStorage.setItem(EVERY_CHAT, was ? '0' : '1');
+      return !was;
+    });
+  }, []);
   /**
    * Everything open: every command showing what it ran and printed, and every
    * line the machine says about itself. Ctrl+O, because that is the key that
@@ -661,19 +667,28 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setOpenAll(localStorage.getItem(CHAT_OPEN_ALL) === '1');
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(CHAT_OPEN_ALL, openAll ? '1' : '0');
-  }, [openAll]);
+  /**
+   * Written where it is CHANGED, never mirrored from an effect: an effect that
+   * writes the state back runs once with the value the screen started at, which
+   * overwrites what was remembered before the effect that reads it has taken —
+   * so the choice was lost on every reload.
+   */
+  const flipOpenAll = useCallback(() => {
+    setOpenAll((was) => {
+      localStorage.setItem(CHAT_OPEN_ALL, was ? '0' : '1');
+      return !was;
+    });
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'o') return;
       e.preventDefault();
-      setOpenAll((was) => !was);
+      flipOpenAll();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [flipOpenAll]);
   const endRef = useRef<HTMLDivElement>(null);
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -724,11 +739,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */
   const typedCommand = /^\/(\S*)$/.exec(draft)?.[1] ?? null;
-  const matches = useMemo(() => {
+  const found = useMemo(() => {
     if (typedCommand === null) return [];
     const wanted = typedCommand.toLowerCase();
     return view.menu.commands.filter((c) => c.name.toLowerCase().startsWith(wanted)).slice(0, 40);
   }, [typedCommand, view.menu.commands]);
+  // Put away by hand, until the next thing he types. Escape used to empty the
+  // whole box instead, so dismissing the list threw away the line — and a
+  // command he meant to send as it stands could not be (bw-1u1.14).
+  const matches = shut ? [] : found;
   useEffect(() => setPick(0), [typedCommand]);
 
   function take(command: CommandInfo) {
@@ -783,7 +802,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           emphasis={everything ? 'loud' : 'quiet'}
           data-testid="toggle-everything"
           data-showing-everything={everything}
-          onClick={() => setEverything((v) => !v)}
+          onClick={flipEverything}
         />
         <ToolButton
           icon={<ListTree />}
@@ -791,7 +810,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           emphasis={openAll ? 'loud' : 'quiet'}
           data-testid="toggle-open-all"
           data-open-all={openAll}
-          onClick={() => setOpenAll((v) => !v)}
+          onClick={flipOpenAll}
         />
         <ToolButton
           icon={<MessageSquarePlus />}
@@ -1043,7 +1062,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             data-testid="composer"
             rows={1}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setShut(false);
+              setDraft(e.target.value);
+            }}
             onPaste={(e) => void absorb(Array.from(e.clipboardData.files))}
             onDrop={(e) => {
               e.preventDefault();
@@ -1068,7 +1090,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 }
                 if (e.key === 'Escape') {
                   e.preventDefault();
-                  setDraft('');
+                  setShut(true);
                   return;
                 }
               }

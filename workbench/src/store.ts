@@ -104,6 +104,12 @@ const MIGRATIONS: string[] = [
   // false forever for a chat that touched none — so every open read the whole
   // conversation off the disk again and re-ran the card scan (bw-m8o.14).
   `ALTER TABLE session ADD COLUMN imported_at TEXT;`,
+
+  // WHICH reading of the record a chat was read in by. Chats read in before
+  // this were given their words and none of their commands, and a mark saying
+  // only "read" left them that way forever — which is the copy the manager
+  // photographed (bw-1u1, docs/agent-workbench.md §6.3.2).
+  `ALTER TABLE session ADD COLUMN imported_recipe INTEGER;`,
 ];
 
 export class Store {
@@ -180,16 +186,45 @@ export class Store {
     return r ? rowToSummary(r) : undefined;
   }
 
-  /** True once this chat's own record has been read into the log. */
-  wasImported(id: string): boolean {
-    const r = this.db.prepare('SELECT imported_at FROM session WHERE id = ?').get(id) as
-      | { imported_at: string | null }
+  /**
+   * Which reading of the record this chat was read in by, or null for a chat
+   * never read in at all. A chat read in by a build that had no recipes at all
+   * counts as recipe 0, so it is re-read once and then left alone.
+   */
+  importedBy(id: string): number | null {
+    const r = this.db.prepare('SELECT imported_at, imported_recipe FROM session WHERE id = ?').get(id) as
+      | { imported_at: string | null; imported_recipe: number | null }
       | undefined;
-    return !!r?.imported_at;
+    if (!r) return null;
+    if (r.imported_recipe !== null) return r.imported_recipe;
+    return r.imported_at ? 0 : null;
   }
 
-  markImported(id: string): void {
-    this.db.prepare('UPDATE session SET imported_at = ? WHERE id = ?').run(new Date().toISOString(), id);
+  markImported(id: string, recipe: number): void {
+    this.db
+      .prepare('UPDATE session SET imported_at = ?, imported_recipe = ? WHERE id = ?')
+      .run(new Date().toISOString(), recipe, id);
+  }
+
+  /**
+   * True once an agent has been attached to this chat here.
+   *
+   * The import never writes `session.started`; a live attach always does. So a
+   * chat without one has a log that is entirely imported, and re-reading its
+   * record can safely replace the lot. One WITH live turns in it cannot be
+   * rewritten — its history is the only copy.
+   */
+  wasDrivenHere(id: string): boolean {
+    const r = this.db
+      .prepare("SELECT 1 AS yes FROM event WHERE session_id = ? AND type = 'session.started' LIMIT 1")
+      .get(id) as { yes: number } | undefined;
+    return !!r;
+  }
+
+  /** Throws away an entirely-imported log so the record can be read in again. */
+  forgetImported(id: string): void {
+    this.db.prepare('DELETE FROM event WHERE session_id = ?').run(id);
+    this.db.prepare('DELETE FROM message WHERE session_id = ?').run(id);
   }
 
   getSession(id: string): SessionSummary | undefined {

@@ -24,6 +24,16 @@ import type { Store } from './store.ts';
 
 type Subscriber = (e: WbpEvent) => void;
 
+/**
+ * Which reading of a past chat's record this build does.
+ *
+ * 1 was the words alone. 2 is the words and the commands, which is what the
+ * manager asked for after photographing the difference (§6.3.2). Raise it
+ * whenever the import would produce a different transcript from the same
+ * record: every chat read in by a lower one is read again on its next open.
+ */
+const IMPORT_RECIPE = 2;
+
 export class Sessions {
   private drivers = new Map<string, Driver>();
   private linkers = new Map<string, Linker>();
@@ -204,12 +214,17 @@ export class Sessions {
    * Reads what was already said in a chat out of the agent kit's own record and
    * writes it into the event log as the events that would have carried it.
    *
-   * Once only: the log is the transcript (§4), so importing twice would say
-   * everything twice. Text alone becomes a row — the tool calls of a past chat
-   * are not replayable and a row saying one ran tells the reader nothing they
-   * can act on (docs/agent-workbench.md §6.3.2). The calls are still read, by
-   * the same rules the live watcher uses, for the cards and the reports they
-   * name; without that a chat this app never watched can never show either.
+   * Once per reading of the record: the log is the transcript (§4), so importing
+   * twice under the same rules would say everything twice. The words AND the
+   * commands become rows, and the calls are read a second time by the rules the
+   * live watcher uses, for the cards and the reports they name — without that a
+   * chat this app never watched can never show either
+   * (docs/agent-workbench.md §6.3.2).
+   *
+   * When the reading itself changes, a chat read in by an older one is read
+   * again: its old copy is thrown away first, so nothing is said twice. Only a
+   * chat whose whole log came from an import can be rewritten that way — one
+   * with live turns in it is the only copy of those, so it keeps what it has.
    */
   private async importPast(summary: SessionSummary): Promise<void> {
     if (!summary.externalId) return;
@@ -217,14 +232,17 @@ export class Sessions {
     // touched: a chat that touched none failed that test forever, so every click
     // read the whole conversation off the disk again and re-ran the card scan,
     // which forks the board's own tool per candidate (bw-m8o.14).
-    if (this.store.wasImported(summary.id)) return;
-    // A chat read in by an older build has its words but was never marked; the
-    // scan is what gives its cards back, so it is read once more and then marked.
-    const alreadySaid = this.store.messageCount(summary.id) > 0;
-    const alreadyScanned = alreadySaid && this.store.beadsForSession(summary.id).length > 0;
-    if (alreadySaid && alreadyScanned) {
-      this.store.markImported(summary.id);
-      return;
+    const readBy = this.store.importedBy(summary.id);
+    if (readBy !== null && readBy >= IMPORT_RECIPE) return;
+
+    if (readBy !== null || this.store.messageCount(summary.id) > 0) {
+      // Read in by an older build, so it has words and no commands. Its live
+      // turns, if it has any, cannot be re-made from the record.
+      if (this.store.wasDrivenHere(summary.id)) {
+        this.store.markImported(summary.id, IMPORT_RECIPE);
+        return;
+      }
+      this.store.forgetImported(summary.id);
     }
 
     let messages: SessionMessage[];
@@ -235,17 +253,14 @@ export class Sessions {
     }
     // From here the record HAS been read, whatever it turned out to hold — an
     // empty one is still a read, and reading it again would find it empty again.
-    this.store.markImported(summary.id);
+    this.store.markImported(summary.id, IMPORT_RECIPE);
 
     // What it did, read before what it said, so the chat's cards and reports are
     // already on the line by the time the first message is drawn.
-    if (!alreadyScanned) {
-      const past = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
-      for (const m of messages) {
-        for (const call of toolCallsOf(m.message)) past.observe(call.name, call.input);
-      }
+    const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
+    for (const m of messages) {
+      for (const call of toolCallsOf(m.message)) links.observe(call.name, call.input);
     }
-    if (alreadySaid) return;
 
     // The words AND the commands, in one order: a past chat drawn as sentences
     // alone is the fault the manager photographed (§6.3.2).
