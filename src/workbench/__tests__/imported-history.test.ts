@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { saidByAnyone, textOf } from '@/workbench/imported-history';
+import { pastTranscript, saidByAnyone, textOf } from '@/workbench/imported-history';
 
 describe('reading a chat’s past', () => {
   it('keeps what a person or an agent said', () => {
@@ -43,5 +43,57 @@ describe('reading a chat’s past', () => {
     ).toBe('the answer');
     expect(textOf({ content: [{ type: 'tool_use', name: 'Bash' }] })).toBe('');
     expect(textOf(null)).toBe('');
+  });
+});
+
+/**
+ * The rule the manager photographed: the same chat showed every command and its
+ * output in his terminal, and sentences alone here (bw-1u1, §6.3.2).
+ */
+describe('a chat’s past comes back with its commands', () => {
+  const record = [
+    { type: 'user', message: { content: 'run the build' } },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Running it.' },
+          { type: 'tool_use', id: 'call-1', name: 'Bash', input: { command: 'npm run build' } },
+        ],
+      },
+    },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'built in 4s' }] },
+    },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } },
+  ];
+
+  it('gives back the words and the commands in the order they happened', () => {
+    expect(pastTranscript(record).map((e) => (e.kind === 'said' ? `${e.role}: ${e.text}` : `ran ${e.name}`))).toEqual([
+      'user: run the build',
+      'assistant: Running it.',
+      'ran Bash',
+      'assistant: Done.',
+    ]);
+  });
+
+  it('carries what each command printed, so an old row opens like a live one', () => {
+    const call = pastTranscript(record).find((e) => e.kind === 'call');
+    expect(call).toMatchObject({ id: 'call-1', name: 'Bash', output: 'built in 4s', ok: true });
+    expect(call && call.kind === 'call' && call.input).toEqual({ command: 'npm run build' });
+  });
+
+  it('marks a command whose result the record does not hold as neither failed nor finished badly', () => {
+    const cut = record.slice(0, 2);
+    expect(pastTranscript(cut).find((e) => e.kind === 'call')).toMatchObject({ output: '', ok: true });
+  });
+
+  it('still drops the lines the harness wrote, calls and all', () => {
+    const noisy = [
+      { type: 'user', message: { content: '<task-notification>\n<task-id>b4qg1</task-id>' } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'c', name: 'Read', input: {} }] } },
+    ];
+    expect(pastTranscript(noisy).map((e) => e.kind)).toEqual(['call']);
   });
 });

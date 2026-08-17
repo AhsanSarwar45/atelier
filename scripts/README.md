@@ -106,6 +106,53 @@ XDG_DATA_HOME=<a copy of ~/.local/share> BEADS_WORKBENCH_PORT=3019 \
 XDG_DATA_HOME=<the same copy> python3 scripts/chat-wakes-on-send.py
 ```
 
+## `chat-draws-every-message.mjs`
+
+Holds the rule that nothing the agent kit sends is dropped. It runs a session the
+way the driver runs one, sends a turn and then `/compact`, and asks of every
+message: does the driver translate this kind properly, or does it at least draw
+it as a line? Both halves of the answer come from the driver itself
+(`TRANSLATED_KINDS`, `noteFor`), so the check and the code cannot drift apart.
+
+It fails when any kind is neither, and when `/compact`'s answer is missing from
+either of the two shapes the kit sends it in — the status carrying
+`compact_error`, and the message the kit writes itself, which never streams and
+so was drawn nowhere at all (bw-1u1).
+
+```
+node scripts/chat-draws-every-message.mjs
+```
+
+Needs a signed-in `claude` and spends one short turn.
+
+## `chat-takes-every-mode.mjs`
+
+Holds the rule that every permission mode the picker offers can actually be
+taken, and that a mode which changes says so in the chat. Bypass came back as a
+500 the first time the manager picked it, because the session had not been
+launched with permission to switch.
+
+It drives **the driver**, not the kit: a copy of the launch options inside the
+check would pass with its own flag set while the app's own session was refused,
+which is the fault it exists for. Shown red by removing that one line —
+"bypassPermissions: REFUSED".
+
+```
+node scripts/chat-takes-every-mode.mjs
+```
+
+Starts a session and sends no turn to it.
+
+## `shoot-chat-everything.mjs`
+
+Not a check — the two pictures the chat work is judged on: a command opened onto
+what it ran and what it printed, and the lines a chat draws when it compacts.
+
+```
+BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3018 \
+  node scripts/shoot-chat-everything.mjs tests/results/chat-shows-everything.png
+```
+
 ## Probes
 
 ### `workbench/scripts/probe-claude-resume.ts`

@@ -5,49 +5,34 @@
  * came back as a 500 the first time the manager picked it: "Cannot set
  * permission mode to bypassPermissions because the session was not launched
  * with --dangerously-skip-permissions" (2026-08-17). A session is now started
- * with permission to switch while still starting in the mode it is pinned to,
- * so this walks the whole list and refuses to pass if any of them is refused
+ * with permission to switch while still starting in the mode it is pinned to
  * (bw-1u1, docs/agent-workbench.md §3.1).
+ *
+ * It drives THE DRIVER, not the kit: a copy of the launch options here would
+ * pass with its own flag set while the app's own session was refused, which is
+ * exactly the fault this check exists for.
  *
  *   node scripts/chat-takes-every-mode.mjs
  *
- * Needs a signed-in `claude`. Starts a session and sends nothing to it.
+ * Needs a signed-in `claude`. Starts a session and sends no turn to it.
  */
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { CLAUDE_PERMISSION_MODES, DEFAULT_PERMISSION_MODE } from '../src/workbench/protocol.ts';
+import { ClaudeDriver } from '../workbench/src/drivers/claude.ts';
 
-import { CLAUDE_PERMISSION_MODES } from '../src/workbench/protocol.ts';
-
-// The agent kit is the sidecar's dependency, not the app's, and this script sits
-// above both — so it is resolved from where it actually lives.
-const fromSidecar = createRequire(new URL('../workbench/package.json', import.meta.url));
-const { query } = await import(pathToFileURL(fromSidecar.resolve('@anthropic-ai/claude-agent-sdk')).href);
-
-let closed = false;
-
-async function* nothing() {
-  // A session with no turn in it: setPermissionMode does not need one, and this
-  // check is about the launch, not about a conversation.
-  while (!closed) await new Promise((r) => setTimeout(r, 50));
-}
-
-const q = query({
-  prompt: nothing(),
-  options: {
-    cwd: process.cwd(),
-    permissionMode: 'default',
-    // The line under test.
-    allowDangerouslySkipPermissions: true,
-    strictMcpConfig: true,
-    settingSources: ['user', 'project', 'local'],
-    canUseTool: async (_name, input) => ({ behavior: 'allow', updatedInput: input }),
+const driver = new ClaudeDriver();
+const said = [];
+await driver.start({
+  cwd: process.cwd(),
+  permissionMode: DEFAULT_PERMISSION_MODE,
+  emit: (e) => {
+    if (e.type === 'note') said.push(e.text);
   },
 });
 
 const refused = [];
 for (const mode of CLAUDE_PERMISSION_MODES) {
   try {
-    await q.setPermissionMode(mode);
+    await driver.setMode(mode);
     console.log(`${mode}: taken`);
   } catch (err) {
     refused.push(mode);
@@ -58,14 +43,18 @@ for (const mode of CLAUDE_PERMISSION_MODES) {
 // Left where a chat starts, so a session this check touched is never left with
 // its cards switched off.
 try {
-  await q.setPermissionMode('default');
+  await driver.setMode(DEFAULT_PERMISSION_MODE);
 } catch {
   // Already reported above if it cannot be set at all.
 }
+await driver.close();
 
-closed = true;
-q.close();
+// A mode that changed in silence is the trap this job also fixed: the chat says
+// so, in the chat it happened to (§8.2.4).
+const quiet = CLAUDE_PERMISSION_MODES.filter((m) => !said.some((line) => line.includes(m)));
 
 console.log(`refused: ${refused.length}${refused.length ? ` — ${refused.join(', ')}` : ''}`);
-console.log(refused.length ? 'FAIL' : 'PASS');
-process.exit(refused.length ? 1 : 0);
+console.log(`changed in silence: ${quiet.length}${quiet.length ? ` — ${quiet.join(', ')}` : ''}`);
+const failed = refused.length > 0 || quiet.length > 0;
+console.log(failed ? 'FAIL' : 'PASS');
+process.exit(failed ? 1 : 0);
