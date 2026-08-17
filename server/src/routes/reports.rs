@@ -1,9 +1,9 @@
 //! Manager reports: the list, and the page for one card.
 //!
-//! A page is always rebuilt from its spec before being served, so what the
-//! screen shows is never older than the board it reads. Specs live in
-//! `reporting/pages/<project>/<slug>.report.json`; `REPORTS_DIR` overrides
-//! where that tree is looked for.
+//! Reports live where this computer keeps this program's data —
+//! `<data>/reports/<project>/<slug>.report.json`, with the built page beside
+//! it. The one place that works out where that is, on every platform, is
+//! `crate::identity`; nothing here reads an environment variable of its own.
 
 use axum::{extract::Query, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -12,12 +12,8 @@ use std::process::Command;
 
 const SPEC_SUFFIX: &str = ".report.json";
 
-fn reports_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("REPORTS_DIR") {
-        return PathBuf::from(dir);
-    }
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home).join("dev/beads-web/reporting")
+fn reports_dir() -> Option<PathBuf> {
+    crate::identity::reports_dir()
 }
 
 /// One report, as the screen lists it.
@@ -52,7 +48,9 @@ fn read_spec(spec: &Path) -> Option<(String, Option<String>)> {
 
 /// Every report on this machine, newest first.
 pub async fn list_reports() -> impl IntoResponse {
-    let root = reports_dir().join("pages");
+    let Some(root) = reports_dir() else {
+        return Json(Vec::<ReportEntry>::new());
+    };
     let mut out: Vec<(std::time::SystemTime, ReportEntry)> = Vec::new();
 
     let projects = match std::fs::read_dir(&root) {
@@ -85,8 +83,15 @@ pub async fn report_page(Query(p): Query<PageParams>) -> impl IntoResponse {
     if p.project.contains(['/', '\\', '.']) || p.slug.contains(['/', '\\']) {
         return (StatusCode::BAD_REQUEST, "bad name".to_string()).into_response();
     }
-    let root = reports_dir();
-    let spec = root.join("pages").join(&p.project).join(format!("{}{}", p.slug, SPEC_SUFFIX));
+    let Some(root) = reports_dir() else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "this computer names no folder for a program's data, so there is nowhere to keep reports"
+                .to_string(),
+        )
+            .into_response();
+    };
+    let spec = root.join(&p.project).join(format!("{}{}", p.slug, SPEC_SUFFIX));
     if !spec.is_file() {
         return (StatusCode::NOT_FOUND, format!("no report called {}", p.slug)).into_response();
     }

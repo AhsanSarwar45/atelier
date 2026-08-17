@@ -64,9 +64,12 @@ mod tests {
     fn the_data_directory_is_absolute_and_belongs_to_nobody_in_particular() {
         let dir = data_dir().expect("a machine running tests has a home directory");
         assert!(dir.is_absolute(), "{dir:?} is not an absolute path");
+        // Tests run from the checkout, so this catches the old fault: a data
+        // folder that resolves inside whoever's copy of the source built it.
+        let checkout = std::env::current_dir().expect("a working directory");
         assert!(
-            !dir.to_string_lossy().contains("dev/beads-web"),
-            "{dir:?} resolves inside a checkout of the product"
+            !dir.starts_with(&checkout),
+            "{dir:?} resolves inside the checkout at {checkout:?}"
         );
     }
 
