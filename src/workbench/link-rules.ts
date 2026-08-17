@@ -23,8 +23,12 @@ const ID_SHAPE = /\b[a-z][a-z0-9]{1,5}-[a-z0-9]{2,}(?:\.\d+)*\b/g;
 /** Tools that put bytes on disk; their `file_path` is an action on that path. */
 const WRITING_TOOLS = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
 
-/** `…/pages/<project>/<slug>.report.json` */
-const REPORT_SPEC = /(?:^|\/)pages\/([^/]+)\/([^/]+)\.report\.json$/;
+/**
+ * `…/reports/<project>/<slug>.report.json`, where the data folder keeps them.
+ * `pages/` is the folder they lived in while they were still inside a checkout,
+ * and it is still matched so an older report opened from an old copy is found.
+ */
+const REPORT_SPEC = /(?:^|\/)(?:reports|pages)\/([^/]+)\/([^/]+)\.report\.json$/;
 
 /**
  * A `bd` invocation, as a command word rather than a substring of one, so

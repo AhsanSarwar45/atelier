@@ -17,7 +17,19 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 TOOLS="$HERE/tools"
-PAGES="$HERE/pages"
+
+# Reports are a person's own work, so they live where this computer keeps a
+# program's data and never inside a copy of the product. The three cases below
+# are the same rule the app itself follows (server/src/identity.rs).
+data_home() {
+  case "$(uname -s)" in
+    Darwin) echo "$HOME/Library/Application Support/com.beads.kanban-ui" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "${APPDATA:-$HOME/AppData/Roaming}/beads/kanban-ui/data" ;;
+    *) echo "${XDG_DATA_HOME:-$HOME/.local/share}/kanban-ui" ;;
+  esac
+}
+PAGES="${REPORTS_DIR:-$(data_home)/reports}"
+mkdir -p "$PAGES"
 
 project_name() {
   python3 "$TOOLS/project.py"

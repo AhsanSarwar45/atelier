@@ -21,12 +21,17 @@ Where a project's machinery can refuse, neither is a judgement call: closing a
 card is refused while its page is behind the work, and asking anything is
 refused until the page carrying it exists.
 
-This directory is shared by every project. A project keeps no report code and
-no report files of its own — it calls the command from here, and its reports
-are filed under its own name in `pages/`. That name is the project's main
-checkout, so a job done in a worktree still files under the project rather than
-under the branch the worktree is named after, which is deleted when the job
-lands.
+The tools here ship inside the product: making a report is one of the things it
+is for, and the app carries this toolchain and lays it down the first time it
+runs. A project keeps no report code of its own — it calls the command, which
+every project shares.
+
+**Reports themselves are never in a repository.** They are one person's own
+work about their own projects, so they live where the computer keeps a
+program's data, filed under the project's name: `<data>/reports/<project>/`.
+That name is the project's main checkout, so a job done in a worktree still
+files under the project rather than under the branch the worktree is named
+after, which is deleted when the job lands.
 
 ```
 report new <slug>                 # start a spec for the project you are in
@@ -70,8 +75,10 @@ Forked from `weselow/beads-web` at `c459cf3` (v0.12.2), branch `ours`, upstream
 kept as the `upstream` remote. Everything of ours is under `reporting/`; taking
 their updates is a merge that should not touch it.
 
-Specs are committed here. A report is a running page — same page, same decision
-numbers, updated in place for the life of the work.
+A report is a running page — same page, same decision numbers, updated in place
+for the life of the work. Nothing about it is committed anywhere: a spec and
+its built page both sit in the data folder, which is what keeps one person's
+projects out of something the whole team installs.
 
 The manager owns the final result and never the mechanism. Everything below
 exists to keep a report readable in seconds by someone who will not open the

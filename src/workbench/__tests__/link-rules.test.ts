@@ -46,7 +46,16 @@ describe('what counts as touching a card', () => {
 });
 
 describe('spotting a report', () => {
-  it('recognises a spec being written', () => {
+  it('recognises a spec being written where the data folder keeps them', () => {
+    expect(
+      reportFrom('Write', { file_path: '/h/.local/share/kanban-ui/reports/beads-web/my-slug.report.json' }),
+    ).toEqual({
+      project: 'beads-web',
+      slug: 'my-slug',
+    });
+  });
+
+  it('still recognises one written where they used to live', () => {
     expect(reportFrom('Write', { file_path: '/h/reporting/pages/beads-web/my-slug.report.json' })).toEqual({
       project: 'beads-web',
       slug: 'my-slug',

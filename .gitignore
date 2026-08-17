@@ -83,8 +83,8 @@ beads-web-linux-*
 beads-web-win-*
 beads-web-darwin-*
 
-# Built report pages are derived from their spec.
-reporting/pages/**/*.html
+# Reports are a person's own work and live in the data folder, never here.
+reporting/pages/
 
 # Python bytecode from the report builder
 __pycache__/

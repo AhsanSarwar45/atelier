@@ -478,7 +478,7 @@ A report already knows its card: `GET /api/reports` returns `{project, slug,
 title, card}` from the spec. So report→card exists today and is not rebuilt.
 
 Report→chat is machine-observed the same way as cards: a tool call that runs
-`report <slug>` or writes `reporting/pages/<project>/<slug>.report.json`
+`report <slug>` or writes `<data>/reports/<project>/<slug>.report.json`
 produces a `report.available` event and a `report_link` row. When the report's
 spec names a card, the sidecar also records
 `bd provenance record --issue <card> --kind used --source workbench-report
