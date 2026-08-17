@@ -133,7 +133,7 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 | `session.title` | `title` (derived from the first user message) |
 | `session.ended` | `reason` |
 | `capabilities` | the matrix of §3.3 — the UI hides every control that is false |
-| `commands` | `items[]` — the typed-command menu for this brand (§7) |
+| `session.menu` | `commands[{name,description,argumentHint}], skills[], models[{value,displayName,description}], permissionModes[]` — everything the writing box offers for THIS session (§7, §8.2.3). Sent at birth and again whenever the brand pushes a new list |
 | `error` | `message, fatal` |
 
 **Content**
@@ -150,6 +150,7 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 |---|---|
 | `tool.started` | `toolCallId, name, input, title, parentToolCallId?` |
 | `tool.completed` | `toolCallId, ok, output, error?` |
+| `tool.progress` | `toolCallId, seconds` — how long this call has been running, as the brand counts it (§8.2.2) |
 | `diff` | `toolCallId, path, before, after` — side-by-side changed lines |
 | `todo` | `items[{text,status}]` — the agent's live checklist |
 | `subagent.started` / `subagent.ended` | `subagentId, name, parentToolCallId` |
@@ -171,10 +172,13 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 
 ### 2.2 App → driver
 
-`session.start`, `session.resume`, `prompt.send` (text + attachments +
-mentions), `ask.answer` (`askId, optionId, updatedInput?, freeText?`),
-`session.stop`, `session.end`, `command.run` (`commandId, args`), `model.set`
-(`model, effort?`), `compact`, `clear`.
+`session.start`, `session.open` (read it without waking it — see
+docs/designs/app-shell.md §1.9), `session.resume`, `prompt.send` (text +
+attachments + mentions), `ask.answer` (`askId, optionId, updatedInput?,
+freeText?`), `session.stop`, `session.end`, `session.mode` (`mode`) and
+`session.model` (`model`) — both acting on the LIVE session (§8.2.3) — and
+`compact`, `clear`. A typed command is not its own message: it is sent as
+ordinary prompt text, which is how the brand runs one (§7).
 
 ### 2.3 Session state
 
@@ -224,6 +228,14 @@ Fixed at launch, every session:
   watching: a permission request arrived for `Read` and again for `Edit`.
 - **No MCP.** `--strict-mcp-config` with no `--mcp-config` — nothing attaches
   unless the owner asks (decision 6).
+- **His own commands, skills and settings are loaded** — `settingSources:
+  ['user', 'project', 'local']` and `skills: 'all'` (bw-f1q). This reverses the
+  build's first choice of `settingSources: []`. That choice bought a session
+  that could not be surprised by anything on the machine, and its price was a
+  chat with no commands and no skills at all, which is what the manager found:
+  "no option to use skills. no option to use commands". Loading them is the
+  whole feature. It follows that his `CLAUDE.md`, his hooks and his own
+  commands apply inside this app exactly as they do in a terminal.
 - **Never `--bare`, never `ANTHROPIC_API_KEY`.** The CLI's own help states
   `--bare` forces API-key auth and never reads OAuth or the keychain. The
   sidecar launches `claude` in the owner's normal environment so the
@@ -531,13 +543,28 @@ the click is the consent, and there is no second button to press.
 
 ## 7. Typed-command menus
 
-Very important to the owner, and per-brand by construction: `Driver.listCommands()`
-returns the menu, the composer renders whatever it gets.
+Very important to the owner, and per-brand by construction: the driver hands the
+menu up, the composer renders whatever it gets.
 
 **Claude** — the install's real slash commands, which work in headless mode.
 The menu lists them with their descriptions; picking one sends it as the
 prompt. Terminal-only commands (`/login` and friends) are filtered out.
 `/compact` and `/clear` are ordinary members of this list.
+
+The list is not asked for: a session announces it at birth. `system/init`
+carries `slash_commands`, `terminal_slash_commands` (the ones a screen like this
+must hide), `skills`, `model` and `permissionMode`; the models come from
+`supportedModels()` once, alongside. All of it rides on `session.started` and
+one `session.menu` event, so a browser that opens the chat later is told the
+same thing without a second round trip. The kit also pushes a fresh command list
+mid-session when the agent discovers skills in a subdirectory; that push
+replaces the stored list.
+
+A picked command is sent as ordinary user text — that is how the kit runs one.
+A LOCAL command (`/usage` and friends) answers with `system/local_command_output`
+and bypasses the query loop entirely, so no `result` message closes the turn:
+the chat must draw that output and put itself back to Ready itself, or it waits
+for a message that is never coming.
 
 **Codex** — exactly four entries, because that is what Codex exposes
 programmatically. There is no command-listing RPC and custom prompts are
@@ -594,6 +621,52 @@ Why: measured 2026-08-16 (bw-p61.3), one chat's 26 card chips made a row 2277 px
 wide in a pane about 700 px wide, and the model and permission text was squeezed
 to 37 px — three words stacked in a column, which is the picture the manager
 sent back.
+
+#### 8.2.2 What a working chat shows (bw-f1q)
+
+Constraint: while the agent owes an answer, the foot of the transcript says what
+it is doing, and it changes. Three things stand there, in one line, immediately
+above the writing box:
+
+- a moving mark, so a still screen and a working one are never the same picture;
+- what it is doing **in its own words** — the tool call being run, or Thinking,
+  or the command it is answering;
+- how long it has been at it, in seconds, taken from the kit's own
+  `tool_progress` (`elapsed_time_seconds`) where it gives one and counted from
+  the state change where it does not.
+
+And the thinking itself is drawn: a dim block that grows as the words arrive and
+collapses to its first line once the answer starts. It is a transcript item like
+any other, folded out of `thinking.delta` by the same reduction as text, so
+replay and live tail agree by construction (§4).
+
+Why here rather than the badge at the top: measured 2026-08-17 (bw-f1q.3), one
+ordinary turn spent ten consecutive seconds in `running_tool` with nothing on the
+screen changing at all, and no thinking was ever drawn in any turn, because the
+driver read only `text_delta` off the stream. The manager's words: "when the
+agent is processing/thinking/running command, i see nothing."
+
+The line is present exactly while `isBusy` holds, so it disappears the moment the
+turn ends and cannot be left behind by a state event that never arrives.
+
+#### 8.2.3 Steering the chat you are in (bw-f1q)
+
+Constraint: the mode, the model, the skills and the commands are chosen from the
+writing box, and they act on the chat that is open — not on the next one.
+
+- **Permission mode** and **model** are pickers on the composer's own row. They
+  send `session.mode` / `session.model`, which call the kit's
+  `setPermissionMode` / `setModel` on the live session; the change comes back as
+  an event, so every window watching that chat agrees and the header's pinned
+  mode is never a guess.
+- **`/`** at the start of the box opens the command and skill menu (§7),
+  filtered as he types, arrow keys and Enter to pick.
+- A **picture** — one waiting in the tray or one already sent — opens at full
+  size over the chat when clicked, and closes on Escape or a click away.
+
+The mode a session is pinned to is still stored per session and re-pinned on
+resume (§3.1); a live change updates that store, so it survives the chat going
+to sleep and coming back.
 
 ### 8.3 The board tab
 
