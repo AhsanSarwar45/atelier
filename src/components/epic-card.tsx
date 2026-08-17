@@ -13,12 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
 import * as api from "@/lib/api";
-import { formatBeadId, isBlockedBy, truncate } from "@/lib/bead-utils";
+import { formatBeadId, getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn, isDoltProject } from "@/lib/utils";
 import { CardLiveChat } from "@/workbench/card-live";
-import { standing } from "@/types";
+import { WORKING, standing } from "@/types";
 import type { Bead, Epic, EpicProgress } from "@/types";
 
 export interface EpicCardProps {
@@ -173,7 +173,11 @@ export function EpicCard({
   // Manager Review is the one column a session may not move a card out of, so the
   // screen is the only place a job there can be finished. Agent Review draws no
   // such button: a job waiting to be read has not been signed by anyone yet.
-  const canCloseEpic = progressPercentage === 100 && epic.status === 'manager_review';
+  // Asked of the pieces, not of the percentage: a job of two hundred with one
+  // still open rounds to a hundred, and offering the sign-off there is offering
+  // it on unfinished work.
+  const allDone = progress.total > 0 && progress.completed === progress.total;
+  const canCloseEpic = allDone && epic.status === 'manager_review';
 
   /**
    * Handle closing the epic
@@ -240,7 +244,9 @@ export function EpicCard({
       />
       <div className="flex items-center gap-3 text-[10px] text-t-muted">
         <span className="flex items-center gap-1">
-          <div className="w-2 h-2 rounded-full bg-status-open" aria-hidden="true" />
+          {/* The In Progress colour, taken off the one list of states — it wore
+              the Todo colour, so the dot beside "in progress" named another. */}
+          <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor(WORKING))} aria-hidden="true" />
           {progress.inProgress} in progress
         </span>
         {/* Dropped pieces are outside every number beside them, and the list
@@ -248,7 +254,7 @@ export function EpicCard({
             full bar over a longer list unexplained. */}
         {progress.dropped > 0 && (
           <span className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-status-cancelled" aria-hidden="true" />
+            <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor('cancelled'))} aria-hidden="true" />
             {progress.dropped} dropped
           </span>
         )}
@@ -370,9 +376,9 @@ export function EpicCard({
               Epic
             </Badge>
             <Badge variant="secondary" appearance="light" size="xs" className="theme-badge">
-              {progressPercentage}% · {progress.dropped > 0
-                ? `${progress.total} tasks · ${progress.dropped} dropped`
-                : `${children.length} tasks`}
+              {/* The count only. What was dropped is said once, by the block
+                  below, which this badge sits directly above. */}
+              {progressPercentage}% · {progress.dropped > 0 ? progress.total : children.length} tasks
             </Badge>
             <BeadTags bead={epic} />
             {commentCount > 0 && (
