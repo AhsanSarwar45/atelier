@@ -6,6 +6,7 @@
 mod db;
 mod dolt;
 mod identity;
+mod report_tools;
 mod routes;
 
 use axum::{
@@ -119,6 +120,14 @@ async fn main() {
         db::Database::new().expect("Failed to initialize database"),
     );
     info!("Database initialized");
+
+    // The tools that make a report travel inside the product; this lays them
+    // down beside the reports. A copy that cannot write there still serves the
+    // board, so this warns rather than stopping.
+    match report_tools::install() {
+        Ok(()) => info!("Report tools ready"),
+        Err(e) => tracing::warn!("Report tools not laid down, so no report can be made: {}", e),
+    }
 
     // Initialize Dolt connection manager
     let dolt_manager = Arc::new(dolt::DoltManager::new());

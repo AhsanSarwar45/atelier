@@ -34,15 +34,23 @@ pub fn settings_db() -> Option<PathBuf> {
 ///
 /// `REPORTS_DIR` overrides it, for tests.
 pub fn reports_dir() -> Option<PathBuf> {
-    resolve_reports_dir(std::env::var("REPORTS_DIR").ok(), data_dir())
+    resolve_dir(std::env::var("REPORTS_DIR").ok(), data_dir(), "reports")
 }
 
-/// The rule behind [`reports_dir`], kept apart from the environment so it can
-/// be tested for the case where the computer names no home.
-fn resolve_reports_dir(override_dir: Option<String>, data: Option<PathBuf>) -> Option<PathBuf> {
+/// Where the tools that make a report live.
+///
+/// The product carries them and lays them down here, so this never points into
+/// anyone's checkout. `REPORT_TOOLS_DIR` overrides it, for tests.
+pub fn tools_dir() -> Option<PathBuf> {
+    resolve_dir(std::env::var("REPORT_TOOLS_DIR").ok(), data_dir(), "tools")
+}
+
+/// The rule behind both, kept apart from the environment so it can be tested
+/// for the case where the computer names no home.
+fn resolve_dir(override_dir: Option<String>, data: Option<PathBuf>, leaf: &str) -> Option<PathBuf> {
     match override_dir.filter(|d| !d.trim().is_empty()) {
         Some(dir) => Some(PathBuf::from(dir)),
-        None => data.map(|dir| dir.join("reports")),
+        None => data.map(|dir| dir.join(leaf)),
     }
 }
 
@@ -74,11 +82,15 @@ mod tests {
     }
 
     #[test]
-    fn reports_dir_sits_under_the_data_directory() {
+    fn reports_dir_and_tools_dir_sit_side_by_side_under_the_data_directory() {
         let data = PathBuf::from("/somewhere/data");
         assert_eq!(
-            resolve_reports_dir(None, Some(data.clone())),
+            resolve_dir(None, Some(data.clone()), "reports"),
             Some(data.join("reports"))
+        );
+        assert_eq!(
+            resolve_dir(None, Some(data.clone()), "tools"),
+            Some(data.join("tools"))
         );
     }
 
@@ -87,13 +99,14 @@ mod tests {
         // The old code read HOME directly and fell back to an empty string, so
         // with HOME unset — the usual state on Windows — it resolved a relative
         // path against whatever directory the program was started in.
-        assert_eq!(resolve_reports_dir(None, None), None);
+        assert_eq!(resolve_dir(None, None, "reports"), None);
+        assert_eq!(resolve_dir(None, None, "tools"), None);
     }
 
     #[test]
     fn reports_dir_takes_the_override_when_one_is_set() {
         assert_eq!(
-            resolve_reports_dir(Some("/elsewhere".to_string()), Some(PathBuf::from("/data"))),
+            resolve_dir(Some("/elsewhere".to_string()), Some(PathBuf::from("/data")), "reports"),
             Some(PathBuf::from("/elsewhere"))
         );
     }
@@ -101,7 +114,7 @@ mod tests {
     #[test]
     fn reports_dir_ignores_an_empty_override() {
         assert_eq!(
-            resolve_reports_dir(Some("  ".to_string()), Some(PathBuf::from("/data"))),
+            resolve_dir(Some("  ".to_string()), Some(PathBuf::from("/data")), "reports"),
             Some(PathBuf::from("/data/reports"))
         );
     }

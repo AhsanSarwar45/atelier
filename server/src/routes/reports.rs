@@ -2,8 +2,12 @@
 //!
 //! Reports live where this computer keeps this program's data —
 //! `<data>/reports/<project>/<slug>.report.json`, with the built page beside
-//! it. The one place that works out where that is, on every platform, is
-//! `crate::identity`; nothing here reads an environment variable of its own.
+//! it, and the tools that make them in `<data>/tools`. The one place that works
+//! out where those are, on every platform, is `crate::identity`; nothing here
+//! reads an environment variable of its own.
+//!
+//! Making a report is part of the product, so the tools travel inside it — see
+//! `crate::report_tools`. Nothing has to be installed alongside.
 
 use axum::{extract::Query, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
@@ -96,11 +100,20 @@ pub async fn report_page(Query(p): Query<PageParams>) -> impl IntoResponse {
         return (StatusCode::NOT_FOUND, format!("no report called {}", p.slug)).into_response();
     }
 
+    let Some(tools) = crate::identity::tools_dir() else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "this computer names no folder for a program's data, so the report tools have nowhere to live"
+                .to_string(),
+        )
+            .into_response();
+    };
+
     // The build reads the board and the pictures from the project it is about.
     let cwd = p.path.clone().unwrap_or_else(|| root.to_string_lossy().to_string());
     let built = spec.with_file_name(format!("{}.html", p.slug));
     let out = Command::new("python3")
-        .arg(root.join("tools/build.py"))
+        .arg(tools.join("build.py"))
         .arg(&spec)
         .arg("--project")
         .arg(&cwd)
