@@ -17,6 +17,7 @@ import type {
   Cost,
   ImagePayload,
   ModelChoice,
+  NoteRank,
   SessionFacts,
   SessionState,
   TodoItem,
@@ -52,6 +53,25 @@ export interface TranscriptTool {
   /** Set when a subagent made this call — the row nests under that call. */
   parentId: string | null;
   diff: { path: string; before: string; after: string } | null;
+  /** What it was asked to do, and what it printed. Both open on the row's own click. */
+  input: Record<string, unknown>;
+  output: string | null;
+}
+
+/**
+ * A line about the chat's own machinery rather than the agent's words.
+ *
+ * `rank` decides how loudly: `note` is always on the page in grey, `detail`
+ * waits until the reader asks for everything (docs/agent-workbench.md §8.2.4).
+ */
+export interface TranscriptNote {
+  kind: 'note';
+  id: string;
+  rank: NoteRank;
+  /** The brand's own name for this kind of message, shown when everything is open. */
+  noteKind: string;
+  text: string;
+  body: string | null;
 }
 
 export interface TranscriptAsk {
@@ -82,6 +102,7 @@ export type TranscriptItem =
   | TranscriptTool
   | TranscriptAsk
   | TranscriptReport
+  | TranscriptNote
   | TranscriptNotice;
 
 export interface SessionView {
@@ -191,14 +212,24 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
           seconds: 0,
           parentId: e.parentToolCallId,
           diff: null,
+          input: e.input,
+          output: null,
         },
       ];
       return next;
 
     case 'tool.completed':
+      // The output is KEPT. It always crossed the wire and was thrown away
+      // here, which is why a command could never be opened (bw-1u1).
       next.items = items.map((it) =>
-        it.kind === 'tool' && it.id === e.toolCallId ? { ...it, status: e.ok ? 'ok' : 'failed' } : it,
+        it.kind === 'tool' && it.id === e.toolCallId
+          ? { ...it, status: e.ok ? 'ok' : 'failed', output: e.output }
+          : it,
       );
+      return next;
+
+    case 'note':
+      next.items = [...items, { kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body }];
       return next;
 
     case 'tool.progress':

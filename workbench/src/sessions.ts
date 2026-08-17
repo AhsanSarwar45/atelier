@@ -12,12 +12,11 @@ import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
   IMPORTED_MESSAGES,
-  saidByAnyone,
-  textOf,
+  pastTranscript,
   toolCallsOf,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
-import { ClaudeDriver } from './drivers/claude.ts';
+import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
 import { knownSessions } from './registry.ts';
@@ -248,24 +247,42 @@ export class Sessions {
     }
     if (alreadySaid) return;
 
-    const said = messages
-      .filter((m): m is SessionMessage & { type: 'user' | 'assistant' } => m.type === 'user' || m.type === 'assistant')
-      .map((m) => ({ role: m.type, text: textOf(m.message) }))
-      .filter((m) => saidByAnyone(m.text));
-    if (said.length === 0) return;
+    // The words AND the commands, in one order: a past chat drawn as sentences
+    // alone is the fault the manager photographed (§6.3.2).
+    const past = pastTranscript(messages);
+    if (past.length === 0) return;
 
-    const shown = said.slice(-IMPORTED_MESSAGES);
-    if (said.length > shown.length) {
+    const shown = past.slice(-IMPORTED_MESSAGES);
+    if (past.length > shown.length) {
       this.publish(summary.id, {
         type: 'notice',
-        text: `${said.length - shown.length} earlier messages are in this chat and are not drawn here.`,
+        text: `${past.length - shown.length} earlier messages and commands are in this chat and are not drawn here.`,
       });
     }
-    for (const message of shown) {
-      const messageId = randomUUID();
-      this.publish(summary.id, { type: 'message.started', messageId, role: message.role });
-      this.publish(summary.id, { type: 'text.delta', messageId, text: message.text });
-      this.publish(summary.id, { type: 'message.completed', messageId });
+    for (const entry of shown) {
+      if (entry.kind === 'said') {
+        const messageId = randomUUID();
+        this.publish(summary.id, { type: 'message.started', messageId, role: entry.role });
+        this.publish(summary.id, { type: 'text.delta', messageId, text: entry.text });
+        this.publish(summary.id, { type: 'message.completed', messageId });
+        continue;
+      }
+      // The same pair a live call emits, so an old command and a new one open
+      // the same way (docs/agent-workbench.md §8.2.4).
+      this.publish(summary.id, {
+        type: 'tool.started',
+        toolCallId: entry.id,
+        name: entry.name,
+        input: entry.input,
+        title: toolTitle(entry.name, entry.input),
+        parentToolCallId: null,
+      });
+      this.publish(summary.id, {
+        type: 'tool.completed',
+        toolCallId: entry.id,
+        ok: entry.ok,
+        output: entry.output.slice(0, 4000),
+      });
     }
   }
 

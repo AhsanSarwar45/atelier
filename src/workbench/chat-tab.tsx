@@ -15,8 +15,10 @@ import {
   ArrowUp,
   Bot,
   Brain,
+  ChevronRight,
   Cpu,
   Hand,
+  ListTree,
   Loader2,
   MessageSquarePlus,
   PanelLeft,
@@ -63,6 +65,8 @@ import {
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
+/** Whether the transcript is showing every command's body and every quiet line. */
+const CHAT_OPEN_ALL = 'workbench.open-all';
 
 interface ChatTabProps {
   projectId: string | null;
@@ -187,29 +191,123 @@ function DiffView({ path, before, after }: { path: string; before: string; after
   );
 }
 
-function ToolRow({ item, nested }: { item: Extract<TranscriptItem, { kind: 'tool' }>; nested: boolean }) {
+/**
+ * What a command was asked to do, and what it printed.
+ *
+ * Cut to a height a reader can skim past, scrolling inside itself rather than
+ * pushing the conversation off the screen.
+ */
+function Body({ label, text, testId }: { label: string; text: string; testId: string }) {
+  if (!text.trim()) return null;
+  return (
+    <div className="mt-1">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</div>
+      <pre
+        data-testid={testId}
+        className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-border/60 bg-muted/30 px-2 py-1.5 font-mono text-xs leading-relaxed text-muted-foreground"
+      >
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+/**
+ * One command, and everything it did behind a click.
+ *
+ * The output has always crossed the wire and was thrown away in the browser, so
+ * a command could be seen running and never read — the manager's "i don't get
+ * output in chat for that" (bw-1u1, docs/agent-workbench.md §8.2.4).
+ */
+function ToolRow({
+  item,
+  nested,
+  openAll,
+}: {
+  item: Extract<TranscriptItem, { kind: 'tool' }>;
+  nested: boolean;
+  openAll: boolean;
+}) {
+  const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
+  const open = openedByHand ?? openAll;
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
+  const asked = JSON.stringify(item.input ?? {}, null, 2);
+  const hasBody = asked !== '{}' || Boolean(item.output?.trim());
+
   return (
     <div
       data-testid={nested ? 'subagent-tool-row' : 'tool-row'}
       data-tool-status={item.status}
       data-tool-name={item.name}
+      data-open={open}
       className={cn(nested && 'ml-6 border-l-2 border-violet-500/50 pl-3')}
     >
-      <Panel inset="none" className="flex items-center gap-2 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
-        <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
-        <span className="truncate">{item.title}</span>
-        {/* How long it has been running, while it is running: a call that takes a
-            minute must not look the same as one that took none. */}
-        {item.status === 'running' && item.seconds > 0 && (
-          <span data-testid="tool-elapsed" className="shrink-0 tabular-nums">
-            {Math.round(item.seconds)}s
-          </span>
+      <Panel inset="none" className="px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
+        <button
+          type="button"
+          data-testid="tool-toggle"
+          disabled={!hasBody}
+          onClick={() => setOpenedByHand(!open)}
+          className="flex w-full items-center gap-2 text-left enabled:hover:text-foreground"
+        >
+          <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
+          {hasBody && (
+            <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
+          )}
+          <span className="truncate">{item.title}</span>
+          {/* How long it has been running, while it is running: a call that takes a
+              minute must not look the same as one that took none. */}
+          {item.status === 'running' && item.seconds > 0 && (
+            <span data-testid="tool-elapsed" className="shrink-0 tabular-nums">
+              {Math.round(item.seconds)}s
+            </span>
+          )}
+          <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
+        </button>
+        {open && (
+          <>
+            <Body label="asked" text={asked === '{}' ? '' : asked} testId="tool-input" />
+            <Body label="printed" text={item.output ?? ''} testId="tool-output" />
+          </>
         )}
-        <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
       </Panel>
       {item.diff && <DiffView path={item.diff.path} before={item.diff.before} after={item.diff.after} />}
+    </div>
+  );
+}
+
+/**
+ * A line about the chat's own machinery: compaction, a retry, a refusal, a mode
+ * change, or a kind of message this app has no name for.
+ *
+ * Grey and one line high, so it never competes with what the agent said, and it
+ * opens onto the whole message. `detail` rows are the machine breathing and
+ * appear only once the reader asks for everything (§8.2.4).
+ */
+function NoteRow({ item, openAll }: { item: Extract<TranscriptItem, { kind: 'note' }>; openAll: boolean }) {
+  const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
+  const open = openedByHand ?? openAll;
+  if (item.rank === 'detail' && !openAll) return null;
+
+  return (
+    <div data-testid="note-row" data-note-rank={item.rank} data-note-kind={item.noteKind} className="font-mono text-xs">
+      <button
+        type="button"
+        data-testid="note-toggle"
+        disabled={!item.body}
+        onClick={() => setOpenedByHand(!open)}
+        className={cn(
+          'flex w-full items-center gap-2 text-left text-muted-foreground/80 enabled:hover:text-foreground',
+          item.rank === 'detail' && 'text-muted-foreground/50',
+        )}
+      >
+        {item.body && <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />}
+        <span className={cn('truncate', !item.body && 'pl-5')}>{item.text}</span>
+        {/* The brand's own name for it, so an unfamiliar line can be looked up. */}
+        {openAll && <span className="ml-auto shrink-0 opacity-50">{item.noteKind}</span>}
+      </button>
+      {open && item.body && <Body label={item.noteKind} text={item.body} testId="note-body" />}
     </div>
   );
 }
@@ -550,6 +648,32 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   useEffect(() => {
     localStorage.setItem(EVERY_CHAT, everything ? '1' : '0');
   }, [everything]);
+  /**
+   * Everything open: every command showing what it ran and printed, and every
+   * line the machine says about itself. Ctrl+O, because that is the key that
+   * does it in his terminal, and remembered for the browser rather than the
+   * chat — it is a way of reading, not a property of one conversation
+   * (docs/agent-workbench.md §8.2.4).
+   */
+  const [openAll, setOpenAll] = useState(false);
+
+  useEffect(() => {
+    setOpenAll(localStorage.getItem(CHAT_OPEN_ALL) === '1');
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_OPEN_ALL, openAll ? '1' : '0');
+  }, [openAll]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'o') return;
+      e.preventDefault();
+      setOpenAll((was) => !was);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const endRef = useRef<HTMLDivElement>(null);
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -660,6 +784,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-testid="toggle-everything"
           data-showing-everything={everything}
           onClick={() => setEverything((v) => !v)}
+        />
+        <ToolButton
+          icon={<ListTree />}
+          label={openAll ? 'Show less (Ctrl+O)' : 'Show everything (Ctrl+O)'}
+          emphasis={openAll ? 'loud' : 'quiet'}
+          data-testid="toggle-open-all"
+          data-open-all={openAll}
+          onClick={() => setOpenAll((v) => !v)}
         />
         <ToolButton
           icon={<MessageSquarePlus />}
@@ -783,7 +915,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         data-testid="transcript"
       >
         {view.items.map((item) => {
-          if (item.kind === 'tool') return <ToolRow key={item.id} item={item} nested={item.parentId !== null} />;
+          if (item.kind === 'tool') {
+            return <ToolRow key={item.id} item={item} nested={item.parentId !== null} openAll={openAll} />;
+          }
+          if (item.kind === 'note') return <NoteRow key={item.id} item={item} openAll={openAll} />;
           if (item.kind === 'thinking') return <ThinkingBlock key={item.id} item={item} />;
           if (item.kind === 'notice') {
             return (

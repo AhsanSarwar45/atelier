@@ -46,10 +46,10 @@ export interface PastToolCall {
 /**
  * The tool calls inside one recorded message.
  *
- * A past chat's tools cannot be re-run, so none of these becomes a row in the
- * transcript. They are read for one purpose: the same rules the live watcher
+ * Read twice over, for two different purposes: the same rules the live watcher
  * uses (src/workbench/link-rules.ts) decide from them which cards the chat
- * worked on and which reports it wrote.
+ * worked on and which reports it wrote, and `pastTranscript` turns them into
+ * the rows a reader sees.
  */
 export function toolCallsOf(message: unknown): PastToolCall[] {
   const content = (message as { content?: unknown } | null)?.content;
@@ -68,6 +68,74 @@ export function toolCallsOf(message: unknown): PastToolCall[] {
         ? block.input
         : {}) as Record<string, unknown>,
     }));
+}
+
+/** One recorded message, as much of it as reading a past chat needs. */
+interface RecordedMessage {
+  type?: string;
+  message?: unknown;
+}
+
+/** One row of a chat that already happened, in the order it happened. */
+export type PastEntry =
+  | { kind: 'said'; role: 'user' | 'assistant'; text: string }
+  | { kind: 'call'; id: string; name: string; input: Record<string, unknown>; output: string; ok: boolean };
+
+/** What each call in the record printed, by the id the call was made under. */
+function resultsByCall(messages: RecordedMessage[]): Map<string, { output: string; ok: boolean }> {
+  const results = new Map<string, { output: string; ok: boolean }>();
+  for (const m of messages) {
+    const content = (m.message as { content?: unknown } | null)?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      const b = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
+      if (b.type !== 'tool_result' || typeof b.tool_use_id !== 'string') continue;
+      const output = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
+      results.set(b.tool_use_id, { output, ok: !b.is_error });
+    }
+  }
+  return results;
+}
+
+/**
+ * A chat's own record read back as the rows a reader sees: what was said, and
+ * every command that was run, in one order.
+ *
+ * The commands are here because an earlier build imported the words alone, and
+ * the manager photographed the result — the same session showing every command
+ * and its output in his terminal, and sentences only here
+ * (docs/agent-workbench.md §6.3.2).
+ */
+export function pastTranscript(messages: RecordedMessage[]): PastEntry[] {
+  const results = resultsByCall(messages);
+  const entries: PastEntry[] = [];
+
+  for (const m of messages) {
+    if (m.type !== 'user' && m.type !== 'assistant') continue;
+    const said = textOf(m.message);
+    if (saidByAnyone(said)) entries.push({ kind: 'said', role: m.type, text: said });
+
+    // A message's own words come before the calls it made, which is the order
+    // they happened in and the order the live wire sends them.
+    const content = (m.message as { content?: unknown } | null)?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      const b = block as { type?: string; id?: string; name?: string; input?: unknown };
+      if (b.type !== 'tool_use' || typeof b.id !== 'string' || typeof b.name !== 'string') continue;
+      const result = results.get(b.id);
+      entries.push({
+        kind: 'call',
+        id: b.id,
+        name: b.name,
+        input: (typeof b.input === 'object' && b.input !== null ? b.input : {}) as Record<string, unknown>,
+        output: result?.output ?? '',
+        // No result in the record means the chat ended before the call came
+        // back; that is not a failure, so it is not drawn as one.
+        ok: result?.ok ?? true,
+      });
+    }
+  }
+  return entries;
 }
 
 /**

@@ -12,7 +12,7 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
-import type { CommandInfo, ImagePayload, ModelChoice, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
@@ -44,8 +44,195 @@ interface PendingAsk {
   input: Record<string, unknown>;
 }
 
+/** A line for the transcript, and the whole message behind it. */
+interface Note {
+  rank: NoteRank;
+  kind: string;
+  text: string;
+  body?: string;
+}
+
+/** The kit's own ranking of an `informational`, which already names our treatment. */
+const INFORMATIONAL_RANK: Record<string, NoteRank> = {
+  // "'info' shows only in transcript mode; 'notice' renders in inactive gray"
+  // — the kit's own words about these levels (sdk.d.ts, SDKInformationalMessage).
+  info: 'detail',
+  notice: 'note',
+  suggestion: 'note',
+  warning: 'note',
+};
+
+/** The fields a message the app has never seen might keep a human sentence in. */
+const SPOKEN_FIELDS = ['content', 'text', 'message', 'error', 'summary', 'reason', 'result'];
+
+/**
+ * The kinds `pump()` translates into something better than a line.
+ *
+ * The one list, read by `noteFor` (which returns null for exactly these) and by
+ * scripts/chat-draws-every-message.mjs (which fails if the kit sends a kind that
+ * is neither in here nor drawn as a note). Two lists would drift, and a kind
+ * that drifts out of both is drawn nowhere — the fault this job exists for.
+ */
+export const TRANSLATED_KINDS = new Set([
+  'system/init',
+  'system/commands_changed',
+  'system/thinking_tokens',
+  'system/local_command_output',
+  'tool_progress',
+  'stream_event',
+  'assistant',
+  'user',
+  'result',
+]);
+
+/** The kit's name for one message, as the tables here spell it. */
+export function kindOf(m: Record<string, any>): string {
+  return m.type === 'system' ? `system/${m.subtype}` : String(m.type ?? 'unknown');
+}
+
+/** One line, whatever it was given: a long value is cut and the whole of it kept in the body. */
+function oneLine(value: unknown, limit = 200): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
+}
+
+/**
+ * Everything the machine says about itself, as one line and a body.
+ *
+ * Returns null only for the kinds translated properly elsewhere. Every OTHER
+ * message — named here or not — comes back as a note, because a driver with a
+ * list of kinds it is willing to hear is what silently lost the manager's
+ * `/compact` answer (docs/agent-workbench.md §8.2.4).
+ */
+export function noteFor(m: Record<string, any>): Note | null {
+  const kind = kindOf(m);
+  const whole = () => oneLine(JSON.stringify(m), 4000);
+  // Translated properly elsewhere in pump().
+  if (TRANSLATED_KINDS.has(kind)) return null;
+
+  switch (kind) {
+    // The answer to /compact, and the only place the reason lives.
+    case 'system/status': {
+      if (m.compact_result === 'failed') {
+        return { rank: 'note', kind, text: `Could not compact: ${oneLine(m.compact_error ?? 'no reason given')}` };
+      }
+      if (m.compact_result === 'success') return { rank: 'note', kind, text: 'Compacted this chat.' };
+      // 'requesting' on every single request, 'compacting' while it works: the
+      // machine breathing, not something it is telling him.
+      return { rank: 'detail', kind, text: `Status: ${oneLine(m.status ?? 'none')}` };
+    }
+
+    case 'system/compact_boundary': {
+      const meta = m.compact_metadata ?? {};
+      const size = meta.post_tokens ? `${meta.pre_tokens} → ${meta.post_tokens} tokens` : `${meta.pre_tokens} tokens`;
+      return { rank: 'note', kind, text: `Compacted (${meta.trigger ?? 'manual'}): ${size}` };
+    }
+
+    case 'system/informational':
+      return {
+        rank: INFORMATIONAL_RANK[String(m.level)] ?? 'note',
+        kind,
+        text: oneLine(m.content),
+        body: String(m.content ?? ''),
+      };
+
+    case 'system/notification':
+      return { rank: m.priority === 'low' ? 'detail' : 'note', kind, text: oneLine(m.text) };
+
+    case 'system/api_retry':
+      return {
+        rank: 'note',
+        kind,
+        text: `Retrying (${m.attempt} of ${m.max_retries})${m.error_status ? ` after HTTP ${m.error_status}` : ''}`,
+        body: whole(),
+      };
+
+    case 'system/permission_denied':
+      return {
+        rank: 'note',
+        kind,
+        text: `${m.tool_name} was not allowed: ${oneLine(m.decision_reason ?? m.message)}`,
+        body: String(m.message ?? ''),
+      };
+
+    case 'system/model_refusal_no_fallback':
+      return { rank: 'note', kind, text: oneLine(m.content), body: String(m.content ?? '') };
+
+    case 'system/model_refusal_fallback':
+      return { rank: 'note', kind, text: `${m.original_model} refused; ${m.direction} to ${m.fallback_model}` };
+
+    // A hook that worked is the machine breathing; one that did not is his to see.
+    case 'system/hook_started':
+    case 'system/hook_progress':
+      return { rank: 'detail', kind, text: `Hook ${m.hook_name} (${m.hook_event})`, body: whole() };
+
+    case 'system/hook_response': {
+      const ok = m.outcome === 'success';
+      const trouble = oneLine(m.stderr || m.output || '');
+      return {
+        rank: ok ? 'detail' : 'note',
+        kind,
+        text: ok ? `Hook ${m.hook_name} ran` : `Hook ${m.hook_name} ${m.outcome}${trouble ? `: ${trouble}` : ''}`,
+        body: [m.output, m.stdout, m.stderr].filter(Boolean).join('\n') || whole(),
+      };
+    }
+
+    case 'system/task_started':
+      return { rank: 'detail', kind, text: `Sent off: ${oneLine(m.description)}` };
+
+    case 'system/task_notification':
+      return { rank: 'note', kind, text: `${oneLine(m.summary)} (${m.status})`, body: whole() };
+
+    case 'system/memory_recall':
+      return {
+        rank: 'detail',
+        kind,
+        text: `Recalled ${(m.memories ?? []).length} memories`,
+        body: (m.memories ?? []).map((mem: { path: string }) => mem.path).join('\n'),
+      };
+
+    case 'system/worker_shutting_down':
+      return { rank: 'note', kind, text: `Shutting down: ${oneLine(m.reason)}` };
+
+    case 'system/plugin_install':
+      return {
+        rank: m.status === 'failed' ? 'note' : 'detail',
+        kind,
+        text: `Plugin ${m.name ?? ''} ${m.status}${m.error ? `: ${oneLine(m.error)}` : ''}`,
+      };
+
+    case 'system/mirror_error':
+      return { rank: 'note', kind, text: `Could not mirror this chat: ${oneLine(m.error)}`, body: whole() };
+
+    case 'tool_use_summary':
+      return { rank: 'detail', kind, text: oneLine(m.summary) };
+
+    case 'auth_status':
+      return {
+        rank: m.error ? 'note' : 'detail',
+        kind,
+        text: m.error ? `Sign-in trouble: ${oneLine(m.error)}` : 'Checking sign-in',
+        body: whole(),
+      };
+
+    case 'conversation_reset':
+      return { rank: 'note', kind, text: 'This chat was started over.' };
+
+    default: {
+      // A kind this build has never seen. If it carries a sentence it is drawn
+      // like anything else that speaks; if it is only structure it waits behind
+      // "show everything". Either way it is never nothing.
+      const spoken = SPOKEN_FIELDS.map((f) => m[f]).find((v) => typeof v === 'string' && v.trim());
+      return spoken
+        ? { rank: 'note', kind, text: oneLine(spoken), body: String(spoken) }
+        : { rank: 'detail', kind, text: kind, body: whole() };
+    }
+  }
+}
+
 /** One line naming what a tool call is about to do, for the feed and the card. */
-function toolTitle(name: string, input: Record<string, unknown>): string {
+export function toolTitle(name: string, input: Record<string, unknown>): string {
   const p = (input.file_path ?? input.path ?? input.notebook_path) as string | undefined;
   if (p) return `${name} ${p.split('/').slice(-2).join('/')}`;
   const cmd = input.command as string | undefined;
@@ -94,10 +281,31 @@ export class ClaudeDriver implements Driver {
   private lastThinkingAt = 0;
   /** TaskCreate calls awaiting the result that carries the task's id. */
   private pendingTodo = new Map<string, { text: string }>();
+  /**
+   * Messages whose words already arrived word-by-word.
+   *
+   * Text has only ever been read off the stream, so a message the kit writes
+   * ITSELF — a compaction refusal, an abort notice — carried its words in
+   * `message.content` and was drawn nowhere (bw-1u1). Anything not in here when
+   * the whole message lands is drawn from its content instead.
+   */
+  private streamed = new Set<string>();
 
   /** One transcript bubble per text block of one message. */
   private blockId(index: number): string {
     return `${this.streamingMessageId}:${index}`;
+  }
+
+  /** A line about the chat's own machinery, and the whole message behind it. */
+  private note(note: Note): void {
+    this.emit({
+      type: 'note',
+      noteId: randomUUID(),
+      rank: note.rank,
+      kind: note.kind,
+      text: note.text,
+      body: note.body ?? null,
+    });
   }
 
   /** Folds one checklist tool call into `todos` and republishes the whole list. */
@@ -217,6 +425,13 @@ export class ClaudeDriver implements Driver {
         // bypass are not restored on resume. 'default' is the mode that asks
         // about every tool — measured, see protocol.ts.
         permissionMode: opts.permissionMode as never,
+        // Permission to SWITCH to bypass later, not a switch to it: the mode
+        // above is still what the session runs in, and every tool is still
+        // asked about until he picks otherwise. Without this the kit refuses
+        // the switch and the picker offers a mode it cannot take — "Cannot set
+        // permission mode to bypassPermissions because the session was not
+        // launched with --dangerously-skip-permissions" (bw-1u1, §3.1).
+        allowDangerouslySkipPermissions: true,
         // Word-by-word text. Without this only whole messages arrive.
         includePartialMessages: true,
         // Decision 6: nothing attaches unless the owner asks for it.
@@ -339,10 +554,14 @@ export class ClaudeDriver implements Driver {
 
   async setMode(mode: string): Promise<void> {
     await this.q?.setPermissionMode(mode as never);
+    // Said out loud, in the chat it happened to: a chat that quietly stopped
+    // asking about tools is a trap (§8.2.4).
+    this.note({ rank: 'note', kind: 'mode', text: `Permission mode is now ${mode}.` });
   }
 
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model);
+    this.note({ rank: 'note', kind: 'model', text: `Model is now ${model}.` });
   }
 
   answer(askId: string, choice: PermissionAnswer): void {
@@ -436,6 +655,10 @@ export class ClaudeDriver implements Driver {
               this.emit({ type: 'message.completed', messageId });
               this.awaitingAnswer = false;
               this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
+            } else {
+              // Every other thing the session says about itself.
+              const note = noteFor(m);
+              if (note) this.note(note);
             }
             break;
 
@@ -456,6 +679,7 @@ export class ClaudeDriver implements Driver {
             // index is the identity that stays put across a whole answer.
             if (ev?.type === 'message_start') {
               this.streamingMessageId = ev.message?.id ?? m.uuid;
+              this.streamed.add(this.streamingMessageId);
             } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'text') {
               this.emit({ type: 'message.started', messageId: this.blockId(ev.index), role: 'assistant' });
               this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
@@ -478,7 +702,21 @@ export class ClaudeDriver implements Driver {
             break;
           }
 
-          case 'assistant':
+          case 'assistant': {
+            // Words that never came down the stream — the kit wrote this message
+            // itself, so there was no `message_start` and nothing was drawn
+            // (bw-1u1). His own turns are unaffected: those always stream.
+            const messageId = String(m.message?.id ?? m.uuid ?? '');
+            if (messageId && !this.streamed.has(messageId)) {
+              this.streamed.add(messageId);
+              (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
+                if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
+                const id = `${messageId}:${index}`;
+                this.emit({ type: 'message.started', messageId: id, role: 'assistant' });
+                this.emit({ type: 'text.delta', messageId: id, text: String(b.text) });
+                this.emit({ type: 'message.completed', messageId: id });
+              });
+            }
             for (const b of m.message?.content ?? []) {
               if (b.type === 'tool_use') {
                 const input = b.input ?? {};
@@ -498,8 +736,20 @@ export class ClaudeDriver implements Driver {
               }
             }
             break;
+          }
 
           case 'user':
+            // A turn the kit wrote in his name — an interrupt notice, a queued
+            // message — says something he should read. A turn HE typed is
+            // already in the log from the moment he sent it, and `isSynthetic`
+            // is the flag that tells the two apart (§8.2.4).
+            if (m.isSynthetic) {
+              for (const b of m.message?.content ?? []) {
+                if (b.type === 'text' && String(b.text ?? '').trim()) {
+                  this.note({ rank: 'note', kind: 'user/synthetic', text: oneLine(b.text), body: String(b.text) });
+                }
+              }
+            }
             // Tool results come back on the user turn.
             for (const b of m.message?.content ?? []) {
               if (b.type === 'tool_result') {
@@ -527,7 +777,20 @@ export class ClaudeDriver implements Driver {
               state: m.subtype === 'success' ? 'idle' : 'errored',
               label: m.subtype === 'success' ? 'Ready' : String(m.subtype ?? 'error'),
             });
+            // An error result carries the sentence saying what went wrong, and
+            // the state label alone is one word.
+            if (m.is_error && typeof m.result === 'string' && m.result.trim()) {
+              this.note({ rank: 'note', kind: 'result', text: oneLine(m.result), body: m.result });
+            }
             break;
+
+          // No list of kinds this driver is willing to hear: whatever else the
+          // kit sends is drawn, because a whitelist is exactly what dropped the
+          // manager's /compact answer (§8.2.4).
+          default: {
+            const note = noteFor(m);
+            if (note) this.note(note);
+          }
         }
       }
     } catch (err) {

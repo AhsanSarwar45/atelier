@@ -146,7 +146,22 @@ export type WbpEvent = EventBase &
     | { type: 'error'; message: string; fatal: boolean }
     /** A line the app says about the chat itself, not the agent's own words. */
     | { type: 'notice'; text: string }
+    /**
+     * Anything the machine says about ITSELF — compaction, a retry, a refusal,
+     * a hook that failed, a mode that changed — and everything the driver had no
+     * name for. Nothing the brand sends is dropped: a kind with no translation
+     * arrives here rather than nowhere, which is what lost the manager's
+     * `/compact` answer (docs/agent-workbench.md §8.2.4).
+     *
+     * `rank` decides the drawing and nothing else: `note` is a grey line always
+     * on the page, `detail` is hidden until the reader asks for everything. Both
+     * are stored, because the log IS the transcript (§4).
+     */
+    | { type: 'note'; noteId: string; rank: NoteRank; kind: string; text: string; body: string | null }
   );
+
+/** How loudly a `note` is drawn. See the rank table in §8.2.4. */
+export type NoteRank = 'note' | 'detail';
 
 export type WbpEventType = WbpEvent['type'];
 
