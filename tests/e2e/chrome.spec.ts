@@ -29,6 +29,41 @@ async function projectId(request: APIRequestContext): Promise<string> {
   return projects[0].id;
 }
 
+/**
+ * Where the gear sits, measured against the bar and against the bar's OWN
+ * controls.
+ *
+ * The row is taken from the back arrow, the project's name and the menu beside
+ * it, not from the middle of the bar: a theme with a heavier bottom border sits
+ * every control a pixel or two above that middle, and the claim is that the gear
+ * is one of them.
+ */
+async function gearOnBar(page: Page) {
+  return page.locator('a[aria-label="Settings"]').evaluate((el) => {
+    const barEl = document.querySelector('[data-testid="project-bar"]')!;
+    const centre = (n: Element) => {
+      const r = n.getBoundingClientRect();
+      return r.y + r.height / 2;
+    };
+    const others = [...barEl.querySelectorAll('a,button,h1,span')]
+      .filter((n) => n !== el && !n.contains(el) && n.getBoundingClientRect().height > 0)
+      .map(centre);
+    const b = barEl.getBoundingClientRect();
+    return {
+      inBar: barEl.contains(el),
+      position: getComputedStyle(el).position,
+      theme: document.documentElement.getAttribute('data-theme'),
+      /** How far the gear is off the row its neighbours sit on. */
+      offRow: others.length ? Math.max(...others.map((c) => Math.abs(centre(el) - c))) : Math.abs(centre(el) - (b.y + b.height / 2)),
+      neighbours: others.length,
+      gearRight: el.getBoundingClientRect().right,
+      barRight: b.right,
+      barPadRight: parseFloat(getComputedStyle(barEl).paddingRight),
+      scrollbarColor: getComputedStyle(document.documentElement).scrollbarColor,
+    };
+  });
+}
+
 /** Every rule in every stylesheet the page loaded, as one piece of text. */
 async function styleText(page: Page): Promise<string> {
   return page.evaluate(() =>
@@ -63,30 +98,14 @@ test.describe('chrome', () => {
       const gear = page.locator('a[aria-label="Settings"]');
       await expect(gear, `${where} has no way out to settings`).toBeVisible();
 
-      const geometry = await gear.evaluate((el) => {
-        const barEl = document.querySelector('[data-testid="project-bar"]')!;
-        const g = el.getBoundingClientRect();
-        const b = barEl.getBoundingClientRect();
-        return {
-          inBar: barEl.contains(el),
-          position: getComputedStyle(el).position,
-          gearCentre: g.y + g.height / 2,
-          barCentre: b.y + b.height / 2,
-          gearRight: g.right,
-          barRight: b.right,
-          barPadRight: parseFloat(getComputedStyle(barEl).paddingRight),
-        };
-      });
+      const geometry = await gearOnBar(page);
 
       expect(geometry.inBar, `${where}: the gear is not inside the bar`).toBe(true);
       // A control taken out of the flow is the fault this case exists for: it
       // reads as belonging to no screen and lands off the bar's own row.
       expect(geometry.position, `${where}: the gear is taken out of the flow`).not.toBe('fixed');
       expect(geometry.position, `${where}: the gear is taken out of the flow`).not.toBe('absolute');
-      expect(
-        Math.abs(geometry.gearCentre - geometry.barCentre),
-        `${where}: the gear is off the bar's row`,
-      ).toBeLessThanOrEqual(1);
+      expect(geometry.offRow, `${where}: the gear is off the row the bar's own controls sit on`).toBeLessThanOrEqual(1);
       // Inside the bar's padding, and at the end of it: the last thing on the row.
       expect(geometry.gearRight, `${where}: the gear overruns the bar's padding`).toBeLessThanOrEqual(
         geometry.barRight - geometry.barPadRight + 1,
@@ -96,6 +115,29 @@ test.describe('chrome', () => {
       );
     }
   });
+
+  // A theme is free to give the bar a heavier border or its own type, and both
+  // move the row the controls sit on. The gear has to move with them: it is one
+  // of the bar's controls now, not a thing parked near it.
+  for (const theme of ['catppuccin-latte', 'neo-brutalist'] as const) {
+    test(`the gear keeps the bar's row under the ${theme} theme`, async ({ page, request }) => {
+      const id = await projectId(request);
+      await page.addInitScript((t) => localStorage.setItem('beads-theme', t), theme);
+      await page.goto(`/project?id=${id}&tab=board`);
+      await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('a[aria-label="Settings"]')).toBeVisible();
+
+      const geometry = await gearOnBar(page);
+      expect(geometry.theme, 'the theme did not take').toBe(theme);
+      expect(geometry.inBar).toBe(true);
+      expect(geometry.offRow, `${theme}: the gear is off the row the bar's own controls sit on`).toBeLessThanOrEqual(1);
+      // The rail follows the theme too, and a theme that answers nothing would
+      // leave the colour unparseable rather than merely different.
+      expect(geometry.scrollbarColor, `${theme}: the rail is not in this theme's ink`).toMatch(
+        /rgba?\(.+\)\s+rgba\([^)]*,\s*0\)/,
+      );
+    });
+  }
 
   test('the app declares its own scrollbar: thin, no track, the theme’s ink', async ({ page, request }) => {
     const id = await projectId(request);
