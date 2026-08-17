@@ -105,6 +105,32 @@ test.describe('the chat draws everything the agent does', () => {
     });
   });
 
+  test('a chat in the safe mode still asks before it runs anything', async ({ page, request }) => {
+    await freshChat(request, page);
+
+    // Every chat is now launched with PERMISSION to switch to bypass, which is
+    // a different thing from being in it (§3.1). What must still be true is
+    // that a chat nobody switched stops and asks — the whole permission story
+    // rests on it, and a flag with "dangerously" in its name is worth proving
+    // rather than reasoning about (bw-1u1.17).
+    await expect(page.getByTestId('mode-picker')).toHaveAttribute('data-current', 'default');
+    // Something the safe mode really does stop for. Its own definition is
+    // "prompts for dangerous operations", and measured 2026-08-17 an `echo` is
+    // waved straight through — so a case built on one would pass whether the
+    // cards worked or not.
+    await say(page, 'Create a file called ask-me-first.txt here holding the word hello. Say nothing else.');
+
+    const card = page.locator('[data-testid="permission-card"][data-ask-state="open"]').first();
+    await card.waitFor({ timeout: TURN_MS });
+    await expect(card).toContainText('Allow');
+
+    // Denied, so the case leaves nothing running behind it.
+    await card.getByTestId('permission-deny').click();
+    await expect(page.locator('[data-testid="permission-card"][data-ask-state="resolved"]').first()).toBeVisible({
+      timeout: 60_000,
+    });
+  });
+
   test('compact says why it could not, instead of saying nothing', async ({ page, request }) => {
     await freshChat(request, page);
     await say(page, '/compact');
