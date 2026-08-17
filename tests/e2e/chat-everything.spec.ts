@@ -1,3 +1,7 @@
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
@@ -51,9 +55,9 @@ interface PastChat {
  * resolved from where it actually lives.
  */
 async function firstThatRanSomething(chats: PastChat[], dir: string): Promise<PastChat | undefined> {
-  const { createRequire } = await import('node:module');
-  const { pathToFileURL } = await import('node:url');
-  const fromSidecar = createRequire(new URL('../../workbench/package.json', import.meta.url));
+  // `__dirname`, not `import.meta.url`: this file is loaded as CommonJS, and
+  // reaching for the other one stopped the whole spec file loading at all.
+  const fromSidecar = createRequire(resolve(__dirname, '../../workbench/package.json'));
   const { getSessionMessages } = await import(
     pathToFileURL(fromSidecar.resolve('@anthropic-ai/claude-agent-sdk')).href
   );
