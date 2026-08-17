@@ -13,14 +13,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { useRouter } from 'next/navigation';
-
+import { BeadChipRow } from '@/components/bead-chip-row';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { BeadChipRow } from '@/components/bead-chip-row';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
 import { folderOf, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -125,7 +122,6 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, everything = false }: ChatSidebarProps) {
-  const router = useRouter();
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
   const rows = useMemo(() => withLive(fetched, live, projectId), [fetched, live, projectId]);
@@ -147,46 +143,44 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
     void load();
   }, [load]);
 
-  const wake = useCallback(
-    async (row: RestoreRow) => {
-      setBusy(rowKey(row));
-      setFailed(null);
-      try {
-        const s = await sendCommand<{ id: string }>({
-          type: 'session.resume',
-          sessionId: row.sessionId ?? undefined,
-          externalId: row.externalId ?? undefined,
-          brand: row.brand,
-          projectId,
-          projectPath,
-        });
-        await load();
-        onOpen(s.id);
-      } catch (e) {
-        // A resume that fails silently leaves a row that looks merely slow.
-        setFailed(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(null);
-      }
-    },
-    [projectId, projectPath, load, onOpen],
-  );
-
   /**
-   * One click is the whole way in: an attached chat opens, a sleeping one is
-   * woken and then opens. Nothing else in the list starts an agent, so the
-   * click is still the consent (docs/agent-workbench.md §6.3.3).
+   * One click is the whole way in, and it is a READ: the conversation is drawn,
+   * and no agent is started. A chat begun in a terminal is given an id and its
+   * past is read in on the way; what wakes an agent is the first message sent to
+   * it, and nothing else (docs/designs/app-shell.md §1.9, the manager's rule of
+   * 2026-08-17).
    */
   const enter = useCallback(
     (row: RestoreRow) => {
-      const asleep = !row.sessionId || row.state === 'dormant' || row.state === 'ended';
-      if (!asleep && row.sessionId) {
+      // A chat this app already knows is opened by its id alone: no round trip,
+      // so the transcript starts drawing on the click.
+      if (row.sessionId && row.state !== 'dormant' && row.state !== 'ended') {
         onOpen(row.sessionId);
         return;
       }
-      void wake(row);
+      const key = rowKey(row);
+      setBusy(key);
+      setFailed(null);
+      void (async () => {
+        try {
+          const s = await sendCommand<{ id: string }>({
+            type: 'session.open',
+            sessionId: row.sessionId ?? undefined,
+            externalId: row.externalId ?? undefined,
+            brand: row.brand,
+            projectId,
+            projectPath,
+          });
+          onOpen(s.id);
+        } catch (e) {
+          // An open that fails silently leaves a row that looks merely slow.
+          setFailed(e instanceof Error ? e.message : String(e));
+        } finally {
+          setBusy(null);
+        }
+      })();
     },
-    [onOpen, wake],
+    [projectId, projectPath, onOpen],
   );
 
   // A screenful, then more as it is pulled: a project with hundreds of chats
@@ -297,10 +291,10 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                         size="xs"
                         shape="circle"
                         data-testid="row-pill"
-                        data-pill="waking"
+                        data-pill="opening"
                         className="ml-auto shrink-0"
                       >
-                        waking
+                        opening
                       </Badge>
                     ) : (
                       live && (

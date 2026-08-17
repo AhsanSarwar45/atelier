@@ -7,7 +7,9 @@
  */
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { ArrowUp, Bot, MessageSquarePlus, PanelLeft, Paperclip, Receipt, Search, Square } from 'lucide-react';
 
@@ -19,21 +21,21 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { diffLines } from '@/workbench/line-diff';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
+import { diffLines } from '@/workbench/line-diff';
+import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportCard, ReportChip } from '@/workbench/report-view';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
-import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import {
   isBusy,
   readImage,
   sendCommand,
   useSession,
   useSessionFacts,
-  useStartSession,
   type TranscriptItem,
 } from '@/workbench/use-session';
 
@@ -213,7 +215,36 @@ function TodoPanel({ items }: { items: TodoItem[] }) {
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
-  const { sessionId, open, start, starting, error: startError } = useStartSession(projectId, projectPath, openSessionId);
+  const router = useRouter();
+  const params = useSearchParams();
+  // The address is which chat is open — never a state of this component's own.
+  // A chat opened here, a link from a card and the Back button all arrive the
+  // same way (docs/designs/app-shell.md §1.7).
+  const sessionId = openSessionId ?? null;
+  const open = useCallback(
+    (id: string) => router.push(addressWith(params, { tab: 'chat', chat: id })),
+    [router, params],
+  );
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const start = useCallback(async () => {
+    if (!projectId || !projectPath) return;
+    setStarting(true);
+    setStartError(null);
+    try {
+      const s = await sendCommand<{ id: string }>({
+        type: 'session.start',
+        projectId,
+        projectPath,
+        brand: 'claude',
+      });
+      open(s.id);
+    } catch (e) {
+      setStartError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStarting(false);
+    }
+  }, [projectId, projectPath, open]);
   const view = useSession(sessionId);
   const facts = useSessionFacts(sessionId);
   // What the board knows plus what this chat has been seen doing since.

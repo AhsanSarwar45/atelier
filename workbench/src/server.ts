@@ -119,6 +119,11 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       sessions.answer(cmd.sessionId, cmd.askId, cmd.optionId);
       json(res, 200, { ok: true });
       return;
+    case 'session.open': {
+      const s = await sessions.open(cmd);
+      json(res, 200, s);
+      return;
+    }
     case 'session.resume': {
       const s = await sessions.resume(cmd);
       json(res, 200, s);

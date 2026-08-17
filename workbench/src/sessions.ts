@@ -20,6 +20,7 @@ import {
 import { ClaudeDriver } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
+import { knownSessions } from './registry.ts';
 import type { Store } from './store.ts';
 
 type Subscriber = (e: WbpEvent) => void;
@@ -90,8 +91,66 @@ export class Sessions {
   }
 
   /**
+   * Opens a chat for READING: it gets an id, its past is read into the log, and
+   * no agent is started. The first message sent to it is what wakes it
+   * (docs/designs/app-shell.md §1.9).
+   *
+   * Nothing here may stamp the session row's last-active time, or a chat would
+   * jump to the top of the list for having been looked at.
+   */
+  async open(params: {
+    sessionId?: string;
+    externalId?: string;
+    brand: Brand;
+    projectId: string;
+    projectPath: string;
+  }): Promise<SessionSummary> {
+    const existing = params.sessionId ? this.store.getSession(params.sessionId) : undefined;
+    // Already running: the transcript is live, so opening it is looking at it.
+    if (existing && this.drivers.has(existing.id)) return existing;
+
+    if (existing) {
+      await this.importPast(existing);
+      // What the row already says, in the transcript's own words: the log's last
+      // state may be `streaming` from a session this process never inherited,
+      // and the writing box reads that to decide whether to offer Stop.
+      if (existing.state === 'dormant' || existing.state === 'ended') {
+        this.publish(existing.id, { type: 'session.state', state: existing.state, label: 'Asleep' });
+      }
+      return { ...existing };
+    }
+
+    // A conversation begun in a terminal, seen for the first time. It keeps the
+    // time the brand's own index gives it, so reading it does not reorder the
+    // list.
+    const seen = params.externalId
+      ? (await knownSessions(params.projectPath)).find((k) => k.externalId === params.externalId)
+      : undefined;
+    const summary: SessionSummary = {
+      id: randomUUID(),
+      brand: params.brand,
+      externalId: params.externalId ?? null,
+      projectId: params.projectId,
+      projectPath: params.projectPath,
+      cwd: seen?.cwd ?? params.projectPath,
+      model: null,
+      permissionMode: DEFAULT_PERMISSION_MODE,
+      title: seen?.name ?? null,
+      state: 'dormant',
+      createdAt: new Date().toISOString(),
+      lastActiveAt: seen?.lastActiveAt ?? new Date().toISOString(),
+    };
+    this.store.createSession({ ...summary, origin: 'terminal' });
+    this.openings.forEach((fn) => fn(summary));
+    await this.importPast(summary);
+    this.publish(summary.id, { type: 'session.state', state: 'dormant', label: 'Asleep' });
+    return summary;
+  }
+
+  /**
    * Brings a session back: the one the app ran, or one begun in a terminal.
-   * Only ever called from a click — nothing here runs on its own (decision 8).
+   * Only ever called from a click, or from the first message sent to a chat that
+   * was open for reading — nothing here runs on its own (decision 8).
    */
   async resume(params: {
     sessionId?: string;
@@ -214,6 +273,21 @@ export class Sessions {
   }
 
   async send(sessionId: string, text: string, images: ImagePayload[] = []): Promise<void> {
+    // Sending is what wakes a chat that was opened for reading. Nothing else
+    // does, so a link into a sleeping conversation is a working one the moment
+    // he types (docs/designs/app-shell.md §1.9).
+    if (!this.drivers.has(sessionId)) {
+      const row = this.store.getSession(sessionId);
+      if (!row) throw new Error(`session ${sessionId} is not running`);
+      this.publish(sessionId, { type: 'notice', text: 'Continuing this chat.' });
+      await this.resume({
+        sessionId,
+        externalId: row.externalId ?? undefined,
+        brand: row.brand,
+        projectId: row.projectId,
+        projectPath: row.projectPath,
+      });
+    }
     const driver = this.require(sessionId);
     // The user's own turn belongs in the transcript before the agent answers it.
     const messageId = randomUUID();
@@ -283,7 +357,10 @@ export class Sessions {
     }
 
     if (full.type === 'session.state') {
-      this.store.updateSession(sessionId, { state: full.state as SessionState });
+      // Falling asleep, or being read while asleep, is not activity: the row
+      // keeps its place in the list (docs/designs/app-shell.md §1.9).
+      const asleep = full.state === 'dormant' || full.state === 'ended';
+      this.store.updateSession(sessionId, { state: full.state as SessionState }, !asleep);
       this.labels.set(sessionId, full.label);
     } else if (full.type === 'session.started') {
       this.store.updateSession(sessionId, { externalId: full.externalId, model: full.model });

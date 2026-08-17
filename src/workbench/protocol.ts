@@ -131,6 +131,20 @@ export type WbpCommand =
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
   | { type: 'session.stop'; sessionId: string }
   | {
+      /**
+       * Open a chat for reading: give a conversation begun elsewhere an id, read
+       * its past into the log, and start NOTHING. The agent is woken by the
+       * first message sent to it (docs/designs/app-shell.md §1.9).
+       */
+      type: 'session.open';
+      /** Ours when the app ran it; otherwise the brand's own id. */
+      sessionId?: string;
+      externalId?: string;
+      brand: Brand;
+      projectId: string;
+      projectPath: string;
+    }
+  | {
       type: 'session.resume';
       /** Ours when the app ran it; otherwise the brand's own id. */
       sessionId?: string;

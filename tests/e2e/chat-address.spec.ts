@@ -76,6 +76,11 @@ async function enter(page: Page, row: RestoreRow): Promise<string> {
   await at.scrollIntoViewIfNeeded();
   await at.getByTestId('row-name').click();
   await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+  // Waiting for THIS chat, not merely for a chat: the one just left is still
+  // drawn for as long as the click takes, so anything less reads it instead.
+  if (row.sessionId) {
+    await expect.poll(async () => (await drawn(page)).sessionId, { timeout: WAY_IN_MS }).toBe(row.sessionId);
+  }
   await expect.poll(async () => (await drawn(page)).messages, { timeout: WAY_IN_MS }).toBeGreaterThan(0);
   const id = (await drawn(page)).sessionId;
   expect(id, 'the chat drew nothing it could be identified by').toBeTruthy();
@@ -125,6 +130,22 @@ test.describe('the address says where you are', () => {
     ).toEqual([]);
   });
 
+  test('a chat begun in a terminal opens for reading, and starts nothing', async ({ page, request }) => {
+    const { project, rows } = await withChats(request);
+    const terminal = rows.find((r) => r.sessionId === null && r.externalId !== null);
+    test.skip(!terminal, 'this instance has no chat begun outside the app');
+    await openChatTab(page, project);
+
+    const sent = await commandsDuring(page, async () => {
+      await enter(page, terminal!);
+    });
+
+    // It is given an id of ours on the way in — that is what the address carries.
+    const drawnId = (await drawn(page)).sessionId;
+    expect(new URL(page.url()).searchParams.get('chat')).toBe(drawnId);
+    expect(sent, 'opening a terminal chat did more than open it').toEqual(['session.open']);
+  });
+
   test('Back returns to the chat that was open before', async ({ page, request }) => {
     const { project, rows } = await withChats(request);
     await openChatTab(page, project);
@@ -159,10 +180,27 @@ test.describe('the address says where you are', () => {
     await openChatTab(page, project);
 
     const opened = await enter(page, worked!);
-    const chip = page.getByTestId('bead-chip').first();
-    await chip.waitFor({ timeout: 60_000 });
-    const card = await chip.getAttribute('data-bead-id');
-    await chip.click();
+    await page.getByTestId('bead-chip').first().waitFor({ timeout: 60_000 });
+    // The line re-crowds when the chat's own account of its cards arrives, so a
+    // chip read before that is a chip that has since moved into the +N. Wait for
+    // the row to stop changing, then take one.
+    const names = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid="bead-chip"]')].map((c) => c.getAttribute('data-bead-id')).join(),
+      );
+    await expect
+      .poll(
+        async () => {
+          const before = await names();
+          await new Promise((r) => setTimeout(r, 750));
+          return (await names()) === before;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+
+    const card = await page.getByTestId('bead-chip').first().getAttribute('data-bead-id');
+    await page.locator(`[data-testid="bead-chip"][data-bead-id="${card}"]`).click();
 
     await page.getByTestId('bead-detail').waitFor({ timeout: 60_000 });
     const address = new URL(page.url());

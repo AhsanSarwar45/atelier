@@ -3,17 +3,18 @@
  *
  * One part for the open chat's line and for a row in the list, so both crowd by
  * the same rule (src/workbench/cards-on-the-line.ts) and both open a card the
- * one way the app opens cards: a card opens where cards live — the board, with
- * its detail panel on that one. The address carries it
- * (src/app/project/kanban-board.tsx reads `bead`), so a chip works from a chat,
- * from the list, and from a link someone pasted.
+ * one way the app opens cards: the card panel slides over whatever tab is
+ * showing, and the reader is not thrown onto the board to read it. The address
+ * carries it (`card=<id>`), so a chip works from a chat, from the list, and from
+ * a link someone pasted — docs/designs/app-shell.md §1.8.
  */
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { addressWith } from '@/lib/address';
 import { CARDS_ON_A_ROW, CARDS_ON_THE_LINE, cardsOnTheLine } from '@/workbench/cards-on-the-line';
 
 /** Where the chips are drawn, which sets how many fit and what they are called. */
@@ -24,8 +25,13 @@ const PLACES = {
   row: { room: CARDS_ON_A_ROW, size: 'xs', chip: 'row-bead-chip', more: 'row-bead-more' },
 } as const;
 
+/**
+ * Where a card opens from outside the project screen — a link with nothing else
+ * to keep. Inside it, the chip keeps the address it is standing on so the tab
+ * and the open chat survive.
+ */
 export function beadHref(projectId: string | null, beadId: string): string {
-  return `/project?id=${projectId ?? ''}&tab=board&bead=${encodeURIComponent(beadId)}`;
+  return `/project?id=${projectId ?? ''}&card=${encodeURIComponent(beadId)}`;
 }
 
 export function BeadChipRow({
@@ -40,6 +46,7 @@ export function BeadChipRow({
   className?: string;
 }) {
   const router = useRouter();
+  const params = useSearchParams();
   const spec = PLACES[place];
   const { shown, rest } = cardsOnTheLine(ids, spec.room);
   if (!ids.length) return null;
@@ -61,7 +68,9 @@ export function BeadChipRow({
         title={`Open ${id}`}
         onClick={(e) => {
           e.stopPropagation();
-          router.push(beadHref(projectId, id));
+          // Pushed, and the rest of the address kept: the card opens over what he
+          // was reading, and Back closes it again.
+          router.push(addressWith(params, { id: projectId, card: id }));
         }}
       >
         {id}

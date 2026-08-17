@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
 import type {
@@ -293,40 +293,9 @@ export function isBusy(state: SessionState): boolean {
 }
 
 /**
- * `openSessionId` attaches to a session that already exists instead of opening
- * a new one — how a link from a card, the tray or the sidebar lands on a chat.
+ * Which chat is open is not a state any component holds: it is in the address,
+ * and the chat tab reads it there (docs/designs/app-shell.md §1.7). A hook that
+ * kept its own copy answered the first link and then quietly disagreed with
+ * every one after it — which is what made an open chat unlinkable and Back do
+ * nothing (bw-m8o).
  */
-export function useStartSession(
-  projectId: string | null,
-  projectPath: string | null,
-  openSessionId?: string | null,
-) {
-  const [sessionId, setSessionId] = useState<string | null>(openSessionId ?? null);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (openSessionId) setSessionId(openSessionId);
-  }, [openSessionId]);
-
-  const start = useCallback(async () => {
-    if (!projectId || !projectPath) return;
-    setStarting(true);
-    setError(null);
-    try {
-      const s = await sendCommand<{ id: string }>({
-        type: 'session.start',
-        projectId,
-        projectPath,
-        brand: 'claude',
-      });
-      setSessionId(s.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setStarting(false);
-    }
-  }, [projectId, projectPath]);
-
-  return { sessionId, open: setSessionId, start, starting, error };
-}

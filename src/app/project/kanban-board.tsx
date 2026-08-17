@@ -4,10 +4,7 @@ import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 
 import { useSearchParams, useRouter } from "next/navigation";
 
-import { ActivityTimeline } from "@/components/activity-timeline";
 import { AgentsPanel } from "@/components/agents-panel";
-import { BeadDetail } from "@/components/bead-detail";
-import { CommentList } from "@/components/comment-list";
 import { CreateBeadDialog } from "@/components/create-bead-dialog";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { KanbanColumn } from "@/components/kanban-column";
@@ -25,15 +22,12 @@ import {
   AlertDialogClose,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { useBeadDetail } from "@/hooks/use-bead-detail";
-import { CardChats } from "@/workbench/card-chats";
-import { StartFromCard } from "@/workbench/start-from-card";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
 import { useBeads } from "@/hooks/use-beads";
 import { useGitHubStatus } from "@/hooks/use-github-status";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
-import { useWorktreeStatuses } from "@/hooks/use-worktree-statuses";
+import { addressWith, whereFrom } from "@/lib/address";
 import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
@@ -155,14 +149,9 @@ export default function KanbanBoard() {
     setFilters({ tags: newTags });
   }, [filters.tags, setFilters]);
 
-  // Filter out closed beads to avoid unnecessary polling for finalized tasks
-  const beadIds = useMemo(() => beads.filter(b => b.status !== 'closed').map(b => b.id), [beads]);
-
-  // Worktree statuses for PR workflow (skip for dolt-only projects)
-  const { statuses: worktreeStatuses } = useWorktreeStatuses(
-    isDoltOnly ? "" : fsPath,
-    isDoltOnly ? [] : beadIds
-  );
+  // The worktree of a card is read by the panel that shows it, for the one card
+  // it is showing — the board itself draws none of it, and polling every open
+  // card's tree to fill a panel that is not on screen was work for nobody.
 
   /**
    * The cards the columns draw (drawnInColumns owns which those are), then the
@@ -208,27 +197,23 @@ export default function KanbanBoard() {
   const unknownStatusBeads = useMemo(() => getUnknownStatusBeads(beads), [beads]);
   const unknownStatusNames = useMemo(() => getUnknownStatusNames(beads), [beads]);
 
-  // Detail panel state
-  const {
-    detailBead,
-    isDetailOpen,
-    openBead,
-    handleDetailOpenChange,
-    navigateToBead,
-  } = useBeadDetail(beads);
-
-  // A card is addressable: ?bead=<id> opens the board with that one open, which
-  // is how a chip in a chat, or a pasted link, lands on a card. The parameter
-  // is an instruction, not a state — it is spent as soon as it is obeyed, or
-  // closing the panel would be undone by the next render.
-  const wantedBead = searchParams.get('bead');
-  useEffect(() => {
-    if (!wantedBead || beads.length === 0) return;
-    navigateToBead(wantedBead);
-    const q = new URLSearchParams(searchParams.toString());
-    q.delete('bead');
-    router.replace(`/project?${q.toString()}`);
-  }, [wantedBead, beads.length, navigateToBead, router, searchParams]);
+  // A card is in the address and nowhere else: the panel over the board is the
+  // one the project screen mounts, and a click here says which card that is
+  // (docs/designs/app-shell.md §1.8). Pushed, so Back closes it.
+  const openCard = whereFrom(searchParams).card;
+  const isDetailOpen = openCard !== null;
+  const openBead = useCallback(
+    (bead: Bead) => router.push(addressWith(searchParams, { card: bead.id })),
+    [router, searchParams],
+  );
+  const navigateToBead = useCallback(
+    (beadId: string) => router.push(addressWith(searchParams, { card: beadId })),
+    [router, searchParams],
+  );
+  const closeCard = useCallback(
+    () => router.replace(addressWith(searchParams, { card: null })),
+    [router, searchParams],
+  );
 
   // Ref for search input (keyboard navigation)
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -244,9 +229,7 @@ export default function KanbanBoard() {
     onOpen: (bead) => {
       openBead(bead);
     },
-    onClose: () => {
-      handleDetailOpenChange(false);
-    },
+    onClose: closeCard,
     searchInputRef,
     isDetailOpen,
   });
@@ -392,46 +375,9 @@ export default function KanbanBoard() {
         )}
       </main>
 
-      {/* Bead Detail Sheet */}
-      <ErrorBoundary label="Bead Detail">
-      {detailBead && (
-        <BeadDetail
-          bead={detailBead}
-          ticketNumber={ticketNumbers.get(detailBead.id)}
-          worktreeStatus={isDoltOnly ? undefined : worktreeStatuses[detailBead.id]}
-          open={isDetailOpen}
-          onOpenChange={handleDetailOpenChange}
-          projectPath={project?.path ?? ""}
-          allBeads={beads}
-          onChildClick={openBead}
-          onUpdate={refreshBeads}
-        >
-          <CommentList
-            comments={detailBead.comments}
-            beadId={detailBead.id}
-            projectPath={project?.path ?? ""}
-            onCommentAdded={refreshBeads}
-          />
-          <ActivityTimeline
-            bead={detailBead}
-            comments={detailBead.comments}
-            childBeads={(detailBead.children || [])
-              .map(id => beads.find(b => b.id === id))
-              .filter((b): b is Bead => !!b)}
-          />
-          <CardChats
-            beadId={detailBead.id}
-            projectId={projectId}
-            projectPath={project?.path ?? ""}
-          />
-          <StartFromCard
-            bead={detailBead}
-            projectId={projectId}
-            projectPath={project?.path ?? ""}
-          />
-        </BeadDetail>
-      )}
-      </ErrorBoundary>
+      {/* The card panel is not mounted here: the project screen mounts the one
+          panel for the whole app, over whichever tab is showing, and reads which
+          card from the address (docs/designs/app-shell.md §1.8). */}
 
       {/* Reports Panel */}
       <ErrorBoundary label="Reports Panel">

@@ -135,15 +135,28 @@ export class Store {
       );
   }
 
-  updateSession(id: string, patch: Partial<Pick<SessionSummary, 'externalId' | 'title' | 'state' | 'model'>>): void {
+  /**
+   * `touch` is what puts the row at the top of the list. It is false for the
+   * things that are not activity — a chat being read, and a chat falling
+   * asleep — because the list is ordered by when a conversation last DID
+   * something, and clicking one is not it (docs/designs/app-shell.md §1.9).
+   */
+  updateSession(
+    id: string,
+    patch: Partial<Pick<SessionSummary, 'externalId' | 'title' | 'state' | 'model'>>,
+    touch = true,
+  ): void {
     const sets: string[] = [];
     const vals: (string | null)[] = [];
     if ('externalId' in patch) { sets.push('external_id = ?'); vals.push(patch.externalId ?? null); }
     if ('title' in patch) { sets.push('title = ?'); vals.push(patch.title ?? null); }
     if ('state' in patch) { sets.push('state = ?'); vals.push(patch.state ?? null); }
     if ('model' in patch) { sets.push('model = ?'); vals.push(patch.model ?? null); }
-    sets.push('last_active_at = ?');
-    vals.push(new Date().toISOString());
+    if (touch) {
+      sets.push('last_active_at = ?');
+      vals.push(new Date().toISOString());
+    }
+    if (!sets.length) return;
     this.db.prepare(`UPDATE session SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
   }
 

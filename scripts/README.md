@@ -69,6 +69,24 @@ about the page the drawer holds:
 - **the page never reaches wider than the drawer** — a sideways scrollbar means
   the right-hand column of every table is off the screen
 
+## `chat-wakes-on-send.py`
+
+Holds the rule that a click is a read: after `session.open` the chat is still
+dormant and has not moved up the list, and after one message it is awake and has
+(the manager's rule, 2026-08-17; docs/designs/app-shell.md §1.9). A browser
+cannot see this one — what must not happen is a process starting — so it drives
+the sidecar and reads back the session row either side.
+
+It starts a real chat and spends one small turn on it, twice, so it wants a
+sidecar with its own data and never the one serving the owner's board:
+
+```
+XDG_DATA_HOME=<a copy of ~/.local/share> BEADS_WORKBENCH_PORT=3019 \
+  node --experimental-strip-types --disable-warning=ExperimentalWarning \
+       --disable-warning=MODULE_TYPELESS_PACKAGE_JSON workbench/src/server.ts &
+XDG_DATA_HOME=<the same copy> python3 scripts/chat-wakes-on-send.py
+```
+
 ## Probes
 
 ### `workbench/scripts/probe-claude-resume.ts`
