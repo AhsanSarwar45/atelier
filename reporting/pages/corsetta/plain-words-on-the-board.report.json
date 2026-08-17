@@ -1,0 +1,151 @@
+{
+  "title": "Tickets You Can Read",
+  "eyebrow": "The board starts refusing a ticket written in the words of whoever built the thing",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing waiting on you. Done and on the main line — override D1 or D2 below if either reads wrong."
+  },
+
+  "status": { "card": "cor-stbf" },
+
+  "content": [
+    {
+      "label": "What changes",
+      "lead": "One check, at the one moment every ticket passes through.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "A ticket whose title carries a word only a builder would use is turned away before it reaches the board.",
+            "The refusal names each offending word and the plain word to use instead, so the fix is one rewrite and not a guessing game.",
+            "The same applies to anything filed in passing, which today is checked for nothing at all.",
+            "The list of words is the one that already guards every page you read, so the board and your reports finally speak the same language."
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "One check, used three times",
+          "text": "The same piece does the work in all three pieces of this effort: it refuses a new ticket here, it is what the next piece extends to the rest of a ticket's sections, and it is the bar the sweep of the hundred and twenty-one existing titles measures against. That is why it is built before the sweep rather than after it."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Why a rule and not a tidy-up",
+          "text": "Your instruction. I had started rewriting the nine cards I filed this morning and stopped after six — hand-fixing leaves the next agent free to file the same thing again tomorrow, and the words already on the board get swept by the machine once it exists."
+        }
+      ]
+    },
+    {
+      "label": "How bad it is right now",
+      "lead": "The word list was run over every title on the board before anything was changed.",
+      "blocks": [
+        {
+          "kind": "tiles",
+          "tiles": [
+            { "value": "551", "key": "titles anyone wrote" },
+            { "value": "121", "key": "you would not be able to read", "tone": "red" },
+            { "value": "22%", "key": "of the board", "tone": "red" }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "bad",
+          "label": "Three of them, as they appear on your screen today",
+          "text": "One opens with the name of a script file and ends in a command nobody typed. One names a piece of code by its run-together internal name and says it swallows a failure. A third quotes a folder path in the middle of the sentence. Every one was accepted without a murmur, because nothing looks at the words. I cannot quote them here in full — this page's own word check refuses them, which is the whole argument for pointing it at the board."
+        }
+      ]
+    },
+    {
+      "label": "It is in and working",
+      "lead": "Built, tested and on the main line. Every result below is a run, not a claim.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Fed to the board", "What happens now"],
+          "rows": [
+            ["A ticket named in builder's words", { "pill": "refused", "tone": "red" }],
+            ["The same, but readable", { "pill": "accepted", "tone": "green" }],
+            ["Something filed in passing, unreadable", { "pill": "refused", "tone": "red" }],
+            ["A subtask, unreadable", { "pill": "refused", "tone": "red" }],
+            ["A whole system, unreadable", { "pill": "refused", "tone": "red" }],
+            ["Anything at all, with the word list missing", { "pill": "refused", "tone": "red" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "What a refusal now says back",
+          "text": "It names every offending word and the plain word to use instead, so the rewrite is mechanical. It also happens before the board is touched at all, so a batch of five subtasks with one bad line is turned away whole rather than half-filed."
+        },
+        {
+          "kind": "table",
+          "columns": ["Proof", "Result"],
+          "rows": [
+            ["The board's own test run", "Twelve checks green, none red. It was eleven before this."],
+            ["The new check, with the refusal taken back out", "Goes red, naming the ticket that got through — so the check has teeth rather than merely passing."],
+            ["Cards created while proving all this", "None. Every case runs with the board out of reach."]
+          ]
+        },
+        {
+          "kind": "tiles",
+          "tiles": [
+            { "value": "75%", "key": "of everything ever written here still passes", "tone": "green" },
+            { "value": "25%", "key": "would have been turned away", "tone": "amber" },
+            { "value": "7 of 7", "key": "cards this job wrote, accepted", "tone": "green" }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Is the bar too tight?",
+          "text": "Run over all five hundred and sixty-six titles anyone has written on this board, three quarters clear it untouched, and every card written while doing this work passed without a rewrite. It bites on the machinery titles and leaves ordinary work alone."
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "The commonest fault is not a word at all",
+          "text": "Most unreadable titles here carry no banned word — they are a file name, a run-together internal name, or a piece of call syntax dropped into the sentence. Four more checks cover exactly those, and each one goes red if that half of the rule is removed."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Read by someone who did not write it",
+          "text": "The board sent its own reader over the whole change and signed it off with nothing to answer. It did turn up one gap, now filed as its own ticket: the board writes the first line of every job itself, and that line is not yet held to the rule. It is the commonest title on your screen, and renaming it reaches further than this piece."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The word list is shared with your reports rather than copied",
+      "why": "Two lists drift within a month and then the board and the page disagree about the same word. One list, read from where it already lives."
+    },
+    {
+      "id": "D2",
+      "title": "Only the manager-facing line is checked, not the evidence underneath",
+      "why": "The title and the one-line problem are what you read on your screen, and titles are pulled onto these pages unedited. The evidence and the finish line below them are required to name files, commands and numbers — the very things the word list bans — so checking those would make the two rules contradict each other."
+    },
+    {
+      "id": "D3",
+      "title": "No escape hatch, not even for work about the machinery itself",
+      "why": "A ticket about the working copies still has to say working copy. Your reports allow a handful of explained terms because a page has room to explain one; a title does not. If it proves too tight in practice it comes back to you as its own question rather than being quietly loosened."
+    },
+    {
+      "id": "D4",
+      "title": "If the word list cannot be read, the ticket is refused rather than waved through",
+      "why": "This board's existing principle, applied here too: a check that could not run is not a check that passed."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "This one is done and on the main line. Next the rest of a ticket's sections get a bar a machine can hold, then the eighty-eight already below it are swept up to it.",
+    "steps": [
+      { "step": "Every section of a ticket has to clear a bar a machine can hold", "cost": "small", "starting": true },
+      { "step": "The eighty-eight tickets below the bar brought up to it", "cost": "medium" }
+    ]
+  }
+}

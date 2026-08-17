@@ -1,0 +1,353 @@
+{
+  "title": "The Board's Own Backlog",
+  "eyebrow": "Sixty-five open tickets, sorted",
+  "actions": {
+    "none": true,
+    "fyi": "Nothing needed from you — all three answers are in, recorded below as D6, D7 and D8, and the gates are being worked in the order you picked."
+  },
+  "status": {
+    "now": "The first gate is fixed and on the main line: a session that claims a ticket, lands the work and closes it is no longer accused of working off the books at the end of the turn. The second is opened — the one that gives a session two different names the moment it starts work, which also costs it the merge queue.",
+    "next_up": "A session stops being refused its own ticket the moment it starts work.",
+    "items": [
+      {
+        "text": "Read and sort every open ticket on the board's own work",
+        "state": "done"
+      },
+      {
+        "text": "The tidy finish stops being accused of working off the books",
+        "state": "done"
+      },
+      {
+        "text": "A session keeps one name, and keeps its place in the merge queue",
+        "state": "draft"
+      },
+      {
+        "text": "Nobody can sign the board under a name they do not hold",
+        "state": "todo"
+      },
+      {
+        "text": "Every job can be signed off by someone who did not write it",
+        "state": "todo"
+      },
+      {
+        "text": "The board screen shows what is there and hides what is not",
+        "state": "todo"
+      },
+      {
+        "text": "Three half-finished jobs closed out",
+        "state": "todo"
+      },
+      {
+        "text": "The written rules say only what the board cannot enforce itself",
+        "state": "todo"
+      }
+    ]
+  },
+  "content": [
+    {
+      "label": "What the sixty-five tickets actually are",
+      "lead": "Sorted by what each group costs, not by when it was filed.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            {
+              "name": "Tickets",
+              "align": "right"
+            },
+            "What it costs today"
+          ],
+          "rows": [
+            [
+              "Gates refusing correct work",
+              {
+                "num": "12",
+                "tone": "red"
+              },
+              "Every session, every day. The written instructions and the gates disagree, so everyone works around them"
+            ],
+            [
+              "The reviewer cannot run",
+              {
+                "num": "5",
+                "tone": "red"
+              },
+              "Jobs stall at the last step. Nothing can be signed off by someone who did not write it"
+            ],
+            [
+              "The screen you read",
+              {
+                "num": "17",
+                "tone": "amber"
+              },
+              "Search empties the board, deleted tickets linger, and two places count the same work differently"
+            ],
+            [
+              "Work living in the other project",
+              {
+                "num": "8",
+                "tone": "amber"
+              },
+              "A job whose change lands in the board project has nothing for a reviewer to read and cannot close"
+            ],
+            [
+              "Written records and rules",
+              {
+                "num": "7",
+                "tone": "grey"
+              },
+              "Facts sitting on tickets instead of in the document that owns them"
+            ],
+            [
+              "In other sessions' hands right now",
+              {
+                "num": "16",
+                "tone": "blue"
+              },
+              "Nothing. Four other sessions are on them as I write"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Twenty-five of these are single findings, not jobs",
+          "text": "They were filed the moment someone tripped over them, one line each. Read together they collapse onto nine causes — three separate tickets, for instance, are all the same fault: a session's name on the board changes the moment it steps into its own working copy."
+        }
+      ]
+    },
+    {
+      "label": "The gates refuse the work they were built to protect",
+      "lead": "Every one of these fires when a session does exactly what the instructions say.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "A session is refused its own ticket the moment it starts work",
+              "note": "The board names a session after the room it is standing in, and the instructions tell it to move rooms between claiming and working. Three tickets, one cause. The only way past it today is a force flag"
+            },
+            {
+              "n": "2",
+              "title": "The turn that finishes its work is accused of working off the books",
+              "note": "Closing your last ticket and stopping is the normal end of a turn. The gate reads that as sixty-five files changed with nothing claimed and refuses to let the turn end. Three tickets and one open job, one cause"
+            },
+            {
+              "n": "3",
+              "title": "The one thing that proves a fault is the one thing that stops the proof being accepted",
+              "note": "Proving a cause means switching it off and watching the fault go. The gate refuses that step to any session that touched a file while holding it — which is what switching it off is"
+            },
+            {
+              "n": "4",
+              "title": "The merge queue refuses the command everyone is told to run before joining it",
+              "note": "The instructions say bring your copy up to date, then take the slot. The gate refuses the first half to anyone who does not already hold the slot. It also refuses read-only questions that merge nothing"
+            },
+            {
+              "n": "5",
+              "title": "Anyone can sign the board under any name",
+              "note": "So the rule that a reviewer is not the author can be walked straight past. Already used once today, by accident"
+            },
+            {
+              "n": "6",
+              "title": "A screen file cannot be cited as a source",
+              "note": "Half this board's work lives in the other project, whose files are the one kind the gate will not accept — so a correctly sourced note naming them is refused"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "bad",
+          "label": "This is the group I would fix first",
+          "text": "None of it is visible to you and all of it is expensive. Every session on this project pays these several times a day, and each workaround is a small hole in the rule the gate was protecting."
+        }
+      ]
+    },
+    {
+      "label": "Nothing can be signed off right now",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "Both reviewers sent at the top job died on the account's own limit",
+              "note": "The reviewer spends the same allowance as the session it is reviewing for. The step stayed shut and said why, which is the designed behaviour — but a job now stalls on the allowance rather than on anything about the change"
+            },
+            {
+              "n": "2",
+              "title": "The reviewer's list of forbidden tools names one that does not exist",
+              "note": "It still cannot edit anything, so nothing is unsafe. A refusal nobody has checked is a refusal nobody can trust"
+            },
+            {
+              "n": "3",
+              "title": "Nine tickets on the board carry no tags at all",
+              "note": "Every one of them was made by the review machinery, which sidesteps the tagging every other route enforces"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "Why this matters more than its size",
+          "text": "The rule that a job is read by someone who did not write it is the newest and the least proven thing on this board. Three review steps have ever closed and all three were signed by their own author. Until the reviewer runs reliably, that rule is decoration."
+        }
+      ]
+    },
+    {
+      "label": "The screen you read the board on",
+      "lead": "These are the ones you would notice yourself.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "Typing a step's name empties the board instead of finding it",
+              "note": "The screen filters every ticket, then draws only the top-level ones. A step matches and is never drawn, and its job does not match, so every column goes blank"
+            },
+            {
+              "n": "2",
+              "title": "A deleted ticket never leaves an open screen",
+              "note": "It stays until you reload the page by hand"
+            },
+            {
+              "n": "3",
+              "title": "A ticket with no title is drawn as the word undefined"
+            },
+            {
+              "n": "4",
+              "title": "One ticket changing fires 367 requests",
+              "note": "The change itself arrives in a tenth of a second; the screen catches up 6.8 seconds later, queued behind them"
+            },
+            {
+              "n": "5",
+              "title": "The home page circle and the board columns count by two different rules",
+              "note": "Two hand-written copies of one mapping, one on the screen and one in the store. They already disagree"
+            },
+            {
+              "n": "6",
+              "title": "The store rewrites a job's state by a rule you overruled",
+              "note": "Your ruling was that a piece of work is never in review and only a job's own last step decides. The store still applies the old rule on every change"
+            },
+            {
+              "n": "7",
+              "title": "A skipped step is recorded and never shown",
+              "note": "So a step everyone skips looks exactly like one everyone runs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Three jobs are already open and waiting on their own findings",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "One list of states, offered everywhere",
+              "note": "Built and reviewed. Five findings to fix: two of the six states still cannot be set from any screen, cancelling cannot be undone, and the check that proves the columns agree only proves five of the six"
+            },
+            {
+              "n": "2",
+              "title": "A job whose change lands in the other project",
+              "note": "Built and reviewed. Six findings to fix, all about the reviewer being handed file names with no project beside them"
+            },
+            {
+              "n": "3",
+              "title": "The two side panels are two different drawers",
+              "note": "Built. One landing left"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "These finish fastest",
+          "text": "The thinking is done and the findings are written. They are the cheapest tickets on the board to close, which is why one of the answers above offers them first."
+        }
+      ]
+    },
+    {
+      "label": "What I am staying off",
+      "blocks": [
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Sixteen of the sixty-five are in other hands",
+          "text": "Four other sessions hold them right now: the six columns, the tags on every card, the live refresh, and one report guard. I will not touch a ticket while someone else is on it — this board runs on one shared working copy, and two sessions in the same file is how work gets lost."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Twenty-five loose findings become nine jobs, not twenty-five",
+      "why": "They were filed one line at a time as people tripped over them. Grouped by cause, three of them are one fix. Twenty-five separate jobs would mean twenty-five clarify steps, twenty-five reviews and twenty-five landings for nine changes."
+    },
+    {
+      "id": "D2",
+      "title": "Nothing another live session is holding gets touched",
+      "why": "One shared working copy, four other sessions on it. The cost of ignoring this is somebody's work quietly disappearing."
+    },
+    {
+      "id": "D3",
+      "title": "Screen work lands in the shared board project, not in this one",
+      "why": "The screen is shared by every project. Copying any of it here would fork the thing every project reads."
+    },
+    {
+      "id": "D4",
+      "title": "A finding that turns out not to be real is closed, not built",
+      "why": "Several were filed in the middle of something else and never checked. Each one starts by reproducing the fault; if it does not reproduce, the job dies there rather than growing a fix for nothing."
+    },
+    {
+      "id": "D5",
+      "title": "The gates get one job per cause, and each starts by making the refusal happen on purpose",
+      "why": "Every one of these is a rule refusing correct work. Loosening a rule without first reproducing exactly what it refuses is how a gate ends up with no teeth at all."
+    },
+    {
+      "id": "D6",
+      "title": "The gates go first; the screen comes after",
+      "tag": "your call",
+      "why": "Answered 13 Aug. The gates cost every session several times a day and each workaround is a hole in the rule the gate was protecting."
+    },
+    {
+      "id": "D7",
+      "title": "The written rules are cut back to the ones the board cannot enforce",
+      "tag": "your call",
+      "why": "Answered 13 Aug. Half of them are already the acceptance test of a step the board opens by itself, so today every rule is read twice and only the copy on the ticket can refuse anything."
+    },
+    {
+      "id": "D8",
+      "title": "The block read at every session start is cut to the loop and the two rules with teeth",
+      "tag": "your call",
+      "why": "Answered 13 Aug. It repeated the board document word for word on every start, resume and restart, and carried a list of tickets nobody acted on."
+    }
+  ],
+  "next": {
+    "if_nothing": "I carry on down the gates in the order above, then the reviewer, then the screen. Each one lands on its own and gets its own page.",
+    "steps": [
+      {
+        "step": "A session stops being refused its own ticket the moment it starts work",
+        "cost": "medium",
+        "starting": true
+      },
+      {
+        "step": "The queue everyone joins to land work stops refusing the step before it",
+        "cost": "small"
+      },
+      {
+        "step": "Every job can be signed off by someone who did not write it",
+        "cost": "medium"
+      },
+      {
+        "step": "The board screen shows what is there and hides what is not",
+        "cost": "large"
+      }
+    ]
+  }
+}

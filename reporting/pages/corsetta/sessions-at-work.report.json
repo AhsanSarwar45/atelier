@@ -1,0 +1,368 @@
+{
+  "title": "The Sessions At Work",
+  "eyebrow": "Fifty-three gigabytes back, three tickets freed",
+  "actions": {
+    "none": true
+  },
+  "status": {
+    "now": "Your three instructions are carried out. The held tickets are back on the board, fifty-three gigabytes are back on the disk, and the two rules that should have prevented both are open jobs waiting to be run.",
+    "next_up": "A session cannot take its next step while the copy of the work it just finished in is still on the disk.",
+    "items": [
+      {
+        "text": "Read the board, the sessions' notes, the copies on disk and the landings",
+        "state": "done"
+      },
+      {
+        "text": "Everything found is on the board as a finding",
+        "state": "done"
+      },
+      {
+        "text": "The three held tickets are freed and back in the queue",
+        "state": "done"
+      },
+      {
+        "text": "The eleven finished copies are off the disk, the four with work in them kept",
+        "state": "done"
+      },
+      {
+        "text": "A copy is deleted the moment its job has nothing left to build in it",
+        "state": "todo"
+      },
+      {
+        "text": "A ticket a stopped session was holding comes back on its own",
+        "state": "todo"
+      },
+      {
+        "text": "A finished ticket names the change that is actually on the main line",
+        "state": "todo"
+      },
+      {
+        "text": "The review step reports the real reason it could not run",
+        "state": "todo"
+      }
+    ]
+  },
+  "content": [
+    {
+      "label": "What your three answers did",
+      "lead": "All three are carried out. Nothing was thrown away to do it.",
+      "blocks": [
+        {
+          "kind": "tiles",
+          "tiles": [
+            {
+              "value": "53 GB",
+              "key": "back on the disk",
+              "tone": "blue",
+              "delta": "60 GB down to 6.9"
+            },
+            {
+              "value": "11",
+              "key": "finished copies deleted",
+              "tone": "blue"
+            },
+            {
+              "value": "3",
+              "key": "held tickets back in the queue",
+              "tone": "blue"
+            },
+            {
+              "value": "0",
+              "key": "lines of work lost",
+              "tone": "grey"
+            }
+          ]
+        },
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "Five of the eleven were not empty, and none of them was thrown away",
+              "note": "Between ten and 1,440 lines each, sitting uncommitted. Every one was saved to a copy of its own before its folder was deleted, so all of it is still recoverable by name. The largest was a set of twenty-four changed files nobody had committed since July"
+            },
+            {
+              "n": "2",
+              "title": "One of the twelve you approved was excluded, because it came back to life",
+              "note": "A session picked that copy up again forty minutes before I started deleting, and was working in it as I wrote. Eleven went instead of twelve. Two more copies were created by other sessions while this was running, and both were left alone"
+            },
+            {
+              "n": "3",
+              "title": "The copy that sat outside the required folder is gone, and so is the folder",
+              "note": "Nothing can be cut there by accident again"
+            },
+            {
+              "n": "4",
+              "title": "The three freed tickets each say who freed them and why",
+              "note": "So the session that comes back to one is not left guessing why its claim vanished. Two of the three had been sitting there since yesterday evening"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "The rule you asked for cannot simply call the obvious command",
+          "text": "It turns out this project's own copies refuse to be deleted the normal way: nine of the eleven were rejected outright, because a copy that carries the interface toolkit we patch cannot be removed by the standard command at all, whatever state it is in. Only the two that had never pulled that toolkit down could go the clean way. A rule written the obvious way would silently do nothing for almost every copy we make — which is on the job as the first thing its design has to answer."
+        }
+      ]
+    },
+    {
+      "label": "The work is good. The machinery around it is what is stuck",
+      "lead": "Nothing below is a session doing the job badly. Every one is the board holding on to work the session finished or cannot start.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "A session that stops never gives its tickets back",
+              "note": "The board says a session that dies has its work handed back automatically. It does not. The hand-back only ever looks for tickets left by a session with its own name, and a name is invented fresh for every session, so nobody can ever release anybody else's. Three tickets sit in it right now, held past the five-minute limit by sessions whose last written trace is yesterday evening in two cases and this morning in the third. One is a container, and its three pieces of work cannot be picked up while it sits there"
+            },
+            {
+              "n": "2",
+              "title": "Two jobs are stuck at review, and the ticket blames the wrong thing",
+              "note": "The rule that someone who did not write the change must read it is the newest thing on this board. Two jobs sent a reader twice; all four attempts died on the account's own allowance. What went on the ticket was that the reader produced nothing readable, so the next person to look will send another reader at a cause that was never true"
+            },
+            {
+              "n": "3",
+              "title": "Ten finished tickets point at a change that no longer exists",
+              "note": "A session brings its copy up to date before merging, which gives every one of its changes a new name. Ten tickets recorded the old name and then merged. Each says landed as, and names something that is on no line of work at all. The check that lets a ticket close reads the ticket number in the message rather than the name, so it passed every time"
+            },
+            {
+              "n": "4",
+              "title": "A finished, checked, screenshotted piece of work sat open for six hours",
+              "note": "Its own notes say it is live on your screen, built, running and compared against the board with no disagreements. Nobody ticked it off, so its job could not leave In Progress. Another session picked it up minutes after this was written, which is the good half of the story: the board is being read"
+            },
+            {
+              "n": "5",
+              "title": "A correction is stranded in the shared copy under nobody's name",
+              "note": "One of the standing instruction files was fixed in the shared copy of the work and never committed. It belongs to no ticket, and every session that runs there inherits it without knowing"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "bad",
+          "label": "The pattern",
+          "text": "Four of these five are the last inch of a job: the change is written, checked and often already on the main line, and the board is holding the receipt. That is the expensive kind of stuck, because the session that could finish it in a minute has usually already gone."
+        }
+      ]
+    },
+    {
+      "label": "Where the copies stand now",
+      "lead": "A session is told to work in its own copy and delete it when the work lands. The second half was not happening at all.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            {
+              "name": "Copies",
+              "align": "right"
+            },
+            "What is in them"
+          ],
+          "rows": [
+            [
+              "Deleted — work already on the main line",
+              {
+                "num": "11",
+                "tone": "blue"
+              },
+              "Nothing that was not already merged. Oldest was cut on 19 July. Five had loose edits, all saved first"
+            ],
+            [
+              "Kept — holding work nobody merged",
+              {
+                "num": "4",
+                "tone": "amber"
+              },
+              "One to two changes each, from 19 to 26 July, on no line anybody reads. Your call to keep them"
+            ],
+            [
+              "Kept — a session is in it right now",
+              {
+                "num": "3",
+                "tone": "grey"
+              },
+              "Two of the three did not exist when you gave the instruction"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The four kept ones are the whole remaining question",
+          "text": "They are about a gigabyte and a half between them and each is a dead end: work from July that nobody has merged and nobody remembers. Keeping them costs almost nothing now. They are worth a decision at some point, but not today's."
+        }
+      ]
+    },
+    {
+      "label": "The board fills about forty times faster than it drains",
+      "blocks": [
+        {
+          "kind": "tiles",
+          "tiles": [
+            {
+              "value": "397",
+              "key": "tickets a session could take right now",
+              "tone": "red"
+            },
+            {
+              "value": "141",
+              "key": "jobs never past their own first step",
+              "tone": "amber"
+            },
+            {
+              "value": "117",
+              "key": "one-line findings with no job yet",
+              "tone": "grey"
+            },
+            {
+              "value": "3",
+              "key": "jobs finished yesterday",
+              "tone": "blue"
+            }
+          ]
+        },
+        {
+          "kind": "bars",
+          "alt": "jobs opened against jobs finished, by day",
+          "unit": " jobs",
+          "series": [
+            {
+              "label": "Opened 12 August",
+              "value": 211,
+              "tone": "red"
+            },
+            {
+              "label": "Finished 12 August",
+              "value": 53,
+              "tone": "blue"
+            },
+            {
+              "label": "Opened 13 August",
+              "value": 5,
+              "tone": "red"
+            },
+            {
+              "label": "Finished 13 August",
+              "value": 3,
+              "tone": "blue"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Your ruling: this stays as it is",
+          "text": "Everything a session trips over gets written down the moment it is seen, and it is written down as a full job. Nothing is being lost, which is the point of the rule. The cost you accepted is that the list a session reads at the start of its turn shows the first hundred of 397, so which one to take is effectively chosen at random — and that a hundred and forty-one jobs sit at their own first step. Nobody will change how a finding is filed."
+        }
+      ]
+    },
+    {
+      "label": "What the sessions are getting right",
+      "lead": "Worth saying, because it is the part that is hardest to enforce and it is holding.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "Every single ticket on the board carries both of its tags",
+              "note": "All 454 of them, system and kind, with no exceptions. That was a new rule two days ago"
+            },
+            {
+              "n": "2",
+              "title": "The notes are real evidence, not claims",
+              "note": "Commands with their numbers, the picture that was looked at, the alternative that was measured and rejected. One ticket records that framing a whole circuit put the camera thirty-eight kilometres out and drew nothing, which is why it frames the starting grid instead"
+            },
+            {
+              "n": "3",
+              "title": "Steps that were dropped say why, specifically",
+              "note": "Not one boilerplate reason among them. This job makes no speed claim, it changes where a camera points is the shape they all take"
+            },
+            {
+              "n": "4",
+              "title": "The two shortcuts taken were declared as shortcuts",
+              "note": "Two sessions had to read their own work because no independent reader was available to them. Both wrote that on the ticket in as many words and told the next reader to treat their confidence accordingly, rather than passing it off as a review"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Everything found here is already on the board as a finding",
+      "why": "Seven of them, one per cause, each with what it is and how it shows. Written the moment they were seen, because a finding held in a session's head dies with the session."
+    },
+    {
+      "id": "D2",
+      "title": "Nothing was fixed, freed or closed while looking",
+      "why": "You asked me to watch, and the standing rule is that a problem gets a diagnosis and then waits for you. Four of the five stuck items are somebody else's work, and reaching into it is how the work gets lost."
+    },
+    {
+      "id": "D3",
+      "title": "The sessions were judged by their own record, not by watching them run",
+      "why": "Their tickets, their notes, the changes on the main line and the copies of the work on this disk. Watching eleven sessions live would cost hours and tell me less than what they each wrote down."
+    },
+    {
+      "id": "D4",
+      "title": "The two failed reviews are counted as one cause, not two",
+      "why": "All four attempts died the same way, on the account's own allowance. One fix covers both jobs and every future one."
+    },
+    {
+      "id": "D5",
+      "title": "The stale rule the reader complains about is left alone",
+      "why": "Its list of forbidden tools names one that no longer exists. The reader still cannot edit anything, so nothing is unsafe and it is noise, not a fault."
+    },
+    {
+      "id": "D6",
+      "title": "Nothing uncommitted was deleted, even where you had approved deleting the copy",
+      "why": "Five of the eleven held loose work, up to 1,440 lines. Saving each one first cost seconds and a few kilobytes; being wrong about whether it mattered would have cost somebody a day. Your instruction was to delete the copies whose work had landed, and loose edits are by definition work that has not."
+    },
+    {
+      "id": "D7",
+      "title": "The copy that came back to life was excluded from your twelve",
+      "why": "A session claimed three tickets in it forty minutes before the deletions started and was working in it at the time. Eleven went instead of twelve. The same test excluded two copies that other sessions created while this was running."
+    },
+    {
+      "id": "D8",
+      "title": "The patched interface toolkit inside each copy was checked, not assumed",
+      "why": "Every copy carried its own uncommitted patches to it, and the main line's copy was clean, which looks like work about to be lost. It is not: the main line is strictly ahead and carries newer versions of the same patches. That was compared file by file before anything was deleted."
+    },
+    {
+      "id": "D9",
+      "title": "The two rules you asked for are jobs on the board, not changes made today",
+      "why": "Both change what refuses a session mid-turn, and a gate written in a hurry is how the board ends up refusing correct work — which is already the largest group of complaints on it. Each starts by making the failure happen on purpose."
+    }
+  ],
+  "next": {
+    "if_nothing": "I run the copy-deletion rule first, since the backlog it prevents is the one that just cost fifty-three gigabytes, then the rule that hands back a stopped session's tickets.",
+    "steps": [
+      {
+        "step": "A session cannot take its next step while the copy it just finished in is still on the disk",
+        "cost": "medium",
+        "starting": true
+      },
+      {
+        "step": "A ticket a stopped session was holding comes back to the board on its own",
+        "cost": "small"
+      },
+      {
+        "step": "A finished ticket names the change that is actually on the main line",
+        "cost": "small"
+      },
+      {
+        "step": "The review step says the reader ran out of allowance instead of blaming its answer",
+        "cost": "small"
+      },
+      {
+        "step": "The four kept copies are either merged or dropped",
+        "cost": "small"
+      }
+    ]
+  }
+}

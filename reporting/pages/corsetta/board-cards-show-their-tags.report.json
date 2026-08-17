@@ -1,27 +1,10 @@
 {
   "title": "Cards Show Their Tags",
-  "eyebrow": "Live on your board now; one thing is waiting on you",
+  "eyebrow": "Live on your board, and now ticked off as well",
 
   "actions": {
-    "questions": [
-      {
-        "ask": "The work list will not tick this job off, because it looks for the change in the wrong repository. Fix that, or let it sit?",
-        "options": [
-          {
-            "label": "Fix it now",
-            "say": "Fix the cross-repository check now, then tick this job off.",
-            "pick": true,
-            "note": "Half a day. It blocks every job whose change lives in the board screen, not just this one, and it also leaves the reviewer with nothing to read"
-          },
-          {
-            "label": "Leave it open",
-            "say": "Leave the steps open for now and move on to other work.",
-            "note": "Costs nothing today. The finished work stays marked unfinished, and the same thing happens to the next board job"
-          }
-        ],
-        "note": "The change itself is written, checked and running on your screen. Only the bookkeeping is stuck."
-      }
-    ]
+    "none": true,
+    "fyi": "Both things that held the tick up are fixed — the cross-repository check, and the rule that refused a finished piece its tick. This job is ticking off now and nothing on this page is waiting on you."
   },
 
   "status": { "card": "cor-41l" },
@@ -82,12 +65,18 @@
             ["Cards whose tags reach the screen", "0 of 553", "544 of 553"],
             ["Cards drawn under a tag that lack it", "—", "0"],
             ["Cards carrying a tag that the filter hid", "—", "0"],
-            ["Rules held by a test that goes red", "0", "15"]
+            ["Rules held by a test that goes red", "0", "15"],
+            ["Re-checked today, on a board grown to 182 cards", "—", "351 tags drawn, 0 disagreements"]
           ]
         },
         {
           "kind": "note",
           "text": "The nine cards with no tags at all really have none: they are made by a side path that skips the tagging, which is now its own card."
+        },
+        {
+          "kind": "note",
+          "text": "All fifteen rules are green today, and weakening the filter on purpose makes the right one go red while the others stay green — so they are watching something.",
+          "tone": "good"
         }
       ]
     },
@@ -148,10 +137,9 @@
   ],
 
   "next": {
-    "if_nothing": "The change stays live on your board and its steps stay marked unfinished, because the tick is blocked on the question above.",
+    "if_nothing": "The tags stay live on your board and the job finishes ticking itself off. Nothing here is waiting on you.",
     "steps": [
-      { "step": "Answer the one question above", "cost": "small", "starting": true },
-      { "step": "Tick the job off and let a second pair of eyes read it", "cost": "small" },
+      { "step": "A second pair of eyes reads the change before it is ticked off", "cost": "small", "starting": true },
       { "step": "The nine untagged cards, and the side path that makes them", "cost": "small" }
     ]
   }

@@ -1,6 +1,6 @@
 {
   "title": "Two Public Protocols, Five Gaps",
-  "eyebrow": "Both projects are a thinner version of what we already run. Five things they do that we do not — and every one of them sits where a helper hands work back.",
+  "eyebrow": "Both projects are a thinner version of what we already run. Five things they do that we do not — and the biggest of them is built, running in both projects, and already catching real work.",
   "actions": {
     "none": true
   },
@@ -31,7 +31,11 @@
       "blocks": [
         {
           "kind": "table",
-          "columns": ["The gap", "What it costs today", "What closing it does"],
+          "columns": [
+            "The gap",
+            "What it costs today",
+            "What closing it does"
+          ],
           "rows": [
             [
               "A helper's answer is taken on trust",
@@ -64,6 +68,44 @@
           "kind": "note",
           "label": "One more, small",
           "text": "The checks that run before a change is saved can be turned off by a single flag, and nothing here looks for it. Both projects block that flag outright. Filed."
+        }
+      ]
+    },
+    {
+      "label": "What is already running",
+      "lead": "The first of the five is built and live in both projects. A helper can no longer end by saying it verified something it never ran.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Refused",
+            "How the line was drawn"
+          ],
+          "rows": [
+            [
+              "A helper says it verified its change and nothing was run after the change",
+              "Our own standing rule, with teeth for the first time: a claim carries what produced it, and building is not verifying."
+            ],
+            [
+              "A helper hands back a transcript instead of a verdict",
+              "The cut-off is the 99th percentile of 2,532 real helper answers measured off this machine — 10,000 characters for one that changed files, 25,000 for one that only read. Their protocol picked 1,200 for their own helpers; that would have refused about 19 of every 20 answers we call normal."
+            ],
+            [
+              "A helper worked one of your cards and its answer never names it",
+              "The honest half of their demand that a helper tick its own ticket. Most of our helpers hold no card at all, so only the ones that took one are held to it."
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "Replayed over real history before it went anywhere near a live session",
+          "text": "600 real helper answers, drawn at random from this machine and pushed back through the gate one at a time: 98.2 per cent passed untouched, 1.7 per cent were pasted logs, and one was a genuine claim of verification with nothing run — a helper that edited four files, ran nothing, and called it verified. That is the tail it was measured for, and nothing else moved."
+        },
+        {
+          "kind": "note",
+          "label": "Two of their demands deliberately dropped",
+          "text": "They also require the helper to tick its ticket line by line and to have committed and pushed. Ours cannot: most helpers hold no ticket, and ours edit the caller's own copy of the work on purpose, so demanding a commit would break the normal way we work. Both drops are recorded on the job rather than quietly skipped."
         }
       ]
     },
@@ -119,19 +161,25 @@
       "id": "D5",
       "title": "Rewriting our rule documents as trigger lines was considered and dropped",
       "why": "Their rules read 'when you do X, stop and do Y'. Ours mostly do already, and the ones that do not are enforced by a guard instead, which is strictly better than a better-worded sentence."
+    },
+    {
+      "id": "D6",
+      "title": "The gate holds a helper to what it actually did, never to a tick box",
+      "why": "Their gate demands a ticked checklist and work pushed to a shared copy. Most of our helpers hold no ticket and ours edit the caller's own copy on purpose, so both demands would train every caller to route around the gate. What is refused instead is a claim of verification with nothing run — the same rule we already live by, enforced for the first time."
+    },
+    {
+      "id": "D7",
+      "title": "It was replayed over 600 real answers before it went live",
+      "why": "A guard nobody measured is a guard that refuses good work. 98.2 per cent passed untouched and the refusals were pasted logs plus one real unproved claim, so the cost of running it is close to nothing and the catch is real."
     }
   ],
   "next": {
-    "if_nothing": "The helper-answer gate gets built and the other four stay filed, so a helper still hands back an unchecked answer in every project until then.",
+    "if_nothing": "The gate keeps running in both projects and the other four stay filed, so the reader still signs off on numbers it never reproduced.",
     "steps": [
       {
-        "step": "A helper can no longer end by saying it is done — it ends by showing its card's success lines ticked, its note on the card and its work saved, or it is refused",
+        "step": "The outside reader stops signing off on a measurement it never reproduced — it re-runs one named proof and compares",
         "cost": "medium",
         "starting": true
-      },
-      {
-        "step": "The outside reader re-runs one named proof instead of reading the claim",
-        "cost": "medium"
       },
       {
         "step": "The opening screen names work already landed whose card is still open, and the flag that skips the pre-save checks stops working",

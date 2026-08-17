@@ -1,0 +1,153 @@
+{
+  "title": "The chat view, fixed",
+  "eyebrow": "All five things you pointed at are done and on your board. It waits on your look.",
+
+  "actions": {
+    "questions": [
+      {
+        "ask": "Does the chat screen read right now?",
+        "options": [
+          {
+            "label": "Yes — close it",
+            "say": "The chat screen reads right. Close the job.",
+            "pick": true
+          },
+          {
+            "label": "Not yet",
+            "say": "Something is still wrong on the chat screen — I'll say what."
+          }
+        ],
+        "note": "Your usual address is rebuilt and restarted, so it is already showing this. 127.0.0.1:3007 shows whatever is on the trunk without a rebuild."
+      }
+    ]
+  },
+
+  "status": { "card": "bw-ccm" },
+
+  "content": [
+    {
+      "label": "The waiting",
+      "lead": "Clicking Chat took nearly eleven seconds. It now takes a third of one.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "Before", "After"],
+          "rows": [
+            ["Click Chat, first chat on screen", "10.8 s", "0.32 s"],
+            ["Click Board again", "10.4 s", "under 1 s"],
+            ["Start a chat", "10 s, and missing from the list", "in the list while it starts"],
+            ["The machine answering with all 320 chats", "0.15 s", "0.15 s"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "text": "The machine was never the problem. The board asked, for every card at once, how its working copy stood and what its pull request was doing — each of those takes seconds, and a browser only holds six conversations with a machine at a time, so the chat's own list waited behind them. Those readings now go two at a time and stop the moment you leave the board. That they are slow at all is its own ticket."
+        }
+      ]
+    },
+    {
+      "label": "Colour, in one place",
+      "lead": "Every chip in the app took its colour from names nothing here defined; they came out grey.",
+      "blocks": [
+        {
+          "kind": "compare",
+          "before": {
+            "path": "reporting/pages/beads-web/agents-inside/chat-list-grey.png",
+            "caption": "Before — the same grey chip 320 times, no ticket on any row, three tools written out as sentences"
+          },
+          "after": {
+            "path": "reporting/pages/beads-web/agents-inside/chat-list-colour.png",
+            "caption": "After — coloured chips, ready pills that read as ready, and the tools as pictures"
+          }
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "text": "One block now answers those colour names from whichever of your ten themes is live, so the board's tags, the chat's chips and everything else follow the theme together. A chip whose colour belongs to the thing it names — a system, a folder, a model — is handed that colour as a number and mixed against the live theme, so two of them never read the same."
+        }
+      ]
+    },
+    {
+      "label": "One set of parts",
+      "lead": "Your rule, said twice: components defined in one place, not redrawn by every screen.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "Chips, boxes, toolbars and text fields now come from one library each — the chat, the board, the project cards, the settings, the folder browser, the agents panel and the memory panel all draw from it.",
+            "The check that catches a hand-drawn one used to read ten files; it now reads every screen in the app, and knows the difference between using a part and redrawing it.",
+            "Two new pieces joined the library rather than being invented on the spot: a toolbar button that is a picture with its words in the tooltip, and a box that means 'here is something you did not ask about'."
+          ]
+        },
+        {
+          "kind": "images",
+          "shots": [
+            {
+              "path": "reporting/pages/beads-web/agents-inside/chat-open-header.png",
+              "caption": "An open chat now says where it is working; when the board records tickets against it, they sit beside it"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "text": "Tickets on an open chat come from the board itself, two ways: the links this app recorded, and the name the board stamps on a card when it is claimed — which ends in the first eight characters of the agent's own session. That second way is the only link a chat you started in a terminal has, and it found 26 tickets for one such chat."
+        }
+      ]
+    },
+    {
+      "label": "How it is held",
+      "lead": "Each fix has a check, and each check was shown to go red when the fix is taken away.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["The check", "What breaking it looks like"],
+          "rows": [
+            ["The chats are on screen within a second", "the cap on background readings raised — 7.3 s for the board"],
+            ["A chip is coloured, not grey", "the chip's colour rule blanked — the drawn colour goes grey"],
+            ["Every tool is a picture with a name", "one tool put back as words — 'tool 0 has no name'"],
+            ["No screen draws its own chip", "one hand-drawn chip added — the check names the file and line"]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "text": "One check outside this job cannot run at all: the one that compares each theme against saved pictures was never given any pictures to compare against. It is on the board as its own ticket."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The long list of chats is drawn a screenful at a time after all",
+      "why": "Last week it was measured alone at 1.7 s and left whole on purpose. On your screen the board sits behind it, and the same list then cost 10.8 s — so that call was right about the list and wrong about your screen. It draws forty and grows as you pull it."
+    },
+    {
+      "id": "D2",
+      "title": "The board is put away when you leave it",
+      "why": "It was kept alive so returning was instant, and that cost ten seconds on every switch in both directions. It comes back in a fraction of a second from what it already holds."
+    },
+    {
+      "id": "D3",
+      "title": "Tickets on a chat are read off the board, not off what this app happened to watch",
+      "why": "The board is the record of who touched what. Reading it is why a chat begun in a terminal — 319 of your 320 — shows its tickets the first time you open it."
+    },
+    {
+      "id": "D4",
+      "title": "Background readings are capped, everywhere, not just on the board",
+      "why": "A browser holds six conversations with a machine at a time. Anything slow that runs per card will starve whatever you are actually waiting for, so the cap sits where every request passes rather than in the one screen that showed the symptom."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "The job sits waiting on your look; nothing else moves on it.",
+    "steps": [
+      { "step": "Opening a chat shows everything said in it before, whoever started it", "cost": "medium", "starting": true },
+      { "step": "A chat already running elsewhere opens for reading, with a way to carry on in a copy", "cost": "medium" },
+      { "step": "Reading a card's working copy stops taking three and a half seconds", "cost": "small" }
+    ]
+  }
+}

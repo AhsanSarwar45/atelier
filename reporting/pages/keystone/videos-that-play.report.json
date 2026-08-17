@@ -1,0 +1,170 @@
+{
+  "title": "Videos That Play",
+  "eyebrow": "Public video from an imported course now plays where it stood; everything that still needs an admin stays a card",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. The work is finished and checked on screen. Override any decision below if you disagree with one."
+  },
+
+  "status": {
+    "now": "Public video plays in the learner view and in the author view; an institution's own tool still shows the grey placeholder.",
+    "next_up": "Turn an imported reading into reusable source material, so a brought-in course can feed new generation instead of being a dead end.",
+    "items": [
+      { "state": "done", "text": "Public video hosts recognised when a course is brought in" },
+      { "state": "done", "text": "Video plays in the learner view" },
+      { "state": "done", "text": "Video plays in the author view" },
+      { "state": "done", "text": "An institution's own tool still shows the placeholder" },
+      { "state": "done", "text": "Public video no longer counted as something to set up" },
+      { "state": "done", "text": "Courses already brought in improve without bringing them in again" },
+      { "state": "done", "text": "Checked against a real course on a real screen" }
+    ]
+  },
+
+  "content": [
+    {
+      "label": "What changed",
+      "lead": "A video that anyone can watch used to arrive as a grey placeholder saying it was not connected. Now it plays.",
+      "blocks": [
+        {
+          "kind": "compare",
+          "before": {
+            "path": "video-shots/before-two-cards.jpeg",
+            "caption": "Before — a public YouTube video and a public Vimeo video, both reduced to grey cards saying they are not connected yet"
+          },
+          "after": {
+            "path": "video-shots/after-two-players.jpeg",
+            "caption": "After — the same two videos, on the same page, playing where the course author put them"
+          }
+        },
+        {
+          "kind": "list",
+          "items": [
+            "The learner clicks the picture and the video starts.",
+            "Nothing is fetched from the video host until they click.",
+            "A page holding several videos stays as light as a page holding none."
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What still shows a card",
+      "lead": "A tool the institution has to register cannot be guessed at, so it keeps the honest placeholder rather than pretending to be a player.",
+      "blocks": [
+        {
+          "kind": "images",
+          "shots": [
+            {
+              "path": "video-shots/tool-still-a-card.jpeg",
+              "caption": "The same page, higher up — the institution's own tool still reads 'not connected yet', unchanged"
+            }
+          ]
+        },
+        {
+          "kind": "table",
+          "columns": ["On one real course page", "Before", "After"],
+          "rows": [
+            ["Public videos playing", "0", "2"],
+            ["Grey placeholders", "3", "1"],
+            ["Counted as needing an admin", "3", "1"]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "The author sees the same thing",
+      "lead": "The author view and the learner view were already drawing the same block, so both got the player from one change.",
+      "blocks": [
+        {
+          "kind": "images",
+          "shots": [
+            {
+              "path": "video-shots/author-view.jpeg",
+              "caption": "The author view of the same page — the video plays inside the editor, and the placeholder for the institution's tool sits above it"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Courses already brought in get better on their own",
+      "lead": "Nobody has to bring a course in again to see the videos play.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "The screen decides from the web address, not from anything written when the course arrived.",
+            "I rewrote a stored page back to exactly the shape it had before this work, then reloaded it.",
+            "Both videos still played."
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "Bringing the course in again is still worth doing eventually — only a fresh arrival drops the videos out of the 'needs an admin' count on the arrival summary.",
+          "tone": "info"
+        }
+      ]
+    },
+    {
+      "label": "Which videos this covers",
+      "lead": "Three hosts, chosen because they play from a plain web address with nothing to set up.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            { "title": "YouTube", "note": "Plays, and loads only when the learner clicks" },
+            { "title": "Vimeo", "note": "Plays" },
+            { "title": "Wistia", "note": "Plays; a link to a Wistia page is turned into one that can play" },
+            { "title": "Anything else", "note": "Unchanged — still the grey card with a link to the original", "tone": "gone" }
+          ]
+        },
+        {
+          "kind": "breakdown",
+          "alt": "What the 53 embedded panels in the two real courses actually are",
+          "parts": [
+            { "label": "Launches into the institution's own video system", "value": 34, "tone": "blue" },
+            { "label": "Interactive exercises", "value": 12, "tone": "amber" },
+            { "label": "Other embedded pages", "value": 7, "tone": "grey" }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "The value is in the next course that arrives, not in these two."
+        }
+      ]
+    },
+    {
+      "label": "How it was checked",
+      "lead": "A real course, brought into a real database, opened in a real browser.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "A copy of the PA 522 course with a public YouTube video and a public Vimeo video added to one page, brought in end to end.",
+            "Three new automatic checks covering what gets stored, plus the 179 that already existed — all passing.",
+            "Both videos opened and played in the learner view and in the author view; the institution's tool checked as still a placeholder in both.",
+            "One warning in the browser's own log, which I removed rather than leave."
+          ]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    { "id": "D1", "title": "Three hosts on the list: YouTube, Vimeo, Wistia", "why": "These play from a plain web address with nothing to register. Anything that needs an account, a licence or an admin cannot be guessed at and keeps the honest placeholder." },
+    { "id": "D2", "title": "Kept the storage shape the course already uses", "why": "It is the only shape proven to survive a save-and-reopen in the editor. Inventing a new one to hold a video would have risked losing the video the first time an author edited the page." },
+    { "id": "D3", "title": "The screen decides from the web address, not from a stored flag", "why": "Courses brought in before this work only carry the address. Reading that is what lets them improve without being brought in again." },
+    { "id": "D4", "title": "The video loads only when the learner clicks it", "why": "A page can hold several videos. Loading them all up front makes the page slow and hands the learner's visit to the video host before they have asked for anything." },
+    { "id": "D5", "title": "Interactive exercises stay placeholders", "why": "12 of the 53 embedded panels in the two real courses are interactive exercises rather than video. They would need their own look and their own decision about how a learner's answers are kept; that is not this piece of work." },
+    { "id": "D6", "title": "No automatic check on the screen half", "why": "This part of the product has no automatic screen checking of any kind yet. Adding the first one is a piece of work in its own right, so the screen half was checked by hand and photographed instead." }
+  ],
+
+  "next": {
+    "if_nothing": "The work sits finished and unshipped. It reaches the shared copy whenever the course-arrival work does, and needs nothing from you to get there.",
+    "steps": [
+      { "step": "Turn an imported reading into reusable source material, so a brought-in course can feed new generation instead of being a dead end", "cost": "medium", "starting": true },
+      { "step": "Show how many accessibility problems a course has and where, instead of only inside one open editor", "cost": "medium" },
+      { "step": "Give interactive exercises the same treatment as video, once someone decides how a learner's answers should be kept", "cost": "large" }
+    ]
+  }
+}

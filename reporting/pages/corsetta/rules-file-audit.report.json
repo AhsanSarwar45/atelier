@@ -1,0 +1,123 @@
+{
+  "title": "What The Rules File Still Owes",
+  "eyebrow": "Every rule in it, checked against whether anything actually enforces it. A third do nothing but take up your reading.",
+
+  "actions": {
+    "questions": [
+      {
+        "id": "Q1",
+        "ask": "Nine rules are pure prose — nothing checks them. Five of those could be caught by a machine, four are judgement a machine cannot make. Where should the four go?",
+        "options": [
+          { "label": "Into the house craft, for every project", "detail": "Stop and re-derive rather than pile up special cases; a cause is only a cause if switching it off removes the fault; never make the output look right without a reason; locate cheaply before reading. None of these are about racing — they are how anyone should work, and they belong where every project's workers read them.", "pick": true },
+          { "label": "Keep them in the racing project's own rules", "detail": "They stay one project's habits, and the same lesson gets learned again in the next project." }
+        ]
+      },
+      {
+        "id": "Q2",
+        "ask": "The section that tells me how to talk to you now exists twice — in the racing project's rules and in the house voice — and the two disagree about whether work waits for your approval. Delete the project copy?",
+        "options": [
+          { "label": "Delete it, and move the three missing bits up", "detail": "The house voice keeps everything except three things it does not yet say: the link goes last, a page is owed for asking you something and not only for finishing, and anything you mention becomes a card. Those move up into the house voice, so every project answers you the same way.", "pick": true },
+          { "label": "Leave both", "detail": "The contradiction stays, and whichever one a session happens to read decides whether it stops and waits for you." }
+        ]
+      }
+    ]
+  },
+
+  "status": { "card": "cor-up1g" },
+
+  "content": [
+    {
+      "label": "The count",
+      "lead": "Thirty rules, audited one by one against the gates, the tools and the tests that are supposed to hold them.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "How many", "What it means for the file"],
+          "rows": [
+            ["Held by a machine, start to finish", "11", "The words are a summary of something that already refuses. They can go, or shrink to a line naming what refuses."],
+            ["Held halfway", "10", "Something fires, but it catches a narrower thing than the rule says. The words are doing real work and cannot go until the gate is widened."],
+            ["Nothing checks them at all", "9", "Read by whoever happens to read them, obeyed by whoever happens to remember."]
+          ]
+        },
+        {
+          "kind": "note",
+          "label": "And it is over its own limit",
+          "text": "The file sets itself a ceiling of about a hundred and ten lines. It is at a hundred and thirty-six."
+        }
+      ]
+    },
+    {
+      "label": "The nine nothing checks",
+      "lead": "Five of these a machine could catch today. Four are judgement.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["The rule", "Could a machine hold it?"],
+          "rows": [
+            ["Never compare two versions by throwing away the working tree — it is shared, and somebody else is in it", "Yes, and urgently: the machine-wide safety net currently tells a session to do the very thing this rule forbids, so the two are in open conflict"],
+            ["Every document is listed in the index", "Yes — trivially"],
+            ["A source file stays on one subject; split it when it grows past about nine hundred lines", "Yes — the size is already measured every run and deliberately not allowed to fail anything"],
+            ["A plan states what improves and what it costs, never how it is built", "Yes — the same kind of reader that already judges documentation could judge a plan"],
+            ["Anything the physics forbids gets an assertion that goes red", "Only weakly — a machine can see that a claim was made without one"],
+            ["Locate cheaply before reading — the map, then the graph, then the search", "No — judgement"],
+            ["Hand a wide search or a long verification to a helper", "No — judgement, and it now lives in the workers' own instructions instead"],
+            ["Stop and re-derive rather than pile up a fifth file or a third special case", "No — judgement"],
+            ["Nothing is a cause until switching it off removes the fault", "No — judgement"]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "The ten held only halfway",
+      "lead": "These are the ones worth widening, because each has a gate already standing that is looking at the wrong thing.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["What the rule says", "What the gate actually catches"],
+          "rows": [
+            ["A copy of the tree lives under this project and nowhere else", "That the path contains the word — not that it is under this project. A copy made somewhere else with the same word in its path passes."],
+            ["A change proves itself by running the thing and reading what came out", "That the note names something runnable with a number in it. A note saying the build compiled satisfies it."],
+            ["Never leave work flagged for a future agent", "The phrase in your reply. A note left in the code itself is not caught."],
+            ["Work state lives on the board, never in a document or a note in the code", "The document half. The note-in-the-code half is open."],
+            ["A fact is written once and everywhere else links to it", "Code copied into prose. The same fact written into two documents is not caught."],
+            ["A guard's threshold comes from a measurement and its teeth are shown by breaking something", "That the guard step exists or that you waived it in your own words. Neither the measurement nor the proof is read."],
+            ["Every shortcut is declared in its document's debt list, in the same change", "That a recording step happened. Not that anything was written into a debt list."],
+            ["Every commit names its card, and an unlanded commit moves that card to waiting-for-review", "The naming. The move is described in the rules and done by nobody."],
+            ["Anything you mention for later becomes a card the same turn", "Only when you are complaining about how a session works. A feature you mention in passing has no detector."],
+            ["A fresh copy of the tree has its borrowed component filled in, and edits to it land separately", "The separate landing, and only at the moment of publishing. Nothing checks the component is filled in."]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "The section about how to talk to you",
+      "lead": "It exists twice, and the two copies disagree.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "Lead with the answer, keep it short, plain words, a page for finished work, a plan states effects not mechanism, a problem you point at gets a diagnosis and waits — all of that is word for word in the house voice already.",
+            "One line is not duplicated but contradicted: the project's copy still says work starts as a plan you approve and checkpoints with you before building. You told me today to stop doing that, and the house voice now says the opposite.",
+            "Three things the project's copy has that the house voice is missing: the link goes last in the message, a page is owed for asking you something and not only for finishing, and anything you mention becomes a card. All three are house rules now, not this project's."
+          ]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    { "id": "D1", "title": "The audit was done against the gates, not from memory", "why": "Every one of the thirty was traced to the file and the line that enforces it, or confirmed to have nothing. A rules file trimmed on a guess deletes the one line that was holding something up." },
+    { "id": "D2", "title": "A rule held only halfway keeps its words until the gate is widened", "why": "Deleting the sentence and leaving the narrow gate is how a rule quietly stops existing. The words go when the gate catches what they say, not before." },
+    { "id": "D3", "title": "The conflict with the machine-wide safety net is treated as the urgent one", "why": "It is the only case where two things in force say opposite things, and the losing side is a rule that exists because the tree is shared with other live sessions." }
+  ],
+
+  "next": {
+    "if_nothing": "The file stays a third longer than it needs to be, nine rules keep being followed only by whoever remembers them, and one line of it keeps telling sessions to wait for you.",
+    "steps": [
+      { "step": "The eleven already held by a machine come out of the file, each leaving one line naming what refuses", "cost": "small", "starting": true },
+      { "step": "The safety net stops recommending the one thing the shared-tree rule forbids", "cost": "small" },
+      { "step": "The five catchable ones get their guard, and their words come out too", "cost": "medium" },
+      { "step": "The ten narrow gates are widened one at a time, each with the fault injected to show its teeth", "cost": "medium" }
+    ]
+  }
+}

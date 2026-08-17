@@ -1,0 +1,198 @@
+{
+  "title": "Stopping before the job is done",
+  "eyebrow": "You have to type continue to restart work nobody was waiting on you for. Here is why it happens, and what would end it.",
+  "actions": {
+    "none": true
+  },
+  "status": {
+    "card": "cor-etbo"
+  },
+  "content": [
+    {
+      "label": "What happens today",
+      "lead": "A session picks up a piece of work, does part of it, writes you a status message, and stops. The work is still open. Nothing was asked of you. You type continue, and it carries on as if nothing happened.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Before a session is allowed to finish a turn, we check",
+            "Do we?"
+          ],
+          "rows": [
+            [
+              "That any work it changed belongs to a piece of work it picked up",
+              "yes"
+            ],
+            [
+              "That a fault it mentions in passing was written down somewhere",
+              "yes"
+            ],
+            [
+              "That a piece of work it ticked off reached you as a page",
+              "yes"
+            ],
+            [
+              "That every new ticket says how anyone would know it is done",
+              "yes"
+            ],
+            [
+              "That the work it picked up is actually finished",
+              "no — nothing looks"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "So the one thing that costs you your attention is the one thing nobody checks. Every other rule is about the quality of what gets recorded; none of them is about whether the session is done."
+        },
+        {
+          "kind": "note",
+          "text": "Watched happening rather than argued from the code. The end-of-turn check was handed a real finish, from this session, with one piece of work picked up and still open, nothing asked of you and nothing blocking: it let the turn end without a word. That is your complaint, reproduced before anything was touched."
+        }
+      ]
+    },
+    {
+      "label": "What changed — this is in",
+      "lead": "One rule, applied every time a session tries to end a turn. Three outcomes, and only three.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "How the turn ends",
+            "What happens"
+          ],
+          "rows": [
+            [
+              "Everything it picked up is finished and handed to you",
+              "it stops, exactly as today"
+            ],
+            [
+              "It puts a question, a choice or an approval to you",
+              "it stops, and you have something to answer"
+            ],
+            [
+              "It is genuinely blocked and names what is blocking it",
+              "it stops — that is a question"
+            ],
+            [
+              "Work still open, nothing asked, nothing blocking",
+              "turned back and told to carry on"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "A progress report is not a stop. Reporting where it has got to and then waiting is the exact failure you named, so it is not one of the ways out."
+        },
+        {
+          "kind": "note",
+          "text": "One case had to be added after the shape was agreed: a session that has sent a helper off and is waiting for it back is not idling, and stopping there costs you nothing — the session wakes itself when the helper answers. So that counts as a legitimate stop too."
+        },
+        {
+          "kind": "note",
+          "text": "Whether a question was really put to you is taken from you having been asked, not from the wording of the message. Wording would let a session clear the rule by ending on a question mark, which is exactly what it already does when it stops early."
+        },
+        {
+          "kind": "note",
+          "text": "Built and landed, and it is running against this session as you read this. Exercised three ways: a finish with work open and nothing asked came back refused with the open work named, and the same finish came back clear both with a question recorded and with nothing held. Answered eight times in a row it refuses seven and then lets go, which is the ceiling it sets for itself. The board's own checks are green, 21 of 21.",
+          "tone": "good"
+        },
+        {
+          "kind": "note",
+          "text": "One gap the first design missed, found while building: a session that finishes a piece of work is holding nothing for the moment between finishing it and picking up the next, and that gap is exactly where it used to stop and wait. So the rule reads the job above the piece as well, and a job still running counts as work open."
+        },
+        {
+          "kind": "note",
+          "text": "It cannot rot quietly. Eight cases now guard it, and they were made to fail on purpose before they were trusted: the check was cut out and the suite went red on the first one, then put back. A check that only ever passes proves nothing."
+        }
+      ]
+    },
+    {
+      "label": "The limit turned out to be eight times larger than we thought",
+      "lead": "I told you a session could only be pushed back to work once per message from you. That was wrong, and finding out is the reason this step exists.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "How many times a session can be turned back before it wins",
+            ""
+          ],
+          "rows": [
+            [
+              "What our own notes claimed",
+              "once, then it ends the turn whatever we say"
+            ],
+            [
+              "What the tool actually does",
+              "eight times in a row, and the number can be raised"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "The one-push ceiling was ours, not the tool's: every check we run gives up the moment it has objected once. Read out of the program itself, because its documentation does not mention the limit at all — so this is not a guess about how it behaves, it is the rule it runs.",
+          "tone": "good"
+        },
+        {
+          "kind": "note",
+          "text": "So the refusal is a real leash after all. Eight turns of being told to carry on is more than any job needs, and the rule now gets built to use them instead of objecting once and standing aside."
+        },
+        {
+          "kind": "note",
+          "text": "The helpers an agent sends off can be held exactly the same way, with the same allowance. That was the second thing worth checking, and it holds."
+        },
+        {
+          "kind": "note",
+          "text": "The written rule still goes in alongside the refusal — the same place the running order and the merge rule already live — because a session that knows the rule never has to be turned back at all."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Two ways out, and no third",
+      "why": "Finished, or asking you something. Anything else — reporting progress, saying what it plans to do next, listing what it found — is a session narrating instead of working, which is the thing you caught."
+    },
+    {
+      "id": "D2",
+      "title": "A checkpoint still stops, because a checkpoint is a question",
+      "why": "You told me non-trivial work checks in with you after design and before building. That is asking you something, so it passes the rule untouched. Nothing about how you approve work changes."
+    },
+    {
+      "id": "D3",
+      "title": "Helpers are held to it too",
+      "why": "A helper that stops early hands its half-done work back to the agent that sent it, which then stops early to you. Fixing only the top of the chain leaves the same failure one level down."
+    },
+    {
+      "id": "D4",
+      "title": "Diagnosing a problem you point at still stops and waits",
+      "why": "Your standing instruction is that a problem you point out gets a diagnosis and then waits for your go-ahead. That is a question, so it stops. This rule never overrides one of yours."
+    },
+    {
+      "id": "D5",
+      "title": "You said build the refusal, so it is being built",
+      "why": "Your words on 2026-08-15: a session that ends a turn with its own work still open and nothing asked of you is turned back and made to carry on. The written rule goes in alongside it, so a session that already knows the rule never has to be turned back at all.",
+      "tag": "revised"
+    },
+    {
+      "id": "D6",
+      "title": "The refusal uses every push it is allowed, not one",
+      "why": "Eight in a row is what the tool actually permits, and a job that needs more than eight nudges has something else wrong with it. Every other check we run keeps its old habit of objecting once and standing aside, because those exist to catch mistakes and a mistaken objection should never trap you."
+    }
+  ],
+  "next": {
+    "if_nothing": "The work carries on to the end on its own — that is the whole point of it — and you get this page again when it is finished.",
+    "steps": [
+      {
+        "step": "Sessions run their work to the end without you having to restart them",
+        "cost": "about a day",
+        "starting": true
+      },
+      {
+        "step": "The same rule holds for the helpers agents send off, so a half-done answer never comes back up the chain",
+        "cost": "half a day"
+      }
+    ]
+  }
+}

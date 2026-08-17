@@ -1,0 +1,200 @@
+{
+  "title": "The board locked itself",
+  "eyebrow": "The stopping rule you asked for is built, landed and working. Its reader then found four real faults in it — and the board will not let anyone fix them, or start anything else.",
+  "actions": {
+    "questions": [
+      {
+        "ask": "How do I get out? Every route crosses a rule only you can waive.",
+        "options": [
+          {
+            "label": "Let me open the one lock, once",
+            "say": "Open the reading lock on that job by hand, this once, and write down that you did. Then fix the four faults and everything behind them.",
+            "pick": true
+          },
+          {
+            "label": "Fix the board first, in a fresh copy",
+            "say": "Leave that job shut. Start a fresh copy of the work, fix the two board faults there, then come back to it.",
+            "note": "Needs the same waiver, because starting anything new is refused for the same reason."
+          },
+          {
+            "label": "Do nothing yet",
+            "say": "Leave it as it stands until I have looked at the board myself."
+          }
+        ],
+        "note": "The recommended one is the smallest: one lock, on one job, opened once and recorded. The reader's four objections are already written down as that job's own work, so nothing is being walked past — they get fixed and the job is read again before it lands."
+      }
+    ]
+  },
+  "status": {
+    "now": "The stopping rule is in and running. Its reader raised four faults, all filed. Nothing can be picked up — that job's own work, or any new job.",
+    "next_up": "The four faults in the stopping rule get fixed and the job goes back for a second reading.",
+    "items": [
+      {
+        "text": "The stopping rule you approved: built, checked, landed",
+        "state": "done"
+      },
+      {
+        "text": "An outside reader read it and raised four faults",
+        "state": "done"
+      },
+      {
+        "text": "The four faults written down as that job's own work",
+        "state": "done"
+      },
+      {
+        "text": "The three board faults behind the lock written down",
+        "state": "done"
+      },
+      {
+        "text": "Fix the four faults in the stopping rule",
+        "state": "todo"
+      },
+      {
+        "text": "Fix the two board faults that caused the lock",
+        "state": "todo"
+      },
+      {
+        "text": "Fix the report that read the wrong board — the one you hit",
+        "state": "todo"
+      }
+    ]
+  },
+  "content": [
+    {
+      "label": "The good half first",
+      "lead": "What you approved is done and it is running against me as I write this.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "A session that ends a turn with its own work still open, nothing asked of you and nothing blocking, is turned back and told to carry on. It landed, the board's checks are green, and it has already been holding this session to it.",
+          "tone": "good"
+        },
+        {
+          "kind": "note",
+          "text": "Then the board sent an outside reader at it, which is the normal last step. The reader said the new rule itself is sound and well tested, and found four faults around it. All four are real. Three of them quietly switch the rule off in ordinary situations, which is worse than not having it."
+        }
+      ]
+    },
+    {
+      "label": "What the reader found",
+      "lead": "Four, all in how the rule decides a session is allowed to stop.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "The fault",
+            "What it costs"
+          ],
+          "rows": [
+            [
+              "Once a session is sent back to work, every other end-of-turn check stops running for the rest of that turn",
+              "the work it is pushed into doing is the one stretch nothing checks"
+            ],
+            [
+              "A helper that has already come back still counts as one the session is waiting for",
+              "any turn that delegates is excused from finishing — and delegating is what our own rules ask for"
+            ],
+            [
+              "One question early in a turn excuses every stop for the rest of it",
+              "work that starts with an approved plan is the most reliably excused, which is backwards"
+            ],
+            [
+              "When the board cannot be reached, the turn ends without recording that it ended",
+              "the next turn inherits the last one and the rule is off for a whole turn"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Why nothing can move",
+      "lead": "Three separate faults in the board line up into a lock with no key.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "What the board does",
+            "Why that traps it"
+          ],
+          "rows": [
+            [
+              "A job turned down by its reader is shut until a reader passes it",
+              "correct on its own — it stops work being finished around an objection"
+            ],
+            [
+              "A piece of work counts as waiting whenever anything above it is waiting",
+              "so the four objections are locked behind the reading that is waiting for those four objections"
+            ],
+            [
+              "A stage counts as built the moment any one piece of it is finished",
+              "so the board thinks this job has nothing left to build, and refuses to let me start anything else either"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "So the reader's own instruction — answer these four as the job's own work — is the one thing the board refuses. Each rule is sensible alone; together they close a circle."
+        },
+        {
+          "kind": "note",
+          "text": "This is not specific to my job. Any job whose reader turns it down lands in the same place, which is why the fix matters more than the escape."
+        }
+      ]
+    },
+    {
+      "label": "Why I am asking rather than deciding",
+      "lead": "The rule in the way is one of the few written as yours.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "A reading lock is never opened by the session it is holding — that is the whole of its value, and it is why reviews here mean anything. I will not open one and then tell you I had a good reason. Every way out of this circle crosses that line once, so the waiver is yours to give."
+        }
+      ]
+    },
+    {
+      "label": "The report you hit yesterday",
+      "lead": "Approved and not started, for the same reason.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "You told me to make a report find its own board rather than the folder you happen to be standing in. It is a separate job, and starting any new job is refused by the same lock. It is first in line once this clears."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The reader's four faults are answered before this job lands, not after",
+      "why": "Three of them switch the new rule off in ordinary situations. Landing the rule and filing the holes as future work would give you a rule that reads as working and is not."
+    },
+    {
+      "id": "D2",
+      "title": "The three board faults are fixed, not worked around",
+      "why": "The lock is not about my job. Every job whose reader turns it down reaches the same dead end, and a one-off escape leaves that waiting for the next person."
+    },
+    {
+      "id": "D3",
+      "title": "Nothing is being finished around the reader",
+      "why": "All four objections are already on the board as this job's own work, and the job goes back for a second reading before it lands. The waiver would only let the work start."
+    }
+  ],
+  "next": {
+    "if_nothing": "Nothing moves: that job cannot be worked, cannot be read again, and no new job can start.",
+    "steps": [
+      {
+        "step": "The four faults in the stopping rule get fixed and the job is read again",
+        "cost": "half a day",
+        "starting": true
+      },
+      {
+        "step": "A job turned down by its reader can be worked on again",
+        "cost": "small"
+      },
+      {
+        "step": "A report finds its own board, so where you are standing stops mattering",
+        "cost": "half a day"
+      }
+    ]
+  }
+}

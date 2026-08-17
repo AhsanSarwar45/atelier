@@ -1,6 +1,6 @@
 {
   "title": "Fog Fix Order",
-  "eyebrow": "Built and measured",
+  "eyebrow": "Built, measured, reviewed, landed",
   "actions": {
     "none": true,
     "fyi": "Nothing needed from you. Fog is built, measured, reviewed by someone who did not write it, and on the main line."
@@ -101,6 +101,12 @@
           "tone": "info",
           "label": "The hilltops in the dense shot are not a mistake",
           "text": "Fog is a layer with a top. Ground-level fog at 100 m still leaves a hill that rises out of it faintly visible, which is what you see on a real foggy morning from a valley floor."
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "One thing these pictures do not prove",
+          "text": "The whole scene also gets darker in fog, by about two fifths at 100 m. That is the sunlight being absorbed on its way down, and nothing gives that absorbed light back as the soft grey glow real fog has. It is an older approximation, not this work, and I have no measurement saying what the right darkness is."
         }
       ]
     },
@@ -191,7 +197,7 @@
             {
               "n": "1",
               "title": "The answer was frozen before a line of fog code moved",
-              "note": "Twelve reference values captured from the old code. They still hold, untouched, against the new code \u2014 so the fog lands where it always landed, it just gets there at real render settings now"
+              "note": "Twelve reference values captured from the old code. They still hold, untouched, against the new code \u2014 so the fog lands where it always landed, it just gets there at real render settings now. Deliberately broken to check it bites: 39 of its 40 comparisons went red, the control stayed green"
             },
             {
               "n": "2",

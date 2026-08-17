@@ -1,0 +1,308 @@
+{
+  "title": "Where The Day Goes",
+  "eyebrow": "Both fixes are built and measured. The storm is dead; the paperwork saving is real and smaller than I told you",
+
+  "actions": {
+    "questions": [
+      {
+        "ask": "Each round of outside reading is still finding real faults. How long do I keep buying them?",
+        "options": [
+          {
+            "label": "Until a round comes back empty",
+            "say": "Keep reading until a round finds nothing, however many that takes.",
+            "pick": true,
+            "note": "Four rounds so far have found 24 faults and every one but a single overstated claim was real — including two that would have been worse than the fault being fixed. What each round finds is getting smaller, so this is likely one or two more rounds and then it stops on its own"
+          },
+          {
+            "label": "Stop after this round",
+            "say": "Land what is there after this round and file whatever is left as its own work.",
+            "note": "Saves the cost of further rounds. Anything the next round would have caught stays on the board unfixed instead, which is where the last four rounds' faults would have been if nobody had read"
+          },
+          {
+            "label": "Two rounds and stop, always",
+            "say": "Make two rounds of reading the standing rule for every job, then land.",
+            "note": "Bounds the cost of every job from now on rather than just this one. On this evidence it would have shipped the landing command still able to move the wrong copy of the work"
+          }
+        ],
+        "note": "This one is yours because it is cost against polish on your own tooling, not an engineering call. Everything else on this page is decided."
+      }
+    ]
+  },
+
+  "status": {
+    "now": "The storm fix is on the main line. The paperwork fix is built and waiting on its reading. Twenty-four faults were found by outside reading across four rounds, twenty-three of them real.",
+    "next_up": "The paperwork fix reaches the main line once its reading is through.",
+    "items": [
+      { "state": "done", "text": "Every open session measured, minute by minute, for a full day" },
+      { "state": "done", "text": "The machine cleared as a cause" },
+      { "state": "done", "text": "The reading storm traced to its real cause, after your challenge" },
+      { "state": "done", "text": "A card with a reader already on the way is not sent another — on the main line" },
+      { "state": "done", "text": "Landing and closing each take one turn instead of four and two" },
+      { "state": "done", "text": "The turns a session spends on the board are counted by a command, not by hand" },
+      { "state": "done", "text": "Every session is told the one-command landing exists" },
+      { "state": "draft", "text": "The paperwork fix read by an outside reader and on the main line" }
+    ]
+  },
+
+  "content": [
+    {
+      "label": "It is not the machine and it is not thinking time",
+      "lead": "Both suspects are cleared by the numbers.",
+      "blocks": [
+        {
+          "kind": "tiles",
+          "tiles": [
+            { "value": "2.8", "key": "of 32 cores busy", "tone": "grey", "delta": "no build running at all" },
+            { "value": "5 sec", "key": "typical time to answer", "tone": "grey", "delta": "worst case 78 seconds" },
+            { "value": "1.5 h", "key": "spent running commands", "tone": "grey", "delta": "across a full 24-hour day" },
+            { "value": "5 h", "key": "of that day with any activity", "tone": "amber", "delta": "the other 19 are a stopped session" }
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "A bigger and bigger conversation does not slow a session down either: at a quarter of a million words of context it answers in four seconds, and at half a million it still answers in five."
+        }
+      ]
+    },
+    {
+      "label": "You were right, and the truth is worse",
+      "lead": "It is one reader per card. The twelve are twelve firings of that one reader at one card.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "My first page said a card gets a dozen readers. It does not. It gets one — sent again, and again, and again, at the same card."
+        },
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "All twelve were reading the same card, and carrying the same brief word for word",
+              "note": "Six went out inside two seconds carrying an identical two hundred and twenty thousand word brief, then six more four minutes later carrying a second identical one. Not twelve opinions — one reader, sent twelve times"
+            },
+            {
+              "n": "2",
+              "title": "A reader is sent every time a piece of that job finishes, and nothing notices one is already on the way",
+              "note": "That card had six pieces settle inside a single second. Six readers went out for them, all at once, all carrying the same thing. It is not a rule about how many readers a card gets — it is that nobody is counting"
+            },
+            {
+              "n": "3",
+              "title": "Answering a reader arms the next storm",
+              "note": "What a reader finds becomes that job's own pieces of work. Finishing them is what triggers a reader — so a card that comes back with six findings is a card that will send six readers the moment they are dealt with"
+            },
+            {
+              "n": "4",
+              "title": "It happened again while I was writing this",
+              "note": "Eight more went out at twenty to six this evening, inside twelve seconds, at the same card. Every one came back with the same sentence: you have hit your session limit"
+            },
+            {
+              "n": "5",
+              "title": "This is a quarter of everything ever run here",
+              "note": "Seventy-seven of the three hundred and twenty sessions in the log died on the limit, going back a month. The card stays open, you are asked to restart it, and it happens again"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Keeping the board up to date costs more than the work",
+      "lead": "In the worst of the two sessions, four and a half board commands went out for every single edit to a file.",
+      "blocks": [
+        {
+          "kind": "bars",
+          "unit": " actions",
+          "alt": "board commands against file edits, two sessions",
+          "series": [
+            { "label": "Session A: board", "value": 351, "tone": "amber" },
+            { "label": "Session A: real edits", "value": 69, "tone": "blue" },
+            { "label": "Session B: board", "value": 233, "tone": "amber" },
+            { "label": "Session B: real edits", "value": 248, "tone": "blue" }
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "Each of those board commands is its own full round trip, so the paperwork sets the pace of the day rather than the building."
+        }
+      ]
+    },
+    {
+      "label": "The storm is dead",
+      "lead": "A card now takes a ticket when its reader sets off, and the other sendings that second find it gone and do nothing.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [{ "name": "" }, { "name": "Before", "align": "right" }, { "name": "Now", "align": "right" }],
+          "rows": [
+            ["Six pieces of one job finished together", "6 readers", "1 reader"],
+            ["Four sendings at one card, live on the real board", "4 readers", "1 reader"],
+            ["Three finished pieces, live on the real board", "3 readers", "1 reader"],
+            ["Setup they read between them before being turned away", "1.7 million words", "220 thousand"],
+            ["Cards actually read", "none", "both of today's"]
+          ]
+        },
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "Every guard was shown with its teeth, not with a green run",
+              "note": "Each of the four was switched off in turn and the whole set rerun: each time it went red and named the fault in its own words. A guard that only passes proves nothing"
+            },
+            {
+              "n": "2",
+              "title": "The reader read its own fix and turned it down on three counts, all of them right",
+              "note": "One of them was serious and mine: a job whose reader counts among the people who worked it would have been sent a fresh reader every time one finished, without end — a worse storm than the one being fixed. All three are answered and each has a case that goes red without the answer"
+            },
+            {
+              "n": "3",
+              "title": "It fails open by construction",
+              "note": "A ticket lost, wiped or left behind costs one extra reader, never a card nobody can ever read. Proved by killing a reader part way through and watching the next sending go"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "The paperwork: real, and a fifth rather than a third",
+      "lead": "I told you it would give back about a third of a session's turns. Counted, it gives back a fifth.",
+      "blocks": [
+        {
+          "kind": "bars",
+          "unit": " turns on the board",
+          "alt": "board turns per session before and after, two sessions",
+          "series": [
+            { "label": "Session A before", "value": 416, "tone": "amber" },
+            { "label": "Session A now", "value": 349, "tone": "blue" },
+            { "label": "Session B before", "value": 316, "tone": "amber" },
+            { "label": "Session B now", "value": 249, "tone": "blue" }
+          ]
+        },
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "Landing is one command where it was four, and can no longer leave the lock held",
+              "note": "It runs the same steps by hand rather than around them, so the rule that refuses a bad merge still refuses it. The lock goes back even when the merge fails — which is the case that goes red without it, and is the leak both sessions already showed"
+            },
+            {
+              "n": "2",
+              "title": "Closing a card was two turns because a rule asked for the same words twice",
+              "note": "The board refused a close that had not said what it did, while the close's own reason was written somewhere the rule never looked. It now reads whichever of the two it finds, held to the same bar — so a close that says nothing is still refused"
+            },
+            {
+              "n": "3",
+              "title": "The count is now a command, so nobody reads it off a log by hand again",
+              "note": "It reads any session and says what that session spent on the board, what it spent on the work, and what the same session would cost now"
+            }
+          ]
+        },
+        { "kind": "note", "text": "The job's own target was that the turns fall to two hundred. They fall to 349 and 249, so the target is missed. It was written before anything was counted; what is left is running notes and reading the board, which is the work rather than paperwork around it." }
+      ]
+    },
+    {
+      "label": "What the outside reading caught",
+      "lead": "Four rounds, 24 faults, 23 of them real — in work I had already checked myself.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [{ "name": "Round" }, { "name": "Found", "align": "right" }, { "name": "The worst one it caught" }],
+          "rows": [
+            ["One", "3", "A job whose reader counts as one of its own workers would have been sent a fresh reader every time one finished, for ever — worse than the fault being fixed"],
+            ["Two", "8", "The landing gave up on the lock after twenty seconds despite being told to queue, and took it under a name every session shares"],
+            ["Three", "13", "The landing would move whatever the main copy happened to be sitting on, and then report that the main line had moved"],
+            ["Four", "running", "—"]
+          ]
+        },
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "It caught me overstating a number to you",
+              "note": "My count of the paperwork saving was counting every catch-up and every merge a session ran, not only the ones belonging to a landing. Corrected here: a fifth, not a third"
+            },
+            {
+              "n": "2",
+              "title": "It caught the thing that would have made the whole job worthless",
+              "note": "The one-command landing existed and nothing told anybody it did — every session was still being handed the four-command version at start-up"
+            },
+            {
+              "n": "3",
+              "title": "One finding did not survive checking",
+              "note": "It claimed running the test set spawns copies of itself without end. Measured: a child run finishes in three seconds and spawns nothing. The underlying sloppiness was fixed anyway and the claim recorded as not real"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "The rest of the waiting",
+      "lead": "Two smaller drains, both already known and on the board.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [{ "name": "What the session was waiting on" }, { "name": "Hours in a day", "align": "right" }, { "name": "State" }],
+          "rows": [
+            ["Stopped, waiting for you to type", "3.6", "known — a card is open for it"],
+            ["Waiting for a helper it sent off", "0.8", "known — a card is open for it"],
+            ["Bounced by its own rules and told to try again", "0.5", "sixty-nine bounces in one session"],
+            ["Actually thinking", "2.0", "healthy"],
+            ["Actually running commands", "1.5", "healthy"]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "One session took sixty-nine of those bounces in a day, and its typical stretch of work between your messages was thirty seconds long."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The machine is cleared, so nothing about the hardware gets touched",
+      "why": "Two and a half of thirty-two cores were busy, no build was running, and no session was waiting on another. Speeding the machine up would change nothing."
+    },
+    {
+      "id": "D2",
+      "title": "The size of the conversations is left alone",
+      "why": "They are very large — half a million words at the peak — but the measurements show that costs almost nothing in time. It is worth money, not speed, and that is a separate question."
+    },
+    {
+      "id": "D3",
+      "title": "The two fixable causes were filed against the shared machinery, not this project",
+      "why": "Both live in the machinery every project shares, so a fix there fixes all of them at once. Filing them here was refused for exactly that reason."
+    },
+    {
+      "id": "D4",
+      "title": "The two waiting problems already on the board were not filed again",
+      "why": "A session stopping with work still open, and a session waiting on a helper it started, are both open cards already."
+    },
+    {
+      "id": "D5",
+      "title": "Revised. The fix is not to cut how many readers a card gets",
+      "why": "You challenged the first version of this page and you were right: a card already gets exactly one reader. The fix is that a card with a reader already on the way must not be sent another, which is a smaller change and does not touch how the reading works."
+    },
+    {
+      "id": "D6",
+      "title": "The paperwork saving is stated at what it measures, not at what I promised",
+      "why": "I said a third. Counted on the two sessions, it is 17 and 21 percent. The job's own target of two hundred turns is missed and says so on the board rather than being quietly rewritten."
+    },
+    {
+      "id": "D7",
+      "title": "Three more faults found on the way were filed rather than folded in",
+      "why": "A card merely named in the sentence explaining another card's close is treated as closed too; a job stops dead when its step is finished from a session homed in a different project; and the reading job's own reader raised three objections. Each has a different cause, so each is its own card."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "Both changes sit on their branches, read but not landed, and the storm keeps costing a day's allowance until they go on the main line.",
+    "steps": [
+      { "step": "Both changes reach the main line once their readings are through", "cost": "small", "starting": true },
+      { "step": "A card named only in passing stops being treated as freshly finished", "cost": "small" },
+      { "step": "A session that is only waiting for you says so instead of stopping", "cost": "medium" }
+    ]
+  }
+}

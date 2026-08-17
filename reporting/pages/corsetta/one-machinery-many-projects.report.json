@@ -1,33 +1,42 @@
 {
   "title": "One Machinery, Many Projects",
-  "eyebrow": "The plan for the machinery every project shares. Waiting on your go.",
+  "eyebrow": "The shared home is real and the first half has landed: the craft definitions now exist once, for every project.",
   "actions": {
-    "questions": [
-      {
-        "ask": "Build it as planned?",
-        "options": [
-          {
-            "label": "Go",
-            "say": "Build it in this shape, in this order.",
-            "pick": true
-          },
-          {
-            "label": "Adjust",
-            "say": "The shape is close but I want something changed — I will say what in chat."
-          },
-          {
-            "label": "Not now",
-            "say": "Leave the machinery where it is; the beads board keeps borrowing."
-          }
-        ],
-        "note": "Going costs roughly two sittings before anything visible changes, and the visible part — the beads project running like the racing one — lands right after. Not going leaves every new project to borrow tools by hand."
-      }
-    ]
+    "none": true
   },
   "status": {
     "card": "cor-up1g"
   },
   "content": [
+    {
+      "label": "Where it stands today",
+      "lead": "The shared home exists, both projects are registered against it, and the half that was costing you tokens has landed.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Piece", "Where it is"],
+          "rows": [
+            ["The craft definitions, the shared skills, the typed commands, the voice you are written to", "Landed, all of them. Fourteen shared items, one copy each; the racing project keeps only what is about cars, tracks, trees, materials and the renderer."],
+            ["Two of the racing project's habits that turned out to be craft", "The way an image is read for facts rather than recognised, and the way a result is judged against a reference by overlaying them rather than by a single number. Both now belong to every project — a screen is judged the same way a render is."],
+            ["The pair of eyes any project can send off to look at a screen", "Landed, and now named in the worker's own instructions — see below."],
+            ["Each project's own declaration — its prefix, its systems, how a change proves itself", "Landed. Both are written and both check out clean."],
+            ["The board tools and the session gates", "No copy is left. The board tools are reached through a single link to the shared home — the directory is gone — and the shared gates are links too. Two real files remain, held only because another session has unlanded work inside them."],
+            ["A card filed from the beads checkout landing on the beads board, with nothing pointed anywhere by hand", "Done and shown, not assumed — the tool offered that project's own list of systems and the card it wrote is on that board."]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "The thing you pointed at",
+          "text": "A worker was never told to send the looking out, so it did the looking itself and filled up on pictures. Both the worker's and the lead's instructions now name the helpers by hand — the eyes for anything a person would see, the locator for a search, the researcher for how something really behaves, the project's own prover for a measurement — and the lead is told to repeat that in every brief it writes."
+        },
+        {
+          "kind": "note",
+          "label": "Four faults found in the shared tools on the way",
+          "text": "Its own suite was red and nobody had run it against a project. The standards answer for one project at a time and every gate the run exercises switched them to whichever checkout it was judging, so later cases were graded against the wrong project's spelling and refused lines that were in fact correct; one refusal was written to a path only the racing project has; one refusal the gates count had no row in the report that spends them; and filing a loose fault was broken outright for every project — anything that got past the wording checks died on the way to the board, and the checks themselves stop above the point where it broke, so nothing caught it. All four fixed, the suite is green against each project in turn, and the last one is held by a case proved by re-breaking it in a scratch copy."
+        }
+      ]
+    },
     {
       "label": "What you get",
       "lead": "Any project of yours runs the way the racing one runs — same ticket quality, same gates, same run of steps, same pages — without borrowing anything.",
@@ -38,7 +47,10 @@
             "An agent filing a beads fault tomorrow lands it on the beads board with nobody watching — the routing is the machinery's, not a habit.",
             "A commit in any project names that project's own cards and is accepted by that project's own gate.",
             "An improvement to the machinery lands once and every project has it the same day.",
-            "A new project joins by writing one short declaration, not by copying tools."
+            "A new project joins by writing one short declaration, not by copying tools.",
+            "A shared pair of eyes: any project can send off a helper that drives the app in a real browser, looks at the screen and reports back in words — the pictures die with it instead of filling up the agent that asked.",
+            "The voice you are written to is the house voice now, not this project's private habit: any project of yours answers you the same way.",
+            "Proved on a second project already — the beads app answers you in that voice today, keeping no copy of it."
           ]
         },
         {
@@ -162,27 +174,34 @@
       "id": "D6",
       "title": "Domain guards and specialist helpers stay home",
       "why": "The render checks, the machine's build traps and the car, track and tree researchers are the racing project's subject knowledge, not machinery. The beads project grows its own equivalents — the screen-driving proof is already wired there."
+    },
+    {
+      "id": "D7",
+      "title": "A plan no longer parks the work waiting for you",
+      "why": "Your words today. The house voice now says a job opens with a plan you can read and carries on building under it; only a question that is genuinely yours stops the work. Waiting for you to approve what an engineer can decide spends your attention on a word that carries no decision."
+    },
+    {
+      "id": "D8",
+      "title": "A worker is told which helper to send the looking to, by name, in its own instructions",
+      "why": "You pointed at workers filling up on pictures. A helper nobody is told to use is a helper nobody uses: the rule had to sit in the worker's own instructions and in every brief written to it, not in a plan."
+    },
+    {
+      "id": "D9",
+      "title": "The definitions moved first, on their own, ahead of the tools",
+      "why": "They are the half that was costing you tokens and the half nothing else is holding. The gates cannot follow yet without walking over live work inside two of those files, and that is worth a few hours rather than someone's afternoon."
     }
   ],
   "next": {
-    "if_nothing": "Nothing moves into a shared home: the beads board keeps borrowing tools with an overridden address, and every new project starts by copying.",
+    "if_nothing": "The definitions stay shared and that much is safe, but the racing project keeps running its own older gates, so an improvement to them still has to be made twice.",
     "steps": [
       {
-        "step": "The machinery stands in its own home and the racing project comes through its whole test run green from it, unchanged",
-        "cost": "medium",
+        "step": "The racing checkout's board tools and gates become pointers at the shared ones, so there is one copy left — held until the live work inside two of those very files lands, which is a few hours, not a decision",
+        "cost": "small",
         "starting": true
       },
       {
         "step": "The beads checkout pours its own cards and its commits are accepted by its own gate — no borrowed address anywhere",
         "cost": "medium"
-      },
-      {
-        "step": "The racing checkout runs from the shared home; nothing visibly different",
-        "cost": "small"
-      },
-      {
-        "step": "The shared skills follow, and each project's declaration is written",
-        "cost": "small"
       },
       {
         "step": "An agent filing a beads fault from either checkout lands it on the beads board — shown by trying it, not by trusting it",

@@ -1,0 +1,204 @@
+{
+  "title": "The Circuit That Would Not Draw",
+  "eyebrow": "Fixed, and it was not the camera",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. Everything is on main, read by a second agent, and the tests that were blocked are green."
+  },
+
+  "status": {
+    "card": "cor-vxc"
+  },
+
+  "content": [
+    {
+      "label": "What you would have seen",
+      "lead": "Load a circuit with no car on it. Before, every surface was skipped as off-screen and the picture was empty. Now it opens at the start line.",
+      "blocks": [
+        {
+          "kind": "compare",
+          "before": {
+            "path": "render-test-rebuild/rep_track_before.jpg",
+            "caption": "Before — not one surface in the frame"
+          },
+          "after": {
+            "path": "render-test-rebuild/rep_track_after.jpg",
+            "caption": "After — the start line, where a car would be parked"
+          }
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Reading the picture",
+          "text": "This is the view that paints each separate piece of the circuit its own colour, so a black frame means nothing at all was drawn."
+        }
+      ]
+    },
+    {
+      "label": "The number that gave it away",
+      "lead": "How much of the circuit gets skipped as off-screen, from three very different camera positions.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Where the camera stood",
+            { "name": "Drawn", "align": "right" },
+            { "name": "Skipped", "align": "right" },
+            { "name": "Surface in frame", "align": "right" }
+          ],
+          "rows": [
+            ["Before — 38 km out", { "num": "6" }, { "num": "1943" }, { "num": "0%" }],
+            ["Before — 14 m from the start line", { "num": "6" }, { "num": "1943" }, { "num": "0%" }],
+            ["Before — at the origin", { "num": "6" }, { "num": "1943" }, { "num": "0%" }],
+            ["After — at the start line", { "num": "588" }, { "num": "1361" }, { "num": "100%" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Why that is the answer",
+          "text": "A count of what is off-screen that does not move when the camera moves cannot be a count of what is off-screen."
+        }
+      ]
+    },
+    {
+      "label": "Two wrong answers first",
+      "lead": "The obvious reading was a badly aimed camera. It was wrong twice, and that is what found the real fault.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "Frame the whole circuit",
+              "note": "Put the camera 38 km back, far enough to hold the entire venue. Identical numbers. Also revealing: a circuit's outer scenery spans 18 km, so framing all of it is never a usable view."
+            },
+            {
+              "n": "2",
+              "title": "Frame the start line",
+              "note": "Put the camera 14 m from where a car would be parked. Identical numbers again — and the same as sitting at the origin doing nothing."
+            },
+            {
+              "n": "3",
+              "title": "Load a car first, then the circuit",
+              "note": "Everything draws. That is the ablation that worked, and it pointed at what the car was quietly supplying: the camera itself."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What a second pair of eyes found",
+      "lead": "An agent that never saw the work read both changes. It confirmed they land the result, and raised four points — three fixed here, one too big to absorb.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "The same mistake survived one line above the fix",
+              "note": "A circuit on its own was also being denied frame-to-frame smoothing, for the same reason. Fixed — and the new check has teeth: put the old condition back and 5573 pixels crawl forever instead of 13."
+            },
+            {
+              "n": "2",
+              "title": "Where an empty grid slot is was worked out twice",
+              "note": "The day a car-less slot gets settled onto the road, the camera would have kept framing the old spot. One place now decides it."
+            },
+            {
+              "n": "3",
+              "title": "A circuit with no start line still opened on nothing",
+              "note": "It now falls back to any marker the author shipped. A venue with none at all is written down as its own card."
+            },
+            {
+              "n": "4",
+              "title": "The default run still does not exercise the fixed path",
+              "note": "Because a car is always loaded first and nothing can unload it — the app has no way to take a car out of a scene. That is a real missing capability, so it is its own job rather than a patch here."
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Also checked and cleared",
+          "text": "That a capture taken without a window keeps its own camera, that clearing a circuit still parks a car at the studio origin, that nothing is newly cut off by distance, and that the existing check would have gone red before either fix."
+        }
+      ]
+    },
+    {
+      "label": "What it unblocks",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "—",
+              "title": "The sky",
+              "note": "About seventy old tests, the biggest single block left. Every one of them judges a picture of a circuit."
+            },
+            {
+              "n": "—",
+              "title": "Any measurement of a circuit at all",
+              "note": "Two of them came out green only because the run happened to load a car first. They now come out green on their own."
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Nothing else moved",
+          "text": "All twenty-four measurements green in one run of the app — twenty-three before, plus the new one that watches a circuit settle."
+        },
+        {
+          "kind": "table",
+          "columns": [
+            "Run order",
+            { "name": "Green", "align": "right" },
+            { "name": "Circuit pieces drawn", "align": "right" }
+          ],
+          "rows": [
+            ["Shuffled, seed 1", { "num": "23 of 23" }, { "num": "1327" }],
+            ["Shuffled, seed 7", { "num": "23 of 23" }, { "num": "1327" }],
+            ["Shuffled, seed 42", { "num": "23 of 23" }, { "num": "1327" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The point of the job",
+          "text": "That middle number used to be 6 whenever the circuit happened to be measured first. It is now the same in every order, not merely green in every order."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Two failed attempts at a cause end the theory, they do not refine it",
+      "why": "Guessing a third camera position would have cost the afternoon. The identical numbers were the finding."
+    },
+    {
+      "id": "D2",
+      "title": "The camera is sent to the renderer every frame, unconditionally",
+      "why": "It is the frame's own state, not something a car brings with it. Any condition on it is another version of this same fault."
+    },
+    {
+      "id": "D3",
+      "title": "The related fault found alongside it was written down, not folded in",
+      "why": "The same condition also switches off the picture's frame-to-frame smoothing for a car-less circuit. Real, separate, and on the board rather than smuggled into this fix."
+    },
+    {
+      "id": "D4",
+      "title": "A car-less circuit opens at the start line, framed as if a car were parked there",
+      "why": "The obvious alternative — fit the whole venue on screen — puts the camera 38 km out, because a circuit's outer scenery spans 18 km. Falls back to any other place the circuit's author marked; a circuit that marked none is left alone rather than pointed somewhere arbitrary, and that gap is written down."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "I start on the sky, which this unblocks.",
+    "steps": [
+      { "step": "The sky — about seventy old tests, the biggest block left", "cost": "large", "starting": true }
+    ]
+  }
+}

@@ -1,0 +1,412 @@
+{
+  "title": "What Makes A Ticket Good",
+  "eyebrow": "Ten faults in how tickets are written, your three answers in, the work started",
+  "actions": {
+    "none": true,
+    "fyi": "All three answers are in and recorded below as D6, D7 and D8. The work is poured and started — override any decision if one reads wrong."
+  },
+  "status": {
+    "now": "The audit is done, all ten faults are on the board, and your three answers are recorded. The first of three pieces of work is under way: the board is being taught to refuse a ticket written in words you cannot read.",
+    "next_up": "The board refuses a ticket written in words you cannot read.",
+    "items": [
+      {
+        "state": "done",
+        "text": "Read every rule that runs when a ticket is written"
+      },
+      {
+        "state": "done",
+        "text": "Measure all nine hundred and fifteen cards against those rules"
+      },
+      {
+        "state": "done",
+        "text": "Prove the weak spots by feeding bad tickets to the checks"
+      },
+      {
+        "state": "done",
+        "text": "File all ten faults as their own cards"
+      },
+      {
+        "state": "draft",
+        "text": "The board refuses a ticket written in words you cannot read"
+      },
+      {
+        "state": "todo",
+        "text": "Every section of a ticket has to clear a bar a machine can hold"
+      },
+      {
+        "state": "todo",
+        "text": "The eighty-eight tickets below the bar swept up to it"
+      },
+      {
+        "state": "todo",
+        "text": "Work you sign off carries what good looks like, not just what finished means"
+      },
+      {
+        "state": "todo",
+        "text": "Work only your eye can judge always reaches you, and a speed promise always gets measured"
+      }
+    ]
+  },
+  "content": [
+    {
+      "label": "The short version",
+      "lead": "Everything is checked at the end of a job. Almost nothing is checked at the start.",
+      "blocks": [
+        {
+          "kind": "text",
+          "text": "The process around a ticket is immaculate and the ticket itself is uneven."
+        },
+        {
+          "kind": "list",
+          "items": [
+            "Thirty rules stop a job finishing badly — no reader, no merged change, no real number, no page brought up to date, and it cannot close.",
+            "Six rules stop a job starting badly, and four of the six are satisfied by a sentence that means nothing.",
+            "So the weakness is entirely at the moment a ticket is written, which is the moment nobody is watching."
+          ]
+        },
+        {
+          "kind": "tiles",
+          "tiles": [
+            {
+              "value": "915",
+              "key": "cards on the board"
+            },
+            {
+              "value": "30",
+              "key": "rules guarding the finish",
+              "tone": "green"
+            },
+            {
+              "value": "6",
+              "key": "guarding the start",
+              "tone": "red"
+            },
+            {
+              "value": "88",
+              "key": "tickets below the bar today",
+              "tone": "amber"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What is checked when a ticket is written",
+      "lead": "Six things. This is the whole list, and what each one actually demands.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "The ticket must say",
+            "What is actually demanded",
+            "Holds?"
+          ],
+          "rows": [
+            [
+              "What is wrong",
+              "Nothing. No length, no shape, no check of any kind",
+              {
+                "pill": "no",
+                "tone": "red"
+              }
+            ],
+            [
+              "Evidence it is real",
+              "Twenty characters of anything",
+              {
+                "pill": "barely",
+                "tone": "amber"
+              }
+            ],
+            [
+              "How we know it is done",
+              "One digit, or one dot, anywhere in the sentence",
+              {
+                "pill": "no",
+                "tone": "red"
+              }
+            ],
+            [
+              "Which system, and bug or feature",
+              "One of eighteen systems, one of three kinds",
+              {
+                "pill": "yes",
+                "tone": "green"
+              }
+            ],
+            [
+              "Which steps it will run, and why it drops any",
+              "Every droppable step taken or refused in writing, twenty-five characters of reason",
+              {
+                "pill": "yes",
+                "tone": "green"
+              }
+            ],
+            [
+              "Who signs it off",
+              "You or the agent, and a reason if it is you",
+              {
+                "pill": "yes",
+                "tone": "green"
+              }
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "bad",
+          "label": "I fed the finish-line check some deliberately worthless sentences",
+          "text": "'Done when it feels right, roughly 1 day' is accepted. So is the single character '0'. So is 'e.g. it works'. The check is looking for a digit or a dot to prove a machine could read the sentence, and an opinion with a deadline in it has both."
+        }
+      ]
+    },
+    {
+      "label": "What is never checked at all",
+      "lead": "These are the gaps, each now a card.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "The words a ticket is written in",
+              "note": "The list of words you cannot read already exists and already guards every page you read. It has never been pointed at the board.",
+              "tone": "hot"
+            },
+            {
+              "n": "2",
+              "title": "What is wrong",
+              "note": "The one line that names the problem is the only required field with no check whatsoever. A ticket can open on 'fix stuff'."
+            },
+            {
+              "n": "3",
+              "title": "What the ticket is not doing",
+              "note": "There is a section for it. All 178 tickets carry the same printed sentence in it, so no ticket has ever stated its own edges."
+            },
+            {
+              "n": "4",
+              "title": "How good the result has to be",
+              "note": "No ticket anywhere says what a good outcome looks like as opposed to a finished one. The agent invents the bar at the end."
+            },
+            {
+              "n": "5",
+              "title": "Whether the ticket itself is any good",
+              "note": "The reader the board sends is given the change and asked about the code. Nobody has ever re-read the ticket it came from."
+            },
+            {
+              "n": "6",
+              "title": "Subtasks",
+              "note": "A subtask's finish line has to be eight characters long. That is the entire rule."
+            },
+            {
+              "n": "7",
+              "title": "Anything noticed in passing",
+              "note": "Filed with no checks at all — not even the twenty characters a real ticket owes."
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "Two checks that do exist are too narrow to catch the ordinary phrasing",
+          "text": "Work only your eye can settle is meant to reach you rather than be signed by the agent — but 'it matches the reference photo', 'the shadows are soft enough' and 'the paint reads as metal to the eye' all slip past and get signed by the agent. Separately, a ticket promising something will be faster must measure it before and after — but 'costs less time on the graphics card', 'cuts the frame budget' and 'cheaper per pixel' are all missed, and the measurement is then dropped without anyone noticing."
+        }
+      ]
+    },
+    {
+      "label": "What that has produced across nine hundred and fifteen cards",
+      "lead": "Measured, not estimated.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            {
+              "name": "Count",
+              "align": "right"
+            },
+            "What it means"
+          ],
+          "rows": [
+            [
+              "Tickets with no sections at all",
+              {
+                "num": "51 of 230",
+                "tone": "red"
+              },
+              "Poured before the shape existed. No evidence, no finish line, nothing"
+            ],
+            [
+              "Finish lines no machine can run",
+              {
+                "num": "37 of 179",
+                "tone": "red"
+              },
+              "'The number exists.' 'It carries a number.' Both passed the check"
+            ],
+            [
+              "Finish lines under a hundred characters",
+              {
+                "num": "33 of 179",
+                "tone": "amber"
+              },
+              "Too short to have said anything specific"
+            ],
+            [
+              "Subtasks naming no number, file or command",
+              {
+                "num": "86 of 138",
+                "tone": "amber"
+              },
+              "Sixty-two percent. Readable English, but nothing runnable"
+            ],
+            [
+              "Tickets whose edges are stated",
+              {
+                "num": "0 of 178",
+                "tone": "red"
+              },
+              "Every one carries the identical printed sentence"
+            ],
+            [
+              "Things noticed in passing that hold up anyway",
+              {
+                "num": "134 of 152",
+                "tone": "green"
+              },
+              "Nothing forces this. Habit is carrying it, and habit is not a rule"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The weak tickets are not scattered — they came in a batch",
+          "text": "A hundred and thirty-four of the tickets were poured in bulk from old planning documents. Twenty-eight percent of those have a finish line no machine can run, against thirteen percent of the ones an agent wrote by hand while thinking about the problem. Bulk imports clear a bar; they do not aim above it."
+        }
+      ]
+    },
+    {
+      "label": "What a ticket should have to carry",
+      "lead": "Your five sections, with a bar under each that a machine can actually hold.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Section",
+            "The bar it must clear"
+          ],
+          "rows": [
+            [
+              "What is wrong",
+              "Written as something observable, not as a fix. Plain words only — every term checked against the same list your report pages are held to. No file names, no run-together names, no shouted initials"
+            ],
+            [
+              "Evidence it is real today",
+              "Names the thing that proves it: a check that went red and its number, a picture, or your words with the date. A sentence carrying none of the three is refused"
+            ],
+            [
+              "How we know it is finished",
+              "A command anyone can run and the number or picture it must produce. A digit somewhere in a sentence stops counting"
+            ],
+            [
+              "How good it has to be",
+              "New. What separates a good result from a merely finished one, and what would make it a no. Required on anything you sign off yourself"
+            ],
+            [
+              "What this is not doing",
+              "Written per ticket or the ticket is refused. The printed sentence stops being accepted as an answer"
+            ],
+            [
+              "Subtasks",
+              "Each one held to the same bar as the finish line above it — a command and its number, not eight characters of anything"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "None of this needs a new tool",
+          "text": "The shape of a ticket, the word list, and the machine that refuses a bad one all exist already. Every fault here is a check that was never written or was written too loosely, in one place that every ticket already passes through."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The ten faults were filed as cards rather than listed here",
+      "why": "A finding in a document is a finding nobody will do. Each is now on the board with the evidence attached, so your three answers turn straight into work."
+    },
+    {
+      "id": "D2",
+      "title": "Unreadable titles get a rule, not a rewrite",
+      "why": "Your instruction. I had started rewriting the nine cards I filed by hand and stopped — six are in plain words and three are not, and the rule will sweep the rest. Hand-fixing leaves the next agent free to do it again."
+    },
+    {
+      "id": "D3",
+      "title": "Subtasks are held to the same bar as the ticket above them",
+      "why": "The ticket demands a runnable finish line and its subtasks demand eight characters, so the work is checked hardest where the least of it happens."
+    },
+    {
+      "id": "D4",
+      "title": "No new kind of ticket — the standard goes on the shape that exists",
+      "why": "One shape, poured one way, checked in one place. A second kind would need its own checks and would drift from the first within a month."
+    },
+    {
+      "id": "D5",
+      "title": "Refusals name the fix, not just the fault",
+      "why": "Every refusal on this board already reads as a sentence telling you what to do instead, and that is why they get followed rather than worked around."
+    },
+    {
+      "id": "D6",
+      "title": "A ticket written in words you cannot read is refused, not warned about",
+      "why": "Your answer. The word list that already guards every page you read gets pointed at the board, and a ticket carrying one of those words is turned away naming the plain word to use instead."
+    },
+    {
+      "id": "D7",
+      "title": "What good looks like is required only on work you sign off yourself",
+      "why": "Your answer. It becomes a required section exactly when a ticket is opened as yours to judge, and stays optional on the plumbing nobody looks at."
+    },
+    {
+      "id": "D8",
+      "title": "The eighty-eight are swept now, and the checker is built first so there is a bar to sweep to",
+      "why": "Your answer was to sweep before anything else. The bar a sweep aims at is the checker itself, so it is built first — hours, not a day — and then the same machine that will refuse the next bad ticket verifies all eighty-eight. Sweeping first would mean rewriting eighty-eight tickets against an agent's guess at the standard."
+    },
+    {
+      "id": "D9",
+      "title": "Three pieces of work, not ten",
+      "why": "The ten faults collapse onto one moment: when a ticket is written. Two of the three pieces change that moment; the third is the sweep. The rest are filed and wait behind them."
+    }
+  ],
+  "next": {
+    "if_nothing": "The three pieces run in the order below, and you next hear from me when the eighty-eight are swept.",
+    "steps": [
+      {
+        "step": "The board refuses a ticket written in words you cannot read",
+        "cost": "small",
+        "starting": true
+      },
+      {
+        "step": "Every section of a ticket has to clear a bar a machine can hold",
+        "cost": "small"
+      },
+      {
+        "step": "The eighty-eight tickets below the bar brought up to it",
+        "cost": "medium"
+      },
+      {
+        "step": "Work you sign off carries what good looks like",
+        "cost": "small"
+      },
+      {
+        "step": "Work only your eye can judge always reaches you, and a speed promise always gets measured",
+        "cost": "medium"
+      },
+      {
+        "step": "The reader the board sends checks the ticket as well as the code",
+        "cost": "medium"
+      }
+    ]
+  }
+}

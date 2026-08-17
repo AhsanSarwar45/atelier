@@ -1,0 +1,191 @@
+{
+  "title": "A lead you call by name",
+  "eyebrow": "Start a piece of work with it and it runs the job on the strongest model, hands every code change to an Opus worker, and reports back to you",
+  "actions": {
+    "none": true
+  },
+  "status": {
+    "card": "cor-1ec6"
+  },
+  "content": [
+    {
+      "label": "What you get",
+      "lead": "A lead you start work with by name. It plans, delegates, checks and talks to you; it never writes the code itself.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            "How it works"
+          ],
+          "rows": [
+            [
+              "Starting work this way",
+              "type lead, then what you want done"
+            ],
+            [
+              "Who talks to you while it runs",
+              "the lead, on the strongest model available"
+            ],
+            [
+              "Who writes and changes the code",
+              "an Opus worker it sends off with a written brief"
+            ],
+            [
+              "Who searches and researches",
+              "the existing Sonnet helpers, untouched"
+            ],
+            [
+              "Sessions you start normally",
+              "unchanged — nothing about the default moved"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "The lead is told the one thing that makes or breaks this: the worker it sends off has no memory of your conversation and cannot see you, so the brief has to carry the goal, whatever you already ruled on in your own words, what is in play, and the command that decides whether it worked. A thin brief is the only way this fails."
+        }
+      ]
+    },
+    {
+      "label": "Checked, not assumed",
+      "lead": "The whole idea rests on a cheap model being allowed to send an expensive one off to work. That was run before anything was built.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Checked",
+            "Found"
+          ],
+          "rows": [
+            [
+              "Can a lead on the cheap model send an Opus worker off at all",
+              "yes — it reported itself as Fable and the worker came back as Opus"
+            ],
+            [
+              "Does the worker's answer actually reach the lead",
+              "yes, after about half a minute of waiting"
+            ],
+            [
+              "Is the hand-off instant",
+              "no — it starts in the background and answers nothing at first, so the lead is told in writing never to sign off while work is still out"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What you caught",
+      "lead": "You saw ordinary sessions calling the Opus worker directly. They can: it sits in the same shared list every session here reads, and nothing tied it to the lead.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "Two things I had wrong and have corrected. The worker was never fenced off — putting it where the lead could reach it put it where everything else could too. And I sold this to you as a cost saving: it is not one. The lead's model is the most capable tier and costs twice what the worker's does per unit of work, so the saving runs the other way — the worker is the cheap one. Checked against the price list, not assumed. What the arrangement actually buys is judgement in the chair, and that is how the lead is now told to behave: decide and check, never build."
+        },
+        {
+          "kind": "note",
+          "text": "You have since said to put the hard stop on, so the worker is being fenced: a session that is not the lead asking for it gets refused and told to go through the lead. That is separate work with its own page."
+        }
+      ]
+    },
+    {
+      "label": "What counted as done was wrong",
+      "lead": "This job was opened before your correction, so what it promised to prove was the thing you then told me not to do.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "It was poured asking to prove that every session here opens on the strongest model by default. You then ruled that it must not be a default at all — something you start work with by name — and the setting that would have done it was taken back out. That left the job measuring itself against something it could never meet and should not have wanted to. It now measures what actually shipped: the lead exists on the strongest model, the worker on Opus, the project's own settings name no model at all, and nothing outside this project was touched. All four checks come back right."
+        }
+      ]
+    },
+    {
+      "label": "What it costs",
+      "lead": "You are paying more per word in the chair to get a better decision, and pushing the bulk of the words down to the cheaper worker.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            "Effect"
+          ],
+          "rows": [
+            [
+              "Cost of a job run this way",
+              "depends on the split: the lead is the dearer model, so this pays off when it decides and delegates, and costs more than an ordinary session when it reads and builds instead"
+            ],
+            [
+              "Judging what comes back",
+              "better — the strongest model is now the one deciding whether a result is real"
+            ],
+            [
+              "Depth of the building itself",
+              "unchanged — still Opus"
+            ],
+            [
+              "Time to first result",
+              "one hand-off longer before work starts"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "That first row is the thing to watch. A lead that reads a third file itself instead of sending someone is running the expensive model on cheap work, so its own rules say to delegate at that point — but rules are not a meter. If you want to know whether it is paying off, the honest answer is to run a real job through it and compare."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "This project only, and the machine-wide setting is untouched",
+      "why": "Your correction. It went in machine-wide first and was put straight back; nothing outside this project sees any change."
+    },
+    {
+      "id": "D2",
+      "title": "It is something you start work with, not a default",
+      "why": "Your second correction, and the version that shipped. Nothing about how a normal session opens changed — the settings key that would have done it was taken back out and the rulebook restored word for word. You get this arrangement when you ask for it by name and never otherwise.",
+      "tag": "revised"
+    },
+    {
+      "id": "D3",
+      "title": "One worker, not a stable of them",
+      "why": "A single Opus worker takes designing, building and checking. Splitting it into a designer and a builder would double the hand-offs and the briefs, which is exactly where this arrangement is fragile."
+    },
+    {
+      "id": "D4",
+      "title": "The searching and researching helpers stay on Sonnet",
+      "why": "They locate and they read; they do not decide anything. Lifting them would cost more for the same answer."
+    },
+    {
+      "id": "D5",
+      "title": "The lead checks what comes back instead of relaying it",
+      "why": "Judging is the part worth paying the top rate for, so it stays with the lead: a cause it cannot switch off and see the fault go away, a number with no command behind it, or a clean build offered as proof all go back rather than reaching you.",
+      "tag": "revised"
+    },
+    {
+      "id": "D6",
+      "title": "It is reachable two ways, because I do not know which one you meant",
+      "why": "You said you want to start new work with it. There are two ways to do that here — picking it by name from the list of workers, or typing it as a command — so both were built rather than guessing. Whichever one you end up using, the other gets removed; that removal is written down and waiting, so it will not be forgotten.",
+      "tag": "revised"
+    },
+    {
+      "id": "D7",
+      "title": "The worker is fenced by a hard stop, not by asking nicely",
+      "why": "Your call, after you caught ordinary sessions using it. A written request would have let the same thing happen again and you would only find out by spotting it a second time. The fence is its own piece of work and has its own page."
+    }
+  ],
+  "next": {
+    "if_nothing": "The lead is finished and works, and the worker is now fenced. Nothing breaks if you leave it — you just keep two ways of starting it instead of one.",
+    "steps": [
+      {
+        "step": "Tell me which way in you want kept, and the other is deleted",
+        "cost": "small",
+        "starting": true
+      },
+      {
+        "step": "Run one real job through the lead and see whether its briefs hold up",
+        "cost": "small"
+      }
+    ]
+  }
+}

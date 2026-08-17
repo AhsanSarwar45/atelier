@@ -1,6 +1,6 @@
 {
   "title": "Who Is Allowed To Merge",
-  "eyebrow": "Landed, after five readings that found twenty-three more ways through. Every one is now shut and held down by a check that goes red without it; your three own projects are untouched.",
+  "eyebrow": "Landed, after sixteen readings that found seventy-seven more faults. Every one is now fixed and held down by a check that goes red without it; your three own projects are untouched.",
   "actions": {
     "none": true
   },
@@ -20,6 +20,8 @@
             ["Send either line up to the company copy", "Allowed", "Refused"],
             ["Bring work in by pulling instead of folding", "Allowed", "Refused"],
             ["Accept a waiting piece of work from the command line", "Allowed", "Refused"],
+            ["Accept it through the code-hosting site's raw interface — in any of its three forms — instead", "Allowed", "Refused"],
+            ["Drag another line straight onto staging without folding at all", "Allowed", "Refused"],
             ["Write a change straight onto the line it is standing on", "Allowed", "Refused"],
             ["Point one of those lines at its own work, or rename it away", "Allowed", "Refused"],
             ["Step onto staging and fold in, as one single command", "Allowed", "Refused"],
@@ -30,7 +32,7 @@
           "kind": "note",
           "tone": "good",
           "label": "And in every way of typing it, which is where the work went",
-          "text": "The same push is refused with the line in quotes, with a plus in front, spelled as the position it is standing at, behind env or sudo or timeout, handed to a second shell, aimed by a directory switch or a setting, written with the tool's full path, or on the second line of the call. Five readings by someone who did not write it found twenty-three of these, one at a time."
+          "text": "The same push is refused with the line in quotes, with a plus in front, spelled as the position it is standing at, behind env or sudo or timeout — with or without those words' own switches — handed to a second shell, aimed by a directory switch or a setting, written with the tool's full path, or on the second line of the call. Sixteen readings by someone who did not write it found seventy-seven of these, one at a time."
         }
       ]
     },
@@ -56,29 +58,40 @@
     },
     {
       "label": "What the readings cost, and what they were worth",
-      "lead": "The change was read five times by someone who did not write it. Every reading sent it back.",
+      "lead": "The change was read sixteen times by someone who did not write it. Every reading sent it back.",
       "blocks": [
         {
           "kind": "table",
           "columns": ["Round", "What it found", "Worst of it"],
           "rows": [
             ["First", "7", "A line named in quotes was read as no line at all, so every refusal was one keystroke away"],
-            ["Second", "4", "A project joining with a board and no answer could never finish a piece of work"],
-            ["Third", "5", "Bringing work in by pulling — the spelling the session briefing itself tells an agent to use"],
-            ["Fourth", "3", "Any word in front of the command walked past the guard untouched"],
-            ["Fifth", "5", "Handing the command to a second shell opened every route again"]
+            ["Second", "7", "A project joining with a board and no answer could never finish a piece of work"],
+            ["Third", "4", "Bringing work in by pulling — the spelling the session briefing itself tells an agent to use"],
+            ["Fourth", "5", "Any word in front of the command walked past the guard untouched"],
+            ["Fifth", "3", "Reaching into another project's copy was judged by the rules of the copy you started in"],
+            ["Sixth", "5", "Handing the command to a second shell opened every route again"],
+            ["Seventh", "5", "Bringing your own line up to date was being refused — the guard blocking correct work"],
+            ["Eighth", "6", "Dragging a line onto staging without folding, and the site's raw merge call, were both unwatched"],
+            ["Ninth", "5", "Naming the line through a plain variable walked past everything — one dollar sign"],
+            ["Tenth", "5", "Somebody else's code checked out inside one of your projects was borrowing your project's permission"],
+            ["Eleventh", "4", "A commit whose message happened to read like a mid-job switch stood its own command down"],
+            ["Twelfth", "4", "A command written inside an if or a loop was not read as a command by either guard"],
+            ["Thirteenth", "5", "From one of your own projects, an agent could still merge a waiting piece of work in the company's"],
+            ["Fourteenth", "3", "The code-hosting site has two more ways onto a shipping line, and neither was watched"],
+            ["Fifteenth", "6", "A line name fed in from a pipe, and a setting exported on its own line, both walked past everything"],
+            ["Sixteenth", "3", "A second shell fed its commands rather than given them, which reopened every route at once"]
           ]
         },
         {
           "kind": "note",
           "tone": "good",
           "label": "Nothing was taken on trust",
-          "text": "Twenty-nine deliberate breakages are put back one at a time and each one has to turn a check red. The run fails rather than reporting a fault nothing noticed, and it stops rather than reporting success if the code it breaks has moved."
+          "text": "Eighty-three deliberate breakages are put back one at a time and each one has to turn a check red. The run fails rather than reporting a fault nothing noticed, and it stops rather than reporting success if the code it breaks has moved."
         },
         {
           "kind": "note",
-          "label": "Three of the faults were in your own projects, not the shared one",
-          "text": "Staying current was being treated as landing; every ordinary commit briefly queued behind the token meant for folds; and a command quoted inside a written note was read as a command being run — found when the guard refused one of this job's own notes."
+          "label": "Four of the faults were in your own projects, not the shared one",
+          "text": "Staying current was being treated as landing; every ordinary commit briefly queued behind the token meant for folds; a command quoted inside a written note was read as a command being run — found when the guard refused one of this job's own notes; and the racing project's own compile gate had started failing your pushes whenever the shared tools moved underneath it, which is now a warning that costs a third of a second."
         }
       ]
     },
@@ -93,6 +106,7 @@
             ["Your three own projects", "That an agent lands its own work here. Written once each, in the file where each project already describes itself"],
             ["The shared work project", "Nothing at all. It is protected because it has never said otherwise, which is the answer you picked"],
             ["Anything you clone next", "Also nothing. Protected on arrival"],
+            ["Somebody else's code checked out inside your project", "Also nothing, and it is now protected in its own right rather than borrowing yours — the vendored dependency in your racing project was open until this round"],
             ["A team project that later runs a board", "One line naming which lines are off limits. It is told exactly that, in the refusal itself, rather than quietly never finishing a job"]
           ]
         }
@@ -149,20 +163,26 @@
     {
       "id": "D10",
       "title": "Every fix ships with a deliberate breakage that proves the check would catch it",
-      "why": "A check that passes proves the code passes it, not that it would notice the fault coming back. Twenty-nine breakages are put back one at a time; the run fails if any of them leaves everything green, and stops rather than reporting success if the code it breaks has moved."
+      "why": "A check that passes proves the code passes it, not that it would notice the fault coming back. Eighty-three breakages are put back one at a time; the run fails if any of them leaves everything green, and stops rather than reporting success if the code it breaks has moved."
+    },
+    {
+      "id": "D11",
+      "title": "The shared tools now hold themselves to the same bar they hold your projects to",
+      "why": "The forty-four breakages were run by nothing: they stood while somebody remembered to type the command, and the only automated caller was the racing project's push — the wrong repository, and it swallowed the answer. The shared tools now run them on their own commits, and only when the code the breakages are written against is what is changing. It caught something real on its first run: one breakage had quietly stopped being caught by anything."
+    },
+    {
+      "id": "D12",
+      "title": "Both guards read a command through one shared piece, not one each",
+      "why": "They already shared the list of words that can be put in front of a command, and still drifted: one of them stripped those words' own switches and the other did not, so the same disguise that the line guard refused walked a commit past the card check. Sharing the list was not enough — the reading itself is now shared, and a disguise closed anywhere is closed everywhere."
     }
   ],
   "next": {
     "if_nothing": "The protection stays exactly as it is. The shared work project is shut to agents on both its shipping lines and your own three are unchanged; the job finishes itself once a reading comes back with nothing.",
     "steps": [
       {
-        "step": "The rule and its one-line opt-out are written into the document that owns how work runs, so the next project reads it rather than discovering it",
+        "step": "A reading comes back with nothing to send back — sixteen in a row have found something",
         "cost": "small",
         "starting": true
-      },
-      {
-        "step": "A reading comes back with nothing to send back — five in a row have found something",
-        "cost": "small"
       },
       {
         "step": "The copy this was built in is removed and the job closes",

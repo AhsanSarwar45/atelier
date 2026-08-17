@@ -1,0 +1,123 @@
+{
+  "title": "Finished Pieces Can Be Ticked Off",
+  "eyebrow": "A finished job is stuck being marked unfinished; you approved the fix and it is being built",
+
+  "actions": {
+    "none": true,
+    "fyi": "You said let the stage's change count, so it is being built. Nothing on this page is waiting on you."
+  },
+
+  "status": { "card": "cor-z9qn" },
+
+  "content": [
+    {
+      "label": "What is wrong",
+      "lead": "A job's pieces are refused their tick even after the change is live on your board.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "A piece of work is ticked off only once a merged change carries that piece's name.",
+            "The pieces of one stage are merged together, under the name of the stage.",
+            "So a piece never sees its own name, and its tick is refused for good.",
+            "The name cannot be added afterwards: the merged change is already shared."
+          ]
+        },
+        {
+          "kind": "table",
+          "columns": ["The tags job", "State"],
+          "rows": [
+            ["The change itself", "Live on your board"],
+            ["Checked by its own gate", "Green: 174 cards, 335 tags, 0 disagreements"],
+            ["Its three pieces on the work list", "Refused a tick"],
+            ["The job", "Cannot finish"]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Watched happening, before anything was changed",
+      "lead": "The rule was asked, card by card, which merged change it would accept.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Card", "Change it will accept", "Found"],
+          "rows": [
+            ["First piece of the tags work", "Only its own name", "Nothing"],
+            ["Second piece", "Only its own name", "Nothing"],
+            ["Third piece", "Only its own name", "Nothing"],
+            ["The stage the three sit under", "Its own name, or the job's", "The one change that landed all three"],
+            ["A piece from a job of today's shape", "Only its own name", "Its own change — already fine"]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "The last row is the control: it must still read exactly the same after the fix.",
+          "tone": "info"
+        }
+      ]
+    },
+    {
+      "label": "What it does now",
+      "lead": "The same question, asked again after the change.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Card", "Before", "After"],
+          "rows": [
+            ["The three pieces of the tags work", "Nothing accepted", "Accepted by the change that landed them"],
+            ["A piece from a job of today's shape", "Its own change only", "Its own change only — untouched"],
+            ["The stage above the three", "Accepted, with its name counted twice", "Accepted, counted once"],
+            ["The tags job on your live board", "Four ticks refused", "Four ticks taken; the job moved on to its next stage"]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "Put the old rule back and two of the three cases go red, while the untouched one stays green. The check now breaks itself on purpose every run, so a case that has quietly stopped watching goes red instead of staying green.",
+          "tone": "good"
+        }
+      ]
+    },
+    {
+      "label": "Why it matters beyond one job",
+      "lead": "Every job that splits into pieces hits this, so the work list drifts away from the truth.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "The board is the only place work state lives. A rule that marks finished work unfinished makes it lie, and every job with more than one piece in a stage runs into it."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "A piece may be ticked off by the change that carries its stage, and only its stage",
+      "why": "The pieces of one stage are pieces of one change, so the change that lands the stage lands all of them. Letting the whole job's name count instead would go back to one change ticking off every stage, which was removed on purpose. Written as one sentence covering both shapes of job, so the strictness of today's shape falls out of the rule rather than being a special case."
+    },
+    {
+      "id": "D2",
+      "title": "The rule gets a case that goes red when it is taken out",
+      "why": "A guard that only ever passes is not a guard. One case proves a stage's change ticks its pieces off, a second proves the whole job's name still does not."
+    },
+    {
+      "id": "D3",
+      "title": "Only jobs of the older shape change; today's jobs stay as strict as they are",
+      "why": "A job written today hangs its pieces straight off the job itself, so there is no stage above them and nothing widens. Only the older shape, where the pieces sit under the stage, is unstuck — which is exactly the shape that is stuck."
+    },
+    {
+      "id": "D4",
+      "title": "One hole is accepted and written down rather than closed",
+      "why": "A change carrying a stage makes every piece of that stage tickable at once, so it cannot tell apart a piece that was genuinely left unfinished. The stage still cannot finish until each piece is ticked with its own written reason, so the gap is a reason nobody wrote honestly, not a silent tick."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "The fix lands and the tags work finishes ticking itself off. Nothing here is waiting on you.",
+    "steps": [
+      { "step": "The work list stops marking finished work unfinished", "cost": "small", "starting": true },
+      { "step": "The tags job finishes and a second pair of eyes reads it", "cost": "small" }
+    ]
+  }
+}

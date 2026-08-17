@@ -97,3 +97,11 @@ __pycache__/
 /tests/.e2e-run/
 /tests/.workbench-run*/
 /tests/.artifacts/
+
+worktrees/
+
+# Beads / Dolt files (added by bd init)
+*.db
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*

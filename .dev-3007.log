@@ -1,0 +1,464 @@
+  [1m[38;2;173;127;168m▲ Next.js 14.2.35[39m[22m
+  - Local:        http://localhost:3007
+
+ [32m[1m✓[22m[39m Starting...
+ [32m[1m✓[22m[39m Ready in 1286ms
+ [37m[1m○[22m[39m Compiling /project ...
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ [32m[1m✓[22m[39m Compiled /project in 4.4s (3330 modules)
+ GET /project [32m200[39m in 4620ms
+ GET /project [32m200[39m in 16ms
+ [32m[1m✓[22m[39m Compiled /_not-found in 411ms (3320 modules)
+ GET /api/projects [33m404[39m in 478ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=board [32m200[39m in 104ms
+ [33m[1m⚠[22m[39m Cross origin request detected from 127.0.0.1 to /_next/* resource. In a future major version of Next.js, you will need to explicitly configure "allowedDevOrigins" in next.config to allow this.
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=chat [32m200[39m in 30ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=board [32m200[39m in 26ms
+ [37m[1m○[22m[39m Compiling / ...
+ [32m[1m✓[22m[39m Compiled / in 729ms (3393 modules)
+ GET / [32m200[39m in 827ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=board [32m200[39m in 96ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=chat [32m200[39m in 25ms
+ [32m[1m✓[22m[39m Compiled /settings in 385ms (3399 modules)
+ GET /settings [32m200[39m in 464ms
+ GET / [32m200[39m in 23ms
+ [32m[1m✓[22m[39m Compiled in 1229ms (3405 modules)
+ [32m[1m✓[22m[39m Compiled in 979ms (3413 modules)
+ [32m[1m✓[22m[39m Compiled in 970ms (3413 modules)
+ [32m[1m✓[22m[39m Compiled in 882ms (3415 modules)
+ [32m[1m✓[22m[39m Compiled in 922ms (3415 modules)
+ GET / [32m200[39m in 232ms
+ GET / [32m200[39m in 13ms
+ GET / [32m200[39m in 12ms
+ [31m[1m⨯[22m[39m Error: Cannot find module './558.js'
+Require stack:
+- /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+- /home/ahsan/dev/beads-web/.next/server/app/page.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js
+[90m    at Function.<anonymous> (node:internal/modules/cjs/loader:1383:15)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:55:36
+[90m    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)[39m
+[90m    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1192:37)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at __webpack_require__.f.require [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:203:28[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:110:67[90m)[39m
+    at Array.map (<anonymous>)
+    at __webpack_require__.X [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:162:22[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/app/project/page.js:25:38269
+    at Object.<anonymous> [90m(/home/ahsan/dev/beads-web/[39m.next/server/app/project/page.js:25:38326[90m)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1706:14)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:1839:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1441:32)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1263:12)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at requirePage [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require.js:109:84[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:84
+    at async loadComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:26[90m)[39m
+    at async DevServer.findPageComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/next-server.js:714:36[90m)[39m
+    at async DevServer.findPageComponents [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:577:20[90m)[39m
+    at async DevServer.renderPageComponent [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:1910:24[90m)[39m
+    at async DevServer.renderToResponseImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:1962:32[90m)[39m
+    at async DevServer.pipeImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:922:25[90m)[39m
+    at async NextNodeServer.handleCatchallRenderRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/next-server.js:272:17[90m)[39m
+    at async DevServer.handleRequestImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:818:17[90m)[39m
+    at async [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:339:20
+    at async Span.traceAsyncFn [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/trace/trace.js:154:20[90m)[39m
+    at async DevServer.handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:336:24[90m)[39m
+    at async invokeRender [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:179:21[90m)[39m
+    at async handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:359:24[90m)[39m
+    at async requestHandlerImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:383:13[90m)[39m
+    at async Server.requestListener [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/start-server.js:141:13[90m)[39m {
+  code: [32m'MODULE_NOT_FOUND'[39m,
+  requireStack: [
+    [32m'/home/ahsan/dev/beads-web/.next/server/webpack-runtime.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/.next/server/app/page.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js'[39m
+  ],
+  page: [32m'/project'[39m
+}
+ [37m[1m○[22m[39m Compiling /_error ...
+ [32m[1m✓[22m[39m Compiled /_error in 969ms (3627 modules)
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=chat [31m500[39m in 1077ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=chat [32m200[39m in 187ms
+ [37m[1m○[22m[39m Compiling /_not-found ...
+ [32m[1m✓[22m[39m Compiled /_not-found in 837ms (3630 modules)
+ GET /_next/static/css/app/project/page.css?v=1786889582722 [33m404[39m in 883ms
+ GET /_next/static/css/app/layout.css?v=1786889582722 [33m404[39m in 884ms
+ GET /_next/static/chunks/main-app.js?v=1786889582722 [33m404[39m in 19ms
+ GET /_next/static/chunks/app/project/page.js [33m404[39m in 16ms
+ GET /_next/static/chunks/app/layout.js [33m404[39m in 16ms
+ GET /_next/static/chunks/app-pages-internals.js [33m404[39m in 17ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=chat [32m200[39m in 80ms
+ GET /_next/static/css/app/project/page.css?v=1786889588151 [33m404[39m in 13ms
+ GET /_next/static/css/app/layout.css?v=1786889588151 [33m404[39m in 14ms
+ GET /_next/static/chunks/app-pages-internals.js [33m404[39m in 19ms
+ GET /_next/static/chunks/app/project/page.js [33m404[39m in 18ms
+ GET /_next/static/chunks/main-app.js?v=1786889588151 [33m404[39m in 19ms
+ GET /_next/static/chunks/app/layout.js [33m404[39m in 18ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=chat [32m200[39m in 15ms
+ GET /_next/static/css/app/project/page.css?v=1786889635074 [33m404[39m in 14ms
+ GET /_next/static/css/app/layout.css?v=1786889635074 [33m404[39m in 14ms
+ GET /_next/static/chunks/app/project/page.js [33m404[39m in 18ms
+ GET /_next/static/chunks/main-app.js?v=1786889635074 [33m404[39m in 19ms
+ GET /_next/static/chunks/app-pages-internals.js [33m404[39m in 18ms
+ GET /_next/static/chunks/app/layout.js [33m404[39m in 18ms
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat '/home/ahsan/dev/beads-web/.next/server/vendor-chunks/eventemitter3.js'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/eventemitter3' in /home/ahsan/dev/beads-web/.next/server for build dependencies doesn't lead to expected result '/home/ahsan/dev/beads-web/.next/server/vendor-chunks/eventemitter3.js', but to 'Error: Can't resolve './vendor-chunks/eventemitter3' in '/home/ahsan/dev/beads-web/.next/server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/eventemitter3 (expected /home/ahsan/dev/beads-web/.next/server/vendor-chunks/eventemitter3.js)
+<w>  at file dependencies /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+<w>  at file /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/.next/server/app/project/page.js
+<w>  at file /home/ahsan/dev/beads-web/.next/server/app/project/page.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+<w>  at resolve commonjs /home/ahsan/dev/beads-web/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/extend' in /home/ahsan/dev/beads-web/.next/server for build dependencies doesn't lead to expected result '/home/ahsan/dev/beads-web/.next/server/vendor-chunks/extend.js', but to 'Error: Can't resolve './vendor-chunks/extend' in '/home/ahsan/dev/beads-web/.next/server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/extend (expected /home/ahsan/dev/beads-web/.next/server/vendor-chunks/extend.js)
+<w>  at file dependencies /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+<w>  at file /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/.next/server/app/project/page.js
+<w>  at file /home/ahsan/dev/beads-web/.next/server/app/project/page.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+<w>  at file dependencies /home/ahsan/dev/beads-web/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+<w>  at file /home/ahsan/dev/beads-web/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+<w>  at resolve commonjs /home/ahsan/dev/beads-web/node_modules/next/dist/build/webpack/loaders/next-route-loader/index.js
+ [32m[1m✓[22m[39m Compiled in 2s (3644 modules)
+ GET / [32m200[39m in 89ms
+ GET / [32m200[39m in 12ms
+ GET /project?id=a4233238-a3a9-4210-a0d1-c347c11168b6&tab=chat [32m200[39m in 50ms
+ [32m[1m✓[22m[39m Compiled /_not-found in 321ms (3632 modules)
+ [31m[1m⨯[22m[39m Error: Cannot find module './558.js'
+Require stack:
+- /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+- /home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js
+[90m    at Function.<anonymous> (node:internal/modules/cjs/loader:1383:15)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:55:36
+[90m    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)[39m
+[90m    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1192:37)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at __webpack_require__.f.require [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:203:28[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:110:67[90m)[39m
+    at Array.map (<anonymous>)
+    at __webpack_require__.X [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:162:22[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2615
+    at Object.<anonymous> [90m(/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2660[90m)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1706:14)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:1839:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1441:32)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1263:12)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at requirePage [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require.js:109:84[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:84
+    at async loadComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:26[90m)[39m
+    at async DevServer.findPageComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/next-server.js:714:36[90m)[39m
+    at async DevServer.findPageComponents [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:577:20[90m)[39m
+    at async DevServer.renderErrorToResponseImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2090:30[90m)[39m
+    at async pipe.req.req [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2056:30[90m)[39m
+    at async DevServer.pipeImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:922:25[90m)[39m
+    at async [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:339:20
+    at async Span.traceAsyncFn [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/trace/trace.js:154:20[90m)[39m
+    at async DevServer.handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:336:24[90m)[39m
+    at async invokeRender [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:179:21[90m)[39m
+    at async handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:374:24[90m)[39m
+    at async requestHandlerImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:383:13[90m)[39m
+    at async Server.requestListener [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/start-server.js:141:13[90m)[39m {
+  code: [32m'MODULE_NOT_FOUND'[39m,
+  requireStack: [
+    [32m'/home/ahsan/dev/beads-web/.next/server/webpack-runtime.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js'[39m
+  ]
+}
+ [31m[1m⨯[22m[39m Error: Cannot find module './558.js'
+Require stack:
+- /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+- /home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js
+[90m    at Function.<anonymous> (node:internal/modules/cjs/loader:1383:15)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:55:36
+[90m    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)[39m
+[90m    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1192:37)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at __webpack_require__.f.require [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:203:28[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:110:67[90m)[39m
+    at Array.map (<anonymous>)
+    at __webpack_require__.X [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:162:22[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2615
+    at Object.<anonymous> [90m(/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2660[90m)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1706:14)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:1839:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1441:32)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1263:12)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at requirePage [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require.js:109:84[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:84
+    at async loadComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:26[90m)[39m
+    at async DevServer.findPageComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/next-server.js:714:36[90m)[39m
+    at async DevServer.findPageComponents [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:577:20[90m)[39m
+    at async DevServer.renderErrorToResponseImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2090:30[90m)[39m
+    at async pipe.req.req [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2056:30[90m)[39m
+    at async DevServer.pipeImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:922:25[90m)[39m
+    at async [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:339:20
+    at async Span.traceAsyncFn [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/trace/trace.js:154:20[90m)[39m
+    at async DevServer.handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:336:24[90m)[39m
+    at async invokeRender [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:179:21[90m)[39m
+    at async handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:374:24[90m)[39m
+    at async requestHandlerImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:383:13[90m)[39m
+    at async Server.requestListener [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/start-server.js:141:13[90m)[39m {
+  code: [32m'MODULE_NOT_FOUND'[39m,
+  requireStack: [
+    [32m'/home/ahsan/dev/beads-web/.next/server/webpack-runtime.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js'[39m
+  ]
+}
+ [31m[1m⨯[22m[39m Error: Cannot find module './558.js'
+Require stack:
+- /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+- /home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js
+[90m    at Function.<anonymous> (node:internal/modules/cjs/loader:1383:15)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:55:36
+[90m    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)[39m
+[90m    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1192:37)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at __webpack_require__.f.require [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:203:28[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:110:67[90m)[39m
+    at Array.map (<anonymous>)
+    at __webpack_require__.X [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:162:22[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2615
+    at Object.<anonymous> [90m(/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2660[90m)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1706:14)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:1839:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1441:32)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1263:12)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at requirePage [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require.js:109:84[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:84
+    at async loadComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:26[90m)[39m
+    at async DevServer.findPageComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/next-server.js:714:36[90m)[39m
+    at async DevServer.findPageComponents [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:577:20[90m)[39m
+    at async DevServer.renderErrorToResponseImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2090:30[90m)[39m
+    at async pipe.req.req [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2056:30[90m)[39m
+    at async DevServer.pipeImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:922:25[90m)[39m
+    at async [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:339:20
+    at async Span.traceAsyncFn [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/trace/trace.js:154:20[90m)[39m
+    at async DevServer.handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:336:24[90m)[39m
+    at async invokeRender [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:179:21[90m)[39m
+    at async handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:374:24[90m)[39m
+    at async requestHandlerImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:383:13[90m)[39m
+    at async Server.requestListener [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/start-server.js:141:13[90m)[39m {
+  code: [32m'MODULE_NOT_FOUND'[39m,
+  requireStack: [
+    [32m'/home/ahsan/dev/beads-web/.next/server/webpack-runtime.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js'[39m
+  ]
+}
+ GET /api/projects [31m500[39m in 1295ms
+ GET /api/version/check [31m500[39m in 1304ms
+ GET /api/workbench/watch [31m500[39m in 1294ms
+ [31m[1m⨯[22m[39m Error: Cannot find module './558.js'
+Require stack:
+- /home/ahsan/dev/beads-web/.next/server/webpack-runtime.js
+- /home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js
+- /home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js
+[90m    at Function.<anonymous> (node:internal/modules/cjs/loader:1383:15)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:55:36
+[90m    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)[39m
+[90m    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1192:37)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at __webpack_require__.f.require [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:203:28[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:111:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:110:67[90m)[39m
+    at Array.map (<anonymous>)
+    at __webpack_require__.X [90m(/home/ahsan/dev/beads-web/[39m.next/server/webpack-runtime.js:162:22[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2615
+    at Object.<anonymous> [90m(/home/ahsan/dev/beads-web/[39m.next/server/app/_not-found/page.js:1:2660[90m)[39m
+[90m    at Module._compile (node:internal/modules/cjs/loader:1706:14)[39m
+[90m    at Object..js (node:internal/modules/cjs/loader:1839:10)[39m
+[90m    at Module.load (node:internal/modules/cjs/loader:1441:32)[39m
+[90m    at Function._load (node:internal/modules/cjs/loader:1263:12)[39m
+[90m    at TracingChannel.traceSync (node:diagnostics_channel:322:14)[39m
+[90m    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)[39m
+[90m    at Module.<anonymous> (node:internal/modules/cjs/loader:1463:12)[39m
+    at mod.require [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require-hook.js:65:28[90m)[39m
+[90m    at require (node:internal/modules/helpers:147:16)[39m
+    at requirePage [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/require.js:109:84[90m)[39m
+    at [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:84
+    at async loadComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/load-components.js:103:26[90m)[39m
+    at async DevServer.findPageComponentsImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/next-server.js:714:36[90m)[39m
+    at async DevServer.findPageComponents [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:577:20[90m)[39m
+    at async DevServer.renderErrorToResponseImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2090:30[90m)[39m
+    at async pipe.req.req [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:2056:30[90m)[39m
+    at async DevServer.pipeImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/base-server.js:922:25[90m)[39m
+    at async [90m/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:339:20
+    at async Span.traceAsyncFn [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/trace/trace.js:154:20[90m)[39m
+    at async DevServer.handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/dev/next-dev-server.js:336:24[90m)[39m
+    at async invokeRender [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:179:21[90m)[39m
+    at async handleRequest [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:374:24[90m)[39m
+    at async requestHandlerImpl [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/router-server.js:383:13[90m)[39m
+    at async Server.requestListener [90m(/home/ahsan/dev/beads-web/[39mnode_modules/[4mnext[24m/dist/server/lib/start-server.js:141:13[90m)[39m {
+  code: [32m'MODULE_NOT_FOUND'[39m,
+  requireStack: [
+    [32m'/home/ahsan/dev/beads-web/.next/server/webpack-runtime.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/.next/server/app/_not-found/page.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/require.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/load-components.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/build/utils.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-middleware.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/dev/hot-reloader-webpack.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-utils/setup-dev-bundler.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/router-server.js'[39m,
+    [32m'/home/ahsan/dev/beads-web/node_modules/next/dist/server/lib/start-server.js'[39m
+  ]
+}
+ GET /api/projects [31m500[39m in 4ms
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename '/home/ahsan/dev/beads-web/.next/cache/webpack/client-development-fallback/0.pack.gz_' -> '/home/ahsan/dev/beads-web/.next/cache/webpack/client-development-fallback/0.pack.gz'
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename '/home/ahsan/dev/beads-web/.next/cache/webpack/client-development-fallback/0.pack.gz_' -> '/home/ahsan/dev/beads-web/.next/cache/webpack/client-development-fallback/0.pack.gz'
+ [31m[1m⨯[22m[39m ./src/components/markdown-body.tsx:11:1
+[31m[1mModule not found[22m[39m: Can't resolve '[32mremark-gfm[39m'
+[0m [90m  9 |[39m [36mimport[39m rehypeHighlight [36mfrom[39m [32m"rehype-highlight"[39m[33m;[39m[0m
+[0m [90m 10 |[39m [36mimport[39m remarkBreaks [36mfrom[39m [32m"remark-breaks"[39m[33m;[39m[0m
+[0m[31m[1m>[22m[39m[90m 11 |[39m [36mimport[39m remarkGfm [36mfrom[39m [32m"remark-gfm"[39m[33m;[39m[0m
+[0m [90m    |[39m [31m[1m^[22m[39m[0m
+[0m [90m 12 |[39m[0m
+[0m [90m 13 |[39m [36mimport[39m [32m"highlight.js/styles/github-dark.css"[39m[33m;[39m[0m
+[0m [90m 14 |[39m[0m
+
+https://nextjs.org/docs/messages/module-not-found
+
+Import trace for requested module:
+./src/components/bead-detail.tsx
+./src/app/project/kanban-board.tsx
+./src/app/project/page.tsx
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, rename '/home/ahsan/dev/beads-web/.next/cache/webpack/client-development-fallback/0.pack.gz_' -> '/home/ahsan/dev/beads-web/.next/cache/webpack/client-development-fallback/0.pack.gz'
+[?25h

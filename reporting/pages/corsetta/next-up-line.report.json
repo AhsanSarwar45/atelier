@@ -118,7 +118,7 @@
     "if_nothing": "It goes in as described, and you see it on the next page you open.",
     "steps": [
       {
-        "step": "Someone who did not write it reads it, then it lands",
+        "step": "Every report you open from here reads this way",
         "cost": "small",
         "starting": true
       }

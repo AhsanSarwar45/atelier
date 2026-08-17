@@ -1,0 +1,82 @@
+{
+  "title": "Signing off on your own screen",
+  "eyebrow": "Watched on your own board: two jobs waiting on you, nothing to press",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. Override any decision below if you disagree with one."
+  },
+
+  "status": { "card": "cor-x1fv" },
+
+  "content": [
+    {
+      "label": "What you found",
+      "lead": "The button that finishes a job is drawn on the agents' column and never on yours.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "Agent Review", "Manager Review"],
+          "rows": [
+            ["Button that finishes the job", "drawn", "nothing"],
+            ["Who the column is waiting on", "an agent's reading", "you"],
+            ["What a session is allowed to do", "close it itself", "refused, on the grounds you sign it on your screen"]
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "So the one column that can only be finished by you is the one column with no way to finish anything. The only route left was the state menu buried inside a card's own panel."
+        },
+        {
+          "kind": "note",
+          "text": "Counted on your board this morning, column by column: two jobs standing in Manager Review, and zero buttons that finish one — the first of them is 12 of 12 finished, every piece closed, waiting only on you."
+        }
+      ]
+    },
+    {
+      "label": "What it is now",
+      "lead": "The button sits on your column and the agents' one is bare.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["", "Before", "After"],
+          "rows": [
+            ["Finishing a job you approve", "hunt through a menu", "one press on the card"],
+            ["What the button says", "Close Epic", "Mark Done"],
+            ["A job still waiting on a reading", "offers a finish you should not give", "offers nothing"]
+          ]
+        },
+        {
+          "kind": "compare",
+          "before": { "path": "shots/signoff-before.png", "caption": "Before — 12 of 12 finished, waiting on you, nothing to press" },
+          "after": { "path": "shots/signoff-after.png", "caption": "After — the same card, with your sign-off on it" }
+        },
+        {
+          "kind": "note",
+          "text": "Held in place two ways: four checks on the card itself, and one that opens the board in a real browser and reads the buttons off each column. Built with the button back on the agents' column, both go red at once — so it cannot drift back unnoticed, and it cannot drift back between the code and what you are served."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The button moves rather than appearing in both columns",
+      "why": "A job in the agents' column has not been read yet. Leaving a finish button there is what let work reach done without anyone signing it, which is the complaint that opened the six columns in the first place."
+    },
+    {
+      "id": "D2",
+      "title": "No send-back button in this change",
+      "why": "Turning a job down is a conversation, not a press: the machinery already tells a session to say what is wrong and leave the card where it is. Adding a second button before that is settled would guess at what turning down means."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "The fix lands on its own and your column gains the button; nothing else changes.",
+    "steps": [
+      { "step": "Your column gains the button that finishes a job, and the agents' column loses it", "cost": "small", "starting": true },
+      { "step": "A check that goes red if the button ever drifts back to the wrong column", "cost": "small" }
+    ]
+  }
+}

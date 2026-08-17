@@ -1,0 +1,128 @@
+{
+  "title": "The report blamed the wrong thing",
+  "eyebrow": "The page built fine for me and refused for you. It was reading a different board, and it told you the ticket was empty rather than saying so.",
+  "actions": {
+    "questions": [
+      {
+        "ask": "Do I fix the report builder now, or park it?",
+        "options": [
+          {
+            "label": "Fix it now",
+            "say": "Fix it now: a report should find its own board, and say which one it read when it cannot.",
+            "pick": true
+          },
+          {
+            "label": "Park it",
+            "say": "Park it — I will run the command from the project folder."
+          }
+        ],
+        "note": "Parking costs you nothing today as long as you always start from the project folder. It costs the next person the same twenty minutes, and the refusal will still name the wrong culprit."
+      }
+    ]
+  },
+  "status": {
+    "now": "Reproduced and on the board as one ticket. Nothing changed yet.",
+    "next_up": "A report finds its own board, so where you happen to be standing stops mattering.",
+    "items": [
+      {
+        "text": "Reproduce your refusal and find what causes it",
+        "state": "done"
+      },
+      {
+        "text": "Put the cause on the board as its own ticket",
+        "state": "done"
+      },
+      {
+        "text": "A report finds its own board rather than the one under your feet",
+        "state": "todo"
+      },
+      {
+        "text": "A refusal names the board it read, so it can never blame the wrong thing again",
+        "state": "todo"
+      }
+    ]
+  },
+  "content": [
+    {
+      "label": "What actually happened",
+      "lead": "The report reads its checklist off a board, and it uses whichever board is in the folder you were standing in when you ran the command.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "Where the command is run from",
+            "Pieces of work it finds under the ticket"
+          ],
+          "rows": [
+            [
+              "The project folder",
+              "12 — the page builds"
+            ],
+            [
+              "The folder the report tools live in",
+              "0 — that folder has a board of its own, and this ticket is not on it"
+            ],
+            [
+              "Anywhere with no board at all",
+              "it says so plainly, which is the honest answer"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "The middle row is the whole fault. The board answers cleanly and says there is nothing, because it was asked about a ticket that lives somewhere else — and the report turns that into an accusation against the ticket."
+        }
+      ]
+    },
+    {
+      "label": "To unblock yourself right now",
+      "lead": "Run it from the project folder and it builds.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "The link I sent you already points at the built page and is still live — nothing about the report itself is broken. Only rebuilding it from the wrong folder fails."
+        }
+      ]
+    },
+    {
+      "label": "Why this is worth a fix and not a note",
+      "lead": "A refusal that names the wrong culprit is worse than no refusal.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "You did the sensible thing with what it told you: it said the ticket was empty, so you asked me about the ticket. The ticket was fine. Any message that sends you looking in the wrong place costs more than the thing it was guarding against."
+        },
+        {
+          "kind": "note",
+          "text": "Same message, two situations that need opposite responses: a ticket nobody has poured work under yet, and a ticket that was looked for on the wrong board. Splitting them is most of the fix."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The report should find its own board, not use the one you are standing in",
+      "why": "Every page is already filed under the project it belongs to, so it knows which project it is about without being told by your working folder. Where you happen to be standing should not change what a page says."
+    },
+    {
+      "id": "D2",
+      "title": "A refusal must name what it read",
+      "why": "The rule holds beyond this one message: a check that refuses has to say what it looked at, or the person reading it starts by suspecting the wrong thing. That is what happened to you here."
+    }
+  ],
+  "next": {
+    "if_nothing": "Reports keep building from the project folder and refusing wrongly from anywhere else.",
+    "steps": [
+      {
+        "step": "A report finds its own board, so where you are standing stops mattering",
+        "cost": "half a day",
+        "starting": true
+      },
+      {
+        "step": "The refusal names the board it read and stops blaming the ticket",
+        "cost": "small"
+      }
+    ]
+  }
+}

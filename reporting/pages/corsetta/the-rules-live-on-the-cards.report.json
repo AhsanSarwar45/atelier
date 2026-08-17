@@ -1,0 +1,189 @@
+{
+  "title": "The Rules Live On The Cards",
+  "eyebrow": "You are right — the file is still a second copy of the run. Diagnosis, and two answers I need",
+
+  "status": {
+    "now": "Nothing is being changed. I read every standard in the file and found where each one is actually enforced.",
+    "next_up": "Your two answers, then the nine repeated standards move onto the cards that already carry them.",
+    "items": [
+      { "state": "done", "text": "Read every standard in the file and traced what enforces it" },
+      { "state": "done", "text": "Nine are the words on a step card already" },
+      { "state": "done", "text": "Three are the technique document already" },
+      { "state": "done", "text": "Four are already a test or a check on every edit" },
+      { "state": "done", "text": "Five are written nowhere else and nothing checks them" },
+      { "state": "todo", "text": "Move the repeated ones onto their cards and cut them from the file" },
+      { "state": "todo", "text": "Give the five unowned rules something that can refuse" },
+      { "state": "todo", "text": "Add the check that counts them" }
+    ]
+  },
+
+  "actions": {
+    "questions": [
+      {
+        "ask": "Does a job's brief carry every standard, or only the ones its kind of work needs?",
+        "options": [
+          {
+            "label": "Only the ones it needs",
+            "say": "Give each job the standards its own kind of work is held to, and nothing else.",
+            "pick": true,
+            "note": "A rendering job is told to design to physics and to prove a cause by switching it off. A tooling job is not, and never reads it. Short briefs get read. The cost: the job's own labels decide which rules it gets, so a mislabelled job is handed the wrong ones"
+          },
+          {
+            "label": "Every job carries all of them",
+            "say": "Put every standard on every job.",
+            "note": "Nothing can be missed by mislabelling. Every brief is long and mostly about work this job is not doing — which is exactly how the file you are pointing at came to be ignored"
+          }
+        ]
+      },
+      {
+        "ask": "Five rules today have nothing checking them. Do they become refusals, or words on a card?",
+        "options": [
+          {
+            "label": "Refusals",
+            "say": "Make the machine refuse them.",
+            "pick": true,
+            "note": "The command that wipes another session's work stops being possible. A file that outgrows its size, a copy of the project that was set up wrong — caught at the moment it happens, not at review. Costs a day of work, and a refusal that misfires stops a session until it is fixed"
+          },
+          {
+            "label": "Words on a card",
+            "say": "Write them into the job briefs for now.",
+            "note": "Free and immediate. Still obeyed from memory, which is what we are trying to end"
+          }
+        ]
+      }
+    ]
+  },
+
+  "content": [
+    {
+      "label": "What you spotted",
+      "lead": "The run moved onto the board. Its standards did not move with it.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "The same rule is written twice",
+              "note": "Nine of the standards in the file are already the words on the step card that enforces them. An agent reads the rule in the file, then reads it again on the card. Only one of the two can refuse anything."
+            },
+            {
+              "title": "Five are written nowhere else",
+              "note": "Including the one that destroys another session's work. Nothing checks any of them. They hold only for as long as an agent remembers the file it read at the start of the session."
+            },
+            {
+              "title": "So the file reads as the playbook",
+              "note": "Because it is one. Removing the list of steps and leaving the list of standards left the same document with a different heading."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Every standard in the file, and what enforces it today",
+      "lead": "Twenty-one standards. Sixteen already have a home with teeth; five have none.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["The standard", "Enforced today by", "Where it goes"],
+          "rows": [
+            ["Work in your own copy of the project", "The card, which checks the copy exists", "Stays on that card"],
+            ["Set that copy up completely before building", "Nothing", "That card refuses a half-set-up copy"],
+            ["Run it and look; a build that compiles proves nothing", "The card", "Stays on that card"],
+            ["Read the source before using a technique", "The card", "Stays on that card"],
+            ["A speed claim ships a before and an after", "The card", "Stays on that card"],
+            ["One review round, by someone who did not write it", "The card", "Stays on that card"],
+            ["A guard's limit comes from a measured number", "The card", "Stays on that card"],
+            ["Anything taken as a shortcut is written down", "The card", "Stays on that card"],
+            ["You approve the design before anyone builds", "The card", "Stays on that card"],
+            ["What is in flight lives on the board, not in a document", "The board itself", "Stays there"],
+            ["Look it up the cheap way before searching everything", "The technique document", "Stays there"],
+            ["Hand a wide search to a helper", "The technique document", "Stays there"],
+            ["The second time you inspect by hand, build the tool", "The technique document", "Stays there"],
+            ["Only the game draws; nothing else builds its own renderer", "A test that goes red", "Stays there"],
+            ["A comment states what the code is, not its history", "A check on every edit", "Stays there"],
+            ["A fact is written once, everywhere else a link", "A check on every edit", "Stays there"],
+            ["Never wipe the shared copy to compare two versions", "Nothing", "A refusal, or a card"],
+            ["A cause is a cause only if switching it off removes the fault", "Nothing", "The card that reproduces the fault"],
+            ["Never make the picture right without a reason it is right", "Nothing", "The card that designs the change"],
+            ["Design to physics, not to what another game did", "A rules document nobody is sent to", "The card that designs the change"],
+            ["A file that grows past a limit is split", "Nothing", "A refusal, or a card"]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What changes",
+      "lead": "The standard arrives at the moment it applies, and it can say no.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "title": "A rule is read where it is used",
+              "note": "The rule about proving a speed claim reaches the agent when it opens the step that claims the speed — not in a file it skimmed an hour earlier alongside twenty rules about other work."
+            },
+            {
+              "title": "A rule that is broken can refuse",
+              "note": "Every standard ends up attached to something that can say no: a card that will not close, a test that goes red, or a command that will not run. None of them stay as prose."
+            },
+            {
+              "title": "The file shrinks to what it is for",
+              "note": "About forty lines: who you are, what the project is, where the reference material lives, and the one trap that has no owner. Everything else is a link to the thing that enforces it."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Cost and risk",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "About a day, most of it in the five rules that have nothing checking them today.",
+            "The risk is a standard that quietly stops applying because no job's labels pick it up. A check counts them, so a rule that no job can ever receive goes red rather than going silent.",
+            "None of this touches the game. It is the machine that runs the work."
+          ]
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "A standard is written once, in the thing that can refuse when it is broken",
+      "why": "Two copies of a rule is one rule and one piece of decoration, and no reader can tell which is which."
+    },
+    {
+      "id": "D2",
+      "title": "Nine standards move onto the step cards that already say the same thing",
+      "why": "They were already there. Deleting the second copy costs nothing and loses nothing."
+    },
+    {
+      "id": "D3",
+      "title": "Three stay in the technique document and are linked, not repeated",
+      "why": "How to search the code and when to build a tool are craft, not a rule a job can be held to."
+    },
+    {
+      "id": "D4",
+      "title": "The file keeps who you are, what the project is, and where the reference material lives",
+      "why": "None of those belong to a step. Everything that does, goes to its step."
+    },
+    {
+      "id": "D5",
+      "title": "A check counts the standards, so one can never fall off the list unnoticed",
+      "why": "The failure this whole change invites is a rule that quietly reaches nobody. That has to be a red test, not a habit."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "The file stays as it is: a second copy of the run, plus five rules that nothing anywhere checks — including the one that wipes another session's work.",
+    "steps": [
+      { "step": "Answer the two questions above", "cost": "small", "starting": true },
+      { "step": "Move the nine repeated standards onto their step cards and cut them from the file", "cost": "small" },
+      { "step": "Give the five unowned rules something that can refuse", "cost": "medium" },
+      { "step": "Add the check that counts them", "cost": "small" }
+    ]
+  }
+}

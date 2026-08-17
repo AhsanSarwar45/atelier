@@ -1,0 +1,270 @@
+{
+  "title": "Drawing Sequence On The Board",
+  "eyebrow": "Nine documents and 7,275 lines are gone. 140 jobs took their place, each carrying its own evidence and its own finish test.",
+  "actions": {
+    "questions": [
+      {
+        "ask": "Where do you want the first work to start?",
+        "options": [
+          {
+            "label": "Fog and air, as the plan said",
+            "say": "Start with the fog and air faults, in the order the plan set.",
+            "pick": true
+          },
+          {
+            "label": "The showroom's worst image first",
+            "say": "Start with the clear-coat fault — the biggest wrong image in the default scene."
+          },
+          {
+            "label": "The two never-analysed systems",
+            "say": "Run the analysis on the two systems nobody has examined before doing anything else."
+          }
+        ],
+        "note": "Nine faults a driver can see are ready in fog and air, one is ready in surfaces, and three in corner darkening. Nothing blocks any of them."
+      },
+      {
+        "ask": "A hundred jobs are claimable at once. Do you want that narrowed?",
+        "options": [
+          {
+            "label": "Leave it open",
+            "say": "Leave the list as it is — only the gates the plan actually stated should block.",
+            "pick": true
+          },
+          {
+            "label": "Do one system at a time",
+            "say": "Block each system behind the one before it, so only one system's work is ever claimable."
+          }
+        ],
+        "note": "Only gates the plan stated in its own words became blocking. Doing one system at a time would freeze faults a driver can see today behind plumbing, which the plan's own sequencing warned against — but it would make the list short."
+      }
+    ]
+  },
+  "status": {
+    "card": "cor-1bs"
+  },
+  "content": [
+    {
+      "label": "What changed for you",
+      "lead": "The plan stopped being something you have to read.",
+      "blocks": [
+        {
+          "kind": "tiles",
+          "tiles": [
+            { "key": "documents retired", "value": "9", "tone": "green", "delta": "7,275 lines" },
+            { "key": "jobs on the board", "value": "140", "tone": "blue" },
+            { "key": "systems, each a container", "value": "6", "tone": "blue" },
+            { "key": "pointers left dangling", "value": "0", "tone": "green" }
+          ]
+        },
+        {
+          "kind": "table",
+          "columns": ["", "Before", "Now"],
+          "rows": [
+            ["Where the work lives", "Nine documents", "The board"],
+            ["Knowing what is next", "A running order in prose", "The only thing claimable"],
+            ["Knowing what is done", "A tally someone had to update", "The board answers it"],
+            [
+              "Trusting a job",
+              { "pill": "29% described code that had moved", "tone": "red" },
+              { "pill": "Every job proves itself first", "tone": "green" }
+            ],
+            [
+              "A job nobody could finish honestly",
+              { "pill": "A third had no real finish test", "tone": "red" },
+              { "pill": "All 135 have one", "tone": "green" }
+            ],
+            ["The physics inside the plan", "Buried in a plan", "In the document that owns it"]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "The six systems, and what is ready in each",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["System", { "name": "Jobs", "align": "right" }, "The headline fault"],
+          "rows": [
+            ["Fog and air", "42", "Dense ground fog never reaches the sky"],
+            ["The lights", "36", "A car's headlights emit nothing, and five places build the key light"],
+            ["Surroundings capture", "35", "A car with nothing around it reflects black"],
+            ["Surfaces", "20", "Every clear-coated surface under a softbox is shaded by the wrong model"],
+            ["Corner darkening", "4", "Three estimates of the same thing multiplied together"],
+            ["What blocks the light", "2", { "pill": "Analysis not yet run", "tone": "amber" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The sky is not here, and that is the point",
+          "text": "Its own work finished last week, so it has no container. What it learned moved into the document that owns the sky."
+        }
+      ]
+    },
+    {
+      "label": "What the plan was wrong about",
+      "lead": "Four claims it made about itself that did not survive contact with the code.",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "A third of its steps described code that had moved",
+              "tone": "hot",
+              "note": "48 of 166. Every job now carries that verdict in its own evidence, so whoever picks one up is warned before they start. Only two turned out to describe a fault already fixed."
+            },
+            {
+              "n": "2",
+              "title": "A third of its finish tests were opinions",
+              "tone": "hot",
+              "note": "41 of 134 said what done looked like without naming anything a machine could run. Folding in each step's own check closed 29; the rest took the sentences naming a real file. No finish test was invented."
+            },
+            {
+              "n": "3",
+              "title": "Its own done-markers hid its most important item",
+              "tone": "hot",
+              "note": "Reading them mechanically dropped the fog fix and one other, because both titles contain the words 'closed form'. The pour now refuses to run unless its count matches what each file claimed."
+            },
+            {
+              "n": "4",
+              "title": "It contradicted itself twice about build order",
+              "note": "Both contradictions are written on the cards rather than guessed into a blocking rule. A wrong block is worse than a missing one."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What survived, and where it went",
+      "blocks": [
+        {
+          "kind": "rows",
+          "rows": [
+            {
+              "n": "1",
+              "title": "The seven angles a system is examined from",
+              "tone": "gone",
+              "note": "Now a rule of its own, carrying the hardest thing the plan learned: examining the code finds nothing, and examining everyone who consumes it is where the faults are."
+            },
+            {
+              "n": "2",
+              "title": "The order the systems must be done in",
+              "tone": "gone",
+              "note": "Joined the rule that already owns how a system publishes its result. It is forced by the equation light obeys, not chosen."
+            },
+            {
+              "n": "3",
+              "title": "The cloud-height measurement",
+              "tone": "gone",
+              "note": "Two tests pointed at the plan for their own numbers. Those numbers are now in the sky's own document, and the tests point there — without it the file could not have been deleted without breaking them."
+            },
+            {
+              "n": "4",
+              "title": "Every step's own words",
+              "tone": "gone",
+              "note": "The fault, the evidence, the finish test and the full text of what the analysis wrote, all on the job."
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "warn",
+          "label": "The diagram did not come back",
+          "text": "It drew how far each system was from where it should be, stamped to one day's code, and one of its own counts was already out by more than half. Restoring it would have shipped a picture that lies. The half that was true is now written down."
+        }
+      ]
+    },
+    {
+      "label": "Two mistakes of mine, both on the board",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "I created a duplicate container, deleted it with its output silenced, never checked, and left it standing. Another session found it before I did.",
+            "A commit of mine swept in two files another session had left ready to commit. Nothing was lost, but the record now points at the wrong work."
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Both are cards",
+          "text": "The second one is a trap anybody here can fall into on a shared machine, so it is filed as a fault rather than an apology."
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "One container per live system, and jobs underneath",
+      "tag": "your call",
+      "why": "Your instruction. Six containers, because the sky is finished."
+    },
+    {
+      "id": "D2",
+      "title": "The staleness check is mechanical now, the real proof is per job",
+      "tag": "your call",
+      "why": "Every job's first step reproduces its own fault and closes the job as not real if it cannot. Two jobs already carry a warning that their claim may be spent."
+    },
+    {
+      "id": "D3",
+      "title": "A full job per step, not a one-line reminder",
+      "tag": "your call",
+      "why": "A one-liner drops the evidence and the finish test, which is what the plan spent months forcing every step to carry."
+    },
+    {
+      "id": "D4",
+      "title": "Finished steps get no card",
+      "tag": "your call",
+      "why": "Thirty-one of them. What was learned in them moved into the documents instead."
+    },
+    {
+      "id": "D5",
+      "title": "The method becomes a rule, not a card",
+      "tag": "your call",
+      "why": "The seven angles outlive every job that uses them. On a card they would die when the card closed."
+    },
+    {
+      "id": "D6",
+      "title": "Only the order the plan states became blocking",
+      "why": "Twenty-three gates. Blocking what the plan merely sequenced would freeze the faults a driver can see today behind plumbing."
+    },
+    {
+      "id": "D7",
+      "title": "Faults already on the board were matched, not duplicated",
+      "why": "Five resolved into the job that already covered them, each with its evidence carried over first because in every case it was sharper than the plan's. The other forty-six read on both sides and kept."
+    },
+    {
+      "id": "D8",
+      "title": "The pouring tool learned to make a container",
+      "why": "It could only make a job, and a job comes with a run of steps a container would never use."
+    },
+    {
+      "id": "D9",
+      "title": "The seven angles are not pre-made cards under the two analysis tickets",
+      "tag": "revised",
+      "why": "I said they would be. They cannot: a step written before the step above it has run carries nothing but a template's words, which is the rule this board is built on. Each ticket points at the rule instead, and the items appear when the analysis actually starts."
+    },
+    {
+      "id": "D10",
+      "title": "The diagram is not restored",
+      "tag": "revised",
+      "why": "I said it would move next to the rule. It turned out to be a dated measurement with a superseded count in it, and it had already been missing from the main line for days without anyone noticing."
+    },
+    {
+      "id": "D11",
+      "title": "A document may no longer count its own finished work",
+      "why": "A new check goes red when one does. That tally drifting silently is exactly how a plan reached a third of itself being wrong with nothing to show for it."
+    }
+  ],
+  "next": {
+    "if_nothing": "The board holds everything and nothing is lost, but nobody starts: a hundred jobs sit claimable and none of them is picked.",
+    "steps": [
+      { "step": "The nine faults a driver can see in fog and air", "cost": "large", "starting": true },
+      { "step": "The clear-coat fault in the showroom", "cost": "medium" },
+      { "step": "The analysis nobody has run on the last two systems", "cost": "large" },
+      { "step": "The chosen way of lighting a scene, still unbuilt", "cost": "large" }
+    ]
+  }
+}

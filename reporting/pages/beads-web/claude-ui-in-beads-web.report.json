@@ -1,6 +1,6 @@
 {
   "title": "Agents Inside The Board",
-  "eyebrow": "Cut, answered, and building. Nothing waits on you.",
+  "eyebrow": "Your four pains: two fixed, two building — and the whole app is now one shell.",
   "actions": {
     "questions": [
       {
@@ -22,6 +22,125 @@
   },
   "content": [
     {
+      "label": "The four things you found on your copy",
+      "lead": "Three of them are one cause: the app was identifying a conversation by its file on disk instead of asking Claude what it is. The fourth is Claude refusing to be in two places at once, which it is right to do.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "What you saw",
+            "Why",
+            "What it does now"
+          ],
+          "rows": [
+            [
+              "Every chat called \"Started in a terminal\"",
+              "The list was built by reading file names off the disk — a name and a timestamp, nothing else.",
+              "Each row is the conversation's own name, the one Claude holds for it."
+            ],
+            [
+              "No card, no folder on a row",
+              "Same cause: nothing but a file name was known about a chat the app had not run itself.",
+              "A second line per row: a chip for each card the chat worked on, which opens that card, and a chip naming the folder it ran in — so two chats on the same project in different trees are told apart at a glance."
+            ],
+            [
+              "A \"Resume all\" button",
+              "Mine, from the first sketch of the restore list.",
+              "Gone, and the rule behind it with it. Forty agents starting at once is a bill nobody meant to sign."
+            ],
+            [
+              "\"Currently running as a background agent\" when you opened a chat",
+              "You opened the conversation that is answering you right now. Claude refuses to attach to a live session twice, and that refusal is correct — two windows writing one transcript would corrupt it.",
+              "Building: the row will say it is running elsewhere before you click, open for reading, and offer to carry on in a copy."
+            ],
+            [
+              "Nothing said before — a resumed chat opened blank",
+              "The window replays the app's own record of a chat, and there is no record of a conversation the app never ran.",
+              "Building: Claude hands over the earlier turns and the window reads them in — which also fills in the card chips for chats begun in a terminal."
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "Watch it happen: 127.0.0.1:3007",
+          "text": "A second address now serves the app straight from the merged code, so anything I land shows up on a refresh — no rebuild, no reinstall, no waiting for me. Your usual address keeps working exactly as before; use this one while I am building. It reads the same board and the same chats, so nothing about it is a copy."
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "The rule that changed",
+          "text": "The app used to refuse to look inside a conversation at all, because the file format is documented as unstable. It no longer has to guess: Claude publishes what its sessions are called, where they ran, and what was said in them. We ask; we still never parse a file ourselves."
+        }
+      ]
+    },
+    {
+      "label": "The whole app is one shell",
+      "lead": "Two bars that never move, and only the work underneath them scrolls.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": [
+            "On a 1440 by 900 screen",
+            "Before",
+            "Now"
+          ],
+          "rows": [
+            [
+              "Bars stacked above the board",
+              "four",
+              "two"
+            ],
+            [
+              "How tall the board page is",
+              "forty times the window",
+              "exactly the window — it ends where the screen ends"
+            ],
+            [
+              "How tall the chat page is",
+              "twenty-five times the window",
+              "exactly the window"
+            ],
+            [
+              "What scrolls",
+              "the whole page, bars and all",
+              "the board columns, the chat list and the conversation, each on its own"
+            ],
+            [
+              "Chips, panels and toolbars drawn by hand on this screen",
+              "thirteen",
+              "none — one part each, and a check that keeps it that way"
+            ]
+          ]
+        },
+        {
+          "kind": "images",
+          "shots": [
+            {
+              "path": "reporting/pages/beads-web/agents-inside/shell-board.png",
+              "caption": "The board: your project and its menu on the first bar, the tabs and the board's own tools on the second, and six columns filling the rest of the window to the bottom edge"
+            },
+            {
+              "path": "reporting/pages/beads-web/agents-inside/shell-chat.png",
+              "caption": "The chat: the same two bars, now carrying the chat's own tools — Search chats, What it cost, New chat — with the list of 319 conversations scrolling on its own beside the conversation"
+            }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "Watch it happen: 127.0.0.1:3007",
+          "text": "That address serves the merged code straight from the checkout and reads your real board, so anything landed shows on a refresh — no rebuild, no restart, nothing to wait for. Your usual 127.0.0.1:3008 has been rebuilt with all of this too."
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The list of 319 chats was measured before anything was built for it",
+          "text": "First row on screen 1.7 seconds after the address, all 319 there twelve milliseconds later, and dragging the list end to end costs sixteen milliseconds a step. Nothing to fix, so nothing was built — a list that draws in one go and scrolls at full speed has nothing to gain from being cut into pieces, and cutting it would cost the sticky day headings and the browser's own find-on-page."
+        }
+      ]
+    },
+    {
       "label": "Your four pains, and what fixes each",
       "lead": "Each one is a separate mechanism, and each is confirmed to work — not assumed.",
       "blocks": [
@@ -42,7 +161,7 @@
             ],
             [
               "Every restart means bringing windows back one by one",
-              "The app lists yesterday's conversations under each project. One click brings one back; one more brings back all of them."
+              "The app lists yesterday's conversations under each project, each under its own name. One click brings one back."
             ],
             [
               "Pictures do not show in the terminal",
@@ -113,14 +232,14 @@
     },
     {
       "label": "Yesterday's conversations, back after a restart",
-      "lead": "Close the app, reopen it, and every chat is still there — including ones you started in a terminal, which it finds without ever opening their contents.",
+      "lead": "Close the app, reopen it, and every chat is still there — including ones you started in a terminal, each under its own name.",
       "blocks": [
         {
           "kind": "images",
           "shots": [
             {
               "path": "reporting/pages/beads-web/agents-inside/restore-list.png",
-              "caption": "The list after a real restart: grouped under Today and Yesterday, each row naming the brand and the time, each offering to come back"
+              "caption": "Your own machine, live: 319 conversations under this project, each one under the name Claude gave it, grouped by the day, with the folder it ran in beneath — where every row used to read \"Started in a terminal\""
             },
             {
               "path": "reporting/pages/beads-web/agents-inside/restore-resumed.png",
@@ -404,8 +523,9 @@
     },
     {
       "id": "D8",
-      "title": "After a restart, yesterday's conversations come back as a list, never running on their own",
-      "why": "One click resumes one, one more resumes all. An agent that wakes itself and starts working unattended is a bill and a surprise; a list is neither."
+      "tag": "revised",
+      "title": "After a restart, yesterday's conversations come back as a list, one click each — and there is no button that starts all of them",
+      "why": "An agent that wakes itself and starts working unattended is a bill and a surprise. Revised on your word: the same objection applies to one button that wakes forty of them, so it is gone."
     },
     {
       "id": "D9",
@@ -467,23 +587,56 @@
       "id": "D20",
       "title": "A card is linked to a chat the moment you start one from it",
       "why": "Pressing Start chat on a card is you saying the two belong together. Waiting to infer it from what the agent does would leave the board blank for the first minute of every conversation."
+    },
+    {
+      "id": "D21",
+      "title": "A chat is identified by what Claude calls it, its cards and its folder — never by a file on disk",
+      "why": "Your words: the row should read as a name, then the card and the tree. A file name is not an identity, which is why every row said the same thing. Claude publishes all three, so the app asks rather than guesses."
+    },
+    {
+      "id": "D22",
+      "title": "Opening a chat is reading it; only typing in it starts an agent",
+      "why": "Reading what was already said costs nothing and starts nothing, so it must never fail — including for a conversation running somewhere else this second. That one opens for reading and offers to carry on in a copy, because two windows writing one transcript would ruin it."
+    },
+    {
+      "id": "D23",
+      "title": "The whole app is one shell: two bars that never move, and only the work underneath scrolls",
+      "why": "Your instruction. Four bars stacked before any work showed, and all of them slid away as you read. From here every screen is built from one set of parts — one place defines a chip, a button, a panel — so the app reads as one product instead of five."
+    },
+    {
+      "id": "D24",
+      "title": "A tab carries its own tools into the second bar",
+      "why": "The board's filter row alone is eleven controls with their own state; the bar borrows them where they stand rather than the page above collecting them, so adding a tool to a tab never touches the shell."
+    },
+    {
+      "id": "D25",
+      "title": "The long list is left whole, because it was measured first",
+      "why": "319 chats draw in one paint and scroll at frame rate, so the machinery for cutting a list into pieces would buy nothing and cost the sticky headings and find-on-page. If the numbers ever turn, that is when it earns it."
     }
   ],
   "next": {
-    "if_nothing": "Six pieces are on your copy now — restart the app and they are there. The build carries on down this list.",
+    "if_nothing": "Everything above is live on 127.0.0.1:3007 and on your usual 127.0.0.1:3008. The build carries on down this list, one merge at a time so you can test each on its own.",
     "steps": [
       {
-        "step": "The typed-command menu: a slash in the box opens your own commands",
+        "step": "Opening a chat shows everything said in it before, whoever started it",
         "cost": "small",
         "starting": true
       },
       {
-        "step": "The second brand of agent, once it is installed and signed in",
+        "step": "A chat running somewhere else opens for reading, and carries on in a copy",
+        "cost": "small"
+      },
+      {
+        "step": "The typed-command menu: a slash in the box opens the list of commands",
         "cost": "medium"
       },
       {
-        "step": "The whole thing run end to end as one acceptance",
+        "step": "Codex beside Claude, once you have installed it and signed in",
         "cost": "small"
+      },
+      {
+        "step": "The acceptance run: every promise on this page driven end to end in one go",
+        "cost": "medium"
       }
     ]
   }

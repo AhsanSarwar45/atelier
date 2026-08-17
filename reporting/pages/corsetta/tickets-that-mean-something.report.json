@@ -1,0 +1,172 @@
+{
+  "title": "Tickets That Mean Something",
+  "eyebrow": "Every section of a ticket gets a bar a machine can hold, so a sentence that says nothing stops being accepted",
+
+  "actions": {
+    "none": true,
+    "fyi": "Nothing waiting on you. This is the second of the three you approved this morning, now finished and on the main line — override a decision below if one reads wrong. The sweep starts next."
+  },
+
+  "status": { "card": "cor-hbho" },
+
+  "content": [
+    {
+      "label": "What is wrong today",
+      "lead": "A ticket has five sections. Four of them accept a sentence that means nothing, tested against the real thing this morning.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Section of a ticket", "What it accepts today"],
+          "rows": [
+            ["What is wrong", { "pill": "no check at all", "tone": "red" }],
+            ["How we will know it is done", { "pill": "any sentence with a digit in it", "tone": "red" }],
+            ["What is not in this job", { "pill": "the same printed sentence, every time", "tone": "red" }],
+            ["A subtask's finish line", { "pill": "eight characters", "tone": "red" }],
+            ["Something filed in passing", { "pill": "nothing whatsoever", "tone": "red" }],
+            ["Evidence it is real", { "pill": "twenty characters — the one real bar", "tone": "amber" }]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "bad",
+          "label": "Three sentences the finish-line check waves through right now",
+          "text": "\"done when it feels right, roughly 1 day\" gets through, on the digit. The single character \"0\" gets through. And \"e.g. it works\" gets through, on the dot in the abbreviation. None of those is something a machine can run, which is the entire point of the section. Seven bad tickets were fed in this morning with the board disconnected: all seven got all the way to it."
+        },
+        {
+          "kind": "tiles",
+          "tiles": [
+            { "value": "61", "key": "of 186 tickets: a finish line no machine can run", "tone": "red" },
+            { "value": "116", "key": "of 156 subtasks: the same", "tone": "red" },
+            { "value": "185", "key": "of 186 carry the identical scope sentence", "tone": "red" }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "The sweep is bigger than this morning's estimate",
+          "text": "Eighty-eight was counted with a looser reading. Measured against the bar now standing: 157 tickets and 116 subtasks are below it. Same work, more of it — and it does not change what the sweep does, only how long it takes."
+        }
+      ]
+    },
+    {
+      "label": "What changes",
+      "lead": "Each section gets the bar its own job implies, and a refusal says what to write instead.",
+      "blocks": [
+        {
+          "kind": "list",
+          "items": [
+            "What is wrong has to describe something observable, not name a fix — a ticket stated as a fix is a ticket with no test.",
+            "The finish line has to name something runnable and something measurable, so the digit alone stops being enough.",
+            "What is not in this job has to be written for this job, so the printed sentence stops passing.",
+            "A subtask's finish line is held to the same bar as its parent's, rather than to a length.",
+            "Anything filed in passing has to say where it is and how it shows, which today is unchecked."
+          ]
+        },
+        {
+          "kind": "table",
+          "columns": ["Section", "Turned away when", "Example that stops passing"],
+          "rows": [
+            ["What is wrong", "it opens with an instruction, or its whole claim is an adjective", "\"Fix the lamp\" · \"The board is bad\""],
+            ["How we know it is done", "nothing runnable is named, or a hedge sits next to it", "\"done when it feels right, roughly 1 day\""],
+            ["What is not in this job", "it is the printed sentence, or names nothing real", "the sentence on 185 of 186 tickets today"],
+            ["A subtask's finish line", "held to the same bar as its parent's", "\"it works\""],
+            ["Filed in passing", "no place named, or no sign of how it shows", "\"over there\""]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "A refusal is a rewrite, not a scolding",
+          "text": "Every one of these turns a ticket away with the missing piece named and a written-out example of the right shape, the same way the words check does. The test run insists on the example: when it was added, two of the refusals had none, and both were rewritten before this landed."
+        }
+      ]
+    },
+    {
+      "label": "It is in and working",
+      "lead": "On the main line. Every result below is a run, not a claim.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["Fed to the board", "Before", "Now"],
+          "rows": [
+            ["A ticket saying only what to do", { "pill": "accepted", "tone": "red" }, { "pill": "refused", "tone": "green" }],
+            ["A ticket whose whole claim is an adjective", { "pill": "accepted", "tone": "red" }, { "pill": "refused", "tone": "green" }],
+            ["A finish line naming nothing to run", { "pill": "accepted", "tone": "red" }, { "pill": "refused", "tone": "green" }],
+            ["A finish line with a hedge next to the command", { "pill": "accepted", "tone": "red" }, { "pill": "refused", "tone": "green" }],
+            ["A ticket that never says what it leaves out", { "pill": "accepted", "tone": "red" }, { "pill": "refused", "tone": "green" }],
+            ["A subtask finished by \"it works\"", { "pill": "accepted", "tone": "red" }, { "pill": "refused", "tone": "green" }],
+            ["Something filed in passing, saying \"over there\"", { "pill": "accepted", "tone": "red" }, { "pill": "refused", "tone": "green" }]
+          ]
+        },
+        {
+          "kind": "table",
+          "columns": ["Proof", "Result"],
+          "rows": [
+            ["The board's own test run", "Seventeen checks green, none red. Two of them new."],
+            ["Each bar taken back out, one at a time", "All five turn the run red. None of them merely passes."],
+            ["A bar written but never connected", "Caught by name, so a section cannot quietly go back to accepting anything."],
+            ["Tickets created while proving all this", "None. Every case runs with the board out of reach."],
+            ["A ticket with every section filled properly", "Still goes straight through — no bar stands in its way."],
+            ["Every pointer in the written material", "All 700 files resolve."],
+            ["Where the rule now lives", "Written into the board's own rulebook: what each section carries, and what is turned away."]
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "good",
+          "label": "The outside reader found one thing, and it was real",
+          "text": "The reader the board sends is held to the same bars as everyone else, and the sentence it falls back on when it cannot say how a fault would be proved fixed was one those bars refuse. Its objection was being turned away and dropped without a word, and with nothing filed the job opened as if the reading had found nothing. Fixed: an objection the board will not take is written onto the job whole and the job stays shut. Both halves of that fault were put back one at a time and both turn the run red."
+        },
+        {
+          "kind": "tiles",
+          "tiles": [
+            { "value": "100%", "key": "of tickets standing today clear the what-is-wrong bar", "tone": "green" },
+            { "value": "91%", "key": "clear the filed-in-passing bar", "tone": "green" },
+            { "value": "45%", "key": "clear the finish-line bar", "tone": "amber" }
+          ]
+        },
+        {
+          "kind": "note",
+          "tone": "info",
+          "label": "Is the bar too tight?",
+          "text": "Two of the three bars leave almost everything already written standing, so they bite on the bad ones and nothing else. The finish line is the one that catches a lot, which is the same finding as this morning's, not a new one: that section is where the board was weakest. Measuring turned up two ways an honest ticket could have been refused — one that quotes a bad sentence as its example, and one that names a real file in a shape the check did not recognise. Both were fixed before this landed."
+        }
+      ]
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Refuse, never warn",
+      "why": "Your ruling this morning, applied to all five sections rather than only to the words. A warning is read once and never again."
+    },
+    {
+      "id": "D2",
+      "title": "The bar is what a machine can act on, not a length",
+      "why": "A character count is gamed by padding, and padding is exactly what produced the tickets you could not read. Each bar asks for the thing the section exists to carry."
+    },
+    {
+      "id": "D3",
+      "title": "How good it has to be is not part of this piece",
+      "why": "You asked for it only on work you sign off yourself, so it is its own ticket rather than a sixth bar on everything."
+    },
+    {
+      "id": "D4",
+      "title": "Three more gaps are named and left to their own tickets",
+      "why": "Ordinary English used in a private meaning, which no rule of this kind catches; the first line the board writes for every job itself; and the reader being asked to judge the ticket as well as the code. Each is a different mechanism, and folding any of them in here would make this piece one nobody can finish."
+    },
+    {
+      "id": "D5",
+      "title": "A missing answer is refused by the rule, not by the argument list",
+      "why": "The shortest path was to make the new answer compulsory at the command line, which would print \"this argument is required\" and teach nothing. It is refused by the rule instead, so what comes back is the shape to write."
+    }
+  ],
+
+  "next": {
+    "if_nothing": "This lands, and then every ticket already below the bar is swept up to it — the thing you asked for first.",
+    "steps": [
+      { "step": "The 157 tickets and 116 subtasks below the bar brought up to it", "cost": "medium", "starting": true }
+    ]
+  }
+}

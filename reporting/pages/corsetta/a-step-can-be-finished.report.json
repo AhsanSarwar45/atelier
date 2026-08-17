@@ -1,0 +1,100 @@
+{
+  "title": "A step that can be finished",
+  "eyebrow": "The rule that stopped a job of yours reaching your column is fixed and in the game",
+  "actions": {
+    "none": true,
+    "fyi": "Nothing is waiting on you. Override the decision below if you disagree with it."
+  },
+  "status": {
+    "card": "cor-6axv"
+  },
+  "content": [
+    {
+      "label": "What was wrong",
+      "lead": "A job whose last check needed a tool built for it could never be finished, and proving that turned up a second hole: inside the copy of the code where all the work happens, none of the board's refusals were on at all.",
+      "blocks": [
+        {
+          "kind": "note",
+          "text": "The board asks a checking step to make nothing, so that the checking is not the change. Once anything is written while that step is held, it is refused forever — even after the writing has been moved onto a piece of work of its own and put in the game. Proving that turned up the other half: run the same command from a second copy of the code and the rule is skipped entirely."
+        },
+        {
+          "kind": "table",
+          "columns": [
+            "",
+            "Before",
+            "Now"
+          ],
+          "rows": [
+            [
+              "A checking step that wrote nothing",
+              "finishes",
+              "finishes"
+            ],
+            [
+              "One whose writing is on a piece of work that landed",
+              "refused forever",
+              "finishes"
+            ],
+            [
+              "One whose writing is on nothing at all",
+              "refused",
+              "refused"
+            ],
+            [
+              "The same step, checked from a second copy of the code",
+              "finishes — the rule is skipped",
+              "refused"
+            ],
+            [
+              "The six-columns job's last check",
+              "refused all day",
+              "finished on its own evidence"
+            ],
+            [
+              "Work written but not yet in the game",
+              "cleared the check",
+              "still counts as standing"
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "The rule is not dropped, it is asked a better question",
+      "why": "The question stops being 'did this step touch anything' and becomes 'is everything it touched carried by a piece of work that landed'. Writing that belongs to nobody is still refused, so a check can still not quietly be the change it is checking."
+    },
+    {
+      "id": "D2",
+      "title": "Picking a step back up does not wipe its slate",
+      "why": "The obvious fix — start the clock again when the step is handed back — would let any session clear its own record by putting a card down and picking it up. The record stays; what changes is what counts against it."
+    },
+    {
+      "id": "D3",
+      "title": "Only work that is already in the game excuses a check",
+      "why": "A piece of work that is merely promised excuses nothing: the writing has to be finished, read and in the game before the check that produced it can be ticked off. Otherwise a session could park its own changes on an open card and walk past the rule."
+    },
+    {
+      "id": "D4",
+      "title": "The reader turned the first attempt down, and it was right to",
+      "why": "Four things came back, and all four were real: the board was no longer being copied off this machine at all, the new rule was blind inside the copy of the code where the work actually happens, one card's name could be read inside another's, and any unrelated card could be used to clear a check. Fixed and back for a second read."
+    },
+    {
+      "id": "D5",
+      "title": "Two reads, eight things found, and the rule is stricter than it started",
+      "why": "The second read caught four more: work committed but not yet in the game read as gone, one piece of work could hide another's name, anything inside a vendored library was invisible, and the check itself was asking the same question of the disk hundreds of times per command. All four are fixed and each one has a case that goes red without it."
+    }
+  ],
+  "next": {
+    "if_nothing": "The six-columns job has finished its last check and is with its reader; this one goes back for a second read.",
+    "steps": [
+      {
+        "step": "Let the six-columns job finish and reach the column where you sign it off",
+        "cost": "small",
+        "starting": true
+      }
+    ]
+  }
+}
