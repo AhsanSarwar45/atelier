@@ -49,6 +49,21 @@ def bd_list(project):
     return json.loads(out.stdout or "[]")
 
 
+def screen_percent(done, total):
+    """The percentage the screen draws, worked out the screen's own way.
+
+    Python rounds a half to the even number and the browser rounds it up, so one
+    piece of eight is 12 here and 13 there — the check would then call a board
+    that is right wrong. And a hundred means finished: the screen refuses to
+    round up to it while a piece is still standing.
+    """
+    if not total:
+        return 0
+    if done == total:
+        return 100
+    return min(99, int(done / total * 100 + 0.5))
+
+
 def dropped(card):
     return (card.get("status") == "closed"
             and DROPPED_LABEL in (card.get("labels") or []))
@@ -209,7 +224,7 @@ def main():
         if shown["dropped"] != want["dropped"]:
             bad.append(f"{job} dropped {want['dropped']} pieces "
                        f"but the card says {shown['dropped'] or 'nothing'}")
-        expect_percent = round(shown["done"] / shown["total"] * 100) if shown["total"] else 0
+        expect_percent = screen_percent(shown["done"], shown["total"])
         if shown["percent"] is not None and shown["percent"] != expect_percent:
             bad.append(f"{job} draws {shown['done']}/{shown['total']} "
                        f"but calls it {shown['percent']}%")

@@ -87,6 +87,20 @@ describe('what a job counts', () => {
     expect(percentOf(p)).toBe(0);
   });
 
+  it('never reads a hundred while a piece is still standing', () => {
+    // 199 of 200 rounds to a hundred, and a hundred is what draws the full
+    // green bar and offers the sign-off.
+    const p = progressOf([...many(199, 'closed'), 'open']);
+    expect(p.total).toBe(200);
+    expect(p.completed).toBe(199);
+    expect(percentOf(p)).toBe(99);
+  });
+
+  it('reads a hundred the moment the last piece closes', () => {
+    const p = progressOf(many(200, 'closed'));
+    expect(percentOf(p)).toBe(100);
+  });
+
   it('counts a job waiting to be read and a job waiting on the manager as unfinished', () => {
     // Neither is done: the work is standing until the board says otherwise.
     const p = progressOf(['closed', 'inreview', 'manager_review']);

@@ -177,7 +177,11 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
  */
 export function progressPercent(progress: EpicProgress): number {
   if (progress.total === 0) return 0;
-  return Math.round((progress.completed / progress.total) * 100);
+  // A hundred means finished and nothing else. Rounding alone gives it to a job
+  // of two hundred pieces with one still open, which then draws a full green
+  // bar over work nobody has done — the same lie in a different place.
+  if (progress.completed === progress.total) return 100;
+  return Math.min(99, Math.round((progress.completed / progress.total) * 100));
 }
 
 /*
