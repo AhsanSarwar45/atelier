@@ -6,18 +6,24 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * Two things are asserted here. The way out to settings is a control ON the
  * first bar — a child of it, centred on its row, inside its padding — and not a
  * button floated over the corner of the window, which is what it used to be.
- * And the scrollbars are the app's own: thin, no track, a thumb in the live
- * theme's ink.
+ * And the scrollbars are the app's own: a 6px hairline, no track, a thumb at a
+ * quarter of the theme's muted ink.
  *
- * ⚠ The rail's WIDTH IN PIXELS cannot be read here. Headless chromium draws
- * overlay scrollbars — they take no room (offsetWidth - clientWidth is 0) and
- * never appear in a screenshot — and no launch flag turns that off. What is
- * read instead is what each PANE THAT SCROLLS resolves the two properties to,
- * which is exactly where the first attempt went wrong: the rule sat on the
- * document, `scrollbar-width` does not inherit, and every pane in the app was
- * left at the browser's default while the document — the one scroller this app
- * never uses — read thin. A picture of the rail itself comes from a browser
- * with a real window.
+ * ⚠ The rail's WIDTH IN PIXELS is only there to read in a browser with a real
+ * window. Headless chromium draws overlay rails — they take no room
+ * (offsetWidth - clientWidth is 0) and never appear in a screenshot — under
+ * every launch flag tried. So the width is measured when the run has it and the
+ * rules are read when it does not, and `scripts/rail-in-a-real-window.mjs` is
+ * the run that has it.
+ *
+ * The two ways of asking for a rail are exclusive, which is the thing these
+ * cases exist to hold: Chrome and Safari draw `::-webkit-scrollbar…` and ignore
+ * every one of those rules for any element whose `scrollbar-width` or
+ * `scrollbar-color` is set, while Firefox draws only those two properties. A
+ * well-meant `* { scrollbar-width: thin }` therefore takes Chrome's hairline
+ * away and hands back a 10px default — so the absence of those properties
+ * outside the Firefox-only block is asserted, not just the presence of the
+ * rules.
  *
  * Run: BEADS_E2E_URL=http://127.0.0.1:3031 BEADS_E2E_BACKEND=http://127.0.0.1:3008 \
  *      npx playwright test tests/e2e/chrome.spec.ts
@@ -61,9 +67,25 @@ async function gearOnBar(page: Page) {
       gearRight: el.getBoundingClientRect().right,
       barRight: b.right,
       barPadRight: parseFloat(getComputedStyle(barEl).paddingRight),
-      scrollbarColor: getComputedStyle(document.documentElement).scrollbarColor,
+      gearInk: getComputedStyle(el).color,
     };
   });
+}
+
+/** Every rule in every stylesheet the page loaded, as one piece of text. */
+async function styleText(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    [...document.styleSheets]
+      .flatMap((sheet) => {
+        try {
+          return [...sheet.cssRules].map((rule) => rule.cssText);
+        } catch {
+          // A sheet from another origin cannot be read; this app serves its own.
+          return [];
+        }
+      })
+      .join('\n'),
+  );
 }
 
 test.describe('chrome', () => {
@@ -117,15 +139,13 @@ test.describe('chrome', () => {
       expect(geometry.theme, 'the theme did not take').toBe(theme);
       expect(geometry.inBar).toBe(true);
       expect(geometry.offRow, `${theme}: the gear is off the row the bar's own controls sit on`).toBeLessThanOrEqual(1);
-      // The rail follows the theme too, and a theme that answers nothing would
-      // leave the colour unparseable rather than merely different.
-      expect(geometry.scrollbarColor, `${theme}: the rail is not in this theme's ink`).toMatch(
-        /rgba?\(.+\)\s+rgba\([^)]*,\s*0\)/,
-      );
+      // The gear's own ink comes from the theme, so a theme that answers nothing
+      // would leave it unset rather than merely different.
+      expect(geometry.gearInk, `${theme}: the gear has no ink of its own`).toMatch(/rgba?\(/);
     });
   }
 
-  test('every pane that scrolls asks for the thin rail, not just the document', async ({ page, request }) => {
+  test('every pane that scrolls gets the app’s hairline, and nothing switches it off', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=board`);
     await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
@@ -140,26 +160,67 @@ test.describe('chrome', () => {
           (/(auto|scroll)/.test(s.overflowX) && e.scrollWidth > e.clientWidth + 4)
         );
       });
-      return scrolls.map((e) => {
-        const s = getComputedStyle(e);
-        return {
-          what: e.getAttribute('data-testid') ?? e.tagName.toLowerCase(),
-          width: s.scrollbarWidth,
-          color: s.scrollbarColor,
-        };
-      });
+      return {
+        knowsRailParts: CSS.supports('selector(::-webkit-scrollbar)') && !CSS.supports('(-moz-orient: inline)'),
+        panes: scrolls.map((e) => {
+          const s = getComputedStyle(e);
+          return {
+            what: e.getAttribute('data-testid') ?? e.tagName.toLowerCase(),
+            across: e.offsetWidth - e.clientWidth,
+            down: e.offsetHeight - e.clientHeight,
+            width: s.scrollbarWidth,
+            color: s.scrollbarColor,
+          };
+        }),
+      };
     });
 
     // A screen with nothing overflowing proves nothing about rails.
-    expect(rails.length, 'no pane on this screen overflows, so there is no rail to read').toBeGreaterThan(0);
-    // This is the assertion the first attempt did not make: `scrollbar-width`
-    // does not inherit, so a rule on the document leaves every one of these at
-    // the browser's own width.
-    const fat = rails.filter((r) => r.width !== 'thin');
-    expect(fat, `panes left at the browser's own rail: ${JSON.stringify(fat.slice(0, 4))}`).toHaveLength(0);
-    // Thumb and track, in that order — the track see-through, so the rail is a
-    // thumb over the work rather than a column beside it.
-    const wrongInk = rails.filter((r) => !/rgba?\(.+\)\s+rgba\([^)]*,\s*0\)/.test(r.color));
-    expect(wrongInk, `panes not in the theme's ink: ${JSON.stringify(wrongInk.slice(0, 4))}`).toHaveLength(0);
+    expect(rails.panes.length, 'no pane on this screen overflows, so there is no rail to read').toBeGreaterThan(0);
+
+    if (rails.knowsRailParts) {
+      // Chrome and Safari: the rail parts draw, and they only draw while
+      // neither property is set. A pane whose properties are set has silently
+      // gone back to the browser's own 10px — which is what shipped once.
+      const switchedOff = rails.panes.filter((r) => r.width !== 'auto' || r.color !== 'auto');
+      expect(
+        switchedOff,
+        `panes whose rail parts are switched off by the two properties: ${JSON.stringify(switchedOff.slice(0, 4))}`,
+      ).toHaveLength(0);
+    } else {
+      // Firefox: the properties are the only way, and the width does not
+      // inherit — so every pane has to carry them, not just the document.
+      const fat = rails.panes.filter((r) => r.width !== 'thin');
+      expect(fat, `panes left at the browser's own rail: ${JSON.stringify(fat.slice(0, 4))}`).toHaveLength(0);
+      const wrongInk = rails.panes.filter((r) => !/rgba?\(.+\)\s+rgba\([^)]*,\s*0\)/.test(r.color));
+      expect(wrongInk, `panes not in the theme's ink: ${JSON.stringify(wrongInk.slice(0, 4))}`).toHaveLength(0);
+    }
+
+    // Where the run has real rails, the hairline is measured rather than
+    // inferred. Overlay rails report 0 and are simply not evidence.
+    const measured = rails.panes.filter((r) => r.across > 0 || r.down > 0);
+    for (const r of measured) {
+      expect(Math.max(r.across, r.down), `${r.what} draws a rail wider than a hairline`).toBeLessThanOrEqual(6);
+    }
+
+    // And the rules themselves, which is all a windowless run can see.
+    const css = await styleText(page);
+    const rail = /::-webkit-scrollbar\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rail, 'the rail parts do not ask for a hairline').toMatch(/width:\s*6px/);
+    expect(rail, 'the sideways rail is not the same hairline').toMatch(/height:\s*6px/);
+    const track = /::-webkit-scrollbar-track[^{]*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(track, 'the rail draws a track behind the thumb').toMatch(/transparent|rgba\(0,\s*0,\s*0,\s*0\)/);
+    const thumb = /::-webkit-scrollbar-thumb\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    // A quarter strength or fainter: the manager's own word for it was 'present'.
+    const alpha = Number(/\/\s*(0?\.\d+)\s*\)/.exec(thumb)?.[1] ?? /,\s*(0?\.\d+)\s*\)/.exec(thumb)?.[1] ?? '1');
+    expect(alpha, `the thumb is louder than a quarter of the theme's muted ink: ${thumb.trim()}`).toBeLessThanOrEqual(
+      0.25,
+    );
+    // The properties exist for Firefox and must stay behind its own gate: loose
+    // in the stylesheet, they take the hairline away from Chrome and Safari.
+    const looseWidth = /(^|[^-])scrollbar-width\s*:/.test(css.replace(/@supports \(-moz-orient[^{]*\{[\s\S]*?\}\s*\}/g, ''));
+    expect(looseWidth, 'scrollbar-width is set outside the Firefox-only block, which switches off the hairline').toBe(
+      false,
+    );
   });
 });

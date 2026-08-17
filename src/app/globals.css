@@ -189,29 +189,56 @@
   }
 }
 
-/* ===== Scrollbars: thin, and in the live theme's own ink =====
+/* ===== Scrollbars: a hairline, in the live theme's faintest usable ink =====
  *
  * Every pane in this app scrolls inside itself — the shell clips and the window
  * never moves — so these rails are on screen all day, beside the work. The
  * browser's own is 15px of grey column with a track behind it, in a colour no
- * theme chose. Asked for here: two thirds of that, no track at all, and a thumb
- * in the theme's own muted ink.
+ * theme chose. This is 6px, no track, and a thumb at a quarter strength: the
+ * manager asked for thinner and fainter than `thin`, which is a fixed 10px and
+ * as narrow as the modern properties can be asked to go.
  *
- * ⚠ EVERY ELEMENT, not `html`. Measured in a real Chrome: `scrollbar-color`
- * inherits and `scrollbar-width` DOES NOT, so the same rule on the document
- * alone left every pane in the app at 15px in the theme's colour — the width
- * simply never arrived. The document element is the one scroller this app never
- * uses.
+ * Getting 6px means using the rail parts, and the two mechanisms are exclusive:
+ * measured in a real Chrome, it ignores every `::-webkit-scrollbar…` rule for
+ * any element whose `scrollbar-width` or `scrollbar-color` is set to anything
+ * but its initial value — set them and the rail parts draw nothing, name them
+ * `auto` and the rail parts come straight back. Firefox is the other way round:
+ * no rail parts at all, only the two properties.
  *
- * The rail parts Chrome and Safari grew up on (`::-webkit-scrollbar…`) are not
- * written: measured in the same browser, Chrome ignores them outright wherever
- * these two properties are set, and they are set here on everything. A 10px
- * rail with a 4px thumb inside it was what they asked for and never what was
- * drawn.
+ * So each engine is given exactly the one it reads, and Chrome must not see the
+ * properties or it drops the block above. The gate is a Firefox-only property,
+ * measured in both engines: asking whether the browser knows the rail parts is
+ * useless, because Firefox answers yes to that for compatibility while drawing
+ * none of them. `scrollbar-width` also does not inherit (`scrollbar-color`
+ * does), which is why that rule is on every element and not on `html` — on
+ * `html` alone the width never reaches a single pane, because the document is
+ * the one scroller this app never uses.
  */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--text-muted) / 0.4) transparent;
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--text-muted) / 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--text-muted) / 0.5);
+}
+
+/* Firefox, and only Firefox: `-moz-orient` is answered by nothing else. */
+@supports (-moz-orient: inline) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--text-muted) / 0.25) transparent;
+  }
 }
 
 .font-heading {
