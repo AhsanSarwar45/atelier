@@ -5,6 +5,7 @@
  * compute progress metrics, and identify blocking relationships.
  */
 
+import { WORKING, counted, finished, standing } from "@/types";
 import type { Bead, Epic, EpicProgress } from "@/types";
 
 /**
@@ -90,8 +91,20 @@ export function buildEpicTree(epics: Epic[], allBeads: Bead[]): Epic[] {
   });
 }
 
+/** A job with nothing under it at all: not finished, just empty. */
+const NOTHING: EpicProgress = {
+  total: 0, completed: 0, inProgress: 0, blocked: 0, dropped: 0,
+};
+
 /**
- * Computes progress metrics for an epic based on its children
+ * How much of a job is done, from the pieces under it.
+ *
+ * Dropped work is not part of the job. A job of fourteen pieces with four
+ * dropped is a job of ten, and it reads ten of ten once those ten are done —
+ * counting the dropped ones in the total is what left a finished job stuck at
+ * 71% and, because the button that finishes a job is offered at 100% and
+ * nowhere else, left it unsignable. What each state counts as is on the one
+ * list of states, not spelled again here.
  *
  * @param epic - Epic bead with children
  * @param allBeads - Array of all beads to resolve children from
@@ -106,21 +119,11 @@ export function buildEpicTree(epics: Epic[], allBeads: Bead[]): Epic[] {
  */
 export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress {
   if (!epic.children || epic.children.length === 0) {
-    return {
-      total: 0,
-      completed: 0,
-      inProgress: 0,
-      blocked: 0,
-    };
+    return NOTHING;
   }
 
   if (!allBeads || allBeads.length === 0) {
-    return {
-      total: epic.children.length,
-      completed: 0,
-      inProgress: 0,
-      blocked: 0,
-    };
+    return { ...NOTHING, total: epic.children.length };
   }
 
   // Create lookup map for children
@@ -134,29 +137,48 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
     .map((childId) => beadMap.get(childId))
     .filter((child): child is Bead => child !== undefined);
 
-  // Count statuses
-  const completed = children.filter((c) => c.status === 'closed').length;
-  const inProgress = children.filter((c) => c.status === 'in_progress').length;
+  // The pieces this job is actually made of, and the ones it dropped.
+  const pieces = children.filter((c) => counted(c.status));
+  const dropped = children.length - pieces.length;
 
-  // Count blocked children (those with unresolved deps)
-  const blocked = children.filter((child) => {
+  const completed = pieces.filter((c) => finished(c.status)).length;
+  const inProgress = pieces.filter((c) => c.status === WORKING).length;
+
+  // A piece is blocked while something it waits on is still standing. Work that
+  // was dropped is standing in nobody's way, so it blocks nothing.
+  const blocked = pieces.filter((child) => {
     if (!child.deps || child.deps.length === 0) {
       return false;
     }
 
-    // Check if any dependency is not yet completed
     return child.deps.some((depId) => {
       const depBead = beadMap.get(depId);
-      return depBead && depBead.status !== 'closed';
+      return depBead !== undefined && standing(depBead.status);
     });
   }).length;
 
   return {
-    total: children.length,
+    total: pieces.length,
     completed,
     inProgress,
     blocked,
+    dropped,
   };
+}
+
+/**
+ * How much of a job is done, as the number the bar and the card draw.
+ *
+ * A job every piece of which was dropped has nothing left to do, so it reads
+ * finished. A job with no pieces at all is not finished, it is empty.
+ *
+ * @param progress - What {@link computeEpicProgress} returned for the job.
+ */
+export function progressPercent(progress: EpicProgress): number {
+  if (progress.total > 0) {
+    return Math.round((progress.completed / progress.total) * 100);
+  }
+  return progress.dropped > 0 ? 100 : 0;
 }
 
 /**
@@ -191,11 +213,11 @@ export function getBlockedTasks(beads: Bead[]): Bead[] {
       return false;
     }
 
-    // Check if any dependency is not yet completed
+    // Blocked while something it waits on is still standing. Work that was
+    // dropped is standing in nobody's way.
     return bead.deps.some((depId) => {
       const depBead = beadMap.get(depId);
-      // Blocked if dependency exists and is not closed
-      return depBead && depBead.status !== 'closed';
+      return depBead !== undefined && standing(depBead.status);
     });
   });
 }

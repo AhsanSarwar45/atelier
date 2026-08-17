@@ -7,13 +7,9 @@
 
 import { classesFor } from "@/lib/state-styles";
 import {
-  STATE_BY_ID, STATES, UNTOUCHED, WORKING, type BeadStatus,
+  STATE_BY_ID, STATES, UNTOUCHED, WORKING, standing, type BeadStatus,
 } from "@/types";
 
-/** Nothing is still standing under a card in one of these. */
-const DONE: ReadonlySet<string> = new Set<string>(
-  STATES.filter((s) => !s.live).map((s) => s.id),
-);
 /** Places the board itself writes, which columnFor takes as final. */
 const SETTLED: ReadonlySet<string> = new Set<string>(
   STATES.filter((s) => s.settled).map((s) => s.id),
@@ -94,9 +90,10 @@ export function truncate(text: string, maxLength: number): string {
 /**
  * Detect if bead is blocked by checking for unresolved dependencies.
  *
- * A bead is blocked when at least one of its dependencies (resolved
- * via {@link allBeads}) has a status other than `closed`. Closed beads
- * are never considered blocked. Dependencies that cannot be found in
+ * A bead is blocked when at least one of the things it waits on (resolved via
+ * {@link allBeads}) is still standing. Work that was dropped is standing in
+ * nobody's way, so it blocks nothing — and a bead with nothing left standing
+ * of its own is never blocked. Dependencies that cannot be found in
  * {@link allBeads} (e.g. references to deleted beads) do NOT block —
  * this matches the behaviour of `bd ready` and `getBlockedTasks` in
  * `epic-parser.ts`.
@@ -109,13 +106,13 @@ export function isBlocked(
   bead: { status: string; deps?: string[] | null },
   allBeads: ReadonlyArray<{ id: string; status: string }>,
 ): boolean {
-  if (bead.status === "closed") return false;
+  if (!standing(bead.status)) return false;
   const deps = bead.deps ?? [];
   if (deps.length === 0) return false;
   const statusById = new Map(allBeads.map((b) => [b.id, b.status]));
   return deps.some((depId) => {
     const status = statusById.get(depId);
-    return status !== undefined && status !== "closed";
+    return status !== undefined && standing(status);
   });
 }
 
@@ -194,10 +191,10 @@ export function columnFor<T extends { id: string; status: string; children?: str
     .filter((k): k is T => k !== undefined && k.id !== bead.id);
   if (pieces.length === 0) return bead.status;
 
-  const standing = pieces.filter((k) => !DONE.has(k.status));
+  const left = pieces.filter((k) => standing(k.status));
   // Nothing left standing is not the same as finished: the board writes the
   // card's own state when it is read and when it is signed off, and until it
   // does, a card it still holds open belongs where it says it is.
-  if (standing.length === 0) return bead.status;
-  return standing.some((k) => k.status === WORKING) ? WORKING : UNTOUCHED;
+  if (left.length === 0) return bead.status;
+  return left.some((k) => k.status === WORKING) ? WORKING : UNTOUCHED;
 }

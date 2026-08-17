@@ -16,7 +16,10 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { NO_COUNTS, SET_BY, STATES, STATE_BY_ID, type BeadStatus } from "@/types";
+import {
+  NO_COUNTS, SET_BY, STATES, STATE_BY_ID, counted, finished, standing,
+  type BeadStatus,
+} from "@/types";
 
 const ROOT = join(__dirname, "../../..");
 
@@ -116,6 +119,22 @@ describe("one list decides the states", () => {
           .toBe('cancelled');
       }
     }
+  });
+
+  it("every state says whether a piece in it is part of the job", () => {
+    // Without this the counter has to name the dropped state itself, and a
+    // seventh state arrives counted as real work nobody asked for.
+    for (const s of STATES) {
+      expect(typeof s.counts, `${s.id} does not say whether it counts`).toBe("boolean");
+      expect(finished(s.id), `${s.id} reads as finished work`).toBe(!s.live && s.counts);
+      expect(standing(s.id), `${s.id} reads as still standing`).toBe(s.live);
+      expect(counted(s.id), `${s.id} reads as part of the job`).toBe(s.counts);
+    }
+  });
+
+  it("exactly one state means the work was dropped", () => {
+    const dropped = STATES.filter((s) => !s.counts).map((s) => s.id);
+    expect(dropped).toEqual(["cancelled"]);
   });
 
   it("the counts carry one number per state", () => {

@@ -15,7 +15,7 @@ import { useTheme } from "@/hooks/use-theme";
 import * as api from "@/lib/api";
 import { formatBeadId, isBlocked, truncate } from "@/lib/bead-utils";
 import { closeBead } from "@/lib/cli";
-import { computeEpicProgress } from "@/lib/epic-parser";
+import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn, isDoltProject } from "@/lib/utils";
 import { CardLiveChat } from "@/workbench/card-live";
 import type { Bead, Epic, EpicProgress } from "@/types";
@@ -155,9 +155,7 @@ export function EpicCard({
   }, [fetchChildPRStatuses]);
 
   const progress = computeProgress(epic, allBeads);
-  const progressPercentage = progress.total > 0
-    ? Math.round((progress.completed / progress.total) * 100)
-    : 0;
+  const progressPercentage = progressPercent(progress);
 
   const commentCount = (epic.comments ?? []).length;
 
@@ -403,6 +401,15 @@ export function EpicCard({
               <div className="w-2 h-2 rounded-full bg-status-open" aria-hidden="true" />
               {progress.inProgress} in progress
             </span>
+            {/* Dropped pieces are outside every number above, and the card lists
+                them, so the card says how many rather than leaving the reader to
+                wonder why it holds fourteen pieces and counts ten. */}
+            {progress.dropped > 0 && (
+              <span className="flex items-center gap-1">
+                <div className="w-2 h-2 rounded-full bg-status-cancelled" aria-hidden="true" />
+                {progress.dropped} dropped
+              </span>
+            )}
             {progress.blocked > 0 && (
               <span className="flex items-center gap-1">
                 <div className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />

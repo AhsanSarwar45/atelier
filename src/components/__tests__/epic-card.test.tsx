@@ -41,6 +41,25 @@ const draw = (status: BeadStatus) =>
     />
   );
 
+/** A job of `done` finished pieces and `dropped` dropped ones, and nothing else. */
+const withPieces = (status: BeadStatus, done: number, dropped: number) => {
+  const pieces: Bead[] = [
+    ...Array.from({ length: done }, (_, i) => ({
+      ...child, id: `test-1.d${i}`, status: 'closed' as BeadStatus,
+    })),
+    ...Array.from({ length: dropped }, (_, i) => ({
+      ...child, id: `test-1.x${i}`, status: 'cancelled' as BeadStatus,
+    })),
+  ];
+  return {
+    epic: { ...epicIn(status), children: pieces.map((p) => p.id) },
+    allBeads: pieces,
+    onSelect: vi.fn(),
+    onChildClick: vi.fn(),
+    projectPath: '/test/project',
+  };
+};
+
 describe('the button that finishes a job', () => {
   it('is drawn on a job waiting for the manager', () => {
     draw('manager_review');
@@ -69,5 +88,30 @@ describe('the button that finishes a job', () => {
       />
     );
     expect(screen.queryByRole('button', { name: FINISH })).toBeNull();
+  });
+
+  it('is drawn when every piece left is finished and the rest were dropped', () => {
+    // bw-oio5's shape: ten finished, four dropped, none standing. Counting the
+    // dropped ones in the total held it at 71%, and the button never appeared.
+    render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
+    expect(screen.getByRole('button', { name: FINISH })).toBeInTheDocument();
+  });
+});
+
+describe('what a card says it is made of', () => {
+  it('counts only the pieces still part of the job', () => {
+    render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
+    expect(screen.getByText(/10\/10/)).toBeInTheDocument();
+    expect(screen.getAllByText('100%').length).toBeGreaterThan(0);
+  });
+
+  it('says how many of its pieces were dropped', () => {
+    render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
+    expect(screen.getByText(/4 dropped/)).toBeInTheDocument();
+  });
+
+  it('says nothing about dropped work when none was dropped', () => {
+    render(<EpicCard {...withPieces('open', 2, 0)} />);
+    expect(screen.queryByText(/dropped/)).toBeNull();
   });
 });

@@ -123,6 +123,18 @@ describe('isBlocked', () => {
     expect(isBlocked({ status: 'open', deps: ['dep1'] }, allBeads)).toBe(true);
   });
 
+  it('returns false when the only thing it waited on was dropped', () => {
+    // Dropped work is standing in nobody's way; a card left blocked by it
+    // waits forever on something nobody is ever going to do.
+    const allBeads = [{ id: 'dep1', status: 'cancelled' }];
+    expect(isBlocked({ status: 'open', deps: ['dep1'] }, allBeads)).toBe(false);
+  });
+
+  it('returns false for a dropped task even with open deps', () => {
+    const allBeads = [{ id: 'dep1', status: 'open' }];
+    expect(isBlocked({ status: 'cancelled', deps: ['dep1'] }, allBeads)).toBe(false);
+  });
+
   it('returns false when dep references a missing bead', () => {
     const allBeads = [{ id: 'other', status: 'open' }];
     expect(isBlocked({ status: 'open', deps: ['ghost'] }, allBeads)).toBe(false);

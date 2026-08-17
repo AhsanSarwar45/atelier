@@ -78,14 +78,18 @@ export interface Tag {
  * left standing: a card in one is drawn where its status says and its pieces
  * are not consulted. Everywhere else the pieces decide — corsetta
  * `docs/board.md#3a1`.
+ *
+ * `counts` is whether a piece in this state is part of the job's size at all.
+ * Dropped work is not: a job of fourteen pieces with four dropped is a job of
+ * ten, and it finishes when those ten are done. Manager's ruling, 2026-08-17.
  */
 export const STATES = [
-  { id: 'open',           label: 'Open',           column: 'Todo',           tone: 'open',      icon: 'circle',     key: 'o', live: true,  settled: false },
-  { id: 'in_progress',    label: 'In Progress',    column: 'In Progress',    tone: 'progress',  icon: 'clock',      key: 'p', live: true,  settled: false },
-  { id: 'inreview',       label: 'In Review',      column: 'Agent Review',   tone: 'review',    icon: 'file-check', key: 'r', live: true,  settled: true  },
-  { id: 'manager_review', label: 'Manager Review', column: 'Manager Review', tone: 'manager',   icon: 'eye',        key: 'm', live: true,  settled: true  },
-  { id: 'closed',         label: 'Closed',         column: 'Done',           tone: 'closed',    icon: 'check',      key: 'c', live: false, settled: true  },
-  { id: 'cancelled',      label: 'Cancelled',      column: 'Cancelled',      tone: 'cancelled', icon: 'ban',        key: 'x', live: false, settled: true  },
+  { id: 'open',           label: 'Open',           column: 'Todo',           tone: 'open',      icon: 'circle',     key: 'o', live: true,  settled: false, counts: true  },
+  { id: 'in_progress',    label: 'In Progress',    column: 'In Progress',    tone: 'progress',  icon: 'clock',      key: 'p', live: true,  settled: false, counts: true  },
+  { id: 'inreview',       label: 'In Review',      column: 'Agent Review',   tone: 'review',    icon: 'file-check', key: 'r', live: true,  settled: true,  counts: true  },
+  { id: 'manager_review', label: 'Manager Review', column: 'Manager Review', tone: 'manager',   icon: 'eye',        key: 'm', live: true,  settled: true,  counts: true  },
+  { id: 'closed',         label: 'Closed',         column: 'Done',           tone: 'closed',    icon: 'check',      key: 'c', live: false, settled: true,  counts: true  },
+  { id: 'cancelled',      label: 'Cancelled',      column: 'Cancelled',      tone: 'cancelled', icon: 'ban',        key: 'x', live: false, settled: true,  counts: false },
 ] as const;
 
 /**
@@ -113,6 +117,28 @@ export const STATE_BY_ID = Object.fromEntries(
 export const UNTOUCHED: BeadStatus = 'open';
 export const WORKING: BeadStatus = 'in_progress';
 export const FINISHED: BeadStatus = 'closed';
+
+/**
+ * The three readings of a piece that anything counting a job needs, taken off
+ * {@link STATES} rather than by naming states again. A seventh state declares
+ * which of these it is on the list, and every count follows it at once.
+ */
+
+/** Whether this piece is part of the job's size — dropped work is not. */
+export function counted(status: string): boolean {
+  return STATE_BY_ID[status as BeadStatus]?.counts ?? true;
+}
+
+/** Whether this piece is work that was done, as opposed to dropped or standing. */
+export function finished(status: string): boolean {
+  const state = STATE_BY_ID[status as BeadStatus];
+  return state ? !state.live && state.counts : false;
+}
+
+/** Whether this piece is still work anyone is waiting on. */
+export function standing(status: string): boolean {
+  return STATE_BY_ID[status as BeadStatus]?.live ?? true;
+}
 
 /**
  * What setting a state means to the board underneath.
@@ -251,10 +277,11 @@ export interface LegacyPRInfo {
  * Epic progress metrics (computed from children)
  */
 export interface EpicProgress {
-  total: number;       // Total number of child tasks
-  completed: number;   // Number of children with status 'closed'
-  inProgress: number;  // Number of children with status 'in_progress'
-  blocked: number;     // Number of children with unresolved dependencies
+  total: number;       // Pieces that count towards the job — dropped ones do not
+  completed: number;   // Counted pieces that are finished work
+  inProgress: number;  // Counted pieces being worked on
+  blocked: number;     // Counted pieces waiting on something still standing
+  dropped: number;     // Pieces dropped, and so outside every number above
 }
 
 /**
