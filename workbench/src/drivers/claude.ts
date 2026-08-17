@@ -290,6 +290,23 @@ export class ClaudeDriver implements Driver {
    * the whole message lands is drawn from its content instead.
    */
   private streamed = new Set<string>();
+  /**
+   * The last few lines put on the page, so the same sentence is not said twice.
+   *
+   * The kit reports one thing in two shapes — `/compact`'s refusal arrives as a
+   * status carrying `compact_error` AND as a message it wrote itself with that
+   * same sentence in it. Both are kept in the log; only the first is drawn.
+   */
+  private recentlySaid: string[] = [];
+
+  /** True when a line just went past saying this already, either way round. */
+  private saidAlready(text: string): boolean {
+    const flat = text.replace(/\s+/g, ' ').trim();
+    if (!flat) return false;
+    const twice = this.recentlySaid.some((seen) => seen.includes(flat) || flat.includes(seen));
+    this.recentlySaid = [...this.recentlySaid, flat].slice(-4);
+    return twice;
+  }
 
   /** One transcript bubble per text block of one message. */
   private blockId(index: number): string {
@@ -298,6 +315,9 @@ export class ClaudeDriver implements Driver {
 
   /** A line about the chat's own machinery, and the whole message behind it. */
   private note(note: Note): void {
+    // A quiet line is skipped when the same sentence has just been drawn; a
+    // `detail` is not, because it is the record rather than the reading.
+    if (note.rank === 'note' && this.saidAlready(note.text)) return;
     this.emit({
       type: 'note',
       noteId: randomUUID(),
@@ -711,6 +731,8 @@ export class ClaudeDriver implements Driver {
               this.streamed.add(messageId);
               (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
                 if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
+                // The status that came just before may already have said this.
+                if (this.saidAlready(String(b.text))) return;
                 const id = `${messageId}:${index}`;
                 this.emit({ type: 'message.started', messageId: id, role: 'assistant' });
                 this.emit({ type: 'text.delta', messageId: id, text: String(b.text) });

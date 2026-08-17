@@ -61,7 +61,9 @@ const q = query({
 
 const dropped = new Map();
 const drawn = new Map();
-let compactAnswer = '';
+/** The two shapes the same answer arrives in; both must be understood. */
+let compactAsStatus = '';
+let compactAsMessage = '';
 let turns = 0;
 
 send('Say the single word: ready. Nothing else.');
@@ -81,16 +83,17 @@ try {
       const note = noteFor(m);
       const bucket = note ? drawn : dropped;
       bucket.set(kind, (bucket.get(kind) ?? 0) + 1);
-      if (note && /compact/i.test(note.text)) compactAnswer = note.text;
+      if (note && /compact/i.test(note.text)) compactAsStatus = note.text;
     }
 
-    // The words of a message the kit wrote itself, which never streams.
+    // The words of a message the kit wrote itself, which never streams — the
+    // half the driver drew nowhere at all until this job (bw-1u1).
     if (m.type === 'assistant' && m.message?.model === '<synthetic>') {
       const said = (m.message?.content ?? [])
         .filter((b) => b.type === 'text')
         .map((b) => b.text)
         .join(' ');
-      if (/compact/i.test(said)) compactAnswer ||= said;
+      if (/compact/i.test(said)) compactAsMessage = said;
     }
 
     if (m.type === 'result') {
@@ -108,8 +111,9 @@ q.close();
 
 console.log(`kinds drawn: ${[...drawn.keys()].sort().join(', ')}`);
 console.log(`dropped kinds: ${dropped.size}${dropped.size ? ` — ${[...dropped.keys()].join(', ')}` : ''}`);
-console.log(`compact answered: ${compactAnswer || 'NOTHING'}`);
+console.log(`compact as a status: ${compactAsStatus || 'NOTHING'}`);
+console.log(`compact as a message with no stream behind it: ${compactAsMessage || 'NOTHING'}`);
 
-const failed = dropped.size > 0 || !compactAnswer;
+const failed = dropped.size > 0 || !compactAsStatus || !compactAsMessage;
 console.log(failed ? 'FAIL' : 'PASS');
 process.exit(failed ? 1 : 0);
