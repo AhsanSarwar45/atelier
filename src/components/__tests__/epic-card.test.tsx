@@ -8,14 +8,29 @@
  * read has been signed by nobody yet, and a finish offered there is how
  * unsigned work reached Done.
  */
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { EpicCard } from '../epic-card';
+import type { CardLayout } from '@/lib/themes';
 import type { Bead, BeadStatus, Epic } from '@/types';
 
 vi.mock('@/lib/cli', () => ({ closeBead: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('@/lib/api', () => ({ git: { prStatus: vi.fn() } }));
+vi.mock('@/lib/api', () => ({ git: { prStatus: vi.fn().mockResolvedValue({ pr: null }) } }));
+
+/** The layout the card is drawn in, so every theme's shape can be read. */
+let layout: CardLayout = 'standard';
+vi.mock('@/hooks/use-theme', () => ({
+  useTheme: () => ({ theme: { layout }, layout, themeId: 'test' }),
+}));
+
+/** Every shape a card is drawn in — one per group of themes. */
+const LAYOUTS: CardLayout[] = ['standard', 'compact-row', 'property-tags'];
+
+beforeEach(() => {
+  layout = 'standard';
+  vi.clearAllMocks();
+});
 
 const FINISH = /mark done/i;
 
@@ -107,11 +122,48 @@ describe('what a card says it is made of', () => {
 
   it('says how many of its pieces were dropped', () => {
     render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
-    expect(screen.getByText(/4 dropped/)).toBeInTheDocument();
+    expect(screen.getAllByText(/4 dropped/).length).toBeGreaterThan(0);
   });
 
   it('says nothing about dropped work when none was dropped', () => {
     render(<EpicCard {...withPieces('open', 2, 0)} />);
     expect(screen.queryByText(/dropped/)).toBeNull();
+  });
+
+  it.each(LAYOUTS)('says how much it dropped in the %s shape too', (shape) => {
+    // Three of the eleven themes draw the shared shape, which carried a full
+    // bar over a piece count that still included the dropped work.
+    layout = shape;
+    const { container } = render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
+    expect(screen.getAllByText(/4 dropped/).length).toBeGreaterThan(0);
+    expect(container.textContent).not.toMatch(/\b14\b/);
+  });
+});
+
+describe('what the card asks the code host about', () => {
+  it('never asks about a piece that was dropped', async () => {
+    const api = await import('@/lib/api');
+    render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
+    await waitFor(() => expect(api.git.prStatus).not.toHaveBeenCalled());
+    // Nothing is standing here, so nothing is asked about at all — and in
+    // particular not the four dropped pieces, which nobody is working on.
+    const asked = vi.mocked(api.git.prStatus).mock.calls.map((c) => c[1]);
+    expect(asked.filter((id) => String(id).includes('.x'))).toEqual([]);
+  });
+
+  it('still asks about a piece that is being worked on', async () => {
+    const api = await import('@/lib/api');
+    const props = withPieces('open', 1, 1);
+    const live: Bead = { ...child, id: 'test-1.live', status: 'in_progress' };
+    render(
+      <EpicCard
+        {...props}
+        epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
+        allBeads={[...props.allBeads, live]}
+      />
+    );
+    await waitFor(() =>
+      expect(vi.mocked(api.git.prStatus).mock.calls.map((c) => c[1])).toEqual([live.id])
+    );
   });
 });

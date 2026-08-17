@@ -32,7 +32,7 @@ import {
 import { updateTitle, updateDescription, updateStatus as cliUpdateStatus } from "@/lib/cli";
 import { ISSUE_TYPES, getIssueTypeMeta } from "@/lib/issue-types";
 import { cn, isDoltProject } from "@/lib/utils";
-import { SET_BY, STATES, type Bead, type BeadStatus, type WorktreeStatus } from "@/types";
+import { SET_BY, STATES, standing, type Bead, type BeadStatus, type WorktreeStatus } from "@/types";
 
 
 /** Priority levels 0–4, displayed P0 (critical) … P4 (backlog). Single source for the editor options. */
@@ -216,8 +216,10 @@ export function BeadDetail({
   const fetchChildPRStatuses = useCallback(async () => {
     if (!projectPath || isDoltProject(projectPath) || childTasks.length === 0) return;
 
+    // Only pieces still standing can have work in flight — a dropped one is
+    // work nobody is doing, so the code host is never asked about it.
     const results = await Promise.all(
-      childTasks.filter(c => c.status !== 'closed').map(async (child) => {
+      childTasks.filter(c => standing(c.status)).map(async (child) => {
         try {
           const prStatus = await api.git.prStatus(projectPath, child.id);
           if (prStatus.pr) {

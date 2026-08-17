@@ -18,6 +18,7 @@ import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn, isDoltProject } from "@/lib/utils";
 import { CardLiveChat } from "@/workbench/card-live";
+import { standing } from "@/types";
 import type { Bead, Epic, EpicProgress } from "@/types";
 
 export interface EpicCardProps {
@@ -102,9 +103,12 @@ export function EpicCard({
 
     const statusMap = new Map<string, ChildPRStatus>();
 
-    // Fetch PR status for all children in parallel (skip closed - no PR needed)
+    // Only pieces still standing can have work in flight: a finished one needs
+    // no reading, and a dropped one is work nobody is doing, so asking the code
+    // host about it is a request per piece every thirty seconds for an answer
+    // that would be drawn against abandoned work.
     const results = await Promise.all(
-      children.filter(c => c.status !== 'closed').map(async (child) => {
+      children.filter(c => standing(c.status)).map(async (child) => {
         try {
           const prStatus = await api.git.prStatus(projectPath, child.id);
           if (prStatus.pr) {
@@ -199,6 +203,15 @@ export function EpicCard({
     },
   };
 
+  // What the job dropped, drawn wherever the count is, so no layout shows a
+  // full bar over a list of pieces it did not count.
+  const droppedNote = progress.dropped > 0 && (
+    <span className="flex items-center gap-1">
+      <div className="w-2 h-2 rounded-full bg-status-cancelled" aria-hidden="true" />
+      {progress.dropped} dropped
+    </span>
+  );
+
   // Shared progress bar section
   const progressSection = (
     <div className="space-y-1.5">
@@ -216,6 +229,9 @@ export function EpicCard({
           getProgressIndicatorClass(progressPercentage)
         )}
       />
+      {droppedNote && (
+        <div className="flex items-center gap-3 text-[10px] text-t-muted">{droppedNote}</div>
+      )}
     </div>
   );
 
@@ -229,7 +245,11 @@ export function EpicCard({
         className="flex items-center gap-1 text-xs font-semibold text-epic hover:text-epic/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic rounded mb-2"
       >
         {isExpanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
-        Child Tasks ({children.length})
+        {/* What the job is made of, and what it dropped — never the two added
+            together, which is the number the bar deliberately does not count. */}
+        Child Tasks ({progress.dropped > 0
+          ? `${progress.total} · ${progress.dropped} dropped`
+          : children.length})
       </button>
       <SubtaskList
         childTasks={children}
@@ -321,7 +341,9 @@ export function EpicCard({
               Epic
             </Badge>
             <Badge variant="secondary" appearance="light" size="xs" className="theme-badge">
-              {progressPercentage}% · {children.length} tasks
+              {progressPercentage}% · {progress.dropped > 0
+                ? `${progress.total} tasks · ${progress.dropped} dropped`
+                : `${children.length} tasks`}
             </Badge>
             <BeadTags bead={epic} />
             {commentCount > 0 && (
@@ -401,15 +423,7 @@ export function EpicCard({
               <div className="w-2 h-2 rounded-full bg-status-open" aria-hidden="true" />
               {progress.inProgress} in progress
             </span>
-            {/* Dropped pieces are outside every number above, and the card lists
-                them, so the card says how many rather than leaving the reader to
-                wonder why it holds fourteen pieces and counts ten. */}
-            {progress.dropped > 0 && (
-              <span className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-status-cancelled" aria-hidden="true" />
-                {progress.dropped} dropped
-              </span>
-            )}
+            {droppedNote}
             {progress.blocked > 0 && (
               <span className="flex items-center gap-1">
                 <div className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />
