@@ -182,7 +182,7 @@
             ],
             [
               "A mode picked twice in a row changed in silence the second time",
-              "the same trap this job set out to close, one step further along"
+              "the same trap you reported, still open a little further along"
             ],
             [
               "A test's name promised the opposite of what it checked",
@@ -212,10 +212,10 @@
             ["The compact answer discarded", "the answer reported as missing"],
             ["The permission to switch removed", "the mode reported as refused, in the tool's own words"],
             ["Command output discarded again", "the command row has nothing to open"],
-            ["Past chats read as sentences alone", "four of nine checks on that reading"],
-            ["An old chat's history thrown away on re-reading it", "two checks on what a chat keeps"],
-            ["The second copy drawn instead of replacing the first", "two checks on what a reader ends up looking at"],
-            ["A mode picked twice allowed to go quiet again", "said so once, where it must say so twice"],
+            ["Past chats read as sentences alone", "the commands vanish from an imported chat"],
+            ["An old chat's history thrown away on re-reading it", "the chat comes back blank, and says so"],
+            ["The second copy drawn instead of replacing the first", "everything appears twice, one copy under the other"],
+            ["A mode picked twice allowed to go quiet again", "the chat says so once, where it must say so twice"],
             ["A hand-opened command pinned open again", "the control cannot shut it, on your own screen"]
           ]
         },
