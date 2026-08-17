@@ -69,13 +69,18 @@ export class ClaudeDriver implements Driver {
   private streamingMessageId = '';
   /** The agent's checklist, in the order the items were created. */
   private todos: TodoItem[] = [];
-  /**
-   * Which streamed blocks are thinking rather than answer, by their index in
-   * the message being built. The stop event says only which index ended.
-   */
-  private thinkingBlocks = new Set<number>();
   /** The skills this install has, kept so a pushed command list can be re-sent with them. */
   private skills: string[] = [];
+  /**
+   * The models and the terminal-only names from the last full menu.
+   *
+   * A mid-session push carries commands and nothing else, and the browser
+   * replaces the whole menu with what it is sent — so re-sending it without
+   * these took the model picker away for the rest of the chat and offered the
+   * commands a browser must hide (bw-f1q.13).
+   */
+  private models: ModelChoice[] = [];
+  private terminalOnly = new Set<string>();
   /**
    * True from the moment a turn is handed over until the brand says it is done.
    *
@@ -298,20 +303,19 @@ export class ClaudeDriver implements Driver {
       // An older install answers neither; the names from init still make a menu.
     }
 
-    this.emitMenu(described.length ? described : named.map((name) => ({ name, description: '' })), terminalOnly, models);
+    // Remembered, because a later push carries neither of them.
+    if (models.length) this.models = models;
+    if (terminalOnly.size) this.terminalOnly = terminalOnly;
+    this.emitMenu(described.length ? described : named.map((name) => ({ name, description: '' })));
   }
 
-  /** Folds one list of commands into the menu event, skills included. */
-  private emitMenu(
-    commands: { name: string; description: string; argumentHint?: string }[],
-    terminalOnly: Set<string>,
-    models: ModelChoice[],
-  ): void {
+  /** Folds one list of commands into the menu event, skills and models included. */
+  private emitMenu(commands: { name: string; description: string; argumentHint?: string }[]): void {
     const skills = new Set(this.skills);
     const items: CommandInfo[] = commands
       // A command whose whole point is the terminal it was typed in cannot work
       // from a browser, so it is not offered here (§7).
-      .filter((c) => !terminalOnly.has(c.name))
+      .filter((c) => !this.terminalOnly.has(c.name))
       .map((c) => ({
         name: c.name,
         description: c.description,
@@ -328,7 +332,7 @@ export class ClaudeDriver implements Driver {
       type: 'session.menu',
       commands: items,
       skills: this.skills,
-      models,
+      models: this.models,
       permissionModes: [...CLAUDE_PERMISSION_MODES],
     });
   }
@@ -411,7 +415,7 @@ export class ClaudeDriver implements Driver {
             } else if (m.subtype === 'commands_changed') {
               // Skills found as the agent moves around: the kit says to replace
               // the list, not to merge it.
-              this.emitMenu(m.commands ?? [], new Set(), []);
+              this.emitMenu(m.commands ?? []);
             } else if (m.subtype === 'thinking_tokens') {
               // Redacted thinking: the API sends pings and nothing else, so this
               // estimate is the only sign the agent is alive. Once every two
@@ -452,22 +456,24 @@ export class ClaudeDriver implements Driver {
             // index is the identity that stays put across a whole answer.
             if (ev?.type === 'message_start') {
               this.streamingMessageId = ev.message?.id ?? m.uuid;
-              this.thinkingBlocks.clear();
             } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'text') {
               this.emit({ type: 'message.started', messageId: this.blockId(ev.index), role: 'assistant' });
               this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
             } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'thinking') {
               // What it is working out, as it works it out. Without this the
               // screen has nothing to show for a long think (bw-f1q).
-              this.thinkingBlocks.add(ev.index);
               this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
             } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
               this.emit({ type: 'text.delta', messageId: this.blockId(ev.index), text: ev.delta.text });
             } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
-              this.emit({ type: 'thinking.delta', messageId: this.blockId(ev.index), text: ev.delta.thinking ?? '' });
+              // Withheld reasoning sends these frames with no words in them.
+              // Drawing one anyway leaves a heading with nothing under it; the
+              // size on the working line is that turn's sign of life instead
+              // (bw-f1q.14).
+              const thought = String(ev.delta.thinking ?? '');
+              if (thought) this.emit({ type: 'thinking.delta', messageId: this.blockId(ev.index), text: thought });
             } else if (ev?.type === 'content_block_stop') {
               this.emit({ type: 'message.completed', messageId: this.blockId(ev.index) });
-              this.thinkingBlocks.delete(ev.index);
             }
             break;
           }

@@ -91,7 +91,9 @@ for (let i = 0; i < SECONDS; i++) {
   const ask = page.getByTestId('permission-allow_once');
   if (await ask.first().isVisible().catch(() => false)) await ask.first().click();
 
-  if (!shot && seen.working && (seen.thinking > 0 || seen.tools > 0)) {
+  // The picture is of a chat at work: the first second the foot has something to
+  // say and the agent is not merely waiting on him.
+  if (!shot && seen.working && seen.state !== 'waiting_permission') {
     await page.screenshot({ path: SHOT });
     shot = true;
     console.log('   (picture of a working chat ->', SHOT, ')');
@@ -116,9 +118,14 @@ if (silent.length) {
   process.exit(1);
 }
 // Either the thinking itself, or — when the brand withholds it — how much of it
-// there has been. One of the two must be on the screen.
-if (!thinkingEver && !thoughtEver) {
-  console.error('FAIL: the agent thought and the screen said nothing about it, neither the words nor the size.');
+// there has been. One of the two must be on the screen, but only for a turn that
+// actually thought for a while: plenty of turns answer without thinking at all,
+// and demanding a sign of one then would fail an honest screen.
+const thoughtSeconds = busySeconds.filter((s) => s.state === 'thinking').length;
+if (thoughtSeconds > 2 && !thinkingEver && !thoughtEver) {
+  console.error(
+    `FAIL: ${thoughtSeconds} seconds of thinking and the screen said nothing about it, neither the words nor the size.`,
+  );
   process.exit(1);
 }
 console.log('PASS: every working second said what it was doing, and the thinking was drawn.');

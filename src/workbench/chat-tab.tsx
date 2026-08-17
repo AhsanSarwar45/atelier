@@ -225,6 +225,9 @@ function ThinkingBlock({ item }: { item: Extract<TranscriptItem, { kind: 'thinki
   const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
   const open = openedByHand ?? !item.done;
   const firstLine = item.text.trim().split('\n')[0] ?? '';
+  // Reasoning the brand withheld arrives as frames with no words: a heading with
+  // nothing under it says less than nothing (bw-f1q.14).
+  if (!item.text.trim()) return null;
 
   return (
     <div data-testid="thinking-block" data-done={item.done} className="text-sm">
@@ -302,6 +305,7 @@ function Picker({
   current,
   options,
   testid,
+  asleep,
   onPick,
 }: {
   icon: ReactNode;
@@ -309,6 +313,8 @@ function Picker({
   current: string | null;
   options: { value: string; label: string; hint?: string }[];
   testid: string;
+  /** No agent is attached, so there is nothing to change until he writes. */
+  asleep: boolean;
   onPick: (value: string) => void;
 }) {
   if (!options.length) return null;
@@ -321,9 +327,13 @@ function Picker({
           size="sm"
           data-testid={testid}
           data-current={current ?? ''}
+          data-asleep={asleep}
+          disabled={asleep}
           aria-label={label}
-          title={label}
-          className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground"
+          // A sleeping chat has no agent to tell, and the command behind this
+          // would fail silently; sending a message wakes it (bw-f1q.12).
+          title={asleep ? `${label} — send a message to wake this chat first` : label}
+          className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
         >
           {icon}
           <span className="max-w-[18ch] truncate">{shown}</span>
@@ -485,6 +495,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   );
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  /** What went wrong the last time he changed the mode or the model. */
+  const [steerError, setSteerError] = useState<string | null>(null);
   const start = useCallback(async () => {
     if (!projectId || !projectPath) return;
     setStarting(true);
@@ -556,6 +568,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }, [draft]);
 
   const busy = isBusy(view.state);
+  /** No agent attached: it is drawn, and the first message is what wakes it. */
+  const asleep = view.state === 'dormant' || view.state === 'ended';
 
   /**
    * How long the agent has been at this. The brand's own count for the call it
@@ -567,9 +581,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [, beat] = useState(0);
   useEffect(() => {
     setBusySince(busy ? Date.now() : null);
-    // Restarted at each change of phase, so the number says how long it has been
-    // doing THIS, which is what the words beside it name.
-  }, [busy, view.state]);
+    // Restarted whenever the WORDS change, not merely the kind of work: two
+    // reads in a row are both `running_tool`, and counting from the first would
+    // show a one-second read as forty (bw-f1q.17).
+  }, [busy, view.state, view.stateLabel]);
   useEffect(() => {
     if (!busy) return;
     const timer = setInterval(() => beat((n) => n + 1), 1000);
@@ -578,7 +593,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const running = view.items.find((it) => it.kind === 'tool' && it.status === 'running');
   const reported = running && running.kind === 'tool' ? running.seconds : 0;
   const counted = busySince ? Math.floor((Date.now() - busySince) / 1000) : 0;
-  const workedFor = Math.max(Math.round(reported), counted, 0);
+  // The brand's own count for the call it names, and our own only when it has
+  // not counted yet. Never the larger of the two: that is how one call's clock
+  // ended up beside another call's name.
+  const workedFor = reported > 0 ? Math.round(reported) : counted;
 
   /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */
   const typedCommand = /^\/(\S*)$/.exec(draft)?.[1] ?? null;
@@ -871,6 +889,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           )}
           {/* His own commands and skills, as this session announced them (§7). */}
           <CommandMenu matches={matches} active={pick} onPick={take} />
+          {steerError && (
+            <p data-testid="steer-error" className="mb-2 text-xs text-red-500">
+              {steerError}
+            </p>
+          )}
           <input
             ref={picker}
             data-testid="image-input"
@@ -946,8 +969,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               label="Permission mode"
               testid="mode-picker"
               current={view.permissionMode}
+              asleep={asleep}
               options={view.menu.permissionModes.map((m) => ({ value: m, label: m }))}
-              onPick={(mode) => void sendCommand({ type: 'session.mode', sessionId, mode })}
+              onPick={(mode) => {
+                setSteerError(null);
+                void sendCommand({ type: 'session.mode', sessionId, mode }).catch((e: unknown) =>
+                  setSteerError(e instanceof Error ? e.message : String(e)),
+                );
+              }}
             />
             <Picker
               icon={<Cpu className="h-3.5 w-3.5" />}
@@ -956,12 +985,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               // A session that has not been given a model is on the brand's own
               // default, and the list has a row for exactly that.
               current={view.model ?? 'default'}
+              asleep={asleep}
               options={view.menu.models.map((m) => ({
                 value: m.value,
                 label: m.displayName,
                 hint: m.description,
               }))}
-              onPick={(model) => void sendCommand({ type: 'session.model', sessionId, model })}
+              onPick={(model) => {
+                setSteerError(null);
+                void sendCommand({ type: 'session.model', sessionId, model }).catch((e: unknown) =>
+                  setSteerError(e instanceof Error ? e.message : String(e)),
+                );
+              }}
             />
             <span className="ml-auto" />
             {busy ? (

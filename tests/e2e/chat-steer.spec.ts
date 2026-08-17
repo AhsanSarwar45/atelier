@@ -123,6 +123,33 @@ test.describe('steering the chat you are in', () => {
     await expect(page.getByTestId('command-menu')).toBeHidden();
   });
 
+  test('a sleeping chat does not offer to steer what is not running', async ({ page, request }) => {
+    const api = backend();
+    const projects = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
+    const project = process.env.BEADS_E2E_PROJECT
+      ? projects.find((p) => p.id === process.env.BEADS_E2E_PROJECT)!
+      : projects[0]!;
+    const q = new URLSearchParams({ project: project.id, path: project.path });
+    const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as {
+      sessionId: string | null;
+      state: string;
+    }[];
+    const asleep = rows.find((r) => r.sessionId && (r.state === 'dormant' || r.state === 'ended'));
+    test.skip(!asleep, 'no sleeping chat on this instance');
+
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${asleep!.sessionId}`);
+    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+    await page.waitForTimeout(3000);
+
+    // The mode and the model belong to a running agent; on a chat with none they
+    // would fail silently, so they are not offered until he writes (bw-f1q.12).
+    const mode = page.getByTestId('mode-picker');
+    if (await mode.isVisible().catch(() => false)) {
+      await expect(mode).toBeDisabled();
+    }
+    await expect(page.getByTestId('steer-error')).toBeHidden();
+  });
+
   test('a picture opens full size when it is clicked', async ({ page, request }) => {
     await freshChat(request, page);
 
