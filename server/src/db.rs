@@ -163,9 +163,7 @@ impl Database {
 
     /// Gets the database file path in the app data directory
     fn get_db_path() -> Result<PathBuf, DbError> {
-        let proj_dirs =
-            directories::ProjectDirs::from("com", "beads", "kanban-ui").ok_or(DbError::PathError)?;
-        Ok(proj_dirs.data_dir().join("settings.db"))
+        crate::identity::settings_db().ok_or(DbError::PathError)
     }
 
     /// Initializes the database schema and runs pending migrations

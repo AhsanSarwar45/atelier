@@ -5,6 +5,7 @@
 
 mod db;
 mod dolt;
+mod identity;
 mod routes;
 
 use axum::{
