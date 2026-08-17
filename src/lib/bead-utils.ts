@@ -117,20 +117,12 @@ export function isBlockedBy(
   });
 }
 
-/**
- * {@link isBlockedBy} for a caller holding the board as a list rather than a
- * lookup. Building the lookup is this function's whole job; the rule is not
- * repeated here.
- *
- * @param bead - The bead to evaluate (only `status` and `deps` are used).
- * @param allBeads - All beads available for dep resolution.
+/*
+ * A second way in used to sit here, taking the board as a list and building the
+ * lookup itself. Once the board built the lookup once and handed it down,
+ * nothing called it — and a second entry point nobody calls is the one that
+ * goes quietly wrong when the rule next moves.
  */
-export function isBlocked(
-  bead: { status: string; deps?: string[] | null },
-  allBeads: ReadonlyArray<{ id: string; status: string }>,
-): boolean {
-  return isBlockedBy(bead, new Map(allBeads.map((b) => [b.id, b.status])));
-}
 
 /**
  * Card shapes that are mechanism rather than work. A gate is a lock the board

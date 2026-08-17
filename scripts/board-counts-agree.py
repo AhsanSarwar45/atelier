@@ -74,7 +74,12 @@ def board_jobs(project, count_dropped):
             continue
         gone = [k for k in kids if dropped(k)]
         counted = kids if count_dropped else [k for k in kids if not dropped(k)]
-        done = [k for k in counted if k.get("status") == "closed"]
+        # Dropped work is stored closed and marked, so "finished" is closed and
+        # NOT marked — under the old rule too. That rule put dropped pieces in
+        # the total and never in the finished count, which is exactly how a job
+        # with nothing left to do sat at 10 of 14; counting them as finished as
+        # well would ask for 14 of 14, a screen that never existed.
+        done = [k for k in counted if k.get("status") == "closed" and not dropped(k)]
         jobs[card["id"]] = {
             "total": len(counted),
             "done": len(done),

@@ -7,7 +7,7 @@ import {
   formatWorktreePath,
   getStatusDotColor,
   truncate,
-  isBlocked,
+  isBlockedBy,
 } from '@/lib/bead-utils';
 
 describe('formatBeadId', () => {
@@ -99,15 +99,19 @@ describe('truncate', () => {
   });
 });
 
-describe('isBlocked', () => {
+/** The board builds this once and hands it to every card. */
+const lookup = (beads: {id: string; status: string}[]) =>
+  new Map(beads.map(b => [b.id, b.status]));
+
+describe('isBlockedBy', () => {
   it('returns false for closed tasks even with open deps', () => {
     const allBeads = [{ id: 'dep1', status: 'open' }];
-    expect(isBlocked({ status: 'closed', deps: ['dep1'] }, allBeads)).toBe(false);
+    expect(isBlockedBy({ status: 'closed', deps: ['dep1'] }, lookup(allBeads))).toBe(false);
   });
 
   it('returns false for open tasks whose only dep is closed', () => {
     const allBeads = [{ id: 'dep1', status: 'closed' }];
-    expect(isBlocked({ status: 'open', deps: ['dep1'] }, allBeads)).toBe(false);
+    expect(isBlockedBy({ status: 'open', deps: ['dep1'] }, lookup(allBeads))).toBe(false);
   });
 
   it('returns true when at least one dep is not closed (one open, one closed)', () => {
@@ -115,40 +119,40 @@ describe('isBlocked', () => {
       { id: 'dep1', status: 'closed' },
       { id: 'dep2', status: 'open' },
     ];
-    expect(isBlocked({ status: 'open', deps: ['dep1', 'dep2'] }, allBeads)).toBe(true);
+    expect(isBlockedBy({ status: 'open', deps: ['dep1', 'dep2'] }, lookup(allBeads))).toBe(true);
   });
 
   it('returns true when dep is in_progress', () => {
     const allBeads = [{ id: 'dep1', status: 'in_progress' }];
-    expect(isBlocked({ status: 'open', deps: ['dep1'] }, allBeads)).toBe(true);
+    expect(isBlockedBy({ status: 'open', deps: ['dep1'] }, lookup(allBeads))).toBe(true);
   });
 
   it('returns false when the only thing it waited on was dropped', () => {
     // Dropped work is standing in nobody's way; a card left blocked by it
     // waits forever on something nobody is ever going to do.
     const allBeads = [{ id: 'dep1', status: 'cancelled' }];
-    expect(isBlocked({ status: 'open', deps: ['dep1'] }, allBeads)).toBe(false);
+    expect(isBlockedBy({ status: 'open', deps: ['dep1'] }, lookup(allBeads))).toBe(false);
   });
 
   it('returns false for a dropped task even with open deps', () => {
     const allBeads = [{ id: 'dep1', status: 'open' }];
-    expect(isBlocked({ status: 'cancelled', deps: ['dep1'] }, allBeads)).toBe(false);
+    expect(isBlockedBy({ status: 'cancelled', deps: ['dep1'] }, lookup(allBeads))).toBe(false);
   });
 
   it('returns false when dep references a missing bead', () => {
     const allBeads = [{ id: 'other', status: 'open' }];
-    expect(isBlocked({ status: 'open', deps: ['ghost'] }, allBeads)).toBe(false);
+    expect(isBlockedBy({ status: 'open', deps: ['ghost'] }, lookup(allBeads))).toBe(false);
   });
 
   it('returns false for open task with empty deps array', () => {
-    expect(isBlocked({ status: 'open', deps: [] }, [])).toBe(false);
+    expect(isBlockedBy({ status: 'open', deps: [] }, lookup([]))).toBe(false);
   });
 
   it('returns false for open task without deps property', () => {
-    expect(isBlocked({ status: 'open' }, [])).toBe(false);
+    expect(isBlockedBy({ status: 'open' }, lookup([]))).toBe(false);
   });
 
   it('returns false when deps is null', () => {
-    expect(isBlocked({ status: 'open', deps: null }, [])).toBe(false);
+    expect(isBlockedBy({ status: 'open', deps: null }, lookup([]))).toBe(false);
   });
 });

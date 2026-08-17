@@ -13,7 +13,7 @@ export interface DependencyBadgeProps {
   blockers?: string[];
   /**
    * Whether this task is currently blocked by unresolved dependencies.
-   * The parent decides this — typically by calling `isBlocked(bead, allBeads)`
+   * The parent decides this — typically by calling `isBlockedBy(bead, statusById)`
    * from `@/lib/bead-utils` so that closed deps don't count as blocking.
    *
    * If omitted, the badge falls back to the legacy heuristic
