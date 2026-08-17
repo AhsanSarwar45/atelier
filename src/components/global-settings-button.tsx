@@ -1,21 +1,34 @@
+/**
+ * The way out to the settings screen.
+ *
+ * It is drawn by the shell as the last thing on the first bar
+ * (src/components/shell.tsx), not floated over the corner of the window: a
+ * control pinned to the viewport belongs to no screen, scrolls with nothing,
+ * and lands off the row every other control in the bar is centred on.
+ */
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { Settings } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+
 export function GlobalSettingsButton() {
   const pathname = usePathname();
 
+  // No way out to the screen you are standing on.
   if (pathname === "/settings") return null;
 
   return (
-    <a
-      href="/settings"
-      aria-label="Settings"
-      className="fixed right-4 top-4 z-40 rounded-md p-2 text-t-tertiary transition-colors duration-150 hover:text-t-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-t-tertiary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base"
-    >
-      <Settings className="h-5 w-5" aria-hidden="true" />
-    </a>
+    // `dim` is the bar's quiet control: the theme's muted ink, its full
+    // strength under the pointer. `ml-auto` only bites on a bar whose contents
+    // do not already reach the right edge.
+    <Button variant="dim" size="icon" className="ml-auto shrink-0" asChild>
+      <Link href="/settings" aria-label="Settings">
+        <Settings aria-hidden="true" />
+      </Link>
+    </Button>
   );
 }

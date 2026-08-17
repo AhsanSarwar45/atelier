@@ -189,6 +189,48 @@
   }
 }
 
+/* ===== Scrollbars: thin, and in the live theme's own ink =====
+ *
+ * Every pane in this app scrolls inside itself — the shell clips and the window
+ * never moves — so these rails are on screen all day, beside the work. The
+ * browser's own is a wide grey column with a track behind it, in a colour no
+ * theme chose. This is the same rail at a third of the weight: no track at all,
+ * and a thumb in the theme's muted ink that comes up to full muted under the
+ * pointer. Both spellings are written — the two properties every browser now
+ * reads, and the rail parts Chrome and Safari have always read, which ignore
+ * the first pair for everything but the coarsest width.
+ *
+ * The properties inherit, so `html` reaches every pane; the rail parts do not
+ * inherit and are written unqualified, which is how they reach every pane.
+ */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--text-muted) / 0.4) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The border is transparent and the paint is clipped inside it, which is what
+ * makes a 10px rail draw a 4px thumb with air on both sides of it. */
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--text-muted) / 0.4);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--text-muted) / 0.7);
+}
+
 .font-heading {
   font-family: var(--font-heading);
   letter-spacing: var(--ls-title);

@@ -16,6 +16,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
+import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -55,6 +56,10 @@ export function Shell({
     <div data-testid="shell" className="flex h-dvh flex-col overflow-hidden bg-surface-base">
       <div data-shell-bar data-testid="project-bar" className={cn(BAR, barClassName)}>
         {bar}
+        {/* The way out to settings ends every bar, drawn here rather than by
+            each page: a control the pages hand in themselves is one a new page
+            forgets, and one every page places differently. */}
+        <GlobalSettingsButton />
       </div>
       {tabs && (
         <div data-shell-bar data-testid="tab-bar" className={BAR}>
