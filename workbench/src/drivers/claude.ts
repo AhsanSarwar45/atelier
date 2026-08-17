@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
+import { resultText } from '../../../src/workbench/imported-history.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
 /**
@@ -50,6 +51,14 @@ interface Note {
   kind: string;
   text: string;
   body?: string;
+  /**
+   * Drawn even when the same sentence just went past.
+   *
+   * For a line that reports a DECISION rather than echoes one of the kit's: the
+   * same permission mode picked twice is two changes and reads as two, where
+   * the kit saying one thing in two shapes is one thing (bw-1u1.32).
+   */
+  always?: boolean;
 }
 
 /** The kit's own ranking of an `informational`, which already names our treatment. */
@@ -327,7 +336,7 @@ export class ClaudeDriver implements Driver {
   private note(note: Note): void {
     // A quiet line is skipped when the same sentence has just been drawn; a
     // `detail` is not, because it is the record rather than the reading.
-    if (note.rank === 'note' && this.saidAlready(note.text)) return;
+    if (note.rank === 'note' && !note.always && this.saidAlready(note.text)) return;
     const body = note.body ?? null;
     this.emit({
       type: 'note',
@@ -588,12 +597,12 @@ export class ClaudeDriver implements Driver {
     await this.q?.setPermissionMode(mode as never);
     // Said out loud, in the chat it happened to: a chat that quietly stopped
     // asking about tools is a trap (§8.2.4).
-    this.note({ rank: 'note', kind: 'mode', text: `Permission mode is now ${mode}.` });
+    this.note({ rank: 'note', kind: 'mode', text: `Permission mode is now ${mode}.`, always: true });
   }
 
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model);
-    this.note({ rank: 'note', kind: 'model', text: `Model is now ${model}.` });
+    this.note({ rank: 'note', kind: 'model', text: `Model is now ${model}.`, always: true });
   }
 
   answer(askId: string, choice: PermissionAnswer): void {
@@ -644,192 +653,204 @@ export class ClaudeDriver implements Driver {
     this.q?.close();
   }
 
-  /** Reads the SDK's message stream and translates every message into WBP. */
+  /** Reads the SDK’s message stream and hands every message to `draw`. */
   private async pump(): Promise<void> {
     if (!this.q) return;
     try {
-      for await (const m of this.q as AsyncIterable<Record<string, any>>) {
-        switch (m.type) {
-          case 'system':
-            if (m.subtype === 'init') {
-              this.emit({
-                type: 'session.started',
-                brand: 'claude',
-                externalId: m.session_id ?? null,
-                model: m.model ?? null,
-                cwd: m.cwd ?? '',
-                permissionMode: m.permissionMode ?? '',
-              });
-              // Only when nothing is in flight: see `awaitingAnswer`.
-              if (!this.awaitingAnswer) this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
-              void this.publishMenu(m);
-            } else if (m.subtype === 'commands_changed') {
-              // Skills found as the agent moves around: the kit says to replace
-              // the list, not to merge it.
-              this.emitMenu(m.commands ?? []);
-            } else if (m.subtype === 'thinking_tokens') {
-              // Redacted thinking: the API sends pings and nothing else, so this
-              // estimate is the only sign the agent is alive. Once every two
-              // seconds — the log is the transcript, and a long think would
-              // otherwise write hundreds of lines into it (§8.2.2).
-              const now = Date.now();
-              if (now - this.lastThinkingAt > 2000) {
-                this.lastThinkingAt = now;
-                this.emit({ type: 'thinking.progress', tokens: Number(m.estimated_tokens ?? 0) });
-              }
-            } else if (m.subtype === 'local_command_output') {
-              // A local command answers by itself and the query loop is bypassed,
-              // so no result message will close this turn — the chat is put back
-              // to Ready here or it waits forever (docs/agent-workbench.md §7).
-              const messageId = randomUUID();
-              this.emit({ type: 'message.started', messageId, role: 'assistant' });
-              this.emit({ type: 'text.delta', messageId, text: String(m.content ?? '') });
-              this.emit({ type: 'message.completed', messageId });
-              this.awaitingAnswer = false;
-              this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
-            } else {
-              // Every other thing the session says about itself.
-              const note = noteFor(m);
-              if (note) this.note(note);
-            }
-            break;
-
-          // How long the call has been running, counted by the kit rather than
-          // by us, subagents included (docs/agent-workbench.md §8.2.2).
-          case 'tool_progress':
-            this.emit({
-              type: 'tool.progress',
-              toolCallId: String(m.tool_use_id ?? ''),
-              seconds: Number(m.elapsed_time_seconds ?? 0),
-            });
-            break;
-
-          case 'stream_event': {
-            const ev = m.event;
-            // Every stream_event carries its OWN uuid, so it cannot identify
-            // the message being built. The Anthropic message id plus the block
-            // index is the identity that stays put across a whole answer.
-            if (ev?.type === 'message_start') {
-              this.streamingMessageId = ev.message?.id ?? m.uuid;
-              this.streamed.add(this.streamingMessageId);
-            } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'text') {
-              this.emit({ type: 'message.started', messageId: this.blockId(ev.index), role: 'assistant' });
-              this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
-            } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'thinking') {
-              // What it is working out, as it works it out. Without this the
-              // screen has nothing to show for a long think (bw-f1q).
-              this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
-            } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-              this.emit({ type: 'text.delta', messageId: this.blockId(ev.index), text: ev.delta.text });
-            } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
-              // Withheld reasoning sends these frames with no words in them.
-              // Drawing one anyway leaves a heading with nothing under it; the
-              // size on the working line is that turn's sign of life instead
-              // (bw-f1q.14).
-              const thought = String(ev.delta.thinking ?? '');
-              if (thought) this.emit({ type: 'thinking.delta', messageId: this.blockId(ev.index), text: thought });
-            } else if (ev?.type === 'content_block_stop') {
-              this.emit({ type: 'message.completed', messageId: this.blockId(ev.index) });
-            }
-            break;
-          }
-
-          case 'assistant': {
-            // Words that never came down the stream — the kit wrote this message
-            // itself, so there was no `message_start` and nothing was drawn
-            // (bw-1u1). His own turns are unaffected: those always stream.
-            const messageId = String(m.message?.id ?? m.uuid ?? '');
-            if (messageId && !this.streamed.has(messageId)) {
-              this.streamed.add(messageId);
-              (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
-                if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
-                // The status that came just before may already have said this.
-                if (this.saidAlready(String(b.text))) return;
-                const id = `${messageId}:${index}`;
-                this.emit({ type: 'message.started', messageId: id, role: 'assistant' });
-                this.emit({ type: 'text.delta', messageId: id, text: String(b.text) });
-                this.emit({ type: 'message.completed', messageId: id });
-              });
-            }
-            for (const b of m.message?.content ?? []) {
-              if (b.type === 'tool_use') {
-                const input = b.input ?? {};
-                this.liveTools.set(b.id, b.name);
-                this.emit({
-                  type: 'tool.started',
-                  toolCallId: b.id,
-                  name: b.name,
-                  input,
-                  title: toolTitle(b.name, input),
-                  // Subagent attribution rides on the MESSAGE, not the block.
-                  parentToolCallId: m.parent_tool_use_id ?? null,
-                });
-                this.emitDiff(b.id, b.name, input);
-                this.applyChecklistCall(b.id, b.name, input);
-                this.emit({ type: 'session.state', state: 'running_tool', label: toolTitle(b.name, input) });
-              }
-            }
-            break;
-          }
-
-          case 'user':
-            // A turn the kit wrote in his name — an interrupt notice, a queued
-            // message — says something he should read. A turn HE typed is
-            // already in the log from the moment he sent it, and `isSynthetic`
-            // is the flag that tells the two apart (§8.2.4).
-            if (m.isSynthetic) {
-              for (const b of m.message?.content ?? []) {
-                if (b.type === 'text' && String(b.text ?? '').trim()) {
-                  this.note({ rank: 'note', kind: 'user/synthetic', text: oneLine(b.text), body: String(b.text) });
-                }
-              }
-            }
-            // Tool results come back on the user turn.
-            for (const b of m.message?.content ?? []) {
-              if (b.type === 'tool_result') {
-                this.liveTools.delete(b.tool_use_id);
-                const output =
-                  typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
-                this.absorbChecklistResult(b.tool_use_id, output);
-                this.emit({
-                  type: 'tool.completed',
-                  toolCallId: b.tool_use_id,
-                  ok: !b.is_error,
-                  output: output.slice(0, 4000),
-                });
-              }
-            }
-            break;
-
-          case 'result':
-            this.awaitingAnswer = false;
-            if (typeof m.total_cost_usd === 'number') {
-              this.emit({ type: 'cost', cost: { kind: 'usd', usd: m.total_cost_usd } });
-            }
-            this.emit({
-              type: 'session.state',
-              state: m.subtype === 'success' ? 'idle' : 'errored',
-              label: m.subtype === 'success' ? 'Ready' : String(m.subtype ?? 'error'),
-            });
-            // An error result carries the sentence saying what went wrong, and
-            // the state label alone is one word.
-            if (m.is_error && typeof m.result === 'string' && m.result.trim()) {
-              this.note({ rank: 'note', kind: 'result', text: oneLine(m.result), body: m.result });
-            }
-            break;
-
-          // No list of kinds this driver is willing to hear: whatever else the
-          // kit sends is drawn, because a whitelist is exactly what dropped the
-          // manager's /compact answer (§8.2.4).
-          default: {
-            const note = noteFor(m);
-            if (note) this.note(note);
-          }
-        }
-      }
+      for await (const m of this.q as AsyncIterable<Record<string, any>>) this.draw(m);
     } catch (err) {
       this.emit({ type: 'error', message: err instanceof Error ? err.message : String(err), fatal: true });
       this.emit({ type: 'session.state', state: 'errored', label: 'Failed' });
+    }
+  }
+
+  /**
+   * Turns one of the kit’s messages into what the chat draws.
+   *
+   * A method of its own, and public, so the standing check can drive THIS
+   * rather than a copy of the tables it reads: a check that asks the tables
+   * whether a kind has a name still passes when the loop that draws it is
+   * gone, which is the shape of fault this whole job is about (bw-1u1.28,
+   * scripts/README.md).
+   */
+  draw(m: Record<string, any>): void {
+    switch (m.type) {
+      case 'system':
+        if (m.subtype === 'init') {
+          this.emit({
+            type: 'session.started',
+            brand: 'claude',
+            externalId: m.session_id ?? null,
+            model: m.model ?? null,
+            cwd: m.cwd ?? '',
+            permissionMode: m.permissionMode ?? '',
+          });
+          // Only when nothing is in flight: see `awaitingAnswer`.
+          if (!this.awaitingAnswer) this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
+          void this.publishMenu(m);
+        } else if (m.subtype === 'commands_changed') {
+          // Skills found as the agent moves around: the kit says to replace
+          // the list, not to merge it.
+          this.emitMenu(m.commands ?? []);
+        } else if (m.subtype === 'thinking_tokens') {
+          // Redacted thinking: the API sends pings and nothing else, so this
+          // estimate is the only sign the agent is alive. Once every two
+          // seconds — the log is the transcript, and a long think would
+          // otherwise write hundreds of lines into it (§8.2.2).
+          const now = Date.now();
+          if (now - this.lastThinkingAt > 2000) {
+            this.lastThinkingAt = now;
+            this.emit({ type: 'thinking.progress', tokens: Number(m.estimated_tokens ?? 0) });
+          }
+        } else if (m.subtype === 'local_command_output') {
+          // A local command answers by itself and the query loop is bypassed,
+          // so no result message will close this turn — the chat is put back
+          // to Ready here or it waits forever (docs/agent-workbench.md §7).
+          const messageId = randomUUID();
+          this.emit({ type: 'message.started', messageId, role: 'assistant' });
+          this.emit({ type: 'text.delta', messageId, text: String(m.content ?? '') });
+          this.emit({ type: 'message.completed', messageId });
+          this.awaitingAnswer = false;
+          this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
+        } else {
+          // Every other thing the session says about itself.
+          const note = noteFor(m);
+          if (note) this.note(note);
+        }
+        break;
+
+      // How long the call has been running, counted by the kit rather than
+      // by us, subagents included (docs/agent-workbench.md §8.2.2).
+      case 'tool_progress':
+        this.emit({
+          type: 'tool.progress',
+          toolCallId: String(m.tool_use_id ?? ''),
+          seconds: Number(m.elapsed_time_seconds ?? 0),
+        });
+        break;
+
+      case 'stream_event': {
+        const ev = m.event;
+        // Every stream_event carries its OWN uuid, so it cannot identify
+        // the message being built. The Anthropic message id plus the block
+        // index is the identity that stays put across a whole answer.
+        if (ev?.type === 'message_start') {
+          this.streamingMessageId = ev.message?.id ?? m.uuid;
+          this.streamed.add(this.streamingMessageId);
+        } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'text') {
+          this.emit({ type: 'message.started', messageId: this.blockId(ev.index), role: 'assistant' });
+          this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
+        } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'thinking') {
+          // What it is working out, as it works it out. Without this the
+          // screen has nothing to show for a long think (bw-f1q).
+          this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
+        } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+          this.emit({ type: 'text.delta', messageId: this.blockId(ev.index), text: ev.delta.text });
+        } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+          // Withheld reasoning sends these frames with no words in them.
+          // Drawing one anyway leaves a heading with nothing under it; the
+          // size on the working line is that turn's sign of life instead
+          // (bw-f1q.14).
+          const thought = String(ev.delta.thinking ?? '');
+          if (thought) this.emit({ type: 'thinking.delta', messageId: this.blockId(ev.index), text: thought });
+        } else if (ev?.type === 'content_block_stop') {
+          this.emit({ type: 'message.completed', messageId: this.blockId(ev.index) });
+        }
+        break;
+      }
+
+      case 'assistant': {
+        // Words that never came down the stream — the kit wrote this message
+        // itself, so there was no `message_start` and nothing was drawn
+        // (bw-1u1). His own turns are unaffected: those always stream.
+        const messageId = String(m.message?.id ?? m.uuid ?? '');
+        if (messageId && !this.streamed.has(messageId)) {
+          this.streamed.add(messageId);
+          (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
+            if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
+            // The status that came just before may already have said this.
+            if (this.saidAlready(String(b.text))) return;
+            const id = `${messageId}:${index}`;
+            this.emit({ type: 'message.started', messageId: id, role: 'assistant' });
+            this.emit({ type: 'text.delta', messageId: id, text: String(b.text) });
+            this.emit({ type: 'message.completed', messageId: id });
+          });
+        }
+        for (const b of m.message?.content ?? []) {
+          if (b.type === 'tool_use') {
+            const input = b.input ?? {};
+            this.liveTools.set(b.id, b.name);
+            this.emit({
+              type: 'tool.started',
+              toolCallId: b.id,
+              name: b.name,
+              input,
+              title: toolTitle(b.name, input),
+              // Subagent attribution rides on the MESSAGE, not the block.
+              parentToolCallId: m.parent_tool_use_id ?? null,
+            });
+            this.emitDiff(b.id, b.name, input);
+            this.applyChecklistCall(b.id, b.name, input);
+            this.emit({ type: 'session.state', state: 'running_tool', label: toolTitle(b.name, input) });
+          }
+        }
+        break;
+      }
+
+      case 'user':
+        // A turn the kit wrote in his name — an interrupt notice, a queued
+        // message — says something he should read. A turn HE typed is
+        // already in the log from the moment he sent it, and `isSynthetic`
+        // is the flag that tells the two apart (§8.2.4).
+        if (m.isSynthetic) {
+          for (const b of m.message?.content ?? []) {
+            if (b.type === 'text' && String(b.text ?? '').trim()) {
+              this.note({ rank: 'note', kind: 'user/synthetic', text: oneLine(b.text), body: String(b.text) });
+            }
+          }
+        }
+        // Tool results come back on the user turn.
+        for (const b of m.message?.content ?? []) {
+          if (b.type === 'tool_result') {
+            this.liveTools.delete(b.tool_use_id);
+            // Named and measured rather than pasted in: a result carrying a
+            // picture is thousands of characters of encoding (bw-1u1.30).
+            const output = resultText(b.content);
+            this.absorbChecklistResult(b.tool_use_id, output);
+            this.emit({
+              type: 'tool.completed',
+              toolCallId: b.tool_use_id,
+              ok: !b.is_error,
+              output: output.slice(0, 4000),
+            });
+          }
+        }
+        break;
+
+      case 'result':
+        this.awaitingAnswer = false;
+        if (typeof m.total_cost_usd === 'number') {
+          this.emit({ type: 'cost', cost: { kind: 'usd', usd: m.total_cost_usd } });
+        }
+        this.emit({
+          type: 'session.state',
+          state: m.subtype === 'success' ? 'idle' : 'errored',
+          label: m.subtype === 'success' ? 'Ready' : String(m.subtype ?? 'error'),
+        });
+        // An error result carries the sentence saying what went wrong, and
+        // the state label alone is one word.
+        if (m.is_error && typeof m.result === 'string' && m.result.trim()) {
+          this.note({ rank: 'note', kind: 'result', text: oneLine(m.result), body: m.result });
+        }
+        break;
+
+      // No list of kinds this driver is willing to hear: whatever else the
+      // kit sends is drawn, because a whitelist is exactly what dropped the
+      // manager's /compact answer (§8.2.4).
+      default: {
+        const note = noteFor(m);
+        if (note) this.note(note);
+      }
     }
   }
 }

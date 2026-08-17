@@ -40,13 +40,19 @@ for (const mode of CLAUDE_PERMISSION_MODES) {
   }
 }
 
-// Left where a chat starts, so a session this check touched is never left with
-// its cards switched off.
+// The same decision, taken twice. A rule meant to stop the kit saying one thing
+// in two shapes used to swallow the second of these, so a mode he had just
+// picked changed in silence (bw-1u1.32).
+const beforeTwice = said.length;
 try {
+  await driver.setMode(DEFAULT_PERMISSION_MODE);
   await driver.setMode(DEFAULT_PERMISSION_MODE);
 } catch {
   // Already reported above if it cannot be set at all.
 }
+// Only the driver's own line for it: the kit has its own things to say about a
+// mode changing, and those are not what went missing.
+const twice = said.slice(beforeTwice).filter((line) => line.includes(`is now ${DEFAULT_PERMISSION_MODE}`)).length;
 await driver.close();
 
 // A mode that changed in silence is the trap this job also fixed: the chat says
@@ -55,6 +61,7 @@ const quiet = CLAUDE_PERMISSION_MODES.filter((m) => !said.some((line) => line.in
 
 console.log(`refused: ${refused.length}${refused.length ? ` — ${refused.join(', ')}` : ''}`);
 console.log(`changed in silence: ${quiet.length}${quiet.length ? ` — ${quiet.join(', ')}` : ''}`);
-const failed = refused.length > 0 || quiet.length > 0;
+console.log(`the same mode picked twice said so ${twice} time(s)`);
+const failed = refused.length > 0 || quiet.length > 0 || twice !== 2;
 console.log(failed ? 'FAIL' : 'PASS');
 process.exit(failed ? 1 : 0);

@@ -55,24 +55,30 @@ const row = page.getByTestId('tool-row').first();
 await row.waitFor({ timeout: 180_000 });
 await page.waitForTimeout(6000);
 
-mkdirSync(dirname(out), { recursive: true });
-
-// The command, opened onto what it ran and what it printed.
-await row.getByTestId('tool-toggle').click();
-await row.scrollIntoViewIfNeeded();
-await page.waitForTimeout(800);
-await page.screenshot({ path: out });
-console.log(`saved ${out}`);
-
-// And what the chat says about compaction, whichever way it goes.
+// Both halves in ONE picture, because one picture is what the job is judged on:
+// a command opened onto what it printed AND the line the compact answer gave.
+// Taking them separately left the named file carrying half the claim (bw-1u1.29).
 await say('/compact');
 const answer = page.getByTestId('note-row').filter({ hasText: /compact/i }).first();
 await answer.waitFor({ timeout: 180_000 });
 await page.waitForTimeout(2000);
+
+// Ctrl+O, the same key as in a terminal: everything opens, the command row with it.
+await page.keyboard.press('Control+o');
+await page.waitForTimeout(500);
 await page.getByTestId('transcript').evaluate((el) => el.scrollTo(0, el.scrollHeight));
 await page.waitForTimeout(800);
-const second = out.replace(/\.png$/, '-compact.png');
-await page.screenshot({ path: second });
-console.log(`saved ${second}`);
+
+const opened = await row.getAttribute('data-open');
+const printed = await row.getByTestId('tool-output').count();
+if (opened !== 'true' || printed === 0) {
+  console.log(`the command row is not open onto its output (open=${opened}, printed boxes=${printed})`);
+  await browser.close();
+  process.exit(1);
+}
+
+mkdirSync(dirname(out), { recursive: true });
+await page.screenshot({ path: out });
+console.log(`saved ${out} — a command opened onto its output, and the compact answer`);
 await browser.close();
 process.exit(0);

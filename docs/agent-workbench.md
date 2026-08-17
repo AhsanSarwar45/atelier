@@ -145,6 +145,7 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 | `message.completed` | `messageId` |
 | `image` | `messageId, mime, dataUrl \| path, alt` |
 | `note` | `noteId, rank: note \| detail, kind, text, body?` — anything the machine says about itself, and everything the mapping above has no name for (§8.2.4) |
+| `transcript.reset` | no payload — drop everything drawn so far; what follows replaces it. Sent once, when a chat's past is read again under a newer reading of the record (§6.3.2) |
 
 **Work**
 | event | payload |
@@ -560,6 +561,18 @@ its result included, so it opens on a click like any other (§8.2.4) — and the
 cap counts calls with the words, because 200 rows is 200 rows however they were
 made.
 
+**A chat read in by an older reading is read again, and nothing is destroyed to
+do it.** The record is read in full FIRST; only when there is a replacement in
+hand does the old copy go, because a record can be moved, pruned, or belong to a
+worktree that no longer exists, and the log is then the only copy the app has
+(bw-1u1.26). "The old copy" is the searchable index of what was said, never the
+event log: seq is handed out as one past the highest in the log, so emptying it
+would restart the numbering a browser mid-chat resumes from and strand it on a
+blank page. The log instead gains one `transcript.reset` and then the new copy,
+which a browser already drawing the old one folds to exactly what a browser
+connecting fresh would (§4, bw-1u1.27). Only a chat this app has never driven is
+rewritten that way — one with live turns in it is the only copy of those.
+
 #### 6.3.3 The way back in
 
 Constraint: a chat opens by being clicked, and a chat that is asleep is woken by
@@ -737,6 +750,12 @@ the output across the wire and the browser threw it away, keeping only a status
 word. It is kept now, with the arguments from `tool.started`, and the row opens
 on a click. That is the manager's "i don't get output in chat for that".
 
+A result that is not plain text is named and measured rather than pasted in: the
+kit hands back blocks, and a block carrying a picture carries its bytes as
+base64. Turning the lot into JSON put thousands of characters of encoding where
+the picture belongs — invisible while the browser was discarding output, and
+unmissable the moment the row started opening onto it (bw-1u1.30).
+
 **One control opens everything, and it is Ctrl+O**, because that is the key that
 does it in his terminal. It opens every call and every `detail` line at once,
 and the choice is remembered for the browser rather than the chat.
@@ -752,7 +771,11 @@ drawn twice).
 
 **A mode change says so.** Switching permission mode mid-chat writes a `note`.
 A chat that quietly stopped asking about tools is a trap, and bypass is now
-reachable from the picker (§3.1).
+reachable from the picker (§3.1). It says so *every* time, including the same
+mode picked twice: a quiet line is otherwise skipped when the same sentence has
+just gone past — which is how one thing the kit says in two shapes is drawn once
+— and that rule cannot tell a repeated sentence from a repeated decision, so a
+line reporting a decision opts out of it (bw-1u1.32).
 
 #### 8.2.5 What this costs the log
 

@@ -221,9 +221,18 @@ export class Store {
     return !!r;
   }
 
-  /** Throws away an entirely-imported log so the record can be read in again. */
+  /**
+   * Drops the searchable copy of an entirely-imported chat, before its record is
+   * read in again under a newer reading.
+   *
+   * Only this copy: the event log is never deleted. Seq is handed out as one
+   * past the highest in the log, so emptying it would start the replacement at
+   * 1 while a browser mid-conversation is asking for everything after 300, and
+   * that browser would be stranded on a blank chat until it reloaded. The log
+   * instead gains a `transcript.reset` and then the new copy, which replays to
+   * exactly what a browser that stayed connected saw (bw-1u1.27).
+   */
   forgetImported(id: string): void {
-    this.db.prepare('DELETE FROM event WHERE session_id = ?').run(id);
     this.db.prepare('DELETE FROM message WHERE session_id = ?').run(id);
   }
 

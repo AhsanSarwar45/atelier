@@ -1,119 +1,101 @@
 /**
  * Nothing the agent kit sends is dropped by the chat.
  *
- * Runs a real session the way workbench/src/drivers/claude.ts runs one, sends a
- * turn and then `/compact`, and asks of every message that comes back: does the
- * driver translate this kind properly, or does it at least draw it as a line?
- * A kind that is neither is a message the manager would never see, which is the
- * fault this check exists for — his `/compact` answer was one, sent twice and
- * drawn neither time (bw-1u1, docs/agent-workbench.md §8.2.4).
+ * It drives THE DRIVER — `ClaudeDriver`, the thing the app runs — and reads back
+ * what it drew. The first version of this check asked the driver's two exported
+ * tables whether a kind had a name, which is a question they answer whether or
+ * not any code is left that draws one: delete the loop's catch-all arm and that
+ * check still passed (bw-1u1.28). This one goes red.
  *
- * Both halves come from the driver itself (`TRANSLATED_KINDS`, `noteFor`), so
- * this check and the code it checks cannot drift apart.
+ * Two halves:
+ *
+ *  - a real chat, one short turn and then `/compact`, so the answer the manager
+ *    never got has to arrive — and arrive once, not twice, because the kit sends
+ *    it both as a status and as a message it wrote itself (bw-1u1)
+ *  - a message of a kind this app has never heard of, handed straight to the
+ *    driver, because that is the whole rule: no list of kinds it is willing to
+ *    hear (docs/agent-workbench.md §8.2.4)
  *
  *   node scripts/chat-draws-every-message.mjs
  *
  * Needs a signed-in `claude` on the machine and spends one short turn.
  */
-import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { ClaudeDriver } from '../workbench/src/drivers/claude.ts';
 
-import { kindOf, noteFor, TRANSLATED_KINDS } from '../workbench/src/drivers/claude.ts';
+const drawn = [];
+const driver = new ClaudeDriver();
 
-// The agent kit is the sidecar's dependency, not the app's, and this script sits
-// above both — so it is resolved from where it actually lives.
-const fromSidecar = createRequire(new URL('../workbench/package.json', import.meta.url));
-const { query } = await import(pathToFileURL(fromSidecar.resolve('@anthropic-ai/claude-agent-sdk')).href);
-
-const inbox = [];
-let wake = null;
-let closed = false;
-
-async function* prompts() {
-  while (!closed) {
-    const next = inbox.shift();
-    if (next === undefined) {
-      await new Promise((r) => (wake = r));
-      continue;
-    }
-    yield { type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content: next } };
-  }
+/**
+ * What a reader sees without asking for anything: the answer, and the grey
+ * lines. A `detail` is deliberately not in here — it is the record rather than
+ * the reading, and waits behind Ctrl+O (§8.2.4).
+ */
+function loud(e) {
+  if (e.type === 'note') return e.rank === 'note' ? `${e.text} ${e.body ?? ''}` : '';
+  if (e.type === 'text.delta') return e.text;
+  if (e.type === 'notice' || e.type === 'error') return e.text ?? e.message ?? '';
+  return '';
 }
 
-function send(text) {
-  inbox.push(text);
-  wake?.();
-  wake = null;
-}
-
-const q = query({
-  prompt: prompts(),
-  options: {
-    cwd: process.cwd(),
-    permissionMode: 'default',
-    allowDangerouslySkipPermissions: true,
-    includePartialMessages: true,
-    strictMcpConfig: true,
-    settingSources: ['user', 'project', 'local'],
-    canUseTool: async (_name, input) => ({ behavior: 'allow', updatedInput: input }),
-  },
+await driver.start({
+  cwd: process.cwd(),
+  permissionMode: 'default',
+  emit: (e) => drawn.push(e),
 });
 
-const dropped = new Map();
-const drawn = new Map();
-/** The two shapes the same answer arrives in; both must be understood. */
-let compactAsStatus = '';
-let compactAsMessage = '';
-let turns = 0;
-
-send('Say the single word: ready. Nothing else.');
-
-const giveUp = setTimeout(() => {
-  console.log('timed out waiting for the session');
-  closed = true;
-  q.close();
-}, 240_000);
-
-try {
-  for await (const m of q) {
-    const kind = kindOf(m);
-    if (TRANSLATED_KINDS.has(kind)) {
-      drawn.set(kind, (drawn.get(kind) ?? 0) + 1);
-    } else {
-      const note = noteFor(m);
-      const bucket = note ? drawn : dropped;
-      bucket.set(kind, (bucket.get(kind) ?? 0) + 1);
-      if (note && /compact/i.test(note.text)) compactAsStatus = note.text;
-    }
-
-    // The words of a message the kit wrote itself, which never streams — the
-    // half the driver drew nowhere at all until this job (bw-1u1).
-    if (m.type === 'assistant' && m.message?.model === '<synthetic>') {
-      const said = (m.message?.content ?? [])
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join(' ');
-      if (/compact/i.test(said)) compactAsMessage = said;
-    }
-
-    if (m.type === 'result') {
-      turns += 1;
-      if (turns === 1) send('/compact');
-      else break;
-    }
+/** Waits for the turn in flight to finish, or gives up. */
+async function settle(seconds = 180) {
+  const mark = drawn.length;
+  for (let i = 0; i < seconds * 10; i += 1) {
+    const done = drawn
+      .slice(mark)
+      .some((e) => e.type === 'session.state' && (e.state === 'idle' || e.state === 'errored'));
+    if (done) return true;
+    await new Promise((r) => setTimeout(r, 100));
   }
-} catch (err) {
-  console.log(`the stream ended: ${err instanceof Error ? err.message : String(err)}`);
+  return false;
 }
-clearTimeout(giveUp);
-closed = true;
-q.close();
 
-console.log(`kinds drawn: ${[...drawn.keys()].sort().join(', ')}`);
-console.log(`dropped kinds: ${dropped.size}${dropped.size ? ` — ${[...dropped.keys()].join(', ')}` : ''}`);
-console.log(`compact as a status: ${compactAsStatus || 'NOTHING'}`);
-console.log(`compact as a message with no stream behind it: ${compactAsMessage || 'NOTHING'}`);
+await driver.send({ text: 'Say the single word: ready. Nothing else.', images: [] });
+const answered = await settle();
 
-const failed = dropped.size > 0 || !compactAsStatus || !compactAsMessage;
-console.log(failed ? 'FAIL' : 'PASS');
-process.exit(failed ? 1 : 0);
+const beforeCompact = drawn.length;
+await driver.send({ text: '/compact', images: [] });
+await settle();
+const sinceCompact = drawn.slice(beforeCompact);
+
+// However the kit chose to say it — a status carrying the reason, or a message
+// with no stream behind it — it reaches the chat, and it reaches it once.
+const compactLines = sinceCompact.map(loud).filter((t) => /compact/i.test(t));
+
+// A kind with no branch anywhere in the driver. Handed to the real loop, not to
+// a copy of its tables: this is the line the fault removes.
+const beforeUnknown = drawn.length;
+driver.draw({ type: 'a_kind_this_app_has_never_heard_of', text: 'something the kit invented today' });
+const unknownDrew = drawn.length - beforeUnknown;
+
+// And the shape the manager's own answer came in, driven the same way, so the
+// check does not rest on a live session happening to compact.
+const beforeStatus = drawn.length;
+driver.draw({ type: 'system', subtype: 'status', compact_result: 'failed', compact_error: 'not enough to compact' });
+const statusLines = drawn.slice(beforeStatus).map(loud).filter((t) => /compact/i.test(t));
+
+await driver.close();
+
+const kinds = [...new Set(drawn.filter((e) => e.type === 'note').map((e) => e.kind))].sort();
+console.log(`a turn was answered: ${answered ? 'yes' : 'no'}`);
+console.log(`kinds of line drawn: ${kinds.join(', ') || 'none'}`);
+console.log(`the compact answer, in the live chat: ${compactLines.length} line(s)`);
+for (const line of compactLines) console.log(`  ${line.slice(0, 160)}`);
+console.log(`an unheard-of kind drew: ${unknownDrew} event(s)`);
+console.log(`a compact status drew: ${statusLines.length} line(s)`);
+
+const wrong = [];
+if (!answered) wrong.push('the session never answered a turn');
+if (compactLines.length === 0) wrong.push('the compact answer reached the chat nowhere');
+if (compactLines.length > 1) wrong.push(`the compact answer was said ${compactLines.length} times`);
+if (unknownDrew === 0) wrong.push('a kind the driver has no branch for was dropped');
+if (statusLines.length !== 1) wrong.push(`a compact status drew ${statusLines.length} lines, not 1`);
+
+console.log(wrong.length ? `FAIL — ${wrong.join('; ')}` : 'PASS');
+process.exit(wrong.length ? 1 : 0);

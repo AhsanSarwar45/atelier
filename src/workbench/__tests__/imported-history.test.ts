@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { pastTranscript, saidByAnyone, textOf } from '@/workbench/imported-history';
+import { pastTranscript, resultText, saidByAnyone, textOf } from '@/workbench/imported-history';
 
 describe('reading a chat’s past', () => {
   it('keeps what a person or an agent said', () => {
@@ -89,11 +89,50 @@ describe('a chat’s past comes back with its commands', () => {
     expect(pastTranscript(cut).find((e) => e.kind === 'call')).toMatchObject({ output: '', ok: true });
   });
 
-  it('still drops the lines the harness wrote, calls and all', () => {
+  it('still drops the words the harness wrote, and keeps what the chat ran', () => {
     const noisy = [
       { type: 'user', message: { content: '<task-notification>\n<task-id>b4qg1</task-id>' } },
       { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'c', name: 'Read', input: {} }] } },
     ];
     expect(pastTranscript(noisy).map((e) => e.kind)).toEqual(['call']);
+  });
+});
+
+/**
+ * What an opened command row prints. The browser used to throw command output
+ * away, so a result carrying a picture was never read by anyone; the moment the
+ * row started opening onto it, a screenshot became a wall of base64 where the
+ * picture belongs (bw-1u1.30).
+ */
+describe('what a command printed', () => {
+  it('gives back plain output as it stands', () => {
+    expect(resultText('built in 4s')).toBe('built in 4s');
+  });
+
+  it('joins the words out of a result that came back in blocks', () => {
+    expect(
+      resultText([
+        { type: 'text', text: 'first' },
+        { type: 'text', text: 'second' },
+      ]),
+    ).toBe('first\nsecond');
+  });
+
+  it('names and measures a picture instead of printing its bytes', () => {
+    const printed = resultText([
+      { type: 'text', text: 'Here is the screen:' },
+      { type: 'image', source: { media_type: 'image/png', data: 'A'.repeat(40_000) } },
+    ]);
+    expect(printed).toBe('Here is the screen:\n[image/png, 29 KB]');
+    expect(printed.length).toBeLessThan(80);
+  });
+
+  it('names a kind of block it has never seen, rather than unrolling it', () => {
+    expect(resultText([{ type: 'document', source: { data: 'B'.repeat(9_000) } }])).toBe('[document]');
+  });
+
+  it('keeps nothing out of a result that carries nothing', () => {
+    expect(resultText(null)).toBe('');
+    expect(resultText(undefined)).toBe('');
   });
 });

@@ -222,9 +222,12 @@ export class Sessions {
    * (docs/agent-workbench.md §6.3.2).
    *
    * When the reading itself changes, a chat read in by an older one is read
-   * again: its old copy is thrown away first, so nothing is said twice. Only a
-   * chat whose whole log came from an import can be rewritten that way — one
-   * with live turns in it is the only copy of those, so it keeps what it has.
+   * again and its old copy replaced, so nothing is said twice. Only a chat whose
+   * whole log came from an import can be rewritten that way — one with live
+   * turns in it is the only copy of those, so it keeps what it has. The
+   * replacement is read in full BEFORE the old copy goes, because a record can
+   * be moved, pruned or belong to a worktree that no longer exists, and the log
+   * is then the only copy the app has (bw-1u1.26).
    */
   private async importPast(summary: SessionSummary): Promise<void> {
     if (!summary.externalId) return;
@@ -235,25 +238,35 @@ export class Sessions {
     const readBy = this.store.importedBy(summary.id);
     if (readBy !== null && readBy >= IMPORT_RECIPE) return;
 
-    if (readBy !== null || this.store.messageCount(summary.id) > 0) {
-      // Read in by an older build, so it has words and no commands. Its live
-      // turns, if it has any, cannot be re-made from the record.
-      if (this.store.wasDrivenHere(summary.id)) {
-        this.store.markImported(summary.id, IMPORT_RECIPE);
-        return;
-      }
-      this.store.forgetImported(summary.id);
+    const drawnAlready = readBy !== null || this.store.messageCount(summary.id) > 0;
+    // Read in by an older build, so it has words and no commands. Its live
+    // turns, if it has any, cannot be re-made from the record.
+    if (drawnAlready && this.store.wasDrivenHere(summary.id)) {
+      this.store.markImported(summary.id, IMPORT_RECIPE);
+      return;
     }
 
     let messages: SessionMessage[];
     try {
       messages = await getSessionMessages(summary.externalId, { dir: summary.cwd });
     } catch {
-      return; // No record to read: the chat simply starts where it is.
+      return; // No record to read: the chat keeps whatever it already has.
     }
+    // The words AND the commands, in one order: a past chat drawn as sentences
+    // alone is the fault the manager photographed (§6.3.2).
+    const past = pastTranscript(messages);
     // From here the record HAS been read, whatever it turned out to hold — an
     // empty one is still a read, and reading it again would find it empty again.
     this.store.markImported(summary.id, IMPORT_RECIPE);
+    if (past.length === 0) return;
+
+    // Only now is the old copy thrown away: there is something to put in its
+    // place (bw-1u1.26). A browser already drawing that copy is told to drop it
+    // in the same breath, or it draws the replacement underneath (bw-1u1.27).
+    if (drawnAlready) {
+      this.store.forgetImported(summary.id);
+      this.publish(summary.id, { type: 'transcript.reset' });
+    }
 
     // What it did, read before what it said, so the chat's cards and reports are
     // already on the line by the time the first message is drawn.
@@ -261,11 +274,6 @@ export class Sessions {
     for (const m of messages) {
       for (const call of toolCallsOf(m.message)) links.observe(call.name, call.input);
     }
-
-    // The words AND the commands, in one order: a past chat drawn as sentences
-    // alone is the fault the manager photographed (§6.3.2).
-    const past = pastTranscript(messages);
-    if (past.length === 0) return;
 
     const shown = past.slice(-IMPORTED_MESSAGES);
     if (past.length > shown.length) {

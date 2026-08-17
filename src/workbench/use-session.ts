@@ -133,7 +133,8 @@ export interface SessionMenu {
 
 const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], permissionModes: [] };
 
-const EMPTY: SessionView = {
+/** A chat with nothing drawn yet. Exported so the fold can be checked on its own. */
+export const EMPTY: SessionView = {
   items: [],
   state: 'starting',
   stateLabel: 'Starting',
@@ -149,7 +150,7 @@ const EMPTY: SessionView = {
 };
 
 /** Applies one event to the view. Pure, so replay and live tail agree by construction. */
-function reduce(view: SessionView, e: WbpEvent): SessionView {
+export function reduce(view: SessionView, e: WbpEvent): SessionView {
   const items = view.items;
   const next: SessionView = { ...view, lastSeq: Math.max(view.lastSeq, e.seq) };
 
@@ -301,6 +302,15 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
 
     case 'notice':
       next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text }];
+      return next;
+
+    // What follows replaces what came before: a chat re-read under a newer
+    // reading of the record republishes its whole transcript, and a browser
+    // already drawing the old copy must drop it rather than append (bw-1u1.27).
+    // The cards go with it — they are read out of the same record.
+    case 'transcript.reset':
+      next.items = [];
+      next.beads = [];
       return next;
 
     default:

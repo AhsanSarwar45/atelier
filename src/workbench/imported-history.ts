@@ -81,6 +81,40 @@ export type PastEntry =
   | { kind: 'said'; role: 'user' | 'assistant'; text: string }
   | { kind: 'call'; id: string; name: string; input: Record<string, unknown>; output: string; ok: boolean };
 
+/**
+ * What a command printed, in a form a reader can read.
+ *
+ * A result comes back as a string or as the kit's blocks, and a block that is
+ * not text — a screenshot, a picture the agent read — carries its bytes encoded
+ * as base64. Turning the lot into raw JSON put thousands of characters of that
+ * encoding where the picture belongs, which nobody saw while the browser was
+ * throwing command output away and everybody saw the moment it stopped
+ * (bw-1u1.30). Such a block is named and measured instead.
+ */
+export function resultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (content === null || content === undefined) return '';
+  if (!Array.isArray(content)) return JSON.stringify(content);
+  return content
+    .map((block) => {
+      const b = (typeof block === 'object' && block !== null ? block : {}) as {
+        type?: string;
+        text?: unknown;
+        source?: { media_type?: string; data?: unknown };
+      };
+      if (b.type === 'text') return String(b.text ?? '');
+      if (b.type === 'image') {
+        const kind = b.source?.media_type ?? 'image';
+        // base64 spends four characters per three bytes, which is close enough
+        // for a size a reader is only deciding "big or small" from.
+        const bytes = typeof b.source?.data === 'string' ? Math.round((b.source.data.length * 3) / 4) : 0;
+        return `[${kind}, ${bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`}]`;
+      }
+      return `[${b.type ?? 'unknown'}]`;
+    })
+    .join('\n');
+}
+
 /** What each call in the record printed, by the id the call was made under. */
 function resultsByCall(messages: RecordedMessage[]): Map<string, { output: string; ok: boolean }> {
   const results = new Map<string, { output: string; ok: boolean }>();
@@ -90,8 +124,7 @@ function resultsByCall(messages: RecordedMessage[]): Map<string, { output: strin
     for (const block of content) {
       const b = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
       if (b.type !== 'tool_result' || typeof b.tool_use_id !== 'string') continue;
-      const output = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
-      results.set(b.tool_use_id, { output, ok: !b.is_error });
+      results.set(b.tool_use_id, { output: resultText(b.content), ok: !b.is_error });
     }
   }
   return results;

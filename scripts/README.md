@@ -138,16 +138,18 @@ XDG_DATA_HOME=<the same copy> python3 scripts/chat-wakes-on-send.py
 
 ## `chat-draws-every-message.mjs`
 
-Holds the rule that nothing the agent kit sends is dropped. It runs a session the
-way the driver runs one, sends a turn and then `/compact`, and asks of every
-message: does the driver translate this kind properly, or does it at least draw
-it as a line? Both halves of the answer come from the driver itself
-(`TRANSLATED_KINDS`, `noteFor`), so the check and the code cannot drift apart.
+Holds the rule that nothing the agent kit sends is dropped. It drives **the
+driver** — the class the app runs — and reads back what it drew. Two halves: a
+real chat, one short turn and then `/compact`, so the answer the manager never
+got has to arrive and arrive once; and a message of a kind this app has never
+heard of, handed straight to the driver, because that is the whole rule — no
+list of kinds it is willing to hear.
 
-It fails when any kind is neither, and when `/compact`'s answer is missing from
-either of the two shapes the kit sends it in — the status carrying
-`compact_error`, and the message the kit writes itself, which never streams and
-so was drawn nowhere at all (bw-1u1).
+The first version of this check asked the driver's two exported tables whether a
+kind had a name, which is a question they answer whether or not any code is left
+that draws one: deleting the message loop's catch-all arm left it green
+(bw-1u1.28). Shown red by deleting that arm — "a kind the driver has no branch
+for was dropped".
 
 ```
 node scripts/chat-draws-every-message.mjs
@@ -167,6 +169,11 @@ check would pass with its own flag set while the app's own session was refused,
 which is the fault it exists for. Shown red by removing that one line —
 "bypassPermissions: REFUSED".
 
+It also picks one mode twice in a row and requires two lines for it. The rule
+that stops the chat saying one thing twice cannot tell a repeated sentence from
+a repeated decision, and used to swallow the second (bw-1u1.32); shown red by
+putting that back — "said so 1 time(s)".
+
 ```
 node scripts/chat-takes-every-mode.mjs
 ```
@@ -175,8 +182,11 @@ Starts a session and sends no turn to it.
 
 ## `shoot-chat-everything.mjs`
 
-Not a check — the two pictures the chat work is judged on: a command opened onto
-what it ran and what it printed, and the lines a chat draws when it compacts.
+Not a check — the one picture the chat work is judged on, and both halves of the
+claim are in it: a command opened onto what it ran and what it printed, and the
+line the compact answer gave. It was two pictures, and the named one carried
+half (bw-1u1.29); it now refuses to save anything unless the command row really
+is open onto its output.
 
 ```
 BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3018 \

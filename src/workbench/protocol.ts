@@ -158,6 +158,16 @@ export type WbpEvent = EventBase &
      * are stored, because the log IS the transcript (§4).
      */
     | { type: 'note'; noteId: string; rank: NoteRank; kind: string; text: string; body: string | null }
+    /**
+     * Drop everything drawn so far; what follows replaces it.
+     *
+     * Sent once, when a chat's past is read again under a newer reading of the
+     * record. A browser already showing the old copy would otherwise draw the
+     * replacement underneath it and say everything twice (bw-1u1.27). Written to
+     * the log like every other event, so a later replay from seq 0 meets it
+     * first, with nothing to drop, and folds to the same transcript.
+     */
+    | { type: 'transcript.reset' }
   );
 
 /** How loudly a `note` is drawn. See the rank table in §8.2.4. */
