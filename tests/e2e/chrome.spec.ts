@@ -145,6 +145,64 @@ test.describe('chrome', () => {
     });
   }
 
+  /**
+   * Every theme, not a sample: the gear is inked from the app's own text scale,
+   * which all eleven spell out. The button's quiet variants are written in the
+   * borrowed vocabulary (`muted-foreground`, `accent-foreground`) that three of
+   * the themes never define, and on those three a control wearing one silently
+   * falls back to a fixed palette. Nothing on screen says so — which is why this
+   * is checked by reading the ink against the theme's own value rather than by
+   * looking at it.
+   */
+  test('the gear is inked by every one of the eleven themes, not by a fallback', async ({ page, request }) => {
+    const id = await projectId(request);
+    const themes = [
+      null,
+      'glassmorphism',
+      'neo-brutalist',
+      'linear-minimal',
+      'soft-light',
+      'notion-warm',
+      'github-clean',
+      'catppuccin-latte',
+      'catppuccin-frappe',
+      'catppuccin-macchiato',
+      'catppuccin-mocha',
+    ] as const;
+
+    await page.goto(`/project?id=${id}&tab=board`);
+    await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
+
+    const off: string[] = [];
+    for (const theme of themes) {
+      // The theme is picked up on load, so it is stored and the screen reloaded
+      // rather than poked onto the document: the ink is read the way a reader
+      // gets it, not the way a script can force it.
+      await page.evaluate((t) => {
+        if (t) localStorage.setItem('beads-theme', t);
+        else localStorage.removeItem('beads-theme');
+      }, theme);
+      await page.reload();
+      await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('a[aria-label="Settings"]')).toBeVisible();
+
+      const ink = await page.locator('a[aria-label="Settings"]').evaluate((el) => {
+        // What the live theme says its third-level text is, resolved to the
+        // same rgb() the browser reports for the gear.
+        const probe = document.createElement('span');
+        probe.style.color = `hsl(${getComputedStyle(document.documentElement).getPropertyValue('--text-tertiary').trim()})`;
+        document.body.appendChild(probe);
+        const wanted = getComputedStyle(probe).color;
+        probe.remove();
+        return { theme: document.documentElement.dataset.theme ?? '(default)', got: getComputedStyle(el).color, wanted };
+      });
+
+      if (ink.got !== ink.wanted) off.push(`${ink.theme}: gear ${ink.got}, theme ${ink.wanted}`);
+    }
+
+    expect(off, `themes the gear does not take its ink from: ${off.join('; ')}`).toHaveLength(0);
+  });
+
   test('every pane that scrolls gets the app’s hairline, and nothing switches it off', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=board`);

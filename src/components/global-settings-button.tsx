@@ -19,10 +19,18 @@ import { Button } from "@/components/ui/button";
 
 export function GlobalSettingsButton() {
   return (
-    // `dim` is the bar's quiet control: the theme's muted ink, its full
-    // strength under the pointer. `ml-auto` only bites on a bar whose contents
-    // do not already reach the right edge.
-    <Button variant="dim" size="icon" className="ml-auto shrink-0" asChild>
+    // The ink is named from the app's own text scale, which all eleven themes
+    // spell out — the button's own quiet variants are written in the borrowed
+    // vocabulary (`muted-foreground`, `accent-foreground`) that three of the
+    // themes never define, so on those three they fall back to a fixed palette
+    // instead of the theme's. `ml-auto` only bites on a bar whose contents do
+    // not already reach the right edge.
+    <Button
+      variant="ghost"
+      size="icon"
+      className="ml-auto shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
+      asChild
+    >
       <Link href="/settings" aria-label="Settings">
         <Settings aria-hidden="true" />
       </Link>
