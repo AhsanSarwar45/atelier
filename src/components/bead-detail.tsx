@@ -32,7 +32,8 @@ import {
 import { updateTitle, updateDescription, updateStatus as cliUpdateStatus } from "@/lib/cli";
 import { ISSUE_TYPES, getIssueTypeMeta } from "@/lib/issue-types";
 import { cn, isDoltProject } from "@/lib/utils";
-import { SET_BY, STATES, counted, standing, type Bead, type BeadStatus, type WorktreeStatus } from "@/types";
+import { computeEpicProgress } from "@/lib/epic-parser";
+import { SET_BY, STATES, standing, type Bead, type BeadStatus, type Epic, type WorktreeStatus } from "@/types";
 
 
 /** Priority levels 0–4, displayed P0 (critical) … P4 (backlog). Single source for the editor options. */
@@ -201,10 +202,14 @@ export function BeadDetail({
       .filter((b): b is Bead => b !== undefined);
   }, [isEpic, bead.children, allBeads]);
 
-  /** How many of them were dropped, and so are no part of the job's size. */
-  const droppedChildren = useMemo(
-    () => childTasks.filter(c => !counted(c.status)).length,
-    [childTasks],
+  /**
+   * The job's size, from the one counter the card reads. Working it out here
+   * as well is how the panel and the card came to state two different sizes
+   * for one job in the first place.
+   */
+  const progress = useMemo(
+    () => computeEpicProgress(bead as Epic, allBeads ?? []),
+    [bead, allBeads],
   );
 
   // Resolve related tasks from IDs
@@ -468,9 +473,11 @@ export function BeadDetail({
                       <span className="text-[10px] font-mono text-t-muted flex-shrink-0">
                         {formatBeadId(related.id)}
                       </span>
+                      {/* Struck through when nobody is waiting on it, finished
+                          or dropped alike — the same reading as everywhere. */}
                       <span className={cn(
                         "text-xs font-medium flex-1 min-w-0 truncate group-hover:underline",
-                        related.status === "closed" ? "line-through text-t-muted" : "text-t-secondary"
+                        standing(related.status) ? "text-t-secondary" : "line-through text-t-muted"
                       )}>
                         {related.title}
                       </span>
@@ -492,8 +499,8 @@ export function BeadDetail({
                     what it dropped, never the two added together. Two screens
                     giving one job two sizes is what this reads against. */}
                 <h3 className="text-sm font-semibold text-t-secondary">
-                  Subtasks ({droppedChildren > 0
-                    ? `${childTasks.length - droppedChildren} · ${droppedChildren} dropped`
+                  Subtasks ({progress.dropped > 0
+                    ? `${progress.total} · ${progress.dropped} dropped`
                     : childTasks.length})
                 </h3>
                 {projectPath && (

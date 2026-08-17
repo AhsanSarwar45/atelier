@@ -16,6 +16,12 @@ export interface KanbanColumnProps {
   beads: Bead[];
   /** All beads for resolving epic children */
   allBeads: Bead[];
+  /**
+   * Every bead's state by id, built once by the board. A card asks it whether
+   * it is blocked; building one per card was a fresh map of the whole board
+   * for each of the cards on it, on every pass.
+   */
+  statusById: ReadonlyMap<string, string>;
   selectedBeadId?: string | null;
   ticketNumbers?: Map<string, number>;
   onSelectBead: (bead: Bead) => void;
@@ -40,6 +46,7 @@ function isEpic(bead: Bead): bead is Epic {
 interface ColumnCardProps {
   bead: Bead;
   allBeads: Bead[];
+  statusById: ReadonlyMap<string, string>;
   ticketNumber?: number;
   isSelected: boolean;
   onSelectBead: (bead: Bead) => void;
@@ -59,6 +66,7 @@ interface ColumnCardProps {
 function ColumnCard({
   bead,
   allBeads,
+  statusById,
   ticketNumber,
   isSelected,
   onSelectBead,
@@ -78,6 +86,7 @@ function ColumnCard({
     <EpicCard
       epic={bead}
       allBeads={allBeads}
+      statusById={statusById}
       ticketNumber={ticketNumber}
       isSelected={isSelected}
       onSelect={onSelectBead}
@@ -90,7 +99,7 @@ function ColumnCard({
   ) : (
     <BeadCard
       bead={bead}
-      allBeads={allBeads}
+      statusById={statusById}
       ticketNumber={ticketNumber}
       isSelected={isSelected}
       onSelect={onSelectBead}
@@ -113,6 +122,7 @@ export function KanbanColumn({
   title,
   beads,
   allBeads,
+  statusById,
   selectedBeadId,
   ticketNumbers,
   onSelectBead,
@@ -153,6 +163,7 @@ export function KanbanColumn({
               key={bead.id}
               bead={bead}
               allBeads={allBeads}
+              statusById={statusById}
               ticketNumber={ticketNumbers?.get(bead.id)}
               isSelected={selectedBeadId === bead.id}
               onSelectBead={onSelectBead}

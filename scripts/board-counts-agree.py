@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Does a job's card count the pieces that count, and say what it dropped?
+
+    board-counts-agree.py <project-path> [--url http://127.0.0.1:3008]
+                          [--shot out.png] [--count-dropped]
+
+Dropped work is not part of a job. A job of sixteen pieces with five dropped is a
+job of eleven: it reads 11/11 and 100% once those eleven are done, and it says
+"5 dropped" beside them — the manager's ruling, 2026-08-17. Counting the dropped
+ones in the total is what left a job with nothing to do sitting at 69% with the
+sign-off button withheld, and no test that stops at the code can see it: the
+screen looked calm and drew the wrong number.
+
+So this asks `bd` what each job holds, opens the project screen in a real
+browser, reads the fraction, the percentage and the dropped note off every job
+card, and compares. It also reads what each card says about its own pieces,
+because a bar counting eleven over a list of sixteen is the disagreement the
+rule exists to stop.
+
+`--count-dropped` puts the old rule back on this side of the comparison, which
+is how the check is shown to bite: run against the fixed screen it must name
+every job that dropped anything.
+
+A live screen never finishes loading — its updates stream forever — so a plain
+headless screenshot never fires. This drives the browser over the debugging
+protocol instead: navigate, settle, read the DOM.
+"""
+import argparse
+import json
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+
+import websocket  # pip install websocket-client
+
+PORT = 9336
+
+# What the board stores for work that was dropped: closed, and marked.
+DROPPED_LABEL = "cancelled"
+
+
+def bd_list(project):
+    out = subprocess.run(["bd", "list", "--all", "--json"],
+                         cwd=project, capture_output=True, text=True)
+    if out.returncode != 0:
+        sys.exit(f"bd list failed:\n{out.stderr.strip()}")
+    return json.loads(out.stdout or "[]")
+
+
+def dropped(card):
+    return (card.get("status") == "closed"
+            and DROPPED_LABEL in (card.get("labels") or []))
+
+
+def board_jobs(project, count_dropped):
+    """Every job's expected numbers, keyed by id: pieces, finished, dropped.
+
+    `count_dropped` restores the rule this check exists to refuse, so the check
+    can be shown going red against a screen that is right.
+    """
+    cards = bd_list(project)
+    children = {}
+    for card in cards:
+        parent = card.get("parent")
+        if parent:
+            children.setdefault(parent, []).append(card)
+
+    jobs = {}
+    for card in cards:
+        kids = children.get(card["id"])
+        if not kids:
+            continue
+        gone = [k for k in kids if dropped(k)]
+        counted = kids if count_dropped else [k for k in kids if not dropped(k)]
+        done = [k for k in counted if k.get("status") == "closed"]
+        jobs[card["id"]] = {
+            "total": len(counted),
+            "done": len(done),
+            "dropped": len(gone),
+            "pieces": len(kids),
+        }
+    return jobs
+
+
+class Browser:
+    def __init__(self):
+        self.proc = subprocess.Popen(
+            ["google-chrome", "--headless=new", "--disable-gpu", "--no-sandbox",
+             f"--remote-debugging-port={PORT}", "--remote-allow-origins=*",
+             "--window-size=1500,1000", "--user-data-dir=/tmp/board-counts-profile",
+             "about:blank"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        for _ in range(40):
+            try:
+                tabs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json"))
+                break
+            except Exception:
+                time.sleep(0.5)
+        else:
+            sys.exit("the browser never came up")
+        page = [t for t in tabs if t["type"] == "page"][0]
+        self.ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=60)
+        self.n = 0
+
+    def send(self, method, **params):
+        self.n += 1
+        self.ws.send(json.dumps({"id": self.n, "method": method, "params": params}))
+        while True:
+            msg = json.loads(self.ws.recv())
+            if msg.get("id") == self.n:
+                return msg.get("result", {})
+
+    def js(self, expr):
+        r = self.send("Runtime.evaluate", expression=expr, returnByValue=True,
+                      awaitPromise=True)
+        return r.get("result", {}).get("value")
+
+    def close(self):
+        self.proc.terminate()
+
+
+# A job's card is a frame in a column that draws a progress bar.
+#
+# The numbers are read off the bar itself and off the block around it, never off
+# the card's whole text: a job whose own title says "reads 100% on the board"
+# would otherwise be measured against its own description.
+READ_JOBS = """
+(() => {
+  const jobs = {};
+  for (const el of document.querySelectorAll('[data-column] .theme-card[data-bead-id]')) {
+    const bar = el.querySelector('[aria-label^="Epic progress:"]');
+    if (!bar) continue;
+    const fraction = bar.getAttribute('aria-label')
+      .match(/^Epic progress: (\\d+) of (\\d+) completed$/);
+    if (!fraction) continue;
+    const block = bar.parentElement;
+    const percent = block.innerText.match(/(\\d+)%/);
+    const drop = block.innerText.match(/(\\d+) dropped/);
+    const header = [...el.querySelectorAll('button')]
+      .map(b => b.textContent.match(/Child Tasks \\(([^)]*)\\)/))
+      .find(Boolean);
+    jobs[el.dataset.beadId] = {
+      done: Number(fraction[1]),
+      total: Number(fraction[2]),
+      percent: percent ? Number(percent[1]) : null,
+      dropped: drop ? Number(drop[1]) : 0,
+      list: header ? header[1] : null,
+    };
+  }
+  return jobs;
+})()
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("project")
+    ap.add_argument("--url", default="http://127.0.0.1:3008")
+    ap.add_argument("--shot", help="also write a screenshot of the board here")
+    ap.add_argument("--count-dropped", action="store_true",
+                    help="expect the old rule, to show this check going red")
+    args = ap.parse_args()
+
+    projects = json.load(urllib.request.urlopen(f"{args.url}/api/projects"))
+    match = [p for p in projects if p["path"] == args.project]
+    if not match:
+        sys.exit(f"the screen does not know a project at {args.project}")
+
+    held = board_jobs(args.project, args.count_dropped)
+
+    b = Browser()
+    try:
+        b.send("Page.enable")
+        b.send("Runtime.enable")
+        b.send("Page.navigate", url=f"{args.url}/project?id={match[0]['id']}")
+        time.sleep(8)
+        drawn = b.js(READ_JOBS)
+        if args.shot:
+            import base64
+            shot = b.send("Page.captureScreenshot", format="png")
+            open(args.shot, "wb").write(base64.b64decode(shot["data"]))
+    finally:
+        b.close()
+
+    if not drawn:
+        sys.exit("no job card on the screen draws a count — is this the fork?")
+
+    bad, checked, with_dropped = [], 0, 0
+    for job, shown in sorted(drawn.items()):
+        want = held.get(job)
+        if want is None:
+            continue
+        checked += 1
+        if want["dropped"]:
+            with_dropped += 1
+        if (shown["done"], shown["total"]) != (want["done"], want["total"]):
+            bad.append(f"{job} holds {want['done']}/{want['total']} "
+                       f"({want['pieces']} pieces, {want['dropped']} dropped) "
+                       f"but draws {shown['done']}/{shown['total']}")
+            continue
+        if shown["dropped"] != want["dropped"]:
+            bad.append(f"{job} dropped {want['dropped']} pieces "
+                       f"but the card says {shown['dropped'] or 'nothing'}")
+        expect_percent = round(shown["done"] / shown["total"] * 100) if shown["total"] else 0
+        if shown["percent"] is not None and shown["percent"] != expect_percent:
+            bad.append(f"{job} draws {shown['done']}/{shown['total']} "
+                       f"but calls it {shown['percent']}%")
+        # A bar counting eleven over a list of sixteen is the disagreement the
+        # rule exists to stop, so the list says the same two numbers.
+        if shown["list"] is not None:
+            want_list = (f"{want['total']} · {want['dropped']} dropped"
+                         if want["dropped"] else str(want["pieces"]))
+            if shown["list"].strip() != want_list:
+                bad.append(f"{job} lists its pieces as ({shown['list']}) "
+                           f"where the count above says ({want_list})")
+
+    print(f"job cards read {checked:>4}   of them with dropped work {with_dropped:>4}")
+    if args.count_dropped:
+        print("expecting the OLD rule: dropped work counted towards the job")
+
+    if bad:
+        print("\nthe screen and the board disagree:")
+        for line in bad[:20]:
+            print("  " + line)
+        if len(bad) > 20:
+            print(f"  … and {len(bad) - 20} more")
+        return 1
+    if with_dropped == 0:
+        print("\nno job on this board has dropped work, so nothing was actually compared")
+        return 1
+    print("\nevery job counts the pieces that count, and says what it dropped")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

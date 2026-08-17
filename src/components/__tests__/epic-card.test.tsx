@@ -45,11 +45,16 @@ const epicIn = (status: BeadStatus): Epic => ({
   children: [child.id],
 });
 
+/** The lookup the board builds once and every card is handed. */
+const lookup = (beads: Bead[]): ReadonlyMap<string, string> =>
+  new Map(beads.map(b => [b.id, b.status]));
+
 const draw = (status: BeadStatus) =>
   render(
     <EpicCard
       epic={epicIn(status)}
       allBeads={[child]}
+      statusById={lookup([child])}
       onSelect={vi.fn()}
       onChildClick={vi.fn()}
       projectPath="/test/project"
@@ -69,6 +74,7 @@ const withPieces = (status: BeadStatus, done: number, dropped: number) => {
   return {
     epic: { ...epicIn(status), children: pieces.map((p) => p.id) },
     allBeads: pieces,
+    statusById: lookup(pieces),
     onSelect: vi.fn(),
     onChildClick: vi.fn(),
     projectPath: '/test/project',
@@ -97,6 +103,7 @@ describe('the button that finishes a job', () => {
       <EpicCard
         epic={{ ...epicIn('manager_review'), children: [child.id, unfinished.id] }}
         allBeads={[child, unfinished]}
+        statusById={lookup([child, unfinished])}
         onSelect={vi.fn()}
         onChildClick={vi.fn()}
         projectPath="/test/project"
@@ -156,6 +163,7 @@ describe('what a card says it is made of', () => {
         {...props}
         epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
         allBeads={[...props.allBeads, live]}
+        statusById={lookup([...props.allBeads, live])}
       />
     );
     expect(screen.getByText(/1 in progress/)).toBeInTheDocument();
@@ -183,6 +191,7 @@ describe('the list of pieces under a card', () => {
         {...props}
         epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
         allBeads={[...props.allBeads, live]}
+        statusById={lookup([...props.allBeads, live])}
       />
     );
     const titles = Array.from(container.querySelectorAll('p.text-xs.font-medium'));
@@ -212,6 +221,7 @@ describe('what the card asks the code host about', () => {
         {...props}
         epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
         allBeads={[...props.allBeads, live]}
+        statusById={lookup([...props.allBeads, live])}
       />
     );
     await waitFor(() =>

@@ -194,6 +194,17 @@ export default function KanbanBoard() {
   }, [topLevelBeads, beads]);
 
   /**
+   * Every bead's state by id, built once for the whole board.
+   *
+   * Each card asks it whether it is blocked. Building one per card meant a
+   * fresh map of the entire board for every card drawn, on every pass.
+   */
+  const statusById = useMemo(
+    () => new Map(beads.map(b => [b.id, b.status] as const)),
+    [beads],
+  );
+
+  /**
    * Detect beads with truly unknown statuses for the warning indicator.
    */
   const unknownStatusBeads = useMemo(() => getUnknownStatusBeads(beads), [beads]);
@@ -367,6 +378,7 @@ export default function KanbanBoard() {
                 title={title}
                 beads={filteredBeadsByStatus[status] || []}
                 allBeads={beads}
+                statusById={statusById}
                 selectedBeadId={selectedId}
                 ticketNumbers={ticketNumbers}
                 onSelectBead={openBead}

@@ -46,6 +46,36 @@ report is drawn inside the card.** It walks up from every "Manager report" on
 the page looking for a card frame around it, so a report parked beside a card
 is caught rather than counted as that card's own.
 
+## `board-counts-agree.py <project-path>`
+
+Asks `bd` what each job holds, opens the project screen, and reads the fraction,
+the percentage and the dropped note off every job card.
+
+The rule it encodes: **dropped work is not part of a job** — the manager's
+ruling, 2026-08-17. A job of sixteen pieces with five dropped is a job of
+eleven; it reads 11/11 and 100% once those eleven are done, and says "5 dropped"
+beside them. Counting the dropped ones in the total is what left a job with
+nothing left to do sitting at 69% with the sign-off button withheld, and no test
+that stops at the code could see it: the screen looked calm and drew the wrong
+number.
+
+Two rules ride along, because they are the same disagreement one step further
+out:
+
+- **the percentage is the fraction it is drawn beside**, not some other reading
+  of the same job
+- **the list of pieces says the same two numbers the count above it does**, so a
+  bar counting eleven never sits over a list of sixteen
+
+`--count-dropped` puts the old rule back on the check's side, which is how it is
+shown to bite: against a screen that is right it must name every job that
+dropped anything. It also fails when no job on the board has dropped work, since
+then it compared nothing.
+
+The numbers come off the progress bar's own label and the block around it, never
+off the card's whole text — a job whose title says "reads 100% on the board"
+would otherwise be measured against its own description.
+
 ## `panel-drawers-agree.py <project-path>`
 
 Opens each side panel and samples it 120 ms later, while it should still be

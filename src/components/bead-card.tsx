@@ -9,16 +9,21 @@ import { CopyableText } from "@/components/copyable-text";
 import { Badge } from "@/components/ui/badge";
 import { useTheme } from "@/hooks/use-theme";
 import { tagFor } from "@/lib/bead-labels";
-import { formatBeadId, formatWorktreePath, isBlocked, truncate } from "@/lib/bead-utils";
+import { formatBeadId, formatWorktreePath, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import { cn } from "@/lib/utils";
+import { standing } from "@/types";
 import type { Bead, WorktreeStatus, PRStatus, StatusBadgeInfo } from "@/types";
 import { CardLiveChat } from "@/workbench/card-live";
 
 export interface BeadCardProps {
   bead: Bead;
-  /** All beads on the board, used to resolve dep statuses for blocked detection */
-  allBeads: Bead[];
+  /**
+   * Every bead's state by id, for asking whether this card is blocked. The
+   * board builds it once: building one here meant a fresh map of the whole
+   * board per card, on every pass.
+   */
+  statusById: ReadonlyMap<string, string>;
   ticketNumber?: number;
   /** Worktree status for the bead */
   worktreeStatus?: WorktreeStatus;
@@ -155,9 +160,9 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
   }
 }
 
-export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatus, isSelected = false, onSelect, report }: BeadCardProps) {
+export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prStatus, isSelected = false, onSelect, report }: BeadCardProps) {
   const { layout } = useTheme();
-  const blocked = isBlocked(bead, allBeads);
+  const blocked = isBlockedBy(bead, statusById);
   const commentCount = (bead.comments ?? []).length;
   const relatedCount = (bead.relates_to ?? []).length;
 
@@ -223,7 +228,10 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
     </span>
   );
 
-  const isClosed = bead.status === 'closed';
+  // A card nobody is waiting on is dimmed and struck through, whether the work
+  // was finished or dropped. Dimming only the finished ones drew abandoned work
+  // as the live work of the board.
+  const isSettled = !standing(bead.status);
 
   // ─── Layout: compact-row (Linear Minimal) ───
   if (layout === 'compact-row') {
@@ -235,7 +243,7 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
           "bg-card border border-transparent",
           "hover:bg-surface-overlay/50",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          isClosed && "opacity-40",
+          isSettled && "opacity-40",
           isSelected && "bg-info/5 outline outline-1 outline-info/20"
         )}
       >
@@ -298,14 +306,14 @@ export function BeadCard({ bead, allBeads, ticketNumber, worktreeStatus, prStatu
           "hover:bg-surface-inset/30",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           blocked && "border-l-3 border-l-danger",
-          isClosed && "opacity-45",
+          isSettled && "opacity-45",
           isSelected && "ring-2 ring-ring ring-offset-2 ring-offset-surface-base"
         )}
       >
         {/* Title first */}
         <div className={cn(
           "text-sm font-medium leading-snug text-t-primary mb-1.5",
-          isClosed && "line-through decoration-t-faint"
+          isSettled && "line-through decoration-t-faint"
         )}>
           {truncate(bead.title, 70)}
         </div>

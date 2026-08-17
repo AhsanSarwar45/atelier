@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
 import * as api from "@/lib/api";
-import { formatBeadId, isBlocked, truncate } from "@/lib/bead-utils";
+import { formatBeadId, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn, isDoltProject } from "@/lib/utils";
@@ -26,6 +26,12 @@ export interface EpicCardProps {
   epic: Epic;
   /** All beads to resolve children */
   allBeads: Bead[];
+  /**
+   * Every bead's state by id, for asking whether this card is blocked. The
+   * board builds it once; a card that builds its own builds a map of the whole
+   * board on every pass.
+   */
+  statusById: ReadonlyMap<string, string>;
   /** Ticket number for display */
   ticketNumber?: number;
   /** Whether this epic is selected */
@@ -73,6 +79,7 @@ const PR_STATUS_REFRESH_INTERVAL = 30_000;
 export function EpicCard({
   epic,
   allBeads,
+  statusById,
   ticketNumber,
   isSelected = false,
   onSelect,
@@ -414,7 +421,7 @@ export function EpicCard({
             <DependencyBadge
               deps={epic.deps}
               blockers={epic.blockers}
-              isBlocked={isBlocked(epic, allBeads)}
+              isBlocked={isBlockedBy(epic, statusById)}
               onNavigate={onNavigateToDependency}
             />
             <Badge variant="outline" className="text-[10px] px-2 py-0.5 border-epic/30 text-epic bg-epic/20 font-semibold">EPIC</Badge>
