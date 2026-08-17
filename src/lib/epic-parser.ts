@@ -5,7 +5,8 @@
  * compute progress metrics, and identify blocking relationships.
  */
 
-import { WORKING, counted, finished, standing } from "@/types";
+import { isBlockedBy } from "@/lib/bead-utils";
+import { WORKING, counted, finished } from "@/types";
 import type { Bead, Epic, EpicProgress } from "@/types";
 
 /**
@@ -144,18 +145,12 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
   const completed = pieces.filter((c) => finished(c.status)).length;
   const inProgress = pieces.filter((c) => c.status === WORKING).length;
 
-  // A piece is blocked while something it waits on is still standing. Work that
-  // was dropped is standing in nobody's way, so it blocks nothing.
-  const blocked = pieces.filter((child) => {
-    if (!child.deps || child.deps.length === 0) {
-      return false;
-    }
-
-    return child.deps.some((depId) => {
-      const depBead = beadMap.get(depId);
-      return depBead !== undefined && standing(depBead.status);
-    });
-  }).length;
+  // What blocks a piece is the board's one rule, asked here rather than spelled
+  // again.
+  const statusById = new Map(
+    Array.from(beadMap, ([id, bead]) => [id, bead.status] as const),
+  );
+  const blocked = pieces.filter((child) => isBlockedBy(child, statusById)).length;
 
   return {
     total: pieces.length,
@@ -185,46 +180,12 @@ export function progressPercent(progress: EpicProgress): number {
   return Math.round((progress.completed / progress.total) * 100);
 }
 
-/**
- * Identifies tasks that are blocked by unresolved dependencies
- *
- * @param beads - Array of all beads to check
- * @returns Array of beads that have blocking dependencies
- *
- * @example
- * ```typescript
- * const blockedTasks = getBlockedTasks(allBeads);
- * console.log(`${blockedTasks.length} tasks are currently blocked`);
- * blockedTasks.forEach(task => {
- *   console.log(`${task.id} blocked by: ${task.deps?.join(', ')}`);
- * });
- * ```
+/*
+ * A third way of asking what is blocked used to live here, over the whole
+ * board. Nothing called it, and it was the copy that had to be taught in step
+ * with the other two every time the rule moved. `isBlockedBy` in
+ * `bead-utils.ts` is the rule now, and it is the only one.
  */
-export function getBlockedTasks(beads: Bead[]): Bead[] {
-  if (!beads || beads.length === 0) {
-    return [];
-  }
-
-  // Create lookup map for fast access
-  const beadMap = new Map<string, Bead>();
-  for (const bead of beads) {
-    beadMap.set(bead.id, bead);
-  }
-
-  // Filter beads with unresolved dependencies
-  return beads.filter((bead) => {
-    if (!bead.deps || bead.deps.length === 0) {
-      return false;
-    }
-
-    // Blocked while something it waits on is still standing. Work that was
-    // dropped is standing in nobody's way.
-    return bead.deps.some((depId) => {
-      const depBead = beadMap.get(depId);
-      return depBead !== undefined && standing(depBead.status);
-    });
-  });
-}
 
 /**
  * Computes which beads the given bead blocks (inverse of deps)

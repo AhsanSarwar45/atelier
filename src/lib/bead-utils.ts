@@ -88,32 +88,48 @@ export function truncate(text: string, maxLength: number): string {
 }
 
 /**
- * Detect if bead is blocked by checking for unresolved dependencies.
+ * Whether a bead is waiting on something — the board's one answer to that.
  *
- * A bead is blocked when at least one of the things it waits on (resolved via
- * {@link allBeads}) is still standing. Work that was dropped is standing in
- * nobody's way, so it blocks nothing — and a bead with nothing left standing
- * of its own is never blocked. Dependencies that cannot be found in
- * {@link allBeads} (e.g. references to deleted beads) do NOT block —
- * this matches the behaviour of `bd ready` and `getBlockedTasks` in
- * `epic-parser.ts`.
+ * It is blocked when at least one of the things it waits on is still standing.
+ * Work that was dropped is standing in nobody's way, so it blocks nothing, and
+ * a bead with nothing left standing of its own is never blocked. Something it
+ * waits on that cannot be found at all (a reference to a deleted card) does NOT
+ * block — this matches what `bd ready` does.
+ *
+ * Everything that asks this question calls this, and the reason is what the
+ * dropped state cost: the rule was written out three times, all three had to be
+ * taught the same thing in step, and the one that was missed would have gone
+ * quietly wrong.
  *
  * @param bead - The bead to evaluate (only `status` and `deps` are used).
- * @param allBeads - All beads available for dep resolution. Pass the
- *   full board state — `deps` lookup is O(deps.length) over a Map.
+ * @param statusById - The status of every bead the deps could name.
+ */
+export function isBlockedBy(
+  bead: { status: string; deps?: string[] | null },
+  statusById: ReadonlyMap<string, string>,
+): boolean {
+  if (!standing(bead.status)) return false;
+  const deps = bead.deps ?? [];
+  if (deps.length === 0) return false;
+  return deps.some((depId) => {
+    const status = statusById.get(depId);
+    return status !== undefined && standing(status);
+  });
+}
+
+/**
+ * {@link isBlockedBy} for a caller holding the board as a list rather than a
+ * lookup. Building the lookup is this function's whole job; the rule is not
+ * repeated here.
+ *
+ * @param bead - The bead to evaluate (only `status` and `deps` are used).
+ * @param allBeads - All beads available for dep resolution.
  */
 export function isBlocked(
   bead: { status: string; deps?: string[] | null },
   allBeads: ReadonlyArray<{ id: string; status: string }>,
 ): boolean {
-  if (!standing(bead.status)) return false;
-  const deps = bead.deps ?? [];
-  if (deps.length === 0) return false;
-  const statusById = new Map(allBeads.map((b) => [b.id, b.status]));
-  return deps.some((depId) => {
-    const status = statusById.get(depId);
-    return status !== undefined && standing(status);
-  });
+  return isBlockedBy(bead, new Map(allBeads.map((b) => [b.id, b.status])));
 }
 
 /**
