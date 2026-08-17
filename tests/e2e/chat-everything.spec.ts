@@ -46,7 +46,7 @@ interface PastChat {
 }
 
 /**
- * The first of these past chats whose own record holds a command, or nothing.
+ * Which of these past chats ran something, by the kit's own record.
  *
  * Asked of the agent kit rather than guessed from the fact that a chat has
  * words in it: a conversation that only ever talked owes the screen no command
@@ -54,7 +54,7 @@ interface PastChat {
  * (bw-1u1.25). The kit is the sidecar's dependency, not the app's, so it is
  * resolved from where it actually lives.
  */
-async function firstThatRanSomething(chats: PastChat[], dir: string): Promise<PastChat | undefined> {
+async function thoseThatRanSomething(chats: PastChat[], dir: string): Promise<PastChat[]> {
   // `__dirname`, not `import.meta.url`: this file is loaded as CommonJS, and
   // reaching for the other one stopped the whole spec file loading at all.
   const fromSidecar = createRequire(resolve(__dirname, '../../workbench/package.json'));
@@ -62,6 +62,7 @@ async function firstThatRanSomething(chats: PastChat[], dir: string): Promise<Pa
     pathToFileURL(fromSidecar.resolve('@anthropic-ai/claude-agent-sdk')).href
   );
 
+  const ran: PastChat[] = [];
   for (const chat of chats) {
     let messages: { message?: { content?: unknown } }[];
     try {
@@ -69,13 +70,13 @@ async function firstThatRanSomething(chats: PastChat[], dir: string): Promise<Pa
     } catch {
       continue; // Its record has moved or gone; the next candidate will do.
     }
-    const ran = messages.some((m) => {
+    const usedATool = messages.some((m) => {
       const content = m.message?.content;
       return Array.isArray(content) && content.some((b) => (b as { type?: string })?.type === 'tool_use');
     });
-    if (ran) return chat;
+    if (usedATool) ran.push(chat);
   }
-  return undefined;
+  return ran;
 }
 
 /** A chat of its own for this case, with nothing said in it. */
@@ -312,38 +313,51 @@ test.describe('the chat draws everything the agent does', () => {
     const project = pickProject(projects);
     const q = new URLSearchParams({ project: project.id, path: project.path });
     const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as PastChat[];
-    // A chat this app has never had a row for, so it cannot have been continued
-    // here — one that was keeps its words-only copy on purpose, and demanding a
-    // command of it fails a build that is behaving as designed (bw-1u1.25).
-    const candidates = rows.filter((r) => r.origin === 'terminal' && r.externalId && !r.sessionId).slice(0, 8);
+    // Every past chat of his the KIT's own record says ran something, rather
+    // than whichever came first: a conversation that only ever talked owes the
+    // screen no command rows (bw-1u1.25).
+    const candidates = rows.filter((r) => r.origin === 'terminal' && r.externalId).slice(0, 8);
+    const ran = await thoseThatRanSomething(candidates, project.path);
+    test.skip(ran.length === 0, 'no past terminal chat on this instance whose record holds a command');
 
-    // And one the KIT's own record says ran something, rather than whichever
-    // came first: a past chat that never ran a command owes the screen no rows.
-    const past = await firstThatRanSomething(candidates, project.path);
-    test.skip(!past, 'no past terminal chat on this instance whose record holds a command');
+    // Tried in turn, because one already continued INSIDE the app keeps its
+    // words-only copy on purpose — its live turns are the only copy of those —
+    // and there is no way to tell which from out here. The rule still bites: if
+    // the import lost commands, none of them draws any and this goes red.
+    const drew: string[] = [];
+    for (const past of ran) {
+      // Opened, which reads it and starts nothing (docs/designs/app-shell.md §1.9).
+      const opened = (await (
+        await request.post(`${api}/api/workbench/command`, {
+          data: {
+            type: 'session.open',
+            sessionId: past.sessionId ?? undefined,
+            externalId: past.externalId,
+            brand: 'claude',
+            projectId: project.id,
+            projectPath: project.path,
+          },
+        })
+      ).json()) as { id: string };
 
-    // Opened, which reads it and starts nothing (docs/designs/app-shell.md §1.9).
-    const opened = (await (
-      await request.post(`${api}/api/workbench/command`, {
-        data: {
-          type: 'session.open',
-          sessionId: past!.sessionId ?? undefined,
-          externalId: past!.externalId,
-          brand: 'claude',
-          projectId: project.id,
-          projectPath: project.path,
-        },
-      })
-    ).json()) as { id: string };
+      await page.goto(`/project?id=${project.id}&tab=chat&chat=${opened.id}`);
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
 
-    await page.goto(`/project?id=${project.id}&tab=chat&chat=${opened.id}`);
-    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+      // The manager's screenshot: the same chat drawn in his terminal showed
+      // every command and its output, and drawn here showed sentences alone
+      // (§6.3.2).
+      const found = await page
+        .getByTestId('tool-row')
+        .first()
+        .waitFor({ timeout: 45_000 })
+        .then(() => true)
+        .catch(() => false);
+      drew.push(`${past.externalId}: ${found ? 'drew its commands' : 'drew none'}`);
+      if (found) break;
+    }
+    expect(drew.join('; '), 'no past chat whose record holds a command drew one').toContain('drew its commands');
 
-    // The manager's screenshot: the same chat drawn in his terminal showed every
-    // command and its output, and drawn here showed sentences alone (§6.3.2).
     const commands = page.getByTestId('tool-row');
-    await expect.poll(async () => commands.count(), { timeout: 90_000 }).toBeGreaterThan(0);
-
     const first = commands.first();
     await first.getByTestId('tool-toggle').click();
     await expect(first).toHaveAttribute('data-open', 'true');

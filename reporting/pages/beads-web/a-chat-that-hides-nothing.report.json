@@ -19,6 +19,20 @@
           }
         ],
         "note": "Your usual address is rebuilt and restarted, so it is already showing all of this. Ctrl+O opens everything at once, the same key as in your terminal."
+      },
+      {
+        "ask": "Your list is on the board — ten of them, from the context figure to diffs on file edits. One thing came through as a placeholder rather than words: the pasted block in the middle of it.",
+        "options": [
+          {
+            "label": "Nothing was lost",
+            "say": "The pasted block was the same items you already have. Nothing was lost.",
+            "pick": true
+          },
+          {
+            "label": "I'll paste it again",
+            "say": "There was more in that block — I'll paste it again."
+          }
+        ]
       }
     ]
   },
@@ -72,11 +86,7 @@
           "shots": [
             {
               "path": "tests/results/chat-shows-everything.png",
-              "caption": "A command opened: what it was asked to do above what it printed, and the grey line saying the mode changed"
-            },
-            {
-              "path": "tests/results/chat-shows-everything-compact.png",
-              "caption": "And what the same chat says when it compacts — the answer that used to be silence"
+              "caption": "One chat, both halves: a command opened onto what it was asked and what it printed, and the grey line carrying the answer /compact gave — the answer that used to be silence"
             }
           ]
         }
@@ -112,7 +122,7 @@
     },
     {
       "label": "Found while building it",
-      "lead": "Four faults nobody had reported, fixed in the same step.",
+      "lead": "Five faults nobody had reported, found in the same step.",
       "blocks": [
         {
           "kind": "table",
@@ -133,6 +143,58 @@
             [
               "The check that a chat opens without waking it looked for a chat the screen had not drawn",
               "it would have gone green on a board of any size while the thing it guards was broken"
+            ],
+            [
+              "Installing the product did not install the screen: your copy kept serving the previous one",
+              "a change could be finished, installed, and still not be in front of you — this one was, for an hour"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "What a second pair of eyes found",
+      "lead": "Someone who did not write it read the whole change. Nine points, all fixed.",
+      "blocks": [
+        {
+          "kind": "table",
+          "columns": ["What it caught", "What it would have cost you"],
+          "rows": [
+            [
+              "Opening an old chat threw its drawn history away before reading the replacement",
+              "a conversation whose record had moved would have come back permanently blank"
+            ],
+            [
+              "The same old chat, once woken, drew its whole history a second time",
+              "two copies of everything, one under the other"
+            ],
+            [
+              "The check guarding all of this never ran the code that does it",
+              "the guarantee could have been deleted and every light would have stayed green"
+            ],
+            [
+              "A command that comes back with a picture filled its opened body with thousands of characters of encoding",
+              "the one row you most want to read is the one you cannot"
+            ],
+            [
+              "The picture this work is judged on showed half of what it claims",
+              "you would have been shown the command and taken the compact answer on trust"
+            ],
+            [
+              "A mode picked twice in a row changed in silence the second time",
+              "the same trap this job set out to close, one step further along"
+            ],
+            [
+              "A test's name promised the opposite of what it checked",
+              "the next reader is told a guarantee the code does not give"
+            ],
+            [
+              "A command you opened by hand could no longer be shut by the one control",
+              "the button reading Show less did not show less"
+            ],
+            [
+              "The check on imported chats demanded a command of a conversation that may never have run one",
+              "a red light on a build behaving exactly as designed"
             ]
           ]
         }
@@ -150,7 +212,11 @@
             ["The compact answer discarded", "the answer reported as missing"],
             ["The permission to switch removed", "the mode reported as refused, in the tool's own words"],
             ["Command output discarded again", "the command row has nothing to open"],
-            ["Past chats read as sentences alone", "four of nine checks on that reading"]
+            ["Past chats read as sentences alone", "four of nine checks on that reading"],
+            ["An old chat's history thrown away on re-reading it", "two checks on what a chat keeps"],
+            ["The second copy drawn instead of replacing the first", "two checks on what a reader ends up looking at"],
+            ["A mode picked twice allowed to go quiet again", "said so once, where it must say so twice"],
+            ["A hand-opened command pinned open again", "the control cannot shut it, on your own screen"]
           ]
         },
         {
@@ -194,17 +260,25 @@
     "if_nothing": "It waits on your look; nothing else moves on it.",
     "steps": [
       {
-        "step": "The eight things an outside reader raised on the last two chat jobs, still unanswered",
+        "step": "A file the agent edits reads like an edit: coloured, with a red-and-green diff of what actually changed",
         "cost": "medium",
         "starting": true
       },
       {
-        "step": "A chat already running in a terminal opens for reading instead of failing",
+        "step": "A chat open in a terminal keeps up in the app instead of freezing where you left it",
         "cost": "medium"
       },
       {
-        "step": "The board's own filters and search survive a link and the Back button, like the chat now does",
+        "step": "A bead id written in a chat is a chip that opens the card, and the chat says how much context it has left",
+        "cost": "medium"
+      },
+      {
+        "step": "The small things off your list: the tag overflow that does nothing, the chip outline, the missing bead icon, the chat that jumps to the top when you only read it",
         "cost": "small"
+      },
+      {
+        "step": "The eight things an outside reader raised on the last two chat jobs, still unanswered",
+        "cost": "medium"
       }
     ]
   }
