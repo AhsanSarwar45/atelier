@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { truncate } from "@/lib/bead-utils";
 import { classesFor } from "@/lib/state-styles";
 import { cn } from "@/lib/utils";
-import { STATE_BY_ID, type Bead, type BeadStatus, type StateInfo } from "@/types";
+import { STATE_BY_ID, standing, type Bead, type BeadStatus, type StateInfo } from "@/types";
 
 /**
  * PR status for a child task (used for icon display)
@@ -185,10 +185,13 @@ export function SubtaskList({
             <PRStatusIcon prStatus={childPRStatuses?.get(child.id)} />
           </div>
           <div className="flex-1 min-w-0">
+            {/* A piece nobody is waiting on is struck through and muted,
+                whether it was finished or dropped. Reading the strike as
+                "finished" and drawing dropped work like live work made the
+                one list of pieces disagree with the count above it. */}
             <p className={cn(
               "text-xs font-medium group-hover:underline",
-              child.status === 'closed' && "line-through text-t-muted",
-              child.status !== 'closed' && "text-t-secondary"
+              standing(child.status) ? "text-t-secondary" : "line-through text-t-muted"
             )}>
               {truncate(child.title, 50)}
             </p>

@@ -144,6 +144,52 @@ describe('what a card says it is made of', () => {
     expect(screen.getAllByText(/4 dropped/).length).toBeGreaterThan(0);
     expect(container.textContent).not.toMatch(/\b14\b/);
   });
+
+  it.each(LAYOUTS)('says what stands behind the numbers in the %s shape too', (shape) => {
+    // The default shape kept its own copy of this block and was the only one
+    // saying any of it; a reader was told different things by different themes.
+    layout = shape;
+    const props = withPieces('open', 1, 1);
+    const live: Bead = { ...child, id: 'test-1.live', status: 'in_progress' };
+    render(
+      <EpicCard
+        {...props}
+        epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
+        allBeads={[...props.allBeads, live]}
+      />
+    );
+    expect(screen.getByText(/1 in progress/)).toBeInTheDocument();
+    expect(screen.getAllByText(/1 dropped/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the list of pieces under a card', () => {
+  it('strikes dropped work through, the same as finished work', () => {
+    const { container } = render(<EpicCard {...withPieces('manager_review', 1, 1)} />);
+    const titles = Array.from(container.querySelectorAll('p.text-xs.font-medium'));
+    expect(titles.length).toBeGreaterThan(0);
+    // Nobody is waiting on any of these, so none of them is drawn as live work.
+    for (const t of titles) {
+      expect(t.className, t.textContent ?? '').toMatch(/line-through/);
+      expect(t.className, t.textContent ?? '').not.toMatch(/text-t-secondary/);
+    }
+  });
+
+  it('leaves work that is still standing undrawn as done', () => {
+    const props = withPieces('open', 0, 1);
+    const live: Bead = { ...child, id: 'test-1.live', status: 'in_progress' };
+    const { container } = render(
+      <EpicCard
+        {...props}
+        epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
+        allBeads={[...props.allBeads, live]}
+      />
+    );
+    const titles = Array.from(container.querySelectorAll('p.text-xs.font-medium'));
+    const standingRow = titles.find((t) => !t.className.includes('line-through'));
+    expect(standingRow, 'the piece being worked on must not be struck through').toBeTruthy();
+    expect(titles.filter((t) => t.className.includes('line-through')).length).toBe(1);
+  });
 });
 
 describe('what the card asks the code host about', () => {

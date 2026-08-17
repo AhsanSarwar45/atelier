@@ -203,21 +203,23 @@ export function EpicCard({
     },
   };
 
-  // What the job dropped, drawn wherever the count is, so no layout shows a
-  // full bar over a list of pieces it did not count.
-  const droppedNote = progress.dropped > 0 && (
-    <span className="flex items-center gap-1">
-      <div className="w-2 h-2 rounded-full bg-status-cancelled" aria-hidden="true" />
-      {progress.dropped} dropped
-    </span>
-  );
-
-  // Shared progress bar section
-  const progressSection = (
+  /**
+   * How much of the job is done: the count, the bar, and what stands behind
+   * the numbers. Every shape draws this one, so a reader is told the same
+   * things about the same job whichever theme he is on — the default shape
+   * used to keep its own copy, and it was the only shape saying what was in
+   * progress, what was blocked and what had been dropped.
+   *
+   * @param wordy - The default shape spells the count out in words; the two
+   *   denser shapes have room for the fraction alone.
+   */
+  const progressBlock = (wordy: boolean) => (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs">
         <span className="text-t-tertiary">
-          {progress.completed}/{progress.total}
+          {wordy
+            ? `Progress: ${progress.completed}/${progress.total} completed`
+            : `${progress.completed}/${progress.total}`}
         </span>
         <span className="font-semibold text-t-secondary">{progressPercentage}%</span>
       </div>
@@ -229,11 +231,31 @@ export function EpicCard({
           getProgressIndicatorClass(progressPercentage)
         )}
       />
-      {droppedNote && (
-        <div className="flex items-center gap-3 text-[10px] text-t-muted">{droppedNote}</div>
-      )}
+      <div className="flex items-center gap-3 text-[10px] text-t-muted">
+        <span className="flex items-center gap-1">
+          <div className="w-2 h-2 rounded-full bg-status-open" aria-hidden="true" />
+          {progress.inProgress} in progress
+        </span>
+        {/* Dropped pieces are outside every number beside them, and the list
+            below holds them, so the card says how many rather than leaving a
+            full bar over a longer list unexplained. */}
+        {progress.dropped > 0 && (
+          <span className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-status-cancelled" aria-hidden="true" />
+            {progress.dropped} dropped
+          </span>
+        )}
+        {progress.blocked > 0 && (
+          <span className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />
+            {progress.blocked} blocked
+          </span>
+        )}
+      </div>
     </div>
   );
+
+  const progressSection = progressBlock(false);
 
   // Shared children section
   const childrenSection = (
@@ -407,31 +429,7 @@ export function EpicCard({
           <p className="text-xs text-t-tertiary leading-relaxed">{truncate(epic.description, 100)}</p>
         )}
 
-        {/* Progress */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-t-tertiary">Progress: {progress.completed}/{progress.total} completed</span>
-            <span className="font-semibold text-t-secondary">{progressPercentage}%</span>
-          </div>
-          <Progress
-            value={progressPercentage}
-            aria-label={`Epic progress: ${progress.completed} of ${progress.total} completed`}
-            className={cn("h-2 bg-surface-overlay", getProgressIndicatorClass(progressPercentage))}
-          />
-          <div className="flex items-center gap-3 text-[10px] text-t-muted">
-            <span className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-status-open" aria-hidden="true" />
-              {progress.inProgress} in progress
-            </span>
-            {droppedNote}
-            {progress.blocked > 0 && (
-              <span className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />
-                {progress.blocked} blocked
-              </span>
-            )}
-          </div>
-        </div>
+        {progressBlock(true)}
 
         {closeButton}
         {childrenSection}

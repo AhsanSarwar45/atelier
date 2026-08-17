@@ -290,7 +290,10 @@ export interface EpicProgress {
 export interface Epic extends Bead {
   issue_type: 'epic';
   children: string[];     // Epics always have children (required, not optional)
-  progress?: EpicProgress; // Computed progress metrics
+  // A job's numbers are worked out where they are drawn, by computeEpicProgress
+  // over the pieces the board holds. It carried a field for them too, which the
+  // only thing that ever filled it has been deleted; a field that is always
+  // undefined is a promise the type makes and the data never keeps.
 }
 
 // ============================================================================

@@ -32,7 +32,7 @@ import {
 import { updateTitle, updateDescription, updateStatus as cliUpdateStatus } from "@/lib/cli";
 import { ISSUE_TYPES, getIssueTypeMeta } from "@/lib/issue-types";
 import { cn, isDoltProject } from "@/lib/utils";
-import { SET_BY, STATES, standing, type Bead, type BeadStatus, type WorktreeStatus } from "@/types";
+import { SET_BY, STATES, counted, standing, type Bead, type BeadStatus, type WorktreeStatus } from "@/types";
 
 
 /** Priority levels 0–4, displayed P0 (critical) … P4 (backlog). Single source for the editor options. */
@@ -200,6 +200,12 @@ export function BeadDetail({
       .map(childId => allBeads.find(b => b.id === childId))
       .filter((b): b is Bead => b !== undefined);
   }, [isEpic, bead.children, allBeads]);
+
+  /** How many of them were dropped, and so are no part of the job's size. */
+  const droppedChildren = useMemo(
+    () => childTasks.filter(c => !counted(c.status)).length,
+    [childTasks],
+  );
 
   // Resolve related tasks from IDs
   const relatedTasks = useMemo(() => {
@@ -482,8 +488,13 @@ export function BeadDetail({
           {isEpic && onChildClick && (
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
+                {/* The same size the card states: what the job is made of and
+                    what it dropped, never the two added together. Two screens
+                    giving one job two sizes is what this reads against. */}
                 <h3 className="text-sm font-semibold text-t-secondary">
-                  Subtasks ({childTasks.length})
+                  Subtasks ({droppedChildren > 0
+                    ? `${childTasks.length - droppedChildren} · ${droppedChildren} dropped`
+                    : childTasks.length})
                 </h3>
                 {projectPath && (
                   <Button
