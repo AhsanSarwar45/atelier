@@ -6,18 +6,19 @@
  * slides the same panel over whichever tab is showing
  * (docs/designs/app-shell.md §1.8).
  *
- * It reads the card list itself and is mounted only while a card is open, so the
- * chat tab pays nothing for it when no card is open.
+ * It reads the project screen's own card list (src/app/project/board-cards.tsx),
+ * so an edit made here moves the card on the board behind it at once, and the
+ * list is fetched once however many parts are reading it.
  */
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useBoardCards } from '@/app/project/board-cards';
 import { ActivityTimeline } from '@/components/activity-timeline';
 import { BeadDetail, PANEL_SLIDE_MS } from '@/components/bead-detail';
 import { CommentList } from '@/components/comment-list';
 import { ErrorBoundary } from '@/components/error-boundary';
-import { useBeads } from '@/hooks/use-beads';
 import { useWorktreeStatuses } from '@/hooks/use-worktree-statuses';
 import { isDoltProject, projectDir } from '@/lib/utils';
 import type { Bead } from '@/types';
@@ -41,7 +42,7 @@ export function CardPanel({
   /** A card named inside this one — a child, or something it depends on. */
   onOpenCard: (id: string) => void;
 }) {
-  const { beads, ticketNumbers, refresh } = useBeads(projectPath);
+  const { beads, ticketNumbers, refresh } = useBoardCards();
   const bead = beads.find((b) => b.id === cardId) ?? null;
 
   // A Dolt-only board has no directory, so there is no worktree to read.
@@ -50,7 +51,7 @@ export function CardPanel({
   const { statuses } = useWorktreeStatuses(isDoltOnly ? '' : fsPath, bead ? [bead.id] : []);
 
   // The panel is unmounted by whoever owns the address, so the slide out has to
-  // be waited for here or it is cut off — the same rule use-bead-detail follows.
+  // be waited for here or it is cut off (PANEL_SLIDE_MS is the panel's own).
   const [open, setOpen] = useState(true);
   const leaving = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (leaving.current) clearTimeout(leaving.current); }, []);

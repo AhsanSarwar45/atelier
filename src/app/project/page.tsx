@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -14,11 +14,12 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
 import { useTheme } from '@/hooks/use-theme';
-import { addressWith, whereFrom } from '@/lib/address';
+import { addressWith, cardCameFromHere, cardWasClosed, cardWasPushed, whereFrom } from '@/lib/address';
 import { cn } from '@/lib/utils';
 import ChatTab from '@/workbench/chat-tab';
 import { WorkbenchStatus } from '@/workbench/globals';
 
+import { BoardCards } from './board-cards';
 import KanbanBoard from './kanban-board';
 
 function LoadingFallback() {
@@ -47,13 +48,26 @@ function ProjectTabs() {
     [router, params],
   );
 
-  // Opening a card is a push, so Back closes it. Closing it by hand rewrites the
-  // address instead of adding to it, so Back still means "what I was looking at
-  // before the card", never "open it again".
-  const closeCard = useCallback(
-    () => router.replace(addressWith(params, { card: null })),
-    [router, params],
-  );
+  // Opening a card pushes, so Back closes it; closing it by hand steps back off
+  // that same entry. Rewriting the address instead would leave a Back press that
+  // goes nowhere, one per card he looked at (bw-m8o.10). A card he ARRIVED on —
+  // a pasted link — has nothing of ours behind it, so that one is rewritten.
+  const closeCard = useCallback(() => {
+    if (cardCameFromHere()) {
+      router.back();
+      return;
+    }
+    router.replace(addressWith(params, { card: null }));
+  }, [router, params]);
+
+  // However the panel went — his Back, its own close, a link — the count of
+  // entries we added comes down when the card leaves the address, so it cannot
+  // drift upwards over a long visit.
+  const cardBefore = useRef(openCard);
+  useEffect(() => {
+    if (cardBefore.current && !openCard) cardWasClosed();
+    cardBefore.current = openCard;
+  }, [openCard]);
 
   return (
     <Shell
@@ -116,26 +130,37 @@ function ProjectTabs() {
       {tab === 'chat' && (
         <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
       )}
-      {/* Only the tab in front is mounted: a board kept alive behind the chat is
-          paid for on every switch, both ways (docs/designs/app-shell.md §1.6). */}
-      {tab === 'board' && (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <KanbanBoard />
-        </div>
-      )}
 
-      {/* One card panel for the whole screen, over whichever tab is showing
-          (docs/designs/app-shell.md §1.8). Mounted only while a card is open, so
-          the chat tab pays nothing for the board's list until he opens one. */}
-      {openCard && project && (
-        <CardPanel
-          cardId={openCard}
-          projectId={projectId}
-          projectPath={project.path}
-          projectLocalPath={project.localPath}
-          onClose={closeCard}
-          onOpenCard={(id) => go({ card: id })}
-        />
+      {/* The board and the card panel read ONE list, held here: an edit in the
+          panel moves the card behind it, and the list is fetched once
+          (src/app/project/board-cards.tsx). It is mounted only when one of them
+          is on screen, so the chat tab alone still pays nothing for the board
+          (docs/designs/app-shell.md §1.6). */}
+      {(tab === 'board' || openCard) && project && (
+        <BoardCards projectPath={project.path}>
+          {/* Only the tab in front is mounted: a board kept alive behind the
+              chat is paid for on every switch, both ways. */}
+          {tab === 'board' && (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <KanbanBoard />
+            </div>
+          )}
+          {/* One card panel for the whole screen, over whichever tab is showing
+              (docs/designs/app-shell.md §1.8). */}
+          {openCard && (
+            <CardPanel
+              cardId={openCard}
+              projectId={projectId}
+              projectPath={project.path}
+              projectLocalPath={project.localPath}
+              onClose={closeCard}
+              onOpenCard={(id) => {
+                cardWasPushed();
+                go({ card: id });
+              }}
+            />
+          )}
+        </BoardCards>
       )}
 
       {project && (

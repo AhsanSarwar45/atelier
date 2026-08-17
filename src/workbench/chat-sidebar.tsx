@@ -171,6 +171,10 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
             projectId,
             projectPath,
           });
+          // The list is asked again, so the row now carries the id it was just
+          // given: without that it keeps reporting it has no chat, is never
+          // highlighted as the open one, and invites a second click (bw-m8o.12).
+          await load();
           onOpen(s.id);
         } catch (e) {
           // An open that fails silently leaves a row that looks merely slow.
@@ -180,7 +184,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
         }
       })();
     },
-    [projectId, projectPath, onOpen],
+    [projectId, projectPath, load, onOpen],
   );
 
   // A screenful, then more as it is pulled: a project with hundreds of chats

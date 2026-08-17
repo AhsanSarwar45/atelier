@@ -98,6 +98,12 @@ const MIGRATIONS: string[] = [
      PRIMARY KEY (session_id, at)
    );
    CREATE INDEX turn_by_day ON turn(day, project_id);`,
+
+  // When a conversation's own record was read in, said plainly rather than
+  // inferred. It used to be inferred from "has this chat any cards?", which is
+  // false forever for a chat that touched none — so every open read the whole
+  // conversation off the disk again and re-ran the card scan (bw-m8o.14).
+  `ALTER TABLE session ADD COLUMN imported_at TEXT;`,
 ];
 
 export class Store {
@@ -159,6 +165,31 @@ export class Store {
     }
     if (!sets.length) return;
     this.db.prepare(`UPDATE session SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
+  }
+
+  /**
+   * The row for a conversation the brand knows by ITS id, whatever we call it.
+   *
+   * Opening one has to find it this way or a second click makes a second row,
+   * with a second imported copy of the same history (bw-m8o.12).
+   */
+  sessionByExternalId(externalId: string): SessionSummary | undefined {
+    const r = this.db
+      .prepare('SELECT * FROM session WHERE external_id = ? ORDER BY last_active_at DESC LIMIT 1')
+      .get(externalId) as Record<string, string> | undefined;
+    return r ? rowToSummary(r) : undefined;
+  }
+
+  /** True once this chat's own record has been read into the log. */
+  wasImported(id: string): boolean {
+    const r = this.db.prepare('SELECT imported_at FROM session WHERE id = ?').get(id) as
+      | { imported_at: string | null }
+      | undefined;
+    return !!r?.imported_at;
+  }
+
+  markImported(id: string): void {
+    this.db.prepare('UPDATE session SET imported_at = ? WHERE id = ?').run(new Date().toISOString(), id);
   }
 
   getSession(id: string): SessionSummary | undefined {

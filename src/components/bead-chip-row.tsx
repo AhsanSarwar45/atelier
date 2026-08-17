@@ -14,7 +14,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { addressWith } from '@/lib/address';
+import { addressWith, cardWasPushed } from '@/lib/address';
 import { CARDS_ON_A_ROW, CARDS_ON_THE_LINE, cardsOnTheLine } from '@/workbench/cards-on-the-line';
 
 /** Where the chips are drawn, which sets how many fit and what they are called. */
@@ -24,15 +24,6 @@ const PLACES = {
   line: { room: CARDS_ON_THE_LINE, size: 'sm', chip: 'bead-chip', more: 'bead-chip-more' },
   row: { room: CARDS_ON_A_ROW, size: 'xs', chip: 'row-bead-chip', more: 'row-bead-more' },
 } as const;
-
-/**
- * Where a card opens from outside the project screen — a link with nothing else
- * to keep. Inside it, the chip keeps the address it is standing on so the tab
- * and the open chat survive.
- */
-export function beadHref(projectId: string | null, beadId: string): string {
-  return `/project?id=${projectId ?? ''}&card=${encodeURIComponent(beadId)}`;
-}
 
 export function BeadChipRow({
   ids,
@@ -70,6 +61,7 @@ export function BeadChipRow({
           e.stopPropagation();
           // Pushed, and the rest of the address kept: the card opens over what he
           // was reading, and Back closes it again.
+          cardWasPushed();
           router.push(addressWith(params, { id: projectId, card: id }));
         }}
       >

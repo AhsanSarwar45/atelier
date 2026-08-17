@@ -105,7 +105,13 @@ export class Sessions {
     projectId: string;
     projectPath: string;
   }): Promise<SessionSummary> {
-    const existing = params.sessionId ? this.store.getSession(params.sessionId) : undefined;
+    // By our id when the app ran it, and otherwise by the brand's own id: a
+    // conversation begun in a terminal already has a row after the first click,
+    // and looking it up only by our id made a second row — and a second imported
+    // copy of the same history — on every click after that (bw-m8o.12).
+    const existing =
+      (params.sessionId ? this.store.getSession(params.sessionId) : undefined) ??
+      (params.externalId ? this.store.sessionByExternalId(params.externalId) : undefined);
     // Already running: the transcript is live, so opening it is looking at it.
     if (existing && this.drivers.has(existing.id)) return existing;
 
@@ -208,14 +214,19 @@ export class Sessions {
    */
   private async importPast(summary: SessionSummary): Promise<void> {
     if (!summary.externalId) return;
-    // Judged on what was SAID, not on what is in the log: a resume writes its
-    // own "coming back" line before this runs.
+    // Said plainly on the row, not inferred from the cards it happens to have
+    // touched: a chat that touched none failed that test forever, so every click
+    // read the whole conversation off the disk again and re-ran the card scan,
+    // which forks the board's own tool per candidate (bw-m8o.14).
+    if (this.store.wasImported(summary.id)) return;
+    // A chat read in by an older build has its words but was never marked; the
+    // scan is what gives its cards back, so it is read once more and then marked.
     const alreadySaid = this.store.messageCount(summary.id) > 0;
-    // A chat read in by an older build has its words but not its doings; the
-    // scan is what gives it back, so having said something is not enough to
-    // skip it.
     const alreadyScanned = alreadySaid && this.store.beadsForSession(summary.id).length > 0;
-    if (alreadySaid && alreadyScanned) return;
+    if (alreadySaid && alreadyScanned) {
+      this.store.markImported(summary.id);
+      return;
+    }
 
     let messages: SessionMessage[];
     try {
@@ -223,6 +234,9 @@ export class Sessions {
     } catch {
       return; // No record to read: the chat simply starts where it is.
     }
+    // From here the record HAS been read, whatever it turned out to hold — an
+    // empty one is still a read, and reading it again would find it empty again.
+    this.store.markImported(summary.id);
 
     // What it did, read before what it said, so the chat's cards and reports are
     // already on the line by the time the first message is drawn.

@@ -214,6 +214,67 @@ test.describe('the address says where you are', () => {
     await expect.poll(async () => (await drawn(page)).sessionId, { timeout: WAY_IN_MS }).toBe(opened);
   });
 
+  test('closing a card leaves no dead Back press behind it', async ({ page, request }) => {
+    const { project, rows } = await withChats(request);
+    const worked = rows.find((r) => r.sessionId !== null && r.beads.length > 0);
+    expect(worked, 'no chat on this instance names a card').toBeTruthy();
+    await openChatTab(page, project);
+    await enter(page, worked!);
+
+    const depth = () => page.evaluate(() => history.length);
+    const before = await depth();
+
+    await page.getByTestId('bead-chip').first().waitFor({ timeout: 60_000 });
+    await page.getByTestId('bead-chip').first().click();
+    await page.getByTestId('bead-detail').waitFor({ timeout: 60_000 });
+    expect(await depth(), 'opening a card added no history entry').toBe(before + 1);
+
+    // Closed by hand, not by Back: the entry it added has to be stepped off, or
+    // the next Back press goes to an address identical to this one and nothing
+    // happens (bw-m8o.10).
+    await page.getByTestId('bead-detail-close').click();
+    await expect(page.getByTestId('bead-detail')).toBeHidden({ timeout: 60_000 });
+    await expect.poll(async () => new URL(page.url()).searchParams.get('card'), { timeout: 30_000 }).toBeNull();
+    const closed = page.url();
+
+    await page.goBack();
+    await page.waitForTimeout(1500);
+    expect(page.url(), 'Back after closing a card did nothing — its entry is still there').not.toBe(closed);
+  });
+
+  test('the board and the card panel read one list, not two', async ({ page, request }) => {
+    const { project, rows } = await withChats(request);
+    const card = rows.flatMap((r) => r.beads)[0];
+    test.skip(!card, 'no chat on this instance names a card');
+
+    const asked: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/api/beads?')) asked.push(r.url());
+    });
+
+    await page.goto(`/project?id=${project.id}&tab=board`);
+    await page.getByTestId('board-scroll').waitFor({ timeout: 60_000 });
+    await page.waitForTimeout(4000);
+    const beforeOpen = asked.length;
+
+    // Opened without leaving the page, the way a click on a card opens it.
+    await page.evaluate((id) => {
+      const q = new URLSearchParams(window.location.search);
+      q.set('card', id);
+      window.history.pushState({}, '', `${window.location.pathname}?${q}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, card!);
+    await page.getByTestId('bead-detail').waitFor({ timeout: 60_000 });
+    await page.waitForTimeout(4000);
+
+    // Opening a card must not start a second reading of the board: one list,
+    // held by the screen and shared with the panel (bw-m8o.11).
+    expect(
+      asked.length - beforeOpen,
+      `the card list was fetched ${asked.length - beforeOpen} more times when a card opened`,
+    ).toBe(0);
+  });
+
   test('the tab you left is in the history', async ({ page, request }) => {
     const { project, rows } = await withChats(request);
     await openChatTab(page, project);

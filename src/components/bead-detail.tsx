@@ -61,9 +61,9 @@ export interface BeadDetailProps {
 /**
  * How long a side panel takes to slide, in milliseconds.
  *
- * The panel is mounted by whoever owns the selection, so that owner has to keep
- * it alive for exactly this long after closing it or the slide out is cut off:
- * use-bead-detail reads the same number.
+ * The panel is mounted by whoever owns the address, so that owner has to keep it
+ * alive for exactly this long after closing it or the slide out is cut off:
+ * src/components/card-panel.tsx reads the same number.
  */
 export const PANEL_SLIDE_MS = 300;
 
@@ -512,6 +512,8 @@ export function BeadDetail({
 
         {/* Close button */}
         <button
+          data-testid="bead-detail-close"
+          aria-label="Close the card"
           onClick={() => onOpenChange(false)}
           className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
         >

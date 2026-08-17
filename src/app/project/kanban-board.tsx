@@ -23,17 +23,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
-import { useBeads } from "@/hooks/use-beads";
 import { useGitHubStatus } from "@/hooks/use-github-status";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
-import { addressWith, whereFrom } from "@/lib/address";
+import { addressWith, cardWasPushed, whereFrom } from "@/lib/address";
 import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
 import { isDoltProject, projectDir } from "@/lib/utils";
 import { STATES, type Bead, type BeadStatus } from "@/types";
+
+import { useBoardCards } from "./board-cards";
 
 /**
  * The columns, read off the one list of states. Their names and meanings are
@@ -60,14 +61,15 @@ export default function KanbanBoard() {
     error: projectError,
   } = useProject(projectId);
 
-  // Fetch beads from project path
+  // The one card list the project screen holds, shared with the card panel so an
+  // edit in the panel moves the card behind it (src/app/project/board-cards.tsx).
   const {
     beads,
     ticketNumbers,
     isLoading: beadsLoading,
     error: beadsError,
     refresh: refreshBeads,
-  } = useBeads(project?.path ?? "");
+  } = useBoardCards();
 
   // Use the bead filters hook with 300ms debounce
   const {
@@ -203,18 +205,19 @@ export default function KanbanBoard() {
   const openCard = whereFrom(searchParams).card;
   const isDetailOpen = openCard !== null;
   const openBead = useCallback(
-    (bead: Bead) => router.push(addressWith(searchParams, { card: bead.id })),
+    (bead: Bead) => {
+      cardWasPushed();
+      router.push(addressWith(searchParams, { card: bead.id }));
+    },
     [router, searchParams],
   );
   const navigateToBead = useCallback(
-    (beadId: string) => router.push(addressWith(searchParams, { card: beadId })),
+    (beadId: string) => {
+      cardWasPushed();
+      router.push(addressWith(searchParams, { card: beadId }));
+    },
     [router, searchParams],
   );
-  const closeCard = useCallback(
-    () => router.replace(addressWith(searchParams, { card: null })),
-    [router, searchParams],
-  );
-
   // Ref for search input (keyboard navigation)
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -229,7 +232,10 @@ export default function KanbanBoard() {
     onOpen: (bead) => {
       openBead(bead);
     },
-    onClose: closeCard,
+    // Escape belongs to the panel itself, which waits for its own slide before
+    // it lets go of the address. A second path here tore the panel out of the
+    // page mid-slide, and only on this tab (bw-m8o.13).
+    onClose: () => {},
     searchInputRef,
     isDetailOpen,
   });

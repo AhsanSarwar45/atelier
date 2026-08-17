@@ -39,6 +39,31 @@ export function whereFrom(params: URLSearchParams): Where {
 }
 
 /**
+ * How many card panels this visit opened by pushing onto the history.
+ *
+ * Closing one has to step BACK off the entry it added, or Back is left pointing
+ * at an address identical to the one before it and does nothing — one dead press
+ * per card looked at (bw-m8o.10). Whoever pushes says so here, because the chips
+ * that push are all over the screen and none of them can reach the panel's own
+ * close. It lives for the life of the page, like the history it counts.
+ */
+let pushedCards = 0;
+
+export function cardWasPushed(): void {
+  pushedCards += 1;
+}
+
+/** True when closing should step back rather than rewrite the address. */
+export function cardCameFromHere(): boolean {
+  return pushedCards > 0;
+}
+
+/** Called by whichever path closed the panel, however it closed. */
+export function cardWasClosed(): void {
+  pushedCards = Math.max(0, pushedCards - 1);
+}
+
+/**
  * The same address with some of it changed. Everything else it carries is kept,
  * so a parameter this file has never heard of survives a tab switch; `null`
  * removes one.
