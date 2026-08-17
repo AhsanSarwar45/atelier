@@ -229,7 +229,12 @@ Fixed at launch, every session:
 - **No MCP.** `--strict-mcp-config` with no `--mcp-config` — nothing attaches
   unless the owner asks (decision 6).
 - **His own commands, skills and settings are loaded** — `settingSources:
-  ['user', 'project', 'local']` and `skills: 'all'` (bw-f1q). This reverses the
+  ['user', 'project', 'local']`, and deliberately *not* `skills: 'all'`: measured
+  2026-08-17, that option makes the kit pass `--allowedTools Skill`, leaving the
+  agent the Skill tool and nothing else, and a turn then ends silently with no
+  answer at all. Omitting it is not "skills off" — the CLI's own defaults still
+  apply, and with the settings loaded his 77 commands and skills are listed
+  (bw-f1q). This reverses the
   build's first choice of `settingSources: []`. That choice bought a session
   that could not be surprised by anything on the machine, and its price was a
   chat with no commands and no skills at all, which is what the manager found:
@@ -551,14 +556,20 @@ The menu lists them with their descriptions; picking one sends it as the
 prompt. Terminal-only commands (`/login` and friends) are filtered out.
 `/compact` and `/clear` are ordinary members of this list.
 
-The list is not asked for: a session announces it at birth. `system/init`
-carries `slash_commands`, `terminal_slash_commands` (the ones a screen like this
-must hide), `skills`, `model` and `permissionMode`; the models come from
-`supportedModels()` once, alongside. All of it rides on `session.started` and
-one `session.menu` event, so a browser that opens the chat later is told the
-same thing without a second round trip. The kit also pushes a fresh command list
-mid-session when the agent discovers skills in a subdirectory; that push
-replaces the stored list.
+The list is asked for the moment the session exists, not when it announces
+itself: measured 2026-08-17, a session sends NOTHING — no `init` — until the
+first turn is sent to it, while `supportedCommands()` and `supportedModels()`
+answer on a silent one in 0.7 s (77 commands and 6 models on this machine).
+Waiting for `init` would leave a fresh chat with no menus until he had already
+typed, which is the opposite of what the menus are for.
+
+So the menu is published twice: once at start from those two calls, and again at
+`init`, which adds what only it carries — `skills` (so a skill can be marked as
+one) and `terminal_slash_commands` (the ones a screen like this must hide). The
+kit also pushes a fresh command list mid-session when the agent discovers skills
+in a subdirectory; that push replaces the stored list. Every publication is one
+`session.menu` event, so a browser that opens the chat later is told the same
+thing without a round trip of its own.
 
 A picked command is sent as ordinary user text — that is how the kit runs one.
 A LOCAL command (`/usage` and friends) answers with `system/local_command_output`

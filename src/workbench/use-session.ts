@@ -13,8 +13,10 @@ import { useEffect, useState } from 'react';
 import { apiUrl } from '@/lib/api-base';
 import type {
   AskOption,
+  CommandInfo,
   Cost,
   ImagePayload,
+  ModelChoice,
   SessionFacts,
   SessionState,
   TodoItem,
@@ -31,12 +33,22 @@ export interface TranscriptMessage {
   done: boolean;
 }
 
+/** What the agent worked out on its way to an answer, as it arrived. */
+export interface TranscriptThinking {
+  kind: 'thinking';
+  id: string;
+  text: string;
+  done: boolean;
+}
+
 export interface TranscriptTool {
   kind: 'tool';
   id: string;
   name: string;
   title: string;
   status: 'running' | 'ok' | 'failed';
+  /** How long it has been running, as the brand counts it. */
+  seconds: number;
   /** Set when a subagent made this call — the row nests under that call. */
   parentId: string | null;
   diff: { path: string; before: string; after: string } | null;
@@ -66,6 +78,7 @@ export interface TranscriptReport {
 
 export type TranscriptItem =
   | TranscriptMessage
+  | TranscriptThinking
   | TranscriptTool
   | TranscriptAsk
   | TranscriptReport
@@ -82,9 +95,22 @@ export interface SessionView {
   /** What the session is actually pinned to, as the agent reported it. */
   permissionMode: string | null;
   model: string | null;
+  /** What the writing box can offer for this session: its commands, skills, models. */
+  menu: SessionMenu;
+  /** Thinking done in this turn when the thinking itself is withheld, as the brand estimates it. */
+  thinkingTokens: number;
   error: string | null;
   lastSeq: number;
 }
+
+export interface SessionMenu {
+  commands: CommandInfo[];
+  skills: string[];
+  models: ModelChoice[];
+  permissionModes: string[];
+}
+
+const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], permissionModes: [] };
 
 const EMPTY: SessionView = {
   items: [],
@@ -95,6 +121,8 @@ const EMPTY: SessionView = {
   beads: [],
   permissionMode: null,
   model: null,
+  menu: NO_MENU,
+  thinkingTokens: 0,
   error: null,
   lastSeq: 0,
 };
@@ -113,6 +141,8 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'session.state':
       next.state = e.state;
       next.stateLabel = e.label;
+      // A turn that is over owes no thinking count to the next one.
+      if (e.state === 'idle' || e.state === 'errored' || e.state === 'stopped') next.thinkingTokens = 0;
       return next;
 
     case 'message.started':
@@ -131,9 +161,21 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
       );
       return next;
 
+    case 'thinking.delta': {
+      // One block per thinking id, grown by its deltas — the same fold as text,
+      // so replay and the live tail cannot disagree (§4).
+      const known = items.some((it) => it.kind === 'thinking' && it.id === e.messageId);
+      next.items = known
+        ? items.map((it) =>
+            it.kind === 'thinking' && it.id === e.messageId ? { ...it, text: it.text + e.text } : it,
+          )
+        : [...items, { kind: 'thinking', id: e.messageId, text: e.text, done: false }];
+      return next;
+    }
+
     case 'message.completed':
       next.items = items.map((it) =>
-        it.kind === 'message' && it.id === e.messageId ? { ...it, done: true } : it,
+        (it.kind === 'message' || it.kind === 'thinking') && it.id === e.messageId ? { ...it, done: true } : it,
       );
       return next;
 
@@ -146,6 +188,7 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
           name: e.name,
           title: e.title,
           status: 'running',
+          seconds: 0,
           parentId: e.parentToolCallId,
           diff: null,
         },
@@ -155,6 +198,12 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'tool.completed':
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId ? { ...it, status: e.ok ? 'ok' : 'failed' } : it,
+      );
+      return next;
+
+    case 'tool.progress':
+      next.items = items.map((it) =>
+        it.kind === 'tool' && it.id === e.toolCallId ? { ...it, seconds: e.seconds } : it,
       );
       return next;
 
@@ -191,6 +240,24 @@ function reduce(view: SessionView, e: WbpEvent): SessionView {
 
     case 'ask.resolved':
       next.items = items.map((it) => (it.kind === 'ask' && it.id === e.askId ? { ...it, chosen: e.chosen } : it));
+      return next;
+
+    case 'thinking.progress':
+      next.thinkingTokens = e.tokens;
+      return next;
+
+    case 'session.menu':
+      next.menu = {
+        commands: e.commands,
+        skills: e.skills,
+        models: e.models,
+        permissionModes: e.permissionModes,
+      };
+      return next;
+
+    case 'session.pinned':
+      next.permissionMode = e.permissionMode;
+      next.model = e.model;
       return next;
 
     case 'cost':

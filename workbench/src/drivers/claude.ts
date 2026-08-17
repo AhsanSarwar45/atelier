@@ -12,7 +12,8 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
-import type { ImagePayload, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { CommandInfo, ImagePayload, ModelChoice, TodoItem } from '../../../src/workbench/protocol.ts';
+import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
 /**
@@ -68,6 +69,24 @@ export class ClaudeDriver implements Driver {
   private streamingMessageId = '';
   /** The agent's checklist, in the order the items were created. */
   private todos: TodoItem[] = [];
+  /**
+   * Which streamed blocks are thinking rather than answer, by their index in
+   * the message being built. The stop event says only which index ended.
+   */
+  private thinkingBlocks = new Set<number>();
+  /** The skills this install has, kept so a pushed command list can be re-sent with them. */
+  private skills: string[] = [];
+  /**
+   * True from the moment a turn is handed over until the brand says it is done.
+   *
+   * A session does not announce itself until the first turn is sent to it
+   * (measured 2026-08-17), so `init` — which means "ready" — routinely arrives
+   * while that first turn is already running. Saying Ready then puts the whole
+   * screen back to rest over a working agent (bw-f1q).
+   */
+  private awaitingAnswer = false;
+  /** When the last thinking-progress line was sent, so a long think is not a flood. */
+  private lastThinkingAt = 0;
   /** TaskCreate calls awaiting the result that carries the task's id. */
   private pendingTodo = new Map<string, { text: string }>();
 
@@ -197,15 +216,31 @@ export class ClaudeDriver implements Driver {
         includePartialMessages: true,
         // Decision 6: nothing attaches unless the owner asks for it.
         strictMcpConfig: true,
-        // The workbench composes its own session; it does not inherit the
-        // owner's terminal settings, so what runs here is predictable.
-        settingSources: [],
+        // His own machine's commands, skills and settings — the same ones his
+        // terminal has. This reverses the first build's `settingSources: []`,
+        // which bought a session nothing could surprise and cost him every
+        // command and every skill: there was literally nothing for a menu to
+        // list (bw-f1q, docs/agent-workbench.md §3.1).
+        //
+        // Deliberately NOT `skills: 'all'`: measured 2026-08-17, that option
+        // makes the kit pass `--allowedTools Skill`, which leaves the agent the
+        // Skill tool and nothing else — a turn then ends silently without an
+        // answer. Omitting it is not "skills off": the CLI's own defaults still
+        // apply, and with the settings above his skills are loaded and listed
+        // (77 of them on this machine).
+        settingSources: ['user', 'project', 'local'],
         canUseTool: (toolName: string, input: Record<string, unknown>, o: { suggestions?: PermissionUpdate[] }) =>
           this.onPermissionRequest(toolName, input, o),
       },
     });
 
     void this.pump();
+    // Asked now, not when the session announces itself: measured 2026-08-17, a
+    // session says nothing at all until the first turn is sent, while
+    // supportedCommands/supportedModels answer in 0.7s on a silent one. Waiting
+    // for `init` would leave a fresh chat with no menus until he had already
+    // typed something (bw-f1q).
+    void this.publishMenu(null);
   }
 
   /** The permission card, and the promise the SDK is blocked on until it is clicked. */
@@ -233,6 +268,79 @@ export class ClaudeDriver implements Driver {
     });
   }
 
+  /**
+   * The menu this session can offer, as the session itself announced it.
+   *
+   * `system/init` already carries the command names, the skills and which
+   * commands belong to a terminal; `supportedCommands()` adds the descriptions
+   * and `supportedModels()` the models. Asked once, on the way in, so the
+   * writing box has its menus before he opens one.
+   */
+  private async publishMenu(init: Record<string, any> | null): Promise<void> {
+    const terminalOnly = new Set<string>(init?.terminal_slash_commands ?? []);
+    if (init) this.skills = (init.skills ?? []) as string[];
+    const named: string[] = (init?.slash_commands ?? []) as string[];
+
+    let described: { name: string; description: string; argumentHint?: string }[] = [];
+    let models: ModelChoice[] = [];
+    try {
+      const [commands, offered] = await Promise.all([
+        this.q?.supportedCommands() ?? Promise.resolve([]),
+        this.q?.supportedModels() ?? Promise.resolve([]),
+      ]);
+      described = commands as typeof described;
+      models = (offered as { value: string; displayName: string; description?: string }[]).map((m) => ({
+        value: m.value,
+        displayName: m.displayName,
+        description: m.description,
+      }));
+    } catch {
+      // An older install answers neither; the names from init still make a menu.
+    }
+
+    this.emitMenu(described.length ? described : named.map((name) => ({ name, description: '' })), terminalOnly, models);
+  }
+
+  /** Folds one list of commands into the menu event, skills included. */
+  private emitMenu(
+    commands: { name: string; description: string; argumentHint?: string }[],
+    terminalOnly: Set<string>,
+    models: ModelChoice[],
+  ): void {
+    const skills = new Set(this.skills);
+    const items: CommandInfo[] = commands
+      // A command whose whole point is the terminal it was typed in cannot work
+      // from a browser, so it is not offered here (§7).
+      .filter((c) => !terminalOnly.has(c.name))
+      .map((c) => ({
+        name: c.name,
+        description: c.description,
+        argumentHint: c.argumentHint,
+        kind: skills.has(c.name) ? ('skill' as const) : ('command' as const),
+      }));
+    // A skill the command list did not mention is still typeable.
+    for (const skill of this.skills) {
+      if (!items.some((i) => i.name === skill)) {
+        items.push({ name: skill, description: '', kind: 'skill' });
+      }
+    }
+    this.emit({
+      type: 'session.menu',
+      commands: items,
+      skills: this.skills,
+      models,
+      permissionModes: [...CLAUDE_PERMISSION_MODES],
+    });
+  }
+
+  async setMode(mode: string): Promise<void> {
+    await this.q?.setPermissionMode(mode as never);
+  }
+
+  async setModel(model: string): Promise<void> {
+    await this.q?.setModel(model);
+  }
+
   answer(askId: string, choice: PermissionAnswer): void {
     const ask = this.asks.get(askId);
     if (!ask) return;
@@ -256,6 +364,7 @@ export class ClaudeDriver implements Driver {
     this.inbox.push(input);
     this.wake?.();
     this.wake = null;
+    this.awaitingAnswer = true;
     this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
   }
 
@@ -268,6 +377,7 @@ export class ClaudeDriver implements Driver {
     }
     this.asks.clear();
     await this.q?.interrupt();
+    this.awaitingAnswer = false;
     this.emit({ type: 'session.state', state: 'stopped', label: 'Stopped' });
   }
 
@@ -295,8 +405,44 @@ export class ClaudeDriver implements Driver {
                 cwd: m.cwd ?? '',
                 permissionMode: m.permissionMode ?? '',
               });
+              // Only when nothing is in flight: see `awaitingAnswer`.
+              if (!this.awaitingAnswer) this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
+              void this.publishMenu(m);
+            } else if (m.subtype === 'commands_changed') {
+              // Skills found as the agent moves around: the kit says to replace
+              // the list, not to merge it.
+              this.emitMenu(m.commands ?? [], new Set(), []);
+            } else if (m.subtype === 'thinking_tokens') {
+              // Redacted thinking: the API sends pings and nothing else, so this
+              // estimate is the only sign the agent is alive. Once every two
+              // seconds — the log is the transcript, and a long think would
+              // otherwise write hundreds of lines into it (§8.2.2).
+              const now = Date.now();
+              if (now - this.lastThinkingAt > 2000) {
+                this.lastThinkingAt = now;
+                this.emit({ type: 'thinking.progress', tokens: Number(m.estimated_tokens ?? 0) });
+              }
+            } else if (m.subtype === 'local_command_output') {
+              // A local command answers by itself and the query loop is bypassed,
+              // so no result message will close this turn — the chat is put back
+              // to Ready here or it waits forever (docs/agent-workbench.md §7).
+              const messageId = randomUUID();
+              this.emit({ type: 'message.started', messageId, role: 'assistant' });
+              this.emit({ type: 'text.delta', messageId, text: String(m.content ?? '') });
+              this.emit({ type: 'message.completed', messageId });
+              this.awaitingAnswer = false;
               this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
             }
+            break;
+
+          // How long the call has been running, counted by the kit rather than
+          // by us, subagents included (docs/agent-workbench.md §8.2.2).
+          case 'tool_progress':
+            this.emit({
+              type: 'tool.progress',
+              toolCallId: String(m.tool_use_id ?? ''),
+              seconds: Number(m.elapsed_time_seconds ?? 0),
+            });
             break;
 
           case 'stream_event': {
@@ -306,13 +452,22 @@ export class ClaudeDriver implements Driver {
             // index is the identity that stays put across a whole answer.
             if (ev?.type === 'message_start') {
               this.streamingMessageId = ev.message?.id ?? m.uuid;
+              this.thinkingBlocks.clear();
             } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'text') {
               this.emit({ type: 'message.started', messageId: this.blockId(ev.index), role: 'assistant' });
               this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
+            } else if (ev?.type === 'content_block_start' && ev.content_block?.type === 'thinking') {
+              // What it is working out, as it works it out. Without this the
+              // screen has nothing to show for a long think (bw-f1q).
+              this.thinkingBlocks.add(ev.index);
+              this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
             } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
               this.emit({ type: 'text.delta', messageId: this.blockId(ev.index), text: ev.delta.text });
+            } else if (ev?.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+              this.emit({ type: 'thinking.delta', messageId: this.blockId(ev.index), text: ev.delta.thinking ?? '' });
             } else if (ev?.type === 'content_block_stop') {
               this.emit({ type: 'message.completed', messageId: this.blockId(ev.index) });
+              this.thinkingBlocks.delete(ev.index);
             }
             break;
           }
@@ -357,6 +512,7 @@ export class ClaudeDriver implements Driver {
             break;
 
           case 'result':
+            this.awaitingAnswer = false;
             if (typeof m.total_cost_usd === 'number') {
               this.emit({ type: 'cost', cost: { kind: 'usd', usd: m.total_cost_usd } });
             }

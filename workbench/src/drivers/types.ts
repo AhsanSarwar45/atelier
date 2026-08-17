@@ -42,6 +42,9 @@ export interface Driver {
   send(input: PromptInput): Promise<void>;
   /** Answer an outstanding permission card. */
   answer(askId: string, choice: PermissionAnswer): void;
+  /** Change what the RUNNING session is pinned to (docs/agent-workbench.md §8.2.3). */
+  setMode(mode: string): Promise<void>;
+  setModel(model: string): Promise<void>;
   /** Stop the turn in flight, leaving the session usable. */
   interrupt(): Promise<void>;
   /** Tear the session down. */

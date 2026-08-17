@@ -270,6 +270,14 @@ export class Sessions {
       resume,
       emit: (e) => this.publish(summary.id, e),
     });
+    // What it is pinned to, said before the agent says anything: a session sends
+    // no `init` until the first turn (docs/agent-workbench.md §7), and a chat
+    // whose pickers read "Model" until he has typed is a chat that looks broken.
+    this.publish(summary.id, {
+      type: 'session.pinned',
+      permissionMode: summary.permissionMode,
+      model: model ?? summary.model ?? null,
+    });
   }
 
   async send(sessionId: string, text: string, images: ImagePayload[] = []): Promise<void> {
@@ -304,6 +312,29 @@ export class Sessions {
 
   answer(sessionId: string, askId: string, optionId: string): void {
     this.require(sessionId).answer(askId, optionId as PermissionAnswer);
+  }
+
+  /**
+   * Changes what the OPEN chat is pinned to, and remembers it: the mode is
+   * re-pinned on every resume (§3.1), so a change made here has to outlive the
+   * chat going to sleep.
+   */
+  async pin(sessionId: string, what: { mode?: string; model?: string }): Promise<void> {
+    const driver = this.require(sessionId);
+    if (what.mode !== undefined) {
+      await driver.setMode(what.mode);
+      this.store.updateSession(sessionId, { permissionMode: what.mode });
+    }
+    if (what.model !== undefined) {
+      await driver.setModel(what.model);
+      this.store.updateSession(sessionId, { model: what.model });
+    }
+    const now = this.store.getSession(sessionId);
+    this.publish(sessionId, {
+      type: 'session.pinned',
+      permissionMode: now?.permissionMode ?? null,
+      model: now?.model ?? null,
+    });
   }
 
   async stop(sessionId: string): Promise<void> {

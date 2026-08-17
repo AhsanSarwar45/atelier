@@ -69,6 +69,25 @@ about the page the drawer holds:
 - **the page never reaches wider than the drawer** — a sideways scrollbar means
   the right-hand column of every table is off the screen
 
+## `chat-shows-its-work.mjs`
+
+Holds the rule that a working chat says so: it opens a chat, sends one real
+prompt, and samples the screen every second. It fails when any second of a busy
+turn has nothing at the foot of the transcript, and when a turn that thought said
+nothing about it — neither the thinking itself nor, when the brand withholds the
+words, how much of it there has been (docs/agent-workbench.md §8.2.2).
+
+Wants a screen serving the checkout under test and an instance with its own data:
+
+```
+NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:3018 npx next dev -p 3017
+BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3018 \
+  node scripts/chat-shows-its-work.mjs
+```
+
+`SHOT=<path>` saves a picture of the first working second; `ASK=` replaces the
+prompt. It spends one small turn.
+
 ## `chat-wakes-on-send.py`
 
 Holds the rule that a click is a read: after `session.open` the chat is still

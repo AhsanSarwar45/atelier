@@ -64,6 +64,27 @@ export interface ImagePayload {
   alt: string;
 }
 
+/**
+ * One entry in the writing box's `/` menu: a command the install has, or a skill
+ * it can run. Both are typed the same way, so both are listed the same way
+ * (docs/agent-workbench.md §7).
+ */
+export interface CommandInfo {
+  /** Without the leading slash. */
+  name: string;
+  description: string;
+  /** What its argument looks like, in the brand's own words. */
+  argumentHint?: string;
+  kind: 'command' | 'skill';
+}
+
+/** One model this session could be switched to, as the brand names it. */
+export interface ModelChoice {
+  value: string;
+  displayName: string;
+  description?: string;
+}
+
 /** Fields every event carries. `seq` is per-session and monotone. */
 interface EventBase {
   seq: number;
@@ -75,9 +96,32 @@ export type WbpEvent = EventBase &
   (
     | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string }
     | { type: 'session.state'; state: SessionState; label: string }
+    /**
+     * Everything the writing box can offer for THIS session: the commands and
+     * skills the install has, the models it could switch to, and the permission
+     * modes it accepts. Sent when the session announces itself, and again
+     * whenever the brand pushes a new list (docs/agent-workbench.md §7).
+     */
+    | {
+        type: 'session.menu';
+        commands: CommandInfo[];
+        skills: string[];
+        models: ModelChoice[];
+        permissionModes: string[];
+      }
+    /** What the session is pinned to now — after the owner changed one of them. */
+    | { type: 'session.pinned'; permissionMode: string | null; model: string | null }
     | { type: 'session.ended'; reason: string }
     | { type: 'message.started'; messageId: string; role: 'user' | 'assistant' }
     | { type: 'text.delta'; messageId: string; text: string }
+    /** The agent's own reasoning, word by word. Drawn dim, and collapsed once it answers. */
+    | { type: 'thinking.delta'; messageId: string; text: string }
+    /**
+     * How much thinking has been done, when the thinking itself is withheld.
+     * The API sends only pings during redacted thinking, and this is the brand's
+     * own estimate — approximate, and the only sign of life there is.
+     */
+    | { type: 'thinking.progress'; tokens: number }
     | { type: 'message.completed'; messageId: string }
     | {
         type: 'tool.started';
@@ -89,6 +133,8 @@ export type WbpEvent = EventBase &
         parentToolCallId: string | null;
       }
     | { type: 'tool.completed'; toolCallId: string; ok: boolean; output: string }
+    /** How long this call has been running, as the brand counts it. */
+    | { type: 'tool.progress'; toolCallId: string; seconds: number }
     | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }
@@ -130,6 +176,9 @@ export type WbpCommand =
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
   | { type: 'session.stop'; sessionId: string }
+  /** Both act on the session that is open, not on the next one (§8.2.3). */
+  | { type: 'session.mode'; sessionId: string; mode: string }
+  | { type: 'session.model'; sessionId: string; model: string }
   | {
       /**
        * Open a chat for reading: give a conversation begun elsewhere an id, read

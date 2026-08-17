@@ -143,7 +143,7 @@ export class Store {
    */
   updateSession(
     id: string,
-    patch: Partial<Pick<SessionSummary, 'externalId' | 'title' | 'state' | 'model'>>,
+    patch: Partial<Pick<SessionSummary, 'externalId' | 'title' | 'state' | 'model' | 'permissionMode'>>,
     touch = true,
   ): void {
     const sets: string[] = [];
@@ -152,6 +152,7 @@ export class Store {
     if ('title' in patch) { sets.push('title = ?'); vals.push(patch.title ?? null); }
     if ('state' in patch) { sets.push('state = ?'); vals.push(patch.state ?? null); }
     if ('model' in patch) { sets.push('model = ?'); vals.push(patch.model ?? null); }
+    if ('permissionMode' in patch) { sets.push('permission_mode = ?'); vals.push(patch.permissionMode ?? null); }
     if (touch) {
       sets.push('last_active_at = ?');
       vals.push(new Date().toISOString());

@@ -7,11 +7,26 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { ArrowUp, Bot, MessageSquarePlus, PanelLeft, Paperclip, Receipt, Search, Square } from 'lucide-react';
+import {
+  ArrowUp,
+  Bot,
+  Brain,
+  Cpu,
+  Hand,
+  Loader2,
+  MessageSquarePlus,
+  PanelLeft,
+  Paperclip,
+  Receipt,
+  Search,
+  ShieldCheck,
+  Square,
+  X,
+} from 'lucide-react';
 
 import { BeadChipRow } from '@/components/bead-chip-row';
 import { MarkdownBody } from '@/components/markdown-body';
@@ -19,6 +34,13 @@ import { useReports } from '@/components/report-panel';
 import { TabTools, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
 import { addressWith } from '@/lib/address';
@@ -26,7 +48,7 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { diffLines } from '@/workbench/line-diff';
-import type { AskOption, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
+import type { AskOption, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportCard, ReportChip } from '@/workbench/report-view';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
@@ -178,9 +200,245 @@ function ToolRow({ item, nested }: { item: Extract<TranscriptItem, { kind: 'tool
       <Panel inset="none" className="flex items-center gap-2 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
         <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
         <span className="truncate">{item.title}</span>
+        {/* How long it has been running, while it is running: a call that takes a
+            minute must not look the same as one that took none. */}
+        {item.status === 'running' && item.seconds > 0 && (
+          <span data-testid="tool-elapsed" className="shrink-0 tabular-nums">
+            {Math.round(item.seconds)}s
+          </span>
+        )}
         <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
       </Panel>
       {item.diff && <DiffView path={item.diff.path} before={item.diff.before} after={item.diff.after} />}
+    </div>
+  );
+}
+
+/**
+ * What the agent worked out on the way to its answer.
+ *
+ * Dim and out of the way, because it is not the answer; open while it is being
+ * written, because that is the only thing on the screen during a long think, and
+ * shut once the answer starts (docs/agent-workbench.md §8.2.2).
+ */
+function ThinkingBlock({ item }: { item: Extract<TranscriptItem, { kind: 'thinking' }> }) {
+  const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
+  const open = openedByHand ?? !item.done;
+  const firstLine = item.text.trim().split('\n')[0] ?? '';
+
+  return (
+    <div data-testid="thinking-block" data-done={item.done} className="text-sm">
+      <button
+        type="button"
+        data-testid="thinking-toggle"
+        onClick={() => setOpenedByHand(!open)}
+        className="flex w-full items-center gap-2 text-left text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground"
+      >
+        <Brain className="h-3.5 w-3.5 shrink-0" />
+        <span className="shrink-0">{item.done ? 'Thought' : 'Thinking'}</span>
+        {!open && <span className="truncate font-normal normal-case opacity-70">{firstLine}</span>}
+      </button>
+      {open && (
+        <div className="mt-1 whitespace-pre-wrap border-l-2 border-border/60 pl-3 italic leading-relaxed text-muted-foreground">
+          {item.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The line at the foot of the transcript, present exactly while the agent owes
+ * an answer: a moving mark, what it is doing in its own words, and how long it
+ * has been at it. Before this the screen could sit unchanged for ten seconds of
+ * work and look identical to a finished one (bw-f1q.3).
+ */
+function WorkingLine({
+  label,
+  seconds,
+  waiting,
+  thought,
+}: {
+  label: string;
+  seconds: number;
+  waiting: boolean;
+  /** Thinking the brand did but withheld, as its own estimate of the size. */
+  thought: number;
+}) {
+  return (
+    <div
+      data-testid="working-line"
+      data-seconds={seconds}
+      data-waiting={waiting}
+      className={cn('flex items-center gap-2 px-1 py-1 text-sm', waiting ? 'text-amber-400' : 'text-muted-foreground')}
+    >
+      {waiting ? (
+        <Hand className="h-4 w-4 shrink-0 animate-pulse" aria-hidden="true" />
+      ) : (
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
+      )}
+      {/* Waiting on him is not the agent working, and the line must not pretend
+          otherwise — it is the one state where the screen is asking, not telling. */}
+      <span className="min-w-0 truncate font-mono text-xs">
+        {waiting ? `Waiting for you · ${label}` : label}
+        {/* A think whose words are withheld still says how big it is getting —
+            otherwise a two-minute think looks the same as a stuck one. */}
+        {!waiting && thought > 0 ? ` · ~${Math.round(thought / 100) / 10}k thought` : ''}
+      </span>
+      <span data-testid="working-elapsed" className="shrink-0 font-mono text-xs tabular-nums opacity-70">
+        {seconds}s
+      </span>
+    </div>
+  );
+}
+
+/**
+ * One picker on the composer's row. What it lists is what the session itself
+ * announced it can do, so it is never a list of guesses (§7).
+ */
+function Picker({
+  icon,
+  label,
+  current,
+  options,
+  testid,
+  onPick,
+}: {
+  icon: ReactNode;
+  label: string;
+  current: string | null;
+  options: { value: string; label: string; hint?: string }[];
+  testid: string;
+  onPick: (value: string) => void;
+}) {
+  if (!options.length) return null;
+  const shown = options.find((o) => o.value === current)?.label ?? current ?? label;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          data-testid={testid}
+          data-current={current ?? ''}
+          aria-label={label}
+          title={label}
+          className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {icon}
+          <span className="max-w-[18ch] truncate">{shown}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto" data-testid={`${testid}-menu`}>
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        {options.map((o) => (
+          <DropdownMenuItem
+            key={o.value}
+            data-testid={`${testid}-option`}
+            data-value={o.value}
+            data-picked={o.value === current}
+            onSelect={() => onPick(o.value)}
+            className="flex-col items-start gap-0.5"
+          >
+            <span className={cn('text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
+            {o.hint && <span className="text-xs text-muted-foreground">{o.hint}</span>}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The `/` menu: the install's own commands and skills, filtered as he types.
+ * Opens on a slash at the start of an empty-of-spaces draft, and picking one
+ * writes it into the box — sending is ordinary, because that is how a command is
+ * run (§7).
+ */
+function CommandMenu({
+  matches,
+  active,
+  onPick,
+}: {
+  matches: CommandInfo[];
+  active: number;
+  onPick: (command: CommandInfo) => void;
+}) {
+  if (!matches.length) return null;
+  return (
+    <div
+      data-testid="command-menu"
+      className="mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-lg"
+    >
+      {matches.map((c, i) => (
+        <button
+          key={`${c.kind}:${c.name}`}
+          type="button"
+          data-testid="command-option"
+          data-command={c.name}
+          data-kind={c.kind}
+          data-active={i === active}
+          onMouseDown={(e) => {
+            // Down, not click: the box must not lose focus before the pick lands.
+            e.preventDefault();
+            onPick(c);
+          }}
+          className={cn(
+            'flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
+            i === active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
+          )}
+        >
+          <span className="shrink-0 font-mono">/{c.name}</span>
+          {c.argumentHint && <span className="shrink-0 font-mono text-xs text-muted-foreground">{c.argumentHint}</span>}
+          <span className="min-w-0 truncate text-xs text-muted-foreground">{c.description}</span>
+          {c.kind === 'skill' && (
+            <Badge variant="secondary" appearance="light" size="xs" shape="circle" className="ml-auto shrink-0">
+              skill
+            </Badge>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A picture at full size, over the chat. Escape or a click away closes it. */
+function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () => void }) {
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onClose]);
+
+  return (
+    <div
+      data-testid="picture-viewer"
+      role="dialog"
+      aria-label={image.alt || 'Picture'}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+      onClick={onClose}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        data-testid="picture-viewer-image"
+        src={image.dataUrl}
+        alt={image.alt}
+        className="max-h-full max-w-full rounded shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <Button
+        variant="ghost"
+        mode="icon"
+        size="sm"
+        aria-label="Close the picture"
+        data-testid="picture-viewer-close"
+        className="absolute right-4 top-4 text-white"
+        onClick={onClose}
+      >
+        <X className="h-5 w-5" />
+      </Button>
     </div>
   );
 }
@@ -258,6 +516,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const ours = reports.filter((r) => r.card !== null && owned.has(r.card));
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
+  /** The picture being looked at, from the tray or from a message. */
+  const [looking, setLooking] = useState<ImagePayload | null>(null);
+  /** Which entry the `/` menu has under the cursor. */
+  const [pick, setPick] = useState(0);
   /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
   const [railOpen, setRailOpen] = useState(false);
   /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
@@ -294,6 +556,45 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }, [draft]);
 
   const busy = isBusy(view.state);
+
+  /**
+   * How long the agent has been at this. The brand's own count for the call it
+   * is running, and otherwise the time since it started owing an answer — so a
+   * think, which no tool reports, still shows a number that moves.
+   */
+  const [busySince, setBusySince] = useState<number | null>(null);
+  // The beat exists only to redraw: the count itself is read from the clock.
+  const [, beat] = useState(0);
+  useEffect(() => {
+    setBusySince(busy ? Date.now() : null);
+    // Restarted at each change of phase, so the number says how long it has been
+    // doing THIS, which is what the words beside it name.
+  }, [busy, view.state]);
+  useEffect(() => {
+    if (!busy) return;
+    const timer = setInterval(() => beat((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
+  const running = view.items.find((it) => it.kind === 'tool' && it.status === 'running');
+  const reported = running && running.kind === 'tool' ? running.seconds : 0;
+  const counted = busySince ? Math.floor((Date.now() - busySince) / 1000) : 0;
+  const workedFor = Math.max(Math.round(reported), counted, 0);
+
+  /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */
+  const typedCommand = /^\/(\S*)$/.exec(draft)?.[1] ?? null;
+  const matches = useMemo(() => {
+    if (typedCommand === null) return [];
+    const wanted = typedCommand.toLowerCase();
+    return view.menu.commands.filter((c) => c.name.toLowerCase().startsWith(wanted)).slice(0, 40);
+  }, [typedCommand, view.menu.commands]);
+  useEffect(() => setPick(0), [typedCommand]);
+
+  function take(command: CommandInfo) {
+    // Written into the box rather than sent: he may want to add an argument, and
+    // a command is ordinary prompt text either way (§7).
+    setDraft(`/${command.name} `);
+    typing.current?.focus();
+  }
 
   async function submit() {
     const text = draft.trim();
@@ -465,6 +766,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       >
         {view.items.map((item) => {
           if (item.kind === 'tool') return <ToolRow key={item.id} item={item} nested={item.parentId !== null} />;
+          if (item.kind === 'thinking') return <ThinkingBlock key={item.id} item={item} />;
           if (item.kind === 'notice') {
             return (
               <p key={item.id} data-testid="transcript-notice" className="text-center text-xs text-muted-foreground">
@@ -508,7 +810,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   data-testid="message-image"
                   src={img.dataUrl}
                   alt={img.alt}
-                  className="mb-2 max-h-64 max-w-full rounded border border-border/60"
+                  title="Click to see it full size"
+                  onClick={() => setLooking(img)}
+                  className="mb-2 max-h-64 max-w-full cursor-zoom-in rounded border border-border/60"
                 />
               ))}
               <MarkdownBody className="text-sm">{item.text}</MarkdownBody>
@@ -516,6 +820,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           );
         })}
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
+        {/* What it is doing, where he is looking. Present exactly while it owes
+            an answer (docs/agent-workbench.md §8.2.2). */}
+        {busy && (
+          <WorkingLine
+            label={view.stateLabel}
+            seconds={workedFor}
+            waiting={view.state === 'waiting_permission'}
+            thought={view.thinkingTokens}
+          />
+        )}
         <div ref={endRef} />
       </div>
 
@@ -532,17 +846,31 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {attached.length > 0 && (
             <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
               {attached.map((img, i) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={i}
-                  src={img.dataUrl}
-                  alt={img.alt}
-                  title={img.alt}
-                  className="h-12 w-12 rounded border border-border/60 object-cover"
-                />
+                <span key={i} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    data-testid="attachment-thumb"
+                    src={img.dataUrl}
+                    alt={img.alt}
+                    title={`${img.alt} — click to see it full size`}
+                    onClick={() => setLooking(img)}
+                    className="h-12 w-12 cursor-zoom-in rounded border border-border/60 object-cover"
+                  />
+                  <button
+                    type="button"
+                    data-testid="attachment-remove"
+                    aria-label={`Remove ${img.alt}`}
+                    onClick={() => setAttached((all) => all.filter((_, at) => at !== i))}
+                    className="absolute -right-1.5 -top-1.5 rounded-full bg-background p-0.5 text-muted-foreground shadow hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
               ))}
             </div>
           )}
+          {/* His own commands and skills, as this session announced them (§7). */}
+          <CommandMenu matches={matches} active={pick} onPick={take} />
           <input
             ref={picker}
             data-testid="image-input"
@@ -564,6 +892,28 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               void absorb(e.dataTransfer.files);
             }}
             onKeyDown={(e) => {
+              if (matches.length) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setPick((n) => (n + 1) % matches.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setPick((n) => (n - 1 + matches.length) % matches.length);
+                  return;
+                }
+                if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                  e.preventDefault();
+                  take(matches[pick] ?? matches[0]!);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setDraft('');
+                  return;
+                }
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 void submit();
@@ -590,6 +940,29 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             >
               <Paperclip className="h-4 w-4" />
             </Button>
+            {/* Both act on THIS chat, not the next one (§8.2.3). */}
+            <Picker
+              icon={<ShieldCheck className="h-3.5 w-3.5" />}
+              label="Permission mode"
+              testid="mode-picker"
+              current={view.permissionMode}
+              options={view.menu.permissionModes.map((m) => ({ value: m, label: m }))}
+              onPick={(mode) => void sendCommand({ type: 'session.mode', sessionId, mode })}
+            />
+            <Picker
+              icon={<Cpu className="h-3.5 w-3.5" />}
+              label="Model"
+              testid="model-picker"
+              // A session that has not been given a model is on the brand's own
+              // default, and the list has a row for exactly that.
+              current={view.model ?? 'default'}
+              options={view.menu.models.map((m) => ({
+                value: m.value,
+                label: m.displayName,
+                hint: m.description,
+              }))}
+              onPick={(model) => void sendCommand({ type: 'session.model', sessionId, model })}
+            />
             <span className="ml-auto" />
             {busy ? (
               <Button
@@ -620,6 +993,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           </div>
         </div>
       </div>
+
+      {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
     </div>,
   );
 }
