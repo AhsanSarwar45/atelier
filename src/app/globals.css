@@ -193,42 +193,25 @@
  *
  * Every pane in this app scrolls inside itself — the shell clips and the window
  * never moves — so these rails are on screen all day, beside the work. The
- * browser's own is a wide grey column with a track behind it, in a colour no
- * theme chose. This is the same rail at a third of the weight: no track at all,
- * and a thumb in the theme's muted ink that comes up to full muted under the
- * pointer. Both spellings are written — the two properties every browser now
- * reads, and the rail parts Chrome and Safari have always read, which ignore
- * the first pair for everything but the coarsest width.
+ * browser's own is 15px of grey column with a track behind it, in a colour no
+ * theme chose. Asked for here: two thirds of that, no track at all, and a thumb
+ * in the theme's own muted ink.
  *
- * The properties inherit, so `html` reaches every pane; the rail parts do not
- * inherit and are written unqualified, which is how they reach every pane.
+ * ⚠ EVERY ELEMENT, not `html`. Measured in a real Chrome: `scrollbar-color`
+ * inherits and `scrollbar-width` DOES NOT, so the same rule on the document
+ * alone left every pane in the app at 15px in the theme's colour — the width
+ * simply never arrived. The document element is the one scroller this app never
+ * uses.
+ *
+ * The rail parts Chrome and Safari grew up on (`::-webkit-scrollbar…`) are not
+ * written: measured in the same browser, Chrome ignores them outright wherever
+ * these two properties are set, and they are set here on everything. A 10px
+ * rail with a 4px thumb inside it was what they asked for and never what was
+ * drawn.
  */
-html {
+* {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--text-muted) / 0.4) transparent;
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-/* The border is transparent and the paint is clipped inside it, which is what
- * makes a 10px rail draw a 4px thumb with air on both sides of it. */
-::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--text-muted) / 0.4);
-  background-clip: content-box;
-  border: 3px solid transparent;
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--text-muted) / 0.7);
 }
 
 .font-heading {

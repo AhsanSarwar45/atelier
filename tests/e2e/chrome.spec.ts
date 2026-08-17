@@ -9,13 +9,15 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * And the scrollbars are the app's own: thin, no track, a thumb in the live
  * theme's ink.
  *
- * ⚠ The rail cannot be MEASURED here. Headless chromium draws overlay
- * scrollbars — they take no room (offsetWidth - clientWidth is 0) and never
- * appear in a screenshot — and no launch flag turns that off. So what is
- * checked is what the page DECLARES: the two properties every browser now
- * reads, computed off the document, and the rail rules Chrome and Safari read,
- * found in the stylesheet the page actually loaded. A picture of the rail comes
- * from a real browser on a real screen.
+ * ⚠ The rail's WIDTH IN PIXELS cannot be read here. Headless chromium draws
+ * overlay scrollbars — they take no room (offsetWidth - clientWidth is 0) and
+ * never appear in a screenshot — and no launch flag turns that off. What is
+ * read instead is what each PANE THAT SCROLLS resolves the two properties to,
+ * which is exactly where the first attempt went wrong: the rule sat on the
+ * document, `scrollbar-width` does not inherit, and every pane in the app was
+ * left at the browser's default while the document — the one scroller this app
+ * never uses — read thin. A picture of the rail itself comes from a browser
+ * with a real window.
  *
  * Run: BEADS_E2E_URL=http://127.0.0.1:3031 BEADS_E2E_BACKEND=http://127.0.0.1:3008 \
  *      npx playwright test tests/e2e/chrome.spec.ts
@@ -62,22 +64,6 @@ async function gearOnBar(page: Page) {
       scrollbarColor: getComputedStyle(document.documentElement).scrollbarColor,
     };
   });
-}
-
-/** Every rule in every stylesheet the page loaded, as one piece of text. */
-async function styleText(page: Page): Promise<string> {
-  return page.evaluate(() =>
-    [...document.styleSheets]
-      .flatMap((sheet) => {
-        try {
-          return [...sheet.cssRules].map((rule) => rule.cssText);
-        } catch {
-          // A sheet from another origin cannot be read; this app serves its own.
-          return [];
-        }
-      })
-      .join('\n'),
-  );
 }
 
 test.describe('chrome', () => {
@@ -139,33 +125,41 @@ test.describe('chrome', () => {
     });
   }
 
-  test('the app declares its own scrollbar: thin, no track, the theme’s ink', async ({ page, request }) => {
+  test('every pane that scrolls asks for the thin rail, not just the document', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=board`);
     await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
+    // The board has to have something in it, or there is no pane to read.
+    await expect.poll(() => page.getByTestId('column-scroll').count(), { timeout: 30_000 }).toBeGreaterThan(0);
 
-    const declared = await page.evaluate(() => {
-      const s = getComputedStyle(document.documentElement);
-      return { width: s.scrollbarWidth, color: s.scrollbarColor };
+    const rails = await page.evaluate(() => {
+      const scrolls = [...document.querySelectorAll('*')].filter((e) => {
+        const s = getComputedStyle(e);
+        return (
+          (/(auto|scroll)/.test(s.overflowY) && e.scrollHeight > e.clientHeight + 4) ||
+          (/(auto|scroll)/.test(s.overflowX) && e.scrollWidth > e.clientWidth + 4)
+        );
+      });
+      return scrolls.map((e) => {
+        const s = getComputedStyle(e);
+        return {
+          what: e.getAttribute('data-testid') ?? e.tagName.toLowerCase(),
+          width: s.scrollbarWidth,
+          color: s.scrollbarColor,
+        };
+      });
     });
-    expect(declared.width, 'the rail is left at the browser default width').toBe('thin');
-    expect(declared.color, 'the rail is left in the browser default colours').not.toBe('auto');
-    // Thumb and track, in that order — and the track is see-through, so the
-    // rail is a thumb on the work rather than a column beside it.
-    expect(declared.color).toMatch(/rgba?\(.+\)\s+rgba\([^)]*,\s*0\)/);
 
-    // Chrome and Safari take their width from their own rail parts, so those
-    // have to be in the stylesheet as well.
-    const css = await styleText(page);
-    expect(css, 'the stylesheet carries no rail rules for Chrome and Safari').toContain('::-webkit-scrollbar-thumb');
-    const thumb = /::-webkit-scrollbar-thumb\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
-    // The paint is clipped inside a transparent border: that is what draws a
-    // hairline thumb with air either side of it instead of a full-width block.
-    expect(thumb, 'the thumb fills the whole rail').toContain('content-box');
-    expect(thumb, 'the thumb has no inset').toMatch(/border:\s*3px\s+solid\s+(transparent|rgba\(0,\s*0,\s*0,\s*0\))/);
-    const rail = /::-webkit-scrollbar\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
-    expect(rail, 'the rail is left at the browser default width').toMatch(/width:\s*10px/);
-    const track = /::-webkit-scrollbar-track[^{]*\{([^}]*)\}/.exec(css)?.[1] ?? '';
-    expect(track, 'the rail still draws a track behind the thumb').toMatch(/transparent|rgba\(0,\s*0,\s*0,\s*0\)/);
+    // A screen with nothing overflowing proves nothing about rails.
+    expect(rails.length, 'no pane on this screen overflows, so there is no rail to read').toBeGreaterThan(0);
+    // This is the assertion the first attempt did not make: `scrollbar-width`
+    // does not inherit, so a rule on the document leaves every one of these at
+    // the browser's own width.
+    const fat = rails.filter((r) => r.width !== 'thin');
+    expect(fat, `panes left at the browser's own rail: ${JSON.stringify(fat.slice(0, 4))}`).toHaveLength(0);
+    // Thumb and track, in that order — the track see-through, so the rail is a
+    // thumb over the work rather than a column beside it.
+    const wrongInk = rails.filter((r) => !/rgba?\(.+\)\s+rgba\([^)]*,\s*0\)/.test(r.color));
+    expect(wrongInk, `panes not in the theme's ink: ${JSON.stringify(wrongInk.slice(0, 4))}`).toHaveLength(0);
   });
 });
