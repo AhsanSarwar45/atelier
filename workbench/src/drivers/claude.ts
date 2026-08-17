@@ -66,6 +66,16 @@ const INFORMATIONAL_RANK: Record<string, NoteRank> = {
 const SPOKEN_FIELDS = ['content', 'text', 'message', 'error', 'summary', 'reason', 'result'];
 
 /**
+ * How much of a quiet line's body is kept, matching a command's output.
+ *
+ * The body is there to be READ, and the whole of it is already on disk in the
+ * kit's own record. Measured 2026-08-17, one hook on this machine answers with
+ * 10.7 KB and fires twice a turn, so keeping every byte would put megabytes of
+ * the same paragraph into a long chat (bw-1u1.18, §8.2.5).
+ */
+const BODY_KEPT = 4000;
+
+/**
  * The kinds `pump()` translates into something better than a line.
  *
  * The one list, read by `noteFor` (which returns null for exactly these) and by
@@ -318,13 +328,15 @@ export class ClaudeDriver implements Driver {
     // A quiet line is skipped when the same sentence has just been drawn; a
     // `detail` is not, because it is the record rather than the reading.
     if (note.rank === 'note' && this.saidAlready(note.text)) return;
+    const body = note.body ?? null;
     this.emit({
       type: 'note',
       noteId: randomUUID(),
       rank: note.rank,
       kind: note.kind,
       text: note.text,
-      body: note.body ?? null,
+      // Cut where a command's output is cut, and for the same reason.
+      body: body && body.length > BODY_KEPT ? `${body.slice(0, BODY_KEPT)}\n… and ${body.length - BODY_KEPT} more` : body,
     });
   }
 
