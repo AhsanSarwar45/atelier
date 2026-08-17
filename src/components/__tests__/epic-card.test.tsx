@@ -105,6 +105,12 @@ describe('the button that finishes a job', () => {
     expect(screen.queryByRole('button', { name: FINISH })).toBeNull();
   });
 
+  it('is not drawn on a job whose every piece was dropped', () => {
+    // Nothing was finished there, so it is a job to drop, not one to sign off.
+    render(<EpicCard {...withPieces('manager_review', 0, 3)} />);
+    expect(screen.queryByRole('button', { name: FINISH })).toBeNull();
+  });
+
   it('is drawn when every piece left is finished and the rest were dropped', () => {
     // bw-oio5's shape: ten finished, four dropped, none standing. Counting the
     // dropped ones in the total held it at 71%, and the button never appeared.

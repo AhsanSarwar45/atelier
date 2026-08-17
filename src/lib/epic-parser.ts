@@ -169,16 +169,20 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
 /**
  * How much of a job is done, as the number the bar and the card draw.
  *
- * A job every piece of which was dropped has nothing left to do, so it reads
- * finished. A job with no pieces at all is not finished, it is empty.
+ * Of the pieces that count, which is what dropping work is for: fourteen
+ * pieces with four dropped is a job of ten, and ten finished is all of it.
+ *
+ * A job with nothing left counting — every piece dropped, or no pieces at all
+ * — reads nothing done, not everything done. Nothing was finished there, and a
+ * job whose every piece was abandoned is one to drop, not one to sign off; the
+ * screen offers the manager the finish only at a hundred, so this is what keeps
+ * it from offering him a job where no work happened.
  *
  * @param progress - What {@link computeEpicProgress} returned for the job.
  */
 export function progressPercent(progress: EpicProgress): number {
-  if (progress.total > 0) {
-    return Math.round((progress.completed / progress.total) * 100);
-  }
-  return progress.dropped > 0 ? 100 : 0;
+  if (progress.total === 0) return 0;
+  return Math.round((progress.completed / progress.total) * 100);
 }
 
 /**

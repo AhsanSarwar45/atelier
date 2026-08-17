@@ -65,11 +65,14 @@ describe('what a job counts', () => {
     expect(percentOf(p)).toBe(75);
   });
 
-  it('reads a job whose every piece was dropped as finished', () => {
+  it('reads a job whose every piece was dropped as nothing done, not as finished', () => {
+    // Nothing was finished there. Such a job is one to drop, not one to sign
+    // off, and the screen offers the finish at a hundred and nowhere else.
     const p = progressOf(many(3, 'cancelled'));
     expect(p.total).toBe(0);
+    expect(p.completed).toBe(0);
     expect(p.dropped).toBe(3);
-    expect(percentOf(p)).toBe(100);
+    expect(percentOf(p)).toBe(0);
   });
 
   it('reads a job with no pieces at all as nothing, not as finished', () => {
