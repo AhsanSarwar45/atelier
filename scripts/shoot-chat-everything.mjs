@@ -63,22 +63,27 @@ const answer = page.getByTestId('note-row').filter({ hasText: /compact/i }).firs
 await answer.waitFor({ timeout: 180_000 });
 await page.waitForTimeout(2000);
 
-// Ctrl+O, the same key as in a terminal: everything opens, the command row with it.
-await page.keyboard.press('Control+o');
+// The command row alone, not Ctrl+O: opening everything fills the screen with
+// hook bodies and pushes the two things being claimed off it.
+await row.getByTestId('tool-toggle').click();
 await page.waitForTimeout(500);
-await page.getByTestId('transcript').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+await row.evaluate((el) => el.scrollIntoView({ block: 'start' }));
 await page.waitForTimeout(800);
 
-const opened = await row.getAttribute('data-open');
-const printed = await row.getByTestId('tool-output').count();
-if (opened !== 'true' || printed === 0) {
-  console.log(`the command row is not open onto its output (open=${opened}, printed boxes=${printed})`);
+// Both halves have to be ON the picture, not merely on the page: the named file
+// carried the command half and the compact half was saved elsewhere (bw-1u1.29).
+const view = page.viewportSize();
+const printed = await row.getByTestId('tool-output').first().boundingBox();
+const said = await answer.boundingBox();
+const inFrame = (box) => box && box.y >= 0 && box.y + box.height <= view.height;
+if (!inFrame(printed) || !inFrame(said)) {
+  console.log(`both halves are not in the frame (printed=${JSON.stringify(printed)}, answer=${JSON.stringify(said)})`);
   await browser.close();
   process.exit(1);
 }
 
 mkdirSync(dirname(out), { recursive: true });
 await page.screenshot({ path: out });
-console.log(`saved ${out} — a command opened onto its output, and the compact answer`);
+console.log(`saved ${out} — a command opened onto its output, and the compact answer, in one frame`);
 await browser.close();
 process.exit(0);
