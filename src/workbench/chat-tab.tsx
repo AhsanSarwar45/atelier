@@ -202,12 +202,17 @@ function Body({ label, text, testId }: { label: string; text: string; testId: st
   return (
     <div className="mt-1">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</div>
-      <pre
-        data-testid={testId}
-        className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-border/60 bg-muted/30 px-2 py-1.5 font-mono text-xs leading-relaxed text-muted-foreground"
-      >
-        {text}
-      </pre>
+      {/* The frame is the Panel's; the text inside carries no edge of its own,
+          and scrolls within it so a long output cannot push the conversation
+          off the screen. */}
+      <Panel inset="none" className="max-h-72 overflow-auto">
+        <pre
+          data-testid={testId}
+          className="whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-xs leading-relaxed text-muted-foreground"
+        >
+          {text}
+        </pre>
+      </Panel>
     </div>
   );
 }

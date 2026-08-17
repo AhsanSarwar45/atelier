@@ -58,7 +58,17 @@ async function withChats(request: APIRequestContext): Promise<{ project: Project
 }
 
 async function openChatTab(page: Page, project: Project): Promise<void> {
+  // Waiting for the LIST, not merely for a row: the rows of chats already
+  // running are drawn from the live stream at once, while the list itself is a
+  // fetch that reads every conversation the kit knows about and lands seconds
+  // later. A case that starts as soon as one row exists is reading the wrong
+  // list (bw-1u1.15).
+  const listed = page.waitForResponse(
+    (r) => r.url().includes('/api/workbench/restore') && r.ok(),
+    { timeout: 120_000 },
+  );
   await page.goto(`/project?id=${project.id}&tab=chat`);
+  await listed;
   await page.getByTestId('restore-row').first().waitFor({ timeout: 60_000 });
 }
 
@@ -70,9 +80,31 @@ async function drawn(page: Page): Promise<{ sessionId: string | null; messages: 
   }));
 }
 
+/**
+ * Brings a row onto the page.
+ *
+ * The list draws a screenful and grows as its foot is scrolled to, so on a board
+ * with hundreds of chats a row the sidecar returned is often not in the document
+ * at all — and waiting for it to scroll into view then waits forever (bw-1u1.15).
+ */
+async function reveal(page: Page, row: RestoreRow): Promise<boolean> {
+  const at = page.locator(`[data-testid="restore-row"][data-row-key="${keyOf(row)}"]`);
+  const more = page.getByTestId('chat-list-more');
+  // Kept waiting when there is nothing to grow yet: the list is fetched after
+  // the screen is drawn, so for the first moment the only rows are the chats
+  // already running and there is no foot to scroll to at all.
+  for (let round = 0; round < 120; round++) {
+    if (await at.count()) return true;
+    if (await more.count()) await more.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+  }
+  return (await at.count()) > 0;
+}
+
 /** Opens one named row and waits until its own words are on the screen. */
 async function enter(page: Page, row: RestoreRow): Promise<string> {
   const at = page.locator(`[data-testid="restore-row"][data-row-key="${keyOf(row)}"]`);
+  expect(await reveal(page, row), 'the list never drew the row this case is about').toBe(true);
   await at.scrollIntoViewIfNeeded();
   await at.getByTestId('row-name').click();
   await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
@@ -132,9 +164,10 @@ test.describe('the address says where you are', () => {
 
   test('a chat begun in a terminal opens for reading, and starts nothing', async ({ page, request }) => {
     const { project, rows } = await withChats(request);
+    await openChatTab(page, project);
+
     const terminal = rows.find((r) => r.sessionId === null && r.externalId !== null);
     test.skip(!terminal, 'this instance has no chat begun outside the app');
-    await openChatTab(page, project);
 
     const sent = await commandsDuring(page, async () => {
       await enter(page, terminal!);
