@@ -34,6 +34,46 @@ function pickProject(projects: Project[]): Project {
     : projects[0]!;
 }
 
+interface PastChat {
+  sessionId: string | null;
+  externalId: string | null;
+  origin: string;
+  title: string | null;
+}
+
+/**
+ * The first of these past chats whose own record holds a command, or nothing.
+ *
+ * Asked of the agent kit rather than guessed from the fact that a chat has
+ * words in it: a conversation that only ever talked owes the screen no command
+ * rows, and demanding some of it failed a build that was behaving perfectly
+ * (bw-1u1.25). The kit is the sidecar's dependency, not the app's, so it is
+ * resolved from where it actually lives.
+ */
+async function firstThatRanSomething(chats: PastChat[], dir: string): Promise<PastChat | undefined> {
+  const { createRequire } = await import('node:module');
+  const { pathToFileURL } = await import('node:url');
+  const fromSidecar = createRequire(new URL('../../workbench/package.json', import.meta.url));
+  const { getSessionMessages } = await import(
+    pathToFileURL(fromSidecar.resolve('@anthropic-ai/claude-agent-sdk')).href
+  );
+
+  for (const chat of chats) {
+    let messages: { message?: { content?: unknown } }[];
+    try {
+      messages = await getSessionMessages(chat.externalId, { dir });
+    } catch {
+      continue; // Its record has moved or gone; the next candidate will do.
+    }
+    const ran = messages.some((m) => {
+      const content = m.message?.content;
+      return Array.isArray(content) && content.some((b) => (b as { type?: string })?.type === 'tool_use');
+    });
+    if (ran) return chat;
+  }
+  return undefined;
+}
+
 /** A chat of its own for this case, with nothing said in it. */
 async function freshChat(request: APIRequestContext, page: Page): Promise<{ project: Project; id: string }> {
   const api = backend();
@@ -202,6 +242,32 @@ test.describe('the chat draws everything the agent does', () => {
     await expect(page.getByTestId('toggle-open-all')).toHaveAttribute('data-open-all', 'false');
   });
 
+  test('the one control shuts a command the reader opened by hand', async ({ page, request }) => {
+    await freshChat(request, page);
+    await letItRun(page);
+    await say(page, 'Run exactly this in the shell and say nothing else: echo shut-by-one-key');
+
+    const row = page.getByTestId('tool-row').first();
+    await row.waitFor({ timeout: TURN_MS });
+    const control = page.getByTestId('toggle-open-all');
+    if ((await control.getAttribute('data-open-all')) === 'true') {
+      await page.keyboard.press('Control+o');
+      await expect(control).toHaveAttribute('data-open-all', 'false');
+    }
+
+    await row.getByTestId('tool-toggle').click();
+    await expect(row).toHaveAttribute('data-open', 'true');
+
+    // A row touched by hand used to pin itself for good, so the control that
+    // opens and shuts every row at once stopped reaching it — and the button
+    // reading "show less" did not show less (bw-1u1.24).
+    await page.keyboard.press('Control+o');
+    await expect(control).toHaveAttribute('data-open-all', 'true');
+    await page.keyboard.press('Control+o');
+    await expect(control).toHaveAttribute('data-open-all', 'false');
+    await expect(row).toHaveAttribute('data-open', 'false');
+  });
+
   test('putting the command list away keeps what he typed', async ({ page, request }) => {
     await freshChat(request, page);
 
@@ -241,16 +307,16 @@ test.describe('the chat draws everything the agent does', () => {
     const projects = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
     const project = pickProject(projects);
     const q = new URLSearchParams({ project: project.id, path: project.path });
-    const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as {
-      sessionId: string | null;
-      externalId: string | null;
-      origin: string;
-      title: string | null;
-    }[];
-    // A chat that ran in his terminal and has words in it, so it has almost
-    // certainly run something too.
-    const past = rows.find((r) => r.origin === 'terminal' && r.externalId && r.title);
-    test.skip(!past, 'no past terminal chat on this instance');
+    const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as PastChat[];
+    // A chat this app has never had a row for, so it cannot have been continued
+    // here — one that was keeps its words-only copy on purpose, and demanding a
+    // command of it fails a build that is behaving as designed (bw-1u1.25).
+    const candidates = rows.filter((r) => r.origin === 'terminal' && r.externalId && !r.sessionId).slice(0, 8);
+
+    // And one the KIT's own record says ran something, rather than whichever
+    // came first: a past chat that never ran a command owes the screen no rows.
+    const past = await firstThatRanSomething(candidates, project.path);
+    test.skip(!past, 'no past terminal chat on this instance whose record holds a command');
 
     // Opened, which reads it and starts nothing (docs/designs/app-shell.md §1.9).
     const opened = (await (

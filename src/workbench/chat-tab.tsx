@@ -218,6 +218,25 @@ function Body({ label, text, testId }: { label: string; text: string; testId: st
 }
 
 /**
+ * Whether one row is open: the reader's own click, until the control that opens
+ * everything moves — which then wins, in both directions.
+ *
+ * A hand-opened row used to pin itself for good, so "show less" stopped reaching
+ * it and did not show less (bw-1u1.24). The last position of the control is kept
+ * rather than watched with an effect, so the row is right on the render that
+ * shows it, never one frame late.
+ */
+function useOpen(openAll: boolean): [boolean, (open: boolean) => void] {
+  const [byHand, setByHand] = useState<boolean | null>(null);
+  const [lastAll, setLastAll] = useState(openAll);
+  if (lastAll !== openAll) {
+    setLastAll(openAll);
+    setByHand(null);
+  }
+  return [byHand ?? openAll, setByHand];
+}
+
+/**
  * One command, and everything it did behind a click.
  *
  * The output has always crossed the wire and was thrown away in the browser, so
@@ -233,8 +252,7 @@ function ToolRow({
   nested: boolean;
   openAll: boolean;
 }) {
-  const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
-  const open = openedByHand ?? openAll;
+  const [open, setOpen] = useOpen(openAll);
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
   const asked = JSON.stringify(item.input ?? {}, null, 2);
@@ -253,7 +271,7 @@ function ToolRow({
           type="button"
           data-testid="tool-toggle"
           disabled={!hasBody}
-          onClick={() => setOpenedByHand(!open)}
+          onClick={() => setOpen(!open)}
           className="flex w-full items-center gap-2 text-left enabled:hover:text-foreground"
         >
           <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
@@ -291,8 +309,7 @@ function ToolRow({
  * appear only once the reader asks for everything (§8.2.4).
  */
 function NoteRow({ item, openAll }: { item: Extract<TranscriptItem, { kind: 'note' }>; openAll: boolean }) {
-  const [openedByHand, setOpenedByHand] = useState<boolean | null>(null);
-  const open = openedByHand ?? openAll;
+  const [open, setOpen] = useOpen(openAll);
   if (item.rank === 'detail' && !openAll) return null;
 
   return (
@@ -301,7 +318,7 @@ function NoteRow({ item, openAll }: { item: Extract<TranscriptItem, { kind: 'not
         type="button"
         data-testid="note-toggle"
         disabled={!item.body}
-        onClick={() => setOpenedByHand(!open)}
+        onClick={() => setOpen(!open)}
         className={cn(
           'flex w-full items-center gap-2 text-left text-muted-foreground/80 enabled:hover:text-foreground',
           item.rank === 'detail' && 'text-muted-foreground/50',
