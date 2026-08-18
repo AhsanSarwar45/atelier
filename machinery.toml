@@ -25,6 +25,12 @@ areas = ["board", "gates", "steps", "craft", "quality", "tests", "docs"]
 # report tools.
 lands_elsewhere = ["corsetta", "beads-web"]
 
+# The one command this project's checks step runs: its own suite and every fault
+# put back, which is what `./check` is. Once a job, in front of the reader — it
+# used to run again on every commit that touched a gate, which is minutes paid
+# over and over for a change nobody had finished making.
+checks = "./check"
+
 # This project's own quality tables. It has none yet: it is measured by the
 # shared measures alone until it declares its own.
 rules = ""

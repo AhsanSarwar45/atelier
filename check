@@ -5,9 +5,13 @@
 # Every project that runs this board is held to `board/selftest.py` by its own
 # compile gate. Nothing held the machinery to the other half — putting each
 # fault back and watching a case go red — so thirty-odd faults stood only while
-# somebody remembered to type the command (mch-mkp.55). This is that command,
-# and `.beads/hooks/pre-commit` runs it whenever a commit touches the source the
-# faults are written against.
+# somebody remembered to type the command (mch-mkp.55). This is that command.
+#
+# It is what the checks step of a job runs here — `machinery.toml` names it, and
+# the step is the one place a job pays for it: once, in front of the reader,
+# against everything the job built. No commit hook runs it. Held back per commit
+# it was the same minutes over and over for a change nobody had finished making
+# (bw-a6o.2).
 set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"

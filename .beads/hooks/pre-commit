@@ -61,12 +61,8 @@ fi
 # Below the markers on purpose: beads rewrites everything between them on every
 # upgrade, and anything put inside would be silently gone.
 #
-# The machinery's own gate, and only when this commit changes what it guards.
-# A gate's refusals are held down by faults that have to turn a case red, and
-# nothing in here ran them: they stood while somebody remembered to type the
-# command (mch-mkp.55). Putting each fault back is a whole suite run apiece, so
-# it is asked for exactly when the source they patch is what is being committed.
-if git diff --cached --name-only | grep -qE '^(hooks/board-merge-gate\.py|hooks/board-status-gate\.py|hooks/board_common\.py|project\.py|board/selftest\.py|board/inject\.py)$'; then
-  echo "machinery: gate source changed — running the suite and every fault"
-  "$(git rev-parse --show-toplevel)/check" || exit 1
-fi
+# Nothing of the machinery's own runs here any more. Its suite and its fault
+# put-back are what the checks step of a job runs — once, in front of the reader,
+# against everything the job built — and running them again per commit was the
+# same minutes paid over and over for a change nobody had finished making yet
+# (bw-a6o.2). The command is `./check`, and `machinery.toml` names it.

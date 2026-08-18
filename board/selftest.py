@@ -3863,6 +3863,37 @@ def main():
           "whose number has gone round to somebody else, by nobody at all, or "
           "naming somebody else's process does not")
 
+    # What a commit costs. The machinery's own commit hook used to put all
+    # ninety-odd faults back whenever a gate file was staged — minutes, paid
+    # again on every commit of a change nobody had finished making. The checks
+    # step is where that is paid now: once a job, in front of the reader, and
+    # the command is the project's own to name (bw-a6o.2).
+    hook_here = os.path.join(HOME, ".beads", "hooks", "pre-commit")
+    runs = [l.strip() for l in open(hook_here).read().splitlines()
+            if not l.lstrip().startswith("#")
+            and re.search(r"/check\b|inject\.py|selftest\.py", l)]
+    assert not runs, \
+        "the machinery's commit hook runs its own suite or its fault put-back " \
+        "again, so every commit to a gate pays minutes for a change nobody has " \
+        "finished making: %s" % runs
+    # The file this tree holds, not whatever `project.of` walks up to: a suite
+    # run from a worktree would otherwise judge the main checkout's declaration.
+    here = project.Declaration(HOME, project._read(os.path.join(HOME,
+                                                               project.DECLARATION)))
+    assert here.checks, \
+        "the machinery declares no checks command, so the one step that is meant " \
+        "to run its suite has nothing to run"
+    assert re.search(r"^checks\s*=", open(os.path.join(HOME, "machinery.toml.example"))
+                     .read(), re.M), \
+        "the declaration every joining project copies never mentions the command " \
+        "its checks step runs"
+    assert project.Declaration("/nowhere", {}).checks == "", \
+        "a project that declares no checks command cannot be read at all, so the " \
+        "step refuses to open rather than saying what was run by hand"
+
+    print("ok: the machinery's commit hook no longer runs its suite or its fault "
+          "put-back, and a project names the command its checks step runs")
+
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a
     # case that is red anyway says so in its own words before this reruns it.

@@ -41,6 +41,7 @@ CLOSE = "hooks/board-status-gate.py"
 DECL = "project.py"
 SUITE = "board/selftest.py"
 LANDING = "hooks/landing-gate.py"
+HOOK = ".beads/hooks/pre-commit"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -355,6 +356,17 @@ FAULTS = [
     ("any git command at all is read as a commit", LANDING,
      lambda s: s.replace('            return word == "commit"',
                          "            return True")),
+    # What a commit costs, and where a project says what its checks are (bw-a6o.2).
+    ("the commit hook pays for every fault again on each gate commit", HOOK,
+     lambda s: s.replace(
+         "# Nothing of the machinery's own runs here any more.",
+         "if git diff --cached --name-only | grep -q 'board/'; then\n"
+         '  "$(git rev-parse --show-toplevel)/check" || exit 1\n'
+         "fi\n"
+         "# Nothing of the machinery's own runs here any more.")),
+    ("a project's own checks command is not read from its declaration", DECL,
+     lambda s: s.replace('        self.checks = data.get("checks") or ""',
+                         '        self.checks = ""')),
 ]
 
 

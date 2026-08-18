@@ -102,6 +102,12 @@ class Declaration:
         # Where this project's own quality-rule modules live, relative to its
         # root. Empty means `quality.py` runs with the shared measures only.
         self.rules = data.get("rules") or ""
+        # The one command this project's own checks step runs: its tests, its
+        # compile gate, whatever it holds a change to. Asked for once a job, in
+        # front of the reader, so nothing here is paid per edit or per commit.
+        # A project that declares none still runs the step; its note says what
+        # was run by hand instead.
+        self.checks = data.get("checks") or ""
         # When this project's pour began asking a job why it drops a step. A job
         # poured before it was never asked and is not held to an answer; a project
         # that joined afterwards has no such jobs and leaves this empty.

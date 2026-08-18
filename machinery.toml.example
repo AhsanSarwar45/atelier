@@ -34,6 +34,11 @@ lands_elsewhere = []
 # Where this project's own quality-rule modules live, relative to its root.
 # Empty runs `quality.py` with the shared measures only.
 rules = ""
+# The one command this project's checks step runs — its tests, its compile gate,
+# whatever it holds a change to. A job runs it once, in front of the reader,
+# against everything the job built; nothing here belongs in a commit hook. Left
+# out, the step still runs and its note names what was run by hand instead.
+checks = "./check"
 
 [review]
 # What the outside reader is told it is reading for.
