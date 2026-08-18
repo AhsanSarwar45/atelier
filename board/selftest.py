@@ -3226,15 +3226,24 @@ def main():
                     fh.write("half-done\n")
                 gl("add", name)
             now = time.time()
+            # Several entries naming one session are several claims of that one
+            # session, oldest first: a session keeps one record however many cards
+            # it holds, and a file written per entry would leave only the last.
+            records = {}
             for sid, cid, _, paths in list(live) + list(dead):
                 gone = (sid, cid) in [(s, c) for s, c, _, _ in dead]
                 when = now - (LONG_GONE if gone else 5)
+                rec = records.setdefault(sid, {"last_beat": when, "claims": [],
+                                               "edits": []})
+                rec["last_beat"] = when
+                rec["claims"].append({"id": cid, "t": when})
+                rec["edits"] += [{"p": os.path.join(land, x), "t": when}
+                                 for x in paths]
+            for sid, rec in records.items():
                 full = os.path.join(state, sid + ".json")
                 with open(full, "w") as fh:
-                    json.dump({"last_beat": when, "claims": [{"id": cid, "t": when}],
-                               "edits": [{"p": os.path.join(land, x), "t": when}
-                                         for x in paths]}, fh)
-                os.utime(full, (when, when))
+                    json.dump(rec, fh)
+                os.utime(full, (rec["last_beat"], rec["last_beat"]))
             said = subprocess.run(
                 [sys.executable, MERGE_GATE], input=json.dumps({
                     "tool_name": "Bash", "tool_input": {"command": cmd},
@@ -3311,6 +3320,25 @@ def main():
         "the refusal still swept the checkout, so a live session's work was " \
         "moved out from under it anyway: %r" % got["stashes"]
 
+    # One session holding two cards, which is the ordinary way of working here:
+    # it left these files in the checkout the landing lands in and then claimed
+    # something from a tree of its own, inside the same lease. The refusal has to
+    # call it by the tree the files are in; the name it holds elsewhere sends
+    # whoever reads it to a checkout with nothing of the sort in it.
+    got = landing_in(["theirs.txt"],
+                     live=[(LIVE_SID, "lit-9.3", "main-" + LIVE_SID[:8],
+                            ["theirs.txt"]),
+                           (LIVE_SID, "lit-9.4", "bw-vb2-" + LIVE_SID[:8], [])])
+    assert got["refused"], \
+        "a landing walked over the half-done work of a session still at it: %r" \
+        % got["said"]
+    assert ("main-" + LIVE_SID[:8]) in got["said"], \
+        "the refusal names the session by a tree it moved on to rather than by " \
+        "the one its files are sitting in: %r" % got["said"]
+    assert ("bw-vb2-" + LIVE_SID[:8]) not in got["said"], \
+        "the refusal carries a name from another tree as well, so it reads as " \
+        "two sessions where there is one: %r" % got["said"]
+
     # The push spelling, which is how work lands here and the strict one: every
     # tracked change blocks it, whether or not the landing goes near the file.
     got = landing_in(["stale.txt"],
@@ -3342,7 +3370,8 @@ def main():
     print("ok: a landing clears leftovers no live session holds into a stash "
           "labelled with the date and who swept them, says what it moved, leaves "
           "untracked files alone, and refuses by name when the leftovers belong "
-          "to a session still at work")
+          "to a session still at work — by the name that session carries in the "
+          "checkout the files are sitting in, not the one it took elsewhere")
 
     # Which checkout a command belongs to. Some shells report the directory the
     # session was started in whatever directory the command names, so a command

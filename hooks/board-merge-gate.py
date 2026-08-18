@@ -1101,20 +1101,28 @@ def board_names(root):
             if isinstance(row, dict)}
 
 
-def board_name(sid, state, held):
-    """What the board calls this session.
+def board_name(sid, state, held, tree):
+    """What the board calls this session in the checkout its leftovers are in.
 
-    Taken from a card it is holding rather than worked out from a rule: a board
-    name carries the tree the session was standing in, and nothing a session
-    records about itself says which tree that was. The fallback is the rule
-    `board_common.actor` uses for a session standing outside any worktree, which
-    is where a file at the top of the shared checkout is edited from.
+    Taken from a card it is holding rather than worked out from a rule: a name
+    carries the tree the session was standing in, and nothing a session records
+    about itself says which tree that was.
+
+    One session works in two of them at once, though — it takes the merge slot
+    inside its worktree and closes the teardown outside it — so its newest claim
+    is as likely as not to have been made somewhere other than where it left
+    these files. A refusal naming that one sends whoever reads it to a checkout
+    the files are not in, so the name belonging to THIS tree is preferred and the
+    newest is only what is left when the board holds nothing under it (bw-vb2.8).
+
+    The name for this tree is `board_common.actor`'s own rule, which is where the
+    fallback comes from too: a session with no card the board still holds is
+    named the way it would name itself standing here.
     """
-    for claim in reversed(state.get("claims") or []):
-        name = held.get(claim.get("id"))
-        if name:
-            return name
-    return "main-" + sid[:8]
+    here = bc.actor(sid, tree)
+    mine = [held[claim.get("id")] for claim in reversed(state.get("claims") or [])
+            if held.get(claim.get("id"))]
+    return here if here in mine else (mine[0] if mine else here)
 
 
 def holding(tree, paths, root, when=None):
@@ -1134,7 +1142,7 @@ def holding(tree, paths, root, when=None):
         theirs = [p for p in paths
                   if os.path.realpath(os.path.join(tree, p)) in touched]
         if theirs:
-            name = board_name(sid, state, held)
+            name = board_name(sid, state, held, tree)
             mine.setdefault(name, []).extend(theirs)
     return {name: sorted(set(paths)) for name, paths in mine.items()}
 
