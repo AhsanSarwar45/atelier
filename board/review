@@ -218,7 +218,7 @@ def run_log(goal_id):
     return tempfile.mkdtemp(prefix=goal_id + ".", suffix=".run", dir=LOG_DIR)
 
 
-def hand_off(goal_id, rerun, mine):
+def hand_off(goal_id, rerun):
     """Give the shell back, and let a copy of this script do the reading.
 
     A reading is a whole `claude` session and takes minutes. Run by hand it held
@@ -241,11 +241,10 @@ def hand_off(goal_id, rerun, mine):
         reader = subprocess.Popen(args, cwd=ROOT, stdout=fh, stderr=fh,
                                   stdin=subprocess.DEVNULL, env=env,
                                   start_new_session=True)
-    # Only a claim this run took is renamed: a rerun that found somebody else's
-    # reader out holds nothing, and writing this copy's pid over theirs would
-    # hand it their claim to let go of.
-    if mine:
-        inflight.name(goal_id, reader.pid)
+    # The claim is this run's — a run that found somebody else's reader out stood
+    # down before it got here — so the copy's name goes straight over this one's,
+    # and the console with it, for whoever fires at the job next.
+    inflight.name(goal_id, reader.pid, log)
     print("%s is being read by a detached run; its console is %s, and the verdict "
           "goes onto the goal itself" % (goal_id, log))
 
@@ -419,9 +418,17 @@ def main():
     READING = goal_id
     # A reader started by hand is still a reader out on this job, so it claims
     # the job like any other — otherwise the board sends a second one at it while
-    # this one works (mch-m1t.15). Claiming is not asking: a rerun goes ahead
-    # whether or not it got the claim, and only lets go of one it took.
+    # this one works (mch-m1t.15). A run that does not get the claim stands down
+    # and says where the reading already going is writing: two readers on one job
+    # are one reading done twice, at the account's expense, and the verdict of the
+    # one already out lands on the goal either way (bw-5e8.4). The copy this run
+    # hands off to is the exception — the claim it finds held is its own parent's.
     mine = inflight.take(goal_id)
+    if not mine and not os.environ.get(inflight.DETACHED):
+        where = inflight.console(goal_id)
+        print("%s already has a reader out%s; the verdict goes onto the goal itself"
+              % (goal_id, (", writing to " + where) if where else ""))
+        return
 
     shas = reading.commits(goal_id, ROOT)
     if not reading.wanted(goal, shas, reading.wrote(goal_id, ROOT)) and not a.rerun:
@@ -433,7 +440,7 @@ def main():
     # reading itself is minutes long, so it happens in a copy of this script and
     # this run ends.
     if not os.environ.get(inflight.DETACHED):
-        hand_off(goal_id, a.rerun, mine)
+        hand_off(goal_id, a.rerun)
         global HANDED
         HANDED = True
         return

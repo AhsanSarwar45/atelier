@@ -27,8 +27,10 @@ import time
 ATTEMPT_TIMEOUT = 3600
 ATTEMPTS = 2
 
-# A claim is taken before the reader exists, so there is a moment with no process
-# to point at. Longer than a spawn, far shorter than a reading.
+# A claim carrying no mark of any kind is judged by its age, and this is the
+# ceiling. Nothing this file writes leaves a claim in that state — the owner goes
+# down inside `take` — so what is left here is a claim from an older run of these
+# tools, or one whose mark could not be written.
 UNNAMED_GRACE = 60
 
 # What a run of board/review is told when it is the detached copy that does the
@@ -53,12 +55,55 @@ def where(goal_id):
     return os.path.join(home(), goal_id + ".reading")
 
 
-def _pid(goal_id):
+def _said(goal_id, what):
+    """What this claim wrote down under that name, or nothing."""
     try:
-        with open(os.path.join(where(goal_id), "pid")) as fh:
-            return int(fh.read().strip())
-    except Exception:
+        with open(os.path.join(where(goal_id), what)) as fh:
+            return fh.read().strip()
+    except OSError:
         return None
+
+
+def _write(goal_id, what, value):
+    """Write one of the claim's marks, and touch the claim so its age is its own."""
+    try:
+        with open(os.path.join(where(goal_id), what), "w") as fh:
+            fh.write(str(value))
+        os.utime(where(goal_id), None)
+    except OSError:
+        pass
+
+
+def _number(goal_id, what):
+    try:
+        return int(_said(goal_id, what))
+    except (TypeError, ValueError):
+        return None
+
+
+def _pid(goal_id):
+    return _number(goal_id, "pid")
+
+
+def _owner(goal_id):
+    """The process that took this claim, marked from the instant it was taken."""
+    return _number(goal_id, "owner")
+
+
+def _alive(pid):
+    """Whether that process is still there at all.
+
+    The owner is asked this and not whether it is a reader: between the claim and
+    the spawn the holder is whoever took the claim — the run tool inside a hook,
+    or a reading fired by hand — and none of them answers to a reader's name.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def _reading(pid, goal_id):
@@ -85,8 +130,11 @@ def held(goal_id):
 
     The reader itself is the answer wherever there is one to ask: a job is held
     for exactly as long as its own reader is running, however long that takes.
-    The clock only decides the moment before the reader exists, so a sending that
-    died between claiming and spawning cannot hold a job shut for good.
+    Before the reader exists the holder is whoever took the claim, and the job is
+    held for as long as that process is alive — a claim marked from the instant it
+    is taken is never mistaken for one nobody is behind, which is how one goal was
+    read by two readers a minute apart (bw-5e8.4). A sending that died between
+    claiming and spawning still cannot hold a job shut: its owner is gone.
     """
     path = where(goal_id)
     try:
@@ -94,9 +142,12 @@ def held(goal_id):
     except OSError:
         return False
     pid = _pid(goal_id)
-    if pid is None:
-        return age <= UNNAMED_GRACE
-    return _reading(pid, goal_id)
+    if pid is not None:
+        return _reading(pid, goal_id)
+    owner = _owner(goal_id)
+    if owner is not None:
+        return _alive(owner)
+    return age <= UNNAMED_GRACE
 
 
 def take(goal_id):
@@ -118,6 +169,11 @@ def take(goal_id):
     for _ in (1, 2):
         try:
             os.mkdir(path)
+            # The mark goes down in the same breath as the claim. Taken and left
+            # bare, the claim would have nothing but its age to be judged by, and
+            # a firing a minute later would read a holder still at work as one
+            # that had died and send a second reader at the job (bw-5e8.4).
+            _write(goal_id, "owner", os.getpid())
             return True
         except FileExistsError:
             if held(goal_id):
@@ -128,14 +184,21 @@ def take(goal_id):
     return False
 
 
-def name(goal_id, pid):
-    """Say which process is behind the claim, once it exists."""
-    try:
-        with open(os.path.join(where(goal_id), "pid"), "w") as fh:
-            fh.write(str(pid))
-        os.utime(where(goal_id), None)
-    except OSError:
-        pass
+def name(goal_id, pid, log=None):
+    """Say which process is behind the claim, once it exists, and where it writes.
+
+    The console goes down beside the name so a second firing has somewhere to
+    send whoever asked: told a reading is already under way, an agent can read
+    that run rather than start one of its own (bw-5e8.4).
+    """
+    _write(goal_id, "pid", pid)
+    if log:
+        _write(goal_id, "console", log)
+
+
+def console(goal_id):
+    """Where the reader holding this claim is writing, if it said."""
+    return _said(goal_id, "console")
 
 
 def clear(goal_id):
@@ -152,10 +215,14 @@ def clear(goal_id):
 def drop(goal_id):
     """Let go of a claim this process holds, and say whether it held one.
 
-    A reader run by hand holds nothing, and must not clear the claim of a reader
-    that is genuinely out: the pid is what tells the two apart.
+    A run that holds nothing must not clear the claim of a reader that is
+    genuinely out: the mark is what tells the two apart, and it is the reader's
+    own name where there is one and the name of whoever took the claim before
+    that.
     """
     mine = _pid(goal_id)
+    if mine is None:
+        mine = _owner(goal_id)
     if mine is not None and mine != os.getpid():
         return False
     if mine is None and not os.path.isdir(where(goal_id)):

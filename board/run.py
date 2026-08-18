@@ -146,8 +146,8 @@ def fire(goal_id, root):
     reader = None
     try:
         os.makedirs(inflight.home(), exist_ok=True)
-        fd, _ = tempfile.mkstemp(prefix=goal_id + ".", suffix=".run.log",
-                                 dir=inflight.home())
+        fd, log = tempfile.mkstemp(prefix=goal_id + ".", suffix=".run.log",
+                                   dir=inflight.home())
         # A reader sent from inside another reader would otherwise inherit that
         # one's run directory and write its attempts on top of them, which is
         # cor-987e again by another route. This one allocates its own.
@@ -157,7 +157,9 @@ def fire(goal_id, root):
                                   cwd=root, stdout=fd, stderr=fd,
                                   stdin=subprocess.DEVNULL, start_new_session=True,
                                   env=env)
-        inflight.name(goal_id, reader.pid)
+        # The console goes down with the name so a firing that finds this claim
+        # held has somewhere to point whoever asked (bw-5e8.4).
+        inflight.name(goal_id, reader.pid, log)
         os.close(fd)
     except Exception:
         # Only a reader that never started leaves the claim behind: past this

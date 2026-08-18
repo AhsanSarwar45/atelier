@@ -247,7 +247,12 @@ class Reached(Exception):
     """
 
 
-def hands_off(detached, rerun=True):
+# Where a reader that is already out says it is writing, for the case that finds
+# one and has to point at it.
+BUSY_LOG = "/nowhere/g.already.run/run.log"
+
+
+def hands_off(detached, rerun=True, busy=None):
     """What a reading fired by hand does: spawn a copy of itself, or read.
 
     Fired by hand it used to do the reading in the caller's own shell, and the
@@ -258,7 +263,8 @@ def hands_off(detached, rerun=True):
 
     `detached` is the copy's side of the same run: told it is the copy, it must
     read rather than hand off again, because a reader that hands off to a reader
-    is a reading nobody ever does.
+    is a reading nobody ever does. `busy` is the pid of a reader already out on
+    the job, which this run must find and stand down from.
     """
     rv = script("review")
     goal = dict(GOAL, status="in_progress", notes="")
@@ -288,6 +294,9 @@ def hands_off(detached, rerun=True):
     if detached:
         os.environ[inflight.DETACHED] = "1"
     inflight.clear("g")
+    if busy:
+        inflight.take("g")
+        inflight.name("g", busy, BUSY_LOG)
     try:
         rv.main()
     except Reached:
@@ -3317,13 +3326,29 @@ def main():
     assert not spawned and read == ["g"], \
         "the copy handed the reading on instead of doing it, which is a reader that " \
         "never arrives"
+    already = tempfile.mkdtemp()
+    stood = pretend_reader(already, "g")
+    try:
+        spawned, read, said = hands_off(detached=False, busy=stood.pid)
+    finally:
+        stood.kill()
+        stood.wait()
+        shutil.rmtree(already, ignore_errors=True)
+    assert not spawned and not read, \
+        "a firing that found a reader already out on the job sent a second one, " \
+        "which is the same reading done twice at the account's expense"
+    assert BUSY_LOG in said, \
+        "a firing that stood down did not say where the reading already going is " \
+        "writing, so whoever asked has nowhere to look"
+
     told = fires_marked()
     assert told["env"].get(inflight.DETACHED) and inflight.RUN_DIR not in told["env"], \
         "the board's own firing sent a reader it had not marked, so that reader " \
         "hands off to another and writes its attempts into its sender's directory"
 
     print("ok: a reading fired by hand hands itself to a marked copy and says where "
-          "the run went, the marked copy reads rather than handing off again, and "
+          "the run went, the marked copy reads rather than handing off again, a "
+          "firing that finds a reader already out stands down and points at it, and "
           "the board's own firing marks the reader it sends")
 
     pretend = tempfile.mkdtemp()
@@ -3344,12 +3369,35 @@ def main():
         victim.wait()
         assert inflight.take(HELD), \
             "a reader that died held its job shut, so nobody could ever read it"
+        # A claim carries its owner from the instant it is taken, so age alone
+        # cannot unseat one whose owner is still at work: a firing a minute later
+        # used to read it as abandoned, clear it, and put a second reader on the
+        # same job (bw-5e8.4).
         inflight.clear(HELD)
         inflight.take(HELD)
-        young = datetime.datetime.now().timestamp() - inflight.UNNAMED_GRACE - 5
+        young = datetime.datetime.now().timestamp() - inflight.UNNAMED_GRACE - 10
+        os.utime(inflight.where(HELD), (young, young))
+        assert inflight.held(HELD), \
+            "a claim seventy seconds old whose owner was still working was read as " \
+            "one nobody was behind"
+        assert not inflight.take(HELD), \
+            "a second firing seventy seconds later took a claim that was held, " \
+            "which is one job read twice over"
+        # What makes such a claim stale is the owner going away, not the clock.
+        # The number written below belonged to a process that has been reaped.
+        with open(os.path.join(inflight.where(HELD), "owner"), "w") as fh:
+            fh.write(str(victim.pid))
+        assert not inflight.held(HELD), \
+            "a claim whose owner died before it could spawn a reader held the job " \
+            "for good"
+        # A claim from before any of this carries no mark at all, and its age is
+        # then the only thing there is to judge it by.
+        inflight.clear(HELD)
+        inflight.take(HELD)
+        os.unlink(os.path.join(inflight.where(HELD), "owner"))
         os.utime(inflight.where(HELD), (young, young))
         assert not inflight.held(HELD), \
-            "a claim taken for a reader that never appeared held the job for good"
+            "an unmarked claim older than the grace held the job for good"
         inflight.clear(HELD)
         inflight.take(HELD)
         inflight.name(HELD, os.getpid())
@@ -3372,9 +3420,10 @@ def main():
         inflight.clear(HELD)
         shutil.rmtree(pretend, ignore_errors=True)
 
-    print("ok: a reader still running holds its job however long it takes, and a "
-          "claim left by a reader that died, that never started, or that names "
-          "somebody else's process does not")
+    print("ok: a reader still running holds its job however long it takes, a claim "
+          "whose owner is still at work holds it a minute after it was taken, and "
+          "a claim left by a reader that died, by an owner that died, by nobody at "
+          "all, or naming somebody else's process does not")
 
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a
