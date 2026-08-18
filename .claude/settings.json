@@ -1,5 +1,6 @@
 {
   "outputStyle": "manager",
+  "autoCompactWindow": 200000,
   "hooks": {
     "PreToolUse": [
       {

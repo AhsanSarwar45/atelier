@@ -217,20 +217,29 @@ WIRING = {
     "SessionEnd": ("board-push.py",),
     "Stop": ("completion-gate.py", "board-gate.py"),
 }
+# The ceiling on a session's own history. A worker session lives for hours, and
+# without this it carries every turn of the day into every request — so the
+# setting is read here too, and a project that has not set one is told.
+CEILING = "autoCompactWindow"
 
 
 def unwired(root):
-    """Hooks this project's settings do not run. A gate nobody wired is a gate
-    that is not there, and it fails silently — which is the whole reason to say
-    it out loud rather than to trust the file."""
+    """Hooks this project's settings do not run, and the ceiling they do not set.
+    A gate nobody wired is a gate that is not there, and it fails silently —
+    which is the whole reason to say it out loud rather than to trust the file."""
     where = os.path.join(root, ".claude", "settings.json")
     try:
         text = open(where).read()
     except OSError:
         return ["no .claude/settings.json at %s — nothing is wired" % root]
     missing = [name for names in WIRING.values() for name in names if name not in text]
-    return ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
+    said = ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
         if missing else []
+    if CEILING not in text:
+        said.append("no %s in .claude/settings.json — a session here runs unbounded, "
+                    "carrying every turn of the day into every request instead of "
+                    "shedding the history it no longer needs" % CEILING)
+    return said
 
 
 def main():

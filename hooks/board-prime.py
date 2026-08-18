@@ -56,6 +56,8 @@ Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --r
 - The board carries the running order and the running notes
   (`bd update <id> --append-notes="..."`). Docs and comments may name a card and
   nothing else: no TODO lines, no handoff files, no plan-in-a-doc.
+- Your history compacts itself at 200k tokens; let it take the old transcript when a step
+  lands. The board and the tree carry the work state, and these rules arrive again after.
 - Merging is how a code step closes, once per step, not once per job:
   `git rebase main` in your own tree, then `bd merge-slot acquire`,
   `git merge --ff-only <branch>`, `bd merge-slot release`. A merge that is not a
