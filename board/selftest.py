@@ -71,6 +71,10 @@ def hook(name):
 
 touch = hook("board-touch")
 gate = hook("board-gate")
+# One `board_common` answers every hook here, so a case that stands a recorder in
+# place of its state reader stands it in front of all of them. Kept from before
+# the first case runs, for the cases that write real state and read it back.
+REAL_STATE = (touch.bc.load, touch.bc.save)
 status = hook("board-status-gate")
 reading = hook("habit-reading")
 runner = touch.run
@@ -1381,16 +1385,19 @@ def waiving(sid, age=0):
 
 
 def carrying_on(held, closed=(), goals=(), asked=False, helper=False, pushes=0,
-                again=False):
+                again=False, helpers=()):
     """What the stop gate says to a turn ending with `held` still claimed.
 
     `goals` is what the board answers about the cards closed in the turn: each is
     the card, the goal above it, and that goal's status. Nothing here touches a
     board — `bd` answers out of that list and nothing else.
+
+    `helper` sends one off in this turn; `helpers` are the ones still out from an
+    earlier turn, by the names they answer to.
     """
     state = {"edits": [], "created": [], "claims": [], "last_stop": T,
              "closed": [{"id": c, "t": T + 40} for c in closed],
-             "asked": T + 45 if asked else 0,
+             "asked": T + 45 if asked else 0, "helper_out": list(helpers),
              "helper": T + 45 if helper else 0, "pushes": pushes}
     kept = {}
     rows = {c: {"id": c, "labels": ["of:" + g]} for c, g, _ in goals}
@@ -1420,6 +1427,47 @@ def carrying_on(held, closed=(), goals=(), asked=False, helper=False, pushes=0,
     # what it says.
     carrying_on.kept = kept
     return (json.loads(printed)["reason"] if printed else ""), kept.get("pushes")
+
+
+# The names two helpers answer to, in the shape the harness hands back — a run
+# of hex, which is what tells a helper's name from any other word in the answer.
+FIRST, SECOND = "a7a71f6e6431474be", "ab048202f54806dba"
+
+
+def helping(sends, backs, order="sent first"):
+    """The helpers still out after `sends` were sent off and `backs` reported
+    back, by the names they answer to.
+
+    Which of the two lands first is the harness's business — a helper run in the
+    background is recorded as it is sent, one run in front of the session
+    reports back before the tool call it was sent by returns — so both orders
+    are put through the same recorder.
+    """
+    tmp = tempfile.mkdtemp(prefix="board-helper-")
+    was, touch.bc.STATE_DIR = touch.bc.STATE_DIR, tmp
+    load, save = touch.bc.load, touch.bc.save
+    touch.bc.load, touch.bc.save = REAL_STATE
+    touch.bc.reviewing = lambda: ""
+    calls = ([("sent", n) for n in sends] + [("back", n) for n in backs])
+    if order != "sent first":
+        calls.reverse()
+    try:
+        for what, name in calls:
+            if what == "sent":
+                fed = {"tool_name": "Agent", "hook_event_name": "PostToolUse",
+                       "tool_response": [{"type": "text",
+                                          "text": "Async agent launched successfully.\n"
+                                                  "agentId: %s (internal)" % name}]}
+            else:
+                fed = {"hook_event_name": "SubagentStop", "agent_id": name}
+            fed.update({"session_id": "selftest-helper", "cwd": ROOT})
+            sys.stdin = io.StringIO(json.dumps(fed))
+            touch.main()
+        return touch.bc.load("selftest-helper").get("helper_out") or []
+    finally:
+        touch.bc.STATE_DIR = was
+        touch.bc.load, touch.bc.save = load, save
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 # The reply a turn ends on, and the cards it poured while writing it. A fault named
@@ -2232,6 +2280,22 @@ def main():
         "a turn that put a question to the manager was sent back to work"
     assert carrying_on(["c"], helper=True)[0] == "", \
         "a turn waiting on a helper it sent off was sent back to work"
+
+    # Six refusals in one night came from this: a session with several helpers
+    # out was read as idle the moment the first of them reported back, and each
+    # refusal re-read the whole session (bw-a6o.1).
+    assert carrying_on(["c"], helpers=["second"])[0] == "", \
+        "a turn with a second helper still out — the first already home — was " \
+        "sent back to work: %s" % carrying_on(["c"], helpers=["second"])[0]
+    assert carrying_on(["c"], helpers=[])[0], \
+        "the case is proving nothing: this turn ends on its own with no helper out"
+
+    for order in ("sent first", "home first"):
+        assert helping([FIRST, SECOND], [FIRST], order) == [SECOND], \
+            "two helpers sent off and one home (%s) left %r still out, wanted " \
+            "the other one" % (order, helping([FIRST, SECOND], [FIRST], order))
+        assert helping([FIRST], [FIRST], order) == [], \
+            "a helper that reported back (%s) was still counted as out" % order
 
     # The gap a held set cannot see: between closing a step and claiming the next,
     # a session holds nothing while its job is still running.

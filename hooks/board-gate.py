@@ -178,11 +178,17 @@ def block(reason):
 def helper_busy(state, since):
     """Whether a helper this session sent off is still out.
 
-    Sent off this turn, or sent off earlier and not yet reported back. What it
-    closes while it is out is its own, not the waiting session's.
+    Counted by name, not by one mark: a session that sent three helpers off is
+    still waiting when the first of them reports back, and a single mark cannot
+    tell that from all three being home. Helpers that answer to a name are
+    struck off as each returns (hooks/board-touch.py); one sent off with nothing
+    to answer to holds only the turn it was sent in, because nothing will ever
+    say it is home. What a helper closes while it is out is its own, not the
+    waiting session's.
     """
-    helper = state.get("helper") or 0
-    return helper > since or helper > (state.get("helper_done") or 0)
+    if state.get("helper_out"):
+        return True
+    return (state.get("helper") or 0) > since
 
 
 def carry_on(sid, state, mine, since, root):

@@ -39,12 +39,56 @@ EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 # a session writes when it stops early, so it cannot tell the two apart.
 # docs/board.md#4f-when-a-session-may-stop
 ASK_TOOLS = ("AskUserQuestion", "ExitPlanMode")
-HELPER_TOOLS = ("Agent", "Task", "Monitor", "TaskCreate",
-                "SendMessage", "Workflow")
+
+# Helpers that report back by name when they finish, so each one can be counted
+# home again. Kept as the names still out and not as one mark: a session that
+# sent three off is still waiting when the first of them comes back, and a mark
+# cannot tell that from all three being home.
+SENT_TOOLS = ("Agent", "Task")
+
+# Sent off with nothing to answer to: a watcher, a message into a run already
+# going, a queued piece of work. Nothing names these home again, so they hold
+# the turn they were sent in and no longer.
+LOOSE_TOOLS = ("Monitor", "TaskCreate", "SendMessage", "Workflow")
+
+# The name a helper is reachable by, printed in what the tool hands back. No word
+# boundary in front of it: the answer is read as it came, and in JSON the line
+# before it ends in an escape rather than in a break.
+HELPER_NAME = re.compile(r"agent[ _]?id\W{0,4}([0-9a-f]{6,})", re.IGNORECASE)
+
+# Helpers out at once, and returns seen before the tool that sent them came
+# back. Both are small in every real session; the cap is against a runaway.
+HELPERS = 50
 
 
 def card_ids(text, prefix):
     return re.findall(r"\b%s-[0-9a-z.-]{2,16}\b" % re.escape(prefix), text or "")
+
+
+def sent_off(state, answer):
+    """One more helper out, by the name it answers to.
+
+    The name is read out of the whole of what the tool handed back, whatever
+    shape that came in: which field of it carries the name is the harness's to
+    change. A helper with no name in it cannot be struck off when it returns, so
+    it is stamped instead and holds only the turn it was sent in — a record that
+    can never be cleared would stand the gate down for good.
+    """
+    if not isinstance(answer, str):
+        try:
+            answer = json.dumps(answer)
+        except Exception:
+            answer = str(answer)
+    name = HELPER_NAME.search(answer or "")
+    if not name:
+        state["helper"] = bc.now()
+        return
+    home = name.group(1)
+    back = state.get("helper_back") or []
+    if home in back:  # it reported back before the tool call returned
+        state["helper_back"] = [h for h in back if h != home]
+        return
+    state["helper_out"] = ((state.get("helper_out") or []) + [home])[-HELPERS:]
 
 
 def response_text(resp):
@@ -76,10 +120,20 @@ def main():
     cmd = bc.said(data) if tool == "Bash" else ""
     answer = None
 
-    # A helper that has come back stamps this; until then the session is waiting
-    # on it, however many turns that takes.
+    # A helper that has come back is struck off by name; until then the session
+    # is waiting on it, however many turns that takes. A return that arrives
+    # before the tool call that sent it is put aside rather than dropped — which
+    # of the two lands first is the harness's business, not this record's.
     if data.get("hook_event_name") == "SubagentStop":
         state["helper_done"] = bc.now()
+        home = data.get("agent_id") or ""
+        out = state.get("helper_out") or []
+        if home and home in out:
+            state["helper_out"] = [h for h in out if h != home]
+        elif home:
+            state["helper_back"] = ((state.get("helper_back") or []) + [home])[-HELPERS:]
+        else:
+            state["helper_out"] = out[1:]
         bc.save(sid, state)
         return
 
@@ -93,7 +147,9 @@ def main():
 
     if tool in ASK_TOOLS:
         state["asked"] = bc.now()
-    elif tool in HELPER_TOOLS:
+    elif tool in SENT_TOOLS:
+        sent_off(state, data.get("tool_response"))
+    elif tool in LOOSE_TOOLS:
         state["helper"] = bc.now()
     elif tool in EDIT_TOOLS:
         path = tin.get("file_path") or tin.get("notebook_path")
