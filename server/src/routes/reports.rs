@@ -95,11 +95,19 @@ fn resolve_project_path(db: &Database, project: &str) -> Option<String> {
     })
 }
 
-/// The folder the build runs in. An explicit `path` always wins — the
-/// screen may pass one — otherwise it is looked up from the project name
-/// the report is filed under.
+/// The folder the build runs in. An explicit `path` wins while it still
+/// exists — the screen may pass one — otherwise it is looked up from the
+/// project name the report is filed under.
+///
+/// A link handed over months ago may name a worktree, a second checkout
+/// named after a branch and deleted the day that job lands. That link is
+/// still about the same report, so a path that has since gone falls through
+/// to the lookup rather than failing.
 fn resolve_cwd(explicit: Option<&str>, db: &Database, project: &str) -> Option<String> {
-    explicit.map(str::to_string).or_else(|| resolve_project_path(db, project))
+    explicit
+        .filter(|dir| Path::new(dir).is_dir())
+        .map(str::to_string)
+        .or_else(|| resolve_project_path(db, project))
 }
 
 /// Every report on this machine, newest first.
@@ -162,10 +170,10 @@ pub async fn report_page(State(db): State<AppState>, Query(p): Query<PageParams>
     };
 
     // The build reads the board and the pictures from the project it is
-    // about. An explicit `path` wins; otherwise it is looked up from the
-    // app's own project list by the name the report is filed under — not
-    // every report names a project the app knows (the data folder also
-    // holds `keystone`, which is filed by hand), so that can come up empty.
+    // about. An explicit `path` wins while it is still there; otherwise it
+    // is looked up from the app's own project list by the name the report is
+    // filed under — not every report names a project the app knows (the data
+    // folder also holds `keystone`, filed by hand), so that can come up empty.
     let Some(cwd) = resolve_cwd(p.path.as_deref(), &db, &p.project) else {
         return (
             StatusCode::NOT_FOUND,
@@ -259,11 +267,20 @@ mod tests {
     }
 
     #[test]
-    fn an_explicit_path_wins_over_the_lookup() {
+    fn an_explicit_path_wins_over_the_lookup_while_it_is_there() {
+        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        let elsewhere = std::env::temp_dir().to_string_lossy().to_string();
+        assert_eq!(resolve_cwd(Some(&elsewhere), &db, "beads-web"), Some(elsewhere));
+    }
+
+    /// The shape of a link handed over before the worktree it was built in
+    /// was deleted. It is still about the same report, so it still opens.
+    #[test]
+    fn an_explicit_path_that_is_gone_falls_through_to_the_lookup() {
         let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
         assert_eq!(
-            resolve_cwd(Some("/some/other/folder"), &db, "beads-web"),
-            Some("/some/other/folder".to_string())
+            resolve_cwd(Some("/home/ahsan/code/beads-web/worktrees/landed"), &db, "beads-web"),
+            Some("/home/ahsan/code/beads-web".to_string())
         );
     }
 }
