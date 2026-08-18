@@ -28,6 +28,12 @@ lands_elsewhere = ["machinery", "corsetta"]
 # the screen is what this project is.
 places = ["\\b(?:the )?(?:Todo|In Progress|Agent Review|Manager Review|Done|Cancelled) column\\b"]
 
+# The one command this project's checks step runs. Both halves, because a change
+# here is as often the server's as the screen's: `npm test` is vitest over the
+# front end, and the server carries its own cases under server/src/routes. Run
+# once a job, in front of the reader — never per edit and never in a commit hook.
+checks = "npm test && (cd server && cargo test)"
+
 [review]
 persona = "the Beads Web project — the manager's own board screen and its server, a Next.js front end over a Rust back end"
 proves = "drive the running screen in a browser and read the result off a screenshot; a passing unit test is not a verified change"
