@@ -148,6 +148,12 @@ const THEMES = [
 ] as const;
 
 test.describe('chrome', () => {
+  // One at a time. Every case here drives the same preview, and the board's
+  // columns do not finish drawing while four other cases are loading it — the
+  // rail case then reads a screen with no pane on it and fails for a reason
+  // that has nothing to do with rails.
+  test.describe.configure({ mode: 'serial' });
+
   test('the way out to settings is a control on the first bar, not floating over the screen', async ({
     page,
     request,
@@ -217,6 +223,8 @@ test.describe('chrome', () => {
    * looking at it.
    */
   test('the gear is inked by every one of the eleven themes, not by a fallback', async ({ page, request }) => {
+    // Eleven loads of the board, against a preview four other cases are using.
+    test.slow();
     const id = await projectId(request);
     const themes = THEMES;
 
@@ -262,6 +270,8 @@ test.describe('chrome', () => {
     page,
     request,
   }) => {
+    // Eleven loads of the board, against a preview four other cases are using.
+    test.slow();
     const id = await projectId(request);
     const themes = THEMES;
 
@@ -341,11 +351,14 @@ test.describe('chrome', () => {
   });
 
   test('every pane that scrolls gets the app’s hairline, and nothing switches it off', async ({ page, request }) => {
+    // The board has to finish drawing before there is a pane to read, and the
+    // preview these run against is compiling while four other cases drive it.
+    test.slow();
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=board`);
     await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
     // The board has to have something in it, or there is no pane to read.
-    await expect.poll(() => page.getByTestId('column-scroll').count(), { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect.poll(() => page.getByTestId('column-scroll').count(), { timeout: 90_000 }).toBeGreaterThan(0);
 
     const rails = await page.evaluate(() => {
       const scrolls = [...document.querySelectorAll('*')].filter((e) => {
@@ -357,6 +370,7 @@ test.describe('chrome', () => {
       });
       return {
         knowsRailParts: CSS.supports('selector(::-webkit-scrollbar)') && !CSS.supports('(-moz-orient: inline)'),
+        documentWidth: getComputedStyle(document.documentElement).scrollbarWidth,
         panes: scrolls.map((e) => {
           const s = getComputedStyle(e);
           return {
@@ -385,8 +399,18 @@ test.describe('chrome', () => {
     } else {
       // Firefox: the properties are the only way, and the width does not
       // inherit — so every pane has to carry them, not just the document.
-      const fat = rails.panes.filter((r) => r.width !== 'thin');
-      expect(fat, `panes left at the browser's own rail: ${JSON.stringify(fat.slice(0, 4))}`).toHaveLength(0);
+      //
+      // Headless Firefox hides scrollbars wholesale: every element, the
+      // document included, reports `none` however the page asks. Measured in a
+      // Firefox with a real window on the same build, every pane reports
+      // `thin` — so a run where even the document says `none` is a run whose
+      // browser took the rails away, and the width is not evidence in it. The
+      // colour is: headless Firefox still reports the theme's ink.
+      const railsHidden = rails.panes.every((r) => r.width === 'none') && rails.documentWidth === 'none';
+      if (!railsHidden) {
+        const fat = rails.panes.filter((r) => r.width !== 'thin');
+        expect(fat, `panes left at the browser's own rail: ${JSON.stringify(fat.slice(0, 4))}`).toHaveLength(0);
+      }
       const wrongInk = rails.panes.filter((r) => !/rgba?\(.+\)\s+rgba\([^)]*,\s*0\)/.test(r.color));
       expect(wrongInk, `panes not in the theme's ink: ${JSON.stringify(wrongInk.slice(0, 4))}`).toHaveLength(0);
     }

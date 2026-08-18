@@ -22,5 +22,15 @@ export default defineConfig({
       name: 'chromium',
       use: { browserName: 'chromium' },
     },
+    {
+      // The scrollbar rules are written twice, once for each engine, because
+      // each engine reads only its own half — and a rule nothing runs is a rule
+      // nobody has checked. Only the chrome file needs the second engine; the
+      // rest of the suite drives the app's behaviour, which does not change
+      // with the browser.
+      name: 'firefox',
+      use: { browserName: 'firefox' },
+      testMatch: /chrome\.spec\.ts/,
+    },
   ],
 });

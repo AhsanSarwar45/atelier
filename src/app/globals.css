@@ -236,7 +236,12 @@
   background-color: hsl(var(--text-muted) / var(--rail-strength-hover, 0.5));
 }
 
-/* Firefox, and only Firefox: `-moz-orient` is answered by nothing else. */
+/* Firefox, and only Firefox: `-moz-orient` is answered by nothing else. Driven
+   under Firefox by the suite, not reasoned about: tests/e2e/chrome.spec.ts runs
+   under both engines. Note that headless Firefox hides scrollbars wholesale —
+   every element reports `none` however the page asks — so the width is proved
+   in a Firefox with a real window (scripts/rail-in-a-real-window.mjs
+   ENGINE=firefox) and the colour in the headless run. */
 @supports (-moz-orient: inline) {
   * {
     scrollbar-width: thin;

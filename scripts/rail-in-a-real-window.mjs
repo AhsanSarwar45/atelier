@@ -23,15 +23,19 @@
  * PROJECT the project to open; the first one the board lists by default
  * THEME   the skin to wear; one whose quiet ink is tinted, so the rail's colour
  *         is evidence. `default` for no skin at all.
+ * ENGINE  chromium (the default) or firefox. The two read different halves of
+ *         the rules, so a claim about the rail holds for one engine only until
+ *         it has been looked at in the other.
  * OUT     where the picture goes; a close-up of one rail is saved beside it
  */
 import { readFileSync } from 'node:fs';
 
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 
 const UI = process.env.UI ?? 'http://127.0.0.1:3007';
 const BOARD = process.env.BOARD ?? 'http://127.0.0.1:3008';
 const THEME = process.env.THEME ?? 'catppuccin-mocha';
+const ENGINE = process.env.ENGINE ?? 'chromium';
 const OUT = process.env.OUT ?? '/tmp/rail-in-a-real-window.png';
 const CLOSE_UP = OUT.replace(/(\.png)?$/i, '-close-up.png');
 
@@ -52,10 +56,16 @@ if (!project) {
 
 // Off the side of the screen: this is run while someone is working, and a window
 // that steals the front is worse than no picture.
-const browser = await chromium.launch({
-  headless: false,
-  args: ['--window-position=-4000,-4000', '--window-size=1440,900'],
-});
+const browser =
+  ENGINE === 'firefox'
+    ? // Firefox takes no window-placement switches, and headless Firefox hides
+      // scrollbars wholesale — every element reports `none` however the page
+      // asks — so this one has to take the front of the screen for a moment.
+      await firefox.launch({ headless: false, args: ['-width', '1440', '-height', '900'] })
+    : await chromium.launch({
+        headless: false,
+        args: ['--window-position=-4000,-4000', '--window-size=1440,900'],
+      });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
 // The skin is read on load, so it is stored before the first one.
 await page.addInitScript((theme) => {
@@ -150,7 +160,9 @@ if (down) {
       document.body.appendChild(probe);
       const ink = getComputedStyle(probe).color.match(/\d+/g).map(Number);
       probe.remove();
-      const wanted = ink.map((c, i) => Math.round(c * 0.25 + behind[i] * 0.75));
+      // Each skin names how much of that ink its own slider is drawn in.
+      const share = Number(getComputedStyle(document.documentElement).getPropertyValue('--rail-strength').trim() || 0.25);
+      const wanted = ink.map((c, i) => Math.round(c * share + behind[i] * (1 - share)));
 
       return {
         theme: document.documentElement.dataset.theme ?? '(default)',
