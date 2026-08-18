@@ -252,7 +252,7 @@ class Reached(Exception):
 BUSY_LOG = "/nowhere/g.already.run/run.log"
 
 
-def hands_off(detached, rerun=True, busy=None):
+def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
     """What a reading fired by hand does: spawn a copy of itself, or read.
 
     Fired by hand it used to do the reading in the caller's own shell, and the
@@ -264,10 +264,12 @@ def hands_off(detached, rerun=True, busy=None):
     `detached` is the copy's side of the same run: told it is the copy, it must
     read rather than hand off again, because a reader that hands off to a reader
     is a reading nobody ever does. `busy` is the pid of a reader already out on
-    the job, which this run must find and stand down from.
+    the job, which this run must find and stand down from. `notes` and `shas` are
+    the two halves of whether a reading is owed at all: what the goal carries a
+    signature for, and what it has landed since.
     """
     rv = script("review")
-    goal = dict(GOAL, status="in_progress", notes="")
+    goal = dict(GOAL, status="in_progress", notes=notes)
     spawned = []
     read = []
 
@@ -286,7 +288,7 @@ def hands_off(detached, rerun=True, busy=None):
     rv.changes = lambda shas, goal_id: ([], "")
     rv.run_log = lambda goal_id: where
     rv.run_reviewer = reads
-    rv.reading.commits = lambda gid, root: ["a1c0ffee"]
+    rv.reading.commits = lambda gid, root: list(shas)
     rv.reading.wrote = lambda gid, root: {"someone"}
     keep_popen, subprocess.Popen = subprocess.Popen, Copy
     keep_argv, sys.argv = sys.argv, ["review", "g"] + (["--rerun"] if rerun else [])
@@ -3326,6 +3328,26 @@ def main():
     assert not spawned and read == ["g"], \
         "the copy handed the reading on instead of doing it, which is a reader that " \
         "never arrives"
+    # A goal read clean is not read again, however it is fired at: the reading
+    # covers the job's commits and says so on the goal, so what decides is the
+    # work and not the switch (bw-5e8.5).
+    spawned, read, said = hands_off(detached=False, notes=SIGNED % "a1c0ffee")
+    assert not spawned and not read, \
+        "a goal already read, with nothing written under it since, was read again " \
+        "from the top — the same commits at a fresh session's price"
+    assert "current" in said, \
+        "a firing that read nothing did not say the reading on the goal is current"
+    spawned, read, said = hands_off(detached=False, notes=SIGNED % "a1c0ffee",
+                                    shas=("a1c0ffee", "b2deadbe"))
+    assert len(spawned) == 1, \
+        "a commit written under a goal since it was read was left unread"
+    # A reader that died signed nothing, so what stands on the job has been read
+    # by nobody and is read again without any forcing at all.
+    spawned, read, said = hands_off(detached=False, rerun=False)
+    assert len(spawned) == 1, \
+        "a job a dead reader left shut was never read again, because nothing but " \
+        "the switch could ask for it"
+
     already = tempfile.mkdtemp()
     stood = pretend_reader(already, "g")
     try:
@@ -3348,8 +3370,9 @@ def main():
 
     print("ok: a reading fired by hand hands itself to a marked copy and says where "
           "the run went, the marked copy reads rather than handing off again, a "
-          "firing that finds a reader already out stands down and points at it, and "
-          "the board's own firing marks the reader it sends")
+          "goal read clean is read again only once something is written under it, "
+          "a firing that finds a reader already out stands down and points at it, "
+          "and the board's own firing marks the reader it sends")
 
     pretend = tempfile.mkdtemp()
     victim = pretend_reader(pretend, HELD)

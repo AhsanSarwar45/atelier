@@ -13,10 +13,14 @@ never touch the shared working tree. It is fired detached by
 board/run.py the moment a job's last piece closes.
 
 Detached whoever asks for it. A reading is a whole session and takes minutes, so
-a run started by hand does the quick part — is this a job, is it standing where a
-reading is owed — hands the reading itself to a copy of this script running on
-its own, says where that copy's console is, and ends. The agent that asked keeps
-working, and the verdict arrives on the goal (bw-k0w).
+a run started by hand does the quick part — is this a job, is a reading already
+going, is one owed at all — hands the reading itself to a copy of this script
+running on its own, says where that copy's console is, and ends. The agent that
+asked keeps working, and the verdict arrives on the goal (bw-k0w).
+
+One reading per finish, and the work is what decides: a job with a reader out is
+left to that reader, and a job read clean is not read again until something is
+written under it (bw-5e8).
 """
 import argparse
 import json
@@ -403,7 +407,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("job", help="the goal to read; a job's old review card also names it")
     ap.add_argument("--rerun", action="store_true",
-                    help="read a job again that a dead reader left shut")
+                    help="kept for the advice the gates print; a job a dead reader "
+                         "left shut carries no signature and is read without it")
     a = ap.parse_args()
 
     asked = card(a.job)
@@ -431,9 +436,18 @@ def main():
         return
 
     shas = reading.commits(goal_id, ROOT)
-    if not reading.wanted(goal, shas, reading.wrote(goal_id, ROOT)) and not a.rerun:
-        sys.exit("%s has already been read and nothing has been written since; "
-                 "--rerun to read it again" % goal_id)
+    # What a reading covers is the job's own commits, and it says so on the goal.
+    # So the answer to whether one is owed comes from the work and not from how
+    # the run was asked for: a goal read clean is read again when something has
+    # been written under it and not before, however many times it is fired at.
+    # Forcing past this bought nothing — the same commits read a second time by
+    # a fresh full-price session — and one goal was read twenty-four times over
+    # (bw-5e8.5). A job a dead reader left shut is read without any forcing: it
+    # carries no signature, so what stands on it has been read by nobody.
+    if not reading.wanted(goal, shas, reading.wrote(goal_id, ROOT)):
+        print("%s has been read and nothing has been written under it since; the "
+              "reading on it is current" % goal_id)
+        return
     # Everything above is quick, and answering here is what makes a reading asked
     # for by hand worth asking for: whoever asked hears at once that this job is
     # not one to read, rather than hearing it from a run they cannot see. The
