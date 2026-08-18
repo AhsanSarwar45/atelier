@@ -2798,6 +2798,103 @@ def main():
           "by any of the six spellings, and a push or a fetch onto it queues for "
           "the slot like a merge")
 
+    # The second layer, and the one that answers for whatever the first never saw:
+    # a hook inside the checkout itself, reading the ref write instead of the
+    # command that made it (bw-7e8.5).
+    GUARD = os.path.join(HOME, "hooks", "landing-gate.py")
+
+    def by_the_checkout(cmd, holder=""):
+        """What the checkout's own guard does to one command line: everything git
+        said, and whether the landing line actually moved.
+
+        A throwaway project that lands on `ours`, with the real hook wired into
+        both directories this project's git looks in — the top of the working
+        tree for an ordinary command, and the git directory for anything arriving
+        over a push, which is a different place and the one a guard is most easily
+        left out of. The board is a stand-in on the path: these cases are about
+        the guard, and asking the real one would take the merge slot away from a
+        session that is using it.
+        """
+        tmp = tempfile.mkdtemp(prefix="board-landing-")
+        try:
+            where = os.path.join(tmp, "bin")
+            os.makedirs(where)
+            with open(os.path.join(where, "bd"), "w") as fh:
+                fh.write('#!/usr/bin/env sh\necho \'{"holder": %s}\'\n'
+                         % json.dumps(holder or None))
+            os.chmod(os.path.join(where, "bd"), 0o755)
+            env = dict(os.environ,
+                       PATH=where + os.pathsep + os.environ.get("PATH", ""))
+
+            def g(*args):
+                return subprocess.run(["git"] + list(args), cwd=tmp, text=True,
+                                      capture_output=True, timeout=120, env=env)
+
+            g("init", "-q", "-b", "ours", ".")
+            g("config", "user.email", "t@t")
+            g("config", "user.name", "t")
+            g("config", "receive.denyCurrentBranch", "updateInstead")
+            g("config", "core.hooksPath", ".beads/hooks")
+            g("commit", "-q", "--allow-empty", "-m", "the line as it stands")
+            g("commit", "-q", "--allow-empty", "-m", "a piece of work, finished")
+            g("branch", "work")
+            # Put the line back behind the work, while there is still no guard to
+            # mind: what every case below starts from is a landing waiting to
+            # happen.
+            g("update-ref", "refs/heads/ours", "HEAD~1")
+            g("reset", "-q", "--hard", "ours")
+            with open(os.path.join(tmp, project.DECLARATION), "w") as fh:
+                fh.write('name = "landing"\nprefix = "lnd"\nlands_on = "ours"\n'
+                         'agent_merges = true\n')
+            shim = "#!/usr/bin/env sh\nexec %s %s \"$@\"\n" % (sys.executable, GUARD)
+            for hooks in (os.path.join(tmp, ".beads", "hooks"),
+                          os.path.join(tmp, ".git", ".beads", "hooks")):
+                os.makedirs(hooks, exist_ok=True)
+                with open(os.path.join(hooks, "reference-transaction"), "w") as fh:
+                    fh.write(shim)
+                os.chmod(os.path.join(hooks, "reference-transaction"), 0o755)
+            was = g("rev-parse", "ours").stdout.strip()
+            run = subprocess.run(cmd, cwd=tmp, shell=True, text=True,
+                                 capture_output=True, timeout=120, env=env)
+            return (run.stdout + run.stderr), g("rev-parse", "ours").stdout.strip() != was
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    said, moved = by_the_checkout("git update-ref refs/heads/ours work", holder="someone-1")
+    assert not moved and "landing gate" in said, \
+        "the line was moved by hand inside the checkout, while the slot was held, " \
+        "and the guard said %r" % said
+    said, moved = by_the_checkout("git symbolic-ref refs/heads/ours refs/heads/work")
+    assert not moved and "landing gate" in said, \
+        "the landing line was repointed at another line and the guard said %r" % said
+    said, moved = by_the_checkout("git merge --ff-only work", holder="someone-1")
+    assert moved, "a fast-forward landing was refused to the holder of the slot: %r" % said
+    said, moved = by_the_checkout("git merge --ff-only work")
+    assert not moved and "merge slot" in said, \
+        "work was folded into the landing line with nobody holding the slot: %r" % said
+    # The board's own ref. It is synced by bd on its own schedule, nothing here
+    # can tell a legitimate one from any other, and a guard that stopped it would
+    # stop the board.
+    said, _ = by_the_checkout("git update-ref refs/dolt/data work "
+                      "&& git rev-parse --verify refs/dolt/data")
+    assert re.search(r"^[0-9a-f]{40}$", said.strip(), re.M), \
+        "the guard reached a ref that is not the landing line: %r" % said
+    said, moved = by_the_checkout("git update-ref refs/heads/ours ours")
+    assert not moved and "landing gate" not in said, \
+        "writing the landing line the sha it already holds was refused, which is " \
+        "what `git stash` does on every stash: %r" % said
+    # The manager's own hand in the shared checkout. The slot queues folds, and a
+    # commit is not one — the guard has to recognise that by the shape of the
+    # move, because a hook is handed the move and never the command.
+    said, moved = by_the_checkout('git commit -q --allow-empty -m "the manager\'s own"')
+    assert moved and "landing gate" not in said, \
+        "an ordinary commit on the landing line, with no slot held, was refused " \
+        "inside the shared checkout: %r" % said
+
+    print("ok: inside the checkout, the landing line refuses a hand-moved pointer "
+          "and an unslotted fold, takes a slotted one, and leaves every other ref "
+          "— the board's own above all — alone")
+
     # Which checkout a command belongs to. Some shells report the directory the
     # session was started in whatever directory the command names, so a command
     # that opens by moving into another registered checkout is taken at its word

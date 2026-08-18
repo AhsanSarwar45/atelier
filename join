@@ -17,8 +17,13 @@ place, out of this one home, and joining is four things:
                        own beside it, which overrides the shared one by name.
   the board's own role  a fork infers a contributor and routes `bd list` at a
                        planning store; a project that pours work is a maintainer
+  the landing guard     git only runs a hook it finds in the checkout itself, so
+                       a one-line pointer at the guard kept here goes wherever
+                       this project's git looks for its ref-transaction hook —
+                       still not a copy, and a re-join puts it back if the board
+                       tooling rewrote that directory
 
-Forwarders are the fifth and are optional (`--forward`): a project that already
+Forwarders are the sixth and are optional (`--forward`): a project that already
 had the tools under `scripts/` keeps those paths working, so settings and running
 sessions are not disturbed. They are one line of pointing and no logic.
 
@@ -70,6 +75,36 @@ _spec.loader.exec_module(_mod)
 # what the copies check reads (`machinery/copies`).
 MARK = "A forwarder, not the tool"
 
+# The one thing that IS put inside a project's checkout, because git will only
+# run a hook it finds there: a shim at the ref-transaction hook, pointing at the
+# guard kept here. The session gates read a command before it runs and see only
+# what a session types; this reads the ref write itself, so a landing line moved
+# by something nobody read is still refused (bw-7e8.5).
+GUARD = "reference-transaction"
+GUARD_MARK = "A pointer, not the guard"
+GUARD_SHIM = '''#!/usr/bin/env sh
+# %(mark)s (machinery/join writes this file).
+#
+# The guard is %(guard)s. It reads the ref write on
+# its standard input and refuses a move of this project's landing line that no
+# landing explains; every other ref goes straight through, `refs/dolt/data` above
+# all — the board syncs that one, and breaking it breaks the board.
+#
+# A missing python, or a machinery that has moved, stands the guard down instead
+# of wedging the repository: a hook that cannot run must not be a hook that
+# refuses everything.
+#
+# Git calls this three times a transaction and only the first can refuse, so the
+# other two are turned round here rather than in python: this runs on every ref
+# write in the repository, and the board's own sync is most of them.
+[ "$1" = prepared ] || exit 0
+GUARD="${MACHINERY_HOME:-%(home)s}/%(rel)s"
+[ -r "$GUARD" ] || exit 0
+command -v python3 >/dev/null 2>&1 || exit 0
+exec python3 "$GUARD" "$@"
+'''
+GUARD_REL = os.path.join("hooks", "landing-gate.py")
+
 
 def git(args, cwd):
     run = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
@@ -99,6 +134,80 @@ def forwarders(root, say):
                 fh.write(FORWARDER % {"home": HOME, "rel": os.path.join(mine, name)})
             os.chmod(out, 0o755)
             say("point  %s -> %s" % (out, os.path.join(mine, name)))
+
+
+def hook_dirs(root):
+    """Every directory this project's git looks in for a hook.
+
+    One, normally. Two where `core.hooksPath` holds a RELATIVE path, which is
+    what `bd hooks install` writes: git resolves it against the directory it runs
+    the hook from, and that is the top of the working tree for an ordinary
+    command but the git directory itself for anything arriving over a push
+    (githooks(5), and watched happening — bw-7e8.5). A guard left in only the
+    first of the two is a guard a push walks straight past.
+    """
+    gitdir = git(["rev-parse", "--absolute-git-dir"], root)[1]
+    if not gitdir:
+        return []
+    said = git(["config", "--get", "core.hooksPath"], root)[1]
+    if not said:
+        return [os.path.join(gitdir, "hooks")]
+    if os.path.isabs(said):
+        return [said]
+    return [os.path.join(root, said), os.path.join(gitdir, said)]
+
+
+def guard(root, say):
+    """Leave the landing guard wherever this project's git will run it.
+
+    Rewritten every join rather than only when absent: the directory it goes in
+    is the board's own, and a project whose board tooling rebuilt that directory
+    gets the guard back by joining again.
+    """
+    body = GUARD_SHIM % {"mark": GUARD_MARK, "home": HOME, "rel": GUARD_REL,
+                         "guard": os.path.join(HOME, GUARD_REL)}
+    for where in hook_dirs(root):
+        out = os.path.join(where, GUARD)
+        if os.path.exists(out):
+            held = open(out, errors="replace").read()
+            if GUARD_MARK not in held:
+                say("kept   %s — this project's own, not the machinery's" % out)
+                continue
+            if held == body:
+                continue
+        os.makedirs(where, exist_ok=True)
+        with open(out, "w") as fh:
+            fh.write(body)
+        os.chmod(out, 0o755)
+        say("guard  %s -> %s" % (out, GUARD_REL))
+
+
+def unguarded(root):
+    """Where the landing guard is not, so a project running without it is told.
+
+    The gate that reads a command answers for the sessions on this machine; this
+    one answers for the checkout, and a checkout whose board tooling wrote its
+    hooks directory afresh has silently lost it.
+    """
+    gone = [os.path.join(w, GUARD) for w in hook_dirs(root)
+            if not there(os.path.join(w, GUARD))]
+    return ["nothing guards the landing line inside the checkout: %s — "
+            "`machinery/join %s` writes it" % (", ".join(gone), root)] if gone else []
+
+
+def there(path):
+    """Whether the guard's own pointer is at this path, pointing at THIS home.
+
+    Both halves matter. A file of that name somebody else wrote is not the guard;
+    and a pointer left by a machinery that has since moved is a guard that
+    quietly does nothing, because a shim whose target is gone stands down rather
+    than refusing. Read as missing, so a re-join writes it afresh.
+    """
+    try:
+        said = open(path, errors="replace").read(2000)
+    except OSError:
+        return False
+    return GUARD_MARK in said and HOME in said
 
 
 MACHINE = os.path.expanduser("~/.claude")
@@ -203,6 +312,7 @@ def standing(root):
                     "routes `bd list` at a planning store rather than at this board; "
                     "`git -C %s config beads.role maintainer`" % (role or "unset", root))
     said += unwired(root)
+    said += unguarded(root)
     return said, decl
 
 
@@ -291,6 +401,7 @@ def main():
     project._DECLS.clear()
     project._ROOTS.clear()
     install(said.append)
+    guard(root, said.append)
     if a.forward:
         forwarders(root, said.append)
     code, role = git(["config", "--get", "beads.role"], root)
