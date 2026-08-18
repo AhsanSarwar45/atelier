@@ -2972,10 +2972,23 @@ def main():
                       "&& git rev-parse --verify refs/dolt/data")
     assert re.search(r"^[0-9a-f]{40}$", said.strip(), re.M), \
         "the guard reached a ref that is not the landing line: %r" % said
-    said, moved = by_the_checkout("git update-ref refs/heads/ours ours")
+    # Tidying the checkout. `git stash` writes the landing line the sha it
+    # already holds, on every stash — which is the whole reason the guard has a
+    # case for a line standing still, and the one thing the litter sweep cannot
+    # do without. It is told apart from a hand write by the old value: git passes
+    # the real one for anything of its own and all-zeroes for an `update-ref`.
+    said, moved = by_the_checkout(
+        "echo litter > f.txt && git add f.txt && git stash push -q -m tidy "
+        "&& git rev-parse --verify refs/stash")
     assert not moved and "landing gate" not in said, \
-        "writing the landing line the sha it already holds was refused, which is " \
-        "what `git stash` does on every stash: %r" % said
+        "tidying the shared checkout with `git stash` was refused, which would " \
+        "leave the litter sweep nothing to sweep with: %r" % said
+    assert re.search(r"^[0-9a-f]{40}$", said.strip(), re.M), \
+        "nothing was stashed, so the case above proved nothing: %r" % said
+    said, moved = by_the_checkout("git update-ref refs/heads/ours ours")
+    assert not moved and "landing gate" in said, \
+        "the landing line was written by hand the sha it already holds — no move, " \
+        "but no landing either — and the guard said %r" % said
     # The manager's own hand in the shared checkout. The slot queues folds, and a
     # commit is not one — the guard has to recognise that by the shape of the
     # move, because a hook is handed the move and never the command.
@@ -2985,7 +2998,8 @@ def main():
         "inside the shared checkout: %r" % said
 
     print("ok: inside the checkout, the landing line refuses a hand-moved pointer "
-          "and an unslotted fold, takes a slotted one, and leaves every other ref "
+          "even where it would not have moved, refuses an unslotted fold, takes a "
+          "slotted one, lets the checkout be tidied, and leaves every other ref "
           "— the board's own above all — alone")
 
     # Which checkout a command belongs to. Some shells report the directory the

@@ -17,12 +17,13 @@ What each shape of move gets, worked out by watching git rather than by reading
 the manual (bw-7e8.5):
 
   a symbolic ref written onto the line        refused outright
-  a force update — git reports the old value  refused outright
-    as all-zeroes when the caller did not
-    ask it to check the current one, which
-    is `update-ref`, `branch -f` and a
-    forced push or fetch
-  the same sha it already has                 allowed; `git stash` makes one
+  a force update — git reports the old value  refused outright, and refused too
+    as all-zeroes when the caller did not       where the line would not have
+    ask it to check the current one, which      moved, because a write made
+    is `update-ref`, `branch -f` and a          without looking is a hand write
+    forced push or fetch                        whatever it names
+  the line standing still, written by         allowed; `git stash` writes one of
+    something that did ask what it held          these on every stash
   one new commit on top of the old tip,       allowed; this is the manager
     carried by no other ref                     committing in the shared checkout
   anything else that moves the line           allowed only while the merge slot
@@ -174,15 +175,25 @@ def why_refused(old, new, ref, root):
         # A line that does not exist yet is being made, and making one takes
         # nothing away from anybody.
         return ""
-    if new == now:
-        # The same sha it already holds. `git stash` writes one of these on
-        # every stash, and refusing it would stop the checkout being tidied.
-        return ""
     if new.startswith(SYMBOLIC) or zeroes(new) or zeroes(old):
         # Three spellings of the same thing: repointing the line by hand, wiping
         # it, or writing to it without asking what it currently holds. None of
         # them is a step of any landing.
+        #
+        # Asked before the standing-still case below, and that order is the whole
+        # of how the two are told apart. Watched rather than read off the manual:
+        # git hands this hook all-zeroes for the old value when the caller never
+        # asked what the line held, which is what `git update-ref` does even when
+        # it names the sha already there, and it hands the real old value for
+        # everything of its own — a commit, a fast-forward, a push, a stash. So a
+        # hand write that would not have moved the line is still refused, and the
+        # stash below is still let past (bw-7e8.5).
         return BY_HAND % {"ref": ref}
+    if new == now:
+        # The line standing still, written by something that asked what it held
+        # first. `git stash` writes one of these on every stash, and refusing it
+        # would stop the checkout being tidied at all.
+        return ""
     if commit_made_here(old, new, root):
         return ""
     held = slot_holder(root)
