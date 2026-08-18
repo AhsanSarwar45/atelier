@@ -404,6 +404,24 @@ def run(goal_status, rows=None, notes="", shas=("a1c0ffee", "b2deadbe"),
     return issued
 
 
+def pours_with(name):
+    """What the pour says to a job declaring it lands in `name`.
+
+    Run as the command rather than imported, because the module IS the command —
+    it parses its arguments and pours as it loads. What is judged is the refusal
+    and its exit, so nothing here reaches the board: a name the project declares
+    is carried past the landing check and refused for the next thing wrong with
+    it, which says the flag let it through without a card being made.
+    """
+    out = subprocess.run(
+        [os.path.join(HOME, "board", "job"), "new", "--lands", name,
+         "--what", "Fix the lamp", "--evidence", "the manager said so today ok",
+         "--done", "python3 x.py reports 0 failures", "--not", "the board",
+         "--area", AREA, "--kind", "bug", "--judge", "agent"],
+        cwd=ROOT, capture_output=True, text=True, timeout=120)
+    return out.returncode, (out.stdout + out.stderr)
+
+
 def told_round(notes):
     """The line a reader is handed about which of the job's readings it is doing.
 
@@ -1801,6 +1819,23 @@ def main():
           "sends a third from inside itself, the last reader is told it is the "
           "last, and answering that last reading opens the step after it instead "
           "of leaving the job shut")
+
+    code, said = pours_with("no-such-project")
+    assert code != 0 and "does not declare" in said, \
+        "the pour took a landing this project never declared, and a card may close " \
+        "on a commit in a repository its work never goes to: %s" % said
+    if DECL.lands_elsewhere:
+        code, said = pours_with(DECL.lands_elsewhere[0])
+        assert "does not declare" not in said and "--what is an instruction" in said, \
+            "a landing this project does declare was turned away by the pour, or " \
+            "the pour was refused for something other than the next thing wrong " \
+            "with it: %s" % said
+        assert code != 0, \
+            "the case poured a real card onto the board rather than being refused " \
+            "for the next thing wrong with it: %s" % said
+
+    print("ok: the pour writes a job's landing itself and turns away a checkout "
+          "this project never declared its work lands in")
 
     found, judged, labelled = reads_elsewhere()
     assert not labelled, \

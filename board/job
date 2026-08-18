@@ -21,6 +21,8 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+import board_common as bc  # noqa: E402
 import plain  # noqa: E402
 import project  # noqa: E402
 import sections  # noqa: E402
@@ -182,7 +184,29 @@ def judge(a):
     return who, why
 
 
+def lands(names):
+    """The landing labels a job is poured with, refusing a checkout this project
+    never declared.
+
+    Held to the declaration rather than taken on the word of whoever typed it: the
+    label steers where a card's change may close against, so a name nobody
+    declared would let a card close on a commit in a repository this project's
+    work never goes to. What the reading SEARCHES is no longer this label's job
+    (hooks/board_common.py `searched`) — the label is now only the narrower fact
+    of where the change is allowed to land.
+    """
+    allowed = DECL.lands_elsewhere
+    for name in names:
+        if name not in allowed:
+            sys.exit("--lands %s: this project does not declare that its work lands "
+                     "there. It declares: %s.\nAdd it to lands_elsewhere in "
+                     "%s/machinery.toml first, or drop the flag."
+                     % (name, ", ".join(allowed) or "nowhere else", ROOT))
+    return [bc.LANDS + n for n in dict.fromkeys(names)]
+
+
 def new(a):
+    tags_land = lands(a.lands)
     not_elsewhere(a.what, a.evidence, a.done, a.not_in)
     plain.refuse(a.what, "This job's --what")
     bar(sections.what_is_wrong(a.what))
@@ -197,7 +221,7 @@ def new(a):
     body = ("## What is wrong\n%s\n\n## Evidence it is real\n%s\n\n"
             "## Success Criteria\n%s\n\n## Not in this job\n%s\n"
             % (a.what, a.evidence, a.done, a.not_in.strip()))
-    tags = ["job", "area:" + a.area, "kind:" + a.kind, "size:" + size]
+    tags = ["job", "area:" + a.area, "kind:" + a.kind, "size:" + size] + tags_land
     if who == "manager":
         tags.append("judge:manager")
     args = ["create", "--title", a.what, "--type", "epic", "-p", str(a.priority),
@@ -443,6 +467,10 @@ p.add_argument("--judge", required=True, metavar="agent|manager=WHAT HE LOOKS AT
 p.add_argument("-p", "--priority", type=int, default=2, choices=range(5))
 p.add_argument("--parent", help="a larger goal this job sits under")
 p.add_argument("--source", help="a find card this job was promoted from; it is closed")
+p.add_argument("--lands", action="append", metavar="PROJECT", default=[],
+               help="repeatable; another checkout this job's change lands in, from "
+                    "the ones this project declares: "
+                    + (", ".join(DECL.lands_elsewhere) or "none"))
 p.set_defaults(func=new)
 
 p = sub.add_parser("epic", help="a container for a system: jobs underneath, no spine")
