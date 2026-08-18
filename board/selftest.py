@@ -238,6 +238,99 @@ def release_sends(signed, shas, wrote=("someone",), rows=None):
     return len(fired)
 
 
+class Reached(Exception):
+    """Raised where a case stands in for the reading itself.
+
+    The reading is a whole `claude` session minutes long, so no case can run one.
+    What a case can ask is whether the run got as far as starting one, and this
+    is how the answer comes back.
+    """
+
+
+def hands_off(detached, rerun=True):
+    """What a reading fired by hand does: spawn a copy of itself, or read.
+
+    Fired by hand it used to do the reading in the caller's own shell, and the
+    agent that asked for it could answer nothing for the minutes that took
+    (bw-k0w). What comes back is the spawn — its command line and what it was
+    told — the goal the reading was actually started on, and the line the caller
+    was left with.
+
+    `detached` is the copy's side of the same run: told it is the copy, it must
+    read rather than hand off again, because a reader that hands off to a reader
+    is a reading nobody ever does.
+    """
+    rv = script("review")
+    goal = dict(GOAL, status="in_progress", notes="")
+    spawned = []
+    read = []
+
+    class Copy:
+        def __init__(self, cmd, env=None, **kw):
+            spawned.append((list(cmd), dict(env or {})))
+            self.pid = os.getpid()
+
+    def reads(prompt, actor, goal_id):
+        read.append(goal_id)
+        raise Reached()
+
+    where = tempfile.mkdtemp()
+    said = io.StringIO()
+    rv.bd = lambda args, actor=None, must=True: json.dumps(goal)
+    rv.changes = lambda shas, goal_id: ([], "")
+    rv.run_log = lambda goal_id: where
+    rv.run_reviewer = reads
+    rv.reading.commits = lambda gid, root: ["a1c0ffee"]
+    rv.reading.wrote = lambda gid, root: {"someone"}
+    keep_popen, subprocess.Popen = subprocess.Popen, Copy
+    keep_argv, sys.argv = sys.argv, ["review", "g"] + (["--rerun"] if rerun else [])
+    keep_out, sys.stdout = sys.stdout, said
+    if detached:
+        os.environ[inflight.DETACHED] = "1"
+    inflight.clear("g")
+    try:
+        rv.main()
+    except Reached:
+        pass
+    finally:
+        subprocess.Popen = keep_popen
+        sys.argv, sys.stdout = keep_argv, keep_out
+        os.environ.pop(inflight.DETACHED, None)
+        inflight.clear("g")
+        shutil.rmtree(where, ignore_errors=True)
+    return spawned, read, said.getvalue()
+
+
+def fires_marked():
+    """The command line and the settings the board's own firing sends a reader on.
+
+    The board fires its readers already detached, so the reader it sends must be
+    told it is the copy: unmarked, it would hand off to a copy of itself and the
+    board would be waiting on a run that spawned another run (bw-k0w.5).
+    """
+    told = {}
+
+    class Reader:
+        def __init__(self, cmd, env=None, **kw):
+            told["cmd"], told["env"] = list(cmd), dict(env or {})
+            self.pid = os.getpid()
+
+    keep_popen, runner.subprocess.Popen = runner.subprocess.Popen, Reader
+    keep_fire, runner.fire = runner.fire, REAL_FIRE
+    # A reader sent from inside another reader inherits that one's run directory
+    # unless the sending clears it, and would write its attempts on top of them.
+    os.environ[inflight.RUN_DIR] = "/nowhere"
+    inflight.clear("g")
+    try:
+        runner.fire("g", ROOT)
+    finally:
+        runner.subprocess.Popen = keep_popen
+        runner.fire = keep_fire
+        os.environ.pop(inflight.RUN_DIR, None)
+        inflight.clear("g")
+    return told
+
+
 def run(goal_status, rows=None, notes="", shas=("a1c0ffee", "b2deadbe"),
         wrote=("someone",)):
     """The commands the hook issues when g.3, the last work item, closes."""
@@ -3192,6 +3285,32 @@ def main():
           "once the reading has opened the step after itself — and nobody follows a "
           "reader that answered nothing, a job that counts its own reader as a "
           "writer, or a job with work open again")
+
+    spawned, read, said = hands_off(detached=False)
+    assert len(spawned) == 1 and not read, \
+        "a reading fired by hand did the reading in the caller's own shell, which " \
+        "is the wait this job exists to end"
+    cmd, env = spawned[0]
+    assert cmd[0].endswith("review") and "g" in cmd and "--rerun" in cmd, \
+        "the copy a hand-fired reading spawned was not this same reader, on this " \
+        "same job, asked the same way"
+    assert env.get(inflight.DETACHED) and env.get(inflight.RUN_DIR), \
+        "the copy was not told it is the copy, so it hands off to a copy of itself " \
+        "and the reading is never done by anyone"
+    assert "run.log" in said, \
+        "a hand-fired reading gave the shell back without saying where its run went"
+    spawned, read, said = hands_off(detached=True)
+    assert not spawned and read == ["g"], \
+        "the copy handed the reading on instead of doing it, which is a reader that " \
+        "never arrives"
+    told = fires_marked()
+    assert told["env"].get(inflight.DETACHED) and inflight.RUN_DIR not in told["env"], \
+        "the board's own firing sent a reader it had not marked, so that reader " \
+        "hands off to another and writes its attempts into its sender's directory"
+
+    print("ok: a reading fired by hand hands itself to a marked copy and says where "
+          "the run went, the marked copy reads rather than handing off again, and "
+          "the board's own firing marks the reader it sends")
 
     pretend = tempfile.mkdtemp()
     victim = pretend_reader(pretend, HELD)
