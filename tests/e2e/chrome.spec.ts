@@ -88,6 +88,50 @@ async function styleText(page: Page): Promise<string> {
   );
 }
 
+/**
+ * The colour a theme's own block SPELLS OUT for third-level text, resolved to
+ * the rgb() a browser reports.
+ *
+ * Read out of the stylesheet rule, not off the live document: the computed
+ * value falls back silently when a theme declares nothing, so comparing the
+ * gear against the computed value would agree with itself and pass on a theme
+ * that inks nothing. Reading the declaration means a theme that stops spelling
+ * the colour out fails here, which is the fault this guards.
+ */
+async function inkThemeSpellsOut(page: Page, theme: string | null): Promise<string | null> {
+  return page.evaluate((wanted) => {
+    const want = wanted ? `html[data-theme="${wanted}"]` : ':root';
+    let spelt: string | null = null;
+    for (const sheet of document.styleSheets) {
+      let rules: CSSRule[];
+      try {
+        rules = [...sheet.cssRules];
+      } catch {
+        continue;
+      }
+      const walk = (list: CSSRule[]) => {
+        for (const rule of list) {
+          const inner = (rule as CSSGroupingRule).cssRules;
+          if (inner) walk([...inner]);
+          const style = (rule as CSSStyleRule).style;
+          const selector = (rule as CSSStyleRule).selectorText;
+          if (!style || selector !== want) continue;
+          const value = style.getPropertyValue('--text-tertiary').trim();
+          if (value) spelt = value;
+        }
+      };
+      walk(rules);
+    }
+    if (!spelt) return null;
+    const probe = document.createElement('span');
+    probe.style.color = `hsl(${spelt})`;
+    document.body.appendChild(probe);
+    const rgb = getComputedStyle(probe).color;
+    probe.remove();
+    return rgb;
+  }, theme);
+}
+
 test.describe('chrome', () => {
   test('the way out to settings is a control on the first bar, not floating over the screen', async ({
     page,
@@ -139,9 +183,12 @@ test.describe('chrome', () => {
       expect(geometry.theme, 'the theme did not take').toBe(theme);
       expect(geometry.inBar).toBe(true);
       expect(geometry.offRow, `${theme}: the gear is off the row the bar's own controls sit on`).toBeLessThanOrEqual(1);
-      // The gear's own ink comes from the theme, so a theme that answers nothing
-      // would leave it unset rather than merely different.
-      expect(geometry.gearInk, `${theme}: the gear has no ink of its own`).toMatch(/rgba?\(/);
+      // The gear's own ink is the one this theme spells out, read off its own
+      // block: a theme that stops spelling it out, or a gear painted any other
+      // colour, fails here.
+      const spelt = await inkThemeSpellsOut(page, theme);
+      expect(spelt, `${theme} spells out no colour for third-level text`).not.toBeNull();
+      expect(geometry.gearInk, `${theme}: the gear is not the ink the theme spells out`).toBe(spelt);
     });
   }
 
@@ -186,18 +233,14 @@ test.describe('chrome', () => {
       await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
       await expect(page.locator('a[aria-label="Settings"]')).toBeVisible();
 
-      const ink = await page.locator('a[aria-label="Settings"]').evaluate((el) => {
-        // What the live theme says its third-level text is, resolved to the
-        // same rgb() the browser reports for the gear.
-        const probe = document.createElement('span');
-        probe.style.color = `hsl(${getComputedStyle(document.documentElement).getPropertyValue('--text-tertiary').trim()})`;
-        document.body.appendChild(probe);
-        const wanted = getComputedStyle(probe).color;
-        probe.remove();
-        return { theme: document.documentElement.dataset.theme ?? '(default)', got: getComputedStyle(el).color, wanted };
-      });
+      const wanted = await inkThemeSpellsOut(page, theme);
+      const ink = await page.locator('a[aria-label="Settings"]').evaluate((el) => ({
+        theme: document.documentElement.dataset.theme ?? '(default)',
+        got: getComputedStyle(el).color,
+      }));
 
-      if (ink.got !== ink.wanted) off.push(`${ink.theme}: gear ${ink.got}, theme ${ink.wanted}`);
+      if (wanted === null) off.push(`${ink.theme}: spells out no colour for third-level text`);
+      else if (ink.got !== wanted) off.push(`${ink.theme}: gear ${ink.got}, theme ${wanted}`);
     }
 
     expect(off, `themes the gear does not take its ink from: ${off.join('; ')}`).toHaveLength(0);
