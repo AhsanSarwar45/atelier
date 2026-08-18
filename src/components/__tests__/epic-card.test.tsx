@@ -231,6 +231,28 @@ describe('what a card says it is made of', () => {
   });
 });
 
+describe('how loudly a card is drawn', () => {
+  it.each(LAYOUTS)('draws a finished job back, in the %s shape', (shape) => {
+    layout = shape;
+    const { container } = render(<EpicCard {...withPieces('closed', 2, 0)} />);
+    expect(container.querySelector('.theme-card')?.className).toMatch(/opacity-45/);
+  });
+
+  it.each(LAYOUTS)('draws a dropped job back, in the %s shape', (shape) => {
+    // Both cards this job was opened over sat in Cancelled at full strength
+    // while every plain card beside them was dimmed.
+    layout = shape;
+    const { container } = render(<EpicCard {...withPieces('cancelled', 0, 2)} />);
+    expect(container.querySelector('.theme-card')?.className).toMatch(/opacity-45/);
+  });
+
+  it.each(LAYOUTS)('leaves a job somebody is waiting on at full strength, in the %s shape', (shape) => {
+    layout = shape;
+    const { container } = render(<EpicCard {...withPieces('in_progress', 1, 0)} />);
+    expect(container.querySelector('.theme-card')?.className).not.toMatch(/opacity-45/);
+  });
+});
+
 describe('the list of pieces under a card', () => {
   it('strikes dropped work through, the same as finished work', () => {
     const { container } = render(<EpicCard {...withPieces('manager_review', 1, 1)} />);

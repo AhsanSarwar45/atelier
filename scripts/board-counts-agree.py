@@ -72,6 +72,25 @@ def dropped(card):
             and DROPPED_LABEL in (card.get("labels") or []))
 
 
+def parent_of(card, known):
+    """Which job a piece belongs to, the three ways the product decides it.
+
+    server/src/routes/beads.rs reads a stated parent, then a parent-child
+    dependency, then the piece's own dotted id. Reading only the first is how a
+    whole job can drop out of this comparison while the run still goes green.
+    """
+    stated = card.get("parent") or card.get("parent_id")
+    if stated:
+        return stated
+    for dep in card.get("dependencies") or []:
+        if isinstance(dep, dict) and dep.get("type") == "parent-child":
+            return dep.get("depends_on_id")
+    dot = card["id"].find(".")
+    if dot != -1 and card["id"][:dot] in known:
+        return card["id"][:dot]
+    return None
+
+
 def board_jobs(project, count_dropped):
     """Every job's expected numbers, keyed by id: pieces, finished, dropped.
 
@@ -79,9 +98,10 @@ def board_jobs(project, count_dropped):
     can be shown going red against a screen that is right.
     """
     cards = bd_list(project)
+    known = {c["id"] for c in cards}
     children = {}
     for card in cards:
-        parent = card.get("parent")
+        parent = parent_of(card, known)
         if parent:
             children.setdefault(parent, []).append(card)
 
@@ -211,10 +231,15 @@ def main():
     if not drawn:
         sys.exit("no job card on the screen draws a count — is this the fork?")
 
-    bad, checked, with_dropped = [], 0, 0
+    bad, checked, with_dropped, skipped = [], 0, 0, []
     for job, shown in sorted(drawn.items()):
         want = held.get(job)
         if want is None:
+            # A card drawn with a progress bar that the board has no pieces for
+            # is a hole in the comparison, not a card to pass over: this used to
+            # be a bare `continue`, and the run still ended by saying every job
+            # counts the pieces that count.
+            skipped.append(job)
             continue
         checked += 1
         if want["dropped"]:
@@ -240,9 +265,19 @@ def main():
                 bad.append(f"{job} lists its pieces as ({shown['list']}) "
                            f"where the count above says ({want_list})")
 
-    print(f"job cards read {checked:>4}   of them with dropped work {with_dropped:>4}")
+    print(f"job cards read {checked:>4}   of them with dropped work {with_dropped:>4}"
+          f"   not compared {len(skipped):>4}")
     if args.count_dropped:
         print("expecting the OLD rule: dropped work counted towards the job")
+
+    if skipped:
+        print("\nthese job cards draw a count the board holds no pieces for, so "
+              "nothing about them was checked:")
+        for job in skipped[:20]:
+            print("  " + job)
+        if len(skipped) > 20:
+            print(f"  … and {len(skipped) - 20} more")
+        return 1
 
     if bad:
         print("\nthe screen and the board disagree:")

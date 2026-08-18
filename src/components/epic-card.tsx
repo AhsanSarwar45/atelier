@@ -170,6 +170,13 @@ export function EpicCard({
 
   const commentCount = (epic.comments ?? []).length;
 
+  // Nobody is waiting on this job any more, so it is drawn back — the same
+  // reading the plain cards beside it use. Without it a finished or dropped job
+  // sat at full strength in the Done and Cancelled columns while every plain
+  // card around it was dimmed, and the loudest cards on the board were the two
+  // nobody needs to look at.
+  const isSettled = !standing(epic.status);
+
   // Manager Review is the one column a session may not move a card out of, so the
   // screen is the only place a job there can be finished. Agent Review draws no
   // such button: a job waiting to be read has not been signed by anyone yet.
@@ -330,6 +337,7 @@ export function EpicCard({
           "theme-card cursor-pointer p-2.5 bg-card border border-epic/20",
           "hover:bg-surface-overlay/50",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic",
+          isSettled && "opacity-45",
           isSelected && "bg-epic/5 outline outline-1 outline-epic/20"
         )}
       >
@@ -362,6 +370,7 @@ export function EpicCard({
           "theme-card cursor-pointer p-3 bg-card border border-epic/30",
           "hover:bg-surface-inset/30",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic",
+          isSettled && "opacity-45",
           isSelected && "ring-2 ring-epic ring-offset-2 ring-offset-surface-base"
         )}
       >
@@ -413,6 +422,7 @@ export function EpicCard({
         "bg-surface-raised/70",
         "border border-b-default/60 border-l-2 border-l-epic",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base",
+        isSettled && "opacity-45",
         isSelected && "ring-2 ring-epic ring-offset-2 ring-offset-surface-base"
       )}
     >
