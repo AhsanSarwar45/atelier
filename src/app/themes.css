@@ -84,6 +84,11 @@ html[data-theme="glassmorphism"] {
   --card-hover-y: -2px;
   --column-blur: blur(24px);
   --column-bg-alpha: 0.03;
+  /* How much of the quiet ink the scrollbar's slider is drawn in. A quarter
+     is right over this app's darkest panes and invisible over a pale one, so
+     each skin names the share that puts its slider a step off its own pane. */
+  --rail-strength: 0.34;
+  --rail-strength-hover: 0.55;
 }
 
 /* ──────────────────────────────────────────────
@@ -161,6 +166,11 @@ html[data-theme="neo-brutalist"] {
   --card-hover-y: 0px;
   --column-blur: 0;
   --column-bg-alpha: 1;
+  /* How much of the quiet ink the scrollbar's slider is drawn in. A quarter
+     is right over this app's darkest panes and invisible over a pale one, so
+     each skin names the share that puts its slider a step off its own pane. */
+  --rail-strength: 0.4;
+  --rail-strength-hover: 0.65;
 }
 
 /* ──────────────────────────────────────────────
@@ -230,6 +240,11 @@ html[data-theme="linear-minimal"] {
   --card-hover-y: 0px;
   --column-blur: 0;
   --column-bg-alpha: 1;
+  /* How much of the quiet ink the scrollbar's slider is drawn in. A quarter
+     is right over this app's darkest panes and invisible over a pale one, so
+     each skin names the share that puts its slider a step off its own pane. */
+  --rail-strength: 0.47;
+  --rail-strength-hover: 0.72;
 }
 
 /* ──────────────────────────────────────────────
@@ -327,6 +342,11 @@ html[data-theme="soft-light"] {
   --card-hover-y: -1px;
   --column-blur: 0;
   --column-bg-alpha: 1;
+  /* How much of the quiet ink the scrollbar's slider is drawn in. A quarter
+     is right over this app's darkest panes and invisible over a pale one, so
+     each skin names the share that puts its slider a step off its own pane. */
+  --rail-strength: 0.47;
+  --rail-strength-hover: 0.72;
 }
 
 /* ──────────────────────────────────────────────
@@ -364,7 +384,9 @@ html[data-theme="notion-warm"] {
   /* Text */
   --text-primary: 40 10% 20%;
   --text-secondary: 40 6% 35%;
-  --text-tertiary: 40 2% 60%;
+  /* 52%, not 60%: at 60 this skin's third-level ink reaches only 2.65:1
+     against its own bar, under the 3:1 a control has to be drawn at. */
+  --text-tertiary: 40 2% 52%;
   --text-muted: 40 2% 75%;
   --text-faint: 40 2% 82%;
 
@@ -424,6 +446,11 @@ html[data-theme="notion-warm"] {
   --card-hover-y: 0px;
   --column-blur: 0;
   --column-bg-alpha: 0;
+  /* How much of the quiet ink the scrollbar's slider is drawn in. A quarter
+     is right over this app's darkest panes and invisible over a pale one, so
+     each skin names the share that puts its slider a step off its own pane. */
+  --rail-strength: 0.7;
+  --rail-strength-hover: 0.9;
 }
 
 /* ──────────────────────────────────────────────
@@ -521,6 +548,11 @@ html[data-theme="github-clean"] {
   --card-hover-y: 0px;
   --column-blur: 0;
   --column-bg-alpha: 0;
+  /* How much of the quiet ink the scrollbar's slider is drawn in. A quarter
+     is right over this app's darkest panes and invisible over a pale one, so
+     each skin names the share that puts its slider a step off its own pane. */
+  --rail-strength: 0.4;
+  --rail-strength-hover: 0.65;
 }
 
 /* --------------------------------------------------
@@ -618,6 +650,11 @@ html[data-theme="catppuccin-latte"] {
   --card-hover-y: -1px;
   --column-blur: 0;
   --column-bg-alpha: 1;
+  /* How much of the quiet ink the scrollbar's slider is drawn in. A quarter
+     is right over this app's darkest panes and invisible over a pale one, so
+     each skin names the share that puts its slider a step off its own pane. */
+  --rail-strength: 0.4;
+  --rail-strength-hover: 0.65;
 }
 
 /* --------------------------------------------------

@@ -24,7 +24,9 @@ export function GlobalSettingsButton() {
     // vocabulary (`muted-foreground`, `accent-foreground`) that three of the
     // themes never define, so on those three they fall back to a fixed palette
     // instead of the theme's. `ml-auto` only bites on a bar whose contents do
-    // not already reach the right edge.
+    // not already reach the right edge. The icon carries its own full strength:
+    // the button dims any picture inside it to 60%, which on the light skins
+    // drops the gear under the strength a control has to be drawn at.
     <Button
       variant="ghost"
       size="icon"
@@ -32,7 +34,7 @@ export function GlobalSettingsButton() {
       asChild
     >
       <Link href="/settings" aria-label="Settings">
-        <Settings aria-hidden="true" />
+        <Settings className="opacity-100" aria-hidden="true" />
       </Link>
     </Button>
   );

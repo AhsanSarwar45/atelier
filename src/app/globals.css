@@ -224,20 +224,23 @@
   background: transparent;
 }
 
+/* How strongly the slider is drawn. A quarter on a dark skin is a clear step
+   away from the pane; the same quarter over near-white is a step of about six
+   percent, which is nothing, so the light skins name their own in themes.css. */
 ::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--text-muted) / 0.25);
+  background-color: hsl(var(--text-muted) / var(--rail-strength, 0.25));
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--text-muted) / 0.5);
+  background-color: hsl(var(--text-muted) / var(--rail-strength-hover, 0.5));
 }
 
 /* Firefox, and only Firefox: `-moz-orient` is answered by nothing else. */
 @supports (-moz-orient: inline) {
   * {
     scrollbar-width: thin;
-    scrollbar-color: hsl(var(--text-muted) / 0.25) transparent;
+    scrollbar-color: hsl(var(--text-muted) / var(--rail-strength, 0.25)) transparent;
   }
 }
 

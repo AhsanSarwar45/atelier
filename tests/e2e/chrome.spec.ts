@@ -132,6 +132,21 @@ async function inkThemeSpellsOut(page: Page, theme: string | null): Promise<stri
   }, theme);
 }
 
+/** Every skin the app ships, and no skin at all. */
+const THEMES = [
+  null,
+  'glassmorphism',
+  'neo-brutalist',
+  'linear-minimal',
+  'soft-light',
+  'notion-warm',
+  'github-clean',
+  'catppuccin-latte',
+  'catppuccin-frappe',
+  'catppuccin-macchiato',
+  'catppuccin-mocha',
+] as const;
+
 test.describe('chrome', () => {
   test('the way out to settings is a control on the first bar, not floating over the screen', async ({
     page,
@@ -203,19 +218,7 @@ test.describe('chrome', () => {
    */
   test('the gear is inked by every one of the eleven themes, not by a fallback', async ({ page, request }) => {
     const id = await projectId(request);
-    const themes = [
-      null,
-      'glassmorphism',
-      'neo-brutalist',
-      'linear-minimal',
-      'soft-light',
-      'notion-warm',
-      'github-clean',
-      'catppuccin-latte',
-      'catppuccin-frappe',
-      'catppuccin-macchiato',
-      'catppuccin-mocha',
-    ] as const;
+    const themes = THEMES;
 
     await page.goto(`/project?id=${id}&tab=board`);
     await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
@@ -244,6 +247,97 @@ test.describe('chrome', () => {
     }
 
     expect(off, `themes the gear does not take its ink from: ${off.join('; ')}`).toHaveLength(0);
+  });
+
+  /**
+   * Drawn strongly enough to be found, on every skin.
+   *
+   * Two ways this went wrong and neither shows up in a colour comparison: the
+   * button style dims any picture inside it to 60%, and a share of the quiet
+   * ink that reads clearly over this app's darkest pane is a step of about six
+   * percent over a pale one. So the bar's controls and the rail are measured
+   * against what is actually behind them, in every skin.
+   */
+  test('the bar’s controls and the rail keep their distance from what is behind them, in every theme', async ({
+    page,
+    request,
+  }) => {
+    const id = await projectId(request);
+    const themes = THEMES;
+
+    await page.goto(`/project?id=${id}&tab=board`);
+    await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
+
+    const weak: string[] = [];
+    for (const theme of themes) {
+      await page.evaluate((t) => {
+        if (t) localStorage.setItem('beads-theme', t);
+        else localStorage.removeItem('beads-theme');
+      }, theme);
+      await page.reload();
+      await expect(page.getByTestId('project-bar')).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('a[aria-label="Settings"]')).toBeVisible();
+
+      const read = await page.evaluate(() => {
+        const num = (c: string) => c.match(/[\d.]+/g)!.map(Number);
+        const lum = ([r, g, b]: number[]) => {
+          const f = (c: number) => {
+            const x = c / 255;
+            return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+          };
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+        };
+        const ratio = (a: number[], b: number[]) => {
+          const [x, y] = [lum(a), lum(b)];
+          return +(((Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)).toFixed(2));
+        };
+        /** The first ancestor that actually paints, which is what you see behind. */
+        const behind = (el: Element) => {
+          for (let n: Element | null = el; n; n = n.parentElement) {
+            const bg = num(getComputedStyle(n).backgroundColor);
+            if ((bg.length > 3 ? bg[3] : 1) > 0.99) return bg.slice(0, 3);
+          }
+          return [0, 0, 0];
+        };
+        /** Ink as drawn: the button dims the picture inside it, so opacity counts. */
+        const drawn = (el: Element) => {
+          const ink = num(getComputedStyle(el).color).slice(0, 3);
+          const o = Number(getComputedStyle(el.querySelector('svg') ?? el).opacity);
+          const bg = behind(el);
+          return ratio(
+            ink.map((c, i) => Math.round(c * o + bg[i] * (1 - o))),
+            bg,
+          );
+        };
+        const bar = document.querySelector('[data-testid="project-bar"]')!;
+        const probe = document.createElement('span');
+        probe.style.color = `hsl(${getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()})`;
+        document.body.appendChild(probe);
+        const muted = num(getComputedStyle(probe).color).slice(0, 3);
+        probe.remove();
+        const pane = document.querySelector('[data-testid="column-scroll"]') ?? document.body;
+        const paneBg = behind(pane);
+        const share = Number(getComputedStyle(document.documentElement).getPropertyValue('--rail-strength').trim() || 0.25);
+        return {
+          theme: document.documentElement.dataset.theme ?? '(default)',
+          gear: drawn(document.querySelector('a[aria-label="Settings"]')!),
+          back: drawn(bar.querySelector('a[href="/"]')!),
+          rail: ratio(
+            muted.map((c, i) => Math.round(c * share + paneBg[i] * (1 - share))),
+            paneBg,
+          ),
+        };
+      });
+
+      // A control has to be drawn at 3:1 to be a control. The rail is quiet on
+      // purpose — the manager asked for that twice — but it still has to be a
+      // step away from its pane rather than a shade of it.
+      if (read.gear < 3) weak.push(`${read.theme}: the gear is ${read.gear} against the bar`);
+      if (read.back < 3) weak.push(`${read.theme}: the back arrow is ${read.back} against the bar`);
+      if (read.rail < 1.35) weak.push(`${read.theme}: the rail is ${read.rail} against its pane`);
+    }
+
+    expect(weak, `drawn too faintly to be found: ${weak.join('; ')}`).toHaveLength(0);
   });
 
   test('every pane that scrolls gets the app’s hairline, and nothing switches it off', async ({ page, request }) => {

@@ -138,7 +138,15 @@ export function ToolButton({
           aria-label={label}
           disabled={disabled}
           onClick={onClick}
-          className={className}
+          // A quiet control is inked from the app's own text scale: the button's
+          // ghost style names a borrowed colour that three skins paint the same
+          // as the bar behind it, and dims the picture to 60% on top of that.
+          className={cn(
+            emphasis === 'loud'
+              ? undefined
+              : 'text-t-tertiary hover:bg-surface-overlay hover:text-t-primary [&_svg]:opacity-100',
+            className,
+          )}
           {...rest}
         >
           {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : icon}

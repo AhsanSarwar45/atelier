@@ -75,11 +75,21 @@ function ProjectTabs() {
       barClassName={terminal ? 'terminal-header' : undefined}
       bar={
         <>
-          <Button variant="ghost" size="icon" asChild>
+          {/* Ink and strength named from the app's own text scale: the quiet
+              button style is written in the borrowed colour names, and three
+              skins paint that the same colour as the bar itself, so the arrow
+              disappeared on them. The picture also carries its own strength,
+              because the button dims any picture inside it to 60%. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
+            asChild
+          >
             {/* A link, not a fresh document: the list is a step back in the same
                 app, so the history keeps what was open on this screen. */}
             <Link href="/">
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4 opacity-100" />
               <span className="sr-only">Back to projects</span>
             </Link>
           </Button>
@@ -98,12 +108,12 @@ function ProjectTabs() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+            className="h-7 w-7 shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
             aria-label="Project settings"
             data-testid="project-menu"
             onClick={() => setSettingsOpen(true)}
           >
-            <EllipsisVertical className="h-3.5 w-3.5" />
+            <EllipsisVertical className="h-3.5 w-3.5 opacity-100" />
           </Button>
           <WorkbenchStatus />
         </>
