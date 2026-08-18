@@ -3013,6 +3013,93 @@ def main():
           "slotted one, lets the checkout be tidied, and leaves every other ref "
           "— the board's own above all — alone")
 
+    # And the guard being there at all, which is `join`'s job. Every case above
+    # wires the hook by hand, so all of them stay green in a checkout that has no
+    # guard in it — the one shape of this fault that matters most, because the
+    # directory the guard lives in is the board tooling's own and gets rebuilt
+    # (bw-7e8.7).
+    def joined(wipe=False):
+        """A throwaway project put through the real `join`, and what its git then
+        does to the landing line moved by hand.
+
+        The machinery is a throwaway too — the three files this piece needs and
+        nothing else — so joining lists a project in a temporary register and has
+        no definitions of a machine home to link anywhere.
+        """
+        tmp = tempfile.mkdtemp(prefix="board-join-")
+        try:
+            mine = os.path.join(tmp, "machinery")
+            os.makedirs(os.path.join(mine, "hooks"))
+            for near in ("join", "project.py",
+                         os.path.join("hooks", "landing-gate.py")):
+                shutil.copy(os.path.join(HOME, near), os.path.join(mine, near))
+            root = os.path.join(tmp, "project")
+            os.makedirs(root)
+            env = dict(os.environ, HOME=tmp)
+
+            def g(*args):
+                return subprocess.run(["git"] + list(args), cwd=root, text=True,
+                                      capture_output=True, timeout=120, env=env)
+
+            g("init", "-q", "-b", "ours", ".")
+            g("config", "user.email", "t@t")
+            g("config", "user.name", "t")
+            # Relative on purpose: it is what `bd hooks install` writes, and it
+            # is the spelling that sends git looking in two different places.
+            g("config", "core.hooksPath", ".beads/hooks")
+            g("commit", "-q", "--allow-empty", "-m", "the line as it stands")
+            g("commit", "-q", "--allow-empty", "-m", "a piece of work, finished")
+            with open(os.path.join(root, project.DECLARATION), "w") as fh:
+                fh.write('name = "joining"\nprefix = "jn"\nlands_on = "ours"\n'
+                         'areas = ["tooling"]\nagent_merges = true\n')
+            said = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
+                                  text=True, capture_output=True, timeout=120, env=env)
+            gitdir = g("rev-parse", "--absolute-git-dir").stdout.strip()
+            wrote = [w for w in
+                     (os.path.join(root, ".beads", "hooks", "reference-transaction"),
+                      os.path.join(gitdir, ".beads", "hooks", "reference-transaction"))
+                     if os.path.exists(w)]
+            if wipe:
+                # The board's own tooling rebuilding its hooks directory, which
+                # is how a joined checkout loses the guard without anybody
+                # touching it.
+                shutil.rmtree(os.path.join(root, ".beads", "hooks"))
+            was = g("rev-parse", "ours").stdout.strip()
+            hand = g("update-ref", "refs/heads/ours", "HEAD~1")
+            moved = g("rev-parse", "ours").stdout.strip() != was
+            check = subprocess.run(
+                [sys.executable, os.path.join(mine, "join"), "--check"],
+                text=True, capture_output=True, timeout=120, env=env)
+            return (said.stdout + said.stderr, wrote, hand.stdout + hand.stderr,
+                    moved, check.stdout + check.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    said, wrote, hand, moved, check = joined()
+    assert len(wrote) == 2, \
+        "joining a project left the guard at %s — git looks in the top of the " \
+        "working tree for an ordinary command and in the git directory for " \
+        "anything arriving over a push, and a guard in only one of them is a " \
+        "guard a push walks past. join said %r" % (wrote or "neither place", said)
+    assert not moved and "landing gate" in hand, \
+        "a project that has just been joined let its landing line be moved by " \
+        "hand: %r (join said %r)" % (hand, said)
+    assert "nothing guards the landing line" not in check, \
+        "join wrote the guard and then reported it missing: %r" % check
+
+    said, wrote, hand, moved, check = joined(wipe=True)
+    assert moved, \
+        "the landing line held still with no guard in the working tree's hooks " \
+        "directory, so the case above proves nothing about the guard: %r" % hand
+    assert "nothing guards the landing line" in check, \
+        "a checkout whose board tooling rebuilt its hooks directory runs " \
+        "unguarded and `join --check` says nothing about it: %r" % check
+
+    print("ok: joining a project leaves the landing guard in both places git "
+          "looks for a hook, a joined checkout turns away a hand-moved pointer "
+          "without anything wiring it by hand, and a checkout that lost the "
+          "guard to its own board tooling is told so")
+
     # Which checkout a command belongs to. Some shells report the directory the
     # session was started in whatever directory the command names, so a command
     # that opens by moving into another registered checkout is taken at its word
