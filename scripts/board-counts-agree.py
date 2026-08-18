@@ -85,14 +85,23 @@ def parent_of(card, known):
     for dep in card.get("dependencies") or []:
         if isinstance(dep, dict) and dep.get("type") == "parent-child":
             return dep.get("depends_on_id")
-    dot = card["id"].find(".")
+    # The LAST dot, the way the server does it (rfind): a piece numbered
+    # bw-4gk.5.2 belongs to bw-4gk.5, not to bw-4gk. Cutting at the first dot
+    # gives a different owner for every number with two of them.
+    dot = card["id"].rfind(".")
     if dot != -1 and card["id"][:dot] in known:
         return card["id"][:dot]
     return None
 
 
 def board_jobs(project, count_dropped):
-    """Every job's expected numbers, keyed by id: pieces, finished, dropped.
+    """Every card's expected numbers, keyed by id: pieces, finished, dropped.
+
+    Every card the board holds gets an entry, including one with no pieces yet
+    — a job is opened before its work items are poured, and its card draws a
+    bar from the first moment, so an entry of nothing is the right answer for
+    it rather than a hole in the comparison. Only a card the board has never
+    heard of is a hole.
 
     `count_dropped` restores the rule this check exists to refuse, so the check
     can be shown going red against a screen that is right.
@@ -107,9 +116,7 @@ def board_jobs(project, count_dropped):
 
     jobs = {}
     for card in cards:
-        kids = children.get(card["id"])
-        if not kids:
-            continue
+        kids = children.get(card["id"]) or []
         gone = [k for k in kids if dropped(k)]
         counted = kids if count_dropped else [k for k in kids if not dropped(k)]
         # Dropped work is stored closed and marked, so "finished" is closed and
