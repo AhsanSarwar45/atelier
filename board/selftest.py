@@ -2815,10 +2815,19 @@ def main():
                             % (elsewhere, commit, other_prefix))
         assert said_it == "", \
             "a commit made in another checkout, naming that project's own card, was refused: %s" % said_it
-        assert "put one of those ids" in gate_says(
-            "cd /nowhere-at-all && %s'fix(x): %s-1a2b something'" % (commit, other_prefix)), \
-            "a commit opening with a move to a directory that does not exist was judged " \
-            "against the other project anyway"
+        # A prefix no board on this machine issues, because either checkout may
+        # declare that its change lands in the other, and then the two accept the
+        # same ids and no real prefix says which one judged the commit. What is
+        # left to read is the refusal: it names the checkout the commit is being
+        # made in, so the same commit with nowhere to move to spells the answer
+        # this case wants, and the bogus move must not shift it.
+        bogus = "fix(x): zz-1a2b something"
+        here = gate_says("%s'%s'" % (commit, bogus))
+        judged = gate_says("cd /nowhere-at-all && %s'%s'" % (commit, bogus))
+        assert "put one of those ids" in judged and judged == here \
+            and elsewhere not in judged, \
+            "a commit opening with a move to a directory that does not exist was not " \
+            "judged against the session's own checkout: %s" % (judged or "it was allowed")
         assert gate_says("cd %s/worktrees && %s'chore: nothing named here'" % (elsewhere, commit)) != "", \
             "a commit naming no card at all was let through by the path it was run from"
 
