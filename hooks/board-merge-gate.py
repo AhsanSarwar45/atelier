@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """PreToolUse (Bash) — what a command writes to decides whether it may run.
 
-Two rules, both answered by the same question, and only the second needs a board.
+Three rules, all answered by the same question, and only the last two need a board.
 
 Protected lines. An agent may not put work onto a line other people ship from.
 Which lines those are is each project's own to declare, and a project that has
 declared nothing is protected rather than open — the checkout nobody has thought
 about is the one most likely to be somebody else's. Manager's ruling, 2026-08-16.
+
+No hand-moved pointers. The line a board measures its closes against is moved by
+folding work into it, and by nothing else: pointing it at a commit is not a
+landing that skipped the queue, it is not a landing at all, and taking the slot
+first would not make it one. A project that lands its own work is covered by this
+where the protected list has nothing to say (bw-7e8.4).
 
 One merge at a time. Where a board is running, merges into its main line are
 serialised through a single slot and must be fast-forwards, because a code step
@@ -102,6 +108,31 @@ UNREAD = (
     "is one this project ships from.\n\n"
     "Spell it out, or name the position you are standing at: `git push origin "
     "HEAD` pushes the line you are on and is read as that line."
+)
+
+# The two ways a command reaches the line a board measures its closes against,
+# and what each one is held to.
+#
+# Pointing: the line is made to say a commit, with nothing folded into anything.
+# `update-ref` and `symbolic-ref` write the ref itself; `branch` in its forcing,
+# renaming and deleting forms and `checkout -B`/`switch -C` are the same write
+# spelled as a line command; a `reset` that moves the line stood on is the same
+# write again, arrived at from the other side. None is a step of any landing here
+# (bw-7e8.4), which is why holding the slot does not make one allowed.
+#
+# Folding: work is brought into the line, which is what a landing is and what the
+# slot serialises. A push into this checkout and a fetch with the line on the
+# right of a refspec are folds that never type either of the folding words.
+POINTED = ("update-ref", "symbolic-ref", "branch", "reset") + MOVE
+FOLDS = ("merge", "rebase", "push", "pull", "fetch")
+
+BY_HAND = (
+    "The landing gate: %s is the line this project's work lands on, and this "
+    "writes to it by hand rather than folding work into it. No landing here is "
+    "spelled that way, so taking the merge slot first would not make it one.\n\n"
+    "Rebase your work in your own tree, take the slot with `bd merge-slot "
+    "acquire`, fast-forward the line with `git merge --ff-only <your branch>`, "
+    "and give the slot back with `bd merge-slot release`."
 )
 
 FF_ONLY = "--ff-only"
@@ -886,11 +917,16 @@ def routes(cmd, home):
                 stand(made_tree[0], made_tree[1])
             continue
         if verb == "symbolic-ref":
-            # Repointing the position by hand is stepping onto a line, spelled
-            # without either of the words that usually say so.
+            # Repointing the POSITION by hand is stepping onto a line, spelled
+            # without either of the words that usually say so. Repointing a LINE
+            # by hand is writing to that line, and is the one spelling that used
+            # to reach a shipping line without this reading it at all (bw-7e8.4).
             args = positionals(rest, verb)
             if len(args) > 1 and args[0] in HERE_NAMES:
                 stand(where, line_named(args[1], line_of(where)))
+            elif args:
+                made.append((verb, where, UNREADABLE if unknowable(seg)
+                             else line_named(args[0], line_of(where)), rest))
             continue
         if verb in MOVE:
             if unknowable(seg):
@@ -970,12 +1006,18 @@ def main():
     if not os.path.isdir(os.path.join(root, ".beads")):
         return
     lands_on = project.of(root).lands_on
-    # Folds only. The slot exists so two sessions never resolve conflicts in the
-    # same tree at once; an ordinary commit on the main line resolves nothing and
-    # was never what it queued.
-    folds = [(verb, rest) for verb, where, line, rest in made
-             if verb in ("merge", "rebase") and line == lands_on
-             and bc.board_root(where) == root]
+    here = [(verb, rest) for verb, where, line, rest in made
+            if line == lands_on and bc.board_root(where) == root]
+    # Pointing the line at a commit is not a landing that skipped the slot; it is
+    # not a landing at all, and taking the slot first would not make it one. So it
+    # is refused on its own, before the slot is ever asked about (bw-7e8.4).
+    if any(verb in POINTED for verb, _ in here):
+        deny(BY_HAND % lands_on)
+        return
+    # Folds. The slot exists so two sessions never resolve conflicts in the same
+    # tree at once; an ordinary commit on the main line resolves nothing and was
+    # never what it queued.
+    folds = [(verb, rest) for verb, rest in here if verb in FOLDS]
     if not folds:
         return
     # Asked of the fold being judged and never of the whole line: a fast-forward

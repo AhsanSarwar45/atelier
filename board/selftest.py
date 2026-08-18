@@ -2738,6 +2738,66 @@ def main():
           "trees it works in, somebody else's hold is not, and a merge that would "
           "not fast-forward is refused to the holder as well")
 
+    # What the slot was blind to until bw-7e8.4. A landing was refused, and the
+    # line was then moved by hand — `git update-ref refs/heads/ours
+    # refs/heads/bw-4gk` — which took the main line onto work nobody had landed.
+    # The lines below are that incident and its neighbours: the spellings that
+    # point the line somewhere are refused outright, because taking the slot
+    # first would not have made any of them a landing; the spellings that fold
+    # work in are held to the slot exactly as merge and rebase already are.
+    LANDS = project.of(ROOT).lands_on
+    MINE = "main-abcd1234"
+    for pointed in ("git update-ref refs/heads/%s refs/heads/bw-4gk" % LANDS,
+                    "git symbolic-ref refs/heads/%s refs/heads/x" % LANDS,
+                    "git branch -f %s x" % LANDS,
+                    # The one that names no line at all: a reset moves the line
+                    # being stood on, and these cases stand on the landing line.
+                    "git reset --hard x"):
+        said = merging(MINE, MINE, cmd=pointed)
+        assert "by hand" in said, \
+            "%r pointed the line every close is measured against at a commit, " \
+            "holding the slot, and was answered with %r" % (pointed, said)
+    for fold in ("git push . x:%s", "git fetch . x:%s"):
+        assert "not holding it" in merging("someone-99999999", MINE, cmd=fold % LANDS), \
+            "%r moved the main line without the slot" % (fold % LANDS)
+        assert merging(MINE, MINE, cmd=fold % LANDS) == "", \
+            "%r was refused to the session holding the slot" % (fold % LANDS)
+    assert merging("someone-99999999", MINE,
+                   cmd="git update-ref refs/heads/anything-else x") == "", \
+        "pointing a line of the agent's own at a commit was refused, and every " \
+        "line but the one this project ships from is the agent's own business"
+
+    # And the incident as it was actually typed, against a project shaped like the
+    # one it happened in: landing on `ours`, with agents landing their own work so
+    # nothing at all is protected. Gate A has nothing to say there, which is why
+    # this had to be the slot's question rather than the protected list's.
+    LIKE_IT = 'name = "x"\nprefix = "x"\nlands_on = "ours"\nagent_merges = true\n'
+    said = merge_says("git update-ref refs/heads/ours refs/heads/bw-4gk",
+                      says=LIKE_IT, on="ours", board=True)
+    assert "by hand" in said and "merge-slot acquire" in said, \
+        "the incident command was answered with %r" % said
+    assert merge_says("git update-ref refs/heads/mine refs/heads/bw-4gk",
+                      says=LIKE_IT, on="ours", board=True) == "", \
+        "a line of the agent's own was refused in the project the incident happened in"
+    # The two spellings that force a line into being AND step onto it. They are
+    # asked here rather than above because the guard only calls one of them a
+    # write when the line is already there: forcing a line that does not exist
+    # yet makes one, and making one takes nothing away from anybody. The scratch
+    # project stands on `ours`, so `ours` is a line that exists.
+    for forced in ("git checkout -B ours x", "git switch -C ours x"):
+        said = merge_says(forced, says=LIKE_IT, on="ours", board=True)
+        assert "by hand" in said, \
+            "%r rewrote the landing line without folding anything into it, " \
+            "and was answered with %r" % (forced, said)
+    assert merge_says("git checkout -B not-a-line-here x", says=LIKE_IT,
+                      on="ours", board=True) == "", \
+        "forcing a line that does not exist yet was refused, and making a " \
+        "line of your own takes nothing away from anybody"
+
+    print("ok: the line a project lands on cannot be pointed at a commit by hand, "
+          "by any of the six spellings, and a push or a fetch onto it queues for "
+          "the slot like a merge")
+
     # Which checkout a command belongs to. Some shells report the directory the
     # session was started in whatever directory the command names, so a command
     # that opens by moving into another registered checkout is taken at its word
