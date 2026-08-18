@@ -1384,8 +1384,28 @@ def waiving(sid, age=0):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def with_a_page(slug, project, asking):
+    """A report spec on the disk, and the link that hands its page over.
+
+    Written where the report tool itself files them, under a data folder of this
+    run's own: the real one is this machine's own reports, and a case must never
+    read or write those.
+    """
+    room = tempfile.mkdtemp(prefix="board-pages-")
+    where = os.path.join(room, project)
+    os.makedirs(where)
+    asks = {"questions": [{"ask": "Which way?", "options": [
+        {"label": "this way", "say": "this way", "pick": True},
+        {"label": "that way", "say": "that way"}]}]}
+    with open(os.path.join(where, slug + ".report.json"), "w") as fh:
+        json.dump({"title": "A Page", "actions": asks if asking else
+                   {"none": True, "fyi": "Nothing is waiting on you."}}, fh)
+    return room, "http://127.0.0.1:3008/api/reports/page?project=%s&slug=%s" % (
+        project, slug)
+
+
 def carrying_on(held, closed=(), goals=(), asked=False, helper=False, pushes=0,
-                again=False, helpers=()):
+                again=False, helpers=(), message=None, pages=None):
     """What the stop gate says to a turn ending with `held` still claimed.
 
     `goals` is what the board answers about the cards closed in the turn: each is
@@ -1411,16 +1431,18 @@ def carrying_on(held, closed=(), goals=(), asked=False, helper=False, pushes=0,
     gate.bc.actor = lambda sid, cwd: "test-session"
     gate.bc.bd = lambda args, root=None: (
         True, json.dumps([rows[a] for a in args if a in rows]))
+    was_pages, gate.bc.specs_dir = gate.bc.specs_dir, lambda: pages or "/nowhere"
     sys.stdin = io.StringIO(json.dumps({
         "session_id": "selftest", "cwd": ROOT, "stop_hook_active": again,
-        "last_assistant_message": "done http://127.0.0.1:3008/api/reports/page?x=1",
+        "last_assistant_message": message if message is not None else
+        "done http://127.0.0.1:3008/api/reports/page?x=1",
     }))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
     try:
         gate.main()
     finally:
-        sys.stdout = keep
+        sys.stdout, gate.bc.specs_dir = keep, was_pages
     printed = out.getvalue().strip()
     # Everything the gate wrote back, for a case that has to read more of it than
     # the push count — what a turn leaves behind is as much the gate's answer as
@@ -2289,6 +2311,29 @@ def main():
         "sent back to work: %s" % carrying_on(["c"], helpers=["second"])[0]
     assert carrying_on(["c"], helpers=[])[0], \
         "the case is proving nothing: this turn ends on its own with no helper out"
+
+    # A question reaches him behind the page carrying it and never in chat
+    # (reporting/README.md), so the reply that hands the page over IS the asking
+    # — and the turn that ends on it was refused all night (bw-a6o.1).
+    room, link = with_a_page("a-choice-to-make", "selftest", asking=True)
+    quiet, no_link = with_a_page("nothing-waiting", "selftest", asking=False)
+    try:
+        assert carrying_on(["c"], message="Two ways to go.\n" + link,
+                           pages=room)[0] == "", \
+            "a turn ending on the link to a page carrying a question was sent " \
+            "back to work: %s" % carrying_on(["c"], message="Two ways to go.\n" + link,
+                                             pages=room)[0]
+        assert carrying_on(["c"], message="Where it stands.\n" + no_link,
+                           pages=quiet)[0], \
+            "a turn ending on a page with nothing waiting on him ended without " \
+            "asking anybody anything"
+        assert carrying_on(["c"], message=link + "\nand then some more words",
+                           pages=room)[0], \
+            "a link with the reply carrying on past it was read as handing the " \
+            "page over"
+    finally:
+        shutil.rmtree(room, ignore_errors=True)
+        shutil.rmtree(quiet, ignore_errors=True)
 
     for order in ("sent first", "home first"):
         assert helping([FIRST, SECOND], [FIRST], order) == [SECOND], \

@@ -18,10 +18,12 @@ that should not have fired must cost one extra reply, never a wedged session. Th
 last one is the point of the gate rather than a guard against a slip, so it keeps
 refusing to `PUSH_LIMIT`.
 """
+import glob
 import json
 import os
 import re
 import sys
+import urllib.parse
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import board_common as bc  # noqa: E402
@@ -65,8 +67,12 @@ CARRY_ON = (
     "him. docs/board.md#4f-when-a-session-may-stop"
 )
 
-# The link a report build prints, however the board screen was reachable.
-LINK = re.compile(r"/api/reports/page|/reporting/pages/\S+\.html")
+# The link a report build prints, however the board screen was reachable
+# (reporting/tools/build.py): the screen's own address while it is up, the file
+# itself when it is not. Both name the project's folder and the page's slug,
+# which is what finds the spec the page was built from.
+LINK = re.compile(r"/api/reports/page(?:\?(?P<query>\S+))?"
+                  r"|/reports/(?P<project>[^/\s]+)/(?P<slug>[^/\s]+)\.html")
 HANDOVER = (
     "You ticked off %s this turn, and this reply does not end on the link to its "
     "page. Finished work reaches the manager as a page: `report list` finds the one "
@@ -112,6 +118,47 @@ def handed_over(message):
     """Whether the reply ends on the link, which is where the manager reads it."""
     lines = [l for l in (message or "").strip().splitlines() if l.strip()]
     return bool(lines) and bool(LINK.search(lines[-1]))
+
+
+def spec_behind(message):
+    """The report spec the reply hands over, or "".
+
+    The last line only: his standing instruction puts the link there with
+    nothing after it (reporting/README.md), so a link quoted mid-message is not
+    a handover. Which project the page belongs to is read off the link when it
+    says, and looked for under every project when it does not — a slug is
+    unique across them in practice, and a page found under the wrong name is
+    still a page the manager was handed.
+    """
+    lines = [l for l in (message or "").strip().splitlines() if l.strip()]
+    hit = LINK.search(lines[-1]) if lines else None
+    if not hit:
+        return ""
+    project, slug = hit.group("project"), hit.group("slug")
+    if hit.group("query"):
+        asked = urllib.parse.parse_qs(hit.group("query").rstrip(">)]\"'"))
+        project = (asked.get("project") or [project])[0]
+        slug = (asked.get("slug") or [slug])[0]
+    if not slug:
+        return ""
+    found = sorted(glob.glob(os.path.join(
+        bc.specs_dir(), project or "*", slug + ".report.json")))
+    return found[0] if found else ""
+
+
+def asked_him(state, since, message):
+    """Whether this turn put a question to the manager.
+
+    Two ways in, and they are one act. The tool that asks him is recorded as it
+    is used; and his own rule sends every question through the page carrying it
+    before it reaches him (reporting/README.md), so a reply ending on the link
+    to a page with a question standing on it has asked him as surely as the tool
+    would. Neither is read off the wording of the reply — one is the tool call,
+    the other is a file the session had to build before the link existed.
+    """
+    if (state.get("asked") or 0) > since:
+        return True
+    return bc.page_asking(spec_behind(message))
 
 
 def rows(ids, root):
@@ -191,7 +238,7 @@ def helper_busy(state, since):
     return (state.get("helper") or 0) > since
 
 
-def carry_on(sid, state, mine, since, root):
+def carry_on(sid, state, mine, since, root, message=""):
     """Send the session back to its own unfinished work, or close the turn.
 
     The last thing the gate does, so a turn is only ever sent back to work once
@@ -199,7 +246,7 @@ def carry_on(sid, state, mine, since, root):
     """
     left = unfinished(state, mine, since, root)
     spent = state.get("pushes") or 0
-    if left and (state.get("asked") or 0) <= since \
+    if left and not asked_him(state, since, message) \
             and not helper_busy(state, since) and spent < PUSH_LIMIT:
         state["pushes"] = spent + 1
         bc.save(sid, state)
@@ -251,7 +298,7 @@ def main():
         )
         return
     if again:
-        carry_on(sid, state, mine, since, root)
+        carry_on(sid, state, mine, since, root, data.get("last_assistant_message"))
         return
 
     # Read off the manager's own message, before this session wrote a word of its
@@ -353,7 +400,7 @@ def main():
             )
             return
 
-    carry_on(sid, state, mine, since, root)
+    carry_on(sid, state, mine, since, root, data.get("last_assistant_message"))
 
 
 if __name__ == "__main__":

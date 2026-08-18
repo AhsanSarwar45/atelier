@@ -838,6 +838,47 @@ def prefixes(root):
     return project.prefixes(project.of(root)) or [prefix(root)]
 
 
+def specs_dir():
+    """Where this machine keeps report specs and the pages built from them.
+
+    A report is one person's own work about their own projects, so it lives
+    where this computer keeps a program's data and never inside a copy of the
+    product — the same three cases the report tool itself follows
+    (reporting/bin/report). Read here rather than asked of it: this runs inside
+    a gate, and a gate that shells out for a path is a gate that hangs while the
+    tool it asks is being edited.
+    """
+    said = os.environ.get("REPORTS_DIR")
+    if said:
+        return os.path.expanduser(said)
+    if sys.platform == "darwin":
+        home = "~/Library/Application Support/com.beads.kanban-ui"
+    elif os.name == "nt":
+        roaming = os.environ.get("APPDATA") or "~/AppData/Roaming"
+        home = os.path.join(roaming, "beads", "kanban-ui", "data")
+    else:
+        home = os.path.join(os.environ.get("XDG_DATA_HOME") or "~/.local/share",
+                            "kanban-ui")
+    return os.path.join(os.path.expanduser(home), "reports")
+
+
+def page_asking(spec):
+    """Whether the page built from this spec is waiting on an answer.
+
+    A spec either carries the manager's own questions or says in so many words
+    that nothing is waiting on him (reporting/README.md, slot 2). A spec that
+    cannot be read is not a question: a gate that cannot see the page must not
+    end a turn on a question that may not be there.
+    """
+    if not spec:
+        return False
+    try:
+        with open(spec) as fh:
+            return bool(((json.load(fh) or {}).get("actions") or {}).get("questions"))
+    except Exception:
+        return False
+
+
 def reports_dir():
     """Where the shared report tools live. `report` on the path is a link into
     them, so the location is read from there rather than written down again; the
