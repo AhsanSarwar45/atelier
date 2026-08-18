@@ -9,15 +9,32 @@
 //! Making a report is part of the product, so the tools travel inside it — see
 //! `crate::report_tools`. Nothing has to be installed alongside.
 
-use axum::{extract::Query, http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+    Json, Router,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use crate::db::{Database, Project};
+use crate::routes::projects::AppState;
 
 const SPEC_SUFFIX: &str = ".report.json";
 
 fn reports_dir() -> Option<PathBuf> {
     crate::identity::reports_dir()
+}
+
+/// `/api/reports` and `/api/reports/page`, carrying the database so a page
+/// can be opened without the caller naming the folder its board lives in.
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/reports", get(list_reports))
+        .route("/reports/page", get(report_page))
 }
 
 /// One report, as the screen lists it.
@@ -48,6 +65,41 @@ fn read_spec(spec: &Path) -> Option<(String, Option<String>)> {
         .and_then(|c| c.as_str())
         .map(str::to_string);
     Some((title, card))
+}
+
+/// The folder that holds `project`'s board — `local_path` when it names
+/// one, `path` otherwise. Mirrors `projectDir()` in `src/lib/utils.ts`: a
+/// project's own `path` can be a `dolt://` address rather than a real
+/// directory, and `local_path` is what the rest of the app then runs
+/// filesystem commands in.
+fn project_dir(project: &Project) -> String {
+    match project.local_path.as_deref() {
+        Some(lp) if !lp.trim().is_empty() => lp.to_string(),
+        _ => project.path.clone(),
+    }
+}
+
+/// Where the project a report is filed under keeps its board, found from
+/// the app's own project list.
+///
+/// The match is exact, never fuzzy, and never against a project's display
+/// `name`: `reporting/tools/project.py` files a report under the last path
+/// segment of the project's main checkout, which is `basename` of the
+/// folder `project_dir` resolves to.
+fn resolve_project_path(db: &Database, project: &str) -> Option<String> {
+    let projects = db.get_projects_filtered(true).ok()?;
+    projects.into_iter().find_map(|p| {
+        let dir = project_dir(&p);
+        let matches = Path::new(&dir).file_name().is_some_and(|n| n.to_string_lossy() == project);
+        matches.then_some(dir)
+    })
+}
+
+/// The folder the build runs in. An explicit `path` always wins — the
+/// screen may pass one — otherwise it is looked up from the project name
+/// the report is filed under.
+fn resolve_cwd(explicit: Option<&str>, db: &Database, project: &str) -> Option<String> {
+    explicit.map(str::to_string).or_else(|| resolve_project_path(db, project))
 }
 
 /// Every report on this machine, newest first.
@@ -83,7 +135,7 @@ pub async fn list_reports() -> impl IntoResponse {
 }
 
 /// One report, rebuilt from its spec so the board it shows is current.
-pub async fn report_page(Query(p): Query<PageParams>) -> impl IntoResponse {
+pub async fn report_page(State(db): State<AppState>, Query(p): Query<PageParams>) -> impl IntoResponse {
     if p.project.contains(['/', '\\', '.']) || p.slug.contains(['/', '\\']) {
         return (StatusCode::BAD_REQUEST, "bad name".to_string()).into_response();
     }
@@ -109,8 +161,22 @@ pub async fn report_page(Query(p): Query<PageParams>) -> impl IntoResponse {
             .into_response();
     };
 
-    // The build reads the board and the pictures from the project it is about.
-    let cwd = p.path.clone().unwrap_or_else(|| root.to_string_lossy().to_string());
+    // The build reads the board and the pictures from the project it is
+    // about. An explicit `path` wins; otherwise it is looked up from the
+    // app's own project list by the name the report is filed under — not
+    // every report names a project the app knows (the data folder also
+    // holds `keystone`, which is filed by hand), so that can come up empty.
+    let Some(cwd) = resolve_cwd(p.path.as_deref(), &db, &p.project) else {
+        return (
+            StatusCode::NOT_FOUND,
+            format!(
+                "this computer's project list names no folder for {}, so this report cannot be \
+                 built without &path=<the folder that holds its board>",
+                p.project
+            ),
+        )
+            .into_response();
+    };
     let built = spec.with_file_name(format!("{}.html", p.slug));
     let out = Command::new("python3")
         .arg(tools.join("build.py"))
@@ -141,5 +207,63 @@ pub async fn report_page(Query(p): Query<PageParams>) -> impl IntoResponse {
         )
             .into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("built page unreadable: {e}")).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::CreateProjectInput;
+
+    fn db_with_projects(rows: &[(&str, &str, Option<&str>)]) -> Database {
+        let db = Database::new_in_memory().expect("an in-memory database");
+        for (name, path, local_path) in rows {
+            db.create_project(CreateProjectInput {
+                name: name.to_string(),
+                path: path.to_string(),
+                local_path: local_path.map(str::to_string),
+            })
+            .expect("create project");
+        }
+        db
+    }
+
+    #[test]
+    fn the_project_whose_path_ends_in_the_name_is_picked_out_of_several() {
+        let db = db_with_projects(&[
+            ("Widgets", "/home/dev/widgets", None),
+            ("Beads Web", "/home/ahsan/code/beads-web", None),
+            ("Gadgets", "/home/dev/gadgets", None),
+        ]);
+        assert_eq!(resolve_project_path(&db, "beads-web"), Some("/home/ahsan/code/beads-web".to_string()));
+    }
+
+    #[test]
+    fn local_path_is_preferred_over_path_when_it_names_a_folder() {
+        // Mirrors `projectDir()` in src/lib/utils.ts: a Dolt project's own
+        // `path` is a database address, not a directory, so `local_path` is
+        // what the rest of the app runs filesystem commands in — and what
+        // `reporting/tools/project.py` would have run in, to file the
+        // report under this name in the first place.
+        let db = db_with_projects(&[("Corsetta", "dolt://corsetta", Some("/home/dev/corsetta-checkout"))]);
+        assert_eq!(
+            resolve_project_path(&db, "corsetta-checkout"),
+            Some("/home/dev/corsetta-checkout".to_string())
+        );
+    }
+
+    #[test]
+    fn nothing_resolves_a_project_name_no_row_matches() {
+        let db = db_with_projects(&[("Widgets", "/home/dev/widgets", None)]);
+        assert_eq!(resolve_project_path(&db, "keystone"), None);
+    }
+
+    #[test]
+    fn an_explicit_path_wins_over_the_lookup() {
+        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        assert_eq!(
+            resolve_cwd(Some("/some/other/folder"), &db, "beads-web"),
+            Some("/some/other/folder".to_string())
+        );
     }
 }

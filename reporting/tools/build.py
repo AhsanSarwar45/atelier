@@ -51,7 +51,7 @@ STEP_LIST = re.compile(r"^(the )?(work|plan|steps|roadmap)\b[\s,]*(in order|so f
 BOARD_URL = os.environ.get("BOARD_URL", "http://127.0.0.1:3008").rstrip("/")
 
 
-def handover(spec: Path, project: Path, out: Path) -> tuple[str, str]:
+def handover(spec: Path, out: Path) -> tuple[str, str]:
     """The link to hand the manager, and a word about it when it is second best.
 
     A path on disk is a path on disk: an editor claims it before any browser
@@ -59,9 +59,10 @@ def handover(spec: Path, project: Path, out: Path) -> tuple[str, str]:
     spec as it opens, so that link is the one worth handing over.
     """
     slug = spec.name.replace(".report.json", "")
-    query = urllib.parse.urlencode(
-        {"project": spec.resolve().parent.name, "slug": slug, "path": str(project.resolve())}
-    )
+    # No `path` here: the server looks the project's folder up from its own
+    # project list by this name, so the link keeps working after the folder
+    # it was built in — often a worktree — is gone.
+    query = urllib.parse.urlencode({"project": spec.resolve().parent.name, "slug": slug})
     try:
         urllib.request.urlopen(f"{BOARD_URL}/api/reports", timeout=1.0).read(1)
     except Exception:
@@ -508,7 +509,7 @@ def main() -> int:
     parts = [f"{len(page) / 1024:.0f} KB", f"{len(spec['content'])} content sections"]
     if warnings:
         parts.append(f"{len(warnings)} words to plain up")
-    link, why = handover(args.spec, args.project, args.out)
+    link, why = handover(args.spec, args.out)
     if why:
         parts.append(why)
     # The link IS the deliverable: it is what the manager is handed in chat.
