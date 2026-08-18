@@ -101,6 +101,30 @@ describe('what a job counts', () => {
     expect(percentOf(p)).toBe(100);
   });
 
+  it('never reads nothing done once a piece is finished', () => {
+    // The mirror of the case above: 1 of 250 rounds down to zero, which draws
+    // the empty bar of a job nobody has started over work that was finished.
+    const p = progressOf(['closed', ...many(249, 'open')]);
+    expect(p.completed).toBe(1);
+    expect(percentOf(p)).toBe(1);
+  });
+
+  it('reads nothing done only when nothing is done', () => {
+    expect(percentOf(progressOf(many(250, 'open')))).toBe(0);
+  });
+
+  it('does not fall back to counting the dropped pieces when the board is empty', () => {
+    // Nothing can be read about the pieces here, least of all which were
+    // dropped, so the size is not known — and reporting the raw count of
+    // references is exactly the rule this counter exists to remove.
+    const { epic } = job(...[...many(10, 'closed'), ...many(4, 'cancelled')]);
+    const p = computeEpicProgress(epic, []);
+    expect(p.total).toBe(0);
+    expect(p.completed).toBe(0);
+    expect(p.dropped).toBe(0);
+    expect(percentOf(p)).toBe(0);
+  });
+
   it('counts a job waiting to be read and a job waiting on the manager as unfinished', () => {
     // Neither is done: the work is standing until the board says otherwise.
     const p = progressOf(['closed', 'inreview', 'manager_review']);

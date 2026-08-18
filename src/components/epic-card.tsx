@@ -242,29 +242,37 @@ export function EpicCard({
           getProgressIndicatorClass(progressPercentage)
         )}
       />
-      <div className="flex items-center gap-3 text-[10px] text-t-muted">
-        <span className="flex items-center gap-1">
-          {/* The In Progress colour, taken off the one list of states — it wore
-              the Todo colour, so the dot beside "in progress" named another. */}
-          <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor(WORKING))} aria-hidden="true" />
-          {progress.inProgress} in progress
-        </span>
-        {/* Dropped pieces are outside every number beside them, and the list
-            below holds them, so the card says how many rather than leaving a
-            full bar over a longer list unexplained. */}
-        {progress.dropped > 0 && (
-          <span className="flex items-center gap-1">
-            <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor('cancelled'))} aria-hidden="true" />
-            {progress.dropped} dropped
-          </span>
-        )}
-        {progress.blocked > 0 && (
-          <span className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />
-            {progress.blocked} blocked
-          </span>
-        )}
-      </div>
+      {/* Each of these says something that is happening to the job, so a zero
+          is not news — a card with nothing in flight, nothing dropped and
+          nothing blocked says none of it rather than three denials. The whole
+          row goes with them: an empty row is a gap under the bar. */}
+      {(progress.inProgress > 0 || progress.dropped > 0 || progress.blocked > 0) && (
+        <div className="flex items-center gap-3 text-[10px] text-t-muted">
+          {progress.inProgress > 0 && (
+            <span className="flex items-center gap-1">
+              {/* The In Progress colour, taken off the one list of states — it
+                  wore the Todo colour, so the dot named another state. */}
+              <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor(WORKING))} aria-hidden="true" />
+              {progress.inProgress} in progress
+            </span>
+          )}
+          {/* Dropped pieces are outside every number beside them, and the list
+              below holds them, so the card says how many rather than leaving a
+              full bar over a longer list unexplained. */}
+          {progress.dropped > 0 && (
+            <span className="flex items-center gap-1">
+              <div className={cn("w-2 h-2 rounded-full bg-current", getStatusDotColor('cancelled'))} aria-hidden="true" />
+              {progress.dropped} dropped
+            </span>
+          )}
+          {progress.blocked > 0 && (
+            <span className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-full bg-danger" aria-hidden="true" />
+              {progress.blocked} blocked
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 

@@ -123,8 +123,12 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
     return NOTHING;
   }
 
+  // Nothing to read the pieces off, so nothing is known about them — least of
+  // all which were dropped. Reporting the raw count of references here is the
+  // old rule this whole counter exists to remove, and it disagreed with the
+  // answer given below once the same empty board is walked properly.
   if (!allBeads || allBeads.length === 0) {
-    return { ...NOTHING, total: epic.children.length };
+    return NOTHING;
   }
 
   // Create lookup map for children
@@ -173,6 +177,9 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
  * screen offers the manager the finish only at a hundred, so this is what keeps
  * it from offering him a job where no work happened.
  *
+ * Both ends of the bar are held to that: a hundred means every piece is in,
+ * and a zero means not one of them is.
+ *
  * @param progress - What {@link computeEpicProgress} returned for the job.
  */
 export function progressPercent(progress: EpicProgress): number {
@@ -181,7 +188,11 @@ export function progressPercent(progress: EpicProgress): number {
   // of two hundred pieces with one still open, which then draws a full green
   // bar over work nobody has done — the same lie in a different place.
   if (progress.completed === progress.total) return 100;
-  return Math.min(99, Math.round((progress.completed / progress.total) * 100));
+  // And a zero means nothing has happened. A job of 250 pieces with one done
+  // rounds to zero, which draws the empty bar of a job nobody has started over
+  // work that was finished — the same lie at the other end.
+  if (progress.completed === 0) return 0;
+  return Math.min(99, Math.max(1, Math.round((progress.completed / progress.total) * 100)));
 }
 
 /*

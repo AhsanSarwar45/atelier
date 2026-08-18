@@ -185,6 +185,16 @@ describe('what a card says it is made of', () => {
     expect(said.length, aboveTheList).toBe(1);
   });
 
+  it.each(LAYOUTS)('says nothing about work in flight when there is none, in the %s shape', (shape) => {
+    // Denials are not news. 26 of the 29 jobs on the manager's board have
+    // nothing in flight, and every one of their cards carried a line saying so
+    // — a line two of the three shapes had never drawn before.
+    layout = shape;
+    render(<EpicCard {...withPieces('open', 2, 0)} />);
+    expect(screen.queryByText(/in progress/)).toBeNull();
+    expect(screen.queryByText(/blocked/)).toBeNull();
+  });
+
   it('paints the in-progress dot the In Progress colour, not Todo', () => {
     const props = withPieces('open', 1, 0);
     const live: Bead = { ...child, id: 'test-1.live', status: 'in_progress' };
