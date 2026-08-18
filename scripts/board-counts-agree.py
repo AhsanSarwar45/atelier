@@ -54,14 +54,17 @@ def screen_percent(done, total):
 
     Python rounds a half to the even number and the browser rounds it up, so one
     piece of eight is 12 here and 13 there — the check would then call a board
-    that is right wrong. And a hundred means finished: the screen refuses to
-    round up to it while a piece is still standing.
+    that is right wrong. And the two ends of the bar are held: a hundred means
+    every piece is in, a zero means not one of them is, and the screen refuses
+    to round its way to either.
     """
     if not total:
         return 0
     if done == total:
         return 100
-    return min(99, int(done / total * 100 + 0.5))
+    if done == 0:
+        return 0
+    return min(99, max(1, int(done / total * 100 + 0.5)))
 
 
 def dropped(card):

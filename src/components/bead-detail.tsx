@@ -33,7 +33,7 @@ import { updateTitle, updateDescription, updateStatus as cliUpdateStatus } from 
 import { ISSUE_TYPES, getIssueTypeMeta } from "@/lib/issue-types";
 import { cn, isDoltProject } from "@/lib/utils";
 import { computeEpicProgress } from "@/lib/epic-parser";
-import { SET_BY, STATES, standing, type Bead, type BeadStatus, type Epic, type WorktreeStatus } from "@/types";
+import { SET_BY, STATES, STATE_BY_ID, standing, type Bead, type BeadStatus, type Epic, type WorktreeStatus } from "@/types";
 
 
 /** Priority levels 0–4, displayed P0 (critical) … P4 (backlog). Single source for the editor options. */
@@ -316,7 +316,7 @@ export function BeadDetail({
             {bead.issue_type !== "epic" && hasWorktree && worktreeStatus?.worktree_path && (
               <div className={cn(
                 "font-mono text-xs text-t-muted",
-                bead.status === "closed" && "opacity-40"
+                !standing(bead.status) && "opacity-40"
               )}>
                 {formatWorktreePath(worktreeStatus.worktree_path)}
               </div>
@@ -384,10 +384,13 @@ export function BeadDetail({
             </span>
           </div>
 
-          {/* Close reason — shown only for closed beads */}
-          {bead.status === "closed" && bead.close_reason && (
+          {/* Why the work stopped. Dropped work is settled the same as finished
+              work and an agent writes down why it dropped it, so asking for the
+              finished state by name is what threw that reason away unread. */}
+          {!standing(bead.status) && bead.close_reason && (
             <div className="mt-2 text-center text-xs text-t-muted">
-              Closed: <span className="text-t-tertiary">{bead.close_reason}</span>
+              {STATE_BY_ID[bead.status as BeadStatus]?.label ?? "Closed"}:{" "}
+              <span className="text-t-tertiary">{bead.close_reason}</span>
             </div>
           )}
 

@@ -40,11 +40,14 @@ export interface BeadCardProps {
  * Green: PR merged or checks passed
  * Yellow/amber: checks pending
  * Red: checks failed or needs rebase
- * Gray: no PR or default state, or bead is closed
+ * Gray: no PR or default state, or nobody is waiting on the bead any more
  */
 function getWorktreeStatusColor(worktreeStatus?: WorktreeStatus, prStatus?: PRStatus, beadStatus?: string): string {
-  // Closed beads should not show colored status badges
-  if (beadStatus === 'closed') {
+  // Work nobody is waiting on gets no colour: the greens and ambers here say
+  // "this is in flight", and dropped work is as settled as finished work. This
+  // used to ask only whether the bead was closed, so a dropped one kept the
+  // colours of live work.
+  if (beadStatus !== undefined && !standing(beadStatus)) {
     return "bg-surface-overlay/50 border-b-default/50";
   }
 

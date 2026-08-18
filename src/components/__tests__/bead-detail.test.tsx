@@ -65,6 +65,28 @@ describe('the size the panel states', () => {
   });
 });
 
+describe('why the work stopped', () => {
+  it('says why work that was dropped was dropped', () => {
+    // An agent writes the reason down when it drops a piece. The panel used to
+    // ask for the finished state by name, so that reason was never read.
+    const bead = piece('job-4', 'cancelled', { close_reason: 'the manager changed his mind' });
+    draw(bead, [bead]);
+    expect(screen.getByText(/the manager changed his mind/)).toBeInTheDocument();
+  });
+
+  it('still says why finished work was closed', () => {
+    const bead = piece('job-5', 'closed', { close_reason: 'landed on main' });
+    draw(bead, [bead]);
+    expect(screen.getByText(/landed on main/)).toBeInTheDocument();
+  });
+
+  it('says nothing of the sort while the work is still standing', () => {
+    const bead = piece('job-6', 'in_progress', { close_reason: 'never happened' });
+    draw(bead, [bead]);
+    expect(screen.queryByText(/never happened/)).toBeNull();
+  });
+});
+
 describe('the related list', () => {
   it('strikes dropped work through, the same as finished work', () => {
     const finished = piece('other-1', 'closed');
