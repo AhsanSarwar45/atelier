@@ -151,7 +151,8 @@ def fire(goal_id, root):
         # A reader sent from inside another reader would otherwise inherit that
         # one's run directory and write its attempts on top of them, which is
         # cor-987e again by another route. This one allocates its own.
-        env = dict(os.environ, **{inflight.DETACHED: "1"})
+        env = dict(os.environ, **{inflight.DETACHED: "1",
+                                  inflight.CONSOLE: log})
         env.pop(inflight.RUN_DIR, None)
         reader = subprocess.Popen([os.path.join(HERE, "review"), goal_id],
                                   cwd=root, stdout=fd, stderr=fd,

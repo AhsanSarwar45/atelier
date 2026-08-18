@@ -250,6 +250,9 @@ class Reached(Exception):
 # Where a reader that is already out says it is writing, for the case that finds
 # one and has to point at it.
 BUSY_LOG = "/nowhere/g.already.run/run.log"
+# Where the run that spawned a detached copy redirected that copy's console. It is
+# told to the copy, because the copy cannot see its own redirection.
+COPY_LOG = "/nowhere/g.copy.run/run.log"
 
 
 def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
@@ -266,7 +269,9 @@ def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
     is a reading nobody ever does. `busy` is the pid of a reader already out on
     the job, which this run must find and stand down from. `notes` and `shas` are
     the two halves of whether a reading is owed at all: what the goal carries a
-    signature for, and what it has landed since.
+    signature for, and what it has landed since. The console the claim carries
+    when the run stops comes back too: a claim named with none leaves the next
+    firing pointing whoever asked at nowhere (bw-5e8.10).
     """
     rv = script("review")
     goal = dict(GOAL, status="in_progress", notes=notes)
@@ -295,6 +300,7 @@ def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
     keep_out, sys.stdout = sys.stdout, said
     if detached:
         os.environ[inflight.DETACHED] = "1"
+        os.environ[inflight.CONSOLE] = COPY_LOG
     inflight.clear("g")
     if busy:
         inflight.take("g")
@@ -307,9 +313,11 @@ def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
         subprocess.Popen = keep_popen
         sys.argv, sys.stdout = keep_argv, keep_out
         os.environ.pop(inflight.DETACHED, None)
+        os.environ.pop(inflight.CONSOLE, None)
+        console = inflight.console("g")
         inflight.clear("g")
         shutil.rmtree(where, ignore_errors=True)
-    return spawned, read, said.getvalue()
+    return spawned, read, said.getvalue(), console
 
 
 def fires_marked():
@@ -3398,7 +3406,7 @@ def main():
           "reader that answered nothing, a job that counts its own reader as a "
           "writer, or a job with work open again")
 
-    spawned, read, said = hands_off(detached=False)
+    spawned, read, said, named = hands_off(detached=False)
     assert len(spawned) == 1 and not read, \
         "a reading fired by hand did the reading in the caller's own shell, which " \
         "is the wait this job exists to end"
@@ -3411,26 +3419,32 @@ def main():
         "and the reading is never done by anyone"
     assert "run.log" in said, \
         "a hand-fired reading gave the shell back without saying where its run went"
-    spawned, read, said = hands_off(detached=True)
+    spawned, read, said, named = hands_off(detached=True)
     assert not spawned and read == ["g"], \
         "the copy handed the reading on instead of doing it, which is a reader that " \
         "never arrives"
+    # The copy names the claim itself wherever it finds no claim to inherit, and a
+    # name is only half of what a later firing needs: without the console beside
+    # it, whoever fires next is told the job is being read and nothing more.
+    assert named == COPY_LOG, \
+        "the copy named the claim after itself and said nothing about where it " \
+        "writes, so a firing that finds the job held has nowhere to point"
     # A goal read clean is not read again, however it is fired at: the reading
     # covers the job's commits and says so on the goal, so what decides is the
     # work and not the switch (bw-5e8.5).
-    spawned, read, said = hands_off(detached=False, notes=SIGNED % "a1c0ffee")
+    spawned, read, said, named = hands_off(detached=False, notes=SIGNED % "a1c0ffee")
     assert not spawned and not read, \
         "a goal already read, with nothing written under it since, was read again " \
         "from the top — the same commits at a fresh session's price"
     assert "current" in said, \
         "a firing that read nothing did not say the reading on the goal is current"
-    spawned, read, said = hands_off(detached=False, notes=SIGNED % "a1c0ffee",
+    spawned, read, said, named = hands_off(detached=False, notes=SIGNED % "a1c0ffee",
                                     shas=("a1c0ffee", "b2deadbe"))
     assert len(spawned) == 1, \
         "a commit written under a goal since it was read was left unread"
     # A reader that died signed nothing, so what stands on the job has been read
     # by nobody and is read again without any forcing at all.
-    spawned, read, said = hands_off(detached=False, rerun=False)
+    spawned, read, said, named = hands_off(detached=False, rerun=False)
     assert len(spawned) == 1, \
         "a job a dead reader left shut was never read again, because nothing but " \
         "the switch could ask for it"
@@ -3438,7 +3452,7 @@ def main():
     already = tempfile.mkdtemp()
     stood = pretend_reader(already, "g")
     try:
-        spawned, read, said = hands_off(detached=False, busy=stood.pid)
+        spawned, read, said, named = hands_off(detached=False, busy=stood.pid)
     finally:
         stood.kill()
         stood.wait()
@@ -3454,6 +3468,9 @@ def main():
     assert told["env"].get(inflight.DETACHED) and inflight.RUN_DIR not in told["env"], \
         "the board's own firing sent a reader it had not marked, so that reader " \
         "hands off to another and writes its attempts into its sender's directory"
+    assert told["env"].get(inflight.CONSOLE), \
+        "the board's own firing did not tell the reader where its console goes, so " \
+        "a reader that has to name its own claim can say nothing about where it writes"
 
     print("ok: a reading fired by hand hands itself to a marked copy and says where "
           "the run went, the marked copy reads rather than handing off again, a "

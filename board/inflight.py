@@ -45,6 +45,13 @@ DETACHED = "MACHINERY_REVIEW_DETACHED"
 # that spawned it had already allocated one. Unset when nobody has: the reader
 # allocates its own.
 RUN_DIR = "MACHINERY_REVIEW_RUN_DIR"
+# The file that copy's own console goes to, told to it by whoever redirected it
+# there. A reader cannot work this out for itself — the redirection happens in
+# the process that spawned it — and it needs it for the one case where it ends up
+# naming its own claim: a firing that finds the job held points whoever asked at
+# the console of the reader that holds it, and a claim named with no console
+# leaves them with nowhere to look (bw-5e8.10).
+CONSOLE = "MACHINERY_REVIEW_CONSOLE"
 
 
 def home():

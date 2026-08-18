@@ -239,7 +239,8 @@ def hand_off(goal_id, rerun):
     """
     here = run_log(goal_id)
     log = os.path.join(here, "run.log")
-    env = dict(os.environ, **{inflight.DETACHED: "1", inflight.RUN_DIR: here})
+    env = dict(os.environ, **{inflight.DETACHED: "1", inflight.RUN_DIR: here,
+                              inflight.CONSOLE: log})
     args = [os.path.realpath(__file__), goal_id] + (["--rerun"] if rerun else [])
     with open(log, "w") as fh:
         reader = subprocess.Popen(args, cwd=ROOT, stdout=fh, stderr=fh,
@@ -459,7 +460,14 @@ def main():
         HANDED = True
         return
     if mine:
-        inflight.name(goal_id, os.getpid())
+        # Reached only where the claim taken for this copy has gone — the whole
+        # point of claiming before spawning is that the copy finds it already
+        # there — but it names the claim, and every other place that names one
+        # says where the reader writes. Left saying nothing, this one would put
+        # the job back to answering a later firing with "already has a reader
+        # out" and nowhere to point (bw-5e8.10). The console is whatever the run
+        # that spawned this copy redirected it to; it is the only one that knows.
+        inflight.name(goal_id, os.getpid(), os.environ.get(inflight.CONSOLE))
     named, diff = changes(shas, goal_id)
     prompt = ask(goal, named, diff)
     here = run_log(goal_id)
