@@ -19,9 +19,10 @@ areas = ["board", "screen", "server", "storage", "reports", "packaging",
 
 # A job poured here may say its change lands in the shared machinery: the board
 # tools every session here runs live there, and a fault this board's own sessions
-# hit is found here and fixed there (bw-30g was the first). The reporting tools
+# hit is found here and fixed there (bw-30g was the first). The board's own
+# document lives in corsetta, so a job's record lands there. The reporting tools
 # under reporting/ are this project's own.
-lands_elsewhere = ["machinery"]
+lands_elsewhere = ["machinery", "corsetta"]
 
 # A column and a card are places anyone can go and look at as much as a file is:
 # the screen is what this project is.
