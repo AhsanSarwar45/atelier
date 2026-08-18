@@ -71,6 +71,11 @@ BRANCH_WRITES = BRANCH_DELETES + BRANCH_RENAMES + BRANCH_COPIES + BRANCH_FORCES
 # takes them out of what is staged and moves nothing.
 RESET_MODES = ("--hard", "--soft", "--mixed", "--merge", "--keep")
 
+# The one `symbolic-ref` form that writes while naming a single ref. Every other
+# one-name spelling asks what that name points at and prints it, writing nowhere,
+# and that is how a session finds out where it is standing (bw-7e8.9).
+SYMREF_DELETES = ("-d", "--delete")
+
 # What a command means by the position it is standing at, rather than by a name.
 HERE_NAMES = ("HEAD", "@")
 
@@ -381,6 +386,7 @@ TAKES_ARG = {
     "am": ("--patch-format", "--exclude", "--include", "--directory",
            "-p", "--whitespace"),
     "update-ref": ("-m",),
+    "symbolic-ref": ("-m",),
     "worktree": ("--reason", "-b", "-B"),
 }
 
@@ -945,10 +951,16 @@ def routes(cmd, home):
             # without either of the words that usually say so. Repointing a LINE
             # by hand is writing to that line, and is the one spelling that used
             # to reach a shipping line without this reading it at all (bw-7e8.4).
+            # With one name and nothing to point it at, the command ASKS where
+            # that name points and prints the answer. Reading the question as the
+            # write refused the one command a session runs to find out which line
+            # it stands on, and a delete is the only write spelled with a single
+            # name on it (bw-7e8.9).
             args = positionals(rest, verb)
             if len(args) > 1 and args[0] in HERE_NAMES:
                 stand(where, line_named(args[1], line_of(where)))
-            elif args:
+            elif len(args) > 1 or (args and any(a in SYMREF_DELETES
+                                               for a in rest)):
                 made.append((verb, where, UNREADABLE if unknowable(seg)
                              else line_named(args[0], line_of(where)), rest))
             continue

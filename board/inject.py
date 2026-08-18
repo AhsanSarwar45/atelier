@@ -238,6 +238,18 @@ FAULTS = [
                          "                stand(made_tree[0], made_tree[1])\n", "")),
     ("repointing the position by hand is not stepping onto a line", GATE,
      lambda s: s.replace('        if verb == "symbolic-ref":', "        if False:")),
+    # And the two sides of the one-name spelling of that word (bw-7e8.9): the
+    # question read as the write, and the write read as the question.
+    ("asking a name what it points at is writing to it", GATE,
+     lambda s: s.replace("            elif len(args) > 1 or (args and any(a in SYMREF_DELETES\n"
+                         "                                               for a in rest)):",
+                         "            elif args:")),
+    ("taking a pointer away is not a write", GATE,
+     lambda s: s.replace("            elif len(args) > 1 or (args and any(a in SYMREF_DELETES\n"
+                         "                                               for a in rest)):",
+                         "            elif len(args) > 1:")),
+    ("the reason a repointing carries is one of its names", GATE,
+     lambda s: s.replace('    "symbolic-ref": ("-m",),\n', "")),
     ("a forge command is judged where the shell stands", GATE,
      lambda s: s.replace("            named = repo_named(line)\n"
                          "            if named and named.lower() != repo_here(where).lower():\n",

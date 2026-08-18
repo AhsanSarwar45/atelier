@@ -720,6 +720,16 @@ ROUTES = (
     # Repointing the position by hand is stepping onto a line.
     ("REFUSED", "git symbolic-ref HEAD refs/heads/main && git commit -m x"),
     ("ALLOWED", "git symbolic-ref HEAD refs/heads/feature/other && git commit -m x"),
+    # The reason a repointing carries is the value of its switch and not a name
+    # of its own. Counted as a name, every name after it moves along one place:
+    # the line written to is read as the reason, and the shipping line goes
+    # unread (bw-7e8.9).
+    ("REFUSED", "git symbolic-ref -m why refs/heads/main refs/heads/x"),
+    ("REFUSED", "git symbolic-ref -m why HEAD refs/heads/main && git commit -m x"),
+    # Taking the pointer away is a write, and the only one spelled with a single
+    # name on it.
+    ("REFUSED", "git symbolic-ref --delete refs/heads/main"),
+    ("REFUSED", "git symbolic-ref -d refs/heads/main"),
     # A here-document body is what a command is HANDED, not what the shell runs.
     # Writing a script that merely mentions a fold is not folding, and reading it
     # as one refuses the writing of any script that names a git command at all.
@@ -2898,6 +2908,27 @@ def main():
         "pointing a line of the agent's own at a commit was refused, and every " \
         "line but the one this project ships from is the agent's own business"
 
+    # And the other side of the same word (bw-7e8.9). With one name on it and
+    # nothing to point that name at, `symbolic-ref` ASKS where the name points
+    # and prints the answer — which is what a session runs to find out which line
+    # its shell is standing on, and these cases stand on the landing line, so
+    # reading the question as the write refuses the truthful answer.
+    for asked in ("git symbolic-ref HEAD",
+                  "git symbolic-ref --short HEAD",
+                  "git symbolic-ref -q --short HEAD"):
+        said = merging(MINE, MINE, cmd=asked)
+        assert said == "", \
+            "%r asked where the shell stands, wrote nowhere, and was answered " \
+            "with %r" % (asked, said)
+    # The write that carries one name and no target is the delete, and it takes
+    # the line away rather than moving it.
+    for took in ("git symbolic-ref --delete refs/heads/%s" % LANDS,
+                 "git symbolic-ref -d refs/heads/%s" % LANDS):
+        said = merging(MINE, MINE, cmd=took)
+        assert "by hand" in said, \
+            "%r took the line every close is measured against away by hand, " \
+            "holding the slot, and was answered with %r" % (took, said)
+
     # And the incident as it was actually typed, against a project shaped like the
     # one it happened in: landing on `ours`, with agents landing their own work so
     # nothing at all is protected. Gate A has nothing to say there, which is why
@@ -2926,8 +2957,9 @@ def main():
         "line of your own takes nothing away from anybody"
 
     print("ok: the line a project lands on cannot be pointed at a commit by hand, "
-          "by any of the six spellings, and a push or a fetch onto it queues for "
-          "the slot like a merge")
+          "by any of the six spellings, nor taken away, and a push or a fetch "
+          "onto it queues for the slot like a merge — while asking where the "
+          "shell stands writes nowhere and is answered")
 
     # The second layer, and the one that answers for whatever the first never saw:
     # a hook inside the checkout itself, reading the ref write instead of the
