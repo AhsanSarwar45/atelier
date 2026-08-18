@@ -170,11 +170,17 @@ Answer with one fenced json block and nothing after it:
 def run_reviewer(prompt, actor, goal_id):
     """A separate claude, with the edit tools withheld and this project's hooks
     told to stand aside for it (hooks/board_common.py reads the same
-    variable, under every name it answers to)."""
+    variable, under every name it answers to).
+
+    The model is named here rather than inherited. A reader that names none takes
+    whatever the person running the board happens to have saved as their default,
+    so the same reading costs the top model's price on one machine and a fraction
+    of it on the next; naming it makes the reading cost the same wherever it runs.
+    """
     env = dict(os.environ, BEADS_ACTOR=actor)
     for name in project.env(DECL, "REVIEWER"):
         env[name] = goal_id
-    cmd = ["claude", "-p",
+    cmd = ["claude", "-p", "--model", "claude-sonnet-5",
            "--allowedTools", "Read", "Grep", "Glob", "Bash(git:*)", "Bash(rg:*)",
            "--disallowedTools", "Edit", "Write", "MultiEdit", "NotebookEdit",
            "Bash(cargo:*)", "Bash(bd:*)"]
