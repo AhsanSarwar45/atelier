@@ -28,6 +28,7 @@ sessions are not disturbed. They are one line of pointing and no logic.
 """
 import argparse
 import filecmp
+import json
 import os
 import re
 import shutil
@@ -221,12 +222,19 @@ WIRING = {
 # without this it carries every turn of the day into every request — so the
 # setting is read here too, and a project that has not set one is told.
 CEILING = "autoCompactWindow"
+# The highest number that is still a ceiling. The 2026-08-18 audit found worker
+# sessions at 599k tokens a request on a million-token window, and the card's bar
+# is per-request load under this — so a ceiling set above it never fires first.
+CEILING_MAX = 200000
 
 
 def unwired(root):
     """Hooks this project's settings do not run, and the ceiling they do not set.
     A gate nobody wired is a gate that is not there, and it fails silently —
-    which is the whole reason to say it out loud rather than to trust the file."""
+    which is the whole reason to say it out loud rather than to trust the file.
+
+    The ceiling is read for its number and not for its name, because a number
+    high enough is the same as no ceiling at all and would otherwise pass."""
     where = os.path.join(root, ".claude", "settings.json")
     try:
         text = open(where).read()
@@ -235,10 +243,21 @@ def unwired(root):
     missing = [name for names in WIRING.values() for name in names if name not in text]
     said = ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
         if missing else []
-    if CEILING not in text:
+    try:
+        found = json.loads(text).get(CEILING)
+    except (ValueError, AttributeError):
+        # Not readable as an object: the hooks above are still worth saying, and
+        # a ceiling nobody can read is one nobody is running under.
+        found = None
+    if isinstance(found, bool) or not isinstance(found, (int, float)):
         said.append("no %s in .claude/settings.json — a session here runs unbounded, "
                     "carrying every turn of the day into every request instead of "
                     "shedding the history it no longer needs" % CEILING)
+    elif found > CEILING_MAX:
+        said.append("%s is %s in .claude/settings.json, above the %s a session here "
+                    "was measured surviving on — a ceiling that high is never reached "
+                    "before the day is read back into the next request, so it bounds "
+                    "nothing" % (CEILING, found, CEILING_MAX))
     return said
 
 
