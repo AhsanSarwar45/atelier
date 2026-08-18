@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 # A git hook exports these as absolute paths to the repository being committed
 # to, and every git command run below inherits them — so the throwaway checkouts
@@ -953,6 +954,24 @@ if "--door" in sys.argv:
     finally:
         shutil.rmtree(_door, ignore_errors=True)
     sys.exit(0)
+
+
+# A session record older than the board's five-minute claim lease, by enough that
+# no clock skew reads it as still at work.
+LONG_GONE = 3600
+LANDER = "aaaabbbb-cccc-dddd-eeee-ffff00001111"
+LIVE_SID = "11112222-3333-4444-5555-666677778888"
+DEAD_SID = "deadbeef-0000-1111-2222-333344445555"
+# A board that answers the two questions the landing gate asks it: who holds the
+# merge slot, and what every card held right now is held by. The slot is always
+# the session doing the landing, because these cases are about what is in the
+# checkout rather than about the queue.
+BOARD = '''#!/usr/bin/env sh
+case "$*" in
+  *"merge-slot"*) echo '{"holder": "main-%s"}' ;;
+  *) echo '%%s' ;;
+esac
+''' % LANDER[:8]
 
 
 def merge_says(cmd, says=None, on="feature/mine", board=False):
@@ -3107,6 +3126,208 @@ def main():
           "looks for a hook, a joined checkout turns away a hand-moved pointer "
           "without anything wiring it by hand, and a checkout that lost the "
           "guard to its own board tooling is told so")
+
+    # Litter in the checkout a landing lands in. Left to git, any tracked change
+    # there refuses the landing with "Working directory has staged changes" and
+    # names nobody (bw-vb2.3), so the gate looks first: leftovers nobody live is
+    # holding go into a labelled stash and the landing carries on, and leftovers
+    # somebody live is holding refuse it by name (bw-vb2).
+    def landing_in(litter, live=(), dead=(), cmd="git merge --ff-only work",
+                   line_elsewhere=False):
+        """What the gate tells a landing with these leftovers in its way, and what
+        the checkout looks like after.
+
+        A real checkout, real leftovers, and real session records of the shape
+        `hooks/board-touch.py` writes — the gate reads all three off the disk and
+        none of them can be faked in memory. `live` and `dead` are (session id,
+        card id, board name, [paths]); a dead one has its record and its file
+        both dated past the lease, which is the whole of what tells them apart.
+
+        `line_elsewhere` puts the landing line in a worktree of its own and
+        stands the main checkout on something else, with the command typed in the
+        main checkout — which is how work lands here: a session pushes from one
+        tree and git applies it to whichever tree holds the line. Then the tree
+        the landing lands in is neither the project's root nor the tree the
+        command was typed in, and a gate that read either of those would find a
+        spotless checkout and sweep nothing.
+        """
+        tmp = tempfile.mkdtemp(prefix="board-litter-")
+        try:
+            root = os.path.join(tmp, "shared")
+            state = os.path.join(tmp, "state", "board-sessions")
+            os.makedirs(root)
+            os.makedirs(state)
+            where = os.path.join(tmp, "bin")
+            os.makedirs(where)
+            # The board, standing in for the real one: these cases are about the
+            # leftovers, and asking the real board would take the merge slot away
+            # from a session using it.
+            with open(os.path.join(where, "bd"), "w") as fh:
+                fh.write(BOARD % json.dumps(
+                    [{"id": cid, "assignee": name}
+                     for _, cid, name, _ in list(live) + list(dead)]))
+            os.chmod(os.path.join(where, "bd"), 0o755)
+            env = dict(os.environ,
+                       PATH=where + os.pathsep + os.environ.get("PATH", ""),
+                       CLAUDE_CODE_TMPDIR=os.path.join(tmp, "state"))
+
+            def g(*args):
+                return subprocess.run(["git"] + list(args), cwd=root, text=True,
+                                      capture_output=True, timeout=120, env=env)
+
+            def gl(*args):  # the same, in the tree the landing lands in
+                return subprocess.run(["git"] + list(args), cwd=land, text=True,
+                                      capture_output=True, timeout=120, env=env)
+
+            g("init", "-q", "-b", "ours", ".")
+            g("config", "user.email", "t@t")
+            g("config", "user.name", "t")
+            os.makedirs(os.path.join(root, ".beads"))
+            with open(os.path.join(root, project.DECLARATION), "w") as fh:
+                fh.write('name = "litter"\nprefix = "lit"\nlands_on = "ours"\n'
+                         'agent_merges = true\n')
+            for name in sorted(set(litter) | {"untouched.txt"}):
+                with open(os.path.join(root, name), "w") as fh:
+                    fh.write("as it was\n")
+            g("add", "-A")
+            g("commit", "-q", "-m", "the line as it stands")
+            g("branch", "work")
+            g("checkout", "-q", "work")
+            with open(os.path.join(root, "untouched.txt"), "w") as fh:
+                fh.write("the work\n")
+            g("commit", "-qam", "a piece of work, finished")
+            g("checkout", "-q", "ours")
+            land = root
+            if line_elsewhere:
+                g("branch", "parked")
+                g("checkout", "-q", "parked")
+                land = os.path.join(tmp, "landing")
+                g("worktree", "add", "-q", land, "ours")
+            # An untracked file, which blocks no landing and must survive a sweep.
+            with open(os.path.join(land, "not-git's.txt"), "w") as fh:
+                fh.write("nobody's\n")
+            for name in litter:
+                with open(os.path.join(land, name), "w") as fh:
+                    fh.write("half-done\n")
+                gl("add", name)
+            now = time.time()
+            for sid, cid, _, paths in list(live) + list(dead):
+                gone = (sid, cid) in [(s, c) for s, c, _, _ in dead]
+                when = now - (LONG_GONE if gone else 5)
+                full = os.path.join(state, sid + ".json")
+                with open(full, "w") as fh:
+                    json.dump({"last_beat": when, "claims": [{"id": cid, "t": when}],
+                               "edits": [{"p": os.path.join(land, x), "t": when}
+                                         for x in paths]}, fh)
+                os.utime(full, (when, when))
+            said = subprocess.run(
+                [sys.executable, MERGE_GATE], input=json.dumps({
+                    "tool_name": "Bash", "tool_input": {"command": cmd},
+                    "cwd": root, "session_id": LANDER}),
+                capture_output=True, text=True, timeout=120, env=env).stdout.strip()
+            out = json.loads(said) if said else {}
+            spoke = (out.get("hookSpecificOutput", {}).get("permissionDecisionReason")
+                     or out.get("systemMessage") or "")
+            refused = (out.get("hookSpecificOutput", {}).get("permissionDecision")
+                       == "deny")
+            return {
+                "said": spoke,
+                "refused": refused,
+                "read": out.get("hookSpecificOutput", {}).get("additionalContext", ""),
+                "dirty": [r[3:] for r in
+                          gl("status", "--porcelain", "-uno").stdout.splitlines()],
+                "stashes": gl("stash", "list").stdout.strip(),
+                "kept": os.path.exists(os.path.join(land, "not-git's.txt")),
+            }
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # Leftovers nobody is holding: swept, and the landing goes through.
+    got = landing_in(["stale.txt", "also-stale.txt"],
+                     dead=[(DEAD_SID, "lit-9.1", "main-deadbeef",
+                            ["stale.txt", "also-stale.txt"])])
+    assert not got["refused"], \
+        "a landing was refused for leftovers whose session finished and went: %r" \
+        % got["said"]
+    assert not got["dirty"], \
+        "the checkout still has %r in it, so the landing is still blocked by " \
+        "exactly what the sweep was for" % got["dirty"]
+    assert "the landing gate swept these aside" in got["stashes"], \
+        "the leftovers were not set aside under a label saying who set them " \
+        "aside: %r" % got["stashes"]
+    assert re.search(r"\d{4}-\d\d-\d\d", got["stashes"]), \
+        "the label carries no date, so a checkout with several of them says " \
+        "nothing about which is which: %r" % got["stashes"]
+    for name in ("stale.txt", "also-stale.txt"):
+        assert name in got["said"] and name in got["read"], \
+            "the note does not name %s, so the session cannot find its own work " \
+            "again: %r" % (name, got["said"])
+    assert got["kept"], \
+        "the sweep moved an untracked file, which blocks no landing at all and " \
+        "is the one thing a stash of it is hardest to get back"
+
+    # A file nobody's record mentions at all — the session died before anything
+    # was written down, or the record aged out. Nobody live is holding it.
+    got = landing_in(["nameless.txt"])
+    assert not got["refused"] and not got["dirty"], \
+        "a leftover no session record mentions blocked the landing: %r" % got["said"]
+
+    # And the same leftovers with their session still at work.
+    got = landing_in(["theirs.txt", "stale.txt"],
+                     live=[(LIVE_SID, "lit-9.2", "bw-vb2-11112222", ["theirs.txt"])],
+                     dead=[(DEAD_SID, "lit-9.1", "main-deadbeef", ["stale.txt"])])
+    assert got["refused"], \
+        "a landing walked over the half-done work of a session still at it: %r" \
+        % got["said"]
+    assert "bw-vb2-11112222" in got["said"], \
+        "the refusal names nobody, which is the whole fault it was built for: %r" \
+        % got["said"]
+    assert "theirs.txt" in got["said"], \
+        "the refusal names the session but not the file it is waiting on: %r" \
+        % got["said"]
+    assert got["said"].count("bw-vb2-11112222") >= 2, \
+        "the refusal names the session once — beside the file or at the head of " \
+        "it, but not both — and a refusal read in a hurry is read at the head: " \
+        "%r" % got["said"]
+    assert "stale.txt" not in got["said"], \
+        "the refusal blames the live session for a leftover that is not theirs, " \
+        "which sends whoever reads it to the wrong person: %r" % got["said"]
+    assert got["dirty"] and not got["stashes"], \
+        "the refusal still swept the checkout, so a live session's work was " \
+        "moved out from under it anyway: %r" % got["stashes"]
+
+    # The push spelling, which is how work lands here and the strict one: every
+    # tracked change blocks it, whether or not the landing goes near the file.
+    got = landing_in(["stale.txt"],
+                     dead=[(DEAD_SID, "lit-9.1", "main-deadbeef", ["stale.txt"])],
+                     cmd="git push . work:ours")
+    assert not got["refused"] and not got["dirty"], \
+        "a landing spelled as a push was left blocked by leftovers nobody holds: " \
+        "%r" % got["said"]
+
+    # The line checked out somewhere else again: typed in the main checkout,
+    # landing in a worktree that holds the line, which is how work lands here.
+    # The checkout that gets looked at is the one holding the line — not the
+    # project's root and not the tree the session is standing in, both of which
+    # are spotless here.
+    got = landing_in(["stale.txt"],
+                     dead=[(DEAD_SID, "lit-9.1", "main-deadbeef", ["stale.txt"])],
+                     cmd="git push . work:ours", line_elsewhere=True)
+    assert not got["refused"] and not got["dirty"], \
+        "a landing pushed from one tree left the leftovers sitting in the tree it " \
+        "actually lands in: %r" % got["said"]
+    assert "stale.txt" in got["said"], \
+        "the note says nothing about the tree the landing lands in: %r" % got["said"]
+
+    # A clean checkout is left alone: no stash, and nothing said.
+    got = landing_in([])
+    assert not got["refused"] and not got["stashes"] and not got["said"], \
+        "a landing with nothing in its way was answered with %r" % got["said"]
+
+    print("ok: a landing clears leftovers no live session holds into a stash "
+          "labelled with the date and who swept them, says what it moved, leaves "
+          "untracked files alone, and refuses by name when the leftovers belong "
+          "to a session still at work")
 
     # Which checkout a command belongs to. Some shells report the directory the
     # session was started in whatever directory the command names, so a command

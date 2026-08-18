@@ -18,6 +18,11 @@ One merge at a time. Where a board is running, merges into its main line are
 serialised through a single slot and must be fast-forwards, because a code step
 lands as it closes and the slot is taken many times a job.
 
+A landing that is allowed still has to be possible, and the fourth thing here is
+about that rather than about permission: leftovers in the tree a landing lands in
+stop it with a message naming nobody, so the ones no live session is holding are
+set aside first and the ones somebody live is holding refuse it by name (bw-vb2).
+
 The question both rules ask is what a command WRITES TO: never which word it
 starts with, and never which project the session was started in. That is what
 lets an agent stay current — bringing a protected line into its own work, and
@@ -28,6 +33,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import board_common as bc  # noqa: E402
@@ -186,6 +192,24 @@ def deny(reason):
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,
     }}))
+
+
+def note(said):
+    """Say something to a command that is going ahead anyway.
+
+    Two fields rather than one, and no decision of any kind. `additionalContext`
+    is what the session itself reads — the kit puts it beside the tool's result,
+    so the session finds out from the run rather than from nowhere.
+    `systemMessage` is what the person watching reads. Neither carries a
+    permission, because there is nothing to permit here: this command was already
+    going to run, and answering "allow" would skip a prompt the session's own
+    settings meant to show.
+    """
+    print(json.dumps({
+        "systemMessage": said,
+        "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                               "additionalContext": said},
+    }))
 
 
 # A value no reading of the text can settle, because a shell works it out at the
@@ -957,6 +981,235 @@ def routes(cmd, home):
     return made
 
 
+# Leftovers in the checkout a landing lands in, and whose they are (bw-vb2).
+#
+# A landing lands in ONE working tree — the one the landing line is checked out
+# in — whichever tree it was typed in: `git merge --ff-only` runs there, and
+# `git push . <branch>:ours` is applied there by git's own
+# receive.denyCurrentBranch=updateInstead. Measured rather than recalled
+# (bw-vb2.3): any tracked change in that tree stops the push spelling dead,
+# whether or not the landing goes anywhere near the file, and git says only
+# "Working directory has staged changes" — no file, no session, nothing anybody
+# can act on. On 2026-08-18 that cost three sessions ten minutes of hunting the
+# owner by hand.
+#
+# So the gate looks before the command runs. Leftovers no live session is
+# holding are set aside under a dated label and the landing goes through;
+# leftovers somebody live is holding refuse the landing, naming them and the
+# files it is waiting on.
+
+LEASE = 300  # seconds a claim survives without activity (hooks/board-touch.py)
+SWEPT = "the landing gate swept these aside"
+# Every mark a session leaves behind that means it was alive at that moment.
+# Read generously and all of them together: calling a live session dead is what
+# sweeps somebody's half-done work out from under them.
+ALIVE = ("last_beat", "last_write", "last_stop", "helper", "helper_done")
+
+
+def git_read(argv, where):
+    """Git's answer to a question, or "" where it cannot be asked."""
+    try:
+        run = subprocess.run(["git"] + argv, cwd=where, capture_output=True,
+                             text=True, timeout=GIT_TIMEOUT)
+    except Exception:
+        return ""
+    return run.stdout if run.returncode == 0 else ""
+
+
+def landing_tree(root, lands_on):
+    """The working tree the landing line is checked out in, or "".
+
+    Never the tree the command was typed in. A session lands from its own copy
+    with `git push . <branch>:ours` and git applies that to whichever tree holds
+    the line, so reading the session's own cwd would look at — and tidy — the
+    wrong checkout entirely.
+    """
+    where = ""
+    for line in git_read(["worktree", "list", "--porcelain"], root).splitlines():
+        if line.startswith("worktree "):
+            where = line[len("worktree "):].strip()
+        elif line.strip() == "branch refs/heads/" + lands_on:
+            return where
+    return ""
+
+
+def leftovers(tree):
+    """Every tracked path in this checkout that has a change in it.
+
+    Tracked only. An untracked file blocks neither spelling of a landing
+    (measured — bw-vb2.3), and `git stash -u` is the spelling that moves files
+    git is not keeping copies of: a checkout is never tidied of anything that
+    could not be got back.
+
+    Read with -z because a path git would otherwise quote is still a path in
+    somebody's way, and a rename carries two of them.
+    """
+    fields = git_read(["status", "--porcelain=v1", "-z", "-uno"], tree).split("\0")
+    found, i = [], 0
+    while i < len(fields):
+        row, i = fields[i], i + 1
+        if len(row) < 4:
+            continue
+        found.append(row[3:])
+        if row[0] in "RC" and i < len(fields):
+            # A rename or a copy names where it came from too, in a field of its
+            # own, and that path is as much in the way as the other.
+            found.append(fields[i])
+            i += 1
+    return sorted(set(p for p in found if p))
+
+
+def working(when):
+    """Every session still inside its claim lease, session id to what it recorded.
+
+    The lease the board already runs on rather than a second idea of liveness:
+    activity refreshes a claim, five minutes without any hands the card back.
+    """
+    live = {}
+    try:
+        names = os.listdir(bc.STATE_DIR)
+    except OSError:
+        return live
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        full = os.path.join(bc.STATE_DIR, name)
+        try:
+            state = json.load(open(full))
+            last = os.path.getmtime(full)
+        except Exception:
+            continue
+        for mark in ALIVE:
+            value = state.get(mark)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                last = max(last, value)
+        if when - last <= LEASE:
+            live[name[:-len(".json")]] = state
+    return live
+
+
+def board_names(root):
+    """Card id to the board name holding it, for every card held right now."""
+    ok, out = bc.bd(["list", "--status", "in_progress", "--brief", "--json"], root)
+    if not ok:
+        return {}
+    try:
+        rows = json.loads(out or "[]")
+    except Exception:
+        return {}
+    return {row.get("id"): (row.get("assignee") or "") for row in rows
+            if isinstance(row, dict)}
+
+
+def board_name(sid, state, held):
+    """What the board calls this session.
+
+    Taken from a card it is holding rather than worked out from a rule: a board
+    name carries the tree the session was standing in, and nothing a session
+    records about itself says which tree that was. The fallback is the rule
+    `board_common.actor` uses for a session standing outside any worktree, which
+    is where a file at the top of the shared checkout is edited from.
+    """
+    for claim in reversed(state.get("claims") or []):
+        name = held.get(claim.get("id"))
+        if name:
+            return name
+    return "main-" + sid[:8]
+
+
+def holding(tree, paths, root, when=None):
+    """Board name to the leftovers that session is holding, for the live ones.
+
+    A path is somebody's if that session edited it and has not gone quiet since.
+    Everything else is nobody's, which includes every file whose session has
+    finished and gone — the whole of what a sweep is for.
+    """
+    when = bc.now() if when is None else when
+    held, mine = board_names(root), {}
+    for sid, state in sorted(working(when).items()):
+        touched = set()
+        for edit in state.get("edits") or []:
+            if edit.get("p"):
+                touched.add(os.path.realpath(edit["p"]))
+        theirs = [p for p in paths
+                  if os.path.realpath(os.path.join(tree, p)) in touched]
+        if theirs:
+            name = board_name(sid, state, held)
+            mine.setdefault(name, []).extend(theirs)
+    return {name: sorted(set(paths)) for name, paths in mine.items()}
+
+
+def sweep(tree):
+    """Set every tracked change in this checkout aside, keeping all of it.
+
+    The whole tree rather than a list of paths: nothing here is anybody's, the
+    landing needs the tree clean, and a partial sweep would leave the landing
+    blocked by exactly what it left behind. `git stash` keeps everything it
+    moves, and the label says who moved it and when so the checkout's own history
+    reads as an account rather than as a mystery.
+    """
+    label = "%s — %s" % (SWEPT, time.strftime("%Y-%m-%d %H:%M"))
+    try:
+        run = subprocess.run(["git", "stash", "push", "-m", label], cwd=tree,
+                             capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except Exception as broke:
+        return "", str(broke)
+    if run.returncode:
+        return "", (run.stdout + run.stderr).strip() or "git stash gave no reason"
+    return label, ""
+
+
+HELD_BY = (
+    "The landing gate: %(who)s is at work in %(tree)s and this landing needs "
+    "these files of theirs out of the way first:\n%(files)s\n\n"
+    "Nothing of theirs has been touched. Left to git this refuses with "
+    "\"Working directory has staged changes\" and names nobody, which is what "
+    "cost three sessions ten minutes on 2026-08-18. Wait for them to land or to "
+    "put it aside themselves and run this again, or ask them directly."
+)
+NOTE = (
+    "The landing gate set %(count)d leftover file(s) aside in %(tree)s before "
+    "this landing. No live session was holding them:\n%(files)s\n\n"
+    "Nothing was discarded — they are in a stash labelled\n  %(label)s\n"
+    "and `git -C %(tree)s stash list` shows it."
+)
+NO_SWEEP = (
+    "The landing gate found leftovers in %(tree)s that no live session is "
+    "holding, and could not set them aside: %(why)s\n\n"
+    "They will block this landing with a message naming nobody. "
+    "`git -C %(tree)s status` says what they are."
+)
+
+
+def clear_the_way(root, lands_on):
+    """Look at the checkout this landing lands in, and either clear it or refuse.
+
+    Returns what to tell the session and whether that is a refusal. Everything it
+    cannot work out is allowed: git's own refusal is still there behind this, and
+    a gate that guesses wrong here either sweeps somebody's work away or blocks a
+    landing nothing was wrong with.
+    """
+    tree = landing_tree(root, lands_on)
+    if not tree:
+        return "", False
+    litter = leftovers(tree)
+    if not litter:
+        return "", False
+    theirs = holding(tree, litter, root)
+    if theirs:
+        return HELD_BY % {
+            "who": ", ".join(sorted(theirs)),
+            "tree": tree,
+            "files": "\n".join("  %s  (%s)" % (p, who)
+                               for who in sorted(theirs) for p in theirs[who]),
+        }, True
+    label, why = sweep(tree)
+    if not label:
+        return NO_SWEEP % {"tree": tree, "why": why}, False
+    return NOTE % {"count": len(litter), "tree": tree, "label": label,
+                   "files": "\n".join("  " + p for p in litter)}, False
+
+
 def main():
     data = json.load(sys.stdin)
     cmd = bc.said(data)
@@ -1038,6 +1291,13 @@ def main():
     # slot in its own copy and merging from the main one, and a name carries the
     # tree it was made in.
     if bc.held_by(slot.get("holder"), data.get("session_id")):
+        # A landing that is allowed to happen. What is left is whether it CAN,
+        # and that is the last thing anybody finds out about by hand (bw-vb2).
+        said, refused = clear_the_way(root, lands_on)
+        if refused:
+            deny(said)
+        elif said:
+            note(said)
         return
     reason = (
         "Merges are serialised through the board's single slot and you are not "

@@ -301,6 +301,35 @@ FAULTS = [
                          "for verb, rest in folds):",
                          "    if any(verb == \"merge\" for verb, rest in folds) "
                          "and FF_ONLY not in bc.words(cmd):")),
+    # The leftovers a landing lands into (bw-vb2). Both halves are here: a sweep
+    # that takes what it should not is as bad as one that never happens, and a
+    # refusal nobody can act on is the fault the whole thing was built for.
+    ("a landing never looks at the checkout it lands in", GATE,
+     lambda s: s.replace("        said, refused = clear_the_way(root, lands_on)",
+                         "        said, refused = ('', False)")),
+    ("the checkout a landing lands in is the one the command was typed in", GATE,
+     lambda s: s.replace("    tree = landing_tree(root, lands_on)",
+                         "    tree = root")),
+    ("leftovers nobody holds are found and left where they are", GATE,
+     lambda s: s.replace("    label, why = sweep(tree)",
+                         "    label, why = ('swept', '')")),
+    ("the sweep takes untracked files with it", GATE,
+     lambda s: s.replace('["git", "stash", "push", "-m", label]',
+                         '["git", "stash", "push", "-u", "-m", label]')),
+    ("nobody is ever read as still at work, so live work is swept aside", GATE,
+     lambda s: s.replace("    when = bc.now() if when is None else when",
+                         "    return {}\n    when = bc.now() if when is None else when")),
+    ("a session that finished and went is read as still at work", GATE,
+     lambda s: s.replace("        if when - last <= LEASE:", "        if True:")),
+    ("the label a sweep leaves behind carries no date", GATE,
+     lambda s: s.replace('    label = "%s \u2014 %s" % (SWEPT, time.strftime("%Y-%m-%d %H:%M"))',
+                         "    label = SWEPT")),
+    ("the note says nothing about which files were moved", GATE,
+     lambda s: s.replace('"files": "\\n".join("  " + p for p in litter)}, False',
+                         '"files": ""}, False')),
+    ("the refusal names the files but not the session holding them", GATE,
+     lambda s: s.replace('            "who": ", ".join(sorted(theirs)),',
+                         '            "who": "somebody",')),
 ]
 
 
