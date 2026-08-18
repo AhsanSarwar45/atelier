@@ -95,8 +95,13 @@ def label(c, prefix):
 def whose(sha, goal_id):
     """The checkout a commit is in. The reader stands in this one, where a foreign
     hash resolves to nothing and a foreign path resolves to nothing or to a
-    same-named file that is not the change."""
-    for where, _ in bc.landings(ROOT, goal_id):
+    same-named file that is not the change.
+
+    Searched exactly where the commits were found (board/reading.py), or a commit
+    from a checkout this one cannot resolve would be quoted as if it were here and
+    the reader shown an empty diff for it.
+    """
+    for where, _ in bc.searched(ROOT):
         if git(["cat-file", "-t", sha], where).strip() == "commit":
             return where
     return ROOT

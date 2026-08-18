@@ -113,6 +113,10 @@ HELD = FIXTURE + "-reading"
 # recorder in its place and leave it there, and this one is about the sending.
 REAL_FIRE = runner.fire
 REAL_POPEN = subprocess.Popen
+# The genuine search for a job's commits, held for the same reason: the cases
+# about the run stand a recorder in its place and leave it there, and the case
+# about the search itself is about the real one.
+REAL_COMMITS = runner.reading.commits
 # A job whose work is six cards rather than two: the shape one command closes at
 # once, and the shape that sent six readers at one goal.
 CROWD = ["g.%d" % n for n in range(10, 16)]
@@ -374,6 +378,50 @@ def run(goal_status, rows=None, notes="", shas=("a1c0ffee", "b2deadbe"),
     runner.fire = lambda gid, root: issued.append("READ " + gid)
     runner.advance("g.3", ROOT)
     return issued
+
+
+def reads_elsewhere():
+    """What a reading finds when the job's every commit is in another checkout.
+
+    The two checkouts are real and so is the commit, because the whole fault was
+    a search that ran in the wrong directory: a recorder standing in for `git log`
+    would have passed the whole time it was broken (mch-4cl). What is stood in for
+    is the registry — a case cannot register a project on the machine it runs on.
+
+    Comes back as (what a reading counts, what a close may be judged against, what
+    the goal's own label says): the first must find the commit, the second must
+    not have widened, and the third must be empty, or the case is passing on the
+    label rather than in spite of it.
+    """
+    tmp = tempfile.mkdtemp()
+    here, there = os.path.join(tmp, "here"), os.path.join(tmp, "there")
+
+    def build(where, subject):
+        os.makedirs(where)
+        for args in (("init", "-q", "-b", "main", "."),
+                     ("config", "user.email", "selftest@example.com"),
+                     ("config", "user.name", "selftest"),
+                     ("commit", "-q", "--allow-empty", "-m", subject)):
+            subprocess.run(["git"] + list(args), cwd=where, capture_output=True)
+
+    build(here, "chore(board): nothing of this job")
+    build(there, "fix(board): tst-x.2 the change this job made, landed elsewhere")
+    bc = runner.reading.bc
+    keep_e, keep_d = bc.elsewhere, bc.declared
+    keep_c, runner.reading.commits = runner.reading.commits, REAL_COMMITS
+    # Registered and declared, and the goal wears no landing label — which is the
+    # state every real job is in, since nothing writes that label.
+    bc.elsewhere = lambda root: {"there": (there, "main")}
+    bc.declared = lambda cid, root: []
+    try:
+        found = runner.reading.commits("tst-x", here)
+        judged = [w for w, _ in bc.landings(here, "tst-x")]
+        labelled = bc.declared("tst-x", here)
+    finally:
+        bc.elsewhere, bc.declared = keep_e, keep_d
+        runner.reading.commits = keep_c
+        shutil.rmtree(tmp, ignore_errors=True)
+    return found, judged, labelled
 
 
 def makes_card(sid):
@@ -1663,6 +1711,21 @@ def main():
 
     print("ok: a job is read when it has nothing left to build, again when it has "
           "been written to since, and not otherwise")
+
+    found, judged, labelled = reads_elsewhere()
+    assert not labelled, \
+        "the case wrote the landing label itself, so it proves nothing about a job " \
+        "without one"
+    assert len(found) == 1, \
+        "a job whose change landed in a checkout this project declares it may land " \
+        "in was read as having written nothing: %s" % found
+    assert len(judged) == 1, \
+        "widening what a reading searches also widened what a card may close " \
+        "against, which is a landing rule and not a search: %s" % judged
+
+    print("ok: a reading counts the commits of every checkout this project declares "
+          "it may land in, label or no label, and closing is still judged against "
+          "the ones the job itself declared")
 
     cardless = sorted(s for s in spine.ORDER if not makes_card(s))
     assert cardless == ["review", "work"], \

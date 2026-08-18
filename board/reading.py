@@ -35,13 +35,16 @@ def commits(goal_id, root):
     """Every commit naming this job or any card of it, oldest first.
 
     Asked of the id rather than of the board's card list, so a commit still counts
-    when the card it names has been closed or removed. Asked of every checkout the
-    job declared, because a change that landed elsewhere is still change to read.
-    Every ref, not the main line: a reader is shown the branch as it stands.
+    when the card it names has been closed or removed. Asked of every checkout this
+    project declared it may land in rather than of the ones a job labelled itself
+    with: nothing writes that label, so the labelled reading found nothing for
+    every job whose change lands elsewhere (mch-4cl, hooks/board_common.py
+    `searched`). Every ref, not the main line: a reader is shown the branch as it
+    stands.
     """
     want = r"\b%s(\.[0-9a-z.]+)?\b" % re.escape(goal_id)
     found = []
-    for where, _ in bc.landings(root, goal_id):
+    for where, _ in bc.searched(root):
         try:
             run = subprocess.run(
                 ["git", "log", "--all", "-E", "--grep", want, "--format=%H", "--reverse"],

@@ -570,6 +570,25 @@ def landings(root, cid=None):
         + [known[n] for n in declared(cid, root) if n in known]
 
 
+def searched(root):
+    """Every (repository, main branch) a reading looks in for a job's commits.
+
+    Wider than `landings`, and deliberately: what a card may CLOSE against is a
+    rule and stays narrow, but what a reader is SHOWN is only a search, and a
+    search that misses a commit signs off on a change nobody read. The label was
+    the only thing that widened it, nothing writes the label, and so a job whose
+    change lands in another checkout was read as having produced nothing at all
+    (mch-4cl). Every checkout this project declared it may land in is searched,
+    label or no label; a `git log --grep` in a checkout the job never touched
+    finds nothing and costs a moment.
+    """
+    seen = [(root, project.of(root).lands_on)]
+    for where, main in elsewhere(root).values():
+        if where not in {w for w, _ in seen} and os.path.isdir(where):
+            seen.append((where, main))
+    return seen
+
+
 def unreachable(cid, root):
     """Declared repositories this machine cannot answer for.
 
