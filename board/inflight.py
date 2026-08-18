@@ -31,6 +31,18 @@ ATTEMPTS = 2
 # to point at. Longer than a spawn, far shorter than a reading.
 UNNAMED_GRACE = 60
 
+# What a run of board/review is told when it is the detached copy that does the
+# reading, rather than the run that spawned one. Both places that spawn a reader
+# set it — run.fire and board/review's own hand-off — and board/review reads it
+# before it would hand off, so no reader can spawn another. Here for the same
+# reason the numbers above are: the reader is a script with no suffix to import
+# by, and a name written out in two files is two names.
+DETACHED = "MACHINERY_REVIEW_DETACHED"
+# The directory that copy writes its console and its attempts into, when the run
+# that spawned it had already allocated one. Unset when nobody has: the reader
+# allocates its own.
+RUN_DIR = "MACHINERY_REVIEW_RUN_DIR"
+
 
 def home():
     return os.path.join(os.environ.get("CLAUDE_CODE_TMPDIR") or "/tmp",

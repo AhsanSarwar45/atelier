@@ -136,6 +136,10 @@ def fire(goal_id, root):
     job is claimed first and a sending that finds a reader already out does
     nothing (board/inflight.py, mch-m1t). The claim is named after the reader as
     soon as there is one to name.
+
+    The reader is told it is already the detached copy. This sending IS the
+    hand-off, so a reader started here does the reading itself rather than
+    spawning a second copy of itself to do it (bw-k0w.5).
     """
     if not inflight.take(goal_id):
         return
@@ -144,9 +148,15 @@ def fire(goal_id, root):
         os.makedirs(inflight.home(), exist_ok=True)
         fd, _ = tempfile.mkstemp(prefix=goal_id + ".", suffix=".run.log",
                                  dir=inflight.home())
+        # A reader sent from inside another reader would otherwise inherit that
+        # one's run directory and write its attempts on top of them, which is
+        # cor-987e again by another route. This one allocates its own.
+        env = dict(os.environ, **{inflight.DETACHED: "1"})
+        env.pop(inflight.RUN_DIR, None)
         reader = subprocess.Popen([os.path.join(HERE, "review"), goal_id],
                                   cwd=root, stdout=fd, stderr=fd,
-                                  stdin=subprocess.DEVNULL, start_new_session=True)
+                                  stdin=subprocess.DEVNULL, start_new_session=True,
+                                  env=env)
         inflight.name(goal_id, reader.pid)
         os.close(fd)
     except Exception:
