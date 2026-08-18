@@ -28,12 +28,13 @@ import {
   formatStatus,
   formatWorktreePath,
   getStatusDotColor,
+  whyItStopped,
 } from "@/lib/bead-utils";
 import { updateTitle, updateDescription, updateStatus as cliUpdateStatus } from "@/lib/cli";
 import { ISSUE_TYPES, getIssueTypeMeta } from "@/lib/issue-types";
 import { cn, isDoltProject } from "@/lib/utils";
 import { computeEpicProgress } from "@/lib/epic-parser";
-import { SET_BY, STATES, STATE_BY_ID, standing, type Bead, type BeadStatus, type Epic, type WorktreeStatus } from "@/types";
+import { SET_BY, STATES, standing, type Bead, type BeadStatus, type Epic, type WorktreeStatus } from "@/types";
 
 
 /** Priority levels 0–4, displayed P0 (critical) … P4 (backlog). Single source for the editor options. */
@@ -389,8 +390,10 @@ export function BeadDetail({
               finished state by name is what threw that reason away unread. */}
           {!standing(bead.status) && bead.close_reason && (
             <div className="mt-2 text-center text-xs text-t-muted">
-              {STATE_BY_ID[bead.status as BeadStatus]?.label ?? "Closed"}:{" "}
-              <span className="text-t-tertiary">{bead.close_reason}</span>
+              {formatStatus(bead.status as BeadStatus)}:{" "}
+              <span className="text-t-tertiary">
+                {whyItStopped(bead.status as BeadStatus, bead.close_reason)}
+              </span>
             </div>
           )}
 

@@ -8,7 +8,35 @@ import {
   getStatusDotColor,
   truncate,
   isBlockedBy,
+  whyItStopped,
 } from '@/lib/bead-utils';
+
+describe('whyItStopped', () => {
+  it('drops the state name the tracker wrote in front of the reason', () => {
+    // Real data: bd stores "cancelled: ..." and the panel puts the state in
+    // front of it as a heading, so the screen read "Cancelled: cancelled: ...".
+    expect(whyItStopped('cancelled', 'cancelled: rests on work that was dropped'))
+      .toBe('rests on work that was dropped');
+  });
+
+  it('drops it whatever case it was written in', () => {
+    expect(whyItStopped('cancelled', 'Cancelled: no longer wanted'))
+      .toBe('no longer wanted');
+  });
+
+  it('drops the name the screen shows as well as the one the tracker stores', () => {
+    expect(whyItStopped('in_progress', 'In Progress: picked back up')).toBe('picked back up');
+  });
+
+  it('leaves a reason that does not start with the state alone', () => {
+    expect(whyItStopped('closed', 'landed on main')).toBe('landed on main');
+  });
+
+  it('does not eat a colon that belongs to the reason', () => {
+    expect(whyItStopped('closed', 'see bw-4gk: the counter was wrong'))
+      .toBe('see bw-4gk: the counter was wrong');
+  });
+});
 
 describe('formatBeadId', () => {
   it('preserves and upper-cases the workspace prefix', () => {

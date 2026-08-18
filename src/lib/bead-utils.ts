@@ -43,6 +43,27 @@ export function formatStatus(status: BeadStatus): string {
 }
 
 /**
+ * Why the work stopped, said once.
+ *
+ * The tracker writes the state's own name at the front of the reason it stores
+ * — "cancelled: rests on work that was dropped" — and the screen puts the state
+ * in front of it as a heading, so the two together stuttered: "Cancelled:
+ * cancelled: rests on...". The heading wins; the copy inside the sentence goes.
+ */
+export function whyItStopped(status: BeadStatus, reason: string): string {
+  const names: string[] = [status, STATE_BY_ID[status]?.label ?? ""]
+    .filter(Boolean)
+    .map((n) => n.toLowerCase());
+  const trimmed = reason.trimStart();
+  for (const name of names) {
+    if (trimmed.toLowerCase().startsWith(`${name}:`)) {
+      return trimmed.slice(name.length + 1).trimStart();
+    }
+  }
+  return trimmed;
+}
+
+/**
  * Get Tailwind color class for status indicator dot
  */
 export function getStatusDotColor(status: BeadStatus): string {
