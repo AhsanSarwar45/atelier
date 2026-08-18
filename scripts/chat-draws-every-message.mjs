@@ -89,6 +89,22 @@ driver.draw({
 });
 const syntheticLines = drawn.slice(beforeSynthetic).map(loud).filter((t) => /never came down the stream/.test(t));
 
+// A command carrying a whole file in its arguments. What a command PRINTED was
+// cut and what it was ASKED to do was cut nowhere, so the first sizeable file
+// the agent wrote opened the row onto every byte of it (bw-1u1.33).
+const beforeBig = drawn.length;
+driver.draw({
+  type: 'assistant',
+  message: {
+    id: 'a-turn-that-writes-a-big-file',
+    content: [
+      { type: 'tool_use', id: 'big-1', name: 'Write', input: { file_path: '/tmp/big.txt', content: 'x'.repeat(60_000) } },
+    ],
+  },
+});
+const asked = drawn.slice(beforeBig).find((e) => e.type === 'tool.started');
+const askedSize = asked ? String(asked.input.content ?? '').length : -1;
+
 // And the shape the manager's own answer came in, driven the same way, so the
 // check does not rest on a live session happening to compact.
 const beforeStatus = drawn.length;
@@ -105,6 +121,7 @@ for (const line of compactLines) console.log(`  ${line.slice(0, 160)}`);
 console.log(`an unheard-of kind drew: ${unknownDrew} event(s)`);
 console.log(`a message with no stream behind it drew: ${syntheticLines.length} line(s)`);
 console.log(`a compact status drew: ${statusLines.length} line(s)`);
+console.log(`a 60,000-character argument was stored as: ${askedSize} characters`);
 
 const wrong = [];
 if (!answered) wrong.push('the session never answered a turn');
@@ -113,6 +130,7 @@ if (compactLines.length > 1) wrong.push(`the compact answer was said ${compactLi
 if (unknownDrew === 0) wrong.push('a kind the driver has no branch for was dropped');
 if (syntheticLines.length !== 1) wrong.push(`a message with no stream behind it drew ${syntheticLines.length} lines, not 1`);
 if (statusLines.length !== 1) wrong.push(`a compact status drew ${statusLines.length} lines, not 1`);
+if (askedSize < 0 || askedSize > 4200) wrong.push(`a 60,000-character argument was kept as ${askedSize} characters`);
 
 console.log(wrong.length ? `FAIL — ${wrong.join('; ')}` : 'PASS');
 process.exit(wrong.length ? 1 : 0);

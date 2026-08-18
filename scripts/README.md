@@ -158,6 +158,11 @@ as a status first, and the second copy is deliberately not drawn twice
 (bw-1u1.35). Shown red by switching that arm off — "a message with no stream
 behind it drew 0 lines, not 1".
 
+And a command carrying a whole file in its arguments, because what a command
+printed was cut and what it was asked to do was cut nowhere (bw-1u1.33). Shown
+red by removing that cut — "a 60,000-character argument was kept as 60000
+characters".
+
 ```
 node scripts/chat-draws-every-message.mjs
 ```
