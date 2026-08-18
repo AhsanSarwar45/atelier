@@ -124,6 +124,18 @@ def gated(goal_id, root):
                for r in rows_of(*bc.bd(["gate", "list", goal_id, "--json"], root)))
 
 
+def reading_gates(goal_id, root):
+    """The gates holding this job shut FOR ITS READING, by id.
+
+    By title rather than by every open gate: the manager's own sign-off is a gate
+    too, and a reading that has run out of rounds is no reason to let a job past
+    the one thing on the board he raised himself.
+    """
+    return [r["id"] for r in rows_of(*bc.bd(["gate", "list", goal_id, "--json"], root))
+            if r.get("id") and r.get("status") != "closed"
+            and r.get("title") == GATE_TITLE]
+
+
 def fire(goal_id, root):
     """Send a reader at a job, detached, and let it outlive the tool call.
 
@@ -249,10 +261,55 @@ def due_again(goal_id, root):
     goal = card(goal_id, root) or {}
     if goal.get("status") == "closed":
         return False
+    # Under the same ceiling as every other sending: this one is fired from inside
+    # a reader, so a reader that could send its own successor past the ceiling is
+    # the one place the ceiling would buy nothing (board/reading.py `spent`).
+    if reading.spent(goal):
+        return False
     rows = children(goal_id, root)
     if not at_reading(spine.stored(tags(goal).get("spine")), rows):
         return False
     return bool(reading.unread(goal, reading.commits(goal_id, root)))
+
+
+# What the goal is told when its last reading's points have been answered and no
+# reader is coming. Written down because the alternative — a job that simply stops
+# being read — is indistinguishable from the fault this replaced, where a job sat
+# behind an open gate with nothing after the reading ever opening (mch-4cl).
+SPENT_NOTE = (
+    "The last reading's findings are answered and this job has had the %d readings "
+    "a job gets, so the run goes on past the reading rather than sending another "
+    "reader. A third round was measured raising fresh objections to code the round "
+    "before it had read and accepted (bw-7e8), and settled nothing."
+    % reading.ROUNDS)
+
+
+def reading_over(goal_id, goal, order, rows, root):
+    """Let a job past a reading it will get no more of, and say so.
+
+    A reading that finds nothing opens the step after itself; a reading that files
+    findings leaves the job shut until answering them brings the reader back. When
+    the reader will not come back — the job has had its rounds — nothing else on
+    the board would ever move the run on, and the job would sit behind its own open
+    gate exactly as it did before any of this. So the run treats the answered
+    findings as the clean reading that never happened: the gate goes, a line goes
+    on the goal, and the step after the reading opens.
+
+    The gate is the latch. Once it is down this is false however often a card of
+    the job closes, so the note is written once.
+    """
+    if not at_reading(order, rows) or not reading.spent(goal):
+        return False
+    if steps_of(rows) & set(order[order.index("review") + 1:]):
+        return False
+    gates = reading_gates(goal_id, root)
+    if not gates:
+        return False
+    for gate in gates:
+        bc.bd(["gate", "resolve", gate], root)
+    bc.bd(["update", goal_id, "--append-notes", SPENT_NOTE], root)
+    after_reading(goal_id, root)
+    return True
 
 
 def open_next(rest, have, goal_id, goal, meta, root):
@@ -325,6 +382,8 @@ def advance(cid, root):
             return
     if reading_due(goal_id, goal, order, rows, root):
         open_reading(goal_id, goal, root)
+        return
+    if reading_over(goal_id, goal, order, rows, root):
         return
     if which == order[-1]:
         park(goal_id, goal, meta, root)

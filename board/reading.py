@@ -56,9 +56,45 @@ def commits(goal_id, root):
     return list(dict.fromkeys(found))
 
 
+# How many times one job is ever read. A reading raises points against the change
+# it was shown; a second is owed because answering the first IS a change, and it
+# is shown only what came after. A third has nothing left to be about — measured
+# on bw-7e8, read three times, each round raising a new objection to code the
+# round before had read and accepted. Two, and the run goes on past the reading
+# with what the second found answered (the manager's ruling on bw-510).
+ROUNDS = 2
+
+
 def readers(goal):
     """The names that have signed this goal, in the order they signed."""
     return RECEIPT.findall(goal.get("notes") or "")
+
+
+def rounds(goal):
+    """How many readings this job has already had.
+
+    Counted from the receipts the goal itself carries and from nothing else: they
+    are written by the readings, they survive every rebase and every worktree
+    thrown away, and a count kept anywhere else is a second place to be wrong.
+    Every receipt counts, a reader the job wrote itself included — the cost is
+    what the ceiling is against, and a reading costs the same whoever signed it.
+    """
+    return len(readers(goal))
+
+
+def spent(goal):
+    """Whether this job has had every reading it will ever get."""
+    return rounds(goal) >= ROUNDS
+
+
+def final(goal):
+    """Whether a reading asked for now would be the last this job gets.
+
+    Asked before the reading signs, so the reader can be told: a reader that knows
+    nobody comes after it raises what is wrong rather than leaving it for a round
+    that will never happen.
+    """
+    return rounds(goal) + 1 >= ROUNDS
 
 
 def covered(goal):
@@ -114,5 +150,13 @@ def wanted(goal, shas, wrote_it=()):
     Never read, or written to since it was: either way what stands has not been
     read by anyone. A signature from a hand that wrote the job counts as none, so
     a job cannot talk itself out of being read by signing itself.
+
+    Under the ceiling either way. A job that has had its readings is not read
+    again however much has landed since — what the last reading raised is answered
+    and the run goes on, because the round after that one raised objections to
+    code the round before it had accepted and no round ever settled anything
+    (bw-7e8). This is the one test both senders ask, so neither can drift past it.
     """
+    if spent(goal):
+        return False
     return not outsiders(goal, wrote_it) or bool(unread(goal, shas))

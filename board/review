@@ -126,9 +126,21 @@ def changes(shas, goal_id):
     return ["%s in %s" % (sha, where) for where, sha in dated], body
 
 
-def ask(goal, shas, diff):
+# What the reader is told about where in the job's two readings it stands. A
+# reader that does not know is a reader that leaves a point for the round after
+# it, and on the last reading there is no round after it (board/reading.py
+# ROUNDS).
+FIRST = ("This job is read at most twice and this is the first reading. What you "
+         "raise here comes back to you once, answered.")
+LAST = ("This is the second and last reading this job will ever get, and you are "
+        "shown only what the first reading was not shown. Nobody reads this job "
+        "after you: what you file here is answered and the job goes on, so raise "
+        "what is actually wrong and leave nothing for a round that will not come.")
+
+
+def ask(goal, shas, diff, final=False):
     return """You are reviewing a change you did not write, for %(persona)s.
-You know nothing about who wrote it and it does not matter. One round.
+You know nothing about who wrote it and it does not matter. %(round)s
 
 Read %(root)s/CLAUDE.md and any rules it points at first: this project's own
 rules are as much a source of findings as correctness is. A change here proves
@@ -181,6 +193,7 @@ Answer with one fenced json block and nothing after it:
 """ % {"root": ROOT, "what": goal.get("title", ""), "desc": goal.get("description", ""),
        "done": goal.get("acceptance_criteria") or goal.get("acceptance") or "",
        "persona": DECL.persona, "proves": sections.PROVES,
+       "round": LAST if final else FIRST,
        "shas": "\n".join(shas) or "none found", "diff": diff or "no diff found"}
 
 
@@ -474,7 +487,9 @@ def main():
         # that spawned this copy redirected it to; it is the only one that knows.
         inflight.name(goal_id, os.getpid(), os.environ.get(inflight.CONSOLE))
     named, diff = changes(shas, goal_id)
-    prompt = ask(goal, named, diff)
+    # Asked of the goal as it stands before this reading signs, so the count is of
+    # the readings that have already happened and not of this one.
+    prompt = ask(goal, named, diff, reading.final(goal))
     here = run_log(goal_id)
     verdict = None
     for attempt in range(1, inflight.ATTEMPTS + 1):

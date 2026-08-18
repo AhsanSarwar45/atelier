@@ -103,6 +103,10 @@ ROWS = [
     {"id": "g.4", "status": "closed", "labels": ["step:verify", "of:g"]},
 ]
 SIGNED = "reviewed-by: review-g\nread-commits: %s"
+# Two readings already on the goal, which is every reading a job ever gets. The
+# second covers less than the first because it is shown only what the first was
+# not (board/reading.py `unread`).
+TWICE = (SIGNED % "a1c0ffee") + "\n\n" + (SIGNED % "b2deadbe")
 
 # The claim readers are sent under, and the fixture job the cases below claim. It
 # carries the fixture prefix like every other, so a real job can never collide
@@ -117,6 +121,12 @@ REAL_POPEN = subprocess.Popen
 # about the run stand a recorder in its place and leave it there, and the case
 # about the search itself is about the real one.
 REAL_COMMITS = runner.reading.commits
+# What decides how many readings a job gets, asked of directly where a case is
+# about the count itself rather than about what the count makes the run do.
+reading_lib = runner.reading
+# The words that tell a reader nobody comes after it. Named here so the case reads
+# the reader's own sentence and not a copy of it that can drift.
+LAST_ROUND = "last reading this job will ever get"
 # A job whose work is six cards rather than two: the shape one command closes at
 # once, and the shape that sent six readers at one goal.
 CROWD = ["g.%d" % n for n in range(10, 16)]
@@ -209,12 +219,13 @@ def script(name):
     return mod
 
 
-def release_sends(signed, shas, wrote=("someone",), rows=None):
+def release_sends(signed, shas, wrote=("someone",), rows=None, notes=None):
     """How many readers letting go of a claim sends, given what this one did.
 
     `wrote` carries the reader's own name in the case where the job counts it
     among the hands that wrote it, and `rows` the case where this very reading
-    filed work that is now open again.
+    filed work that is now open again. `notes` carries the receipts already on the
+    goal, for the case where this reading was the last one the job gets.
     """
     rv = script("review")
     fired = []
@@ -223,7 +234,8 @@ def release_sends(signed, shas, wrote=("someone",), rows=None):
     inflight.name("g", os.getpid())
     # A reader that never signed left the goal exactly as it found it, which is
     # what makes the job still want one — and what would send another at it.
-    goal = dict(GOAL, status="in_progress", notes=SIGNED % "a1" if signed else "",
+    goal = dict(GOAL, status="in_progress",
+                notes=notes if notes is not None else (SIGNED % "a1" if signed else ""),
                 metadata=dict(GOAL["metadata"],
                               spine="worktree,work,review,record,land"))
     keep = (rv.READING, rv.SIGNED, rv.running.card, rv.running.children,
@@ -355,9 +367,19 @@ def fires_marked():
     return told
 
 
+# A job held shut by its own reading, as the board answers `gate list` for it.
+READING_GATE = [{"id": "g-gate", "status": "open", "issue_type": "gate",
+                 "title": runner.GATE_TITLE}]
+
+
 def run(goal_status, rows=None, notes="", shas=("a1c0ffee", "b2deadbe"),
-        wrote=("someone",)):
-    """The commands the hook issues when g.3, the last work item, closes."""
+        wrote=("someone",), gates=()):
+    """The commands the hook issues when g.3, the last work item, closes.
+
+    `gates` is what is holding the job shut at that moment — empty for a job that
+    has not been read yet, the reading's own gate for a job waiting on a reader
+    that is not coming.
+    """
     goal = dict(GOAL, status=goal_status, notes=notes)
     rows = ROWS if rows is None else rows
     issued = []
@@ -366,6 +388,8 @@ def run(goal_status, rows=None, notes="", shas=("a1c0ffee", "b2deadbe"),
         issued.append(" ".join(args))
         if args[:2] == ["list", "--parent"]:
             return True, json.dumps(rows)
+        if args[:2] == ["gate", "list"]:
+            return True, json.dumps(list(gates))
         if args[0] == "show":
             return True, json.dumps(goal if args[1] == "g" else rows[2])
         return True, "{}"
@@ -378,6 +402,19 @@ def run(goal_status, rows=None, notes="", shas=("a1c0ffee", "b2deadbe"),
     runner.fire = lambda gid, root: issued.append("READ " + gid)
     runner.advance("g.3", ROOT)
     return issued
+
+
+def told_round(notes):
+    """The line a reader is handed about which of the job's readings it is doing.
+
+    Read off the prompt itself rather than off a flag, because the flag is not
+    what the reader acts on: a reader told nothing leaves its point for the round
+    after it, and on the last reading there is no round after it.
+    """
+    rv = script("review")
+    goal = dict(GOAL, status="in_progress", notes=notes)
+    return rv.ask(goal, ["a1c0ffee in /nowhere"], "a diff",
+                  rv.reading.final(goal))
 
 
 def reads_elsewhere():
@@ -1711,6 +1748,59 @@ def main():
 
     print("ok: a job is read when it has nothing left to build, again when it has "
           "been written to since, and not otherwise")
+
+    # The whole shape of the ceiling, in the order a job meets it: read when the
+    # work is done, read once more when the reader's own findings are answered,
+    # and never a third time however much has landed since (bw-7e8, read three
+    # times, each round objecting to code the round before had accepted).
+    once = run("in_progress")
+    twice = run("open", notes=SIGNED % "a1c0ffee")
+    thrice = run("open", notes=TWICE,
+                 shas=("a1c0ffee", "b2deadbe", "c3landedsince"))
+    assert "READ g" in once and "READ g" in twice, \
+        "a job was not read after its work or not after its findings: %s / %s" \
+        % (once, twice)
+    assert "READ g" not in thrice, \
+        "a job already read twice was read a third time, which is the round that " \
+        "objects to what the round before it accepted: %s" % thrice
+    assert release_sends(signed=True, shas=["a1c0ffee", "b2deadbe", "c3landedsince"],
+                         notes=TWICE) == 0, \
+        "a reader that had just done the job's last reading sent a third at it"
+    assert reading_lib.rounds({"notes": TWICE}) == reading_lib.ROUNDS, \
+        "the rounds a job has had are not counted off the receipts it carries"
+
+    assert LAST_ROUND not in told_round(""), \
+        "the first reader was told nobody comes after it"
+    assert LAST_ROUND in told_round(SIGNED % "a1c0ffee"), \
+        "the last reader a job gets was not told it is the last, so it leaves its " \
+        "point for a round that never comes"
+
+    # Answering the last reading's findings is what would have brought the reader
+    # back. Nobody comes, so nothing else on the board would move the run on and
+    # the job would sit behind its own gate for good (mch-4cl by another route).
+    on = run("open", notes=TWICE, shas=("a1c0ffee", "b2deadbe", "c3landedsince"),
+             gates=READING_GATE)
+    assert "READ g" not in on, \
+        "the job was read a third time after all: %s" % on
+    assert any(a.startswith("gate resolve g-gate") for a in on), \
+        "a job whose last reading's findings are answered stayed shut behind that " \
+        "reading's own gate, waiting for a reader that is not coming: %s" % on
+    assert any(a.startswith("create") for a in on), \
+        "the run never opened the step after the reading, so the job stops where " \
+        "the reading was: %s" % on
+    assert any("append-notes" in a and "readings a job gets" in a for a in on), \
+        "the goal says nothing about why its last reading's points were answered " \
+        "with no reading after them: %s" % on
+    # The gate is the latch: down once, the note is written once.
+    again = run("open", notes=TWICE, shas=("a1c0ffee", "b2deadbe", "c3landedsince"))
+    assert not any("append-notes" in a and "readings a job gets" in a for a in again), \
+        "the run wrote the same line onto the goal every time a card closed: %s" % again
+
+    print("ok: a job is read once when its work is done and once when its findings "
+          "are answered, never a third time however much landed since, no reader "
+          "sends a third from inside itself, the last reader is told it is the "
+          "last, and answering that last reading opens the step after it instead "
+          "of leaving the job shut")
 
     found, judged, labelled = reads_elsewhere()
     assert not labelled, \
