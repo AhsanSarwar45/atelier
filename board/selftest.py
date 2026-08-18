@@ -3500,6 +3500,19 @@ def main():
         assert not inflight.held(HELD), \
             "a claim whose owner died before it could spawn a reader held the job " \
             "for good"
+        # A number is not a name: the owner is the process that took the claim,
+        # not whoever holds its number afterwards. The owner below is written
+        # with a birth that is not this process's, which is what a claim looks
+        # like once its owner has died and the number has gone round again — and
+        # what used to hold the job shut for good, since the number answers and
+        # no clock is left watching it (bw-5e8.7).
+        inflight.clear(HELD)
+        inflight.take(HELD)
+        with open(os.path.join(inflight.where(HELD), "owner"), "w") as fh:
+            fh.write("%d %d" % (os.getpid(), inflight._born(os.getpid()) + 1))
+        assert not inflight.held(HELD), \
+            "a claim whose owner's number had been handed to another process " \
+            "held the job shut for good, with no clock left to get it back"
         # A claim from before any of this carries no mark at all, and its age is
         # then the only thing there is to judge it by.
         inflight.clear(HELD)
@@ -3532,8 +3545,9 @@ def main():
 
     print("ok: a reader still running holds its job however long it takes, a claim "
           "whose owner is still at work holds it a minute after it was taken, and "
-          "a claim left by a reader that died, by an owner that died, by nobody at "
-          "all, or naming somebody else's process does not")
+          "a claim left by a reader that died, by an owner that died, by an owner "
+          "whose number has gone round to somebody else, by nobody at all, or "
+          "naming somebody else's process does not")
 
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a

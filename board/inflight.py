@@ -27,10 +27,11 @@ import time
 ATTEMPT_TIMEOUT = 3600
 ATTEMPTS = 2
 
-# A claim carrying no mark of any kind is judged by its age, and this is the
+# A claim nothing can be told about is judged by its age, and this is the
 # ceiling. Nothing this file writes leaves a claim in that state — the owner goes
 # down inside `take` — so what is left here is a claim from an older run of these
-# tools, or one whose mark could not be written.
+# tools, one whose mark could not be written, and one whose owner was written
+# without a birth to check it by.
 UNNAMED_GRACE = 60
 
 # What a run of board/review is told when it is the detached copy that does the
@@ -85,9 +86,49 @@ def _pid(goal_id):
     return _number(goal_id, "pid")
 
 
+def _born(pid):
+    """When that process started, which is what tells it from a later one.
+
+    A process number is handed back out once the process behind it is gone, so
+    the number on its own says nothing about who holds it now. The start time is
+    fixed for the life of a process, so the number and the start time together
+    are an identity, and that is what a claim writes down. It is the twenty-
+    second field of /proc/<pid>/stat; the program's own name is the second and
+    sits inside brackets that may hold spaces of their own, so the fields are
+    counted from after the last bracket rather than from the beginning.
+    """
+    try:
+        with open("/proc/%d/stat" % pid) as fh:
+            rest = fh.read().rsplit(")", 1)[1]
+        return int(rest.split()[19])
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _mine():
+    """This process written down the way a claim's owner is: number, then birth."""
+    born = _born(os.getpid())
+    if born is None:
+        return str(os.getpid())
+    return "%d %d" % (os.getpid(), born)
+
+
 def _owner(goal_id):
-    """The process that took this claim, marked from the instant it was taken."""
-    return _number(goal_id, "owner")
+    """The process that took this claim and when it started, as a pair.
+
+    Marked from the instant the claim was taken. The birth is missing on a claim
+    written where the start time could not be read, and on one left by an older
+    run of these tools that wrote the number alone.
+    """
+    said = (_said(goal_id, "owner") or "").split()
+    try:
+        pid = int(said[0])
+    except (IndexError, ValueError):
+        return None, None
+    try:
+        return pid, int(said[1])
+    except (IndexError, ValueError):
+        return pid, None
 
 
 def _alive(pid):
@@ -96,6 +137,8 @@ def _alive(pid):
     The owner is asked this and not whether it is a reader: between the claim and
     the spawn the holder is whoever took the claim — the run tool inside a hook,
     or a reading fired by hand — and none of them answers to a reader's name.
+    Asked alone it cannot tell the owner from whoever inherited its number later,
+    so it is only what is left where the claim carries no birth to check.
     """
     try:
         os.kill(pid, 0)
@@ -134,7 +177,11 @@ def held(goal_id):
     held for as long as that process is alive — a claim marked from the instant it
     is taken is never mistaken for one nobody is behind, which is how one goal was
     read by two readers a minute apart (bw-5e8.4). A sending that died between
-    claiming and spawning still cannot hold a job shut: its owner is gone.
+    claiming and spawning still cannot hold a job shut: its owner is gone, and
+    gone means the process that took the claim, not the number it was using. A
+    number outlives its process and is handed to the next one along, so asking
+    only whether something is alive at that number hands the job to a stranger
+    to hold shut for good, with no clock left to get it back (bw-5e8.7).
     """
     path = where(goal_id)
     try:
@@ -144,9 +191,13 @@ def held(goal_id):
     pid = _pid(goal_id)
     if pid is not None:
         return _reading(pid, goal_id)
-    owner = _owner(goal_id)
+    owner, born = _owner(goal_id)
     if owner is not None:
-        return _alive(owner)
+        if born is not None:
+            return _born(owner) == born
+        # Nothing to tell the owner from whoever holds its number now, so the
+        # claim is worth no more than a bare one and the clock guards it.
+        return _alive(owner) and age <= UNNAMED_GRACE
     return age <= UNNAMED_GRACE
 
 
@@ -173,7 +224,7 @@ def take(goal_id):
             # bare, the claim would have nothing but its age to be judged by, and
             # a firing a minute later would read a holder still at work as one
             # that had died and send a second reader at the job (bw-5e8.4).
-            _write(goal_id, "owner", os.getpid())
+            _write(goal_id, "owner", _mine())
             return True
         except FileExistsError:
             if held(goal_id):
@@ -222,7 +273,7 @@ def drop(goal_id):
     """
     mine = _pid(goal_id)
     if mine is None:
-        mine = _owner(goal_id)
+        mine = _owner(goal_id)[0]
     if mine is not None and mine != os.getpid():
         return False
     if mine is None and not os.path.isdir(where(goal_id)):
