@@ -40,6 +40,7 @@ COMMON = "hooks/board_common.py"
 CLOSE = "hooks/board-status-gate.py"
 DECL = "project.py"
 SUITE = "board/selftest.py"
+LANDING = "hooks/landing-gate.py"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -330,6 +331,14 @@ FAULTS = [
     ("the refusal names the files but not the session holding them", GATE,
      lambda s: s.replace('            "who": ", ".join(sorted(theirs)),',
                          '            "who": "somebody",')),
+    # The checkout's own guard, and the one carve-out it makes (bw-7e8.8).
+    ("the shape of a commit is a commit, whatever made the write", LANDING,
+     lambda s: s.replace("    if commit_made_here(old, new, root) and "
+                         "a_commit(written_by()):",
+                         "    if commit_made_here(old, new, root):")),
+    ("any git command at all is read as a commit", LANDING,
+     lambda s: s.replace('            return word == "commit"',
+                         "            return True")),
 ]
 
 

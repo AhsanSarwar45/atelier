@@ -24,18 +24,31 @@ the manual (bw-7e8.5):
     forced push or fetch                        whatever it names
   the line standing still, written by         allowed; `git stash` writes one of
     something that did ask what it held          these on every stash
-  one new commit on top of the old tip,       allowed; this is the manager
-    carried by no other ref                     committing in the shared checkout
+  one new commit on top of the old tip,       allowed where `git commit` is
+    carried by no other ref, made by              what made it; this is the
+    `git commit`                                  manager committing in the
+                                                  shared checkout
   anything else that moves the line           allowed only while the merge slot
     — a fold, a rebase, a reset                 is held
 
 The carve-out for an ordinary commit is the same one the session gate makes: the
 slot exists so two sessions never resolve conflicts in the same tree at once, and
-a commit resolves nothing with anybody. It is recognised by its shape rather than
-by the verb, because a hook is told the move and never the command: a commit made
-here has exactly one parent, that parent is the tip the line is being moved off,
-and no other line in the repository carries it yet. A fold never looks like that
-— it lands the tip of a branch, which is a branch that exists.
+a commit resolves nothing with anybody. Its shape is the first half of what says
+so: one parent, that parent the tip the line is being moved off, and no other
+line in the repository carrying it yet. A fold never looks like that — it lands
+the tip of a branch, which is a branch that exists.
+
+Shape alone is not enough, and taking it for enough was this guard's own hole
+(bw-7e8.8). `git update-ref <line> <new> <old>`, handed the tip it is moving off,
+is reported to this hook exactly as a commit is — the real old value and one new
+commit on top of it — and <new> can be a squash built by hand carrying a whole
+feature past the gate, which is the shape of the incident that put the guard here
+in the first place. So the caller is asked as well: a hook is a child of the git
+process making the write and of nothing else, so that process's own words say
+which git command this is, and the carve-out is given to `git commit` alone.
+Everything else that writes one commit onto the tip — a cherry-pick, a rebase, an
+`am`, a pointer moved by hand — is back with the folds, allowed while the slot is
+held.
 
 A person can stand this guard down deliberately by setting MACHINERY_LANDING_OPEN
 (or <BRAND>_LANDING_OPEN, for a project that declared a brand) to anything at
@@ -133,6 +146,57 @@ def git(args, cwd=None):
     return run.stdout.strip() if run.returncode == 0 else ""
 
 
+# Where a process's own words are kept. Linux writes them in `/proc`; everywhere
+# else `ps` answers the same question, losing quoting that a verb never needs.
+CALLER = "/proc/%d/cmdline"
+# The git options that swallow the word after them, so a value is never mistaken
+# for the verb.
+TAKES_A_VALUE = ("-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                 "--exec-path", "--super-prefix", "--config-env")
+
+
+def written_by():
+    """The words of the git command making this write, [] where none can be read.
+
+    Git runs a hook as a direct child of the process doing the write, and the
+    shim in front of this one `exec`s, so the parent is that git command itself
+    and nothing in between.
+    """
+    try:
+        with open(CALLER % os.getppid(), "rb") as fh:
+            said = fh.read()
+        return [word.decode("utf-8", "replace") for word in said.split(b"\0") if word]
+    except OSError:
+        pass
+    try:
+        run = subprocess.run(["ps", "-o", "args=", "-p", str(os.getppid())],
+                             capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except Exception:
+        return []
+    return run.stdout.split() if run.returncode == 0 else []
+
+
+def a_commit(argv):
+    """Whether those words are git making a commit, and nothing else.
+
+    Read strictly, and a caller this cannot make out is not one: what a `False`
+    costs is a slot to be taken or the switch to be set, and what a `True` costs
+    is every hand-moved pointer wearing the manager's own permission.
+    """
+    if not argv or os.path.basename(argv[0]).split(".")[0] != "git":
+        return False
+    at = 1
+    while at < len(argv):
+        word = argv[at]
+        if word in TAKES_A_VALUE:
+            at += 2
+        elif word.startswith("-"):
+            at += 1
+        else:
+            return word == "commit"
+    return False
+
+
 def commit_made_here(old, new, root):
     """Whether this move is one commit written onto the tip, and nothing else.
 
@@ -141,6 +205,10 @@ def commit_made_here(old, new, root):
     carries it — it exists only as the thing about to become the tip. A landing
     fails all three: it moves the line onto the tip of a branch, and that branch
     is a ref that already exists.
+
+    Necessary and not sufficient: a pointer moved by hand onto a commit built to
+    look like this is the same three answers (bw-7e8.8), so `why_refused` asks
+    who made the write as well.
     """
     walk = git(["rev-list", "--parents", "-n", "1", new], root).split()
     if len(walk) != 2 or walk[1] != old:
@@ -194,7 +262,9 @@ def why_refused(old, new, ref, root):
         # first. `git stash` writes one of these on every stash, and refusing it
         # would stop the checkout being tidied at all.
         return ""
-    if commit_made_here(old, new, root):
+    if commit_made_here(old, new, root) and a_commit(written_by()):
+        # The shape of the manager's own commit, made by the command that makes
+        # one. Either half alone lets a squash built by hand walk past (bw-7e8.8).
         return ""
     held = slot_holder(root)
     if held is None:

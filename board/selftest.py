@@ -3028,17 +3028,32 @@ def main():
         "the landing line was written by hand the sha it already holds — no move, " \
         "but no landing either — and the guard said %r" % said
     # The manager's own hand in the shared checkout. The slot queues folds, and a
-    # commit is not one — the guard has to recognise that by the shape of the
-    # move, because a hook is handed the move and never the command.
+    # commit is not one.
     said, moved = by_the_checkout('git commit -q --allow-empty -m "the manager\'s own"')
     assert moved and "landing gate" not in said, \
         "an ordinary commit on the landing line, with no slot held, was refused " \
         "inside the shared checkout: %r" % said
+    # And the same move made by a hand instead of by a commit, which is what the
+    # incident was: `git update-ref <line> <new> <old>`, handed the tip it moves
+    # off, is reported to the hook exactly as a commit is, and <new> is built here
+    # to carry the whole of the waiting work (bw-7e8.8).
+    SQUASH = ('new=$(git commit-tree $(git rev-parse work^{tree}) '
+              '-p $(git rev-parse ours) -m squashed) && '
+              'git update-ref refs/heads/ours $new $(git rev-parse ours)')
+    said, moved = by_the_checkout(SQUASH)
+    assert not moved and "landing gate" in said, \
+        "a whole squashed commit was walked onto the landing line by hand, with " \
+        "no slot held and no landing of any kind, and the guard said %r" % said
+    said, moved = by_the_checkout(SQUASH, holder="someone-1")
+    assert moved, \
+        "the same move with the slot held was refused as well, which leaves the " \
+        "manager no way to put the line right by hand at all: %r" % said
 
     print("ok: inside the checkout, the landing line refuses a hand-moved pointer "
-          "even where it would not have moved, refuses an unslotted fold, takes a "
-          "slotted one, lets the checkout be tidied, and leaves every other ref "
-          "— the board's own above all — alone")
+          "even where it would not have moved and even where it is dressed as a "
+          "commit, refuses an unslotted fold, takes a slotted one, lets the "
+          "checkout be tidied, and leaves every other ref — the board's own above "
+          "all — alone")
 
     # And the guard being there at all, which is `join`'s job. Every case above
     # wires the hook by hand, so all of them stay green in a checkout that has no
