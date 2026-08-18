@@ -187,20 +187,24 @@ test.describe('the chat draws everything the agent does', () => {
     });
   });
 
-  test('a message with no stream behind it is drawn, and only once', async ({ page, request }) => {
+  test('the compact answer is drawn, and drawn exactly once', async ({ page, request }) => {
     await freshChat(request, page);
     await say(page, '/compact');
-    await page.getByTestId('note-row').filter({ hasText: /compact/i }).first().waitFor({ timeout: TURN_MS });
+    const answer = page.getByTestId('note-row').filter({ hasText: /not enough messages to compact/i });
+    await answer.first().waitFor({ timeout: TURN_MS });
 
-    // The kit reports this in two shapes — a status and a message it wrote
-    // itself. Both are kept; one is read. Text has only ever come off the
-    // stream, and a message the kit writes never streams (§8.2.4).
-    const said = await page
+    // The kit reports this in two shapes — a status carrying the reason, and a
+    // message it wrote itself with the same sentence in it. Both are kept in
+    // the log; exactly one is drawn (§8.2.4). It used to assert "at most one",
+    // which zero satisfies, on a machine where the answer may never come at all
+    // (bw-1u1.35).
+    const drawn = await page
       .getByTestId('transcript')
       .evaluate((el) => (el.textContent ?? '').match(/not enough messages to compact/gi)?.length ?? 0);
-    expect(said, 'the same sentence was drawn more than once').toBeLessThanOrEqual(1);
-    await expect(page.getByTestId('transcript')).toContainText(/compact/i);
-    // And his own turn is still drawn exactly once beside it.
+    expect(drawn, 'the compact answer was not drawn exactly once').toBe(1);
+
+    // And it is the machine speaking, not an echo of what he typed.
+    await expect(answer).toHaveCount(1);
     await expect(page.getByTestId('user-message').filter({ hasText: '/compact' })).toHaveCount(1);
   });
 

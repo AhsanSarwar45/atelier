@@ -150,8 +150,8 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 **Work**
 | event | payload |
 |---|---|
-| `tool.started` | `toolCallId, name, input, title, parentToolCallId?` — `input` is kept and drawn behind the row's own click (§8.2.4) |
-| `tool.completed` | `toolCallId, ok, output, error?` — `output` is kept and drawn the same way |
+| `tool.started` | `toolCallId, name, input, title, parentToolCallId?` — `input` is kept and drawn behind the row's own click (§8.2.4), cut to `KEPT` |
+| `tool.completed` | `toolCallId, ok, output, error?` — `output` is kept and drawn the same way, cut the same way |
 | `tool.progress` | `toolCallId, seconds` — how long this call has been running, as the brand counts it (§8.2.2) |
 | `diff` | `toolCallId, path, before, after` — side-by-side changed lines |
 | `todo` | `items[{text,status}]` — the agent's live checklist |
@@ -781,9 +781,32 @@ line reporting a decision opts out of it (bw-1u1.32).
 
 Every rank is stored; only the drawing differs (§4 — the log is the transcript,
 and a `detail` line hidden today must still be there when he presses Ctrl+O).
-Hook events are the volume risk, since an install with `PreToolUse`/`PostToolUse`
-hooks writes two per tool call; they are `detail`, they are small, and the number
-is measured on a real turn rather than assumed.
+
+Measured rather than assumed, with `scripts/measure-quiet.mjs`, 2026-08-18 —
+two turns each running one command, on this machine with this owner's hooks
+installed:
+
+| | events | bytes |
+|---|---|---|
+| the whole log | 59 | 75,751 |
+| quiet lines, every rank | 13 (22%) | 11,981 (16%) |
+
+Inside those 13, two sources account for nearly all of it, and they are
+different shapes of risk:
+
+- **a hook that answers at length** — `hook_response` twice a turn, 8,581 B of
+  the 11,981. One hook on this machine prints 10.7 KB, which is why every body
+  is cut to the same 4,000 characters a command's output is (`KEPT`, bw-1u1.18,
+  bw-1u1.33). An install without hooks pays none of this
+- **`system/status`** — one per API request, six across two turns for 852 B
+  total. The most frequent quiet line and the cheapest; it is `detail`, so it
+  costs a row and no attention
+
+The earlier version of this paragraph named hooks as the risk and left the
+per-request status uncounted (bw-1u1.36). Both are now measured, and the
+measurement also found that neither is where the log's weight actually is: the
+menu of what a chat can do is republished whole every turn and was 78% of those
+75,751 bytes, which is bw-7bj and not a quiet line at all.
 
 ### 8.3 The board tab
 

@@ -82,6 +82,42 @@ export type PastEntry =
   | { kind: 'call'; id: string; name: string; input: Record<string, unknown>; output: string; ok: boolean };
 
 /**
+ * How much of any one body is kept: a command's arguments, what it printed, a
+ * quiet line's whole message. One number, because a reader meeting two of them
+ * on the same row should not find one cut and the other running to fifty
+ * kilobytes (bw-1u1.33).
+ *
+ * The body is there to be READ, and the whole of it is already on disk in the
+ * kit's own record.
+ */
+export const KEPT = 4000;
+
+/** Cut to `KEPT`, saying how much was left out rather than trailing off. */
+export function cut(text: string, kept = KEPT): string {
+  return text.length > kept ? `${text.slice(0, kept)}\n… and ${text.length - kept} more characters` : text;
+}
+
+/**
+ * What a command was asked to do, small enough to read and to store.
+ *
+ * A `Write` or an `Edit` carries the whole file in one of its arguments. That
+ * was cut nowhere — so the first sizeable file the agent touched opened the row
+ * onto every byte of it, and an imported chat wrote every byte into the stored
+ * history as well (bw-1u1.33). Each value is cut where the output is, however
+ * deep it sits: a multi-edit hides whole files one list and one object down.
+ * `depth` is a guard against a value that refers to itself, nothing more.
+ */
+export function trimInput(input: Record<string, unknown>, depth = 4): Record<string, unknown> {
+  const small = (value: unknown, left: number): unknown => {
+    if (typeof value === 'string') return cut(value);
+    if (left <= 0 || value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map((v) => small(v, left - 1));
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, small(v, left - 1)]));
+  };
+  return small(input, depth) as Record<string, unknown>;
+}
+
+/**
  * What a command printed, in a form a reader can read.
  *
  * A result comes back as a string or as the kit's blocks, and a block that is

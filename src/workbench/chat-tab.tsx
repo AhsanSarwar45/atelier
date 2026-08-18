@@ -218,6 +218,27 @@ function Body({ label, text, testId }: { label: string; text: string; testId: st
 }
 
 /**
+ * What a command was asked to do, written out to be read.
+ *
+ * As JSON it was one escaped line — every newline in a file the agent wrote
+ * came back as a literal backslash-n, so the one row a reader most wants to
+ * read was the one they could not (bw-1u1.33). Each argument gets its own
+ * heading and its value beneath it, whole lines intact.
+ */
+function whatItWasAsked(input: Record<string, unknown>): string {
+  const entries = Object.entries(input ?? {});
+  if (entries.length === 0) return '';
+  return entries
+    .map(([key, value]) => {
+      const written = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+      // On one line when it fits there, which is most of them: a path, a flag,
+      // a short command.
+      return written.includes('\n') ? `${key}:\n${written}` : `${key}: ${written}`;
+    })
+    .join('\n');
+}
+
+/**
  * Whether one row is open: the reader's own click, until the control that opens
  * everything moves — which then wins, in both directions.
  *
@@ -255,8 +276,8 @@ function ToolRow({
   const [open, setOpen] = useOpen(openAll);
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
-  const asked = JSON.stringify(item.input ?? {}, null, 2);
-  const hasBody = asked !== '{}' || Boolean(item.output?.trim());
+  const asked = whatItWasAsked(item.input);
+  const hasBody = asked !== '' || Boolean(item.output?.trim());
 
   return (
     <div
@@ -290,7 +311,7 @@ function ToolRow({
         </button>
         {open && (
           <>
-            <Body label="asked" text={asked === '{}' ? '' : asked} testId="tool-input" />
+            <Body label="asked" text={asked} testId="tool-input" />
             <Body label="printed" text={item.output ?? ''} testId="tool-output" />
           </>
         )}

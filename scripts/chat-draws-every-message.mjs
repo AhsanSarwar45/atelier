@@ -74,6 +74,21 @@ const beforeUnknown = drawn.length;
 driver.draw({ type: 'a_kind_this_app_has_never_heard_of', text: 'something the kit invented today' });
 const unknownDrew = drawn.length - beforeUnknown;
 
+// A message the kit wrote ITSELF — no stream behind it, its words only in
+// `message.content`. That arm drew nothing at all before this job, and the live
+// half above cannot guard it: the same sentence arrives as a status first and
+// the second copy is deliberately not drawn twice (bw-1u1.35).
+const beforeSynthetic = drawn.length;
+driver.draw({
+  type: 'assistant',
+  message: {
+    id: 'a-message-the-kit-wrote-itself',
+    model: '<synthetic>',
+    content: [{ type: 'text', text: 'A sentence that never came down the stream.' }],
+  },
+});
+const syntheticLines = drawn.slice(beforeSynthetic).map(loud).filter((t) => /never came down the stream/.test(t));
+
 // And the shape the manager's own answer came in, driven the same way, so the
 // check does not rest on a live session happening to compact.
 const beforeStatus = drawn.length;
@@ -88,6 +103,7 @@ console.log(`kinds of line drawn: ${kinds.join(', ') || 'none'}`);
 console.log(`the compact answer, in the live chat: ${compactLines.length} line(s)`);
 for (const line of compactLines) console.log(`  ${line.slice(0, 160)}`);
 console.log(`an unheard-of kind drew: ${unknownDrew} event(s)`);
+console.log(`a message with no stream behind it drew: ${syntheticLines.length} line(s)`);
 console.log(`a compact status drew: ${statusLines.length} line(s)`);
 
 const wrong = [];
@@ -95,6 +111,7 @@ if (!answered) wrong.push('the session never answered a turn');
 if (compactLines.length === 0) wrong.push('the compact answer reached the chat nowhere');
 if (compactLines.length > 1) wrong.push(`the compact answer was said ${compactLines.length} times`);
 if (unknownDrew === 0) wrong.push('a kind the driver has no branch for was dropped');
+if (syntheticLines.length !== 1) wrong.push(`a message with no stream behind it drew ${syntheticLines.length} lines, not 1`);
 if (statusLines.length !== 1) wrong.push(`a compact status drew ${statusLines.length} lines, not 1`);
 
 console.log(wrong.length ? `FAIL — ${wrong.join('; ')}` : 'PASS');

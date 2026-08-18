@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
-import { resultText } from '../../../src/workbench/imported-history.ts';
+import { cut, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
 /**
@@ -74,38 +74,9 @@ const INFORMATIONAL_RANK: Record<string, NoteRank> = {
 /** The fields a message the app has never seen might keep a human sentence in. */
 const SPOKEN_FIELDS = ['content', 'text', 'message', 'error', 'summary', 'reason', 'result'];
 
-/**
- * How much of a quiet line's body is kept, matching a command's output.
- *
- * The body is there to be READ, and the whole of it is already on disk in the
- * kit's own record. Measured 2026-08-17, one hook on this machine answers with
- * 10.7 KB and fires twice a turn, so keeping every byte would put megabytes of
- * the same paragraph into a long chat (bw-1u1.18, §8.2.5).
- */
-const BODY_KEPT = 4000;
 
-/**
- * The kinds `pump()` translates into something better than a line.
- *
- * The one list, read by `noteFor` (which returns null for exactly these) and by
- * scripts/chat-draws-every-message.mjs (which fails if the kit sends a kind that
- * is neither in here nor drawn as a note). Two lists would drift, and a kind
- * that drifts out of both is drawn nowhere — the fault this job exists for.
- */
-export const TRANSLATED_KINDS = new Set([
-  'system/init',
-  'system/commands_changed',
-  'system/thinking_tokens',
-  'system/local_command_output',
-  'tool_progress',
-  'stream_event',
-  'assistant',
-  'user',
-  'result',
-]);
-
-/** The kit's name for one message, as the tables here spell it. */
-export function kindOf(m: Record<string, any>): string {
+/** The kit's name for one message, as the branches below spell it. */
+function kindOf(m: Record<string, any>): string {
   return m.type === 'system' ? `system/${m.subtype}` : String(m.type ?? 'unknown');
 }
 
@@ -119,16 +90,20 @@ function oneLine(value: unknown, limit = 200): string {
 /**
  * Everything the machine says about itself, as one line and a body.
  *
- * Returns null only for the kinds translated properly elsewhere. Every OTHER
- * message — named here or not — comes back as a note, because a driver with a
- * list of kinds it is willing to hear is what silently lost the manager's
- * `/compact` answer (docs/agent-workbench.md §8.2.4).
+ * Reached only from the last arm of `draw()`, so everything translated properly
+ * has already been dealt with by the time this runs. Every OTHER message —
+ * named below or not — comes back as a note, because a driver with a list of
+ * kinds it is willing to hear is what silently lost the manager's `/compact`
+ * answer (docs/agent-workbench.md §8.2.4).
+ *
+ * There used to be a table of the translated kinds here as well, checked on the
+ * way in. Nothing outside this file read it, the check could never be true, and
+ * its comment promised a cross-check that no longer existed — a safety net made
+ * of a sentence (bw-1u1.34).
  */
-export function noteFor(m: Record<string, any>): Note | null {
+function noteFor(m: Record<string, any>): Note | null {
   const kind = kindOf(m);
-  const whole = () => oneLine(JSON.stringify(m), 4000);
-  // Translated properly elsewhere in pump().
-  if (TRANSLATED_KINDS.has(kind)) return null;
+  const whole = () => oneLine(JSON.stringify(m), KEPT);
 
   switch (kind) {
     // The answer to /compact, and the only place the reason lives.
@@ -345,7 +320,10 @@ export class ClaudeDriver implements Driver {
       kind: note.kind,
       text: note.text,
       // Cut where a command's output is cut, and for the same reason.
-      body: body && body.length > BODY_KEPT ? `${body.slice(0, BODY_KEPT)}\n… and ${body.length - BODY_KEPT} more` : body,
+      // Cut where a command's arguments and its output are cut, and for the
+      // same reason: the body is there to be read, and the whole of it is
+      // already on disk in the kit's own record.
+      body: body === null ? null : cut(body),
     });
   }
 
@@ -784,7 +762,9 @@ export class ClaudeDriver implements Driver {
               type: 'tool.started',
               toolCallId: b.id,
               name: b.name,
-              input,
+              // Trimmed for the row and for the log; the whole of it still goes
+              // to the diff, the checklist and the title below (bw-1u1.33).
+              input: trimInput(input),
               title: toolTitle(b.name, input),
               // Subagent attribution rides on the MESSAGE, not the block.
               parentToolCallId: m.parent_tool_use_id ?? null,
@@ -821,7 +801,7 @@ export class ClaudeDriver implements Driver {
               type: 'tool.completed',
               toolCallId: b.tool_use_id,
               ok: !b.is_error,
-              output: output.slice(0, 4000),
+              output: cut(output),
             });
           }
         }

@@ -151,6 +151,13 @@ that draws one: deleting the message loop's catch-all arm left it green
 (bw-1u1.28). Shown red by deleting that arm — "a kind the driver has no branch
 for was dropped".
 
+It also hands the driver a message the kit wrote ITSELF, with no stream behind
+it and its words only in `message.content` — the arm that drew nothing at all
+before this job. The live half cannot guard that one: the same sentence arrives
+as a status first, and the second copy is deliberately not drawn twice
+(bw-1u1.35). Shown red by switching that arm off — "a message with no stream
+behind it drew 0 lines, not 1".
+
 ```
 node scripts/chat-draws-every-message.mjs
 ```
@@ -218,3 +225,21 @@ the helper's dependency, not the app's.
 A new rule gets a fault injected against it before it is trusted — switch the
 fix off, watch the check name that panel or that card, switch it back on. A
 check that has never been red is not known to work.
+
+## `measure-quiet.mjs`
+
+Not a check — the measurement behind docs/agent-workbench.md §8.2.5. It drives
+the driver through two turns, each running one command, and tallies every event
+the chat would store: how many, how many bytes, and how much of that is the
+quiet lines nobody reads unless they press Ctrl+O.
+
+Run it again whenever that section's numbers are questioned, rather than
+arguing from the shape of the code — the first version of that paragraph priced
+the wrong source entirely (bw-1u1.36), and this run is what found that four
+fifths of a chat's stored bytes are the menu being republished (bw-7bj).
+
+```
+node scripts/measure-quiet.mjs
+```
+
+Needs a signed-in `claude` and spends two short turns.

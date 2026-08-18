@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { pastTranscript, resultText, saidByAnyone, textOf } from '@/workbench/imported-history';
+import { cut, KEPT, pastTranscript, resultText, saidByAnyone, textOf, trimInput } from '@/workbench/imported-history';
 
 describe('reading a chat’s past', () => {
   it('keeps what a person or an agent said', () => {
@@ -134,5 +134,39 @@ describe('what a command printed', () => {
   it('keeps nothing out of a result that carries nothing', () => {
     expect(resultText(null)).toBe('');
     expect(resultText(undefined)).toBe('');
+  });
+});
+
+/**
+ * What a command was ASKED to do, which is the other half of the same row.
+ *
+ * Output was cut in two places and arguments in none, so the first sizeable
+ * file the agent wrote opened the row onto every byte of it — and an imported
+ * chat wrote every byte into the stored history too (bw-1u1.33).
+ */
+describe('what a command was asked to do', () => {
+  const aBigFile = 'x'.repeat(50_000);
+
+  it('cuts a value to the same length the output is cut to, and says how much went', () => {
+    const trimmed = trimInput({ file_path: '/tmp/big.txt', content: aBigFile });
+    expect(trimmed.file_path).toBe('/tmp/big.txt');
+    expect(String(trimmed.content)).toHaveLength(KEPT + '\n… and 46000 more characters'.length);
+    expect(String(trimmed.content)).toContain('… and 46000 more characters');
+  });
+
+  it('leaves a command small enough to read exactly as it stands', () => {
+    expect(trimInput({ command: 'npm run build' })).toEqual({ command: 'npm run build' });
+  });
+
+  it('reaches the values inside a list of edits, where the whole file also hides', () => {
+    const trimmed = trimInput({ edits: [{ old_string: aBigFile, new_string: 'small' }] });
+    const edits = trimmed.edits as { old_string: string; new_string: string }[];
+    expect(edits[0]!.old_string.length).toBeLessThan(aBigFile.length);
+    expect(edits[0]!.new_string).toBe('small');
+  });
+
+  it('cuts nothing that is already short, whatever shape it is', () => {
+    expect(cut('short')).toBe('short');
+    expect(trimInput({ n: 7, on: true, nothing: null })).toEqual({ n: 7, on: true, nothing: null });
   });
 });

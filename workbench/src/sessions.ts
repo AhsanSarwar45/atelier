@@ -11,9 +11,11 @@ import { randomUUID } from 'node:crypto';
 import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
+  cut,
   IMPORTED_MESSAGES,
   pastTranscript,
   toolCallsOf,
+  trimInput,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
@@ -296,7 +298,7 @@ export class Sessions {
         type: 'tool.started',
         toolCallId: entry.id,
         name: entry.name,
-        input: entry.input,
+        input: trimInput(entry.input),
         title: toolTitle(entry.name, entry.input),
         parentToolCallId: null,
       });
@@ -304,7 +306,7 @@ export class Sessions {
         type: 'tool.completed',
         toolCallId: entry.id,
         ok: entry.ok,
-        output: entry.output.slice(0, 4000),
+        output: cut(entry.output),
       });
     }
   }
