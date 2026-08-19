@@ -257,6 +257,15 @@ Fixed at launch, every session:
   sidecar launches `claude` in the owner's normal environment so the
   subscription he already signed into in the terminal is what runs
   (decision 5).
+- **His own rules are watched** — `includeHookEvents: true`. The kit's default
+  is false, and with it off only `SessionStart` and `Setup` arrive: the grey
+  line this app promises for "a hook that failed" (§8.2.4) could not fire for a
+  `PreToolUse` or a `PostToolUse` rule at all, which is the kind that fails
+  while the agent is working. Measured 2026-08-18 against a project whose
+  `PostToolUse` rule exits non-zero: with the flag off, four hook lines and no
+  refusal; with it on, `Hook PostToolUse:Bash error: …` in the chat
+  (bw-1u1.38). A rule starting and a rule finishing quietly are `detail` lines
+  and carry no body, which is what keeps the flag cheap.
 - `--include-partial-messages` for word-by-word text, and
   `--forward-subagent-text` so subagent output arrives with
   `parent_tool_use_id` set and can be nested in the feed.
@@ -769,13 +778,41 @@ when `isSynthetic` is set, which is the flag that separates a turn the kit wrote
 from one of his (his own turn is written to the log on send and must not be
 drawn twice).
 
-**A mode change says so.** Switching permission mode mid-chat writes a `note`.
+**A line that was cut can always be opened.** A quiet line's text is cut at two
+hundred characters; the row's own toggle is disabled when there is no body, so a
+long notification or a subagent's description ended in an ellipsis with the rest
+of it reachable nowhere — against this section's own promise that the body of
+anything sits behind a click. Every quiet line whose text was cut now carries
+one, held where the line is built rather than in each branch so the next branch
+cannot forget it (bw-1u1.39). The converse holds too: a line that says
+everything it has keeps no body, and its toggle stays shut — a hook starting
+names the rule and the moment, and its line already says both, which is what
+keeps `includeHookEvents` (§3.1) cheap.
+
+**One cap, everywhere the same file arrives.** A `Write` or an `Edit` carries a
+whole file, and it reaches the log three times over: as the call's arguments, as
+the side-by-side diff, and — in the mode that asks — on the permission card. All
+three are cut to `KEPT`. The first was capped and the other two were not, so one
+sizeable file still landed whole in the record; the card's copy was worse than
+useless, because the browser's card keeps no arguments at all and not one byte
+of it was ever drawn (bw-1u1.40, bw-1u1.42). What the kit is *answered* with is
+never cut — only what is stored and shown.
+
+**A mode change says so, whoever made it.** Switching permission mode mid-chat writes a `note`.
 A chat that quietly stopped asking about tools is a trap, and bypass is now
 reachable from the picker (§3.1). It says so *every* time, including the same
 mode picked twice: a quiet line is otherwise skipped when the same sentence has
 just gone past — which is how one thing the kit says in two shapes is drawn once
 — and that rule cannot tell a repeated sentence from a repeated decision, so a
 line reporting a decision opts out of it (bw-1u1.32).
+
+The tool changes the mode by itself too — approving a plan ends plan mode — and
+that path said nothing and left the picker claiming the old mode, which is the
+same trap on the one road the first fix did not cover. Every `system/status`
+message carries the mode in force, so the driver compares it with what it last
+knew and, when it differs, says the line and republishes the pinned mode; the
+sidecar stores it, so the chat does not wake up back in the old mode
+(bw-1u1.43).
 
 #### 8.2.5 What this costs the log
 

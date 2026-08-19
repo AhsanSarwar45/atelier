@@ -102,6 +102,19 @@ function oneLine(value: unknown, limit = 200): string {
  * of a sentence (bw-1u1.34).
  */
 function noteFor(m: Record<string, any>): Note | null {
+  const note = noteBody(m);
+  // A line cut at two hundred characters with nothing behind it is a line whose
+  // rest is reachable nowhere: the row's own toggle is disabled when there is no
+  // body, and §8.2.4 promises that the body of anything sits behind a click.
+  // Held here rather than in each branch, so the next branch cannot forget
+  // (bw-1u1.39).
+  if (note && note.body === undefined && note.text.endsWith('…')) {
+    note.body = oneLine(JSON.stringify(m), KEPT);
+  }
+  return note;
+}
+
+function noteBody(m: Record<string, any>): Note | null {
   const kind = kindOf(m);
   const whole = () => oneLine(JSON.stringify(m), KEPT);
 
@@ -114,7 +127,7 @@ function noteFor(m: Record<string, any>): Note | null {
       if (m.compact_result === 'success') return { rank: 'note', kind, text: 'Compacted this chat.' };
       // 'requesting' on every single request, 'compacting' while it works: the
       // machine breathing, not something it is telling him.
-      return { rank: 'detail', kind, text: `Status: ${oneLine(m.status ?? 'none')}` };
+      return { rank: 'detail', kind, text: `Status: ${oneLine(m.status ?? 'none')}`, body: String(m.status ?? '') };
     }
 
     case 'system/compact_boundary': {
@@ -132,7 +145,7 @@ function noteFor(m: Record<string, any>): Note | null {
       };
 
     case 'system/notification':
-      return { rank: m.priority === 'low' ? 'detail' : 'note', kind, text: oneLine(m.text) };
+      return { rank: m.priority === 'low' ? 'detail' : 'note', kind, text: oneLine(m.text), body: String(m.text ?? '') };
 
     case 'system/api_retry':
       return {
@@ -156,24 +169,31 @@ function noteFor(m: Record<string, any>): Note | null {
     case 'system/model_refusal_fallback':
       return { rank: 'note', kind, text: `${m.original_model} refused; ${m.direction} to ${m.fallback_model}` };
 
-    // A hook that worked is the machine breathing; one that did not is his to see.
+    // A hook that worked is the machine breathing; one that did not is his to
+    // see. Neither keeps a body it has nothing to put in: a rule starting says
+    // only which rule and which moment, and its line already says both. With
+    // every hook event now asked for (§3.1), that body was two thirds of what
+    // an install with hooks stored (bw-1u1.38, §8.2.5).
     case 'system/hook_started':
     case 'system/hook_progress':
-      return { rank: 'detail', kind, text: `Hook ${m.hook_name} (${m.hook_event})`, body: whole() };
+      return { rank: 'detail', kind, text: `Hook ${m.hook_name} (${m.hook_event})` };
 
     case 'system/hook_response': {
       const ok = m.outcome === 'success';
       const trouble = oneLine(m.stderr || m.output || '');
+      const said = [m.output, m.stdout, m.stderr].filter(Boolean).join('\n');
       return {
         rank: ok ? 'detail' : 'note',
         kind,
         text: ok ? `Hook ${m.hook_name} ran` : `Hook ${m.hook_name} ${m.outcome}${trouble ? `: ${trouble}` : ''}`,
-        body: [m.output, m.stdout, m.stderr].filter(Boolean).join('\n') || whole(),
+        // What it printed, when it printed anything. A rule that succeeded in
+        // silence has nothing behind its line, and says so by not opening.
+        body: said || (ok ? undefined : whole()),
       };
     }
 
     case 'system/task_started':
-      return { rank: 'detail', kind, text: `Sent off: ${oneLine(m.description)}` };
+      return { rank: 'detail', kind, text: `Sent off: ${oneLine(m.description)}`, body: String(m.description ?? '') };
 
     case 'system/task_notification':
       return { rank: 'note', kind, text: `${oneLine(m.summary)} (${m.status})`, body: whole() };
@@ -187,7 +207,7 @@ function noteFor(m: Record<string, any>): Note | null {
       };
 
     case 'system/worker_shutting_down':
-      return { rank: 'note', kind, text: `Shutting down: ${oneLine(m.reason)}` };
+      return { rank: 'note', kind, text: `Shutting down: ${oneLine(m.reason)}`, body: String(m.reason ?? '') };
 
     case 'system/plugin_install':
       return {
@@ -200,7 +220,7 @@ function noteFor(m: Record<string, any>): Note | null {
       return { rank: 'note', kind, text: `Could not mirror this chat: ${oneLine(m.error)}`, body: whole() };
 
     case 'tool_use_summary':
-      return { rank: 'detail', kind, text: oneLine(m.summary) };
+      return { rank: 'detail', kind, text: oneLine(m.summary), body: String(m.summary ?? '') };
 
     case 'auth_status':
       return {
@@ -387,10 +407,13 @@ export class ClaudeDriver implements Driver {
   private emitDiff(toolCallId: string, name: string, input: Record<string, unknown>): void {
     const path = String(input.file_path ?? '');
     if (!path) return;
+    // Cut where a command's arguments and its output are cut. A Write carries
+    // the whole file here too, three lines after the arguments that were
+    // capped, and it went into the log whole (bw-1u1.40).
     if (name === 'Edit' && typeof input.old_string === 'string' && typeof input.new_string === 'string') {
-      this.emit({ type: 'diff', toolCallId, path, before: input.old_string, after: input.new_string });
+      this.emit({ type: 'diff', toolCallId, path, before: cut(input.old_string), after: cut(input.new_string) });
     } else if (name === 'Write' && typeof input.content === 'string') {
-      this.emit({ type: 'diff', toolCallId, path, before: '', after: input.content });
+      this.emit({ type: 'diff', toolCallId, path, before: '', after: cut(input.content) });
     }
   }
 
@@ -453,6 +476,13 @@ export class ClaudeDriver implements Driver {
         allowDangerouslySkipPermissions: true,
         // Word-by-word text. Without this only whole messages arrive.
         includePartialMessages: true,
+        // His own rules, when they fire and when they fail. The kit's default
+        // is false, and only SessionStart and Setup arrive without it — so the
+        // grey line this app promises for "a hook that failed" could not fire
+        // for a PreToolUse or PostToolUse rule at all, which is exactly the
+        // kind that fails while the agent is working (bw-1u1.38, §8.2.4).
+        // They are `detail` lines, so they cost a row and no attention.
+        includeHookEvents: true,
         // Decision 6: nothing attaches unless the owner asks for it.
         strictMcpConfig: true,
         // His own machine's commands, skills and settings — the same ones his

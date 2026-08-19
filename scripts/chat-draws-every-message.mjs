@@ -15,6 +15,9 @@
  *  - a message of a kind this app has never heard of, handed straight to the
  *    driver, because that is the whole rule: no list of kinds it is willing to
  *    hear (docs/agent-workbench.md §8.2.4)
+ *  - a message the kit wrote itself, a command carrying a whole file, and a
+ *    quiet line longer than one line — the three shapes that were drawn wrong
+ *    rather than not at all (bw-1u1.35, .33, .40, .39)
  *
  *   node scripts/chat-draws-every-message.mjs
  *
@@ -104,6 +107,18 @@ driver.draw({
 });
 const asked = drawn.slice(beforeBig).find((e) => e.type === 'tool.started');
 const askedSize = asked ? String(asked.input.content ?? '').length : -1;
+// The same file arrives a second time as the side-by-side diff, which went into
+// the log whole after the arguments beside it had been cut (bw-1u1.40).
+const shownDiff = drawn.slice(beforeBig).find((e) => e.type === 'diff');
+const diffSize = shownDiff ? String(shownDiff.after ?? '').length : -1;
+
+// A quiet line longer than one line. Its text is cut at two hundred characters,
+// and without a body the row's toggle is disabled — so the rest of it was
+// reachable nowhere (bw-1u1.39).
+const beforeLong = drawn.length;
+driver.draw({ type: 'system', subtype: 'notification', text: 'x'.repeat(500) });
+const longNote = drawn.slice(beforeLong).find((e) => e.type === 'note');
+const longBody = longNote ? String(longNote.body ?? '').length : -1;
 
 // And the shape the manager's own answer came in, driven the same way, so the
 // check does not rest on a live session happening to compact.
@@ -122,6 +137,8 @@ console.log(`an unheard-of kind drew: ${unknownDrew} event(s)`);
 console.log(`a message with no stream behind it drew: ${syntheticLines.length} line(s)`);
 console.log(`a compact status drew: ${statusLines.length} line(s)`);
 console.log(`a 60,000-character argument was stored as: ${askedSize} characters`);
+console.log(`the same file, as a diff, was stored as: ${diffSize} characters`);
+console.log(`a 500-character quiet line kept a body of: ${longBody} characters`);
 
 const wrong = [];
 if (!answered) wrong.push('the session never answered a turn');
@@ -131,6 +148,8 @@ if (unknownDrew === 0) wrong.push('a kind the driver has no branch for was dropp
 if (syntheticLines.length !== 1) wrong.push(`a message with no stream behind it drew ${syntheticLines.length} lines, not 1`);
 if (statusLines.length !== 1) wrong.push(`a compact status drew ${statusLines.length} lines, not 1`);
 if (askedSize < 0 || askedSize > 4200) wrong.push(`a 60,000-character argument was kept as ${askedSize} characters`);
+if (diffSize < 0 || diffSize > 4200) wrong.push(`the same file as a diff was kept as ${diffSize} characters`);
+if (longBody !== 500) wrong.push(`a 500-character quiet line kept a body of ${longBody} characters, not 500`);
 
 console.log(wrong.length ? `FAIL — ${wrong.join('; ')}` : 'PASS');
 process.exit(wrong.length ? 1 : 0);
