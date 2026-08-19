@@ -421,6 +421,12 @@ export class Sessions {
       this.store.rememberBeadLink(sessionId, full.beadId, full.via);
     } else if (full.type === 'report.available') {
       this.store.rememberReportLink(sessionId, full.project, full.slug);
+    } else if (full.type === 'session.pinned' && full.permissionMode !== null) {
+      // The mode is re-pinned on every resume from what is stored (§3.1), so a
+      // mode the tool changed by itself — approving a plan ends plan mode — has
+      // to be written down here or the chat wakes up back in the old one
+      // (bw-1u1.43).
+      this.store.updateSession(sessionId, { permissionMode: full.permissionMode });
     }
 
     // What was said and what it cost, folded out of the log as it goes by, so

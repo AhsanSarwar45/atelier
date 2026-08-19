@@ -18,6 +18,8 @@
  *  - a message the kit wrote itself, a command carrying a whole file, and a
  *    quiet line longer than one line — the three shapes that were drawn wrong
  *    rather than not at all (bw-1u1.35, .33, .40, .39)
+ *  - a mode the tool changed by itself, and the permission card for a big
+ *    write: the two places the job's own rules did not reach (bw-1u1.43, .42)
  *
  *   node scripts/chat-draws-every-message.mjs
  *
@@ -120,6 +122,28 @@ driver.draw({ type: 'system', subtype: 'notification', text: 'x'.repeat(500) });
 const longNote = drawn.slice(beforeLong).find((e) => e.type === 'note');
 const longBody = longNote ? String(longNote.body ?? '').length : -1;
 
+// A mode the tool changed by itself. Every status carries the mode in force;
+// the chat only ever said so when the change came from its own menu, so
+// approving a plan left the picker claiming plan with nothing said (bw-1u1.43).
+const beforeMode = drawn.length;
+driver.draw({ type: 'system', subtype: 'status', status: 'requesting', permissionMode: 'acceptEdits' });
+const modeSaid = drawn.slice(beforeMode).map(loud).filter((t) => /Permission mode is now acceptEdits/.test(t));
+const modeRepinned = drawn
+  .slice(beforeMode)
+  .filter((e) => e.type === 'session.pinned' && e.permissionMode === 'acceptEdits').length;
+// And the same mode again, which is what arrives on every single API request.
+const beforeSameMode = drawn.length;
+driver.draw({ type: 'system', subtype: 'status', status: 'requesting', permissionMode: 'acceptEdits' });
+const modeSaidAgain = drawn.slice(beforeSameMode).map(loud).filter((t) => /Permission mode is now/.test(t)).length;
+
+// The card that asks about a call carries the same arguments the call does, and
+// they were cut on the row and not on the card (bw-1u1.42). No agent is needed:
+// the driver's own permission handler is what the kit calls.
+const beforeAsk = drawn.length;
+void driver.onPermissionRequest('Write', { file_path: '/tmp/big.txt', content: 'x'.repeat(60_000) }, {});
+const card = drawn.slice(beforeAsk).find((e) => e.type === 'ask.permission');
+const cardSize = card ? String(card.input.content ?? '').length : -1;
+
 // And the shape the manager's own answer came in, driven the same way, so the
 // check does not rest on a live session happening to compact.
 const beforeStatus = drawn.length;
@@ -139,6 +163,9 @@ console.log(`a compact status drew: ${statusLines.length} line(s)`);
 console.log(`a 60,000-character argument was stored as: ${askedSize} characters`);
 console.log(`the same file, as a diff, was stored as: ${diffSize} characters`);
 console.log(`a 500-character quiet line kept a body of: ${longBody} characters`);
+console.log(`a mode the tool changed by itself said: ${modeSaid.length} line(s), repinned ${modeRepinned} time(s)`);
+console.log(`the same mode again said: ${modeSaidAgain} line(s)`);
+console.log(`a 60,000-character permission card carried: ${cardSize} characters`);
 
 const wrong = [];
 if (!answered) wrong.push('the session never answered a turn');
@@ -150,6 +177,10 @@ if (statusLines.length !== 1) wrong.push(`a compact status drew ${statusLines.le
 if (askedSize < 0 || askedSize > 4200) wrong.push(`a 60,000-character argument was kept as ${askedSize} characters`);
 if (diffSize < 0 || diffSize > 4200) wrong.push(`the same file as a diff was kept as ${diffSize} characters`);
 if (longBody !== 500) wrong.push(`a 500-character quiet line kept a body of ${longBody} characters, not 500`);
+if (modeSaid.length !== 1) wrong.push(`a mode the tool changed by itself said ${modeSaid.length} lines, not 1`);
+if (modeRepinned !== 1) wrong.push(`a mode the tool changed by itself repinned ${modeRepinned} times, not 1`);
+if (modeSaidAgain !== 0) wrong.push(`the same mode arriving again said ${modeSaidAgain} lines, not 0`);
+if (cardSize < 0 || cardSize > 4200) wrong.push(`a 60,000-character permission card carried ${cardSize} characters`);
 
 console.log(wrong.length ? `FAIL — ${wrong.join('; ')}` : 'PASS');
 process.exit(wrong.length ? 1 : 0);

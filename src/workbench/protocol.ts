@@ -109,7 +109,12 @@ export type WbpEvent = EventBase &
         models: ModelChoice[];
         permissionModes: string[];
       }
-    /** What the session is pinned to now — after the owner changed one of them. */
+    /**
+     * What the session is set to now — after the owner changed one of them from
+     * the picker, or after the tool changed one by itself (approving a plan
+     * ends plan mode). A field that is `null` is one this message says nothing
+     * about, and the reader keeps what it had (bw-1u1.43).
+     */
     | { type: 'session.pinned'; permissionMode: string | null; model: string | null }
     | { type: 'session.ended'; reason: string }
     | { type: 'message.started'; messageId: string; role: 'user' | 'assistant' }

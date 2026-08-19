@@ -293,6 +293,17 @@ export class ClaudeDriver implements Driver {
   private awaitingAnswer = false;
   /** When the last thinking-progress line was sent, so a long think is not a flood. */
   private lastThinkingAt = 0;
+  /**
+   * The permission mode this session is actually in, as far as anything here
+   * knows: what it was pinned to, or the last change either side made.
+   *
+   * The tool changes it by itself — approving a plan ends plan mode — and that
+   * left the picker claiming the old mode with nothing said, which is the trap
+   * this job exists to close, on the one road the first fix did not cover. Every
+   * `system/status` carries the mode in force, so this is what it is compared
+   * against (bw-1u1.43).
+   */
+  private mode = '';
   /** TaskCreate calls awaiting the result that carries the task's id. */
   private pendingTodo = new Map<string, { text: string }>();
   /**
@@ -419,6 +430,7 @@ export class ClaudeDriver implements Driver {
 
   async start(opts: StartOptions): Promise<void> {
     this.emit = opts.emit;
+    this.mode = opts.permissionMode ?? '';
 
     const self = this;
     async function* prompts() {
@@ -512,8 +524,12 @@ export class ClaudeDriver implements Driver {
     void this.publishMenu(null);
   }
 
-  /** The permission card, and the promise the SDK is blocked on until it is clicked. */
-  private onPermissionRequest(
+  /**
+   * The permission card, and the promise the SDK is blocked on until it is
+   * clicked. Public for the same reason `draw` is: the standing check drives
+   * THIS rather than a copy of it (scripts/README.md).
+   */
+  onPermissionRequest(
     toolName: string,
     input: Record<string, unknown>,
     o: { suggestions?: PermissionUpdate[] },
@@ -525,7 +541,12 @@ export class ClaudeDriver implements Driver {
         type: 'ask.permission',
         askId,
         toolName,
-        input,
+        // Cut where the call's own arguments and its output are cut. The card
+        // for a Write carries the whole file, one method away from the cap
+        // bw-1u1.33 put on the same bytes — and every chat in the asking mode
+        // is the ones that pays it. The kit is still ANSWERED with the whole
+        // input: `this.asks` above keeps it (bw-1u1.42).
+        input: trimInput(input),
         title: toolTitle(toolName, input),
         options: [
           { id: 'allow_once', label: 'Allow once', kind: 'allow_once' },
@@ -603,8 +624,29 @@ export class ClaudeDriver implements Driver {
 
   async setMode(mode: string): Promise<void> {
     await this.q?.setPermissionMode(mode as never);
-    // Said out loud, in the chat it happened to: a chat that quietly stopped
-    // asking about tools is a trap (§8.2.4).
+    this.modeIsNow(mode);
+  }
+
+  /**
+   * The mode is now this — said once, however it got there.
+   *
+   * A change made from the picker and one the tool made by itself end here
+   * alike: the line is said, and the pinned mode is republished so the picker
+   * and the header stop claiming the old one. Saying it out loud is the point —
+   * a chat that quietly stopped asking about tools is a trap (§8.2.4) — and so
+   * is saying it every time, including the same mode picked twice, which is why
+   * it opts out of the rule that skips a sentence just said (bw-1u1.32).
+   *
+   * Nothing is said when nothing changed: a status arrives on every single API
+   * request and carries the mode each time (bw-1u1.43).
+   */
+  private modeIsNow(mode: string): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    // `model: null` is "this message says nothing about the model" — see
+    // protocol.ts. The sidecar stores the mode off this event, so a chat that
+    // goes to sleep does not wake up back in the old one (§3.1).
+    this.emit({ type: 'session.pinned', permissionMode: mode, model: null });
     this.note({ rank: 'note', kind: 'mode', text: `Permission mode is now ${mode}.`, always: true });
   }
 
@@ -684,6 +726,12 @@ export class ClaudeDriver implements Driver {
   draw(m: Record<string, any>): void {
     switch (m.type) {
       case 'system':
+        // Every status carries the mode in force, and the tool changes it by
+        // itself (bw-1u1.43). Read before anything else in this arm, because
+        // the same message is then drawn as an ordinary quiet line below.
+        if (m.subtype === 'status' && typeof m.permissionMode === 'string' && m.permissionMode) {
+          this.modeIsNow(m.permissionMode);
+        }
         if (m.subtype === 'init') {
           this.emit({
             type: 'session.started',

@@ -161,7 +161,32 @@ behind it drew 0 lines, not 1".
 And a command carrying a whole file in its arguments, because what a command
 printed was cut and what it was asked to do was cut nowhere (bw-1u1.33). Shown
 red by removing that cut — "a 60,000-character argument was kept as 60000
+characters". The same file reaches the log twice more, as the side-by-side diff
+and as the permission card every asking chat writes, and both were uncut
+(bw-1u1.40, .42); shown red by removing each — "the same file as a diff was kept
+as 60000 characters", "a 60,000-character permission card carried 60000
 characters".
+
+A quiet line longer than one line, because its text is cut at two hundred
+characters and a row with no body cannot be opened (bw-1u1.39). Shown red by
+removing that body — "a 500-character quiet line kept a body of 0 characters,
+not 500".
+
+And a mode the tool changed by ITSELF. The chat only said a mode changed when
+the change came from its own menu, so approving a plan left the picker claiming
+plan with nothing said — the same trap this job exists to close, on the one road
+the first fix did not cover (bw-1u1.43). Two rules, because a status carrying
+the mode arrives on every single API request: it says so once when the mode
+differs, and not at all when it does not. Shown red both ways — "a mode the tool
+changed by itself said 0 lines, not 1" and "the same mode arriving again said 1
+lines, not 0".
+
+That last one is driven rather than acted out in a browser on purpose: whether
+the agent chooses to call `ExitPlanMode` is the model's decision, and a standing
+check that depends on it is a check that goes red for no reason. That it really
+happens was measured instead, 2026-08-19 — a session pinned to `plan`, one turn
+asking for a plan, the card approved: `[tool] ExitPlanMode`, `[pinned] default`,
+`Permission mode is now default.`
 
 ```
 node scripts/chat-draws-every-message.mjs

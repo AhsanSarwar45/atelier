@@ -288,8 +288,11 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'session.pinned':
-      next.permissionMode = e.permissionMode;
-      next.model = e.model;
+      // A null field says nothing about that setting; what was there stays.
+      // The tool changing the mode by itself reports only the mode, and it must
+      // not blank the model on its way past (bw-1u1.43).
+      if (e.permissionMode !== null) next.permissionMode = e.permissionMode;
+      if (e.model !== null) next.model = e.model;
       return next;
 
     case 'cost':
