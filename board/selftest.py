@@ -2128,6 +2128,47 @@ def main():
     print("ok: a close moves the run on under the name stamped on that very "
           "command, and under the session's own name when nothing stamped it")
 
+    # The opening text is the only place most of this is written down, and it is
+    # handed to every session before it reads a line of code. A run of steps typed
+    # out there by hand goes stale the day the playbook changes, which is exactly
+    # what happened to the eleven-step one (bw-a6o.2).
+    prime = hook("board-prime")
+    keep_prime = (prime.bc.bd, prime.bc.actor, prime.bc.load, prime.bc.save,
+                  prime.bc.reviewing, prime.bc.board_root)
+    prime.bc.bd = lambda args, root=None: (True, "[]")
+    prime.bc.actor = lambda sid, cwd: "tree-a1b2c3d4"
+    prime.bc.load = lambda sid: {"last_stop": T}
+    prime.bc.save = lambda sid, state: None
+    prime.bc.reviewing = lambda: ""
+    prime.bc.board_root = lambda cwd: ROOT
+    sys.stdin = io.StringIO(json.dumps({"session_id": "selftest", "cwd": ROOT}))
+    spoke = io.StringIO()
+    keep_out, sys.stdout = sys.stdout, spoke
+    try:
+        prime.main()
+    finally:
+        sys.stdout = keep_out
+        (prime.bc.bd, prime.bc.actor, prime.bc.load, prime.bc.save,
+         prime.bc.reviewing, prime.bc.board_root) = keep_prime
+    told = json.loads(spoke.getvalue())["hookSpecificOutput"]["additionalContext"]
+
+    listed = ", ".join(("[%s]" % s) if spine.tier(s) != spine.MUST else s
+                       for s in spine.ORDER)
+    assert listed in told, \
+        "the opening text hands a session a run of steps that is not the one the " \
+        "pour runs — it should read %r" % listed
+    assert "--skip" not in told, \
+        "the opening text still asks a job to write a refusal for every step it " \
+        "does not run, which the cut stopped demanding"
+    assert re.search(r"closing a piece hands you", told), \
+        "the opening text still tells a session to claim every step by hand"
+    assert re.search(r"checks step is the project's own checks command", told), \
+        "the opening text does not say what the checks step runs or when"
+
+    print("ok: the opening text a session is handed prints the run of steps the "
+          "pour actually runs, asks for no refusal for the ones it skips, and says "
+          "the claim and the checks carry the whole job")
+
     assert stopping([{"id": "c", "t": T + 5}], [{"id": "c", "t": T + 40}], []), \
         "a turn that held a card through every edit and closed it was refused"
     assert stopping([{"id": "c", "t": T + 5}], [], ["c"]), \

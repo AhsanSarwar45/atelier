@@ -46,6 +46,7 @@ SPINE = "board/spine.py"
 POUR = "board/job"
 RUN = "board/run.py"
 TOUCH = "hooks/board-touch.py"
+PRIME = "hooks/board-prime.py"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -423,6 +424,22 @@ FAULTS = [
      TOUCH,
      lambda s: s.replace("run.advance(cid, root, closing_actor(cmd, data))",
                          "run.advance(cid, root)")),
+
+    # The opening text every session is handed before it reads any code: a run of
+    # steps written out there by hand, and the refusal the cut stopped asking for
+    # (bw-a6o.2).
+    ("the opening text spells its own run of steps instead of the playbook's", PRIME,
+     lambda s: s.replace('        steps=", ".join(("[%s]" % s) if spine.tier(s) '
+                         "!= spine.MUST else s\n"
+                         "                        for s in spine.ORDER))]",
+                         '        steps="worktree, [clarify], work, [prove], '
+                         'verify, review, land")]')),
+    ("a session is still told to write a refusal for every step it does not run",
+     PRIME,
+     lambda s: s.replace("  --steps <the optional ones it runs>`, which creates "
+                         "the goal and its first step.",
+                         "  --steps <the ones it runs> --skip <one it does not>="
+                         '"why"`, which creates the goal.')),
 ]
 
 

@@ -20,6 +20,9 @@ RULES = """# Board — the only place work state lives
 Your board name: {name} (stamped onto your board commands for you).
 
 Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --reason="..."`.
+One claim carries the whole job: closing a piece hands you whatever opens after it —
+the next step, or the next work item nobody is holding — so nothing after the first
+card is claimed by hand.
 
 - Changing code requires a claimed card. The stop gate refuses to finish a turn without one.
 - A fault you find goes one of two ways before the turn ends, never into your head alone.
@@ -35,17 +38,18 @@ Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --r
   The pour tool requires them and the stop gate refuses a turn that made a card without them.
 - Cards are never written by hand; `bd create` is refused. A job opens with
   `{pour} new --what … --evidence … --done … --area … --kind …
-  --steps <the ones it runs> --skip <one it does not>="why"`, which creates the goal
-  and its first step. Closing a step opens the next one, so a job never shows a step
+  --steps <the optional ones it runs>`, which creates the goal and its first step.
+  Closing a step opens the next one and hands it to you, so a job never shows a step
   nobody has thought about yet. A goal is not claimable: claim its step. Promote a
   find with `job new --source <id> …`.
-- The playbook IS the run of steps, and the pour will not guess it:
-  {steps}. The bracketed ones are answered one by one — named
-  in `--steps`, or dropped with a reason that stays on the goal. The rest are
-  mandatory. A speed claim in `--done` selects benchmark by itself and cannot drop it.
+- The playbook IS the run of steps: {steps}. The bracketed ones
+  run only when `--steps` names them, and nothing is owed for the ones it does not.
+  The rest are mandatory. A speed claim in `--done` selects benchmark by itself and
+  cannot be dropped; a document named in `--done` or in `--record` selects record.
 - Every step is proved by one of three things, and the close gate knows which:
   a commit naming THAT step on main; a note carrying its own evidence (a run with its
-  number, a source, the manager's words, the review's points); or an outside fact —
+  number, the exact command the checks step ran and the count it came back with, a
+  source, the manager's words, the review's points); or an outside fact —
   you are standing in the worktree, the tree and branch are gone, the slot is free.
   A step that declared it makes no code cannot close if this session edited the project
   while holding it.
@@ -53,6 +57,10 @@ Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --r
   `{pour} under <goal> --do "<what to do>|<how we know it is done>" --do …`.
   The run waits there for the last item to close. A card with open children is a
   container and cannot be claimed.
+- The checks step is the project's own checks command, run once over everything the
+  job built and in front of the reader — not per edit, and not from the commit hook,
+  which no longer runs it. Its note carries the exact command and the count it came
+  back with. A project that declares none says on the card what it ran instead.
 - The board carries the running order and the running notes
   (`bd update <id> --append-notes="..."`). Docs and comments may name a card and
   nothing else: no TODO lines, no handoff files, no plan-in-a-doc.
