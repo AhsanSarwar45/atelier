@@ -476,9 +476,17 @@ def run() -> int:
         failures.append("what the build could not check was counted as words to plain up")
     build.card_state = lambda card, project, base=None: "open"
 
+    # what the build could not check reaches the line handed over with the link,
+    # or a page still asking about unconfirmed work goes out looking whole
+    said = build.tally("x" * 1024, GOOD, [], ["question 1 says it is holding up x.2"])
+    if "nobody could confirm" not in said:
+        failures.append(f"the line handed over said nothing about what was unchecked — {said}")
+    if "nobody could confirm" in build.tally("x" * 1024, GOOD, [], []):
+        failures.append("a fully checked page was reported as unconfirmed")
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 36 - len(failures)}/{len(CASES) + 36} report gates hold")
+    print(f"{len(CASES) + 38 - len(failures)}/{len(CASES) + 38} report gates hold")
     return 1 if failures else 0
 
 

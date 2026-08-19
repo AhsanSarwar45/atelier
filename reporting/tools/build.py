@@ -511,6 +511,23 @@ def verify(page: str) -> bool:
     return hashlib.sha256(page.replace(m.group(1), STAMP).encode("utf-8")).hexdigest()[:32] == m.group(1)
 
 
+def tally(page: str, spec: dict, warnings: list, notes: list) -> str:
+    """What rides beside the link when the page is handed over.
+
+    Everything the reader of that line would act on: how big it is, how much of
+    it there is, the words to plain up, and what the build could not check. A
+    page still asking about work nobody could confirm goes out looking whole
+    unless this line says so.
+    """
+    parts = [f"{len(page) / 1024:.0f} KB", f"{len(spec['content'])} content sections"]
+    if warnings:
+        parts.append(f"{len(warnings)} words to plain up")
+    if notes:
+        n = len(notes)
+        parts.append(f"{n} question{'s' if n > 1 else ''} nobody could confirm is still live")
+    return ", ".join(parts)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("spec", type=Path)
@@ -558,14 +575,12 @@ def main() -> int:
         return 1
 
     args.out.write_text(page, encoding="utf-8")
-    parts = [f"{len(page) / 1024:.0f} KB", f"{len(spec['content'])} content sections"]
-    if warnings:
-        parts.append(f"{len(warnings)} words to plain up")
+    said = tally(page, spec, warnings, ctx.notes)
     link, why = handover(args.spec, args.out)
     if why:
-        parts.append(why)
+        said += f", {why}"
     # The link IS the deliverable: it is what the manager is handed in chat.
-    print(f"{link}  ({', '.join(parts)})")
+    print(f"{link}  ({said})")
     return 0
 
 
