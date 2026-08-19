@@ -20,7 +20,6 @@ import {
   Hand,
   ListTree,
   Loader2,
-  MessageSquarePlus,
   PanelLeft,
   Paperclip,
   Receipt,
@@ -942,16 +941,22 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-open-all={openAll}
           onClick={flipOpenAll}
         />
-        <ToolButton
-          icon={<MessageSquarePlus />}
-          label="New chat"
-          emphasis="loud"
-          className="ml-auto"
+        {/* The one control on this bar that says what it does in words. Every
+            other tool here is a picture, and a picture is right for a thing you
+            reach for once you know the bar; starting a conversation is the first
+            thing a reader wants and the one he was hunting for (bw-4wcd.8). */}
+        <Button
+          size="sm"
+          variant="primary"
+          className="ml-auto shrink-0"
           data-testid="new-chat-tool"
-          busy={starting}
+          aria-label="New Chat"
           disabled={starting}
           onClick={() => void start()}
-        />
+        >
+          {starting ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
+          {starting ? 'Starting…' : '+ New Chat'}
+        </Button>
       </TabTools>
 
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
@@ -992,7 +997,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat open for this project.</p>
         <Button variant="primary" onClick={() => void start()} disabled={starting} data-testid="new-chat">
-          {starting ? 'Starting…' : 'New chat'}
+          {starting ? 'Starting…' : '+ New Chat'}
         </Button>
         {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}
       </div>,

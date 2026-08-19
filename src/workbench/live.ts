@@ -104,6 +104,25 @@ function patch(id: string, change: Partial<LiveSession>): void {
   sessions = sessions.map((s, i) => (i === at ? { ...s, ...change } : s));
 }
 
+/**
+ * Whether a chat's own clock moves on this event.
+ *
+ * Opening a conversation replays the whole of it onto this stream, every
+ * message stamped with the moment it was read — and this took each of those
+ * for activity, so reading a chat from March carried it to the top of the list
+ * under today's time. The sidecar has always refused to stamp the row for a
+ * read (workbench/src/store.ts, `touch`); this is that same rule on this side
+ * of the wire. A sleeping chat did nothing, whatever is coming down its log
+ * (bw-4wcd.9).
+ */
+export function movesTheClock(state: SessionState | undefined): boolean {
+  return state !== undefined && state !== 'dormant' && state !== 'ended';
+}
+
+function moves(id: string, next?: SessionState): boolean {
+  return movesTheClock(next ?? sessions.find((s) => s.id === id)?.state);
+}
+
 function absorb(frame: WatchFrame): void {
   if (frame.kind === 'running') {
     running = new Set(frame.conversations);
@@ -149,7 +168,11 @@ function absorb(frame: WatchFrame): void {
 
   switch (e.type) {
     case 'session.state':
-      patch(e.sessionId, { state: e.state, activity: e.label, lastActiveAt: e.at });
+      patch(e.sessionId, {
+        state: e.state,
+        activity: e.label,
+        ...(moves(e.sessionId, e.state) ? { lastActiveAt: e.at } : {}),
+      });
       break;
     case 'ask.permission':
       patch(e.sessionId, { waitingFor: e.title, lastActiveAt: e.at });
@@ -158,12 +181,16 @@ function absorb(frame: WatchFrame): void {
       patch(e.sessionId, { waitingFor: null, lastActiveAt: e.at });
       break;
     case 'text.delta':
+      if (!moves(e.sessionId)) return;
       patch(e.sessionId, { lastActiveAt: e.at });
       break;
     case 'link.bead': {
       const had = sessions.find((s) => s.id === e.sessionId)?.beads ?? [];
       if (had.includes(e.beadId)) return;
-      patch(e.sessionId, { beads: [...had, e.beadId], lastActiveAt: e.at });
+      patch(e.sessionId, {
+        beads: [...had, e.beadId],
+        ...(moves(e.sessionId) ? { lastActiveAt: e.at } : {}),
+      });
       break;
     }
     case 'error':

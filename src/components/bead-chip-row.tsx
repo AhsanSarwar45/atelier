@@ -12,6 +12,8 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { CircleDot } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { addressWith, cardWasPushed } from '@/lib/address';
@@ -65,6 +67,9 @@ export function BeadChipRow({
           router.push(addressWith(params, { id: projectId, card: id }));
         }}
       >
+        {/* A card wears a picture the way a report does, so a line carrying both
+            says which is which before either is read (bw-4wcd.7). */}
+        <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
         {id}
       </button>
     </Badge>

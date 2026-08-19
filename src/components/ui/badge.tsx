@@ -27,7 +27,12 @@ export interface BadgeButtonProps
 export type BadgeDotProps = React.HTMLAttributes<HTMLSpanElement>;
 
 const badgeVariants = cva(
-  'inline-flex items-center whitespace-nowrap justify-center border border-transparent font-medium focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 [&_svg]:-ms-px [&_svg]:shrink-0',
+    // Clicked, a chip brightens its OWN border and nothing else. It used to throw
+  // a two-pixel ring an offset away from itself, which on a line of chips drew a
+  // halo over the chips either side of it and read as an error box — the manager
+  // saw one and asked for the outline gone (bw-4wcd.6). The border is already
+  // there and already transparent, so lighting it moves nothing.
+  'inline-flex items-center whitespace-nowrap justify-center border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus-visible:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
   {
     variants: {
       variant: {
