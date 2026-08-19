@@ -210,11 +210,6 @@ async fn main() {
         .route("/api/git/worktree", delete(routes::worktree::delete_worktree))
         .route("/api/git/worktrees", get(routes::worktree::list_worktrees))
         // PR endpoints
-        .route("/api/git/pr-status", get(routes::worktree::pr_status))
-        .route("/api/git/pr-files", get(routes::worktree::pr_files))
-        .route("/api/git/create-pr", post(routes::worktree::create_pr))
-        .route("/api/git/merge-pr", post(routes::worktree::merge_pr))
-        .route("/api/git/rebase-siblings", post(routes::worktree::rebase_siblings))
         // Agent endpoints
         .route("/api/agents", get(routes::agents::list_agents))
         .route("/api/agents/:filename", put(routes::agents::update_agent))

@@ -1,22 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 
 import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
 
 import { BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { DependencyBadge } from "@/components/dependency-badge";
-import { SubtaskList, ChildPRStatus } from "@/components/subtask-list";
+import { SubtaskList } from "@/components/subtask-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
-import * as api from "@/lib/api";
 import { formatBeadId, getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
-import { cn, isDoltProject } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { CardLiveChat } from "@/workbench/card-live";
 import { WORKING, standing } from "@/types";
 import type { Bead, Epic } from "@/types";
@@ -61,9 +60,6 @@ function getProgressIndicatorClass(percentage: number): string {
   return "[&>*]:bg-progress-0";
 }
 
-/** Auto-refresh interval for PR statuses (30 seconds) */
-const PR_STATUS_REFRESH_INTERVAL = 30_000;
-
 /**
  * Larger epic card with distinctive styling
  */
@@ -84,10 +80,6 @@ export function EpicCard({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
 
-  // PR status for child tasks
-  const [childPRStatuses, setChildPRStatuses] = useState<Map<string, ChildPRStatus>>(new Map());
-  const isMountedRef = useRef(true);
-
   // Resolve children from IDs (memoized to prevent unnecessary re-fetches)
   const children = useMemo(() =>
     (epic.children || [])
@@ -95,67 +87,6 @@ export function EpicCard({
       .filter((b): b is Bead => b !== undefined),
     [epic.children, allBeads]
   );
-
-  // Fetch PR status for all children
-  const fetchChildPRStatuses = useCallback(async () => {
-    if (!projectPath || isDoltProject(projectPath) || children.length === 0) return;
-
-    const statusMap = new Map<string, ChildPRStatus>();
-
-    // Only pieces still standing can have work in flight: a finished one needs
-    // no reading, and a dropped one is work nobody is doing, so asking the code
-    // host about it is a request per piece every thirty seconds for an answer
-    // that would be drawn against abandoned work.
-    const results = await Promise.all(
-      children.filter(c => standing(c.status)).map(async (child) => {
-        try {
-          const prStatus = await api.git.prStatus(projectPath, child.id);
-          if (prStatus.pr) {
-            return {
-              id: child.id,
-              status: {
-                state: prStatus.pr.state,
-                checks: { status: prStatus.pr.checks.status },
-              } as ChildPRStatus,
-            };
-          }
-        } catch {
-          // Ignore errors for individual children
-        }
-        return null;
-      })
-    );
-
-    // Build the map from results
-    for (const result of results) {
-      if (result) {
-        statusMap.set(result.id, result.status);
-      }
-    }
-
-    // Only update state if component is still mounted
-    if (isMountedRef.current) {
-      setChildPRStatuses(statusMap);
-    }
-  }, [projectPath, children]);
-
-  // Fetch PR statuses on mount and set up auto-refresh interval
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    // Initial fetch
-    fetchChildPRStatuses();
-
-    // Set up auto-refresh interval
-    const intervalId = setInterval(() => {
-      fetchChildPRStatuses();
-    }, PR_STATUS_REFRESH_INTERVAL);
-
-    return () => {
-      isMountedRef.current = false;
-      clearInterval(intervalId);
-    };
-  }, [fetchChildPRStatuses]);
 
   // Worked out once per change of the board, not once per redraw: this card
   // redraws on every poll, and walking the whole board each time cost more than
@@ -304,7 +235,6 @@ export function EpicCard({
         onChildClick={onChildClick}
         maxCollapsed={3}
         isExpanded={isExpanded}
-        childPRStatuses={childPRStatuses}
       />
     </div>
   );

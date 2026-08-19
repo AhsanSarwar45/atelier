@@ -4,8 +4,8 @@
  */
 
 import { apiUrl } from '@/lib/api-base';
-import { BeadsResponseSchema, PRStatusSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
-import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, PRStatus, PRFilesResponse, MemoryEntry, Agent, AgentModel } from '@/types';
+import { BeadsResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
+import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, MemoryEntry, Agent, AgentModel } from '@/types';
 
 /**
  * Input for creating a new project
@@ -240,64 +240,9 @@ export interface ListWorktreesResponse {
 }
 
 /**
- * Create PR response
- */
-export interface CreatePRResponse {
-  success: boolean;
-  pr_number?: number;
-  pr_url?: string;
-  error?: string;
-}
-
-/**
- * Merge PR response
- */
-export interface MergePRResponse {
-  success: boolean;
-  merged: boolean;
-  error?: string;
-}
-
-/**
- * Rebase sibling result
- */
-export interface RebaseSiblingResult {
-  bead_id: string;
-  success: boolean;
-  error?: string;
-}
-
-/**
- * Rebase siblings response
- */
-export interface RebaseSiblingsResponse {
-  results: RebaseSiblingResult[];
-}
-
-/**
- * Merge method for PR merging
- */
-export type MergeMethod = 'merge' | 'squash' | 'rebase';
-
-/**
- * GitHub status response
- */
-export interface GitHubStatusResponse {
-  has_remote: boolean;
-  gh_authenticated: boolean;
-  error?: string;
-}
-
-/**
  * Git API
  */
 export const git = {
-  /**
-   * Get GitHub status for a repository
-   */
-  githubStatus: (repoPath: string) => fetchApi<GitHubStatusResponse>(
-    `/api/git/github-status?repo_path=${encodeURIComponent(repoPath)}`
-  ),
   /**
    * Get branch status relative to main
    * @deprecated Use `worktreeStatus()` instead. Branch-based workflow is deprecated in favor of worktrees.
@@ -330,38 +275,7 @@ export const git = {
 
   listWorktrees: (repoPath: string) => fetchApi<ListWorktreesResponse>(
     `/api/git/worktrees?repo_path=${encodeURIComponent(repoPath)}`
-  ),
-
-  // PR endpoints
-  prStatus: async (repoPath: string, beadId: string) => {
-    const data = await chore(() => fetchApi<PRStatus>(
-      `/api/git/pr-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`
-    ));
-    PRStatusSchema.parse(data);
-    return data;
-  },
-
-  prFiles: (repoPath: string, beadId: string) => fetchApi<PRFilesResponse>(
-    `/api/git/pr-files?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`
-  ),
-
-  createPR: (repoPath: string, beadId: string, title: string, body: string) =>
-    fetchApi<CreatePRResponse>('/api/git/create-pr', {
-      method: 'POST',
-      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId, title, body }),
-    }),
-
-  mergePR: (repoPath: string, beadId: string, mergeMethod: MergeMethod = 'squash') =>
-    fetchApi<MergePRResponse>('/api/git/merge-pr', {
-      method: 'POST',
-      body: JSON.stringify({ repo_path: repoPath, bead_id: beadId, merge_method: mergeMethod }),
-    }),
-
-  rebaseSiblings: (repoPath: string, excludeBeadId: string) =>
-    fetchApi<RebaseSiblingsResponse>('/api/git/rebase-siblings', {
-      method: 'POST',
-      body: JSON.stringify({ repo_path: repoPath, exclude_bead_id: excludeBeadId }),
-    }),
+  )
 };
 
 /**

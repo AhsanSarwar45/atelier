@@ -43,33 +43,6 @@ export const BeadsResponseSchema = z.object({
   source: z.string().optional(),
 });
 
-export const PRChecksSchema = z.object({
-  total: z.number(),
-  passed: z.number(),
-  failed: z.number(),
-  pending: z.number(),
-  status: z.enum(["success", "failure", "pending"]),
-});
-
-export const PRInfoSchema = z.object({
-  number: z.number(),
-  url: z.string(),
-  state: z.enum(["open", "merged", "closed"]),
-  checks: PRChecksSchema,
-  mergeable: z.boolean(),
-});
-
-export const PRStatusSchema = z.object({
-  has_remote: z.boolean(),
-  branch_pushed: z.boolean(),
-  pr: z.nullable(PRInfoSchema),
-  rate_limit: z.object({
-    remaining: z.number(),
-    limit: z.number(),
-    reset_at: z.string(),
-  }),
-});
-
 export const WorktreeStatusSchema = z.object({
   exists: z.boolean(),
   worktree_path: z.nullable(z.string()),

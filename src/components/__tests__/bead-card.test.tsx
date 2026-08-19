@@ -13,7 +13,7 @@ import { BeadCard } from '../bead-card';
 import type { CardLayout } from '@/lib/themes';
 import type { Bead, BeadStatus } from '@/types';
 
-vi.mock('@/lib/api', () => ({ git: { prStatus: vi.fn().mockResolvedValue({ pr: null }) } }));
+vi.mock('@/lib/api', () => ({ git: {} }));
 
 /** The layout the card is drawn in, so every theme's shape can be read. */
 let layout: CardLayout = 'standard';

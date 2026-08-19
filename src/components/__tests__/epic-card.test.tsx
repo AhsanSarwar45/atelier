@@ -16,7 +16,7 @@ import type { CardLayout } from '@/lib/themes';
 import type { Bead, BeadStatus, Epic } from '@/types';
 
 vi.mock('@/lib/cli', () => ({ closeBead: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('@/lib/api', () => ({ git: { prStatus: vi.fn().mockResolvedValue({ pr: null }) } }));
+vi.mock('@/lib/api', () => ({ git: {} }));
 
 /** The layout the card is drawn in, so every theme's shape can be read. */
 let layout: CardLayout = 'standard';
@@ -283,31 +283,16 @@ describe('the list of pieces under a card', () => {
   });
 });
 
-describe('what the card asks the code host about', () => {
-  it('never asks about a piece that was dropped', async () => {
-    const api = await import('@/lib/api');
-    render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
-    await waitFor(() => expect(api.git.prStatus).not.toHaveBeenCalled());
-    // Nothing is standing here, so nothing is asked about at all — and in
-    // particular not the four dropped pieces, which nobody is working on.
-    const asked = vi.mocked(api.git.prStatus).mock.calls.map((c) => c[1]);
-    expect(asked.filter((id) => String(id).includes('.x'))).toEqual([]);
-  });
-
-  it('still asks about a piece that is being worked on', async () => {
-    const api = await import('@/lib/api');
-    const props = withPieces('open', 1, 1);
-    const live: Bead = { ...child, id: 'test-1.live', status: 'in_progress' };
-    render(
-      <EpicCard
-        {...props}
-        epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
-        allBeads={[...props.allBeads, live]}
-        statusById={lookup([...props.allBeads, live])}
-      />
-    );
-    await waitFor(() =>
-      expect(vi.mocked(api.git.prStatus).mock.calls.map((c) => c[1])).toEqual([live.id])
-    );
+describe('what the card asks anyone else about', () => {
+  it('asks nothing at all while it is drawn', async () => {
+    // The card used to ask a question per piece every thirty seconds, and each
+    // one went across the internet before it could be answered. Nothing on a
+    // card is worth a network call: everything it draws came with the board.
+    const asked = vi.fn();
+    vi.stubGlobal('fetch', asked);
+    render(<EpicCard {...withPieces('open', 3, 1)} />);
+    await waitFor(() => expect(screen.getByText(/Child Tasks/)).toBeInTheDocument());
+    expect(asked).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

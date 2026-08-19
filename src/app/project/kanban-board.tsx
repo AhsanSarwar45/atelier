@@ -12,18 +12,8 @@ import { MemoryPanel } from "@/components/memory-panel";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
 import { ReportPanel } from "@/components/report-panel";
 import { TabTools } from "@/components/shell";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogClose,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
-import { useGitHubStatus } from "@/hooks/use-github-status";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
 import { addressWith, cardWasPushed, whereFrom } from "@/lib/address";
@@ -90,14 +80,6 @@ export default function KanbanBoard() {
   const isDoltOnly = isDolt && !project?.localPath;
   const fsPath = projectDir(project);
 
-  // GitHub status check
-  const { hasRemote, isAuthenticated, isLoading: githubStatusLoading } = useGitHubStatus(
-    fsPath || null
-  );
-
-  // Track whether the GitHub warning has been dismissed (session-only)
-  const [githubWarningDismissed, setGithubWarningDismissed] = useState(false);
-
   // Theme
 
   // Memory panel state
@@ -113,13 +95,6 @@ export default function KanbanBoard() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   // Project settings dialog state
-
-  // Show GitHub warning if project loaded, status checked, and either no remote or not authenticated
-  const showGitHubWarning = !projectLoading &&
-    !githubStatusLoading &&
-    project !== null &&
-    !githubWarningDismissed &&
-    (!hasRemote || !isAuthenticated);
 
   /**
    * Toggle a status in the filter
@@ -438,24 +413,6 @@ export default function KanbanBoard() {
         />
       )}
 
-      {/* GitHub Integration Warning Dialog */}
-      <AlertDialog open={showGitHubWarning} onOpenChange={(open) => !open && setGithubWarningDismissed(true)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>GitHub Integration Unavailable</AlertDialogTitle>
-            <AlertDialogDescription>
-              {!hasRemote
-                ? "This repository doesn't have a GitHub remote configured."
-                : "GitHub CLI is not authenticated."}
-              {" "}PR features (Create PR, Merge PR, status checks) will not be available.
-              You can still work on tasks locally.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose render={<Button>Continue Without GitHub</Button>} />
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

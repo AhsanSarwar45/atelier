@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 
-import { FolderOpen, GitPullRequest, Link2, MessageSquare, Check, X, Clock } from "lucide-react";
+import { FolderOpen, Link2, MessageSquare } from "lucide-react";
 
 import { BeadKindTag, BeadSystemTag, BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
@@ -13,7 +13,7 @@ import { formatBeadId, formatWorktreePath, isBlockedBy, truncate } from "@/lib/b
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import { cn } from "@/lib/utils";
 import { standing } from "@/types";
-import type { Bead, WorktreeStatus, PRStatus, StatusBadgeInfo } from "@/types";
+import type { Bead, WorktreeStatus, StatusBadgeInfo } from "@/types";
 import { CardLiveChat } from "@/workbench/card-live";
 
 export interface BeadCardProps {
@@ -27,8 +27,6 @@ export interface BeadCardProps {
   ticketNumber?: number;
   /** Worktree status for the bead */
   worktreeStatus?: WorktreeStatus;
-  /** Mini PR status for card display */
-  prStatus?: PRStatus;
   isSelected?: boolean;
   onSelect: (bead: Bead) => void;
   /** Sits with the card's other facts, beside the comment count. */
@@ -37,12 +35,11 @@ export interface BeadCardProps {
 
 /**
  * Get worktree status color for the status box
- * Green: PR merged or checks passed
- * Yellow/amber: checks pending
- * Red: checks failed or needs rebase
- * Gray: no PR or default state, or nobody is waiting on the bead any more
+ * Green: work is ahead of main and needs nothing from it
+ * Red: needs rebase
+ * Gray: no copy of the work, or nobody is waiting on the bead any more
  */
-function getWorktreeStatusColor(worktreeStatus?: WorktreeStatus, prStatus?: PRStatus, beadStatus?: string): string {
+function getWorktreeStatusColor(worktreeStatus?: WorktreeStatus, beadStatus?: string): string {
   // Work nobody is waiting on gets no colour: the greens and ambers here say
   // "this is in flight", and dropped work is as settled as finished work. This
   // used to ask only whether the bead was closed, so a dropped one kept the
@@ -55,27 +52,6 @@ function getWorktreeStatusColor(worktreeStatus?: WorktreeStatus, prStatus?: PRSt
     return "bg-surface-overlay/50 border-b-default/50";
   }
 
-  // Check PR status first
-  if (prStatus?.pr) {
-    const { state, checks } = prStatus.pr;
-
-    if (state === "merged") {
-      return "bg-success/10 border-success/30";
-    }
-
-    if (checks.status === "success") {
-      return "bg-success/10 border-success/30";
-    }
-
-    if (checks.status === "pending") {
-      return "bg-warning/10 border-warning/30";
-    }
-
-    if (checks.status === "failure") {
-      return "bg-danger/10 border-danger/30";
-    }
-  }
-
   // Check worktree ahead/behind
   const { ahead, behind } = worktreeStatus;
 
@@ -85,59 +61,11 @@ function getWorktreeStatusColor(worktreeStatus?: WorktreeStatus, prStatus?: PRSt
   }
 
   if (ahead > 0 && behind === 0) {
-    // Ready to push/PR - green
+    // Ahead of main with nothing to take back - green
     return "bg-success/10 border-success/30";
   }
 
   return "bg-surface-overlay/50 border-b-default/50";
-}
-
-/**
- * Get the PR checks display icon and text
- */
-function getPRChecksDisplay(prStatus: PRStatus): { icon: React.ReactNode; text: string; className: string } {
-  const { pr } = prStatus;
-
-  if (!pr) {
-    return { icon: null, text: "", className: "" };
-  }
-
-  if (pr.state === "merged") {
-    return {
-      icon: <Check className="size-3" aria-hidden="true" />,
-      text: "Merged",
-      className: "text-success"
-    };
-  }
-
-  const { checks } = pr;
-  const checksText = `${checks.passed}/${checks.total}`;
-
-  if (checks.status === "success") {
-    return {
-      icon: <Check className="size-3" aria-hidden="true" />,
-      text: checksText,
-      className: "text-success"
-    };
-  }
-
-  if (checks.status === "pending") {
-    return {
-      icon: <Clock className="size-3" aria-hidden="true" />,
-      text: checksText,
-      className: "text-warning"
-    };
-  }
-
-  if (checks.status === "failure") {
-    return {
-      icon: <X className="size-3" aria-hidden="true" />,
-      text: checksText,
-      className: "text-danger"
-    };
-  }
-
-  return { icon: null, text: checksText, className: "text-t-tertiary" };
 }
 
 /**
@@ -163,7 +91,7 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
   }
 }
 
-export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prStatus, isSelected = false, onSelect, report }: BeadCardProps) {
+export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSelected = false, onSelect, report }: BeadCardProps) {
   const { layout } = useTheme();
   const blocked = isBlockedBy(bead, statusById);
   const commentCount = (bead.comments ?? []).length;
@@ -174,10 +102,6 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
   const TypeIcon = typeMeta.icon;
 
   const hasWorktree = worktreeStatus?.exists ?? false;
-  const hasPR = prStatus?.pr !== null && prStatus?.pr !== undefined;
-
-  // Get PR checks display info
-  const prChecksDisplay = prStatus ? getPRChecksDisplay(prStatus) : null;
 
   // Shared interaction props
   const interactionProps = {
@@ -194,12 +118,12 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
     },
   };
 
-  // Shared worktree/PR section
+  // Shared worktree section
   const worktreeSection = hasWorktree && worktreeStatus?.worktree_path && (
     <div
       className={cn(
         "rounded-md border p-2 space-y-1.5",
-        getWorktreeStatusColor(worktreeStatus, prStatus, bead.status)
+        getWorktreeStatusColor(worktreeStatus, bead.status)
       )}
     >
       <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -208,27 +132,7 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
           {formatWorktreePath(worktreeStatus.worktree_path)}
         </span>
       </div>
-      {hasPR && prStatus?.pr && prChecksDisplay && (
-        <div className="flex items-center justify-between text-[10px]">
-          <div className="flex items-center gap-1.5 text-foreground">
-            <GitPullRequest className="size-3 shrink-0" aria-hidden="true" />
-            <span>PR #{prStatus.pr.number}</span>
-          </div>
-          <div className={cn("flex items-center gap-1", prChecksDisplay.className)}>
-            {prChecksDisplay.icon}
-            <span className="tabular-nums">{prChecksDisplay.text}</span>
-          </div>
-        </div>
-      )}
     </div>
-  );
-
-  // Inline PR badge for compact layouts
-  const inlinePRBadge = hasPR && prStatus?.pr && prChecksDisplay && (
-    <span className={cn("flex items-center gap-1 text-[10px] font-medium", prChecksDisplay.className)}>
-      <GitPullRequest className="size-3" aria-hidden="true" />
-      PR #{prStatus.pr.number} {prChecksDisplay.text}
-    </span>
   );
 
   // A card nobody is waiting on is dimmed and struck through, whether the work
@@ -273,7 +177,7 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
               {bead.title}
             </span>
           </div>
-          {(bead.description || inlinePRBadge) && (
+          {(blocked || bead.description) && (
             <div className="flex items-center gap-2 mt-0.5">
               {blocked && (
                 <Badge variant="destructive" appearance="light" size="xs">BLOCKED</Badge>
@@ -283,7 +187,6 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
                   {truncate(bead.description, 60)}
                 </span>
               )}
-              {inlinePRBadge}
             </div>
           )}
         </div>
@@ -362,7 +265,6 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
               P{bead.priority}
             </Badge>
           )}
-          {inlinePRBadge}
           {commentCount > 0 && (
             <span className="text-[10px] text-t-faint px-1">
               {commentCount} {commentCount === 1 ? "comment" : "comments"}
@@ -457,7 +359,7 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
           )}
         </div>
 
-        {/* Worktree and PR status box */}
+        {/* Worktree status box */}
         {worktreeSection && (
           <div className="px-3 pb-3">{worktreeSection}</div>
         )}

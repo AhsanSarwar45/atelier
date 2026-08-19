@@ -1,20 +1,11 @@
 "use client";
 
-import { Ban, Check, Circle, Clock, Eye, FileCheck, GitPullRequest, GitMerge, Link2, type LucideIcon } from "lucide-react";
+import { Ban, Check, Circle, Clock, Eye, FileCheck, Link2, type LucideIcon } from "lucide-react";
 
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { truncate } from "@/lib/bead-utils";
 import { classesFor } from "@/lib/state-styles";
 import { cn } from "@/lib/utils";
 import { STATE_BY_ID, standing, type Bead, type BeadStatus, type StateInfo } from "@/types";
-
-/**
- * PR status for a child task (used for icon display)
- */
-export interface ChildPRStatus {
-  state: "open" | "merged" | "closed";
-  checks: { status: "success" | "failure" | "pending" };
-}
 
 export interface SubtaskListProps {
   /** Child tasks to display */
@@ -25,8 +16,6 @@ export interface SubtaskListProps {
   maxCollapsed?: number;
   /** Whether the list is expanded */
   isExpanded?: boolean;
-  /** PR status for each child task, keyed by bead ID */
-  childPRStatuses?: Map<string, ChildPRStatus>;
 }
 
 /**
@@ -59,90 +48,6 @@ function getStatusColor(status: BeadStatus): string {
 }
 
 /**
- * Get PR status info including icon and tooltip message
- * Returns null if no PR status (no icon shown)
- */
-function getPRStatusInfo(prStatus: ChildPRStatus | undefined): { icon: React.ReactNode; tooltip: string } | null {
-  if (!prStatus) {
-    // No PR - no icon
-    return null;
-  }
-
-  if (prStatus.state === "merged") {
-    // Merged PR - purple GitMerge icon
-    return {
-      icon: (
-        <GitMerge
-          className="h-3.5 w-3.5 text-epic"
-          aria-hidden="true"
-        />
-      ),
-      tooltip: "PR merged",
-    };
-  }
-
-  if (prStatus.state === "open") {
-    // Open PR - color based on checks status
-    if (prStatus.checks.status === "success") {
-      return {
-        icon: (
-          <GitPullRequest
-            className="h-3.5 w-3.5 text-success"
-            aria-hidden="true"
-          />
-        ),
-        tooltip: "PR open, checks passing",
-      };
-    }
-    if (prStatus.checks.status === "failure") {
-      return {
-        icon: (
-          <GitPullRequest
-            className="h-3.5 w-3.5 text-danger"
-            aria-hidden="true"
-          />
-        ),
-        tooltip: "PR open, checks failing",
-      };
-    }
-    // Pending checks
-    return {
-      icon: (
-        <GitPullRequest
-          className="h-3.5 w-3.5 text-warning"
-          aria-hidden="true"
-        />
-      ),
-      tooltip: "PR open, checks pending",
-    };
-  }
-
-  // Closed PR (not merged) - no icon
-  return null;
-}
-
-/**
- * Render PR status icon with tooltip
- */
-function PRStatusIcon({ prStatus }: { prStatus: ChildPRStatus | undefined }) {
-  const info = getPRStatusInfo(prStatus);
-  if (!info) return null;
-
-  return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="cursor-help" tabIndex={0} aria-label={info.tooltip}>{info.icon}</span>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="text-xs">
-          {info.tooltip}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-/**
  * Compact list of child tasks within epic card
  */
 export function SubtaskList({
@@ -150,7 +55,6 @@ export function SubtaskList({
   onChildClick,
   maxCollapsed = 3,
   isExpanded = false,
-  childPRStatuses,
 }: SubtaskListProps) {
   if (childTasks.length === 0) {
     return (
@@ -182,7 +86,6 @@ export function SubtaskList({
         >
           <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
             {getStatusIcon(child.status)}
-            <PRStatusIcon prStatus={childPRStatuses?.get(child.id)} />
           </div>
           <div className="flex-1 min-w-0">
             {/* A piece nobody is waiting on is struck through and muted,

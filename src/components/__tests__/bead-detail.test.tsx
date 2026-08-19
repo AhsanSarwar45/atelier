@@ -17,7 +17,7 @@ vi.mock('@/lib/cli', () => ({
   updateBeadStatus: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/api', () => ({
-  git: { prStatus: vi.fn().mockResolvedValue({ pr: null }), worktreeStatus: vi.fn() },
+  git: { worktreeStatus: vi.fn() },
   beads: { get: vi.fn() },
 }));
 

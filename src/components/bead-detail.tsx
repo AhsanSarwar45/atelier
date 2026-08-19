@@ -12,7 +12,6 @@ import {
   X,
 } from "lucide-react";
 
-import { BeadPRSection } from "@/components/bead-pr-section";
 import { CopyableText } from "@/components/copyable-text";
 import { CreateBeadDialog } from "@/components/create-bead-dialog";
 import { EditableField } from "@/components/editable-field";
@@ -56,7 +55,6 @@ export interface BeadDetailProps {
   projectPath?: string;
   allBeads?: Bead[];
   onChildClick?: (child: Bead) => void;
-  onCleanup?: () => void;
   onUpdate?: () => void;
 }
 
@@ -71,7 +69,7 @@ export const PANEL_SLIDE_MS = 300;
 
 /**
  * Bead detail panel — slides in from the right.
- * Displays full bead information with metadata, PR section, subtasks, and comments.
+ * Displays full bead information with metadata, subtasks, and comments.
  */
 export function BeadDetail({
   bead,
@@ -83,7 +81,6 @@ export function BeadDetail({
   projectPath,
   allBeads,
   onChildClick,
-  onCleanup,
   onUpdate,
 }: BeadDetailProps) {
   /**
@@ -226,40 +223,6 @@ export function BeadDetail({
       .filter((b): b is Bead => b !== undefined);
   }, [bead.relates_to, allBeads]);
 
-  // PR status for child tasks (epics only)
-  const [childPRStatuses, setChildPRStatuses] = useState<Map<string, { state: "open" | "merged" | "closed"; checks: { status: "success" | "failure" | "pending" } }>>(new Map());
-
-  const fetchChildPRStatuses = useCallback(async () => {
-    if (!projectPath || isDoltProject(projectPath) || childTasks.length === 0) return;
-
-    // Only pieces still standing can have work in flight — a dropped one is
-    // work nobody is doing, so the code host is never asked about it.
-    const results = await Promise.all(
-      childTasks.filter(c => standing(c.status)).map(async (child) => {
-        try {
-          const prStatus = await api.git.prStatus(projectPath, child.id);
-          if (prStatus.pr) {
-            return { id: child.id, status: { state: prStatus.pr.state, checks: { status: prStatus.pr.checks.status } } };
-          }
-        } catch { /* ignore */ }
-        return null;
-      })
-    );
-
-    const statusMap = new Map<string, { state: "open" | "merged" | "closed"; checks: { status: "success" | "failure" | "pending" } }>();
-    for (const result of results) {
-      if (result) statusMap.set(result.id, result.status);
-    }
-    setChildPRStatuses(statusMap);
-  }, [projectPath, childTasks]);
-
-  useEffect(() => {
-    if (!open || !isEpic || !projectPath || childTasks.length === 0) return;
-    fetchChildPRStatuses();
-    const intervalId = setInterval(fetchChildPRStatuses, 30_000);
-    return () => clearInterval(intervalId);
-  }, [open, isEpic, projectPath, childTasks, fetchChildPRStatuses]);
-
   return (
     <>
       {/* Overlay */}
@@ -401,17 +364,6 @@ export function BeadDetail({
             </div>
           )}
 
-          {/* Worktree & PR Section */}
-          {hasWorktree && projectPath && (
-            <BeadPRSection
-              bead={bead}
-              worktreeStatus={worktreeStatus}
-              projectPath={projectPath}
-              open={open}
-              onCleanup={onCleanup}
-            />
-          )}
-
           {/* Description */}
           {(bead.description || !isReadOnly) && (
             <div className="mt-6">
@@ -531,7 +483,6 @@ export function BeadDetail({
                   childTasks={childTasks}
                   onChildClick={onChildClick}
                   isExpanded={true}
-                  childPRStatuses={childPRStatuses}
                 />
               </div>
             </div>

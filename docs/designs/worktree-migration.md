@@ -1,5 +1,9 @@
 # Worktree Migration Design
 
+> The pull-request parts of this design are no longer in the app: nothing on the
+> board, in a card or on the server asks about a pull request. The worktree parts
+> below are still what the app does.
+
 ## Executive Summary
 
 This design document outlines the migration from git branches to git worktrees for the beads-kanban-ui and beads-orchestration workflow, including support for remote repositories and PR-based workflows.
