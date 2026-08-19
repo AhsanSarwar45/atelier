@@ -976,6 +976,29 @@ search, spend, report viewer), `tests/e2e/workbench.spec.ts`, this document.
   with the event holding a reference.
 - The side-by-side change view diffs the fragment the tool was handed
   (`old_string` against `new_string`), not the whole file before and after.
+- The body of anything is cut to `KEPT`, four thousand characters. A file
+  bigger than that cannot be read to its end from the chat: the cut line says
+  how many characters were left out, and the whole of it is on disk in the
+  kit's own record. Raising the number is a storage decision, not a drawing
+  one (§8.2.5).
+- Every hook event is forwarded (§3.1), so an install with hooks pays for its
+  own rules: one hook on this machine answers with 10.7 KB, and hook lines were
+  12,474 of the 17,104 quiet bytes measured. Cutting every body to `KEPT` and
+  dropping the two lines that need none is what keeps that bounded. An install
+  without hooks pays nothing.
+- That the tool changes the permission mode by itself is held at driver level
+  rather than in the browser, because whether the agent calls `ExitPlanMode` is
+  the model's decision and a standing browser check resting on it goes red for
+  no reason. It was watched happening once by hand instead, 2026-08-19
+  (`scripts/README.md`).
+
+Three faults found under this section's work are filed rather than fixed, and
+each is still open: the menu of what a chat can do is republished whole every
+turn and is four fifths of the stored log (`bw-7bj`); a frontend-only change is
+never embedded in the installed binary, so the built product keeps serving the
+previous screen unless the frontend is built first by hand (`bw-a4o`); and
+every browser check and screenshot run leaves its chats on whichever list it
+was pointed at (`bw-guo`).
 
 ---
 
