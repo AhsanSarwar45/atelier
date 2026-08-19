@@ -1507,9 +1507,9 @@ def closing(cmd, labels=()):
     touch.bc.load, touch.bc.save = REAL_STATE
     touch.bc.reviewing = lambda: ""
     touch.bc.held = lambda name, root=None: []
-    touch.run.card = lambda cid, root=None: {"id": cid, "labels": list(labels)}
-    touch.run.advance = lambda cid, root=None: None
-    touch.run.started = lambda cid, root=None: None
+    touch.run.card = lambda cid, *a, **k: {"id": cid, "labels": list(labels)}
+    touch.run.advance = lambda cid, *a, **k: None
+    touch.run.started = lambda cid, *a, **k: None
     try:
         sys.stdin = io.StringIO(json.dumps(
             {"tool_name": "Bash", "hook_event_name": "PostToolUse",
