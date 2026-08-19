@@ -289,6 +289,27 @@ function line(chat: { id: string; cwd: string }, parent: string | null, role: 'u
   };
 }
 
+/** One line of a record carrying blocks — a command, or what it printed. */
+function blocks(chat: { id: string; cwd: string }, parent: string | null, role: 'user' | 'assistant', content: unknown[]) {
+  const uuid = randomUUID();
+  return {
+    uuid,
+    row: JSON.stringify({
+      parentUuid: parent,
+      isSidechain: false,
+      type: role,
+      message: { role, content },
+      uuid,
+      timestamp: new Date().toISOString(),
+      userType: 'external',
+      entrypoint: 'cli',
+      cwd: chat.cwd,
+      sessionId: chat.id,
+      version: '2.1.232',
+    }),
+  };
+}
+
 /**
  * A chat that another program is in the middle of, made rather than waited for.
  *
@@ -313,6 +334,24 @@ function aChatSomebodyElseIsIn(projectPath: string, opening: string) {
     /** The other program says something more, as it would while somebody watched. */
     says(text: string): void {
       const next = line(chat, last, 'assistant', text);
+      appendFileSync(file, `${next.row}\n`);
+      last = next.uuid;
+    },
+    /**
+     * It starts a command and has not got the answer yet — the shape a record
+     * being written to right now ends in, and the shape the app holds back
+     * rather than drawing a finished, empty row.
+     */
+    runs(name: string, input: Record<string, unknown>): string {
+      const id = `toolu_${randomUUID().replace(/-/g, '')}`;
+      const next = blocks(chat, last, 'assistant', [{ type: 'tool_use', id, name, input }]);
+      appendFileSync(file, `${next.row}\n`);
+      last = next.uuid;
+      return id;
+    },
+    /** And what it printed, which is what settles that tail. */
+    printed(id: string, output: string): void {
+      const next = blocks(chat, last, 'user', [{ type: 'tool_result', tool_use_id: id, content: output }]);
       appendFileSync(file, `${next.row}\n`);
       last = next.uuid;
     },
@@ -471,6 +510,56 @@ test.describe('a chat another program is running', () => {
     await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
     await expect(page.getByTestId('session-state')).not.toHaveText('working');
+    chat.forget();
+  });
+
+  /**
+   * What the other program was in the middle of when the reader walked away.
+   *
+   * A record being written to right now ends in commands whose answers have not
+   * landed, and those are held back rather than drawn finished and empty. Only
+   * the follower ever draws them — so when the reader leaves, the follower is
+   * torn down and that tail belongs to nobody. The chat had already been written
+   * down as read in full, so opening it again read nothing and drew nothing, and
+   * what the other program did while nobody was watching was gone for good
+   * (bw-dmxj.14).
+   */
+  test('a command left mid-air is drawn when the chat is opened again', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const project = await aProject(request);
+    const opening = 'Run the suite and tell me what broke';
+    const chat = aChatSomebodyElseIsIn(project.path, opening);
+    const release = claimConversation(chat.id);
+    // Started over there, with nothing back yet.
+    const call = chat.runs('Bash', { command: 'npm test' });
+    const row = `[data-testid="restore-row"][data-external-id="${chat.id}"]`;
+
+    try {
+      await openChatTab(page, project);
+      await expect(page.locator(row), 'the chat being worked in was not offered').toBeVisible({ timeout: 30_000 });
+      await page.locator(row).getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
+      // Held back, because drawing it now would draw it finished and empty.
+      await expect(page.locator('[data-testid="tool-row"]')).toHaveCount(0);
+
+      // He looks at something else, and what was in the air lands while nobody
+      // is watching that chat.
+      await page.goto(`/project?id=${project.id}&tab=board`);
+      await expect(page.getByTestId('transcript')).toHaveCount(0, { timeout: 30_000 });
+    } finally {
+      release();
+    }
+    chat.printed(call, '313 passed, 0 failed');
+    chat.says('Nothing broke.');
+
+    // Opened again, with that program gone: the chat holds everything it did.
+    await openChatTab(page, project);
+    await page.locator(row).getByTestId('row-name').click();
+    await expect(
+      page.locator('[data-testid="tool-row"][data-tool-name="Bash"]'),
+      'what the other program did while nobody watched was dropped',
+    ).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByTestId('transcript').getByText('Nothing broke.')).toBeVisible({ timeout: 30_000 });
     chat.forget();
   });
 });

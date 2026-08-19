@@ -318,10 +318,17 @@ export class Sessions {
     // yet; those are held back rather than drawn finished and empty. The number
     // this returns is the mark the follower carries on from, so the two use one
     // rule and no row is drawn twice or missed between them.
-    const past = live ? all.slice(0, settledUpTo(all)) : all;
+    const upto = live ? settledUpTo(all) : all.length;
+    const past = all.slice(0, upto);
     // From here the record HAS been read, whatever it turned out to hold — an
     // empty one is still a read, and reading it again would find it empty again.
-    this.store.markImported(summary.id, IMPORT_RECIPE);
+    //
+    // Unless a tail was held back. That tail is drawn by the follower and by
+    // nothing else, so the moment the reader looks away it is nobody's: the
+    // follower is torn down, and a chat already marked read is never read again,
+    // so what the other program was mid-way through when he left is dropped for
+    // good. A partial read is therefore not a read (bw-dmxj.14).
+    if (upto === all.length) this.store.markImported(summary.id, IMPORT_RECIPE);
     if (past.length === 0) return past.length;
 
     // Only now is the old copy thrown away: there is something to put in its
