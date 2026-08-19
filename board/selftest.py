@@ -1791,13 +1791,18 @@ def teardown(tmp, answers=True, closed_only=True):
 REAL_SPINE = status.unfinished_spine
 
 
-def next_job(tmp, work_left, order="worktree,work,land", half=False):
+def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False):
     """What the gate says to a session claiming a new job's first step, while it
     still owns the scratch copy — whose own job either has work left, or does not.
 
     `order` empty is a goal poured before an order was ever recorded: nothing can
     be concluded about it, and concluding 'finished' refuses its owner the next
     job for no reason at all.
+
+    `same` claims a piece of the copy's OWN job instead of a new one. A job is
+    spent from the moment its work closes, which is the moment its checks, its
+    reader's findings, its record and its landing are claimed — so read without
+    care this refusal tells a session to finish the job before starting it.
     """
     goal = {"id": "tst-old", "issue_type": "epic", "labels": ["job"],
             "metadata": {"spine": order} if order else {}}
@@ -1815,7 +1820,8 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False):
         if args[0] == "show":
             return True, json.dumps(goal if args[1] == "tst-old" else
                                     {"id": args[1], "issue_type": "task",
-                                     "labels": ["step:work", "of:tst-new"]})
+                                     "labels": ["step:checks", "of:tst-old"] if same
+                                     else ["step:work", "of:tst-new"]})
         if args[:2] == ["list", "--parent"]:
             # Only the old job has pieces; the card being claimed is a step, and
             # answering for it too would make it read as a container.
@@ -1833,7 +1839,8 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False):
     status.unfinished_spine = REAL_SPINE
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": tmp,
-         "tool_input": {"command": "bd update tst-new.1 --claim"}}))
+         "tool_input": {"command": "bd update %s --claim"
+                        % ("tst-old.9" if same else "tst-new.1")}}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
     here = os.environ.pop("CLAUDE_PROJECT_DIR", None)
@@ -3078,6 +3085,15 @@ def main():
         assert part == "", \
             "a stage with one piece closed and one still open was read as built, " \
             "so its owner was refused the next job: %s" % part
+
+        # Its own job is never the answer. Every piece after the work — the
+        # checks, a reader's finding, the record, the landing — is claimed at a
+        # moment when that job has nothing left to build, and this refusal read
+        # without care tells a session to finish the job before starting it.
+        itself = next_job(tmp, work_left=False, same=True)
+        assert itself == "", \
+            "a session was refused the next piece of the very job its copy holds, " \
+            "as if that job were somebody else's abandoned one: %s" % itself
 
         under_reading = claim_of(tmp, {
             "tst-j.1": [{"id": "tst-j", "status": "open", "issue_type": "epic",

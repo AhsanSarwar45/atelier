@@ -521,13 +521,19 @@ def unfinished_spine(card, root, me=None):
     return [s for s in order if s not in done]
 
 
-def spent_copies(session, root):
+def spent_copies(session, root, skip=None):
     """Copies this session owns whose job has nothing left to build in them.
 
     The teardown refusal only ever fires for a job that reaches its last step,
     and most never do — so the same rule stands in front of the NEXT job instead:
     a session carries at most one live copy, and the one it abandoned is the one
     it is asked about (cor-futg).
+
+    `skip` is the job the card being claimed belongs to, and it is never an
+    answer: a job is spent from the moment its work closes, which is exactly the
+    moment its checks, its reader's findings, its record and its landing are
+    claimed. Asked about its own job, this refusal tells a session to finish the
+    job before starting it (bw-a6o.2.10).
     """
     sid = (session or "nosession")[:8]
     out = {}
@@ -540,7 +546,7 @@ def spent_copies(session, root):
         goals = {l[3:] for c in cards for l in c.get("labels") or []
                  if l.startswith("of:")}
         for goal in goals:
-            if spent(goal, root):
+            if goal != skip and spent(goal, root):
                 out[path] = (branch, goal)
                 break
     return out
@@ -940,8 +946,10 @@ def main():
             # copy is made before a job's first claim now, and what this asks is
             # whether the session is starting fresh work while still owning a
             # finished job's copy (bw-a6o.2).
-            if any(l.startswith("of:") for l in (card.get("labels") or [])):
-                spent_ones = spent_copies(data.get("session_id"), root)
+            own = next((l[3:] for l in card.get("labels") or []
+                        if l.startswith("of:")), None)
+            if own:
+                spent_ones = spent_copies(data.get("session_id"), root, own)
                 if spent_ones is UNREADABLE:
                     deny(
                         "%s is a piece of a job, and the board could not say "

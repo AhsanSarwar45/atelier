@@ -446,6 +446,9 @@ FAULTS = [
                          "                        for s in spine.ORDER))]",
                          '        steps="worktree, [clarify], work, [prove], '
                          'verify, review, land")]')),
+    ("a session is refused the next piece of the very job its copy holds", CLOSE,
+     lambda s: s.replace("            if goal != skip and spent(goal, root):",
+                         "            if spent(goal, root):")),
     ("a session is still told to write a refusal for every step it does not run",
      PRIME,
      lambda s: s.replace("  --steps <the optional ones it runs>`, which creates "
