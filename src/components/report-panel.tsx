@@ -63,12 +63,19 @@ export function useReports() {
  * directory at all, which is why this is never that path.
  */
 export function reportUrl(entry: ReportEntry, fsPath: string): string {
-  const q = new URLSearchParams({
-    project: entry.project,
-    slug: entry.slug,
-    path: fsPath,
-  });
+  const q = new URLSearchParams({ project: entry.project, slug: entry.slug });
+  // Only when this board IS the report's project. The drawer lists every
+  // report on the machine, so sending the open board's folder with all of them
+  // built one project's report against another's board (bw-pqt.18). Without a
+  // folder the server looks the right one up from its own project list.
+  if (fsPath && ownsReport(fsPath, entry.project)) q.set("path", fsPath);
   return apiUrl(`/api/reports/page?${q.toString()}`);
+}
+
+/** Whether `fsPath` is the folder a report filed under `project` is about. */
+function ownsReport(fsPath: string, project: string): boolean {
+  const parts = fsPath.replace(/[/\\]+$/, "").split(/[/\\]/);
+  return parts[parts.length - 1] === project;
 }
 
 interface ReportPanelProps {
@@ -82,9 +89,12 @@ interface ReportPanelProps {
 export function ReportPanel({ open, onOpenChange, fsPath, card }: ReportPanelProps) {
   const { reports, isLoading } = useReports();
   const [showing, setShowing] = useState<ReportEntry | null>(null);
-  // Every report here is built by running the report tools in the project, so
-  // with no directory there is nothing any of these rows could open.
-  const buildable = !!fsPath && !isDoltProject(fsPath);
+  // This board's own copy on disk, when it has one. It is no longer what makes
+  // the list openable: the server finds each report's own folder from its
+  // project list, so a board with no copy here still reads every other
+  // project's reports (bw-pqt.18).
+  const hasCopyHere = !!fsPath && !isDoltProject(fsPath);
+  const here = hasCopyHere ? fsPath : "";
 
   useEffect(() => {
     if (!open) return;
@@ -118,11 +128,6 @@ export function ReportPanel({ open, onOpenChange, fsPath, card }: ReportPanelPro
           <div className="flex items-center justify-center flex-1">
             <Loader2 className="size-5 animate-spin text-t-muted" aria-hidden="true" />
           </div>
-        ) : !buildable ? (
-          <p className="flex-1 mt-4 text-sm text-t-muted text-center py-12">
-            This board has no copy of the project on this machine, so there is
-            nowhere to build its reports.
-          </p>
         ) : showing ? (
           <div className="flex-1 mt-4 flex flex-col min-h-0">
             <div className="pb-2 flex items-center gap-3">
@@ -134,7 +139,7 @@ export function ReportPanel({ open, onOpenChange, fsPath, card }: ReportPanelPro
                 All reports
               </button>
               <a
-                href={reportUrl(showing, fsPath)}
+                href={reportUrl(showing, here)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-sm text-t-tertiary hover:text-t-primary flex items-center gap-1"
@@ -147,7 +152,7 @@ export function ReportPanel({ open, onOpenChange, fsPath, card }: ReportPanelPro
                 drawer's own wallpaper. */}
             <iframe
               title={showing.title}
-              src={reportUrl(showing, fsPath)}
+              src={reportUrl(showing, here)}
               className="flex-1 w-full mb-6 rounded-lg border border-b-default/60
                          bg-white dark:bg-transparent"
             />

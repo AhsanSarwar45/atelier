@@ -120,18 +120,46 @@ fn resolve_project_path(db: &Database, project: &str) -> Option<String> {
 }
 
 /// The folder the build runs in. An explicit `path` wins while it still
-/// exists — the screen may pass one — otherwise it is looked up from the
-/// project name the report is filed under.
+/// exists — the screen may pass one — then the project name the report is
+/// filed under is looked up in the app's own list, and failing both, the
+/// report's own folder beside its spec.
 ///
 /// A link handed over months ago may name a worktree, a second checkout
 /// named after a branch and deleted the day that job lands. That link is
 /// still about the same report, so a path that has since gone falls through
 /// to the lookup rather than failing.
-fn resolve_cwd(explicit: Option<&str>, db: &Database, project: &str) -> Option<String> {
-    explicit
-        .filter(|dir| Path::new(dir).is_dir())
-        .map(str::to_string)
-        .or_else(|| resolve_project_path(db, project))
+///
+/// Not every report is about a project this app was ever told about: reports
+/// filed by hand sit in the data folder under a name no row matches. Those
+/// name no card, so no board is wanted, and their pictures live beside the
+/// spec — which is why their own folder is a working answer and a refusal is
+/// not (bw-pqt.23). A spec that does name a card and cannot reach a board
+/// still fails, and the builder says so in its own words.
+///
+/// A named folder that belongs to some OTHER project is worse than none at
+/// all: the screen lists every report on the machine and hands whichever one
+/// is opened the board the reader happens to be looking at, so one project's
+/// report was built against another's board and came back as an error about
+/// its card (bw-pqt.18). A name that does not match is therefore only a last
+/// resort, behind the lookup — it is still what opens a report of a project
+/// the app has never been told about.
+fn resolve_cwd(explicit: Option<&str>, db: &Database, project: &str, spec: &Path) -> String {
+    let named = explicit.filter(|dir| Path::new(dir).is_dir()).map(str::to_string);
+    let is_this_projects = named
+        .as_deref()
+        .and_then(|dir| Path::new(dir).file_name().map(|n| n.to_string_lossy() == project))
+        .unwrap_or(false);
+    if is_this_projects {
+        return named.expect("a folder that matched the project name");
+    }
+    resolve_project_path(db, project)
+        .or(named)
+        .unwrap_or_else(|| spec_home(spec))
+}
+
+/// The report's own folder — where its spec and its pictures sit.
+fn spec_home(spec: &Path) -> String {
+    spec.parent().unwrap_or(spec).to_string_lossy().to_string()
 }
 
 /// Every report on this machine, newest first.
@@ -189,8 +217,18 @@ fn run_builder(
     match cmd.output() {
         Ok(o) if o.status.success() => {}
         Ok(o) => {
-            let why = String::from_utf8_lossy(&o.stderr).to_string();
-            return Err((StatusCode::UNPROCESSABLE_ENTITY, format!("this report does not build:\n{why}")));
+            // The builder's own first line already says what went wrong, and
+            // says it in the reader's words — "this report does not build:",
+            // or "the spec is not valid JSON:". Putting a sentence in front of
+            // it showed the manager the same words twice (bw-pqt.21). Only a
+            // builder that said nothing at all needs one supplied.
+            let why = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            let said = if why.is_empty() {
+                "this report does not build, and the builder gave no reason".to_string()
+            } else {
+                why
+            };
+            return Err((StatusCode::UNPROCESSABLE_ENTITY, said));
         }
         Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("the report builder did not run: {e}"))),
     }
@@ -258,22 +296,8 @@ fn report_output(
 }
 
 /// Where the build runs, worked out the one way both report routes share.
-///
-/// An explicit `path` wins while it is still there; otherwise it is looked up
-/// from the app's own project list by the name the report is filed under —
-/// not every report names a project the app knows (the data folder also holds
-/// `keystone`, filed by hand), so that can come up empty.
-fn cwd_or_404(p: &PageParams, db: &Database) -> Result<String, (StatusCode, String)> {
-    resolve_cwd(p.path.as_deref(), db, &p.project).ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!(
-                "this computer's project list names no folder for {}, so this report cannot be \
-                 built without &path=<the folder that holds its board>",
-                p.project
-            ),
-        )
-    })
+fn build_cwd(p: &PageParams, db: &Database, spec: &Path) -> String {
+    resolve_cwd(p.path.as_deref(), db, &p.project, spec)
 }
 
 /// One report, rebuilt from its spec so the board it shows is current.
@@ -303,10 +327,7 @@ pub async fn report_page(State(db): State<AppState>, Query(p): Query<PageParams>
             .into_response();
     };
 
-    let cwd = match cwd_or_404(&p, &db) {
-        Ok(cwd) => cwd,
-        Err(resp) => return resp.into_response(),
-    };
+    let cwd = build_cwd(&p, &db, &spec);
     let built = spec.with_file_name(format!("{}.html", p.slug));
     match report_output(&tools, &spec, &cwd, false, &built, p.wants_fresh()) {
         // Without the charset the browser reads the page as windows-1252.
@@ -353,10 +374,7 @@ pub async fn report_spec(State(db): State<AppState>, Query(p): Query<PageParams>
             .into_response();
     };
 
-    let cwd = match cwd_or_404(&p, &db) {
-        Ok(cwd) => cwd,
-        Err(resp) => return resp.into_response(),
-    };
+    let cwd = build_cwd(&p, &db, &spec);
     let built = spec.with_file_name(format!("{}.json", p.slug));
     match report_output(&tools, &spec, &cwd, true, &built, p.wants_fresh()) {
         Ok(json) => ([(axum::http::header::CONTENT_TYPE, "application/json")], json).into_response(),
@@ -412,11 +430,44 @@ mod tests {
         assert_eq!(resolve_project_path(&db, "keystone"), None);
     }
 
+    /// Where a report filed under `project` would sit in the data folder.
+    fn a_spec(project: &str) -> PathBuf {
+        PathBuf::from("/data/reports").join(project).join("some-report.report.json")
+    }
+
     #[test]
-    fn an_explicit_path_wins_over_the_lookup_while_it_is_there() {
+    fn an_explicit_path_wins_over_the_lookup_when_it_names_this_projects_own_folder() {
+        let here = std::env::temp_dir().join("beads-web");
+        std::fs::create_dir_all(&here).expect("a folder to name");
         let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
-        let elsewhere = std::env::temp_dir().to_string_lossy().to_string();
-        assert_eq!(resolve_cwd(Some(&elsewhere), &db, "beads-web"), Some(elsewhere));
+        let named = here.to_string_lossy().to_string();
+        assert_eq!(resolve_cwd(Some(&named), &db, "beads-web", &a_spec("beads-web")), named);
+    }
+
+    /// What the reports drawer used to do: it lists every report on the
+    /// machine and handed each one the board the reader was looking at, so a
+    /// report of another project was built against the wrong board and came
+    /// back as an error about its card (bw-pqt.18).
+    #[test]
+    fn a_folder_belonging_to_another_project_loses_to_the_lookup() {
+        let open_board = std::env::temp_dir().to_string_lossy().to_string();
+        let db = db_with_projects(&[
+            ("Beads Web", "/home/ahsan/code/beads-web", None),
+            ("Machinery", "/home/ahsan/code/machinery", None),
+        ]);
+        assert_eq!(
+            resolve_cwd(Some(&open_board), &db, "machinery", &a_spec("machinery")),
+            "/home/ahsan/code/machinery".to_string()
+        );
+    }
+
+    /// The one thing a named folder is still for: a project the app has never
+    /// been told about, where there is nothing to look up.
+    #[test]
+    fn a_named_folder_still_opens_a_report_of_a_project_no_row_matches() {
+        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        let anywhere = std::env::temp_dir().to_string_lossy().to_string();
+        assert_eq!(resolve_cwd(Some(&anywhere), &db, "keystone", &a_spec("keystone")), anywhere);
     }
 
     /// The shape of a link handed over before the worktree it was built in
@@ -425,8 +476,37 @@ mod tests {
     fn an_explicit_path_that_is_gone_falls_through_to_the_lookup() {
         let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
         assert_eq!(
-            resolve_cwd(Some("/home/ahsan/code/beads-web/worktrees/landed"), &db, "beads-web"),
-            Some("/home/ahsan/code/beads-web".to_string())
+            resolve_cwd(
+                Some("/home/ahsan/code/beads-web/worktrees/landed"),
+                &db,
+                "beads-web",
+                &a_spec("beads-web"),
+            ),
+            "/home/ahsan/code/beads-web".to_string()
+        );
+    }
+
+    /// Two of the reports on this machine are filed under a project the app
+    /// was never told about. They name no card and their pictures sit beside
+    /// the spec, so their own folder builds them — a refusal only meant the
+    /// page would not open at all (bw-pqt.23).
+    #[test]
+    fn a_report_of_a_project_the_app_never_heard_of_builds_in_its_own_folder() {
+        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        assert_eq!(
+            resolve_cwd(None, &db, "keystone", &a_spec("keystone")),
+            "/data/reports/keystone".to_string()
+        );
+    }
+
+    /// A dead `path` on such a link falls all the way through rather than
+    /// stopping at the folder that is no longer there.
+    #[test]
+    fn a_dead_path_on_an_unknown_project_still_reaches_the_reports_own_folder() {
+        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        assert_eq!(
+            resolve_cwd(Some("/gone/for/good"), &db, "keystone", &a_spec("keystone")),
+            "/data/reports/keystone".to_string()
         );
     }
 
@@ -513,6 +593,19 @@ os.replace(part, out)
         assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
         assert!(err.1.contains("this report does not build"), "{}", err.1);
         assert!(err.1.contains("next"), "{}", err.1);
+        // The builder writes that sentence itself. Saying it again in front of
+        // its own words showed the manager the same line twice (bw-pqt.21).
+        assert_eq!(
+            err.1.matches("this report does not build").count(),
+            1,
+            "the reason is the builder's own words, said once: {}",
+            err.1
+        );
+        assert!(
+            err.1.starts_with("this report does not build:"),
+            "the message opens with the builder's own first line, with nothing in front of it: {}",
+            err.1
+        );
     }
     #[test]
     fn only_an_explicit_fresh_asks_for_a_new_run() {

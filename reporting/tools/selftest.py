@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import copy
 import json
 import re
@@ -53,6 +54,12 @@ GOOD = {
         "steps": [{"step": "Drive the long circuit", "cost": "small", "starting": True}],
     },
 }
+
+# The smallest real PNG there is, for cases that only need a picture to exist.
+ONE_PIXEL = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE"
+    "hQGAhKmMIQAAAABJRU5ErkJggg=="
+)
 
 CASES: list[tuple[str, object, str, str]] = []
 
@@ -663,9 +670,41 @@ def run() -> int:
         failures.append(f"with the app down, the file itself was not handed over — {link} / {why}")
     build.urllib.request.urlopen = real_open
 
+
+    # A report filed under a project the app was never told about. It names no
+    # card, so no board is wanted at all, and its pictures sit beside its own
+    # spec — which is what lets the server build it in the report's own folder
+    # rather than refusing to open it (bw-pqt.23).
+    alone = Path(tempfile.mkdtemp()) / "keystone"
+    alone.mkdir(parents=True)
+    (alone / "video-shots").mkdir()
+    (alone / "video-shots" / "one.png").write_bytes(ONE_PIXEL)
+    hand_filed = copy.deepcopy(GOOD)
+    hand_filed["actions"] = {"none": True, "note": "Nothing is waiting on you."}
+    hand_filed["content"][0]["blocks"] = [
+        {"kind": "images",
+         "shots": [{"path": "video-shots/one.png", "caption": "A frame that plays"}]},
+    ]
+
+    def never(*a, **k):
+        raise AssertionError("the board was asked about a report that names no card")
+
+    was_state, was_info = build.card_state, build.card_info
+    build.card_state, build.card_info = never, never
+    try:
+        page = build.build(copy.deepcopy(hand_filed), build.Ctx([], alone, alone))
+        if "data:image/png;base64," not in page:
+            failures.append("a hand-filed report's picture, beside its own spec, "
+                            "never reached the page")
+    except Exception as e:
+        failures.append("a report of a project nobody registered would not build "
+                        "in its own folder — %s" % e)
+    finally:
+        build.card_state, build.card_info = was_state, was_info
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 63 - len(failures)}/{len(CASES) + 63} report gates hold")
+    print(f"{len(CASES) + 64 - len(failures)}/{len(CASES) + 64} report gates hold")
     return 1 if failures else 0
 
 

@@ -71,3 +71,28 @@ fn nothing_looks_for_a_folder_in_someones_home() {
          folder or a checkout directly: {guilty:#?}"
     );
 }
+
+/// The tools must travel INSIDE the binary, not be read off the machine that
+/// built it.
+///
+/// Without `debug-embed`, rust-embed only bakes files in for a release build;
+/// every other build reads them back off disk at the absolute path fixed when
+/// it was compiled. So `report_tools`'s own test — the one that says this copy
+/// carries what a report needs — would pass on a copy that carries nothing,
+/// and a dev-built binary run on any other machine would lay down no tools at
+/// all. The feature is what makes that test exercise the bytes it claims to.
+#[test]
+fn the_tools_are_baked_in_for_every_build_not_only_a_release() {
+    let manifest = std::fs::read_to_string(repo_root().join("server/Cargo.toml"))
+        .expect("the server's own manifest");
+    let line = manifest
+        .lines()
+        .find(|l| l.trim_start().starts_with("rust-embed"))
+        .expect("rust-embed is a dependency of the server");
+    assert!(
+        line.contains("debug-embed"),
+        "without debug-embed the embedded files are read off the build machine's disk in \
+         every build but a release one, so nothing that checks them is checking the product. \
+         The dependency reads: {line}"
+    );
+}
