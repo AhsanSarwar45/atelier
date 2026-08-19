@@ -39,8 +39,13 @@ import type { ReportSpec } from '../types';
 interface CardLink {
   id: string;
   title: string;
-  /** The board heading this card is filed under — "Todo", "In Progress", … */
-  column: string;
+  /**
+   * The board heading this card is filed under — "Todo", "In Progress", … —
+   * or null while nothing here knows it yet. The board's list arrives a moment
+   * after the report on a Dolt-backed project, and a column guessed in the
+   * meantime is a wrong answer the reader cannot tell from a right one.
+   */
+  column: string | null;
 }
 
 /**
@@ -76,7 +81,7 @@ export function LinksRail({
     const id = spec.status.card;
     if (!id) return null;
     const bead = beadsById.get(id);
-    return { id, title: bead?.title ?? id, column: columnOf(bead?.status) };
+    return { id, title: bead?.title ?? id, column: bead ? columnOf(bead.status) : null };
   }, [spec.status.card, beadsById]);
 
   const questionCards: CardLink[] = useMemo(() => {
@@ -151,7 +156,7 @@ export function LinksRail({
       size="sm"
       data-testid={testid}
       data-card-id={card.id}
-      data-card-column={card.column}
+      data-card-column={card.column ?? undefined}
       className="h-auto w-full min-w-0 justify-start gap-2 py-1.5"
       onClick={() => onOpenCard(card.id)}
     >
@@ -159,7 +164,7 @@ export function LinksRail({
       <span className="flex min-w-0 flex-col items-start gap-0.5">
         <span className="min-w-0 max-w-full truncate">{card.title}</span>
         <span className="flex items-center gap-1.5 text-xs font-normal text-t-muted">
-          <span data-testid="report-link-column">{card.column}</span>
+          {card.column && <span data-testid="report-link-column">{card.column}</span>}
           <Badge variant="secondary" appearance="outline" size="xs" shape="circle" className="font-mono">
             {card.id}
           </Badge>
