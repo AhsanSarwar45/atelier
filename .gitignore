@@ -92,11 +92,12 @@ __pycache__/
 
 # Agent workbench (docs/agent-workbench.md)
 /workbench/node_modules
-# E2E run artifacts: the isolated instance's data dir and its fixture project.
+# E2E run artifacts: every spec's own instance data dir and fixture project,
+# the browser's output folder, and the marker a run drops recording how it went.
 # The screenshots at tests/results/*.png are evidence and stay tracked.
-/tests/.e2e-run/
-/tests/.workbench-run*/
+/tests/.*-run*/
 /tests/.artifacts/
+/test-results/
 
 worktrees/
 
