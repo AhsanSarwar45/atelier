@@ -3904,8 +3904,18 @@ def main():
                        "title": "The count above the list names one row too few",
                        "description": "## Where it is\nui/report.tsx prints one less "
                                       "than the rows under it\n"}}
+        # Where a find says it is only has to name a place and show how it manifests,
+        # so it is not a finish line and the item promoted from it says how we will
+        # know it is fixed.
+        FIXED = {"tst-f1": "`npm test` reports 0 failures with ui/settings.tsx "
+                           "keeping the choice",
+                 "tst-f2": "`npm test` reports 0 failures with ui/settings.tsx "
+                           "keeping the tick",
+                 "tst-f3": "`npm test` reports 0 failures with ui/report.tsx "
+                           "counting every row"}
         board(goals=[], cards=FINDS)
-        code, said, err, asked = opens(*sum([["--source", f] for f in sorted(FINDS)], []))
+        code, said, err, asked = opens(
+            *sum([["--source", "%s|%s" % (f, FIXED[f])] for f in sorted(FINDS)], []))
         assert code == 0, "three finds promoted together were refused: %s" % (said + err)
         made = [l for l in asked if l.startswith("create ")]
         assert len([l for l in made if "--type epic" in l]) == 1, \
@@ -3928,6 +3938,13 @@ def main():
             assert "-l step:work" in item[0] and "-l of:" in item[0], \
                 "the item promoted from %s is not one of the job's own work items, " \
                 "so nothing moves the run on when it closes: %s" % (fid, item[0])
+            half = item[0].replace("\\n", "\n").split(
+                "## Acceptance Criteria\n", 1)[-1].split("\n\n", 1)[0]
+            assert not bars.finish_line(half), \
+                "the item promoted from %s boarded with a second half that `job " \
+                "under` would have bounced, so promotion is the way onto the board " \
+                "for a card nothing can close it against: %s" \
+                % (fid, bars.finish_line(half))
         closed = [l for l in asked if l.startswith("close ")]
         assert len(closed) == 3, \
             "promoting three finds closed %d of them, so the rest stand open as " \
@@ -3940,14 +3957,33 @@ def main():
             "a job whose work items are the finds it was promoted from still told " \
             "the pourer to pour them by hand: %s" % said
 
-        # One find still promotes the way it always did.
-        board(goals=[], cards={"tst-f1": FINDS["tst-f1"]})
-        code, said, err, asked = opens("--source", "tst-f1")
+        # One find still promotes the way it always did, and where it says it is
+        # stands as the item's own finish line when those words already are one.
+        READY = {"id": "tst-f4", "status": "open", "labels": ["find"],
+                 "title": "The count above the list is written twice over",
+                 "description": "## Where it is\n`npm test` reports 1 failure over "
+                                "ui/report.tsx, which counts every row twice\n"}
+        board(goals=[], cards={"tst-f4": READY})
+        code, said, err, asked = opens("--source", "tst-f4")
         assert code == 0 and len([l for l in asked if l.startswith("create ")]) == 2, \
             "promoting a single find stopped making one goal and one work item: %s" \
             % (said + err)
-        assert any(l.startswith("close tst-f1") for l in asked), \
+        assert any(l.startswith("close tst-f4") for l in asked), \
             "the find a job was promoted from was left open: %s" % asked
+
+        # A find's where-it-is is a weaker thing than a finish line: it says where to
+        # go and look, not what settles it. Promotion is not the way onto the board
+        # for a work item `job under` would have bounced.
+        board(goals=[], cards={"tst-f1": FINDS["tst-f1"]})
+        code, said, err, asked = opens("--source", "tst-f1")
+        assert code != 0, \
+            "a find whose where-it-is names nothing runnable was promoted into a " \
+            "work item anyway, so closing against it is an opinion: %s" % (said + err)
+        assert '--source "tst-f1|' in (said + err), \
+            "the refusal never handed over the way to promote this find, so the " \
+            "batch it belongs to cannot be opened at all: %s" % (said + err)
+        assert not [l for l in asked if l.startswith("create ")], \
+            "the promotion was refused after cards had already been written: %s" % asked
 
         # A find nobody can read is a promotion that would carry no words at all.
         board(goals=[], cards={})
@@ -3955,11 +3991,15 @@ def main():
         assert code != 0 and "nothing to promote" in (said + err), \
             "a job was promoted from a card that is not there, so its work item " \
             "carries no words: %s" % (said + err)
+        assert not [l for l in asked if l.startswith("create ")], \
+            "a promotion refused after the goal was written leaves half a job " \
+            "standing that nobody asked for: %s" % asked
 
         print("ok: naming several finds on one opening makes one job carrying one "
               "work item per find in the words it was filed in, closes every one of "
-              "them as promoted, still promotes a single find the way it did, and "
-              "refuses a source card that is not there")
+              "them as promoted, holds each promoted item to the same finish line "
+              "`under` holds one to, still promotes a single find the way it did, "
+              "and refuses a source card that is not there")
 
         # The merge nudge. Two buttons and a checkbox on one page arrive as three
         # work items settled by one run in one place, and nothing said so.
@@ -4011,10 +4051,36 @@ def main():
             "two items of one batch settled by one run in one place were poured " \
             "with nothing said between them: %r" % err
 
+        # A sibling settled by two runs in two places is not settled by either
+        # command in the other's place. Reading every command against every place
+        # invents a pair the sibling never wrote, and nudges a merge nobody can make.
+        BOTH = [{"id": "tst-goal.2", "status": "open",
+                 "title": "The settings page and the count are read together",
+                 "description": "## Acceptance Criteria\n`npm test` reports 0 "
+                                "failures with ui/settings.tsx keeping the choice "
+                                "and pytest board/count.py reports 0 failures\n"}]
+        board(goals=[], cards={"tst-goal": PARENT}, kin=BOTH)
+        code, said, err, asked = ran(
+            ["under", "tst-goal", "--do", "The count above the list names one row too "
+             "few|pytest reports 0 failures with ui/settings.tsx counting every row"])
+        assert code == 0 and "WARNING" not in err, \
+            "an item was nudged towards a sibling over a command and a place that " \
+            "sibling never ran together, so the merge it names cannot be made: %r" % err
+        # ...and the same sibling still nudges the item it really does land with.
+        board(goals=[], cards={"tst-goal": PARENT}, kin=BOTH)
+        code, said, err, asked = ran(
+            ["under", "tst-goal", "--do", "The settings page loses the tick when the "
+             "page turns|`npm test` reports 0 failures with ui/settings.tsx keeping "
+             "the tick"])
+        assert code == 0 and "WARNING" in err and "tst-goal.2" in err, \
+            "pairing each place with the run it was written after lost the nudge " \
+            "for an item that does land with its sibling: %r" % err
+
         print("ok: a work item poured where an open sibling already lands is nudged "
               "towards merging with it by name and never refused, the ids it prints "
               "are untouched, an item landing elsewhere or run by another command is "
-              "left alone, and two items of one batch are judged against each other")
+              "left alone, a command and a place a sibling never ran together are no "
+              "pair, and two items of one batch are judged against each other")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
