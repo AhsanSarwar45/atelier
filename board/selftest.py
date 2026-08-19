@@ -530,11 +530,18 @@ WORK_STEP = {"status": "in_progress", "notes": "", "assignee": "selftest",
              "labels": ["step:work", "of:tst-j"], "metadata": {}}
 
 
-def landed(merge_fails, release_fails=False, main_on="main"):
+def landed(merge_fails, release_fails=False, main_on="main", litter=(),
+           held_by=None):
     """What a landing asks of the merge slot, how it asks, and what it then says.
 
     Every git call is answered rather than run: the case is about the slot going
     back, and a case that merges for real needs two repositories to say so.
+
+    `litter` is what the checkout the landing lands in has lying in it, and
+    `held_by` which live session is holding those files. The merge gate's own
+    sweep is what reads both — stood in for one layer below `clear_the_way`, so
+    what the case proves is that a landing calls the gate's sweep and not a
+    second copy of it (bw-a6o.3.6).
     """
     spec = importlib.util.spec_from_loader(
         "board_land", importlib.machinery.SourceFileLoader(
@@ -577,9 +584,20 @@ def landed(merge_fails, release_fails=False, main_on="main"):
             return Ran(0)
         return Ran(1, "somebody else holds it") if release_fails else Ran(0)
 
+    def swept(tree):
+        asked.append("sweep")
+        return "the landing gate swept these aside — some date", ""
+
     land.git = fake_git
     land.subprocess = type("shim", (), {"run": staticmethod(fake_run)})
     land.bc.landings = lambda root, cid=None: [("/tmp/tst-main", "main")]
+    # Always stood in for, litter or none: left real, `clear_the_way` would go
+    # looking at this machine's own main checkout and stash whatever it found
+    # there.
+    land.gate.landing_tree = lambda root, lands_on: "/tmp/tst-main"
+    land.gate.leftovers = lambda tree: list(litter)
+    land.gate.holding = lambda tree, paths, root, when=None: dict(held_by or {})
+    land.gate.sweep = swept
     # Restored: this suite decides whether to run itself again by looking at its
     # own arguments, and a case that leaves somebody else's there makes every run
     # spawn two more, without end (mch-aa9.10).
@@ -3885,10 +3903,30 @@ def main():
     assert "standing on somebody-else" in astray["said"] \
         and "acquire" not in astray["asked"], \
         "a landing moved whatever branch the main checkout happened to be on"
+    # The gate's litter sweep reads a session's Bash tool, and this merge is made
+    # by a subprocess that tool never sees — so the sweep has to be called here or
+    # a one-command landing walks into the refusal it was built to stop
+    # (bw-a6o.3.6).
+    tidied = landed(merge_fails=False, litter=["board/land"])
+    assert tidied["asked"] == ["acquire", "sweep", "merge", "release"], \
+        "a landing merged into a checkout with leftovers in it without setting " \
+        "them aside first: %s" % tidied["asked"]
+    assert "set 1 leftover file(s) aside" in tidied["said"] \
+        and "landed" in tidied["said"], \
+        "a landing swept a checkout clear and said nothing about it: %s" % tidied["said"]
+    theirs = landed(merge_fails=False, litter=["board/land"],
+                    held_by={"bw-other-99": ["board/land"]})
+    assert "merge" not in theirs["asked"] and "release" in theirs["asked"], \
+        "a landing merged over a live session's leftovers, or kept the slot " \
+        "after refusing to: %s" % theirs["asked"]
+    assert "bw-other-99" in theirs["said"] and "sweep" not in theirs["asked"], \
+        "a landing blocked by somebody's work in the way swept it aside or named " \
+        "nobody: %s" % theirs["said"]
 
     print("ok: landing is one command that takes the slot under this session's own "
-          "name and queues for it, merges, and gives the slot back — when the merge "
-          "fails as well, and says so loudly when it cannot")
+          "name and queues for it, sets aside leftovers no live session holds before "
+          "merging and refuses by name the ones somebody holds, merges, and gives the "
+          "slot back — when the merge fails as well, and says so loudly when it cannot")
 
     # A step is proved by a note or by the reason its close is carrying, and the
     # two answer to the same bar: `bd close --reason` writes neither the notes nor

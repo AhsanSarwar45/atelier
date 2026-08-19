@@ -15,8 +15,18 @@ Four turns a session cannot skip is four turns that are not the work.
 fast-forward is refused here exactly as it is refused by hand. The slot goes
 back in a `finally`: the one thing worse than four turns is a slot nobody holds
 and nobody can take.
+
+The same goes for what the gate does around that merge. Its litter sweep reads
+the command out of a session's Bash tool, and the merge here is made by a
+subprocess of this script, which that tool never sees — so a landing run this
+way would walk into the one refusal the sweep was built to stop, "Working
+directory has staged changes", naming nobody. The gate's own `clear_the_way` is
+called here instead of copied, so both spellings of a landing set the same
+leftovers aside and refuse for the same live session by name (bw-a6o.3.6).
 """
 import argparse
+import importlib.machinery
+import importlib.util
 import os
 import subprocess
 import sys
@@ -27,6 +37,20 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import board_common as bc  # noqa: E402
 import project  # noqa: E402
+
+
+def _gate():
+    """The merge gate, loaded by path: a hook's filename is not an identifier."""
+    where = os.path.join(os.path.dirname(HERE), "hooks", "board-merge-gate.py")
+    spec = importlib.util.spec_from_loader(
+        "board_merge_gate",
+        importlib.machinery.SourceFileLoader("board_merge_gate", where))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+gate = _gate()
 
 ROOT = project.root(os.getcwd())
 HERE_TREE = os.getcwd()
@@ -114,10 +138,19 @@ def main():
     took, out = slot("acquire")
     if not took:
         sys.exit("could not take the merge slot: %s" % out.strip())
-    merged = False
+    merged, blocked = False, ""
     try:
-        _, code = git(["merge", "--ff-only", branch], main_tree, must=False)
-        merged = code == 0
+        # Inside the slot, so no other landing is sweeping the same checkout at
+        # the same moment, and before the merge, because leftovers are what the
+        # merge would die on.
+        said, refused = gate.clear_the_way(ROOT, trunk)
+        if said:
+            print(said)
+        if refused:
+            blocked = said
+        else:
+            _, code = git(["merge", "--ff-only", branch], main_tree, must=False)
+            merged = code == 0
     finally:
         gave, why = slot("release")
 
@@ -128,6 +161,8 @@ def main():
         sys.exit("⛔ the merge slot is STILL HELD and no other landing can run "
                  "until it is freed — `bd merge-slot release --actor %s`: %s"
                  % (me(), why.strip()))
+    if blocked:
+        sys.exit("nothing was merged and the slot is free again: %s" % blocked)
     if not merged:
         sys.exit("%s would not fast-forward onto %s even after catching up; "
                  "the slot is free again" % (branch, trunk))
