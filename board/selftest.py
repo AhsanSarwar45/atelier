@@ -2372,6 +2372,15 @@ def main():
                            pages=room)[0], \
             "a link with the reply carrying on past it was read as handing the " \
             "page over"
+        # The screen down, so the build hands over the file itself
+        # (reporting/tools/build.py handover). The folder it sits in is this
+        # machine's own setting and is not called "reports" here, which is the
+        # whole point: the link is known by its scheme and its last two folders.
+        itself = "file://" + os.path.join(room, "selftest", "a-choice-to-make.html")
+        assert carrying_on(["c"], message="Two ways to go.\n" + itself,
+                           pages=room)[0] == "", \
+            "a turn ending on the page file itself was sent back to work: %s" \
+            % carrying_on(["c"], message="Two ways to go.\n" + itself, pages=room)[0]
     finally:
         shutil.rmtree(room, ignore_errors=True)
         shutil.rmtree(quiet, ignore_errors=True)

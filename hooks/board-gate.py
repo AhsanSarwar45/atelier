@@ -71,8 +71,13 @@ CARRY_ON = (
 # (reporting/tools/build.py): the screen's own address while it is up, the file
 # itself when it is not. Both name the project's folder and the page's slug,
 # which is what finds the spec the page was built from.
+#
+# The file itself is recognised by its scheme and by the two folders at the end
+# of it, never by the name of the folder they sit in: where this machine keeps
+# its pages is a setting (REPORTS_DIR), and a gate that only knew the default
+# name pushed a real handover back to work on any machine that changed it.
 LINK = re.compile(r"/api/reports/page(?:\?(?P<query>\S+))?"
-                  r"|/reports/(?P<project>[^/\s]+)/(?P<slug>[^/\s]+)\.html")
+                  r"|file://\S*?/(?P<project>[^/\s]+)/(?P<slug>[^/\s]+)\.html")
 HANDOVER = (
     "You ticked off %s this turn, and this reply does not end on the link to its "
     "page. Finished work reaches the manager as a page: `report list` finds the one "
