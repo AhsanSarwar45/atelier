@@ -1567,7 +1567,7 @@ HIS_COMPLAINT = ("whenever I point a systematic issue to Claude it starts fixing
 NAMED = "fixes the examples instead of what produced them"
 
 
-def pointed_at(verdict, made=(), prompt="habit-case"):
+def pointed_at(verdict, made=(), prompt="habit-case", said=None, standing=()):
     """What the stop gate says to a turn whose message was read like this, and what
     it counted.
 
@@ -1575,6 +1575,10 @@ def pointed_at(verdict, made=(), prompt="habit-case"):
     gate's own reader, so the shapes that are not an answer at all — nothing written,
     a torn write, JSON that is not an object — go through the same path a real one
     does. `None` writes nothing.
+
+    `said` is the reply the turn ends on and `standing` is what the board answers
+    when the gate asks about the cards that reply names — the two halves of
+    pointing at a card that is already there.
     """
     state = {"edits": [], "last_stop": T, "closed": [], "asked": T + 45,
              "claims": [{"id": "c", "t": T + 5}],
@@ -1586,7 +1590,9 @@ def pointed_at(verdict, made=(), prompt="habit-case"):
     gate.bc.machine_name = lambda root=None: "someone"
     gate.bc.reviewing = lambda: ""
     gate.bc.actor = lambda sid, cwd: "test-session"
-    gate.bc.bd = lambda args, root=None: (True, "[]")
+    gate.bc.bd = lambda args, root=None: (
+        (True, json.dumps([c for c in standing if c["id"] in args]))
+        if args[:1] == ["show"] else (True, "[]"))
     os.makedirs(gate.bc.HABIT_DIR, exist_ok=True)
     where = gate.bc.habit_path(prompt)
     if verdict is None:
@@ -1600,7 +1606,8 @@ def pointed_at(verdict, made=(), prompt="habit-case"):
     gate.tally = fired.append
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": ROOT, "prompt_id": prompt,
-         "last_assistant_message": "I have rewritten the three files you named."}))
+         "last_assistant_message":
+             said or "I have rewritten the three files you named."}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
     try:
@@ -2671,6 +2678,30 @@ def main():
         assert filed == "" and not fired, \
             "the turn filed the cause and was refused anyway: %s" % filed
 
+        # A cause he names twice wants one card, not one a turn. The second time
+        # round the honest answer is to point at the card the first turn poured,
+        # and a turn that pours nothing because the card is already there was
+        # refused all night for it (bw-a6o.1).
+        A_FIND = {"id": "tst-fff", "labels": ["find", "area:board", "kind:bug"]}
+        A_GOAL = {"id": "tst-ggg", "labels": ["job", "area:board", "kind:bug"]}
+        A_STEP = {"id": "tst-ggg.4", "labels": ["step:work", "of:tst-ggg"]}
+        for what, card in (("a find", A_FIND), ("a goal", A_GOAL)):
+            named, fired = pointed_at(
+                YES, said="That is %s already — it is on %s." % (what, card["id"]),
+                standing=[card])
+            assert named == "" and not fired, \
+                "a reply naming %s already carrying the cause was refused: %s" \
+                % (what, named or "ALLOWED")
+        stepped, _ = pointed_at(
+            YES, said="I am on it, see tst-ggg.4.", standing=[A_STEP])
+        assert "how you work" in stepped, \
+            "a step named instead of a cause stood the refusal down: %s" \
+            % (stepped or "ALLOWED")
+        ghost, _ = pointed_at(YES, said="The cause is on tst-fff.", standing=[])
+        assert "how you work" in ghost, \
+            "a card named in the reply and nowhere on the board stood the " \
+            "refusal down: %s" % (ghost or "ALLOWED")
+
         # Every shape of not-a-yes, including the three that are not an answer at
         # all. A gate that cannot be sure lets the reply through: a wrong refusal
         # costs him a blocked message, which is worse than a habit missed.
@@ -2759,9 +2790,11 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
     print("ok: a habit the manager points at cannot end the turn with nothing on the "
-          "board naming what produced it, a card in the same turn satisfies it, every "
-          "reading that is not a plain yes lets the reply through, and either way of "
-          "switching the gate off stops the refusal and the reading both")
+          "board naming what produced it, a card in the same turn satisfies it, so "
+          "does pointing at a find or a goal already standing while a step or a card "
+          "that is not there does not, every reading that is not a plain yes lets the "
+          "reply through, and either way of switching the gate off stops the refusal "
+          "and the reading both")
 
     his = landing("manager")
     assert any(a.startswith("update j -s manager_review") for a in his), \

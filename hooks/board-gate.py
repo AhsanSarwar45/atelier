@@ -3,8 +3,8 @@
 then while the work itself is unfinished.
 
 Six refusals, in the order they matter: the board must be reachable at all; a
-habit the manager pointed at this turn must have a card naming what produced it,
-before anything he said gets answered; code changed in this turn must belong to a
+habit the manager pointed at this turn must have a card naming what produced it —
+poured this turn or already standing — before anything he said gets answered; code changed in this turn must belong to a
 card this session held when it changed it (`bc.unowned` — the held set at the
 instant of stopping would make a job's clean finish look like work under no card
 at all); anything the reply reports as found-but-not-fixed must already be
@@ -175,6 +175,30 @@ def rows(ids, root):
     return got if isinstance(got, list) else [got]
 
 
+# What a card has to be to answer for a cause: something wrong that was found, or
+# a job poured to put it right. A step is neither — it is one move inside somebody
+# else's plan, and pointing at it says how the work is being done rather than what
+# let the habit happen.
+CAUSES = ("find", "job")
+
+
+def cause_named(message, root):
+    """Whether the reply points at a card already on the board carrying the cause.
+
+    What the refusal asks for is the cause recorded, not the cause recorded
+    *this turn*. A habit he names twice is one cause and wants one card, so the
+    second turn's honest answer is to point at the card the first turn poured —
+    and a session that poured nothing has nothing to point at, which is what the
+    refusal is for. Read off the board and not off the wording: the card has to
+    be there, and it has to be one of the two shapes a cause is kept in.
+    """
+    named = set()
+    for said in bc.prefixes(root):
+        named.update(re.findall(r"\b%s-[0-9a-z.-]{2,16}\b" % re.escape(said),
+                                message or ""))
+    return any(set(r.get("labels") or []) & set(CAUSES) for r in rows(named, root))
+
+
 # A goal here is work this session is expected to carry on with. The rest are
 # waiting on somebody who is not it: `in_review` on the board's own reader,
 # `blocked` and `deferred` on another card or an outside date, `manager_review`
@@ -309,7 +333,8 @@ def main():
         # `is True` and not merely truthy: the reading writes a boolean, so anything
         # else in that slot is a file half-written or edited by hand, and a gate that
         # refuses on those refuses on damage rather than on an answer.
-        if habit.get("habit") is True:
+        if habit.get("habit") is True \
+                and not cause_named(data.get("last_assistant_message"), root):
             block(HABIT % {"what": habit.get("what")
                                        or "a way of working he has named before",
                                        "pour": bc.tool(root, "job")})
