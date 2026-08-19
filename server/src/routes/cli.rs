@@ -8,6 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::process::Command;
 
+use super::beads::forget_all_boards;
 use super::validate_path_security;
 
 /// Whitelisted bd subcommands that are allowed to be executed.
@@ -116,6 +117,13 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
     cmd.args(&req.args).current_dir(&cwd);
 
     let result = tokio::time::timeout(Duration::from_secs(30), cmd.output()).await;
+
+    // `update`, `close`, `create` and `comment` all write cards, and this route
+    // is handed the arguments rather than a board, so which board moved is not
+    // knowable here: everything read of every board is dropped.
+    if matches!(subcommand.as_str(), "update" | "close" | "create" | "comment") {
+        forget_all_boards();
+    }
 
     match result {
         Ok(Ok(output)) => {

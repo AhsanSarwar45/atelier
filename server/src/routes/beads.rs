@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 
 use super::validate_path_security;
@@ -125,7 +125,7 @@ pub(crate) struct LegacyDependency {
 /// Supports both old and new `bd` CLI formats:
 /// - **Old**: `dependencies` as array of objects with `depends_on_id` and `type`
 /// - **New**: `parent` (string), `dependencies` as array of string IDs, `related` as array of strings
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bead {
     pub id: String,
     pub title: String,
@@ -246,7 +246,7 @@ where
 }
 
 /// A comment on a bead.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
     #[serde(deserialize_with = "deserialize_comment_id")]
     pub id: String,
@@ -511,6 +511,67 @@ const LIVE_STAGES: [(&str, &[&str]); 3] = [
 /// On every successful read, the computed per-status bead counts are upserted
 /// into the local SQLite cache (`project_bead_counts`) so `/api/projects` can
 /// return them for instant home-page rendering. Cache writes are best-effort.
+/// How long a board that has just been read is handed out again unread.
+///
+/// Reading one costs a `bd` run and about a second, and a screen asks for the
+/// same board from several places at once — the columns, the counts, the search
+/// — so the reader used to wait for that second more than once for one screen
+/// (bw-uiyz.9). The answer is thrown away the moment anything can have changed
+/// it: this app's own writes clear it, and so does the watcher that already
+/// tells the screen a file moved, which is why it may be kept this long.
+const BOARD_MEMO: Duration = Duration::from_secs(30);
+
+/// A board as it was last read, by the path it was read from.
+type Boards = Mutex<HashMap<String, (Instant, String, Vec<Bead>)>>;
+
+fn boards() -> &'static Boards {
+    static BOARDS: OnceLock<Boards> = OnceLock::new();
+    BOARDS.get_or_init(Boards::default)
+}
+
+/// One reader per board at a time, so two arriving together cost one `bd` run:
+/// the second waits, and then finds the first one's answer already kept.
+type Gates = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+
+fn gate_for(path: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static GATES: OnceLock<Gates> = OnceLock::new();
+    let gates = GATES.get_or_init(Gates::default);
+    let mut held = gates.lock().unwrap_or_else(|e| e.into_inner());
+    held.entry(path.to_string()).or_default().clone()
+}
+
+/// The board as it was last read, if that was recent enough to hand out again.
+fn kept_board(path: &str) -> Option<(Vec<Bead>, String)> {
+    let kept = boards().lock().unwrap_or_else(|e| e.into_inner());
+    let (at, source, beads) = kept.get(path)?;
+    (at.elapsed() < BOARD_MEMO).then(|| (beads.clone(), source.clone()))
+}
+
+fn keep_board(path: &str, source: &str, beads: &[Bead]) {
+    let mut kept = boards().lock().unwrap_or_else(|e| e.into_inner());
+    kept.insert(path.to_string(), (Instant::now(), source.to_string(), beads.to_vec()));
+}
+
+/// Something changed a board, so what was read of it is no longer the truth.
+///
+/// Called by every route that writes a card and by the watcher that sees the
+/// file move under us, whoever wrote it.
+pub fn forget_board(project_path: &str) {
+    let key = project_path.replace('\\', "/");
+    let mut kept = boards().lock().unwrap_or_else(|e| e.into_inner());
+    kept.remove(&key);
+    // A path may be named to us in more than one way — a worktree, a symlink,
+    // a trailing slash — and a card written under one name must not leave the
+    // same board kept under another.
+    kept.retain(|held, _| !held.starts_with(&key) && !key.starts_with(held.as_str()));
+}
+
+/// Everything read of every board is thrown away: a command we did not write
+/// has just run against one of them and we cannot tell which.
+pub fn forget_all_boards() {
+    boards().lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 pub async fn read_beads(
     Extension(dolt_manager): Extension<Arc<DoltManager>>,
     Extension(db): Extension<Arc<Database>>,
@@ -559,6 +620,30 @@ pub async fn read_beads(
         );
     }
 
+    // Reading a whole board costs a `bd` run and about a second, and one screen
+    // asks for the same board from several places at once (bw-uiyz.9). So whole
+    // reads share: the board just read is handed straight back, and two asking
+    // at the same moment cost one read between them rather than one each.
+    // A read of only what changed since a moment is never shared — it is not the
+    // board, and it is cheap already.
+    let whole_read = params.updated_after.is_none();
+    if whole_read {
+        if let Some((beads, source)) = kept_board(&path) {
+            return (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": source })));
+        }
+    }
+    let gate = if whole_read { Some(gate_for(&path)) } else { None };
+    let _hold = match gate.as_ref() {
+        Some(gate) => Some(gate.lock().await),
+        None => None,
+    };
+    // Whoever we waited behind has read it by now.
+    if whole_read {
+        if let Some((beads, source)) = kept_board(&path) {
+            return (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": source })));
+        }
+    }
+
     // Tier 0: Try per-project Dolt server via port file or log
     if let Some(port) = resolve_dolt_port(&beads_dir) {
         // Quick TCP probe: skip Tier 0 if port is dead (avoids slow SQL timeout)
@@ -584,6 +669,9 @@ pub async fn read_beads(
                         tracing::info!("Read {} beads from per-project Dolt (port {})", beads.len(), port);
                         let beads = post_process_beads(beads);
                         upsert_counts_cache(&db, &path, "dolt-project", &beads);
+                        if whole_read {
+                            keep_board(&path, "dolt-project", &beads);
+                        }
                         return (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": "dolt-project" })));
                     }
                     Err(e) => {
@@ -648,6 +736,9 @@ pub async fn read_beads(
 
     let beads = post_process_beads(beads);
     upsert_counts_cache(&db, &path, source, &beads);
+    if whole_read {
+        keep_board(&path, source, &beads);
+    }
     (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": source })))
 }
 
@@ -673,6 +764,18 @@ pub struct CreateBeadRequest {
 /// Creates a new bead. For `dolt://` paths, inserts directly via Dolt SQL.
 /// For filesystem paths, delegates to `bd create` CLI.
 pub async fn create_bead_handler(
+    manager: Extension<Arc<DoltManager>>,
+    req: Json<CreateBeadRequest>,
+) -> impl IntoResponse {
+    let board = req.path.clone();
+    let answer = create_bead(manager, req).await;
+    // The board now holds a card it did not before, whichever way the write
+    // went, so nothing read of it before this may be handed out again.
+    forget_board(&board);
+    answer
+}
+
+async fn create_bead(
     Extension(dolt_manager): Extension<Arc<DoltManager>>,
     Json(req): Json<CreateBeadRequest>,
 ) -> impl IntoResponse {
@@ -815,6 +918,16 @@ pub struct UpdateBeadRequest {
 /// Updates a bead's fields. For `dolt://` paths, updates via Dolt SQL.
 /// For filesystem paths, delegates to `bd update` CLI.
 pub async fn update_bead_handler(
+    manager: Extension<Arc<DoltManager>>,
+    req: Json<UpdateBeadRequest>,
+) -> impl IntoResponse {
+    let board = req.path.clone();
+    let answer = update_bead(manager, req).await;
+    forget_board(&board);
+    answer
+}
+
+async fn update_bead(
     Extension(dolt_manager): Extension<Arc<DoltManager>>,
     Json(req): Json<UpdateBeadRequest>,
 ) -> impl IntoResponse {

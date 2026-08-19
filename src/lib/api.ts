@@ -90,9 +90,42 @@ async function chore<T>(run: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Reads already on their way, by what they are reading.
+ *
+ * A screen is built from many parts and several of them ask for the same thing
+ * as it opens — the project list four times over, the memory twice, the board
+ * from every hook that wants a count. Each of those was a separate journey to
+ * the server, so the reader waited for the same answer several times over
+ * (bw-uiyz.9). Now the first asker's journey is the one everybody waits on.
+ *
+ * Only reads share, and only while one is actually in the air: nothing is kept
+ * after it lands, so nobody is ever handed a stale answer. The answer itself is
+ * shared rather than copied, so callers must treat what comes back as read-only
+ * — which every caller here already does.
+ */
+const readsInFlight = new Map<string, Promise<unknown>>();
+
+/**
  * Helper for fetch with error handling
  */
-async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = options?.method ?? 'GET';
+  // A caller that brought its own cancel wants to cancel its own read and
+  // nobody else's, so it does not join or become a shared one.
+  const shareable = method === 'GET' && !options?.signal;
+  if (!shareable) return readApi<T>(path, options);
+
+  const waiting = readsInFlight.get(path);
+  if (waiting) return waiting as Promise<T>;
+
+  const journey = readApi<T>(path, options).finally(() => {
+    readsInFlight.delete(path);
+  });
+  readsInFlight.set(path, journey);
+  return journey;
+}
+
+async function readApi<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(apiUrl(path), {
     ...options,
     signal: options?.signal ?? AbortSignal.timeout(10000),

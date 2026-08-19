@@ -24,7 +24,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
-use super::beads::{recompute_epic_statuses, resolve_issues_path};
+use super::beads::{forget_board, recompute_epic_statuses, resolve_issues_path};
 use super::validate_path_security;
 
 /// How long a burst of writes must be quiet before it is reported, in ms.
@@ -145,8 +145,9 @@ pub async fn watch_beads(
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(100);
 
     // Spawn the watcher task
+    let watched = project_path.to_string_lossy().to_string();
     tokio::spawn(async move {
-        if let Err(e) = run_watcher(store, tx).await {
+        if let Err(e) = run_watcher(store, watched, tx).await {
             error!("Board watcher error: {}", e);
         }
     });
@@ -162,6 +163,7 @@ pub async fn watch_beads(
 /// Runs the board watcher and sends events through the channel.
 async fn run_watcher(
     store: BoardStore,
+    watched: String,
     tx: mpsc::Sender<Result<Event, Infallible>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create a channel for notify events
@@ -238,6 +240,12 @@ async fn run_watcher(
 
             _ = tokio::time::sleep(debounce), if pending.is_some() => {
                 let change_type = pending.take().unwrap_or("modified");
+
+                // The board on disk moved, so what the read path last read of
+                // it is no longer the truth. Throw it away before telling the
+                // screen to come back for it, or the screen is handed the very
+                // answer the change made wrong.
+                forget_board(&watched);
 
                 let file_event = FileChangeEvent {
                     path: reported_path.clone(),
