@@ -208,6 +208,33 @@ export function pastTranscript(messages: RecordedMessage[]): PastEntry[] {
 }
 
 /**
+ * How much of a record may be drawn while it is still being written.
+ *
+ * A command is written into the record when it is made, and what it printed
+ * lands in a later entry. So the last entries of a chat somebody is working in
+ * right now are often calls with nothing back yet, and drawing one of those
+ * draws it finished and empty — a row nothing revisits, because the log is the
+ * transcript and what is written there stays written (§4).
+ *
+ * The tail is therefore held back until something follows it. A command that
+ * genuinely printed nothing waits for the chat's next word, which is a delay
+ * nobody sees rather than a wrong row that stays wrong (bw-dmxj.6).
+ *
+ * Only for FOLLOWING a live record. Reading a finished chat draws all of it:
+ * there, a call with nothing back means the chat ended before the answer came.
+ */
+export function settledUpTo(entries: PastEntry[]): number {
+  let n = entries.length;
+  for (let i = entries.length - 1; i !== -1; i -= 1) {
+    const last = entries[i]!;
+    if (last.kind !== 'call') break;
+    if (last.output !== '') break;
+    n = i;
+  }
+  return n;
+}
+
+/**
  * A message the reader should not be shown, judged from the event that opened
  * it. Applied where the log is read rather than where it is written, so a chat
  * read in by an older build stops showing harness lines without being read

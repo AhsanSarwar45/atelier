@@ -5,7 +5,7 @@
  * Every event is written to the log before it is broadcast, so a browser that
  * reconnects and replays sees exactly what a browser that stayed connected saw.
  */
-import { getSessionMessages, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
+import { getSessionInfo, getSessionMessages, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
 import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
@@ -13,7 +13,9 @@ import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
   cut,
   IMPORTED_MESSAGES,
+  type PastEntry,
   pastTranscript,
+  settledUpTo,
   toolCallsOf,
   trimInput,
   withoutMachineChatter,
@@ -22,6 +24,7 @@ import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
 import { knownSessions } from './registry.ts';
+import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
 
 type Subscriber = (e: WbpEvent) => void;
@@ -35,6 +38,16 @@ type Subscriber = (e: WbpEvent) => void;
  * record: every chat read in by a lower one is read again on its next open.
  */
 const IMPORT_RECIPE = 2;
+
+/**
+ * How often a chat another program is driving is looked at again.
+ *
+ * The look is one stat of one file — `getSessionInfo` reads that session's
+ * record and no other — and the record itself is only re-read when that stat
+ * has moved. Under two seconds is fast enough that a reader watching over
+ * somebody's shoulder does not feel it lag.
+ */
+const FOLLOW_BEAT_MS = 1_500;
 
 export class Sessions {
   private drivers = new Map<string, Driver>();
@@ -51,6 +64,11 @@ export class Sessions {
    * has been running since the last restart.
    */
   private labels = new Map<string, string>();
+  /**
+   * Chats another program is driving, being drawn here as they go: session id
+   * to the call that stops watching (bw-dmxj.6).
+   */
+  private followers = new Map<string, () => void>();
   // Declared, not a parameter property: Node's strip-only TypeScript mode
   // rejects `constructor(private store: Store)`.
   private store: Store;
@@ -127,13 +145,19 @@ export class Sessions {
     if (existing && this.drivers.has(existing.id)) return existing;
 
     if (existing) {
-      await this.importPast(existing);
+      // Somebody else is typing in it. Its record is still being written, so
+      // what this app drew the last time it looked is behind by however long
+      // ago that was, and reading it again is the only way to be level with the
+      // conversation the reader is being shown.
+      const live = this.heldElsewhere(existing);
+      const read = await this.importPast(existing, live);
       // What the row already says, in the transcript's own words: the log's last
       // state may be `streaming` from a session this process never inherited,
       // and the writing box reads that to decide whether to offer Stop.
       if (existing.state === 'dormant' || existing.state === 'ended') {
         this.publish(existing.id, { type: 'session.state', state: existing.state, label: 'Asleep' });
       }
+      if (live) this.follow(existing, read);
       return { ...existing };
     }
 
@@ -159,8 +183,10 @@ export class Sessions {
     };
     this.store.createSession({ ...summary, origin: 'terminal' });
     this.openings.forEach((fn) => fn(summary));
-    await this.importPast(summary);
+    const live = this.heldElsewhere(summary);
+    const read = await this.importPast(summary, live);
     this.publish(summary.id, { type: 'session.state', state: 'dormant', label: 'Asleep' });
+    if (live) this.follow(summary, read);
     return summary;
   }
 
@@ -231,36 +257,41 @@ export class Sessions {
    * be moved, pruned or belong to a worktree that no longer exists, and the log
    * is then the only copy the app has (bw-1u1.26).
    */
-  private async importPast(summary: SessionSummary): Promise<void> {
-    if (!summary.externalId) return;
+  private async importPast(summary: SessionSummary, live = false): Promise<number | null> {
+    if (!summary.externalId) return null;
     // Said plainly on the row, not inferred from the cards it happens to have
     // touched: a chat that touched none failed that test forever, so every click
     // read the whole conversation off the disk again and re-ran the card scan,
     // which forks the board's own tool per candidate (bw-m8o.14).
     const readBy = this.store.importedBy(summary.id);
-    if (readBy !== null && readBy >= IMPORT_RECIPE) return;
+    if (!live && readBy !== null && readBy >= IMPORT_RECIPE) return null;
 
     const drawnAlready = readBy !== null || this.store.messageCount(summary.id) > 0;
     // Read in by an older build, so it has words and no commands. Its live
     // turns, if it has any, cannot be re-made from the record.
     if (drawnAlready && this.store.wasDrivenHere(summary.id)) {
       this.store.markImported(summary.id, IMPORT_RECIPE);
-      return;
+      return null;
     }
 
     let messages: SessionMessage[];
     try {
       messages = await getSessionMessages(summary.externalId, { dir: summary.cwd });
     } catch {
-      return; // No record to read: the chat keeps whatever it already has.
+      return null; // No record to read: the chat keeps whatever it already has.
     }
     // The words AND the commands, in one order: a past chat drawn as sentences
     // alone is the fault the manager photographed (§6.3.2).
-    const past = pastTranscript(messages);
+    const all = pastTranscript(messages);
+    // A record still being written ends in calls whose answers have not landed
+    // yet; those are held back rather than drawn finished and empty. The number
+    // this returns is the mark the follower carries on from, so the two use one
+    // rule and no row is drawn twice or missed between them.
+    const past = live ? all.slice(0, settledUpTo(all)) : all;
     // From here the record HAS been read, whatever it turned out to hold — an
     // empty one is still a read, and reading it again would find it empty again.
     this.store.markImported(summary.id, IMPORT_RECIPE);
-    if (past.length === 0) return;
+    if (past.length === 0) return past.length;
 
     // Only now is the old copy thrown away: there is something to put in its
     // place (bw-1u1.26). A browser already drawing that copy is told to drop it
@@ -284,35 +315,147 @@ export class Sessions {
         text: `${past.length - shown.length} earlier messages and commands are in this chat and are not drawn here.`,
       });
     }
-    for (const entry of shown) {
-      if (entry.kind === 'said') {
-        const messageId = randomUUID();
-        this.publish(summary.id, { type: 'message.started', messageId, role: entry.role });
-        this.publish(summary.id, { type: 'text.delta', messageId, text: entry.text });
-        this.publish(summary.id, { type: 'message.completed', messageId });
-        continue;
-      }
-      // The same pair a live call emits, so an old command and a new one open
-      // the same way (docs/agent-workbench.md §8.2.4).
-      this.publish(summary.id, {
-        type: 'tool.started',
-        toolCallId: entry.id,
-        name: entry.name,
-        input: trimInput(entry.input),
-        title: toolTitle(entry.name, entry.input),
-        parentToolCallId: null,
-      });
-      this.publish(summary.id, {
-        type: 'tool.completed',
-        toolCallId: entry.id,
-        ok: entry.ok,
-        output: cut(entry.output),
-      });
+    for (const entry of shown) this.draw(summary.id, entry);
+    return past.length;
+  }
+
+  /**
+   * One row of a record, said in the events that would have carried it live —
+   * so a command read off the disk and one watched as it ran open the same way
+   * (docs/agent-workbench.md §8.2.4).
+   */
+  private draw(sessionId: string, entry: PastEntry): void {
+    if (entry.kind === 'said') {
+      const messageId = randomUUID();
+      this.publish(sessionId, { type: 'message.started', messageId, role: entry.role });
+      this.publish(sessionId, { type: 'text.delta', messageId, text: entry.text });
+      this.publish(sessionId, { type: 'message.completed', messageId });
+      return;
     }
+    this.publish(sessionId, {
+      type: 'tool.started',
+      toolCallId: entry.id,
+      name: entry.name,
+      input: trimInput(entry.input),
+      title: toolTitle(entry.name, entry.input),
+      parentToolCallId: null,
+    });
+    this.publish(sessionId, {
+      type: 'tool.completed',
+      toolCallId: entry.id,
+      ok: entry.ok,
+      output: cut(entry.output),
+    });
+  }
+
+  /** Is a live process on this machine holding this conversation right now? */
+  private heldElsewhere(summary: SessionSummary): boolean {
+    return summary.externalId !== null && runningNow().has(summary.externalId);
+  }
+
+  /**
+   * Draws what a chat gains while another program is driving it.
+   *
+   * Opening such a chat used to be a photograph: whatever the record held at
+   * the moment of the click, and then nothing, however long the reader sat
+   * there watching an agent work somewhere else (bw-dmxj.6). There is no event
+   * to subscribe to — the other program answers to its own terminal, not to us
+   * — so this watches the record, which is the only thing the two halves share.
+   *
+   * A beat is one stat. The record is re-read only when that stat has moved,
+   * and only entries past the mark are said, so a chat nothing is happening in
+   * costs a stat and nothing else.
+   *
+   * `from` is where the import left off, or `null` when it did not read the
+   * record at all — a chat with live turns of its own keeps them, and the first
+   * beat then sets the mark without saying anything, so following starts from
+   * now rather than repeating what is already on the screen.
+   */
+  private follow(summary: SessionSummary, from: number | null): void {
+    const externalId = summary.externalId;
+    if (externalId === null) return;
+    if (this.followers.has(summary.id)) return;
+
+    let mark = from;
+    let stamp = '';
+    let reading = false;
+    // Its own, because the session has no driver and so no linker in the map:
+    // the cards and reports a command names are found here or not at all.
+    const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
+
+    const draw = async (): Promise<void> => {
+      let messages: SessionMessage[];
+      try {
+        messages = await getSessionMessages(externalId, { dir: summary.cwd });
+      } catch {
+        return; // Being written to this instant, or moved: try the next beat.
+      }
+      const past = pastTranscript(messages);
+      const upto = settledUpTo(past);
+      // The first look at a chat whose record was not imported: where it has
+      // got to is the mark, and nothing before it is said again.
+      if (mark === null) {
+        mark = upto;
+        return;
+      }
+      // Compaction rewrites the record shorter than it was. What is already
+      // drawn stays drawn — it is the only copy of those turns — and the mark
+      // moves to the new end rather than replaying it as if it were new.
+      if (past.length < mark) {
+        mark = upto;
+        return;
+      }
+      const fresh = past.slice(mark, upto);
+      if (fresh.length === 0) return;
+      mark = upto;
+      for (const entry of fresh) {
+        if (entry.kind === 'call') links.observe(entry.name, entry.input);
+        this.draw(summary.id, entry);
+      }
+    };
+
+    const look = async (): Promise<void> => {
+      if (reading) return;
+      reading = true;
+      try {
+        const still = runningNow().has(externalId);
+        let now = '';
+        try {
+          const info = await getSessionInfo(externalId, { dir: summary.cwd });
+          if (info) now = `${info.lastModified}:${info.fileSize ?? 0}`;
+        } catch {
+          now = stamp; // Unreadable this beat; not a reason to re-read it all.
+        }
+        // Read on a change, and once more when the other program has gone: its
+        // last words may have landed after the beat that saw it still there.
+        if (now !== stamp || !still) {
+          stamp = now;
+          await draw();
+        }
+        if (!still) this.unfollow(summary.id);
+      } finally {
+        reading = false;
+      }
+    };
+
+    const beat = setInterval(() => void look(), FOLLOW_BEAT_MS);
+    // Watching a chat is not a reason for the sidecar to stay up.
+    beat.unref?.();
+    this.followers.set(summary.id, () => clearInterval(beat));
+    void look();
+  }
+
+  /** Stops watching a chat's record: it has stopped, or this app has taken it over. */
+  private unfollow(sessionId: string): void {
+    this.followers.get(sessionId)?.();
+    this.followers.delete(sessionId);
   }
 
   /** Starts the driver for a session row and wires its linker. */
   private async attach(summary: SessionSummary, model?: string, resume?: string): Promise<void> {
+    // This app is driving it now, and the driver says everything the record
+    // would: watching both would say each turn twice.
+    this.unfollow(summary.id);
     const driver = new ClaudeDriver();
     this.drivers.set(summary.id, driver);
     this.linkers.set(

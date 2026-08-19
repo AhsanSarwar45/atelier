@@ -263,6 +263,7 @@ const server = createServer((req, res) => {
         const cwd = seen?.cwd ?? s.cwd;
         json(res, 200, {
           sessionId,
+          externalId: s.externalId,
           title: seen?.name ?? s.title,
           cwd,
           folder: folderOf(cwd),

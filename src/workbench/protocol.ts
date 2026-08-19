@@ -280,6 +280,12 @@ export interface RestoreRow {
  */
 export interface SessionFacts {
   sessionId: string;
+  /**
+   * The brand's own id for this conversation, which is what says whether the
+   * chat on the screen is one of the ones a live process is holding — the
+   * running set is named in the brand's ids, not ours (bw-dmxj.6).
+   */
+  externalId: string | null;
   title: string | null;
   cwd: string | null;
   folder: string | null;

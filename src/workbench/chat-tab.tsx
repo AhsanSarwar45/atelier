@@ -50,8 +50,10 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { diffLines } from '@/workbench/line-diff';
+import { useRunningElsewhere } from '@/workbench/live';
 import type { AskOption, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportCard, ReportChip } from '@/workbench/report-view';
+import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
 import {
@@ -754,6 +756,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const asleep = view.state === 'dormant' || view.state === 'ended';
 
   /**
+   * Another program on this machine is driving this very conversation: what it
+   * does is drawn here as it happens, and typing is what cannot be done. The
+   * rule is in running.ts with the rest of the reasoning about live chats.
+   */
+  const elsewhere = useRunningElsewhere();
+  const held = heldElsewhere(view.state, facts?.externalId, elsewhere);
+
+  /**
    * How long the agent has been at this. The brand's own count for the call it
    * is running, and otherwise the time since it started owing an answer — so a
    * think, which no tool reports, still shows a number that moves.
@@ -1091,6 +1101,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               {steerError}
             </p>
           )}
+          {held && (
+            <p data-testid="held-elsewhere" className="mb-2 text-xs text-muted-foreground">
+              Another program is working in this chat. It draws here as it goes; you can type when it stops.
+            </p>
+          )}
           <input
             ref={picker}
             data-testid="image-input"
@@ -1142,7 +1157,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 void submit();
               }
             }}
-            placeholder="Ask the agent to do something…"
+            disabled={held}
+            placeholder={held ? 'Another program is working in this chat.' : 'Ask the agent to do something…'}
             // The frame is the box; the typing area inside it carries no second
             // edge, no shadow and no colour of its own, and it grows with what
             // is written until it would take the conversation's room.
@@ -1220,7 +1236,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 data-testid="send-button"
                 className="rounded-full"
                 onClick={() => void submit()}
-                disabled={!draft.trim()}
+                disabled={!draft.trim() || held}
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>

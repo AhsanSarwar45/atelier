@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { parseMarker, procStartFromStat, runningChats, startedByAPerson } from '@/workbench/running';
+import { heldElsewhere, parseMarker, procStartFromStat, runningChats, startedByAPerson } from '@/workbench/running';
 import type { IsAlive, SessionMarker } from '@/workbench/running';
 
 /** A marker exactly as Claude Code wrote it, extra fields and all. */
@@ -186,5 +186,41 @@ describe('who is at the other end', () => {
   it('one an SDK host drives is not', () => {
     expect(startedByAPerson(running('sdk-cli'))).toBe(false);
     expect(startedByAPerson(running('sdk-ts'))).toBe(false);
+  });
+});
+
+describe('when the writing box is not the reader’s to type in', () => {
+  const OURS = 'c1';
+
+  it('says so for a chat asleep here that a live process is holding', () => {
+    expect(heldElsewhere('dormant', OURS, new Set([OURS]))).toBe(true);
+    expect(heldElsewhere('ended', OURS, new Set([OURS]))).toBe(true);
+  });
+
+  /**
+   * The trap. Every agent this app drives is a Claude Code process of its own
+   * and writes its own marker, so our own open chat is in the running set
+   * exactly like a terminal's. Locking on that alone would take the box away
+   * during our own work, which is when steering matters most.
+   */
+  it('leaves the box alone for a chat this app is driving, marker and all', () => {
+    expect(heldElsewhere('idle', OURS, new Set([OURS]))).toBe(false);
+    expect(heldElsewhere('streaming', OURS, new Set([OURS]))).toBe(false);
+    expect(heldElsewhere('running_tool', OURS, new Set([OURS]))).toBe(false);
+    expect(heldElsewhere('waiting_permission', OURS, new Set([OURS]))).toBe(false);
+  });
+
+  it('leaves a sleeping chat nobody is in alone', () => {
+    expect(heldElsewhere('dormant', OURS, new Set(['someone-else']))).toBe(false);
+    expect(heldElsewhere('dormant', OURS, new Set())).toBe(false);
+  });
+
+  it('claims nothing until the stream has said what is running', () => {
+    expect(heldElsewhere('dormant', OURS, null)).toBe(false);
+  });
+
+  it('claims nothing about a chat the brand has no id for', () => {
+    expect(heldElsewhere('dormant', null, new Set([OURS]))).toBe(false);
+    expect(heldElsewhere('dormant', undefined, new Set([OURS]))).toBe(false);
   });
 });

@@ -7,7 +7,17 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { cut, KEPT, pastTranscript, resultText, saidByAnyone, textOf, trimInput } from '@/workbench/imported-history';
+import {
+  cut,
+  KEPT,
+  type PastEntry,
+  pastTranscript,
+  resultText,
+  saidByAnyone,
+  settledUpTo,
+  textOf,
+  trimInput,
+} from '@/workbench/imported-history';
 
 describe('reading a chat’s past', () => {
   it('keeps what a person or an agent said', () => {
@@ -168,5 +178,49 @@ describe('what a command was asked to do', () => {
   it('cuts nothing that is already short, whatever shape it is', () => {
     expect(cut('short')).toBe('short');
     expect(trimInput({ n: 7, on: true, nothing: null })).toEqual({ n: 7, on: true, nothing: null });
+  });
+});
+
+describe('how much of a record still being written may be drawn', () => {
+  const said = (text: string): PastEntry => ({ kind: 'said', role: 'assistant', text });
+  const call = (id: string, output: string): PastEntry => ({
+    kind: 'call',
+    id,
+    name: 'Bash',
+    input: {},
+    output,
+    ok: true,
+  });
+
+  it('draws all of a record whose last entry is a finished command', () => {
+    const entries = [said('running the tests'), call('t1', '282 passed')];
+    expect(settledUpTo(entries)).toBe(2);
+  });
+
+  it('holds back a command whose answer has not landed yet', () => {
+    const entries = [said('running the tests'), call('t1', '')];
+    expect(settledUpTo(entries)).toBe(1);
+  });
+
+  it('holds back the whole run of them, not merely the last', () => {
+    const entries = [said('two at once'), call('t1', ''), call('t2', '')];
+    expect(settledUpTo(entries)).toBe(1);
+  });
+
+  // The delay this costs: a command that really did print nothing waits for
+  // whatever the chat says next, and is then drawn like any other.
+  it('draws a command that printed nothing once something follows it', () => {
+    const entries = [call('t1', ''), said('done')];
+    expect(settledUpTo(entries)).toBe(2);
+  });
+
+  it('draws a record that ends in words, whatever came before', () => {
+    const entries = [call('t1', ''), call('t2', 'ok'), said('that is all')];
+    expect(settledUpTo(entries)).toBe(3);
+  });
+
+  it('says nothing may be drawn out of nothing', () => {
+    expect(settledUpTo([])).toBe(0);
+    expect(settledUpTo([call('t1', '')])).toBe(0);
   });
 });

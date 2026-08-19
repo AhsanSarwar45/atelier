@@ -174,3 +174,31 @@ export function runningChats(markers: SessionMarker[], alive: IsAlive): Map<stri
   });
   return running;
 }
+
+/**
+ * Is the chat on the screen one that ANOTHER program is driving?
+ *
+ * The writing box turns on this. Typing into such a chat would wake a second
+ * agent on the same conversation and the two would write over each other's
+ * record, so the box says why instead (bw-dmxj.6).
+ *
+ * Asleep is half the question, and it is the half that is easy to leave out.
+ * Every agent this app drives is itself a Claude Code process and writes its
+ * own marker, so OUR OWN open chat is in the running set exactly like a
+ * terminal's. What tells them apart is that a chat we drive is idle between
+ * turns and never dormant — and without that half the box would lock during
+ * our own work, which is when steering matters most.
+ *
+ * `running` is null until the stream has said what is running. Null is not
+ * "nothing is running": nothing is claimed until it has spoken.
+ */
+export function heldElsewhere(
+  state: string,
+  externalId: string | null | undefined,
+  running: ReadonlySet<string> | null,
+): boolean {
+  const asleep = state === 'dormant' || state === 'ended';
+  if (!asleep) return false;
+  if (!externalId) return false;
+  return running !== null && running.has(externalId);
+}

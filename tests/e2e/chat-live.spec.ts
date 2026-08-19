@@ -1,6 +1,7 @@
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
@@ -27,6 +28,12 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * The copied markers name the same live processes, so the first case reads the
  * same truth either way. The second writes one marker of its own, naming the
  * test runner's own process, and deletes it again.
+ *
+ * The third writes a whole chat: a record under that copy's own `projects`
+ * directory, and a marker saying a live process is in it. That is the only way
+ * to make a chat say something on cue — a real one answers to its own terminal,
+ * not to us — and the sidecar reads it by the same kit call it uses for every
+ * other chat.
  *
  * Run: BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3008 \
  *      BEADS_E2E_MARKERS=/some/scratch/claude/sessions \
@@ -242,5 +249,135 @@ test.describe('a chat that is working', () => {
       .poll(async () => (await rowNow(page, key))?.running ?? null, { timeout: 20_000 })
       .toBe(false);
     expect(fetches - settled, 'the rail asked for the list again instead of listening').toBe(0);
+  });
+});
+
+/** Where the sidecar under test keeps everything, markers and records alike. */
+function configDir(): string {
+  return dirname(markerDir());
+}
+
+/**
+ * Where a project's records live, named the way the tool names them: the path
+ * with everything that is not a letter or a digit turned into a dash.
+ */
+function recordDir(projectPath: string): string {
+  return join(configDir(), 'projects', projectPath.replace(/[^a-zA-Z0-9]/g, '-'));
+}
+
+/** One line of a record, in the shape the tool writes and the kit reads back. */
+function line(chat: { id: string; cwd: string }, parent: string | null, role: 'user' | 'assistant', text: string) {
+  const uuid = randomUUID();
+  return {
+    uuid,
+    row: JSON.stringify({
+      parentUuid: parent,
+      isSidechain: false,
+      type: role,
+      message:
+        role === 'user'
+          ? { role: 'user', content: text }
+          : { role: 'assistant', content: [{ type: 'text', text }] },
+      uuid,
+      timestamp: new Date().toISOString(),
+      userType: 'external',
+      entrypoint: 'cli',
+      cwd: chat.cwd,
+      sessionId: chat.id,
+      version: '2.1.232',
+    }),
+  };
+}
+
+/**
+ * A chat that another program is in the middle of, made rather than waited for.
+ *
+ * A real one cannot be told to say something on cue, and driving a second agent
+ * from a test to make it happen would be a test of that agent. What this stands
+ * on instead is the only thing the two programs share: the record on disk. The
+ * stack under test reads a scratch config directory, so the record written here
+ * is one the sidecar genuinely reads, by the same kit call it uses for every
+ * other chat.
+ */
+function aChatSomebodyElseIsIn(projectPath: string, opening: string) {
+  const chat = { id: randomUUID(), cwd: projectPath };
+  const dir = recordDir(projectPath);
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${chat.id}.jsonl`);
+  const first = line(chat, null, 'user', opening);
+  writeFileSync(file, `${first.row}\n`);
+  let last = first.uuid;
+  return {
+    ...chat,
+    file,
+    /** The other program says something more, as it would while somebody watched. */
+    says(text: string): void {
+      const next = line(chat, last, 'assistant', text);
+      appendFileSync(file, `${next.row}\n`);
+      last = next.uuid;
+    },
+    forget(): void {
+      rmSync(file, { force: true });
+    },
+  };
+}
+
+/** The project the run is pointed at, or the first the instance lists. */
+async function aProject(request: APIRequestContext): Promise<Project> {
+  const projects = (await (await request.get(`${backend()}/api/projects`)).json()) as Project[];
+  expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
+  const wanted = process.env.BEADS_E2E_PROJECT;
+  const project = wanted ? projects.find((p) => p.id === wanted) : projects[0];
+  expect(project, `no project ${wanted ?? ''}`).toBeTruthy();
+  return project!;
+}
+
+test.describe('a chat another program is running', () => {
+  test('follows a chat another program runs', async ({ page, request }) => {
+    // Longer than the default: this case waits for the list, then for a chat to
+    // be opened and read, then twice for something said in another program to
+    // arrive. Each wait is short; the sum of them is not.
+    test.setTimeout(180_000);
+    const project = await aProject(request);
+    const opening = 'Look at the routing on the chat tab';
+    const chat = aChatSomebodyElseIsIn(project.path, opening);
+    const release = claimConversation(chat.id);
+
+    try {
+      await openChatTab(page, project);
+
+      // It is being worked in, so it is marked and at the top of the rail.
+      const row = page.locator(`[data-testid="restore-row"][data-row-key="ext:${chat.id}"]`);
+      await expect(row, 'the chat being worked in was not offered').toBeVisible({ timeout: 30_000 });
+      // The name is the way in; the row around it is not a button.
+      await row.getByTestId('row-name').click();
+
+      // Opening it is opening THAT conversation: what was already said is here.
+      await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
+
+      // And the box says why it cannot be typed into, rather than looking
+      // ordinary and waking a second agent on the same conversation.
+      await expect(page.getByTestId('held-elsewhere')).toBeVisible();
+      await expect(page.getByTestId('composer')).toBeDisabled();
+      await expect(page.getByTestId('send-button')).toBeDisabled();
+
+      // The whole of it: something said over there turns up here, with nobody
+      // reloading anything.
+      const said = 'the suite came back green, 282 passed';
+      chat.says(said);
+      await expect(page.getByTestId('transcript').getByText(said)).toBeVisible({ timeout: 30_000 });
+
+      // Twice, so it is following rather than having read once more on open.
+      const then = 'and the build is on the shelf';
+      chat.says(then);
+      await expect(page.getByTestId('transcript').getByText(then)).toBeVisible({ timeout: 30_000 });
+    } finally {
+      release();
+    }
+
+    // That program has stopped: the chat is the reader's to take up.
+    await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
+    chat.forget();
   });
 });
