@@ -4,7 +4,7 @@ import { PackageOpen } from "lucide-react";
 
 import { BeadCard } from "@/components/bead-card";
 import { EpicCard } from "@/components/epic-card";
-import { CardReportLink, useCardReport } from "@/components/report-panel";
+import { CardReportLink, useCardReport } from "@/components/reports";
 import { Badge } from "@/components/ui/badge";
 import { classesFor, colorFor } from "@/lib/state-styles";
 import { cn } from "@/lib/utils";

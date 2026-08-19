@@ -19,7 +19,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  *
  * Needs an instance holding a project that has at least one report built for
  * it. Pick the project with BEADS_E2E_PROJECT and the report with
- * BEADS_E2E_REPORT, or the first of each the instance lists.
+ * BEADS_E2E_REPORT, or leave both and the run finds the first pair it can
+ * actually draw.
  *
  * Run: BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3017 \
  *      npx playwright test tests/e2e/report-screen.spec.ts
@@ -48,48 +49,60 @@ async function projects(request: APIRequestContext): Promise<ProjectRow[]> {
   return rows;
 }
 
-async function projectId(request: APIRequestContext): Promise<string> {
-  if (process.env.BEADS_E2E_PROJECT) return process.env.BEADS_E2E_PROJECT;
-  return (await projects(request))[0].id;
-}
-
 /**
- * A report of that project's that the instance can actually draw.
+ * A project of this instance's, and a report of its the app can draw.
  *
- * Not simply the first one it lists: the report tools refuse a spec that
- * breaks one of their rules — a question about work already under way, a
- * paragraph where a block belongs — and a report they refuse has nothing to
- * measure. So the list is walked until one builds, and the answer is kept for
- * the rest of the file, since each try costs a run of the toolchain.
+ * Neither is simply the first the instance lists. The project list is this
+ * computer's real one, and most projects on it have no report at all, so the
+ * first row is whichever project happened to be opened last — a test run
+ * against it would be measuring an empty screen. The reports refuse too: the
+ * tools throw out a spec that breaks one of their rules, and a report they
+ * refuse has nothing to measure. So both lists are walked until a project
+ * turns up holding a report that builds, and the pair is kept for the rest of
+ * the file, since each try costs a run of the toolchain.
+ *
+ * BEADS_E2E_PROJECT and BEADS_E2E_REPORT narrow the search to one of each.
  */
-let drawable: string | null = null;
+let picked: { id: string; slug: string } | null = null;
 
-async function reportSlug(request: APIRequestContext, id: string): Promise<string> {
-  if (process.env.BEADS_E2E_REPORT) return process.env.BEADS_E2E_REPORT;
-  if (drawable) return drawable;
-  const row = (await projects(request)).find((p) => p.id === id);
-  const dir = row?.localPath || row?.path || '';
-  const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? '';
+async function pickReport(request: APIRequestContext): Promise<{ id: string; slug: string }> {
+  if (picked) return picked;
+
+  const wantProject = process.env.BEADS_E2E_PROJECT;
+  const wantReport = process.env.BEADS_E2E_REPORT;
+  const rows = (await projects(request)).filter((p) => !wantProject || p.id === wantProject);
   const reports = (await (await request.get(`${api()}/api/reports`)).json()) as {
     project: string;
     slug: string;
   }[];
-  const ours = reports.filter((r) => r.project === name);
-  expect(ours.length, `the instance holds no report for ${name}`).toBeGreaterThan(0);
+
   const refused: string[] = [];
-  for (const r of ours) {
-    const res = await request.get(
-      `${api()}/api/reports/spec?project=${r.project}&slug=${r.slug}&path=${encodeURIComponent(dir)}`,
-      { timeout: 120_000 },
-    );
-    if (res.ok()) {
-      drawable = r.slug;
-      return r.slug;
+  for (const row of rows) {
+    const dir = row.localPath || row.path || '';
+    const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? '';
+    for (const r of reports.filter((r) => r.project === name && (!wantReport || r.slug === wantReport))) {
+      const res = await request.get(
+        `${api()}/api/reports/spec?project=${r.project}&slug=${r.slug}&path=${encodeURIComponent(dir)}`,
+        { timeout: 120_000 },
+      );
+      if (res.ok()) {
+        picked = { id: row.id, slug: r.slug };
+        return picked;
+      }
+      refused.push(`${name}/${r.slug}`);
     }
-    refused.push(r.slug);
   }
-  expect(refused, `the tools refuse every report ${name} has`).toEqual([]);
-  return ours[0].slug;
+
+  expect(refused, 'the tools refuse every report this instance holds').toEqual([]);
+  throw new Error('no project on this instance holds a report to measure');
+}
+
+async function projectId(request: APIRequestContext): Promise<string> {
+  return (await pickReport(request)).id;
+}
+
+async function reportSlug(request: APIRequestContext, _id: string): Promise<string> {
+  return (await pickReport(request)).slug;
 }
 
 /** The first of these reports the tools will actually draw, or null. */

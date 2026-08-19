@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ReportsList } from '@/components/report/screen/reports-list';
 import { ownReports, reportFolder, waitingCount, waitingLabel } from '@/components/report/waiting';
-import type { ReportEntry } from '@/components/report-panel';
+import type { ReportEntry } from '@/components/reports';
 
 function entry(project: string, slug: string, waiting: number): ReportEntry {
   return { project, slug, title: slug, card: null, waiting };
@@ -24,7 +24,7 @@ const REPORTS: ReportEntry[] = [
 ];
 
 // Read when the list renders, so the reports above are already built by then.
-vi.mock('@/components/report-panel', () => ({
+vi.mock('@/components/reports', () => ({
   useReports: () => ({ reports: REPORTS, isLoading: false, reload: () => {} }),
 }));
 

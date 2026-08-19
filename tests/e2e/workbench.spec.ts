@@ -4,7 +4,7 @@ import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } f
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { makeFixtureProject, PARENT_CARD, REPORT_SLUG } from './fixture-board';
+import { makeFixtureProject, PARENT_CARD, REPORT_PROJECT, REPORT_SLUG } from './fixture-board';
 import { restartInstance } from './restart';
 import { quadrantPng } from './fixture-png';
 
@@ -28,6 +28,18 @@ const fixtureFor = (name: string) => join(__dirname, '..', `.workbench-run-${nam
 const SHOTS = join(__dirname, '..', 'results');
 
 /**
+ * Where the instance under test keeps its report specs.
+ *
+ * A report is filed under the name of the project's own folder, and that is
+ * how the app finds it again — so a run whose report has to be readable in the
+ * app files it here, exactly as a real one is filed.
+ */
+function reportsHome(project: string): string {
+  const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+  return join(data, 'kanban-ui', 'reports', project);
+}
+
+/**
  * Two sentences first so the answer visibly grows between screenshots, then an
  * edit so a permission card has to appear.
  */
@@ -36,11 +48,13 @@ const PROMPT =
   'Then append a line saying HELLO to notes.txt using the Edit tool.';
 
 /** Reuses the project row a previous run left behind; its path is unique. */
-async function projectAt(request: APIRequestContext, path: string): Promise<{ id: string }> {
+async function projectAt(request: APIRequestContext, path: string, name?: string): Promise<{ id: string }> {
   const existing = (await (await request.get('/api/projects')).json()) as { id: string; path: string }[];
   const found = existing.find((p) => p.path === path);
   if (found) return found;
-  const created = await request.post('/api/projects', { data: { name: `workbench-${path.split('-').pop()}`, path } });
+  const created = await request.post('/api/projects', {
+    data: { name: name ?? `workbench-${path.split('-').pop()}`, path },
+  });
   expect(created.status(), await created.text()).toBe(201);
   return (await created.json()) as { id: string };
 }
@@ -223,12 +237,18 @@ test.describe('workbench', () => {
   test('links a chat to the card it touched, carries row chips both ways, and shows the report it made', async ({ page, request }) => {
     test.setTimeout(600_000);
 
-    const FIXTURE = fixtureFor('links');
-    const reportsDir = join(FIXTURE, 'reporting');
-    makeFixtureProject(FIXTURE, reportsDir);
+    // The app opens a report by the project it sits under, so this run's
+    // project folder is named for the report project and its spec is filed
+    // where the instance keeps its specs — the way a real report is filed.
+    const RUN_DIR = fixtureFor('links');
+    const FIXTURE = join(RUN_DIR, REPORT_PROJECT);
+    const SPEC = join(reportsHome(REPORT_PROJECT), `${REPORT_SLUG}.report.json`);
+    rmSync(RUN_DIR, { recursive: true, force: true });
+    rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });
+    makeFixtureProject(FIXTURE, join(RUN_DIR, 'reporting'), { specPath: SPEC });
     mkdirSync(SHOTS, { recursive: true });
 
-    const project = await projectAt(request, FIXTURE);
+    const project = await projectAt(request, FIXTURE, 'workbench-links');
 
     const started = await request.post('/api/workbench/command', {
       data: {
@@ -252,7 +272,7 @@ test.describe('workbench', () => {
       [
         `Run this exact shell command and show me its output: bd note ${PARENT_CARD} "looked at by the workbench"`,
         '',
-        `Then use the Edit tool on reporting/pages/linkdemo/${REPORT_SLUG}.report.json to change its`,
+        `Then use the Edit tool on ${SPEC} to change its`,
         '"eyebrow" line to say: Written from the chat that made it.',
         '',
         'Do nothing else.',
@@ -274,22 +294,26 @@ test.describe('workbench', () => {
     const chats = (await onBoard.json()) as { sessionId: string }[];
     expect(chats.map((c) => c.sessionId)).toContain(session.id);
 
-    // ---- (c) the report, inline then large ------------------------------
+    // ---- (c) the report, in the stream then in its own place ------------
     const inline = page.getByTestId('report-inline');
     await expect(inline).toBeVisible({ timeout: 60_000 });
     await inline.scrollIntoViewIfNeeded();
     await page.setViewportSize({ width: 1440, height: 1400 });
     await page.screenshot({ path: join(SHOTS, 'link-c-inline.png'), fullPage: false });
 
+    // Clicking it goes to the report's own place under this project — not a
+    // modal, and not a page held in a frame (bw-7ks.21.15).
     await inline.click();
-    const modal = page.getByTestId('report-modal');
-    await expect(modal).toBeVisible({ timeout: 30_000 });
-    // The page inside really is the built report, not an error.
-    const framed = page.frameLocator('[data-testid="report-modal-frame"]');
-    await expect(framed.locator('text=Linked From The Chat').first()).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/tab=reports.*report=/);
+    await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
+    // And what is drawn really is the report, not the builder's refusal.
+    await expect(page.locator('text=Linked From The Chat').first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('iframe')).toHaveCount(0);
     await page.screenshot({ path: join(SHOTS, 'link-c.png'), fullPage: false });
-    await page.getByTestId('report-modal-close').click();
-    await expect(modal).toBeHidden({ timeout: 15_000 });
+
+    // Back is the conversation he was reading, at the message that named it.
+    await page.goBack();
+    await expect(page.getByTestId('report-inline')).toBeVisible({ timeout: 30_000 });
 
     // ---- (b) the card's own side of the join ----------------------------
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -320,6 +344,9 @@ test.describe('workbench', () => {
     await expect(rowChip).toBeVisible({ timeout: 60_000 });
     await rowChip.click();
     await expect(page.getByTestId('bead-detail')).toBeVisible({ timeout: 60_000 });
+
+    // The run's report is filed among the real ones, so it is taken away again.
+    rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });
   });
 
   /**

@@ -33,7 +33,7 @@ import {
 import { BeadChip, BeadChipRow } from '@/components/bead-chip-row';
 import { reads, TIGHT } from '@/workbench/context-window';
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
-import { useReports } from '@/components/report-panel';
+import { useReports } from '@/components/reports';
 import { TabTools, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -789,7 +789,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         if (!found) return slug;
         return (
           <span className="mx-0.5 inline-flex align-baseline">
-            <ReportChip project={found.project} slug={found.slug} title={found.title} fsPath={projectPath ?? ''} />
+            <ReportChip project={found.project} slug={found.slug} title={found.title} />
           </span>
         );
       },
@@ -1111,7 +1111,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           className="flex min-w-0 items-center gap-1 overflow-hidden"
         />
         {ours.map((r) => (
-          <ReportChip key={`${r.project}/${r.slug}`} project={r.project} slug={r.slug} title={r.title} fsPath={projectPath} />
+          <ReportChip key={`${r.project}/${r.slug}`} project={r.project} slug={r.slug} title={r.title} />
         ))}
         {facts?.folder && (
           <Badge
@@ -1182,7 +1182,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             );
           }
           if (item.kind === 'report') {
-            return <ReportCard key={item.id} project={item.project} slug={item.slug} fsPath={projectPath} />;
+            return <ReportCard key={item.id} project={item.project} slug={item.slug} />;
           }
           if (item.kind === 'ask') {
             return (

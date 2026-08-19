@@ -11,7 +11,7 @@
  * files a report under a project: the last segment of the folder that holds
  * its board.
  */
-import type { ReportEntry } from '@/components/report-panel';
+import type { ReportEntry } from '@/components/reports';
 import { projectDir } from '@/lib/utils';
 
 /** The folder name a report is filed under — mirrors the server's basename match. */

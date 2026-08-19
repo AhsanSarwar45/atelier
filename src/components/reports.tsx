@@ -1,10 +1,14 @@
 /**
  * What reports this machine holds, and the way in from a card.
  *
- * A report is a place under its project now, drawn by the app itself
+ * A report is a place under its project, drawn by the app itself
  * (`src/app/project/report-tab.tsx`), so nothing here draws one: this is the
  * one shared answer to "what reports are there", and a card's link is a link to
  * that place rather than a drawer of its own (bw-7ks.21.14).
+ *
+ * Nothing in the app builds the report tools' own self-contained page any more
+ * either — that page is what the builder prints a link to for a reader with no
+ * app in front of him, and the app never sends anybody to it (bw-7ks.21.15).
  */
 "use client";
 
@@ -60,28 +64,6 @@ export function useReports() {
   }, [reload]);
 
   return { reports, isLoading, reload };
-}
-
-/**
- * Where the page is fetched from. `fsPath` is the project's directory on disk:
- * the server builds the report there, and the checklist is read by running the
- * board in it. A Dolt-backed project's own path is a database address and no
- * directory at all, which is why this is never that path.
- */
-export function reportUrl(entry: Pick<ReportEntry, 'project' | 'slug'>, fsPath: string): string {
-  const q = new URLSearchParams({ project: entry.project, slug: entry.slug });
-  // Only when this board IS the report's project. The drawer lists every
-  // report on the machine, so sending the open board's folder with all of them
-  // built one project's report against another's board (bw-pqt.18). Without a
-  // folder the server looks the right one up from its own project list.
-  if (fsPath && ownsReport(fsPath, entry.project)) q.set("path", fsPath);
-  return apiUrl(`/api/reports/page?${q.toString()}`);
-}
-
-/** Whether `fsPath` is the folder a report filed under `project` is about. */
-function ownsReport(fsPath: string, project: string): boolean {
-  const parts = fsPath.replace(/[/\\]+$/, "").split(/[/\\]/);
-  return parts[parts.length - 1] === project;
 }
 
 /** The report belonging to this card, or null when it has none. */

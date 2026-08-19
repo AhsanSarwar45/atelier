@@ -10,7 +10,7 @@ import { ArrowLeft, EllipsisVertical } from 'lucide-react';
 import { CardPanel } from '@/components/card-panel';
 import { ProjectSettingsDialog } from '@/components/project-settings-dialog';
 import { reportFolder, waitingCount } from '@/components/report/waiting';
-import { useReports } from '@/components/report-panel';
+import { useReports } from '@/components/reports';
 import { Shell } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

@@ -2,7 +2,7 @@
  * The Reports tab with no `report=` in the address: this project's own
  * reports, and nothing else on this machine (bw-7ks.21.4).
  *
- * `useReports()` (`report-panel.tsx`) answers for every report this computer
+ * `useReports()` (`reports.tsx`) answers for every report this computer
  * holds, the same call the drawer and the chat tab already share — one fetch,
  * however many places read it. What is "this project's own" is decided the
  * way the server itself files a report under a project: the last segment of
@@ -17,7 +17,7 @@ import { useMemo } from 'react';
 import { FileText, Loader2 } from 'lucide-react';
 
 import { ownReports, reportFolder } from '@/components/report/waiting';
-import { useReports, type ReportEntry } from '@/components/report-panel';
+import { useReports, type ReportEntry } from '@/components/reports';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';

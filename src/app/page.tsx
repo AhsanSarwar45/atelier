@@ -9,7 +9,7 @@ import { Plus, Github, Search, X, Archive } from "lucide-react";
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { ProjectCard } from "@/components/project-card";
 import { reportFolder, waitingCount } from "@/components/report/waiting";
-import { useReports } from "@/components/report-panel";
+import { useReports } from "@/components/reports";
 import { Shell } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

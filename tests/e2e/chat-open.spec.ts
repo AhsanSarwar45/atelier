@@ -187,7 +187,11 @@ test.describe('the open chat', () => {
     }
     expect(found, 'no chat that worked a reported card showed its report').toBeGreaterThan(0);
 
+    // The chip is a way through to the report's own place under this project,
+    // not a viewer of its own (bw-7ks.21.15).
     await page.getByTestId('chat-report-chip').first().click();
-    await page.getByTestId('report-modal-frame').waitFor({ timeout: 30_000 });
+    await expect(page).toHaveURL(/tab=reports.*report=/);
+    await page.getByTestId('report-tab').waitFor({ timeout: 30_000 });
+    await expect(page.locator('iframe')).toHaveCount(0);
   });
 });

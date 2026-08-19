@@ -1030,22 +1030,25 @@ dollars-per-day chart for Claude and a tokens-per-day chart for Codex. They are
 never added together and no price is ever applied to a token count
 (decision 12).
 
-### 8.5 The report viewer
+### 8.5 Reports named in a chat
 
-Decision 9: the report path is untouched. `GET /api/reports/page?project=&slug=&path=`
-already returns finished HTML, and `src/components/report-panel.tsx` already
-builds that URL with `reportUrl()`.
+A report in a chat is a way through to it, never a viewer of its own
+(bw-7ks.21.15). The chip on the chat's line and the card a `report.available`
+event drops into the stream both push the report's own address under this
+project — `/project?id=…&tab=reports&report=<slug>` — where the app draws the
+report out of its own parts (`src/app/project/report-tab.tsx`). One report, one
+place, one address, and no page held in a frame anywhere in the chat.
 
-In the chat, a `report.available` event renders an **inline card**: title, card
-chip, and the live report in a short non-scrolling `<iframe>` preview. Clicking
-opens the same URL in a Radix `Dialog` at near-full viewport. An iframe, not
-injected markup — the report page ships its own 17KB stylesheet and its own
-script, and letting that loose in the app's Tailwind document would wreck both.
+The card in the stream carries what decides whether to stop and read it: the
+report's title, and a mark when a question on it is waiting on the manager's
+answer. Both come from the one shared answer to "what reports are there"
+(`useReports()` in `src/components/reports.tsx`, which goes through `apiUrl()`
+like every other call in the app).
 
-One note for the builder: `src/components/report-panel.tsx:31` fetches
-`/api/reports` bare instead of through `apiUrl()`, unlike every other call in
-the app, so it targets 3007 in the dev split. That is an upstream bug, out of
-scope, and must not be copied — the workbench goes through `apiUrl()`.
+The self-contained page the report tools build (`GET
+/api/reports/page?project=&slug=&path=`) still exists: it is what the builder
+prints a link to for a reader with no app in front of him. Nothing in the app
+sends anybody to it.
 
 ### 8.6 Shared state
 
