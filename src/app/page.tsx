@@ -8,6 +8,8 @@ import { Plus, Github, Search, X, Archive } from "lucide-react";
 
 import { AddProjectDialog } from "@/components/add-project-dialog";
 import { ProjectCard } from "@/components/project-card";
+import { reportFolder, waitingCount } from "@/components/report/waiting";
+import { useReports } from "@/components/report-panel";
 import { Shell } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +25,9 @@ export default function ProjectsPage() {
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const { projects, isLoading, loadingStatus, error, showArchived, addProject, updateProjectTags, refetch, archiveProject, unarchiveProject, deleteProject, toggleShowArchived } = useProjects();
   const { toast } = useToast();
+  // Every report on this machine, in one call for the whole list — each card
+  // then counts its own (bw-7ks.21.6).
+  const { reports } = useReports();
 
   // Get all unique tags across projects
   const allTags = useMemo(() => {
@@ -252,6 +257,7 @@ export default function ProjectsPage() {
                   tags={project.tags}
                   beadCounts={project.beadCounts}
                   countsLoaded={project.countsLoaded ?? false}
+                  reportsWaiting={waitingCount(reports, reportFolder(project.path, project.localPath))}
                   dataSource={project.dataSource}
                   beadError={project.beadError}
                   archivedAt={project.archivedAt}

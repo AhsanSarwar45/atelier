@@ -16,16 +16,11 @@ import { useMemo } from 'react';
 
 import { FileText, Loader2 } from 'lucide-react';
 
+import { ownReports, reportFolder } from '@/components/report/waiting';
 import { useReports, type ReportEntry } from '@/components/report-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
-import { projectDir } from '@/lib/utils';
-
-/** The folder name a report is filed under — mirrors the server's own basename match. */
-function basenameOf(dir: string): string {
-  return dir.split(/[\\/]/).filter(Boolean).pop() ?? dir;
-}
 
 export function ReportsList({
   projectPath,
@@ -37,14 +32,11 @@ export function ReportsList({
   onOpen: (slug: string) => void;
 }) {
   const { reports, isLoading } = useReports();
-  const basename = useMemo(
-    () => basenameOf(projectDir({ path: projectPath, localPath: projectLocalPath })),
+  const folder = useMemo(
+    () => reportFolder(projectPath, projectLocalPath),
     [projectPath, projectLocalPath],
   );
-  const ours: ReportEntry[] = useMemo(
-    () => reports.filter((r) => r.project === basename),
-    [reports, basename],
-  );
+  const ours: ReportEntry[] = useMemo(() => ownReports(reports, folder), [reports, folder]);
 
   if (isLoading) {
     return (
@@ -81,6 +73,18 @@ export function ReportsList({
               <span className="truncate text-sm font-semibold text-t-primary">{r.title}</span>
               <span className="truncate font-mono text-xs text-t-muted">{r.slug}</span>
             </span>
+            {r.waiting > 0 && (
+              <Badge
+                variant="warning"
+                appearance="light"
+                size="sm"
+                shape="circle"
+                className="shrink-0"
+                data-testid="reports-list-waiting"
+              >
+                Waiting on you
+              </Badge>
+            )}
             {r.card && (
               <Badge variant="secondary" appearance="outline" size="sm" shape="circle" className="shrink-0 font-mono">
                 {r.card}

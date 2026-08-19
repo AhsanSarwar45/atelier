@@ -43,13 +43,17 @@ pub fn router() -> Router<AppState> {
 }
 
 /// One report, as the screen lists it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReportEntry {
     pub project: String,
     pub slug: String,
     pub title: String,
     /// The card this report belongs to, when it names one.
     pub card: Option<String>,
+    /// How many of its questions are still holding work up — what makes this a
+    /// report waiting on the reader rather than one he has finished with
+    /// (bw-7ks.21.6).
+    pub waiting: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,7 +83,9 @@ fn bad_name(p: &PageParams) -> bool {
     p.project.contains(['/', '\\', '.']) || p.slug.contains(['/', '\\'])
 }
 
-fn read_spec(spec: &Path) -> Option<(String, Option<String>)> {
+/// A report's own words: its title, the card it is about, and the cards its
+/// questions say they are holding up.
+fn read_spec(spec: &Path) -> Option<(String, Option<String>, Vec<String>)> {
     let raw = std::fs::read_to_string(spec).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let title = v.get("title")?.as_str()?.to_string();
@@ -88,7 +94,108 @@ fn read_spec(spec: &Path) -> Option<(String, Option<String>)> {
         .and_then(|s| s.get("card"))
         .and_then(|c| c.as_str())
         .map(str::to_string);
-    Some((title, card))
+    Some((title, card, holds_of(&v)))
+}
+
+/// The cards a spec's questions are holding up, in the order it asks them.
+fn holds_of(spec: &serde_json::Value) -> Vec<String> {
+    spec.get("actions")
+        .and_then(|a| a.get("questions"))
+        .and_then(|q| q.as_array())
+        .map(|questions| {
+            questions
+                .iter()
+                .filter_map(|q| q.get("holds").and_then(|h| h.as_str()))
+                .map(|h| h.trim().to_string())
+                .filter(|h| !h.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A dropped card, however a board drops one — the same three words
+/// `reporting/tools/board.py` reads, by status or by label.
+const DROPPED: [&str; 3] = ["cancelled", "dropped", "wontfix"];
+
+/// The states that mean the work is over, and with it the question that was
+/// holding it up.
+const SETTLED: [&str; 2] = ["closed", "cancelled"];
+
+/// The board's own word for one card, a dropped one read as `cancelled`
+/// whichever way it was dropped.
+///
+/// A card the board gave no word for keeps none: only the two words that end a
+/// question are read from here, so anything else — nothing included — leaves
+/// the question standing.
+fn card_status(card: &serde_json::Value) -> String {
+    let status = card.get("status").and_then(|s| s.as_str()).unwrap_or_default();
+    let dropped_by_label = card
+        .get("labels")
+        .and_then(|l| l.as_array())
+        .is_some_and(|labels| {
+            labels.iter().filter_map(|l| l.as_str()).any(|l| DROPPED.contains(&l))
+        });
+    if dropped_by_label || DROPPED.contains(&status) {
+        "cancelled".to_string()
+    } else {
+        status.to_string()
+    }
+}
+
+/// How many of these questions are still waiting on an answer.
+///
+/// The same reading the report itself draws a question by (`live` in
+/// `reporting/tools/build.py`'s `question_facts`): a question dies with the
+/// card it is holding up, and only with it. So the count says exactly what the
+/// page says when it is opened, and closing that card takes both away.
+///
+/// A card the board has never heard of is not counted, though the page would
+/// still print its question: a card that cannot be closed would leave a badge
+/// nothing could ever clear.
+fn waiting_of(holds: &[String], states: &HashMap<String, String>) -> usize {
+    holds
+        .iter()
+        .filter(|held| states.get(*held).is_some_and(|s| !SETTLED.contains(&s.as_str())))
+        .count()
+}
+
+/// The first thing in the board's answer that reads as JSON.
+///
+/// `bd show` names the cards it could not find on the way past, so its own
+/// words can sit in front of the document it wrote.
+fn first_json(out: &[u8]) -> Option<serde_json::Value> {
+    let text = String::from_utf8_lossy(out);
+    let start = text.find(['[', '{'])?;
+    serde_json::Deserializer::from_str(&text[start..])
+        .into_iter::<serde_json::Value>()
+        .next()?
+        .ok()
+}
+
+/// What the board says about these cards, asked once for all of them.
+///
+/// A card missing from the answer is a card the board has never heard of, and
+/// a board that cannot answer at all leaves the map empty: either way nothing
+/// counts as waiting, so a machine with no board is quiet rather than wrong.
+fn card_states(dir: &str, ids: &[String]) -> HashMap<String, String> {
+    let mut states = HashMap::new();
+    if ids.is_empty() {
+        return states;
+    }
+    let Ok(out) = Command::new("bd").arg("show").args(ids).arg("--json").current_dir(dir).output() else {
+        return states;
+    };
+    let rows = match first_json(&out.stdout) {
+        Some(serde_json::Value::Array(rows)) => rows,
+        Some(one @ serde_json::Value::Object(_)) => vec![one],
+        _ => return states,
+    };
+    for row in rows {
+        if let Some(id) = row.get("id").and_then(|i| i.as_str()) {
+            states.insert(id.to_string(), card_status(&row));
+        }
+    }
+    states
 }
 
 /// The folder that holds `project`'s board — `local_path` when it names
@@ -162,36 +269,100 @@ fn spec_home(spec: &Path) -> String {
     spec.parent().unwrap_or(spec).to_string_lossy().to_string()
 }
 
-/// Every report on this machine, newest first.
-pub async fn list_reports() -> impl IntoResponse {
-    let Some(root) = reports_dir() else {
-        return Json(Vec::<ReportEntry>::new());
-    };
-    let mut out: Vec<(std::time::SystemTime, ReportEntry)> = Vec::new();
+/// How long the list is kept before the board is asked about it again.
+///
+/// Every card on a board asks whether it has a report, so this route is hit in
+/// bursts, and each answer now costs one board read per project. Short enough
+/// that closing the card a question holds up shows on the next screen the
+/// reader opens, long enough that a hundred cards cost one read between them.
+const MEMO: std::time::Duration = std::time::Duration::from_secs(3);
 
-    let projects = match std::fs::read_dir(&root) {
-        Ok(d) => d,
-        Err(_) => return Json(Vec::<ReportEntry>::new()),
-    };
+fn memo() -> &'static Mutex<Option<(SystemTime, Vec<ReportEntry>)>> {
+    static MEMO_CELL: OnceLock<Mutex<Option<(SystemTime, Vec<ReportEntry>)>>> = OnceLock::new();
+    MEMO_CELL.get_or_init(|| Mutex::new(None))
+}
+
+/// Every report on this machine, newest first, each saying how much of it is
+/// still waiting on an answer.
+pub async fn list_reports(State(db): State<AppState>) -> impl IntoResponse {
+    if let Some((when, ref cached)) = *memo().lock().unwrap_or_else(|e| e.into_inner()) {
+        if when.elapsed().map(|since| since < MEMO).unwrap_or(false) {
+            return Json(cached.clone());
+        }
+    }
+
+    // Reading every spec and asking the board about each question's card is
+    // filesystem and subprocess work, and this is an async handler.
+    let entries = tokio::task::spawn_blocking(move || collect_reports(&db)).await.unwrap_or_default();
+    *memo().lock().unwrap_or_else(|e| e.into_inner()) = Some((SystemTime::now(), entries.clone()));
+    Json(entries)
+}
+
+/// One report, before the board has been asked about the cards it names.
+struct Filed {
+    when: SystemTime,
+    slug: String,
+    title: String,
+    card: Option<String>,
+    holds: Vec<String>,
+}
+
+/// Walks the reports folder, then asks each project's board once about every
+/// card its reports are holding up.
+///
+/// One question to the board per project, not per question: a machine holding
+/// twenty reports for one project would otherwise pay twenty starts of `bd` to
+/// draw one badge.
+fn collect_reports(db: &Database) -> Vec<ReportEntry> {
+    let Some(root) = reports_dir() else { return Vec::new() };
+    let Ok(projects) = std::fs::read_dir(&root) else { return Vec::new() };
+
+    let mut out: Vec<(SystemTime, ReportEntry)> = Vec::new();
     for project in projects.flatten() {
         if !project.path().is_dir() {
             continue;
         }
         let project_name = project.file_name().to_string_lossy().to_string();
         let Ok(specs) = std::fs::read_dir(project.path()) else { continue };
+
+        let mut filed: Vec<Filed> = Vec::new();
         for spec in specs.flatten() {
             let name = spec.file_name().to_string_lossy().to_string();
             let Some(slug) = name.strip_suffix(SPEC_SUFFIX) else { continue };
-            let Some((title, card)) = read_spec(&spec.path()) else { continue };
+            let Some((title, card, holds)) = read_spec(&spec.path()) else { continue };
             let when = spec.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            filed.push(Filed { when, slug: slug.to_string(), title, card, holds });
+        }
+
+        let asked: Vec<String> = {
+            let mut ids: Vec<String> = filed.iter().flat_map(|f| f.holds.clone()).collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+        // A project the app's own list does not know has no folder to run the
+        // board in — the same reports still list, with nothing waiting on them.
+        let states = match resolve_project_path(db, &project_name) {
+            Some(dir) if !asked.is_empty() => card_states(&dir, &asked),
+            _ => HashMap::new(),
+        };
+
+        for f in filed {
             out.push((
-                when,
-                ReportEntry { project: project_name.clone(), slug: slug.to_string(), title, card },
+                f.when,
+                ReportEntry {
+                    project: project_name.clone(),
+                    slug: f.slug,
+                    title: f.title,
+                    card: f.card,
+                    waiting: waiting_of(&f.holds, &states),
+                },
             ));
         }
     }
+
     out.sort_by(|a, b| b.0.cmp(&a.0));
-    Json(out.into_iter().map(|(_, e)| e).collect::<Vec<_>>())
+    out.into_iter().map(|(_, e)| e).collect()
 }
 
 /// Runs the report builder and hands back what it wrote — the built page, or
@@ -398,6 +569,74 @@ mod tests {
             .expect("create project");
         }
         db
+    }
+
+    fn states(rows: &[(&str, &str)]) -> HashMap<String, String> {
+        rows.iter().map(|(id, st)| (id.to_string(), st.to_string())).collect()
+    }
+
+    #[test]
+    fn a_question_holding_work_the_board_has_not_finished_is_waiting() {
+        let holds = vec!["a-1".to_string(), "a-2".to_string()];
+        let seen = states(&[("a-1", "open"), ("a-2", "blocked")]);
+        assert_eq!(waiting_of(&holds, &seen), 2);
+    }
+
+    #[test]
+    fn closing_the_card_a_question_holds_takes_it_off_the_count() {
+        let holds = vec!["a-1".to_string()];
+        assert_eq!(waiting_of(&holds, &states(&[("a-1", "open")])), 1);
+        assert_eq!(waiting_of(&holds, &states(&[("a-1", "closed")])), 0);
+    }
+
+    #[test]
+    fn work_under_way_is_still_waiting_because_the_page_still_asks() {
+        // The report prints the question until its card is finished, so the
+        // count has to agree with the page the reader is being sent to.
+        let holds = vec!["a-1".to_string()];
+        assert_eq!(waiting_of(&holds, &states(&[("a-1", "in_progress")])), 1);
+    }
+
+    #[test]
+    fn a_dropped_card_takes_its_question_with_it() {
+        let holds = vec!["a-1".to_string()];
+        assert_eq!(waiting_of(&holds, &states(&[("a-1", "cancelled")])), 0);
+    }
+
+    #[test]
+    fn a_card_the_board_has_never_heard_of_holds_nothing() {
+        let holds = vec!["gone-1".to_string()];
+        assert_eq!(waiting_of(&holds, &HashMap::new()), 0);
+    }
+
+    #[test]
+    fn a_card_dropped_by_its_label_reads_as_dropped_like_one_dropped_by_status() {
+        let by_status = serde_json::json!({"id": "a-1", "status": "wontfix"});
+        let by_label = serde_json::json!({"id": "a-2", "status": "open", "labels": ["dropped"]});
+        assert_eq!(card_status(&by_status), "cancelled");
+        assert_eq!(card_status(&by_label), "cancelled");
+        assert_eq!(card_status(&serde_json::json!({"id": "a-3", "status": "open"})), "open");
+    }
+
+    #[test]
+    fn the_cards_a_spec_holds_up_are_read_off_its_questions() {
+        let spec = serde_json::json!({
+            "actions": {"questions": [{"ask": "?", "holds": " a-1 "}, {"ask": "?", "holds": "a-2"}]}
+        });
+        assert_eq!(holds_of(&spec), vec!["a-1".to_string(), "a-2".to_string()]);
+    }
+
+    #[test]
+    fn a_report_asking_nothing_holds_nothing_up() {
+        let fyi = serde_json::json!({"actions": {"none": true, "fyi": "For your information."}});
+        assert!(holds_of(&fyi).is_empty());
+    }
+
+    #[test]
+    fn the_board_naming_a_card_it_could_not_find_still_leaves_readable_json() {
+        let said = b"Error fetching nope-1: no issue found\n[{\"id\": \"a-1\", \"status\": \"open\"}]";
+        let found = first_json(said).expect("the document after the board's own words");
+        assert_eq!(found[0]["id"], "a-1");
     }
 
     #[test]

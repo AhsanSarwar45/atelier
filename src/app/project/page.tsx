@@ -9,7 +9,10 @@ import { ArrowLeft, EllipsisVertical } from 'lucide-react';
 
 import { CardPanel } from '@/components/card-panel';
 import { ProjectSettingsDialog } from '@/components/project-settings-dialog';
+import { reportFolder, waitingCount } from '@/components/report/waiting';
+import { useReports } from '@/components/report-panel';
 import { Shell } from '@/components/shell';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
@@ -41,6 +44,13 @@ function ProjectTabs() {
   const { project, refetch } = useProject(projectId);
   const { theme } = useTheme();
   const terminal = theme.headerVariant === 'terminal';
+  // The tab says how many of this project's reports are still waiting on an
+  // answer, so a question is not missed by whoever is on the board instead
+  // (bw-7ks.21.6).
+  const { reports } = useReports();
+  const waiting = project
+    ? waitingCount(reports, reportFolder(project.path, project.localPath))
+    : 0;
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   /** A move he made by hand: it belongs in the history, so Back undoes it. */
@@ -136,8 +146,19 @@ function ProjectTabs() {
             <TabsTrigger value="board" data-testid="tab-board">
               Board
             </TabsTrigger>
-            <TabsTrigger value="reports" data-testid="tab-reports">
+            <TabsTrigger value="reports" data-testid="tab-reports" className="gap-1.5">
               Reports
+              {waiting > 0 && (
+                <Badge
+                  variant="warning"
+                  appearance="light"
+                  size="sm"
+                  shape="circle"
+                  data-testid="tab-reports-waiting"
+                >
+                  {waiting}
+                </Badge>
+              )}
             </TabsTrigger>
           </TabsList>
         </Tabs>

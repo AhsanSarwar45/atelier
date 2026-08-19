@@ -32,7 +32,7 @@ interface ReportCardProps {
  */
 function useReportModal({ project, slug, fsPath }: ReportCardProps) {
   const [open, setOpen] = useState(false);
-  const src = apiUrl(reportUrl({ project, slug, title: slug, card: null }, fsPath));
+  const src = apiUrl(reportUrl({ project, slug }, fsPath));
   const modal = (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent

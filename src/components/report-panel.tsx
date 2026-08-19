@@ -19,6 +19,8 @@ export interface ReportEntry {
   slug: string;
   title: string;
   card: string | null;
+  /** Questions on it still holding work up — 0 for a report nothing waits on. */
+  waiting: number;
 }
 
 /**
@@ -62,7 +64,7 @@ export function useReports() {
  * board in it. A Dolt-backed project's own path is a database address and no
  * directory at all, which is why this is never that path.
  */
-export function reportUrl(entry: ReportEntry, fsPath: string): string {
+export function reportUrl(entry: Pick<ReportEntry, 'project' | 'slug'>, fsPath: string): string {
   const q = new URLSearchParams({ project: entry.project, slug: entry.slug });
   // Only when this board IS the report's project. The drawer lists every
   // report on the machine, so sending the open board's folder with all of them

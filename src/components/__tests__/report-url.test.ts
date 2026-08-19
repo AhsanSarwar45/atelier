@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { reportUrl, type ReportEntry } from "@/components/report-panel";
 
 function entry(project: string): ReportEntry {
-  return { project, slug: "who-is-allowed-to-merge", title: "Who Is Allowed To Merge", card: null };
+  return {
+    project, slug: "who-is-allowed-to-merge", title: "Who Is Allowed To Merge",
+    card: null, waiting: 0,
+  };
 }
 
 /**

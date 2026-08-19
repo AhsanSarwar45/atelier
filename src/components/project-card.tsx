@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, Archive, ArchiveRestore, Code, FolderOpen, Loader2, Settings } from "lucide-react";
 
 import { ProjectSettingsDialog } from "@/components/project-settings-dialog";
+import { waitingLabel } from "@/components/report/waiting";
 import { StatusDonut } from "@/components/status-donut";
 import { TagPicker } from "@/components/tag-picker";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +60,8 @@ interface ProjectCardProps {
    * the user never sees misleading zeros on first paint.
    */
   countsLoaded?: boolean;
+  /** This project's reports that end in a question nobody has answered (bw-7ks.21.6). */
+  reportsWaiting?: number;
   dataSource?: string;
   beadError?: string;
   archivedAt?: string;
@@ -77,6 +80,7 @@ export function ProjectCard({
   tags,
   beadCounts = NO_COUNTS(),
   countsLoaded = true,
+  reportsWaiting = 0,
   dataSource,
   beadError,
   archivedAt,
@@ -203,6 +207,20 @@ export function ProjectCard({
             <Badge variant="secondary" appearance="light" size="sm" shape="circle" className="shrink-0 gap-1">
               <Archive className="h-3 w-3" aria-hidden="true" />
               Archived
+            </Badge>
+          )}
+          {/* A report that ends in a question is work stopped until it is
+              answered, so the list of projects says so before he opens one. */}
+          {!archivedAt && reportsWaiting > 0 && (
+            <Badge
+              variant="warning"
+              appearance="light"
+              size="sm"
+              shape="circle"
+              className="shrink-0"
+              data-testid="project-reports-waiting"
+            >
+              {waitingLabel(reportsWaiting)}
             </Badge>
           )}
           {!archivedAt && dataSource === 'jsonl' && (
