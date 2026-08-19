@@ -98,15 +98,17 @@ test.describe('the list of chats', () => {
     await page.goto(`/project?id=${id}&tab=chat`);
     await page.getByTestId('restore-row').first().waitFor();
 
-    // The chat with the most cards on it, since that is the one that crowds:
-    // a row carrying a "+N" of its own is a chat with more cards than fit.
-    const crowded = page.locator(
-      '[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"]):has([data-testid="row-bead-more"])',
-    );
+    // The chat with the most cards on it, since that is the one that crowds the
+    // open chat's own line. The row no longer draws them, so it is read off the
+    // ids the row carries.
     const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"])');
     await ready.first().waitFor({ timeout: 20_000 });
     await page.waitForTimeout(1500);
-    const pick = (await crowded.count()) > 0 ? crowded.first() : ready.first();
+    const counts = await ready.evaluateAll((rows) =>
+      rows.map((r) => (r.getAttribute('data-beads') ?? '').split(' ').filter(Boolean).length),
+    );
+    const most = counts.reduce((best, n, i) => (n > counts[best] ? i : best), 0);
+    const pick = ready.nth(counts.length > 0 && counts[most] > 0 ? most : 0);
     await pick.getByTestId('row-name').click();
     await page.getByTestId('chat-tab').waitFor({ timeout: 60_000 });
     await page.waitForTimeout(1000);

@@ -337,13 +337,10 @@ test.describe('workbench', () => {
     ).toBeVisible({ timeout: 60_000 });
 
     // ---- and the chat list says the same thing, one line per chat -------
-    // The row carries the card as a chip, and the chip is the way back to it:
-    // clicking it leaves the chat and opens that card on the board.
+    // The row knows which cards the chat worked on — it carries them rather than
+    // drawing them, so the rail stays two lines of words.
     const row = page.locator(`[data-testid="restore-row"][data-row-key="${session.id}"]`);
-    const rowChip = row.locator(`[data-testid="row-bead-chip"][data-bead-id="${PARENT_CARD}"]`);
-    await expect(rowChip).toBeVisible({ timeout: 60_000 });
-    await rowChip.click();
-    await expect(page.getByTestId('bead-detail')).toBeVisible({ timeout: 60_000 });
+    await expect(row).toHaveAttribute('data-beads', new RegExp(`\\b${PARENT_CARD}\\b`), { timeout: 60_000 });
 
     // The run's report is filed among the real ones, so it is taken away again.
     rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });

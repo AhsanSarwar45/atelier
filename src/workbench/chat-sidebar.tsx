@@ -6,14 +6,14 @@
  * owner clicks (decision 8) — see docs/agent-workbench.md §6.3.
  *
  * A row says three things and no more: what the conversation is called, which
- * cards it worked on, and which folder it ran in. That is what tells two chats
- * apart when a project has forty of them.
+ * folder it ran in, and how it is doing. The cards it worked on ride along as
+ * `data-beads` for anything that needs to know, but they are not drawn: a rail
+ * this narrow reads better without a wall of ids.
  */
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { BeadChipRow } from '@/components/bead-chip-row';
 import { Badge } from '@/components/ui/badge';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
@@ -285,6 +285,9 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                   // terminal or under another host. Not the same fact as
                   // `state`, which is what our own driver knows (protocol.ts).
                   data-running={row.runningElsewhere ? 'yes' : 'no'}
+                  // The cards this chat worked on. Carried, not drawn — the ids
+                  // are what a chat is looked up by, and the row has no room.
+                  data-beads={row.beads.join(' ')}
                   // Two lines, never three: the name, then what it worked on and
                   // where. Everything else — the time, the way back in — rides on
                   // one of those two lines, because a rail this narrow turns a
@@ -309,12 +312,6 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                     </span>
                   </div>
                   <div className="mt-1 flex items-center gap-1 overflow-hidden">
-                    <BeadChipRow
-                      ids={row.beads}
-                      projectId={projectId}
-                      place="row"
-                      className="flex min-w-0 items-center gap-1 overflow-hidden"
-                    />
                     {row.folder && (
                       <Badge
                         hue={hueFor(row.folder)}

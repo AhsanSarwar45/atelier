@@ -139,7 +139,7 @@ test.describe('the open chat', () => {
     await openChatTab(page, id);
 
     // A chat that has worked on cards — its row already says so.
-    const worked = page.locator('[data-testid="restore-row"]:has([data-testid="row-bead-chip"])');
+    const worked = page.locator('[data-testid="restore-row"][data-beads]:not([data-beads=""])');
     await worked.first().waitFor({ timeout: 30_000 });
     await worked.first().getByTestId('row-name').click();
     await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
@@ -171,7 +171,7 @@ test.describe('the open chat', () => {
     test.skip(reports.filter((r) => r.card).length === 0, 'this instance has no report naming a card');
 
     await openChatTab(page, id);
-    const worked = page.locator('[data-testid="restore-row"]:has([data-testid="row-bead-chip"])');
+    const worked = page.locator('[data-testid="restore-row"][data-beads]:not([data-beads=""])');
     await worked.first().waitFor({ timeout: 30_000 });
 
     // Whichever of them worked a card that has a report; a chat with none is not
