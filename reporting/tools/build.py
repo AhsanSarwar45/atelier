@@ -52,23 +52,54 @@ STEP_LIST = re.compile(r"^(the )?(work|plan|steps|roadmap)\b[\s,]*(in order|so f
 BOARD_URL = os.environ.get("BOARD_URL", "http://127.0.0.1:3008").rstrip("/")
 
 
+def app_project_id(project: str) -> str | None:
+    """The app's own id for the project a report is filed under, if it holds one.
+
+    A report is filed under the last part of the project folder's path
+    (`project.py`), which is what the app's project list can be matched on —
+    `local_path` when it names a folder, `path` otherwise, the same reading
+    `resolve_project_path` does server-side.
+    """
+    try:
+        rows = json.loads(urllib.request.urlopen(f"{BOARD_URL}/api/projects", timeout=1.0).read())
+    except Exception:
+        return None
+    for row in rows:
+        folder = (row.get("localPath") or row.get("path") or "").rstrip("/\\")
+        if folder and Path(folder).name == project:
+            return row.get("id")
+    return None
+
+
 def handover(spec: Path, out: Path) -> tuple[str, str]:
     """The link to hand the manager, and a word about it when it is second best.
 
-    A path on disk is a path on disk: an editor claims it before any browser
-    sees it. The screen serves the same report over http, rebuilt from this
-    spec as it opens, so that link is the one worth handing over.
+    A report is part of the project it is about, so the link opens it there:
+    the app's own report screen, under that project, with the bar above it and
+    the board and the chats one click away (bw-7ks.21.8). The report on its own
+    page is what is left when the app cannot say which project this is, and a
+    path on disk when the app is not running at all — an editor claims that
+    before any browser sees it, so it is the last resort rather than the first.
     """
     slug = spec.name.replace(".report.json", "")
+    project = spec.resolve().parent.name
+    ident = app_project_id(project)
+    if ident:
+        inside = urllib.parse.urlencode({"id": ident, "tab": "reports", "report": slug})
+        return f"{BOARD_URL}/project?{inside}", ""
+
     # No `path` here: the server looks the project's folder up from its own
     # project list by this name, so the link keeps working after the folder
     # it was built in — often a worktree — is gone.
-    query = urllib.parse.urlencode({"project": spec.resolve().parent.name, "slug": slug})
+    query = urllib.parse.urlencode({"project": project, "slug": slug})
     try:
         urllib.request.urlopen(f"{BOARD_URL}/api/reports", timeout=1.0).read(1)
     except Exception:
-        return out.resolve().as_uri(), "the board screen is not up, so this is the file itself"
-    return f"{BOARD_URL}/api/reports/page?{query}", ""
+        return out.resolve().as_uri(), "the app is not up, so this is the file itself"
+    return (
+        f"{BOARD_URL}/api/reports/page?{query}",
+        f"the app holds no project called {project}, so this is the report on its own page",
+    )
 
 
 # ── the spec, walked ─────────────────────────────────────────────────────────

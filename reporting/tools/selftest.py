@@ -556,9 +556,47 @@ def run() -> int:
     build.card_state = lambda card, project, base=None: "open"
     build.card_info = board_mod.card_info
 
+    # the link handed over opens the report where it belongs — inside the app,
+    # under its own project (bw-7ks.21.8). Its own page is what is left when
+    # the app cannot say which project this is, and a file on disk when the app
+    # is not running at all.
+    class Answered:
+        def __init__(self, payload: bytes):
+            self.payload = payload
+
+        def read(self, *_):
+            return self.payload
+
+    real_open = build.urllib.request.urlopen
+    here = tmp / "corsetta" / "mirrors.report.json"
+    page = tmp / "corsetta" / "mirrors.html"
+
+    listed = json.dumps([{"id": "abc-123", "path": "/home/dev/corsetta", "localPath": None}]).encode()
+    build.urllib.request.urlopen = lambda url, timeout=None: Answered(listed)
+    link, why = build.handover(here, page)
+    inside = all(bit in link for bit in ("/project?", "id=abc-123", "tab=reports", "report=mirrors"))
+    if not inside:
+        failures.append(f"the link handed over does not open the report inside the app — {link}")
+    if why:
+        failures.append(f"the report's own place in the app was handed over as second best — {why}")
+
+    build.urllib.request.urlopen = lambda url, timeout=None: Answered(b"[]")
+    link, why = build.handover(here, page)
+    if "/api/reports/page" not in link or "corsetta" not in why:
+        failures.append(f"a project the app has never heard of lost its fallback page — {link} / {why}")
+
+    def refused(url, timeout=None):
+        raise OSError("connection refused")
+
+    build.urllib.request.urlopen = refused
+    link, why = build.handover(here, page)
+    if not link.startswith("file://") or "not up" not in why:
+        failures.append(f"with the app down, the file itself was not handed over — {link} / {why}")
+    build.urllib.request.urlopen = real_open
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 47 - len(failures)}/{len(CASES) + 47} report gates hold")
+    print(f"{len(CASES) + 50 - len(failures)}/{len(CASES) + 50} report gates hold")
     return 1 if failures else 0
 
 
