@@ -87,4 +87,26 @@ describe('the list keeps up', () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]!.sessionId).toBe('s1');
   });
+
+  // The list is ordered by where the work is, not by what happened last, and the
+  // stream must not undo that when it merges a chat this app is driving.
+  it('a chat somebody is working in stays above one that only started later', () => {
+    const busy = row({ sessionId: 's1', runningElsewhere: true });
+    const merged = withLive([busy], [session()], PROJECT);
+    expect(merged.map((r) => r.sessionId)).toEqual(['s1', 's2']);
+  });
+
+  it('a row keeps the later of the two dates, never the stream’s alone', () => {
+    const merged = withLive(
+      [row({ lastActiveAt: '2026-08-16T12:00:00.000Z' })],
+      [session({ id: 's1', state: 'thinking', lastActiveAt: '2026-08-16T11:00:00.000Z' })],
+      PROJECT,
+    );
+    expect(merged[0]!.lastActiveAt).toBe('2026-08-16T12:00:00.000Z');
+  });
+
+  it('the working mark survives the stream touching the row', () => {
+    const merged = withLive([row({ runningElsewhere: true })], [session({ id: 's1', state: 'thinking' })], PROJECT);
+    expect(merged[0]!.runningElsewhere).toBe(true);
+  });
 });

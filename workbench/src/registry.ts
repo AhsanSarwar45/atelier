@@ -12,7 +12,7 @@
  */
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 
-import { folderOf } from '../../src/workbench/protocol.ts';
+import { byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
@@ -90,7 +90,11 @@ export async function restoreList(
       externalId: s.externalId,
       brand: s.brand,
       title: seen?.name ?? s.title,
-      lastActiveAt: s.lastActiveAt,
+      // The tool's index moves whenever the conversation is written to, wherever
+      // that happens; our own log only moves when this app drives it. A chat
+      // worked on elsewhere is exactly the one that matters most here, so the
+      // later of the two wins (bw-dmxj.4).
+      lastActiveAt: laterOf(s.lastActiveAt, seen?.lastActiveAt),
       state: s.state,
       origin: s.origin,
       projectId: s.projectId,
@@ -130,6 +134,6 @@ export async function restoreList(
     });
   }
 
-  rows.sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
+  rows.sort(byWhatIsWorking);
   return rows;
 }

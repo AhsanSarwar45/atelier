@@ -357,3 +357,37 @@ export function folderOf(cwd: string | null): string | null {
   const name = cwd.replace(/\/+$/, '').split('/').pop();
   return name ? name : null;
 }
+
+/**
+ * The later of two times a chat was last active, as an ISO string.
+ *
+ * A chat this app has driven carries two dates: the one our own log wrote, and
+ * the one the tool's session index carries for the same conversation. They part
+ * company the moment somebody works in that chat somewhere else — the index
+ * moves and our log does not — and taking ours alone froze such a chat at the
+ * last time the app happened to look at it, which sank it to the bottom of a
+ * list ordered by date (bw-dmxj). Both are the same clock, so the later one is
+ * simply the truer one.
+ */
+export function laterOf(mine: string, theirs: string | null | undefined): string {
+  if (!theirs) return mine;
+  return theirs.localeCompare(mine) > 0 ? theirs : mine;
+}
+
+/**
+ * The order of the restore list: chats somebody is working in right now, then
+ * everything else, each half newest first.
+ *
+ * Date alone is the wrong order for this list. It answers "what happened most
+ * recently", and the reader's question is "where is the work" — a chat that has
+ * been running for an hour writes no more often than one that was read a minute
+ * ago, and the list draws only a screenful, so the running one was not merely
+ * lower down, it was not drawn at all.
+ *
+ * Both sides sort: the sidecar when it builds the list, the screen again after
+ * the live stream has added to it.
+ */
+export function byWhatIsWorking(a: RestoreRow, b: RestoreRow): number {
+  if (!!a.runningElsewhere !== !!b.runningElsewhere) return a.runningElsewhere ? -1 : 1;
+  return b.lastActiveAt.localeCompare(a.lastActiveAt);
+}

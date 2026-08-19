@@ -19,7 +19,7 @@ import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { useLiveSessions, type LiveSession } from '@/workbench/live';
-import { folderOf, type RestoreRow } from '@/workbench/protocol';
+import { byWhatIsWorking, folderOf, laterOf, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
 /**
@@ -88,7 +88,10 @@ export function withLive(rows: RestoreRow[], live: LiveSession[], projectId: str
         ...known,
         state: session.state,
         title: session.title ?? known.title,
-        lastActiveAt: session.lastActiveAt,
+        // Never backwards: the stream carries what our own driver has seen, and
+        // the row may already hold a later time from the tool's index — a chat
+        // being worked on in a terminal moves that index and not our driver.
+        lastActiveAt: laterOf(known.lastActiveAt, session.lastActiveAt),
         beads: session.beads.length ? session.beads : known.beads,
       };
       continue;
@@ -109,7 +112,7 @@ export function withLive(rows: RestoreRow[], live: LiveSession[], projectId: str
     });
   }
 
-  return merged.sort((a, b) => b.lastActiveAt.localeCompare(a.lastActiveAt));
+  return merged.sort(byWhatIsWorking);
 }
 
 interface ChatSidebarProps {
@@ -241,6 +244,10 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                   data-external-id={row.externalId ?? ''}
                   data-origin={row.origin}
                   data-state={row.state}
+                  // Somebody is working in this conversation right now, in a
+                  // terminal or under another host. Not the same fact as
+                  // `state`, which is what our own driver knows (protocol.ts).
+                  data-running={row.runningElsewhere ? 'yes' : 'no'}
                   // Two lines, never three: the name, then what it worked on and
                   // where. Everything else — the time, the way back in — rides on
                   // one of those two lines, because a rail this narrow turns a
@@ -299,6 +306,21 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                         className="ml-auto shrink-0"
                       >
                         opening
+                      </Badge>
+                    ) : row.runningElsewhere ? (
+                      // The strongest thing a row can say, so it says it in
+                      // place of "ready" rather than beside it: one pill's
+                      // worth of room, and two would read as two facts.
+                      <Badge
+                        variant="success"
+                        appearance="default"
+                        size="xs"
+                        shape="circle"
+                        data-testid="row-pill"
+                        data-pill="working"
+                        className="ml-auto shrink-0"
+                      >
+                        working
                       </Badge>
                     ) : (
                       live && (
