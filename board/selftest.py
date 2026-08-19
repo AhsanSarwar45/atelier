@@ -2433,6 +2433,10 @@ def main():
     assert helping([FIRST], [""]) == [], \
         "the one helper out was left out by a return that said no name, and " \
         "nothing else will ever say it is home"
+    assert helping([FIRST, SECOND], ["", ""]) == [], \
+        "two helpers out and two returns that said no name left %r out for the " \
+        "rest of the session, so nothing would ask this session about its own " \
+        "unfinished work again" % helping([FIRST, SECOND], ["", ""])
 
     # The gap a held set cannot see: between closing a step and claiming the next,
     # a session holds nothing while its job is still running.

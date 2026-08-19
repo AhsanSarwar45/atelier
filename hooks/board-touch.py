@@ -152,11 +152,12 @@ def main():
     # before the tool call that sent it is put aside rather than dropped — which
     # of the two lands first is the harness's business, not this record's.
     #
-    # A return that says no name strikes off the one helper out, because there is
-    # nothing to guess; with two or more out it strikes off nobody. Guessing the
-    # oldest came home is how a helper still running gets counted home, and the
-    # turn is then read as idle — the very refusal this record exists to stop,
-    # reached from the other side.
+    # A return that says no name says one helper is home and never which, so it is
+    # counted rather than guessed at: while fewer have come home that way than went
+    # out, they all stay out; once as many have come home as went out, none of them
+    # is still running. Guessing the oldest came home is how a helper still working
+    # gets counted home and the turn read as idle; never clearing at all is how a
+    # session stops being asked about its own unfinished work for good.
     if data.get("hook_event_name") == "SubagentStop":
         state["helper_done"] = bc.now()
         home = data.get("agent_id") or ""
@@ -165,8 +166,12 @@ def main():
             state["helper_out"] = [h for h in out if h != home]
         elif home:
             state["helper_back"] = ((state.get("helper_back") or []) + [home])[-HELPERS:]
-        elif len(out) == 1:
-            state["helper_out"] = []
+        else:
+            homes = (state.get("helper_home") or 0) + 1
+            if homes >= len(out):
+                state["helper_out"], state["helper_home"] = [], 0
+            else:
+                state["helper_home"] = homes
         bc.save(sid, state)
         return
 
