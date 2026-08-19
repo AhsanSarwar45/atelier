@@ -1796,10 +1796,11 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
     """What the gate says to a session claiming a new job's first step, while it
     still owns the scratch copy — whose own job either has work left, or does not.
 
-    `where` is the tree the claim is typed in, and it is the scratch copy rather
-    than the shared checkout because that is where a session claiming its next
-    piece actually stands. The claim gate refuses a code card claimed from the
-    shared tree outright, and every case here is about a different refusal.
+    `where` is the tree the claim is typed in, and it is the claimed job's own
+    copy rather than the shared checkout because that is where a session claiming
+    its next piece actually stands. The claim gate refuses a code card claimed
+    from anywhere that is not that job's copy, and every case here is about a
+    different refusal.
 
     `order` empty is a goal poured before an order was ever recorded: nothing can
     be concluded about it, and concluding 'finished' refuses its owner the next
@@ -1845,7 +1846,8 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
     status.unfinished_spine = REAL_SPINE
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest",
-         "cwd": where or os.path.join(tmp, "worktrees", "second"),
+         "cwd": where or os.path.join(tmp, "worktrees",
+                                      "tst-old" if same else "tst-new"),
          "tool_input": {"command": "bd update %s --claim"
                         % ("tst-old.9" if same else "tst-new.1")}}))
     out = io.StringIO()
@@ -1888,9 +1890,9 @@ def claim_of(tmp, deps):
     """What the gate says to a claim on a card the board reports as waiting.
 
     Drives the hook rather than the judgement underneath it, so removing the
-    judgement from the refusal is caught too. Typed from the scratch copy, like
-    every other claim a session makes: a code card claimed from the shared
-    checkout earns a refusal of its own, and this case is not about that one.
+    judgement from the refusal is caught too. Typed from the job's own copy, like
+    every other claim a session makes: a code card claimed from anywhere else
+    earns a refusal of its own, and this case is not about that one.
     """
     def board(args, root=None):
         if args[0] == "blocked":
@@ -1906,7 +1908,7 @@ def claim_of(tmp, deps):
     status.bc.reviewing = lambda: ""
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest",
-         "cwd": os.path.join(tmp, "worktrees", "second"),
+         "cwd": os.path.join(tmp, "worktrees", "tst-j"),
          "tool_input": {"command": "bd update tst-j.1 --claim"}}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
@@ -3199,10 +3201,20 @@ def main():
         assert route == ["git -C %s worktree add worktrees/tst-new -b tst-new" % tmp], \
             "the refusal named no command that cuts the copy: %s" % route
 
-        # The same claim from a copy is nobody's business but the session's.
-        inside = copy_first(tmp, second)
+        # The same claim from the job's own copy is nobody's business but the
+        # session's.
+        inside = copy_first(tmp, os.path.join(tmp, "worktrees", "tst-new"))
         assert inside == "", \
-            "a claim made from the session's own copy was refused: %s" % inside
+            "a claim made from the job's own copy was refused: %s" % inside
+
+        # Somebody else's copy is not a copy of its own: two jobs in one tree is
+        # the same hazard one directory further in, and the session is told to
+        # cut its own rather than waved through (bw-1tgx.5).
+        borrowed = copy_first(tmp, second)
+        assert "no copy of its own" in borrowed and second in borrowed, \
+            "a card was claimed from another job's copy: %s" % (borrowed or "ALLOWED")
+        assert "git -C %s worktree add worktrees/tst-new -b tst-new" % tmp in borrowed, \
+            "the refusal named no command that cuts the copy: %s" % borrowed
 
         # A card that makes no code is read and written from wherever the session
         # stands — and the landing, which is one of them, is closed from the shared

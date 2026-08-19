@@ -486,6 +486,12 @@ FAULTS = [
          "    if not mine and own_copy(goal, "
          "[w for w in spots if os.path.realpath(w) != home]):\n"
          '        return ""\n', "")),
+    ("any copy at all counts as the job's own, so two jobs share one tree one "
+     "directory further in", CLOSE,
+     lambda s: s.replace("    inside, stood = stood_in(here, root)\n"
+                         "    if inside == goal:",
+                         "    inside, stood = stood_in(here, root)\n"
+                         "    if inside:")),
     ("a second landing lets a job past the copy standing in this checkout", CLOSE,
      lambda s: s.replace(
          "    mine = own_copy(goal, "

@@ -485,6 +485,24 @@ def own_copy(goal, spots):
     return ""
 
 
+def stood_in(here, root):
+    """Which copy this session is typing from, and what to call the place.
+
+    The name is the folder the copy sits in, which is the goal it was cut for —
+    the same reading `board_common.actor` takes to name a session and the
+    teardown takes to find the copies a job left behind.
+
+    Standing in some copy is not standing in this job's: a session sitting in
+    one job's tree and claiming another's puts two jobs in one tree exactly as
+    the shared checkout does, one directory further in (bw-1tgx.5). So the
+    refusal has to be able to say which tree it is looking at.
+    """
+    got = re.search(r"^(.*?/worktrees/([^/]+))(?:/|$)", here or "")
+    if not got:
+        return "", "%s — the checkout every session here shares" % root.rstrip("/")
+    return got.group(2), "%s, which was cut for %s" % (got.group(1), got.group(2))
+
+
 def without_a_copy(cid, goal, root, here):
     """The refusal a claim earns for having nowhere of its own to make the change.
 
@@ -503,7 +521,8 @@ def without_a_copy(cid, goal, root, here):
     project's board has never heard of these ids — so the most that can be asked
     of it is that it is cut and waiting.
     """
-    if "/worktrees/" in (here or ""):
+    inside, stood = stood_in(here, root)
+    if inside == goal:
         return ""
     spots = copy_places(goal, root)
     # By what the paths resolve to rather than how they are spelt: a landing is
@@ -516,20 +535,20 @@ def without_a_copy(cid, goal, root, here):
     if mine:
         return (
             "%s is a piece of %s, which makes code, and this session is standing in "
-            "%s — the checkout every session here shares. That job already has a copy "
-            "of its own, so the work belongs in it: two jobs editing one tree "
-            "overwrite each other, and a claim made from here is recorded under the "
-            "shared tree's name, which owns nothing when the job is torn down.\n"
+            "%s. That job already has a copy of its own, so the work belongs in it: "
+            "two jobs editing one tree overwrite each other, and a claim made from "
+            "here is recorded under the name of the tree it was made in, which owns "
+            "nothing when the job is torn down.\n"
             "  cd %s\n"
-            "Then claim it again." % (cid, goal, root.rstrip("/"), mine)
+            "Then claim it again." % (cid, goal, stood, mine)
         )
     return (
         "%s is a piece of %s, which makes code, and that job has no copy of its own "
-        "— so the change would be made in the checkout every session here shares, "
-        "where two jobs edit one file under each other and neither can see it "
-        "happening. Cut it one%s and work there:\n  %s\n"
+        "— so the change would be made in %s, where two jobs edit one file under "
+        "each other and neither can see it happening. Cut it one%s and work "
+        "there:\n  %s\n"
         "Then claim it again."
-        % (cid, goal,
+        % (cid, goal, stood,
            " in whichever of these the change is made" if len(spots) > 1 else "",
            "\n  ".join(cut(where, goal) for where in spots))
     )
