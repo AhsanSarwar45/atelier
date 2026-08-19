@@ -200,3 +200,38 @@ def status(card: str, project: Path, spec_dir: Path | None = None) -> dict:
         next_up = "Nothing left — every piece of this is finished."
 
     return {"now": now, "next_up": next_up, "items": items}
+
+
+class NoBoard(Exception):
+    """There is no board command on this machine to ask."""
+
+
+def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | None:
+    """The board's own word for one card, or None when it does not know it.
+
+    A machine with no board at all is not the same answer as a card that is
+    finished, so it raises rather than returning: a report built somewhere the
+    board cannot be reached is warned about, never refused.
+    """
+    if spec_dir is not None:
+        project = board_home(spec_dir, project)
+    try:
+        out = subprocess.run(
+            ["bd", "show", card, "--json"],
+            capture_output=True, text=True, cwd=project, timeout=20,
+        )
+    except FileNotFoundError:
+        raise NoBoard
+    try:
+        data = json.loads(out.stdout or "null")
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if not isinstance(data, dict) or data.get("error") or not data.get("id"):
+        return None
+    # A card dropped by label reads as closed unless the label is watched for,
+    # and work that is not happening cannot be holding a question open either.
+    if set(data.get("labels") or []) & set(DROPPED):
+        return "cancelled"
+    return data.get("status") or "open"

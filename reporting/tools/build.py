@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blocks import OPAQUE, ReportError, render as render_block  # noqa: E402
-from board import status as board_status  # noqa: E402
+from board import NoBoard, card_state, status as board_status  # noqa: E402
 from jargon import jargon, markup  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -97,6 +97,8 @@ class Ctx:
         self._cache: dict[str, str] = {}
         # Plain-words hits found while building, from text the spec does not hold.
         self.warnings: list[str] = []
+        # Things the build could not check rather than words to plain up.
+        self.notes: list[str] = []
 
     def text(self, s: str) -> str:
         out = html.escape(str(s))
@@ -407,7 +409,40 @@ def next_card(spec: dict, ctx: Ctx) -> str:
     return card("c-next", "next", "Next", body, ctx)
 
 
+def live_questions(spec: dict, ctx: Ctx) -> None:
+    """Refuse the page while it asks about work the board has already settled.
+
+    Slot 2 is the one part of a report nobody thinks to delete: the answer
+    arrives in chat, the work goes on, and the question is rebuilt onto every
+    page after it. Each one names the card it is holding up, and that card
+    finishing is what takes it off. A machine with no board cannot say either
+    way, so it warns instead.
+    """
+    for i, q in enumerate(spec["actions"].get("questions", []), 1):
+        held = str(q["holds"]).strip()
+        try:
+            state = card_state(held, ctx.project, ctx.base)
+        except NoBoard:
+            ctx.notes.append(
+                f"question {i} says it is holding up {held}, and there is no board on this "
+                "machine to confirm that is still true"
+            )
+            continue
+        if state is None:
+            raise ReportError(
+                f"question {i} says it is holding up {held}, and the board has never heard "
+                "of it — name the card that is actually waiting on this answer"
+            )
+        if state in ("closed", "cancelled"):
+            raise ReportError(
+                f"question {i} is holding up {held}, which the board has finished — the "
+                "answer has stopped mattering, so take the question off the page, and put "
+                "the call it settled in the decisions slot"
+            )
+
+
 def build(spec: dict, ctx: Ctx) -> str:
+    live_questions(spec, ctx)
     cards, nav = [], []
     nav.append(('act', 'What I need', True))
     cards.append(action_card(spec, ctx))
@@ -503,6 +538,8 @@ def main() -> int:
         print(f"this report does not build: {e}", file=sys.stderr)
         return 1
 
+    for note in ctx.notes:
+        print(f"UNCHECKED: {note}", file=sys.stderr)
     warnings += ctx.warnings
     if warnings:
         print(f"WORDS THE MANAGER WOULD HAVE TO DECODE — {len(warnings)}:", file=sys.stderr)
