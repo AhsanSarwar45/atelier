@@ -317,7 +317,7 @@ def starting_step(spec: dict) -> str:
 def status_card(spec: dict, ctx: Ctx) -> str:
     s = spec["status"]
     if s.get("card"):
-        s = board_status(s["card"], ctx.project)
+        s = board_status(s["card"], ctx.project, ctx.base)
         # README, "Next-up is the exception". A job with nothing left keeps the
         # list's own last word: a plan step advertised under a full set of ticks
         # reads as work still to come.

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -85,6 +86,31 @@ def _title(kid: dict, shared: set) -> str:
     return kid.get("title", kid["id"])
 
 
+def board_home(spec_dir: Path, fallback: Path) -> Path:
+    """Where the board lives for the project this spec is about.
+
+    The spec's own folder names the project, and the board screen's project
+    list says where that project's checkout is — so a build finds the right
+    board from any directory, not only when run inside the project. The list
+    sits beside the reports themselves (reports/<project>/ -> ../settings.db).
+    A project the list does not know falls back to the directory the command
+    was run from, which is where an unregistered project's board would be.
+    """
+    db = spec_dir.parent.parent / "settings.db"
+    if db.is_file():
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                for (path,) in con.execute("SELECT path FROM projects"):
+                    if path and Path(path).name == spec_dir.name and Path(path).is_dir():
+                        return Path(path)
+            finally:
+                con.close()
+        except sqlite3.Error:
+            pass
+    return fallback
+
+
 def children(card: str, project: Path) -> list[dict]:
     """The card's direct children, in board order, closed ones included."""
     try:
@@ -128,13 +154,15 @@ def _under_way(kid: str, project: Path) -> bool:
     return any(_under_way(b["id"], project) for b in below)
 
 
-def status(card: str, project: Path) -> dict:
+def status(card: str, project: Path, spec_dir: Path | None = None) -> dict:
     """The whole status slot: what is happening now, what is next, and the list.
 
     Both lines are about the whole board, not its first row: naming one of three
     live items reads as the only one, and a board with nothing left to start
     still has everything left to finish.
     """
+    if spec_dir is not None:
+        project = board_home(spec_dir, project)
     kids = children(card, project)
     seen: dict[str, int] = {}
     for k in kids:

@@ -274,9 +274,27 @@ def run() -> int:
         if got != want:
             failures.append(f"a report made in {said} would be filed under {got!r}")
 
+    # a spec that reads a card finds its project's board from any directory:
+    # the spec's folder names the project, and the board screen's own list says
+    # where that project lives — the build's directory is only the fallback
+    import sqlite3
+    import board as board_mod
+    home = tmp / "kanban-ui"
+    spec_dir = home / "reports" / "some-project"
+    spec_dir.mkdir(parents=True)
+    con = sqlite3.connect(home / "settings.db")
+    con.execute("CREATE TABLE projects (name TEXT, path TEXT)")
+    con.execute("INSERT INTO projects VALUES ('Some Project', ?)", (str(repo),))
+    con.commit()
+    con.close()
+    elsewhere = tmp / "nowhere"
+    if board_mod.board_home(spec_dir, elsewhere) != repo:
+        failures.append("a build run outside the project did not find its board from the screen's list")
+    if board_mod.board_home(home / "reports" / "unlisted-project", elsewhere) != elsewhere:
+        failures.append("an unlisted project did not fall back to the build's own directory")
+
     # ── the two status lines describe the whole board, not its first row ──
     # From here on the board is a fixture, so nothing below may reach `bd`.
-    import board as board_mod
     board_mod._under_way = lambda kid, project: False
     full = [{"id": "a", "title": "Alpha", "status": "closed"},
             {"id": "b", "title": "Bravo", "status": "open"},
