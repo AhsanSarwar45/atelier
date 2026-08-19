@@ -117,9 +117,24 @@ fn holds_of(spec: &serde_json::Value) -> Vec<String> {
 /// `reporting/tools/board.py` reads, by status or by label.
 const DROPPED: [&str; 3] = ["cancelled", "dropped", "wontfix"];
 
-/// The states that mean the work is over, and with it the question that was
-/// holding it up.
-const SETTLED: [&str; 2] = ["closed", "cancelled"];
+/// The states that mean nobody has started, which is the only work a question
+/// can still be holding up — `WAITING` in `reporting/tools/build.py`.
+const WAITING: [&str; 4] = ["open", "pinned", "blocked", "deferred"];
+
+/// The board's word on one card, as far as a question cares.
+#[derive(Debug, Clone)]
+struct Card {
+    state: String,
+    /// Whether other work sits underneath it.
+    carries: bool,
+}
+
+impl Card {
+    /// Whether a question naming this card is still waiting on an answer.
+    fn waiting(&self) -> bool {
+        !self.carries && WAITING.contains(&self.state.as_str())
+    }
+}
 
 /// The board's own word for one card, a dropped one read as `cancelled`
 /// whichever way it was dropped.
@@ -144,19 +159,18 @@ fn card_status(card: &serde_json::Value) -> String {
 
 /// How many of these questions are still waiting on an answer.
 ///
-/// The same reading the report itself draws a question by (`live` in
-/// `reporting/tools/build.py`'s `question_facts`): a question dies with the
-/// card it is holding up, and only with it. So the count says exactly what the
-/// page says when it is opened, and closing that card takes both away.
+/// Exactly the rule the report builder refuses a page by (`live_questions` in
+/// `reporting/tools/build.py`): the card a question names has to be one piece
+/// of work that nobody has started. Finished, dropped or never heard of holds
+/// nothing; work already under way was not waiting on this answer; and a card
+/// carrying other work underneath it never finishes at all, so a question hung
+/// on one would sit there through every answer it was ever given.
 ///
-/// A card the board has never heard of is not counted, though the page would
-/// still print its question: a card that cannot be closed would leave a badge
-/// nothing could ever clear.
-fn waiting_of(holds: &[String], states: &HashMap<String, String>) -> usize {
-    holds
-        .iter()
-        .filter(|held| states.get(*held).is_some_and(|s| !SETTLED.contains(&s.as_str())))
-        .count()
+/// The two have to agree or the mark lies: a report the builder would refuse
+/// is a report whose page comes up as an error, and sending the reader to one
+/// of those is worse than saying nothing.
+fn waiting_of(holds: &[String], cards: &HashMap<String, Card>) -> usize {
+    holds.iter().filter(|held| cards.get(*held).is_some_and(Card::waiting)).count()
 }
 
 /// The first thing in the board's answer that reads as JSON.
@@ -172,30 +186,40 @@ fn first_json(out: &[u8]) -> Option<serde_json::Value> {
         .ok()
 }
 
-/// What the board says about these cards, asked once for all of them.
+/// The board's word on every card it holds, in one question.
+///
+/// The whole board rather than the handful of cards a report names, because
+/// what makes a card unanswerable is what sits UNDER it, and the only cheap
+/// way to know that is to read every card's parent once. One start of `bd` for
+/// a project either way, and the answer keeps for as long as the list does.
 ///
 /// A card missing from the answer is a card the board has never heard of, and
 /// a board that cannot answer at all leaves the map empty: either way nothing
 /// counts as waiting, so a machine with no board is quiet rather than wrong.
-fn card_states(dir: &str, ids: &[String]) -> HashMap<String, String> {
-    let mut states = HashMap::new();
-    if ids.is_empty() {
-        return states;
-    }
-    let Ok(out) = Command::new("bd").arg("show").args(ids).arg("--json").current_dir(dir).output() else {
-        return states;
+fn board_cards(dir: &str) -> HashMap<String, Card> {
+    let mut cards = HashMap::new();
+    let Ok(out) = Command::new("bd")
+        .args(["list", "--all", "--json"])
+        .current_dir(dir)
+        .output()
+    else {
+        return cards;
     };
-    let rows = match first_json(&out.stdout) {
-        Some(serde_json::Value::Array(rows)) => rows,
-        Some(one @ serde_json::Value::Object(_)) => vec![one],
-        _ => return states,
+    let Some(serde_json::Value::Array(rows)) = first_json(&out.stdout) else {
+        return cards;
     };
-    for row in rows {
+    let carriers: std::collections::HashSet<String> = rows
+        .iter()
+        .filter_map(|row| row.get("parent").and_then(|p| p.as_str()))
+        .map(str::to_string)
+        .collect();
+    for row in &rows {
         if let Some(id) = row.get("id").and_then(|i| i.as_str()) {
-            states.insert(id.to_string(), card_status(&row));
+            let carries = carriers.contains(id);
+            cards.insert(id.to_string(), Card { state: card_status(row), carries });
         }
     }
-    states
+    cards
 }
 
 /// The folder that holds `project`'s board — `local_path` when it names
@@ -334,16 +358,12 @@ fn collect_reports(db: &Database) -> Vec<ReportEntry> {
             filed.push(Filed { when, slug: slug.to_string(), title, card, holds });
         }
 
-        let asked: Vec<String> = {
-            let mut ids: Vec<String> = filed.iter().flat_map(|f| f.holds.clone()).collect();
-            ids.sort();
-            ids.dedup();
-            ids
-        };
+        // Nothing held up is nothing to ask the board about.
+        let asked = filed.iter().any(|f| !f.holds.is_empty());
         // A project the app's own list does not know has no folder to run the
         // board in — the same reports still list, with nothing waiting on them.
-        let states = match resolve_project_path(db, &project_name) {
-            Some(dir) if !asked.is_empty() => card_states(&dir, &asked),
+        let cards = match resolve_project_path(db, &project_name) {
+            Some(dir) if asked => board_cards(&dir),
             _ => HashMap::new(),
         };
 
@@ -355,7 +375,7 @@ fn collect_reports(db: &Database) -> Vec<ReportEntry> {
                     slug: f.slug,
                     title: f.title,
                     card: f.card,
-                    waiting: waiting_of(&f.holds, &states),
+                    waiting: waiting_of(&f.holds, &cards),
                 },
             ));
         }
@@ -571,12 +591,15 @@ mod tests {
         db
     }
 
-    fn states(rows: &[(&str, &str)]) -> HashMap<String, String> {
-        rows.iter().map(|(id, st)| (id.to_string(), st.to_string())).collect()
+    /// A board of single pieces of work, each in the state named.
+    fn states(rows: &[(&str, &str)]) -> HashMap<String, Card> {
+        rows.iter()
+            .map(|(id, st)| (id.to_string(), Card { state: st.to_string(), carries: false }))
+            .collect()
     }
 
     #[test]
-    fn a_question_holding_work_the_board_has_not_finished_is_waiting() {
+    fn a_question_holding_work_nobody_has_started_is_waiting() {
         let holds = vec!["a-1".to_string(), "a-2".to_string()];
         let seen = states(&[("a-1", "open"), ("a-2", "blocked")]);
         assert_eq!(waiting_of(&holds, &seen), 2);
@@ -590,11 +613,22 @@ mod tests {
     }
 
     #[test]
-    fn work_under_way_is_still_waiting_because_the_page_still_asks() {
-        // The report prints the question until its card is finished, so the
-        // count has to agree with the page the reader is being sent to.
+    fn work_already_under_way_was_never_waiting_on_the_answer() {
         let holds = vec!["a-1".to_string()];
-        assert_eq!(waiting_of(&holds, &states(&[("a-1", "in_progress")])), 1);
+        assert_eq!(waiting_of(&holds, &states(&[("a-1", "in_progress")])), 0);
+    }
+
+    #[test]
+    fn a_card_carrying_other_work_holds_nothing_up() {
+        // It cannot finish until everything under it does, so the builder
+        // refuses the page rather than ask again — and a mark on a report that
+        // will not build sends the reader to an error (bw-7ks.21.13).
+        let holds = vec!["a-1".to_string()];
+        let goal = HashMap::from([(
+            "a-1".to_string(),
+            Card { state: "open".to_string(), carries: true },
+        )]);
+        assert_eq!(waiting_of(&holds, &goal), 0);
     }
 
     #[test]
