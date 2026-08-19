@@ -3938,13 +3938,21 @@ def main():
             assert "-l step:work" in item[0] and "-l of:" in item[0], \
                 "the item promoted from %s is not one of the job's own work items, " \
                 "so nothing moves the run on when it closes: %s" % (fid, item[0])
-            half = item[0].replace("\\n", "\n").split(
-                "## Acceptance Criteria\n", 1)[-1].split("\n\n", 1)[0]
+            # Read back the way `board/job` itself reads a card apart, because a
+            # section runs to the next heading or to the end of the body: what a
+            # promoted card was filed as, written after its finish line, is read
+            # back as part of it and matched against siblings it never lands with.
+            body = item[0].replace("\\n", "\n")
+            half = bars.part(body, "Acceptance Criteria").split("\n -l ", 1)[0].strip()
             assert not bars.finish_line(half), \
                 "the item promoted from %s boarded with a second half that `job " \
                 "under` would have bounced, so promotion is the way onto the board " \
                 "for a card nothing can close it against: %s" \
                 % (fid, bars.finish_line(half))
+            assert half == FIXED[fid], \
+                "the finish line read back off the item promoted from %s is not the " \
+                "one it was given — everything else in the section is measured as " \
+                "part of it: %r" % (fid, half)
         closed = [l for l in asked if l.startswith("close ")]
         assert len(closed) == 3, \
             "promoting three finds closed %d of them, so the rest stand open as " \
@@ -4050,6 +4058,23 @@ def main():
         assert code == 0 and err.count("WARNING") == 1 and "tst-made1" in err, \
             "two items of one batch settled by one run in one place were poured " \
             "with nothing said between them: %r" % err
+
+        # A promoted card standing as somebody's sibling: what it was filed as is
+        # not what it is judged by, so the place the find named is no reason to
+        # merge an item that only lands there.
+        PROMOTED = [{"id": "tst-goal.9", "status": "open",
+                     "title": "The settings page forgets the choice the manager made",
+                     "description": "## Where it is\nui/report.tsx prints one less "
+                                    "than the rows under it\n\nPromoted from tst-f3."
+                                    "\n\n## Acceptance Criteria\n`npm test` reports 0 "
+                                    "failures with ui/settings.tsx keeping the choice\n"}]
+        board(goals=[], cards={"tst-goal": PARENT}, kin=PROMOTED)
+        code, said, err, asked = ran(
+            ["under", "tst-goal", "--do", "The count above the list names one row too "
+             "few|`npm test` reports 0 failures with ui/report.tsx counting every row"])
+        assert code == 0 and "WARNING" not in err, \
+            "an item was nudged towards a promoted sibling over the place that " \
+            "sibling was FILED at rather than the one it is judged by: %r" % err
 
         # A sibling settled by two runs in two places is not settled by either
         # command in the other's place. Reading every command against every place

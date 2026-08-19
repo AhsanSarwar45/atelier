@@ -387,11 +387,16 @@ def promoted(root, ready, area, kind, priority):
     made = []
     labels = ["area:" + area, "kind:" + kind, "step:work", "of:" + root]
     for src, title, where, done in ready:
+        # The find's words go ABOVE the finish line and never after it. A section
+        # runs to the next heading or to the end of the body, so anything written
+        # after the Acceptance Criteria is read back as part of it — and a find's
+        # where-it-is is guaranteed to name a path or a command, which would then be
+        # matched against siblings this item does not land with at all (bw-msdm.8).
+        told = "Promoted from %s." % src
         args = ["create", "--title", title, "--type", "task",
                 "-p", str(priority), "--parent", root, "--json",
-                "-d", "## Acceptance Criteria\n%s\n\nPromoted from %s.%s\n"
-                      % (done, src, ("\nFiled as: %s" % where)
-                         if where and where != done else "")]
+                "-d", "## Where it is\n%s\n\n%s\n\n## Acceptance Criteria\n%s\n"
+                      % (where or "not said on the find", told, done)]
         args += sum([["-l", lab] for lab in labels], [])
         out = bd(args)
         try:

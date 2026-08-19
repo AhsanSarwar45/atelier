@@ -426,6 +426,16 @@ FAULTS = [
                          "    for value in sources[:1]:\n")),
     ("a find is promoted into a work item on words that settle nothing", POUR,
      lambda s: s.replace("        if wrong:\n", "        if False:\n")),
+    ("the whole of a work item's body is read as the finish line it is judged by",
+     POUR,
+     lambda s: s.replace(
+         'sections.part(card.get("description") or "", "Acceptance Criteria")',
+         '(card.get("description") or "")')),
+    ("what a promoted card was filed as is written where its finish line is read "
+     "back from", POUR,
+     lambda s: s.replace(
+         '"## Where it is\\n%s\\n\\n%s\\n\\n## Acceptance Criteria\\n%s\\n"',
+         '"## Acceptance Criteria\\n%s\\n\\n%s\\n\\n## Where it is\\n%s\\n"')),
     ("what is already open under a goal is nothing a new item is measured against",
      POUR,
      lambda s: s.replace("    kin = siblings_of(a.parent)\n", "    kin = []\n")),
