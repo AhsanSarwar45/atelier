@@ -2476,10 +2476,25 @@ def main():
         "the opening text still tells a session to claim every step by hand"
     assert re.search(r"checks step is the project's own checks command", told), \
         "the opening text does not say what the checks step runs or when"
+    # A job reaches the agents' review column when its last piece has closed and
+    # nobody is building it — the manager's ruling — and the run puts it there
+    # itself (board/run.py column()). The opening text told every session a commit
+    # not yet on main did it, which nothing anywhere writes, the status gate
+    # refuses by hand, and run.py's own docstring contradicts: a session read the
+    # sentence, believed the column was broken, and filed the wrong fault against
+    # working code (mch-qhw.1).
+    assert not re.search(r"commit[^.]*\bmoves? (?:that|the|its) card\b", told), \
+        "the opening text still tells a session that a commit moves its card " \
+        "into the agents' review column, which nothing writes and the status " \
+        "gate refuses"
+    assert re.search(r"(?:review column|%s)[^.]*last piece" % bc.AGENT_REVIEW, told), \
+        "the opening text does not say what actually puts a job in the agents' " \
+        "review column: its last piece closing"
 
     print("ok: the opening text a session is handed prints the run of steps the "
-          "pour actually runs, asks for no refusal for the ones it skips, and says "
-          "the claim and the checks carry the whole job")
+          "pour actually runs, asks for no refusal for the ones it skips, says "
+          "the claim and the checks carry the whole job, and names what really "
+          "puts a job in the agents' review column rather than a commit")
 
     assert stopping([{"id": "c", "t": T + 5}], [{"id": "c", "t": T + 40}], []), \
         "a turn that held a card through every edit and closed it was refused"

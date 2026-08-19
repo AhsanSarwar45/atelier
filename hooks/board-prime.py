@@ -72,9 +72,10 @@ card is claimed by hand.
   `git rebase main`, `bd merge-slot acquire`, `git merge --ff-only <branch>`,
   `bd merge-slot release`. A merge that is not a fast-forward is refused whoever
   holds the slot.
-- Every commit names its card; a commit that is not on main yet moves that card to
-  in_review, which is what that column means. A card closes only once a commit
-  naming it is on main.
+- Every commit names its card, and a card closes only once a commit naming it is on
+  main. A commit does not move anything on the board: a job reaches the agents'
+  review column when its last piece has closed and nobody is building it, which is
+  what that column means, and the run puts it there itself.
 - You stop for one of three reasons and there is no fourth: your own work is finished,
   you have put a question to the manager, or a helper you sent off is still running.
   Reporting where you have got to and waiting is not one of them — the manager owns the

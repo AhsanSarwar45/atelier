@@ -600,6 +600,17 @@ FAULTS = [
                          "    if ok:\n        return True\n",
                          "    ok, _ = bc.bd([\"update\", goal_id, \"-s\", want], root)\n"
                          "    if True:\n        return ok\n")),
+    ("the opening text says a commit is what moves a card into the agents' "
+     "review column", PRIME,
+     lambda s: s.replace(
+         "- Every commit names its card, and a card closes only once a commit "
+         "naming it is on\n  main. A commit does not move anything on the board: "
+         "a job reaches the agents'\n  review column when its last piece has "
+         "closed and nobody is building it, which is\n  what that column means, "
+         "and the run puts it there itself.\n",
+         "- Every commit names its card; a commit that is not on main yet moves "
+         "that card to\n  in_review, which is what that column means. A card "
+         "closes only once a commit\n  naming it is on main.\n")),
 ]
 
 
