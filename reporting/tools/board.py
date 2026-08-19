@@ -206,12 +206,19 @@ class NoBoard(Exception):
     """There is no board command on this machine to ask."""
 
 
+class BoardSilent(Exception):
+    """The board is here and could not answer; it carries its own reason."""
+
+
 def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | None:
     """The board's own word for one card, or None when it does not know it.
 
-    A machine with no board at all is not the same answer as a card that is
-    finished, so it raises rather than returning: a report built somewhere the
-    board cannot be reached is warned about, never refused.
+    Three answers, and the difference between them is the whole point. A card
+    the board knows comes back as its state. A card it has never heard of comes
+    back as None, which is a real answer and gets the reader told to name a card
+    that exists. Anything that stopped the board answering at all — none
+    installed, none of this project's own to read — raises, because a report
+    built where nothing could be checked must not read as one that was.
     """
     if spec_dir is not None:
         project = board_home(spec_dir, project)
@@ -225,13 +232,22 @@ def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | 
     try:
         data = json.loads(out.stdout or "null")
     except json.JSONDecodeError:
-        return None
+        data = None
     if isinstance(data, list):
         data = data[0] if data else None
-    if not isinstance(data, dict) or data.get("error") or not data.get("id"):
+    if not isinstance(data, dict):
+        # An unknown card is still an answer, and the board writes one: an error
+        # it can name. Nothing on that channel at all means it never got as far
+        # as looking, and telling the reader to rename their card would send
+        # them after the wrong thing entirely.
+        if out.returncode != 0:
+            raise BoardSilent(out.stderr.strip() or "no reason given")
         return None
-    # A card dropped by label reads as closed unless the label is watched for,
-    # and work that is not happening cannot be holding a question open either.
-    if set(data.get("labels") or []) & set(DROPPED):
+    if data.get("error") or not data.get("id"):
+        return None
+    # A board drops a card by status or by putting the word on it and closing
+    # it, and either way the work is not happening — so it cannot be holding a
+    # question open either. Watching only the label leaves half the drops alive.
+    if data.get("status") in DROPPED or set(data.get("labels") or []) & set(DROPPED):
         return "cancelled"
     return data.get("status") or "open"

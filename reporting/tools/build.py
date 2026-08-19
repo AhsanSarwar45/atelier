@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blocks import OPAQUE, ReportError, render as render_block  # noqa: E402
-from board import NoBoard, card_state, status as board_status  # noqa: E402
+from board import BoardSilent, NoBoard, card_state, status as board_status  # noqa: E402
 from jargon import jargon, markup  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -432,6 +432,15 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
                 "machine to confirm that is still true"
             )
             continue
+        except BoardSilent as why:
+            # Not the same news as a card nobody has heard of, and telling the
+            # reader to rename their card would send them after the wrong thing.
+            # The board that is here is broken, and it says how.
+            raise ReportError(
+                f"question {i} says it is holding up {held}, and the board here could not "
+                f"answer: {why} — until that is fixed, nothing on this page can be checked "
+                "against the work it is about"
+            )
         if state is None:
             dead.append(
                 f"question {i} says it is holding up {held}, and the board has never heard "

@@ -111,10 +111,15 @@ again, naming every dead question at once and telling you to put the call it
 settled in slot 5. A question naming no card, or one the board has never heard
 of, is refused the same way.
 
+Dropped work kills a question exactly as finished work does — a question about
+something nobody is going to do has stopped mattering just as hard.
+
 A machine with no board cannot say either way, so it says so instead: the build
 prints what it could not check and the line handed over counts it, because a
 page still asking about unconfirmed work otherwise reads exactly like a
-finished one.
+finished one. A board that is installed and still could not answer is a
+different thing again, and is refused carrying its own reason — being sent to
+rename a card that was never the problem costs more than the report did.
 
 ### Where we are, read from the board
 

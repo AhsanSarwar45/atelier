@@ -476,6 +476,52 @@ def run() -> int:
         failures.append("what the build could not check was counted as words to plain up")
     build.card_state = lambda card, project, base=None: "open"
 
+    # the board's own answer, read the way card_state itself reads it — the
+    # cases above hand it a state, and none of them exercise the reading
+    class Answer:
+        def __init__(self, code, out, err=""):
+            self.returncode, self.stdout, self.stderr = code, out, err
+
+    real_run = board_mod.subprocess.run
+    for how, payload, want in [
+        ("its status", {"id": "x", "status": "dropped"}, "cancelled"),
+        ("a refusal", {"id": "x", "status": "wontfix"}, "cancelled"),
+        ("a word on it", {"id": "x", "status": "closed", "labels": ["dropped"]}, "cancelled"),
+        ("nothing", {"id": "x", "status": "in_progress"}, "in_progress"),
+    ]:
+        board_mod.subprocess.run = lambda *a, **k: Answer(0, json.dumps(payload))
+        got = board_mod.card_state("x", tmp)
+        if got != want:
+            failures.append(f"a card dropped by {how} read as {got!r}, not {want!r}")
+
+    board_mod.subprocess.run = lambda *a, **k: Answer(
+        1, '{"error": "no issues found matching the provided IDs"}')
+    if board_mod.card_state("x", tmp) is not None:
+        failures.append("a card the board has never heard of did not read as unknown")
+
+    board_mod.subprocess.run = lambda *a, **k: Answer(1, "", "no beads database found")
+    try:
+        board_mod.card_state("x", tmp)
+        failures.append("a board that could not answer at all was read as an unknown card")
+    except board_mod.BoardSilent as why:
+        if "no beads database" not in str(why):
+            failures.append(f"a broken board's own reason never reached anyone — {why}")
+    board_mod.subprocess.run = real_run
+
+    # and that reason is what the reader is told, rather than to rename a card
+    # that was never the problem
+    def silent(card, project, base=None):
+        raise board_mod.BoardSilent("no beads database found")
+
+    build.card_state = silent
+    try:
+        build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+        failures.append("a page nothing could be checked against was built anyway")
+    except ReportError as e:
+        if "no beads database" not in str(e):
+            failures.append(f"the build hid why the board went quiet — {e}")
+    build.card_state = lambda card, project, base=None: "open"
+
     # what the build could not check reaches the line handed over with the link,
     # or a page still asking about unconfirmed work goes out looking whole
     said = build.tally("x" * 1024, GOOD, [], ["question 1 says it is holding up x.2"])
@@ -486,7 +532,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 38 - len(failures)}/{len(CASES) + 38} report gates hold")
+    print(f"{len(CASES) + 45 - len(failures)}/{len(CASES) + 45} report gates hold")
     return 1 if failures else 0
 
 
