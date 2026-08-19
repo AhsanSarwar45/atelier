@@ -188,6 +188,21 @@ def previous(spec_path: Path) -> dict | None:
         return None
 
 
+def picture_paths(node, where="spec"):
+    """Every `path` a picture in this spec names, with where it was found."""
+    out = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "path" and isinstance(v, str):
+                out.append((where, v))
+            else:
+                out += picture_paths(v, f"{where}.{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            out += picture_paths(v, f"{where}[{i}]")
+    return out
+
+
 def validate(spec: dict, spec_path: Path) -> tuple[list[str], list[str]]:
     """Faults that stop the page, and plain-words warnings that do not.
 
@@ -289,6 +304,24 @@ def validate(spec: dict, spec_path: Path) -> tuple[list[str], list[str]]:
                 next(d for d in spec["decisions"] if d["id"] == did).get("tag", "")
             ):
                 bad.append(f"{did} now says something else — mark it tag:'revised' or give the new call a new number")
+
+    # A picture named by somebody's own folder dies the day that folder does,
+    # and it takes the page with it: five specs still pointed at the checkout
+    # this product's reports were moved out of, and none of them would rebuild
+    # (bw-pqt.26). A report keeps its pictures beside itself, so the path is
+    # relative and stays inside the report's own folder.
+    for where, path in picture_paths(spec):
+        if Path(path).is_absolute():
+            bad.append(
+                f"{where} names a picture by a full path from the root of a disk "
+                f"({path!r}) — keep the picture beside this report and name it "
+                "from here, or the page dies the day that folder does"
+            )
+        elif ".." in Path(path).parts:
+            bad.append(
+                f"{where} reaches outside this report's own folder for a picture "
+                f"({path!r}) — a report carries its pictures with it"
+            )
 
     nxt = spec["next"]
     if not nxt.get("if_nothing"):

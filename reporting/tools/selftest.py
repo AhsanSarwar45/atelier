@@ -173,6 +173,32 @@ case("no next-up named", no_next_up, "next_up")
 case("two decisions sharing a number", duplicate_id, "share a number")
 case("decision numbers going backwards", out_of_order, "out of order")
 case("jargon in the content warns but still builds", jargon_word, "shader", "warn")
+
+def picture_by_full_path(s):
+    """The shape that killed five of the manager's pages: a picture named at
+    somebody's own checkout, which stopped existing when the reports moved out
+    of it (bw-pqt.26)."""
+    s["content"][0]["blocks"] = [
+        {"kind": "images",
+         "shots": [{"path": "/home/someone/dev/product/reporting/pages/x/shot.png",
+                    "caption": "A picture that lived somewhere else"}]},
+    ]
+
+
+def picture_reaching_outside_the_report(s):
+    s["content"][0]["blocks"] = [
+        {"kind": "images",
+         "shots": [{"path": "../another-report/shot.png", "caption": "Somebody else's picture"}]},
+    ]
+
+
+def picture_beside_the_report(s):
+    s["content"][0]["blocks"] = [
+        {"kind": "images",
+         "shots": [{"path": "shots/one.png", "caption": "A picture of its own"}]},
+    ]
+
+
 case("markup in the content", markup_in_text, "an HTML tag")
 case("a colour in the content", colour_in_text, "a colour")
 case("a step with no cost", no_cost, "needs a cost")
@@ -181,6 +207,11 @@ case("a status both read from the board and typed", card_and_typed_status, "the 
 case("a report that reads a card and counts its steps too", board_and_typed_count, "counts the work itself")
 case("a report that reads a card and lists its steps too", board_and_typed_step_list, "sets out the work in order")
 case("a measured count and a section about the plan are allowed", board_and_a_measured_count, "", "")
+case("a picture named at somebody's own checkout", picture_by_full_path,
+     "names a picture by a full path from the root of a disk")
+case("a picture reached for outside the report's folder", picture_reaching_outside_the_report,
+     "reaches outside this report's own folder")
+case("a picture beside the report is allowed", picture_beside_the_report, "", "")
 
 
 def run() -> int:
