@@ -22,6 +22,15 @@
  * This half is pure so it can be tested without processes: the disk and the
  * process table live in `workbench/src/running.ts`, which injects the liveness
  * test into `runningChats`.
+ *
+ * **A host counts the same as a terminal.** The marker says whether a person is
+ * typing at a terminal (`cli`) or a program is driving (`sdk-cli`, `sdk-ts`),
+ * and nothing here branches on it. Measured on this machine, 2026-08-19
+ * (bw-dmxj.13): the one live `sdk-ts` marker was Zed's Claude agent, seven
+ * hours into a conversation in this repository. Somebody is working in there,
+ * through a host rather than a terminal, and a rule that counted only terminals
+ * would draw that chat as asleep and offer to wake a second agent on it — which
+ * is the whole of what this signal exists to prevent.
  */
 
 /**
@@ -67,11 +76,6 @@ export interface RunningChat {
  * has none.
  */
 export type IsAlive = (marker: SessionMarker) => boolean;
-
-/** Typed at by a person in a terminal, rather than driven by an SDK host. */
-export function startedByAPerson(chat: RunningChat): boolean {
-  return chat.entrypoint === 'cli';
-}
 
 function isText(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;

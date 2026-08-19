@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { heldElsewhere, parseMarker, procStartFromStat, runningChats, startedByAPerson } from '@/workbench/running';
+import { heldElsewhere, parseMarker, procStartFromStat, runningChats } from '@/workbench/running';
 import type { IsAlive, SessionMarker } from '@/workbench/running';
 
 /** A marker exactly as Claude Code wrote it, extra fields and all. */
@@ -175,17 +175,23 @@ describe('which chats somebody is working in', () => {
   });
 });
 
-describe('who is at the other end', () => {
-  const running = (entrypoint: string) =>
-    runningChats([marker({ entrypoint })], machine({ 1870877: '1558291' })).get(marker().sessionId)!;
-
-  it('a terminal chat is a person typing', () => {
-    expect(startedByAPerson(running('cli'))).toBe(true);
-  });
-
-  it('one an SDK host drives is not', () => {
-    expect(startedByAPerson(running('sdk-cli'))).toBe(false);
-    expect(startedByAPerson(running('sdk-ts'))).toBe(false);
+describe('who is at the other end, and why the answer changes nothing', () => {
+  /**
+   * Measured on this machine, 2026-08-19: the one live `sdk-ts` marker was
+   * Zed's Claude agent, seven hours into a conversation in this repository. A
+   * person is working in there through a host rather than a terminal, so a rule
+   * that counted only terminals would draw that chat as asleep and offer to
+   * wake a second agent on it (bw-dmxj.13).
+   */
+  it('counts a chat a host drives exactly as it counts a terminal one', () => {
+    for (const entrypoint of ['cli', 'sdk-cli', 'sdk-ts']) {
+      const running = runningChats([marker({ entrypoint })], machine({ 1870877: '1558291' }));
+      expect(running.has(marker().sessionId), `a ${entrypoint} chat was not counted as running`).toBe(true);
+      expect(
+        heldElsewhere('dormant', marker().sessionId, new Set(running.keys())),
+        `the box stayed typeable over a ${entrypoint} chat`,
+      ).toBe(true);
+    }
   });
 });
 
