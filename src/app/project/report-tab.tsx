@@ -90,28 +90,49 @@ export default function ReportTab({
   const ids = useMemo(() => entries.map((e) => e.id), [entries]);
   const active = useActiveSection(ids, pane);
 
+  // Where the reader is put when a report opens, and when they stop being put
+  // anywhere: the cached copy paints first and fresh facts replace it a moment
+  // later (`use-report-spec.ts`), which drops the reader back at the top — so
+  // the two landings below run again on the new facts, and both stand down the
+  // moment the reader moves the report themselves.
+  const took = useRef(false);
+  useEffect(() => {
+    took.current = false;
+  }, [report, section]);
+
+  useEffect(() => {
+    const el = pane.current;
+    if (!el) return undefined;
+    const theirs = () => {
+      took.current = true;
+    };
+    el.addEventListener('wheel', theirs, { passive: true });
+    el.addEventListener('touchmove', theirs, { passive: true });
+    el.addEventListener('keydown', theirs);
+    return () => {
+      el.removeEventListener('wheel', theirs);
+      el.removeEventListener('touchmove', theirs);
+      el.removeEventListener('keydown', theirs);
+    };
+  }, [report, spec]);
+
   const scrollTo = useCallback((id: string) => {
+    took.current = true;
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
   // A pasted address may name the part to open on, so honour it once the report
   // is on screen rather than dropping the reader at the top of it.
-  const landed = useRef<string | null>(null);
   useEffect(() => {
-    if (!spec || !section || landed.current === section) return;
-    landed.current = section;
+    if (!spec || !section || took.current) return;
     document.getElementById(section)?.scrollIntoView({ block: 'start' });
   }, [spec, section]);
 
   // A report with a question waiting opens on the question (bw-7ks.21.7): the
   // ask is why the manager was handed the link, and the title it sits under is
-  // one scroll up. Once per report, and never over an address that already
-  // names the part to land on.
-  const opened = useRef<string | null>(null);
+  // one scroll up. Never over an address that already names the part to land on.
   useEffect(() => {
-    if (!spec || section || !report) return;
-    if (opened.current === report) return;
-    opened.current = report;
+    if (!spec || section || !report || took.current) return;
     if (!spec.actions.questions.some((q) => q.live)) return;
     document.getElementById('act')?.scrollIntoView({ block: 'start' });
   }, [spec, section, report]);
@@ -167,8 +188,12 @@ export default function ReportTab({
         }}
         standaloneUrl={standaloneUrl}
         className={[
-          'col-start-1 row-start-2 flex-row gap-2 overflow-x-auto border-b border-b-default p-2 [&>*]:shrink-0',
-          'lg:col-start-1 lg:row-start-2 lg:flex-col lg:gap-4 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-3',
+          // A strip, whatever it holds: the tallest group in it — a card that
+          // half a dozen chats have touched — would otherwise stand the links
+          // up as a banner and push the report off the screen, so the strip
+          // keeps its height and scrolls inside itself.
+          'col-start-1 row-start-2 max-h-32 flex-row gap-2 overflow-auto border-b border-b-default p-2 [&>*]:shrink-0',
+          'lg:col-start-1 lg:row-start-2 lg:max-h-none lg:flex-col lg:gap-4 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-3',
           'xl:col-start-3 xl:row-start-1 xl:border-r-0 xl:border-l xl:border-b-default',
         ].join(' ')}
       />

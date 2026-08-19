@@ -339,9 +339,19 @@ test.describe('a report says what it is holding up, and lands where it is pointe
 
   let fixture: Fixture | null = null;
 
-  test.afterAll(() => {
+  // The screen asks for fresh facts a moment after it paints, so the build it
+  // set off can land after the last case ends — sweeping once leaves the
+  // fixture's facts sitting in the manager's own list of reports. Sweep until
+  // nothing comes back.
+  test.afterAll(async () => {
     if (!fixture) return;
-    for (const path of fixturePaths(fixture.project)) rmSync(path, { force: true });
+    const paths = fixturePaths(fixture.project);
+    for (let sweep = 0; sweep < 10; sweep += 1) {
+      for (const path of paths) rmSync(path, { force: true });
+      await new Promise((done) => setTimeout(done, 500));
+      if (!paths.some((path) => existsSync(path))) return;
+    }
+    expect(paths.filter((path) => existsSync(path)), 'the fixture report would not go away').toEqual([]);
   });
 
   test('the rail says which column each card it names is in', async ({ page, request }) => {
