@@ -50,10 +50,29 @@ standing instruction, so the thing they click is where their eye already is and
 they never scroll back up for it. Nothing follows it: no recap, no next steps,
 no sign-off.
 
+**The link names no folder**, so it outlives the worktree it was built in. The
+app finds the project's own folder from its list of projects, matching the last
+part of the path; a folder passed by hand wins only when it IS that project's,
+and a report filed under a project the app has never been told about builds in
+its own folder, because it names no card and keeps its pictures beside itself.
+
 `report` is on the path as a link to `bin/report`. The project a report is
 about is the directory the command was run from: the pictures a spec names are
 resolved there first, so a spec kept here can point at a render that lives in
 the project.
+
+**A report keeps its pictures beside itself.** A spec may not name one by a
+full path from the root of a disk, nor reach outside the report's own folder
+for one — both are refused. Five pages once named their pictures at a checkout
+this product's reports were moved out of, and every one of them died on the
+next build with the file sitting beside its own spec the whole time.
+
+**Where `<data>` is, is the program's answer, not this script's.** `beads-web
+--data-dir` prints it, and `bin/report` asks before falling back to the three
+per-platform paths. One definition, in `server/src/identity.rs`; renaming the
+product there moves the shell tool with it, and
+`the_shell_tool_and_the_program_agree_on_where_data_goes` fails the moment the
+two drift.
 
 Every build runs the gates first, so a broken rule costs the next report rather
 than waiting for someone to run the checks by hand.
@@ -217,7 +236,11 @@ explains each inline. Past six, the page is written for the wrong reader.
 | Plain words | The builder warns, naming each term and its replacement |
 | A status is the board's or the spec's, never both | The builder refuses to emit a page |
 | Only shelf blocks appear | The builder, by name |
+| A picture is beside its own report, never at a full path or outside that folder | The builder refuses to emit a page |
 | A report is never published | `tools/publish-gate.py` refuses a built page |
+| The shell tool and the program agree on where data goes | `server/tests/reports_live_elsewhere.rs` |
+| No report page of anyone's is tracked inside the product | `server/tests/reports_live_elsewhere.rs` |
+| The tools travel in the binary in every build, not only a release | `debug-embed`, guarded in the same file |
 | Every gate has teeth | `tools/selftest.py` — one fault per rule, each of which must go red |
 
 The gate recognises a page by the builder's hash of its own content, so a
@@ -230,7 +253,12 @@ report cannot reach the cloud by being renamed or lightly edited.
   on this machine the day the second half landed, 26 naming nothing and 7
   naming a card that carries work. Each is refused on its next build until
   someone names the piece of work that is waiting. There is no sweep; each is
-  fixed the next time its page is built.
+  fixed the next time its page is built. Measured again on 2026-08-19 by
+  rebuilding all 73 through the running copy: 51 rebuilt, 20 still refused on
+  this rule, over four projects. They open from the page built last time, so
+  what the manager sees is stale rather than broken. Filed as bw-kquv.
+- One spec names its pictures at a session cache that no longer exists, which
+  no rule can mend from here — the files are gone, not moved. Filed as bw-3m1.
 - A next step's cost is checked for being there and not for being one of the
   four words the reader draws, so a spec that writes a plain duration builds
   clean and hands over a link to a blank screen. Filed as bw-6of0.
