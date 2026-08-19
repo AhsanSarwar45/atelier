@@ -2336,6 +2336,12 @@ def main():
             assert CUTS in held, \
                 "the step was left unowned and the session told nothing about the "\
                 "copy it has to cut: %s" % (held or "SAID NOTHING")
+            # And what it says to do next is the truth about this session: nothing
+            # typed a claim for a hand-over, so a line telling it to claim the card
+            # *again* is a line about a command it never issued (bw-n1x5.3).
+            assert "again" not in held, \
+                "the session was told to claim again a card that nothing ever "\
+                "claimed, because the refusal is worded for the claim alone: %s" % held
 
             # The pieces of the work are the code itself, and they are handed on
             # one by one as each of them closes.

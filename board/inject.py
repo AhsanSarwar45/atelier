@@ -520,6 +520,12 @@ FAULTS = [
          "    mine = own_copy(goal, spots)\n"
          "    if mine and len(spots) > 1:\n"
          '        return ""')),
+    # The refusal is read by the claim and by the run's own hand-over, and only
+    # one of those was ever typed by anybody (bw-n1x5.3).
+    ("the copy refusal tells a session to claim again a card that nothing ever "
+     "claimed", CLOSE,
+     lambda s: s.replace('"Then claim it from there."',
+                         '"Then claim it again."')),
 ]
 
 

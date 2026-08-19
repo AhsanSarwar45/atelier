@@ -533,6 +533,13 @@ def without_a_copy(cid, goal, root, here):
     another checkout is a place the claim can never be typed from — that
     project's board has never heard of these ids — so the most that can be asked
     of it is that it is cut and waiting.
+
+    What it says at the end is what to do next and never what was just done: the
+    run's own hand-over reads this same refusal (board/run.py, `nowhere_to_work`)
+    for a card nobody claimed, and a line saying to claim it *again* would be
+    telling that session about a command it never typed (bw-n1x5.3). Claiming is
+    the next thing either way — a claim refused here left the card unowned, and so
+    did the hand-over that was not made.
     """
     inside, stood = stood_in(here, root)
     if inside == goal:
@@ -553,14 +560,14 @@ def without_a_copy(cid, goal, root, here):
             "here is recorded under the name of the tree it was made in, which owns "
             "nothing when the job is torn down.\n"
             "  cd %s\n"
-            "Then claim it again." % (cid, goal, stood, mine)
+            "Then claim it from there." % (cid, goal, stood, mine)
         )
     return (
         "%s is a piece of %s, which makes code, and that job has no copy of its own "
         "— so the change would be made in %s, where two jobs edit one file under "
         "each other and neither can see it happening. Cut it one%s and work "
         "there:\n  %s\n"
-        "Then claim it again."
+        "Then claim it from there."
         % (cid, goal, stood,
            " in whichever of these the change is made" if len(spots) > 1 else "",
            "\n  ".join(cut(where, goal) for where in spots))
