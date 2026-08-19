@@ -507,7 +507,7 @@ def run() -> int:
             if "x.2" not in str(e):
                 failures.append(f"a question naming work already {moving}: did not name it — {e}")
 
-    for still in ("open", "blocked", "deferred"):
+    for still in ("open", "pinned", "blocked", "deferred"):
         build.card_state = lambda card, project, base=None: still
         try:
             build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
@@ -665,7 +665,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 62 - len(failures)}/{len(CASES) + 62} report gates hold")
+    print(f"{len(CASES) + 63 - len(failures)}/{len(CASES) + 63} report gates hold")
     return 1 if failures else 0
 
 

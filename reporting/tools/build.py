@@ -461,8 +461,10 @@ def next_card(spec: dict, ctx: Ctx) -> str:
 
 # The states that mean nobody has started: work still standing still is the
 # only work a question can be holding up. Anything else means the answer was
-# either given already or taken without one.
-WAITING = ("open", "blocked", "deferred")
+# either given already or taken without one. Every one of these is a board
+# column the app files under Todo (src/types/index.ts), pinned included —
+# pinned is work someone has flagged to do next, not work they have begun.
+WAITING = ("open", "pinned", "blocked", "deferred")
 
 
 def live_questions(spec: dict, ctx: Ctx) -> None:

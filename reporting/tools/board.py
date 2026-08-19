@@ -25,6 +25,7 @@ STATE = {
     "in_review": "draft",
     "manager_review": "draft",
     "open": "todo",
+    "pinned": "todo",
     "blocked": "todo",
     "deferred": "todo",
 }
