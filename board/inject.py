@@ -482,7 +482,17 @@ FAULTS = [
          '                if card.get("issue_type") not in ("decision", "epic"):')),
     ("a job whose change lands in another checkout is asked to stand in the copy "
      "it cut there", CLOSE,
-     lambda s: s.replace('    if mine and len(spots) > 1:\n        return ""\n', "")),
+     lambda s: s.replace(
+         "    if not mine and own_copy(goal, "
+         "[w for w in spots if os.path.realpath(w) != home]):\n"
+         '        return ""\n', "")),
+    ("a second landing lets a job past the copy standing in this checkout", CLOSE,
+     lambda s: s.replace(
+         "    mine = own_copy(goal, "
+         "[w for w in spots if os.path.realpath(w) == home])",
+         "    mine = own_copy(goal, spots)\n"
+         "    if mine and len(spots) > 1:\n"
+         '        return ""')),
 ]
 
 

@@ -3245,6 +3245,15 @@ def main():
             % (outside or "ALLOWED")
         assert "worktree add" not in outside, \
             "a session whose copy already exists was told to cut another: %s" % outside
+
+        # And the same once the job also lands somewhere else. What lets a
+        # straddling job claim from here is having nowhere here to stand — not
+        # the second landing itself, which says nothing about the copy sitting
+        # in this checkout (bw-1tgx.4).
+        both = copy_first(tmp, tmp, lands=(away,))
+        assert "cd %s" % os.path.join(tmp, "worktrees", "tst-new") in both, \
+            "a job that lands elsewhere was waved past the copy standing in this " \
+            "checkout: %s" % (both or "ALLOWED")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

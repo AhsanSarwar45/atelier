@@ -495,17 +495,23 @@ def without_a_copy(cid, goal, root, here):
     here, at the last moment before a file is changed under the card.
 
     Two shapes, because a job's cards and its code do not always live in the same
-    project. When the change lands in THIS checkout the session can stand in its
-    copy and type its board commands from there, so standing in one is what is
-    asked. When it lands in another, the claim has to be typed here — that
+    project. A copy in THIS checkout is one the session can stand in and type its
+    board commands from, so standing in it is what is asked — however many other
+    checkouts the job also lands in, since the hazard is the shared tree it is
+    standing in now and not the ones it is not (bw-1tgx.4). A copy only in
+    another checkout is a place the claim can never be typed from — that
     project's board has never heard of these ids — so the most that can be asked
-    is that the copy is over there, cut and waiting.
+    of it is that it is cut and waiting.
     """
     if "/worktrees/" in (here or ""):
         return ""
     spots = copy_places(goal, root)
-    mine = own_copy(goal, spots)
-    if mine and len(spots) > 1:
+    # By what the paths resolve to rather than how they are spelt: a landing is
+    # written down as the project declared it, and this checkout arrives from the
+    # session's own directory.
+    home = os.path.realpath(root)
+    mine = own_copy(goal, [w for w in spots if os.path.realpath(w) == home])
+    if not mine and own_copy(goal, [w for w in spots if os.path.realpath(w) != home]):
         return ""
     if mine:
         return (
