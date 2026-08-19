@@ -21,10 +21,11 @@ import {
   trimInput,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
-import { latest, type Recorded } from '../../src/workbench/context-window.ts';
+import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
+import { findRecord, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
@@ -58,11 +59,64 @@ const IMPORT_RECIPE = 5;
 const FOLLOW_BEAT_MS = 1_500;
 
 /**
+ * Where reading a chat's record got to, so the follower carries on from there
+ * rather than reading the whole thing again.
+ *
+ * `at` is the byte the record stood at BEFORE it was read, and `through` the
+ * last line that reading took in. The follower starts at the byte and throws
+ * away everything up to and including that line, so a line written while the
+ * read was going on is neither said twice nor lost — which either number on its
+ * own would do, one of the two ways.
+ *
+ * `carry` is the messages whose rows were held back because their commands had
+ * not answered yet; the follower reads them again with the answers attached and
+ * draws only the `drawn` rows it has not already drawn.
+ */
+interface ReadSoFar {
+  at: number | null;
+  through: string | null;
+  carry: RecordLine[];
+  drawn: number;
+}
+
+/** The record was not read at all: the follower starts from the end of it. */
+const NOTHING_READ: ReadSoFar = { at: null, through: null, carry: [], drawn: 0 };
+
+/**
  * What the reader is told when the chat he typed into belongs to somebody else
  * for the moment. The screen says the same thing under the writing box, so the
  * refusal reads as the same rule twice rather than as a fault.
  */
 export const HELD_ELSEWHERE = 'Another program is working in this chat. It draws here as it goes; you can type when it stops.';
+
+/** The window these lines state, if any of them does; the last one wins. */
+function windowIn(messages: readonly Recorded[]): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const named = windowNamed(messages[i]);
+    if (named !== null) return named;
+  }
+  return null;
+}
+
+/**
+ * What the follower needs to carry on from a whole-record read.
+ *
+ * `held` is how many rows that read kept back — trailing commands with no
+ * answer yet. The messages those rows came from are handed on, together with
+ * how many of their rows are already drawn, because the answers land in later
+ * lines and the rows can only be finished by reading the two together.
+ */
+function readState(at: number | null, messages: readonly SessionMessage[], held: number): ReadSoFar {
+  const through = messages.length > 0 ? (messages[messages.length - 1]?.uuid ?? null) : null;
+  if (held <= 0) return { at, through, carry: [], drawn: 0 };
+  // The shortest tail of the conversation that covers the held-back rows: a
+  // message makes the same rows wherever it is read, so counting them off the
+  // end is enough to find where they start.
+  let take = 1;
+  while (take < messages.length && pastTranscript(messages.slice(-take)).length < held) take += 1;
+  const carry = messages.slice(-take);
+  return { at, through, carry, drawn: pastTranscript(carry).length - held };
+}
 
 export class Sessions {
   private drivers = new Map<string, Driver>();
@@ -86,6 +140,13 @@ export class Sessions {
   private followers = new Map<string, () => void>();
   /** The last fullness said for each chat, so an unchanged one is not said twice. */
   private fullness = new Map<string, number>();
+  /**
+   * The window each chat was last known to be measured against. The kit states
+   * it once, in one line of the record; a later handful of lines names none, and
+   * without this the figure would drop back to the ordinary window mid-chat
+   * (bw-4wcd.15).
+   */
+  private windows = new Map<string, number>();
   // Declared, not a parameter property: Node's strip-only TypeScript mode
   // rejects `constructor(private store: Store)`.
   private store: Store;
@@ -284,28 +345,32 @@ export class Sessions {
    * be moved, pruned or belong to a worktree that no longer exists, and the log
    * is then the only copy the app has (bw-1u1.26).
    */
-  private async importPast(summary: SessionSummary, live = false): Promise<number | null> {
-    if (!summary.externalId) return null;
+  private async importPast(summary: SessionSummary, live = false): Promise<ReadSoFar> {
+    if (!summary.externalId) return NOTHING_READ;
     // Said plainly on the row, not inferred from the cards it happens to have
     // touched: a chat that touched none failed that test forever, so every click
     // read the whole conversation off the disk again and re-ran the card scan,
     // which forks the board's own tool per candidate (bw-m8o.14).
     const readBy = this.store.importedBy(summary.id);
-    if (!live && readBy !== null && readBy >= IMPORT_RECIPE) return null;
+    if (!live && readBy !== null && readBy >= IMPORT_RECIPE) return NOTHING_READ;
 
     const drawnAlready = readBy !== null || this.store.messageCount(summary.id) > 0;
     // Read in by an older build, so it has words and no commands. Its live
     // turns, if it has any, cannot be re-made from the record.
     if (drawnAlready && this.store.wasDrivenHere(summary.id)) {
       this.store.markImported(summary.id, IMPORT_RECIPE);
-      return null;
+      return NOTHING_READ;
     }
 
+    // Where the record stands before a byte of it is read: what arrives while
+    // the reading is going on is the follower's, and it can only know that if
+    // it knows where the reading started (bw-uiyz.6).
+    const at = recordSize(summary.externalId);
     let messages: SessionMessage[];
     try {
       messages = await getSessionMessages(summary.externalId, { dir: summary.cwd });
     } catch {
-      return null; // No record to read: the chat keeps whatever it already has.
+      return NOTHING_READ; // No record to read: the chat keeps what it has.
     }
     // Said the moment the record is read, because it is true of the record and
     // not of the drawing: a chat whose record holds nothing to draw still has a
@@ -329,7 +394,8 @@ export class Sessions {
     // so what the other program was mid-way through when he left is dropped for
     // good. A partial read is therefore not a read (bw-dmxj.14).
     if (upto === all.length) this.store.markImported(summary.id, IMPORT_RECIPE);
-    if (past.length === 0) return past.length;
+    const read = readState(at, messages, all.length - upto);
+    if (past.length === 0) return read;
 
     // Only now is the old copy thrown away: there is something to put in its
     // place (bw-1u1.26). A browser already drawing that copy is told to drop it
@@ -354,7 +420,7 @@ export class Sessions {
       });
     }
     for (const entry of shown) this.draw(summary.id, entry);
-    return past.length;
+    return read;
   }
 
   /**
@@ -402,12 +468,19 @@ export class Sessions {
   private sayFullness(sessionId: string, messages: readonly Recorded[]): void {
     const now = latest(messages);
     if (!now) return;
+    // The window is stated once, in one line of the record, and a handful of
+    // newly arrived lines names none — so it is remembered rather than worked
+    // out again from what happens to be in hand (bw-4wcd.15).
+    let window = now.window;
+    const named = windowIn(messages);
+    if (named !== null) this.windows.set(sessionId, named);
+    else window = this.windows.get(sessionId) ?? window;
     // Only when it has moved: this is read off the disk every few seconds while
     // anyone is watching, and the log IS the transcript — saying the same
     // figure again would grow the record without telling the reader anything.
     if (this.fullness.get(sessionId) === now.used) return;
     this.fullness.set(sessionId, now.used);
-    this.publish(sessionId, { type: 'context', used: now.used, window: now.window });
+    this.publish(sessionId, { type: 'context', used: now.used, window });
   }
 
   /**
@@ -448,52 +521,76 @@ export class Sessions {
    * a terminal afterwards, and a rule that decided once at the click left that
    * chat frozen (bw-4wcd.20).
    *
-   * `from` is where the import left off, or `null` when it did not read the
-   * record at all — a chat with live turns of its own keeps them, and the first
-   * beat then sets the mark without saying anything, so following starts from
-   * now rather than repeating what is already on the screen.
+   * A beat is one stat, and a record that moved is read from the byte the last
+   * look stopped at — never from the start. Reading the whole of it and taking
+   * it apart again cost 475ms on the manager's longest conversation, every
+   * 1.5s, on the one thread this sidecar answers every other request from
+   * (bw-uiyz.6).
+   *
+   * `read` is where the import left off. Its `at` is null when the record was
+   * not read at all — a chat with live turns of its own keeps them — and
+   * following then starts from the end of what is there now, so nothing already
+   * on the screen is said again.
    */
-  private follow(summary: SessionSummary, from: number | null): void {
+  private follow(summary: SessionSummary, read: ReadSoFar): void {
     const externalId = summary.externalId;
     if (externalId === null) return;
     if (this.followers.has(summary.id) || this.drivers.has(summary.id)) return;
+    const path = findRecord(externalId);
+    if (path === null) return; // No record on this machine to follow.
 
-    let mark = from;
-    let stamp = '';
+    const tail = new RecordTail(path);
+    // Set before the first beat, so a record that grows in between is read from
+    // here and not from where it has got to by then.
+    if (read.at === null) void tail.toEnd();
+    else tail.seek(read.at);
+    // Lines the import already took in, thrown away by name the first time they
+    // come round again.
+    let through = read.at === null ? null : read.through;
+    let carry = read.carry;
+    let drawn = read.drawn;
     let reading = false;
     // Its own, because the session has no driver and so no linker in the map:
     // the cards and reports a command names are found here or not at all.
     const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
 
     const draw = async (): Promise<void> => {
-      let messages: SessionMessage[];
-      try {
-        messages = await getSessionMessages(externalId, { dir: summary.cwd });
-      } catch {
-        return; // Being written to this instant, or moved: try the next beat.
-      }
-      // How full it stands, on every beat: the figure is the reader's only
-      // warning that a job he is watching is about to be compacted (bw-4wcd.4).
-      this.sayFullness(summary.id, messages);
-      const past = pastTranscript(messages);
-      const upto = settledUpTo(past);
-      // The first look at a chat whose record was not imported: where it has
-      // got to is the mark, and nothing before it is said again.
-      if (mark === null) {
-        mark = upto;
-        return;
-      }
+      const grown = await tail.grown();
       // Compaction rewrites the record shorter than it was. What is already
-      // drawn stays drawn — it is the only copy of those turns — and the mark
-      // moves to the new end rather than replaying it as if it were new.
-      if (past.length < mark) {
-        mark = upto;
+      // drawn stays drawn — it is the only copy of those turns — and reading
+      // carries on from the new end rather than replaying it as if it were new.
+      if (grown.rewritten) {
+        carry = [];
+        drawn = 0;
+        through = null;
+        await tail.toEnd();
         return;
       }
-      const fresh = past.slice(mark, upto);
+      let fresh = grown.fresh;
+      if (through !== null) {
+        const already = fresh.findIndex((line) => line.uuid === through);
+        if (already !== -1) fresh = fresh.slice(already + 1);
+        through = null;
+      }
       if (fresh.length === 0) return;
-      mark = upto;
-      for (const entry of fresh) {
+      // How full it stands: the figure is the reader's only warning that a job
+      // he is watching is about to be compacted (bw-4wcd.4).
+      this.sayFullness(summary.id, fresh);
+      // The held-back rows are worked out again WITH the lines that answer
+      // them, which is the only way a command drawn empty last beat comes out
+      // finished this one.
+      const all = [...carry, ...fresh];
+      const entries = pastTranscript(all);
+      const upto = settledUpTo(entries);
+      const said = entries.slice(drawn, upto);
+      if (upto === entries.length) {
+        carry = [];
+        drawn = 0;
+      } else {
+        carry = all;
+        drawn = upto;
+      }
+      for (const entry of said) {
         if (entry.kind === 'call') links.observe(entry.name, entry.input);
         this.draw(summary.id, entry);
       }
@@ -503,22 +600,14 @@ export class Sessions {
       if (reading) return;
       reading = true;
       try {
-        let now = '';
-        try {
-          const info = await getSessionInfo(externalId, { dir: summary.cwd });
-          if (info) now = `${info.lastModified}:${info.fileSize ?? 0}`;
-        } catch {
-          now = stamp; // Unreadable this beat; not a reason to re-read it all.
-        }
-        // The stat alone says whether there is anything new, whoever wrote it
-        // and whether or not that program is still there. Stopping the moment
-        // the terminal exited lost every later turn: the manager answers a
-        // prompt, walks away, and comes back to a chat that stopped growing at
-        // the first answer (bw-4wcd.20).
-        if (now !== stamp) {
-          stamp = now;
-          await draw();
-        }
+        // The stat inside the read alone says whether there is anything new,
+        // whoever wrote it and whether or not that program is still there.
+        // Stopping the moment the terminal exited lost every later turn: the
+        // manager answers a prompt, walks away, and comes back to a chat that
+        // stopped growing at the first answer (bw-4wcd.20).
+        await draw();
+      } catch {
+        // Being written to this instant, or moved: try the next beat.
       } finally {
         reading = false;
       }
