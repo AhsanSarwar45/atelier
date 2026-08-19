@@ -182,8 +182,10 @@ def run() -> int:
     spec_path = tmp / "case.report.json"
     build.previous = lambda _p: None
     # Every question names a card, so every build here asks the board about one.
-    # The cases that are not about that rule get a board that says "still open".
+    # The cases that are not about that rule get a board that says "still open",
+    # and one piece of work rather than a whole job.
     build.card_state = lambda card, project, base=None: "open"
+    build.is_container = lambda card, project, base=None: False
 
     for name, mutate, expect, kind in CASES:
         spec = copy.deepcopy(GOOD)
@@ -253,8 +255,10 @@ def run() -> int:
         failures.append("a decision rewritten under its old number went unnoticed")
     build.previous = lambda _p: None
     # Every question names a card, so every build here asks the board about one.
-    # The cases that are not about that rule get a board that says "still open".
+    # The cases that are not about that rule get a board that says "still open",
+    # and one piece of work rather than a whole job.
     build.card_state = lambda card, project, base=None: "open"
+    build.is_container = lambda card, project, base=None: False
 
     # a card with nothing under it refuses, rather than quietly showing no work
     spec = copy.deepcopy(GOOD)
@@ -463,6 +467,34 @@ def run() -> int:
     build.card_state = lambda card, project, base=None: "open"
     build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
 
+    # a question may only name work that is standing still: a whole job outlives
+    # every answer it could be given, and work already under way did not wait
+    build.is_container = lambda card, project, base=None: True
+    try:
+        build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+        failures.append("a question naming a whole job: printed anyway")
+    except ReportError as e:
+        if "x.2" not in str(e) or "whole job" not in str(e):
+            failures.append(f"a question naming a whole job: unhelpful refusal — {e}")
+    build.is_container = lambda card, project, base=None: False
+
+    for moving in ("in_progress", "in_review", "manager_review"):
+        build.card_state = lambda card, project, base=None: moving
+        try:
+            build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+            failures.append(f"a question naming work already {moving}: printed anyway")
+        except ReportError as e:
+            if "x.2" not in str(e):
+                failures.append(f"a question naming work already {moving}: did not name it — {e}")
+
+    for still in ("open", "blocked", "deferred"):
+        build.card_state = lambda card, project, base=None: still
+        try:
+            build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+        except ReportError as e:
+            failures.append(f"a question naming work that is {still} was refused — {e}")
+    build.card_state = lambda card, project, base=None: "open"
+
     # a machine with no board cannot say either way, so it says so and builds
     def no_board(card, project, base=None):
         raise board_mod.NoBoard
@@ -498,6 +530,13 @@ def run() -> int:
         1, '{"error": "no issues found matching the provided IDs"}')
     if board_mod.card_state("x", tmp) is not None:
         failures.append("a card the board has never heard of did not read as unknown")
+
+    board_mod.subprocess.run = lambda *a, **k: Answer(0, json.dumps([{"id": "x.1"}]))
+    if not board_mod.is_container("x", tmp):
+        failures.append("a job with work poured under it did not read as a job")
+    board_mod.subprocess.run = lambda *a, **k: Answer(0, "[]")
+    if board_mod.is_container("x", tmp):
+        failures.append("one piece of work read as a whole job")
 
     board_mod.subprocess.run = lambda *a, **k: Answer(1, "", "no beads database found")
     try:
@@ -596,7 +635,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 50 - len(failures)}/{len(CASES) + 50} report gates hold")
+    print(f"{len(CASES) + 59 - len(failures)}/{len(CASES) + 59} report gates hold")
     return 1 if failures else 0
 
 

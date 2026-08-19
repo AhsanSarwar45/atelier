@@ -31,7 +31,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blocks import OPAQUE, ReportError, render as render_block  # noqa: E402
-from board import BoardSilent, NoBoard, card_info, card_state, status as board_status  # noqa: E402
+from board import (  # noqa: E402
+    BoardSilent, NoBoard, card_info, card_state, is_container,
+    status as board_status,
+)
 from jargon import jargon, jargon_hits, markup  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -456,14 +459,26 @@ def next_card(spec: dict, ctx: Ctx) -> str:
     return card("c-next", "next", "Next", body, ctx)
 
 
+# The states that mean nobody has started: work still standing still is the
+# only work a question can be holding up. Anything else means the answer was
+# either given already or taken without one.
+WAITING = ("open", "blocked", "deferred")
+
+
 def live_questions(spec: dict, ctx: Ctx) -> None:
     """Refuse the page while it asks about work the board has already settled.
 
     Slot 2 is the one part of a report nobody thinks to delete: the answer
     arrives in chat, the work goes on, and the question is rebuilt onto every
-    page after it. Each one names the card it is holding up, and that card
-    finishing is what takes it off. A machine with no board cannot say either
-    way, so it warns instead.
+    page after it. Each one names the work it is holding up, and that work
+    moving is what takes it off. A machine with no board cannot say either way,
+    so it warns instead.
+
+    What a question may name is exactly the work that is still standing still:
+    not the whole job, which does not finish until everything under it does and
+    so outlives every answer, and not work already under way, because work that
+    did not wait was not waiting on this. Both of those printed a settled
+    question for weeks before this was written.
 
     Every question is read before anything is refused: a page carrying two dead
     questions that names one of them costs a second build to find the other.
@@ -473,6 +488,7 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
         held = str(q["holds"]).strip()
         try:
             state = card_state(held, ctx.project, ctx.base)
+            whole_job = state is not None and is_container(held, ctx.project, ctx.base)
         except NoBoard:
             ctx.notes.append(
                 f"question {i} says it is holding up {held}, and there is no board on this "
@@ -498,6 +514,19 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
                 f"question {i} is holding up {held}, which the board has finished — the "
                 "answer has stopped mattering, so take the question off the page, and put "
                 "the call it settled in the decisions slot"
+            )
+        elif whole_job:
+            dead.append(
+                f"question {i} names {held}, which is a whole job and not one piece of "
+                "one — a job is unfinished until everything under it is done, so the "
+                "question would sit there for weeks after it was answered. Name the piece "
+                "of work that cannot start until you have the answer"
+            )
+        elif state not in WAITING:
+            dead.append(
+                f"question {i} names {held}, which is already under way — the work did not "
+                "wait for this answer, so nothing is holding on it. Take the question off "
+                "the page, and put the call it settled in the decisions slot"
             )
     if dead:
         raise ReportError("\n  · ".join(["this page asks about work that is over:"] + dead))

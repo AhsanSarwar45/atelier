@@ -114,6 +114,15 @@ of, is refused the same way.
 Dropped work kills a question exactly as finished work does — a question about
 something nobody is going to do has stopped mattering just as hard.
 
+**What it may name is exactly the work that is standing still**: one piece of
+work, in a state that says nobody has started — waiting, blocked or put off.
+A whole job is refused, because a job is unfinished until everything under it
+is, so a question hung on one survives every answer it is ever given; that is
+how a settled question stayed on a page for a full day of work. Work already
+under way is refused too: work that did not wait was not waiting on this. In
+both cases the fix is the same — name the piece that cannot start until the
+answer arrives, or take the question off and put the call in slot 5.
+
 A machine with no board cannot say either way, so it says so instead: the build
 prints what it could not check and the line handed over counts it, because a
 page still asking about unconfirmed work otherwise reads exactly like a
@@ -199,7 +208,7 @@ explains each inline. Past six, the page is written for the wrong reader.
 | Rule | Enforced by |
 |------|-------------|
 | Slot order, completeness, one recommended answer per question | The builder refuses to emit a page |
-| Every question names a card, and dies when the board finishes it | The builder, against the board |
+| Every question names one piece of work that is standing still, and dies when that work moves | The builder, against the board |
 | Decision numbers never move | The builder, against the committed spec |
 | No markup, colours or sizes in content | The builder refuses to emit a page |
 | Plain words | The builder warns, naming each term and its replacement |
@@ -213,9 +222,10 @@ report cannot reach the cloud by being renamed or lightly edited.
 
 ## Debt
 
-- Every spec written before questions named a card carries one that names none,
-  and is refused on its next build until someone names the card it is waiting
-  on — 19 of the 66 specs on this machine the day the rule landed. There is no
+- Every spec written before this rule carries a question that names nothing, or
+  names a whole job — 21 pages and 35 questions on this machine the day it
+  landed, 26 of them naming nothing and 9 naming a job. Each is refused on its
+  next build until someone names the piece of work that is waiting. There is no
   sweep; each is fixed the next time its page is built.
 - The phrasebook is seeded from the terms one project used most; it is not a
   complete list of what a report should not say.

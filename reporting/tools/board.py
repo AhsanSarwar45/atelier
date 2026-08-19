@@ -297,6 +297,36 @@ def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | 
     return _status_of(data)
 
 
+def is_container(card: str, project: Path, spec_dir: Path | None = None) -> bool:
+    """Whether this card is a whole job rather than one piece of one.
+
+    A job does not finish until everything under it does, so a question that
+    names one outlives every answer it could ever be given — which is how a
+    settled question keeps being printed for weeks. Work poured underneath is
+    what tells the two apart: a job carries pieces, a piece carries none.
+    """
+    if spec_dir is not None:
+        project = board_home(spec_dir, project)
+    try:
+        out = subprocess.run(
+            ["bd", "list", "--parent", card, "--all", "--json"],
+            capture_output=True, text=True, cwd=project, timeout=20,
+        )
+    except FileNotFoundError:
+        raise NoBoard
+    try:
+        kids = json.loads(out.stdout or "[]")
+    except json.JSONDecodeError:
+        kids = None
+    if not isinstance(kids, list):
+        # Same reading as everywhere else here: a card with nothing under it is
+        # an answer the board writes down, and silence on a failed run is not.
+        if out.returncode != 0:
+            raise BoardSilent(out.stderr.strip() or "no reason given")
+        return False
+    return bool(kids)
+
+
 def card_info(card: str, project: Path, spec_dir: Path | None = None) -> dict | None:
     """The board's fuller word on one card: id, title and status, not only the state.
 
