@@ -145,6 +145,12 @@ def main():
     # is waiting on it, however many turns that takes. A return that arrives
     # before the tool call that sent it is put aside rather than dropped — which
     # of the two lands first is the harness's business, not this record's.
+    #
+    # A return that says no name strikes off the one helper out, because there is
+    # nothing to guess; with two or more out it strikes off nobody. Guessing the
+    # oldest came home is how a helper still running gets counted home, and the
+    # turn is then read as idle — the very refusal this record exists to stop,
+    # reached from the other side.
     if data.get("hook_event_name") == "SubagentStop":
         state["helper_done"] = bc.now()
         home = data.get("agent_id") or ""
@@ -153,8 +159,8 @@ def main():
             state["helper_out"] = [h for h in out if h != home]
         elif home:
             state["helper_back"] = ((state.get("helper_back") or []) + [home])[-HELPERS:]
-        else:
-            state["helper_out"] = out[1:]
+        elif len(out) == 1:
+            state["helper_out"] = []
         bc.save(sid, state)
         return
 

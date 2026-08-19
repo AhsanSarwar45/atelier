@@ -2406,6 +2406,16 @@ def main():
         assert helping([FIRST], [FIRST], order) == [], \
             "a helper that reported back (%s) was still counted as out" % order
 
+    # A return that says no name. With one helper out it can only be that one;
+    # with two, striking off the older is a guess, and a guess that goes wrong
+    # counts a helper still running as home and reads the turn as idle.
+    assert helping([FIRST, SECOND], [""]) == [FIRST, SECOND], \
+        "an unnamed return struck a helper off while two were out, so %r was " \
+        "counted home without having said so" % helping([FIRST, SECOND], [""])
+    assert helping([FIRST], [""]) == [], \
+        "the one helper out was left out by a return that said no name, and " \
+        "nothing else will ever say it is home"
+
     # The gap a held set cannot see: between closing a step and claiming the next,
     # a session holds nothing while its job is still running.
     gap, _ = carrying_on([], closed=("c",), goals=[("c", "g", "in_progress")])
