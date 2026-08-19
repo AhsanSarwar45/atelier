@@ -5540,9 +5540,81 @@ def main():
         "is how the review half of a job goes missing without anyone noticing: %r" \
         % silent
 
+    # AND THE JOBS THE BOARD ALREADY REFUSED ARE PUT BACK. Telling the board the
+    # word does not go back for the jobs parked while it was still refusing one:
+    # nothing revisits a job once it is parked, so each sat in the agents' column
+    # waiting for a signature nobody could see was owed — three of them on the
+    # beads app board the day this was found. The stamp identifies them and the
+    # notes never do, because a job whose work reopened keeps the sentence and
+    # loses the stamp, and putting that one back would ask him to sign something
+    # still being built.
+    PARKED = [
+        {"id": "j1", "status": "in_progress",
+         "metadata": {"waiting_since": "2026-08-19T11:00:00Z", "judge": "manager"}},
+        {"id": "j2", "status": "in_progress",
+         "metadata": '{"waiting_since": "2026-08-19T12:00:00Z", "judge": "manager"}'},
+        {"id": "signed", "status": "manager_review",
+         "metadata": {"waiting_since": "2026-08-19T13:00:00Z", "judge": "manager"}},
+        {"id": "reopened", "status": "open", "metadata": {"judge": "manager"}},
+        {"id": "agents", "status": "in_progress",
+         "metadata": {"waiting_since": "2026-08-19T14:00:00Z", "judge": "agent"}},
+        {"id": "done", "status": "closed",
+         "metadata": {"waiting_since": "2026-08-19T15:00:00Z", "judge": "manager"}},
+    ]
+
+    def parked(cards):
+        """What joining does to a board holding these cards, and what it said."""
+        asked, spoke = [], []
+        was = joiner.board
+        try:
+            def answer(args, root):
+                asked.append(args)
+                if args[:2] == ["list", "--status"]:
+                    return True, json.dumps(cards)
+                return True, ""
+            joiner.board = answer
+            joiner.replace("/nowhere", spoke.append)
+        finally:
+            joiner.board = was
+        return asked, spoke
+
+    asked, spoke = parked(PARKED)
+    put = [a[1] for a in asked if a[:1] == ["update"]]
+    assert put == ["j1", "j2"], \
+        "joining does not put back the jobs the board refused while it was still " \
+        "refusing the manager's column, so each waits for a signature nobody can " \
+        "see is owed: %s" % put
+    assert all(a[-1] == project.MANAGER_REVIEW for a in asked if a[:1] == ["update"]), \
+        "a job put back went somewhere other than the manager's column: %s" % asked
+    assert spoke and "2 job(s)" in spoke[0], \
+        "joining put jobs back and said nothing, so nobody knows a signature is " \
+        "now owed on them: %s" % spoke
+    assert parked([c for c in PARKED if c["id"] not in ("j1", "j2")])[1] == [], \
+        "joining speaks up on a board with nothing to put back, so the one line " \
+        "that means something is lost in lines that do not"
+
+    def unsigned(cards):
+        """What the joining check says about a board holding these cards."""
+        was = (joiner.board, project.custom_states)
+        try:
+            joiner.board = lambda args, root: (True, json.dumps(cards))
+            project.custom_states = lambda root: list(project.REVIEW_STATES)
+            return [l for l in joiner.standing(ROOT)[0] if "outside his column" in l]
+        finally:
+            joiner.board, project.custom_states = was
+
+    owed = unsigned(PARKED)
+    assert owed and "j1" in owed[0] and "j2" in owed[0], \
+        "a board holding jobs finished and waiting on the manager outside his " \
+        "column does not say so, so the wait is invisible from both ends: %s" % owed
+    assert unsigned([c for c in PARKED if c["id"] not in ("j1", "j2")]) == [], \
+        "a board with nothing waiting outside his column is reported as having " \
+        "some"
+
     print("ok: joining tells a board about the two review states this machinery "
           "invented, keeps the ones it already had, says so when it has not been "
-          "told, and the run no longer swallows the refusal")
+          "told, puts back the jobs it refused into the manager's column and says "
+          "which, and the run no longer swallows the refusal")
 
 
     # The suite under its own way out — the one thing the cases above cannot say

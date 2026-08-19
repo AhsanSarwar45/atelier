@@ -571,6 +571,20 @@ FAULTS = [
      lambda s: s.replace('",".join(have + want)', '",".join(want)')),
     ("a board that was never told about the review states is not told so", JOIN,
      lambda s: s.replace("        said += unstated(root)\n", "")),
+    # And the jobs the board refused while it was still refusing: telling it the
+    # word does not go back for them, so each waits for a signature nobody can
+    # see is owed (bw-n5k4, three of them on the beads app board).
+    ("joining never puts back the jobs the board refused into the manager's "
+     "column", JOIN,
+     lambda s: s.replace("    replace(root, said.append)\n", "")),
+    ("putting them back takes a job whose work reopened to the manager, asking "
+     "him to sign something still being built", JOIN,
+     lambda s: s.replace(
+         '        if not meta.get("waiting_since") or meta.get("judge") != "manager":\n',
+         '        if meta.get("judge") != "manager":\n')),
+    ("a job waiting on the manager outside his column is not reported as "
+     "waiting", JOIN,
+     lambda s: s.replace("        said += unsigned(root)\n", "")),
     ("the run swallows the board refusing a card into a review column", RUN,
      lambda s: s.replace("    ok, _ = bc.bd([\"update\", goal_id, \"-s\", want], root)\n"
                          "    if ok:\n        return True\n",

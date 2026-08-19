@@ -138,6 +138,65 @@ def states(root, say):
         "states %s would not take %s: %s" % (root, ", ".join(want), out))
 
 
+def stranded(root):
+    """Jobs stamped as waiting on the manager that the board is not showing there.
+
+    A board never told about his column refused every move into it and handed the
+    refusal back to the code that asked, which dropped it — so a job could finish,
+    be stamped with the moment his wait began, have that wait written into its own
+    notes, and go on sitting in the agents' column where he never looks. Telling
+    the board the word does not go back for those: nothing revisits a job once it
+    has been parked, so each one waits for a signature nobody can see is owed.
+
+    The stamp is what identifies them, never the notes: a job whose work reopened
+    keeps the sentence and loses the stamp, and putting that one in his column
+    would ask him to sign something still being built (bw-n5k4).
+    """
+    ok, out = board(["list", "--status", "all", "--json"], root)
+    if not ok:
+        return []
+    try:
+        cards = json.loads(out or "[]")
+    except ValueError:
+        return []
+    held = []
+    for card in cards:
+        meta = card.get("metadata") or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except ValueError:
+                continue
+        if not meta.get("waiting_since") or meta.get("judge") != "manager":
+            continue
+        if card.get("status") in ("closed", project.MANAGER_REVIEW):
+            continue
+        held.append(card["id"])
+    return held
+
+
+def replace(root, say):
+    """Put the jobs the board refused into the column they were sent to.
+
+    Run at joining and nowhere else: this is the one moment the board has just
+    been told the word it was refusing, so it is also the one moment the cards it
+    refused can be put right. Idempotent by construction — a job it moves is no
+    longer stranded, so a second run finds nothing.
+    """
+    held = stranded(root)
+    if not held:
+        return
+    moved, stuck = [], []
+    for goal in held:
+        ok, out = board(["update", goal, "-s", project.MANAGER_REVIEW], root)
+        (moved if ok else stuck).append(goal if ok else "%s (%s)" % (goal, out))
+    if moved:
+        say("parked %s put %d job(s) back in the manager's column: %s"
+            % (root, len(moved), ", ".join(moved)))
+    if stuck:
+        say("parked %s could not put back: %s" % (root, ", ".join(stuck)))
+
+
 def unstated(root):
     """The review states this board was never told about, so a project running
     without them is told rather than finding out one refused card at a time."""
@@ -146,6 +205,16 @@ def unstated(root):
             "refused and nobody sees the refusal — the review half of a job here "
             "does nothing at all; `machinery/join %s` tells it"
             % (" or ".join(gone), root)] if gone else []
+
+
+def unsigned(root):
+    """Jobs finished and waiting on the manager that his own column is not showing,
+    so the signature they are waiting for is owed and nothing anywhere says so."""
+    held = stranded(root)
+    return ["%d job(s) finished and waiting on the manager sit outside his column, "
+            "so each waits for a signature nobody can see is owed: %s; "
+            "`machinery/join %s` puts them back"
+            % (len(held), ", ".join(held), root)] if held else []
 
 
 def git(args, cwd):
@@ -341,6 +410,7 @@ def standing(root):
         said.append("no board at %s/.beads — `bd init --prefix %s`" % (root, decl.prefix))
     else:
         said += unstated(root)
+        said += unsigned(root)
         if decl.lands_on in decl.protected:
             said.append("machinery.toml does not say who lands work here, so %s is "
                         "protected — and a card here closes only once a commit naming "
@@ -455,6 +525,9 @@ def main():
     # After the role, never before it: a checkout still inferring a contributor
     # routes bd at a planning store, and the states would be told to that.
     states(root, said.append)
+    # After the states and never before them: these are the cards the board
+    # refused for want of the word it has just been told.
+    replace(root, said.append)
     print("\n".join(said) or "nothing to do — %s was already joined" % decl.name)
     left, _ = standing(root)
     if left:
