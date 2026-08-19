@@ -819,31 +819,45 @@ sidecar stores it, so the chat does not wake up back in the old mode
 Every rank is stored; only the drawing differs (§4 — the log is the transcript,
 and a `detail` line hidden today must still be there when he presses Ctrl+O).
 
-Measured rather than assumed, with `scripts/measure-quiet.mjs`, 2026-08-18 —
-two turns each running one command, on this machine with this owner's hooks
-installed:
+Measured rather than assumed, with `scripts/measure-quiet.mjs`, 2026-08-19 —
+two turns **in the mode that asks**, one running a command and one writing a
+file, on this machine with this owner's hooks installed and every hook event
+forwarded (§3.1):
 
 | | events | bytes |
 |---|---|---|
-| the whole log | 59 | 75,751 |
-| quiet lines, every rank | 13 (22%) | 11,981 (16%) |
+| the whole log | 82 | 79,300 |
+| quiet lines, every rank | 49 (60%) | 17,104 (22%) |
 
-Inside those 13, two sources account for nearly all of it, and they are
-different shapes of risk:
+The mode matters and the first run got it wrong: it measured the mode that never
+asks, so not one permission card was written during it, and the total it
+reported was not the total anyone pays (bw-1u1.44). Every chat starts in the
+asking mode.
 
-- **a hook that answers at length** — `hook_response` twice a turn, 8,581 B of
-  the 11,981. One hook on this machine prints 10.7 KB, which is why every body
-  is cut to the same 4,000 characters a command's output is (`KEPT`, bw-1u1.18,
-  bw-1u1.33). An install without hooks pays none of this
-- **`system/status`** — one per API request, six across two turns for 852 B
-  total. The most frequent quiet line and the cheapest; it is `detail`, so it
-  costs a row and no attention
+Inside those 17,104, three sources, and they are different shapes of risk:
 
-The earlier version of this paragraph named hooks as the risk and left the
-per-request status uncounted (bw-1u1.36). Both are now measured, and the
-measurement also found that neither is where the log's weight actually is: the
-menu of what a chat can do is republished whole every turn and was 78% of those
-75,751 bytes, which is bw-7bj and not a quiet line at all.
+- **a hook that answers at length** — `hook_response`, 12,474 B of the 17,104,
+  and `hook_started` 3,546 B beside it. One hook on this machine prints 10.7 KB,
+  which is why every body is cut to the same 4,000 characters a command's output
+  is (`KEPT`, bw-1u1.18, bw-1u1.33), and why a line that says everything it has
+  keeps no body at all: dropping the whole-message body from the two hook lines
+  that need none halved what an install with hooks stores (bw-1u1.39). An
+  install without hooks pays none of this
+- **`system/status`** — one per API request, four across two turns for 600 B.
+  The most frequent quiet line and the cheapest; it is `detail`, so it costs a
+  row and no attention. It is also where the mode in force is read (bw-1u1.43)
+- **the permission card** — one per call the settings do not already allow,
+  383 B for a one-line file here. It carries the call's arguments, so a card for
+  a `Write` is as big as the file: cut to `KEPT` like everything else that
+  carries one, which caps it at about 4 KB (bw-1u1.42)
+
+Two earlier versions of this paragraph were wrong in the same way — reasoning
+from the shape of the code, and then measuring a mode nobody runs in
+(bw-1u1.36, bw-1u1.44). The measurement's own finding still stands and is the
+reason to keep taking it: none of these is where the log's weight actually is.
+The menu of what a chat can do is republished whole every turn — 58,969 B of
+these 79,300, three quarters of the log, and not a quiet line at all. That is
+bw-7bj.
 
 ### 8.3 The board tab
 

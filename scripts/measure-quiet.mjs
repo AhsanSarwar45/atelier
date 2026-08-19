@@ -2,9 +2,15 @@
  * What keeping every quiet line actually costs the log.
  *
  * Not a check — the measurement behind docs/agent-workbench.md §8.2.5. It runs
- * two turns, each running one command, and tallies every event the chat would
- * store: how many, how many bytes, and how much of that is the lines nobody
- * reads unless they press Ctrl+O.
+ * two turns — one running a command, one writing a file — and tallies every
+ * event the chat would store: how many, how many bytes, and how much of that is
+ * the lines nobody reads unless they press Ctrl+O.
+ *
+ * It runs in the mode that ASKS, which is the mode every chat starts in and the
+ * one the manager is in: the first version measured the mode that never asks,
+ * so no permission card was written during the whole run and the total it
+ * reported was not the total anyone pays (bw-1u1.44). Every card is answered
+ * "allow once" as it arrives, so the run is a real turn and not an interview.
  *
  * It exists because that section once priced the wrong source entirely, from
  * the shape of the code rather than a run (bw-1u1.36). Run it again whenever
@@ -18,7 +24,16 @@ import { ClaudeDriver } from '../workbench/src/drivers/claude.ts';
 
 const drawn = [];
 const driver = new ClaudeDriver();
-await driver.start({ cwd: process.cwd(), permissionMode: 'bypassPermissions', emit: (e) => drawn.push(e) });
+await driver.start({
+  cwd: process.cwd(),
+  permissionMode: 'default',
+  emit: (e) => {
+    drawn.push(e);
+    // Answered the moment it arrives: the card is what is being measured, and a
+    // run that waits for a person measures nothing.
+    if (e.type === 'ask.permission') driver.answer(e.askId, 'allow_once');
+  },
+});
 const settle = async (s = 240) => {
   const mark = drawn.length;
   for (let i = 0; i < s * 10; i += 1) {
@@ -29,7 +44,10 @@ const settle = async (s = 240) => {
 };
 await driver.send({ text: 'Run exactly this in the shell and say nothing else: echo measuring', images: [] });
 await settle();
-await driver.send({ text: 'Run exactly this in the shell and say nothing else: echo measuring again', images: [] });
+await driver.send({
+  text: 'Write the single line "measuring" to /tmp/measure-quiet.txt with the Write tool, and say nothing else.',
+  images: [],
+});
 await settle();
 await driver.close();
 
@@ -44,7 +62,10 @@ for (const e of drawn) {
 const rows = [...tally.entries()].sort((a, b) => b[1].bytes - a[1].bytes);
 let total = 0;
 for (const [, r] of rows) total += r.bytes;
-console.log(`two turns, each running one command. ${drawn.length} events, ${total} bytes of log.`);
+console.log(
+  `two turns in the asking mode, one running a command and one writing a file. ` +
+    `${drawn.length} events, ${total} bytes of log.`,
+);
 for (const [k, r] of rows) console.log(`  ${String(r.n).padStart(3)}  ${String(r.bytes).padStart(7)}B  ${k}`);
 const quiet = rows.filter(([k]) => k.startsWith('note/'));
 const qn = quiet.reduce((a, [, r]) => a + r.n, 0);

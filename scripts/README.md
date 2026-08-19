@@ -259,14 +259,20 @@ check that has never been red is not known to work.
 ## `measure-quiet.mjs`
 
 Not a check — the measurement behind docs/agent-workbench.md §8.2.5. It drives
-the driver through two turns, each running one command, and tallies every event
-the chat would store: how many, how many bytes, and how much of that is the
-quiet lines nobody reads unless they press Ctrl+O.
+the driver through two turns, one running a command and one writing a file, and
+tallies every event the chat would store: how many, how many bytes, and how much
+of that is the quiet lines nobody reads unless they press Ctrl+O.
+
+It runs in the mode that ASKS and answers each card as it arrives, because that
+is the mode every chat starts in and the one the manager is in. The first
+version ran the mode that never asks, so no permission card was written during
+the whole run and the total it reported was not a total anyone pays
+(bw-1u1.44).
 
 Run it again whenever that section's numbers are questioned, rather than
 arguing from the shape of the code — the first version of that paragraph priced
-the wrong source entirely (bw-1u1.36), and this run is what found that four
-fifths of a chat's stored bytes are the menu being republished (bw-7bj).
+the wrong source entirely (bw-1u1.36), and this run is what found that three
+quarters of a chat's stored bytes are the menu being republished (bw-7bj).
 
 ```
 node scripts/measure-quiet.mjs
