@@ -1,0 +1,176 @@
+/**
+ * Which conversations a live Claude Code process is holding right now.
+ *
+ * The restore list (docs/agent-workbench.md §6.3) has until now drawn every
+ * chat it did not itself start as asleep, so a chat being typed at in a
+ * terminal looked exactly like one that died last week. It isn't a cosmetic
+ * difference: a row that is asleep is an offer to wake it, and the offer is
+ * wrong when somebody is already working in there.
+ *
+ * The signal is the tool's own: Claude Code writes one marker file per running
+ * process at `<config>/sessions/<pid>.json`, naming the conversation that
+ * process is on. Measured on this machine, 2026-08-19 (bw-dmxj.3): six markers
+ * present, six live processes, every `procStart` matching the kernel's.
+ *
+ * **Not the transcript's mtime.** The obvious-looking signal — the SDK's
+ * `lastModified` on the session index — is the conversation file's mtime and
+ * nothing more, and it was measured wrong for this: one genuinely working chat
+ * was silent for 488 seconds while another wrote every 5 (bw-dmxj). The SDK's
+ * `SDKSessionInfo` carries no liveness field at all, so it cannot answer this
+ * question and we do not ask it to.
+ *
+ * This half is pure so it can be tested without processes: the disk and the
+ * process table live in `workbench/src/running.ts`, which injects the liveness
+ * test into `runningChats`.
+ */
+
+/**
+ * One marker file, as the tool writes it.
+ *
+ * Only the fields we act on are named; a marker also carries the version, a
+ * messaging socket path, a derived display name, and on some of them a
+ * `status`/`updatedAt` pair. Those are the tool's business, not ours.
+ */
+export interface SessionMarker {
+  /** The conversation this process is on — the id the SDK's index uses too. */
+  sessionId: string;
+  pid: number;
+  /** Where the process is working: a worktree's path is the worktree. */
+  cwd: string;
+  /** When the chat began, ms since the epoch. */
+  startedAt: number;
+  /**
+   * The process's own start time as the kernel counts it — field 22 of
+   * `/proc/<pid>/stat`, in clock ticks since boot, kept verbatim as the string
+   * it was written as. This is what tells a live chat from a stale marker whose
+   * process number has since been handed to something else.
+   */
+  procStart: string;
+  /** `cli` when a person is at a terminal, `sdk-cli`/`sdk-ts` when a host drives it. */
+  entrypoint: string;
+  /** `interactive` for a chat somebody talks to. */
+  kind: string;
+}
+
+/** A conversation a live process is holding, as the rest of the app needs it. */
+export interface RunningChat {
+  sessionId: string;
+  pid: number;
+  cwd: string;
+  startedAt: number;
+  entrypoint: string;
+}
+
+/**
+ * Whether the process a marker names is still the process that wrote it.
+ * Injected, because asking the real one means real processes and the unit test
+ * has none.
+ */
+export type IsAlive = (marker: SessionMarker) => boolean;
+
+/** Typed at by a person in a terminal, rather than driven by an SDK host. */
+export function startedByAPerson(chat: RunningChat): boolean {
+  return chat.entrypoint === 'cli';
+}
+
+function isText(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
+}
+
+/**
+ * One marker file's contents, validated, or nothing.
+ *
+ * Never throws: this reads files another program writes while we are reading
+ * them, so a half-written line, a truncated file or a shape a later version
+ * invents must all come back as "no marker" rather than take the sidecar down.
+ *
+ * Every named field is required. A marker missing one is a shape we have not
+ * measured, and the house rule on other people's formats holds here as it does
+ * for the session index (§6.3): we stand behind what the tool documented by
+ * writing it, and ignore what we would have to guess at. If a later version
+ * drops one of the descriptive fields — `kind`, `entrypoint`, `cwd` — this is
+ * the line to loosen; the four that carry identity and liveness (`sessionId`,
+ * `pid`, `startedAt`, `procStart`) cannot be loosened at all.
+ */
+export function parseMarker(text: string): SessionMarker | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const m = raw as Record<string, unknown>;
+  if (!isText(m.sessionId) || !isText(m.procStart) || !isText(m.cwd)) return null;
+  if (!isText(m.entrypoint) || !isText(m.kind)) return null;
+  if (typeof m.pid !== 'number' || !Number.isInteger(m.pid) || m.pid <= 0) return null;
+  if (typeof m.startedAt !== 'number' || !Number.isFinite(m.startedAt)) return null;
+  return {
+    sessionId: m.sessionId,
+    pid: m.pid,
+    cwd: m.cwd,
+    startedAt: m.startedAt,
+    procStart: m.procStart,
+    entrypoint: m.entrypoint,
+    kind: m.kind,
+  };
+}
+
+/**
+ * Field 22 of a `/proc/<pid>/stat` line: the process's start time.
+ *
+ * Split on the LAST `)`, never on whitespace from the left. Field 2 is the
+ * executable's name in parentheses and the kernel does not escape it, so a
+ * process called `foo (bar)` shifts every field after it and a naive split
+ * reads the wrong number — which here would mean calling a live chat dead, or
+ * worse, calling a recycled process number the same chat. After the closing
+ * parenthesis the fields resume at 3 (the run state), so 22 is the 20th.
+ *
+ * Pure, and here rather than beside the file read, because the parenthesis rule
+ * is the part worth a test.
+ */
+export function procStartFromStat(line: string): string | null {
+  const close = line.lastIndexOf(')');
+  if (close < 0) return null;
+  const after = line.slice(close + 1).trim();
+  if (after.length === 0) return null;
+  return after.split(/\s+/)[19] ?? null;
+}
+
+/**
+ * The conversations somebody is working in, by session id.
+ *
+ * A marker whose process is gone is simply not in the answer; the file itself
+ * is left alone, because it is the tool's to write and the tool's to clean up,
+ * and deleting another program's state on a hunch is how a reader turns into a
+ * bug.
+ *
+ * Two markers can name the same conversation — a chat resumed in a second
+ * terminal, or one whose marker outlived a crash and whose number came back
+ * around. The newest by `startedAt` wins, and only among the ones still
+ * running: an older live process beats a newer dead one, because the question
+ * is who is working in there now, not who was last to start.
+ */
+export function runningChats(markers: SessionMarker[], alive: IsAlive): Map<string, RunningChat> {
+  const newest = new Map<string, SessionMarker>();
+  for (const marker of markers) {
+    if (!alive(marker)) continue;
+    const had = newest.get(marker.sessionId);
+    if (had && had.startedAt >= marker.startedAt) continue;
+    newest.set(marker.sessionId, marker);
+  }
+
+  // `forEach` rather than `for…of` over the map: this file is compiled by the
+  // browser half's tsconfig too, which targets ES5 and rejects iterating a Map.
+  const running = new Map<string, RunningChat>();
+  newest.forEach((m, sessionId) => {
+    running.set(sessionId, {
+      sessionId,
+      pid: m.pid,
+      cwd: m.cwd,
+      startedAt: m.startedAt,
+      entrypoint: m.entrypoint,
+    });
+  });
+  return running;
+}

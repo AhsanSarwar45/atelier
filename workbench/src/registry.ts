@@ -14,6 +14,7 @@ import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 
 import { folderOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
+import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
 
 interface KnownSession {
@@ -73,6 +74,12 @@ export async function restoreList(
   const mine = everything ? all : all.filter((s) => s.title !== null || store.messageCount(s.id) > 0);
   const known = new Map((await knownSessions(project?.path ?? null, everything)).map((s) => [s.externalId, s]));
   const claimed = new Set(mine.map((s) => s.externalId).filter((x): x is string => !!x));
+  // Who is actually working, which the session index cannot say: it carries the
+  // conversation file's mtime and nothing about processes, and mtime was
+  // measured useless for this — one working chat went 488 seconds without
+  // writing (bw-dmxj). The tool's own markers are asked instead, and the
+  // answer is cached, so listing forty rows costs one look at the machine.
+  const running = runningNow();
 
   const rows: RestoreRow[] = mine.map((s) => {
     // The name Claude holds wins over the opening line we cut down ourselves:
@@ -91,6 +98,11 @@ export async function restoreList(
       folder: folderOf(seen?.cwd ?? s.cwd),
       branch: seen?.branch ?? null,
       beads: store.beadsForSession(s.id),
+      // A chat this app started can be running in a process of its own too:
+      // the driver's child writes a marker like any other Claude Code. The row
+      // says so either way, and `state` stays the authority on whether a driver
+      // of ours is attached to it.
+      runningElsewhere: !!s.externalId && running.has(s.externalId),
     };
   });
 
@@ -111,6 +123,10 @@ export async function restoreList(
       // A chat the app has never driven has no confirmed cards yet: they arrive
       // with its history, the first time it is opened.
       beads: store.beadsForSession(s.externalId),
+      // The row this whole signal exists for: a chat the owner is typing at in
+      // a terminal is `dormant` here, because nothing of ours is attached to
+      // it, and until now it was drawn identically to one that died last week.
+      runningElsewhere: running.has(s.externalId),
     });
   }
 

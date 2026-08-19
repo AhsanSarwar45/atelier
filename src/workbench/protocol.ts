@@ -253,6 +253,23 @@ export interface RestoreRow {
   branch: string | null;
   /** Cards this chat is known to have worked on. */
   beads: string[];
+  /**
+   * A live Claude Code process is holding this conversation right now —
+   * somebody is working in it, in a terminal or under another host.
+   *
+   * Separate from `state` on purpose. `state` is what this app's own driver
+   * knows and it is what the click on a row acts on (§6.3.3); a chat running
+   * in a terminal has no driver of ours attached and is `dormant` in every
+   * sense this app can act on, while being the least asleep thing in the list.
+   * Overloading `state` with it would arm the wake-on-click path against a
+   * process that is already awake.
+   *
+   * Answered by the sidecar, which reads the tool's own per-process marker
+   * files and the process table (workbench/src/running.ts, bw-dmxj.3). Absent
+   * on a row the browser built for itself out of the live stream: those are
+   * sessions this app is driving, which it already knows everything about.
+   */
+  runningElsewhere?: boolean;
 }
 
 /**
