@@ -17,8 +17,11 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 use crate::db::{Database, Project};
 use crate::routes::projects::AppState;
@@ -55,6 +58,17 @@ pub struct PageParams {
     pub slug: String,
     /// The project folder the report is about — pictures and the board resolve there.
     pub path: Option<String>,
+    /// `1` to wait for a run of the toolchain rather than take the last one.
+    /// The screen paints from the last build and then asks again with this,
+    /// so the reader sees the report at once and the board's current answer a
+    /// few seconds later (bw-7ks.21.9).
+    pub fresh: Option<String>,
+}
+
+impl PageParams {
+    fn wants_fresh(&self) -> bool {
+        matches!(self.fresh.as_deref(), Some("1") | Some("true"))
+    }
 }
 
 /// Both report routes take the same `project`/`slug` pair, and neither may
@@ -187,6 +201,62 @@ fn run_builder(
     })
 }
 
+/// One gate per built file. Two readers asking for the same report at the same
+/// moment run the toolchain once between them rather than once each — and two
+/// runs at once would be two writers of one file.
+fn gate(built: &Path) -> Arc<Mutex<()>> {
+    static GATES: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let gates = GATES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = gates.lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(built.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+}
+
+/// What was built last time, when there is anything there.
+fn last_build(built: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(built).ok()?;
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// The report, from the last build unless the caller asked to wait for a new one.
+///
+/// A run of the toolchain takes about ten seconds — it reads the board, looks
+/// up every card and redraws every picture — and running it on every visit made
+/// opening a report a ten-second wait. The file beside the spec is what it said
+/// last time, so that goes back at once, and the screen asks again with
+/// `fresh=1` behind the reader (bw-7ks.21.9).
+fn report_output(
+    tools: &Path,
+    spec: &Path,
+    cwd: &str,
+    emit_json: bool,
+    built: &Path,
+    fresh: bool,
+) -> Result<String, (StatusCode, String)> {
+    if !fresh {
+        if let Some(text) = last_build(built) {
+            return Ok(text);
+        }
+    }
+
+    let asked = SystemTime::now();
+    let gate = gate(built);
+    let _held = gate.lock().unwrap_or_else(|e| e.into_inner());
+
+    // Someone else's run finished while this request waited its turn, so it is
+    // as current as one of our own would be.
+    let built_since = std::fs::metadata(built)
+        .and_then(|m| m.modified())
+        .map(|when| when > asked)
+        .unwrap_or(false);
+    if built_since {
+        if let Some(text) = last_build(built) {
+            return Ok(text);
+        }
+    }
+
+    run_builder(tools, spec, cwd, emit_json, built)
+}
+
 /// Where the build runs, worked out the one way both report routes share.
 ///
 /// An explicit `path` wins while it is still there; otherwise it is looked up
@@ -238,7 +308,7 @@ pub async fn report_page(State(db): State<AppState>, Query(p): Query<PageParams>
         Err(resp) => return resp.into_response(),
     };
     let built = spec.with_file_name(format!("{}.html", p.slug));
-    match run_builder(&tools, &spec, &cwd, false, &built) {
+    match report_output(&tools, &spec, &cwd, false, &built, p.wants_fresh()) {
         // Without the charset the browser reads the page as windows-1252.
         Ok(html) => (
             [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -288,7 +358,7 @@ pub async fn report_spec(State(db): State<AppState>, Query(p): Query<PageParams>
         Err(resp) => return resp.into_response(),
     };
     let built = spec.with_file_name(format!("{}.json", p.slug));
-    match run_builder(&tools, &spec, &cwd, true, &built) {
+    match report_output(&tools, &spec, &cwd, true, &built, p.wants_fresh()) {
         Ok(json) => ([(axum::http::header::CONTENT_TYPE, "application/json")], json).into_response(),
         Err(resp) => resp.into_response(),
     }
@@ -361,7 +431,7 @@ mod tests {
     }
 
     fn params(project: &str, slug: &str) -> PageParams {
-        PageParams { project: project.to_string(), slug: slug.to_string(), path: None }
+        PageParams { project: project.to_string(), slug: slug.to_string(), path: None, fresh: None }
     }
 
     #[test]
@@ -394,6 +464,20 @@ mod tests {
         "decisions": [{"id": "D1", "title": "Add the new address", "why": "The app needs facts, not a page."}],
         "next": {"if_nothing": "Nothing changes."}
     }"#;
+
+    /// A builder that does nothing but take its time and leave a mark, for
+    /// the test that counts how many runs four readers cause.
+    const STAND_IN_BUILDER: &str = r#"import os, pathlib, sys, time
+
+spec = pathlib.Path(sys.argv[1])
+with open(spec.parent / "runs", "a") as tally:
+    tally.write("x")
+time.sleep(0.4)
+out = spec.with_name(spec.name.replace(".report.json", ".json"))
+part = out.with_name(out.name + ".part")
+part.write_text('{"title": "built once"}')
+os.replace(part, out)
+"#;
 
     #[test]
     fn a_clean_spec_builds_into_the_same_facts_the_json_contract_names() {
@@ -429,5 +513,103 @@ mod tests {
         assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
         assert!(err.1.contains("this report does not build"), "{}", err.1);
         assert!(err.1.contains("next"), "{}", err.1);
+    }
+    #[test]
+    fn only_an_explicit_fresh_asks_for_a_new_run() {
+        let mut p = params("beads-web", "some-report");
+        assert!(!p.wants_fresh());
+        p.fresh = Some("1".to_string());
+        assert!(p.wants_fresh());
+        p.fresh = Some("true".to_string());
+        assert!(p.wants_fresh());
+        p.fresh = Some("0".to_string());
+        assert!(!p.wants_fresh());
+    }
+
+    /// The ten-second wait, gone: a report already built goes back untouched
+    /// and nothing runs. Proved by pointing at a folder holding no tools at
+    /// all — a build would fail here rather than answer.
+    #[test]
+    fn a_report_already_built_goes_back_without_running_anything() {
+        let project = tempfile::tempdir().expect("a project directory");
+        let spec = project.path().join("route-check.report.json");
+        std::fs::write(&spec, CLEAN_SPEC).expect("write the spec");
+        let built = project.path().join("route-check.json");
+        std::fs::write(&built, "{\"title\":\"from the last build\"}").expect("write the last build");
+
+        let out = report_output(
+            Path::new("/nowhere/there/are/no/tools"),
+            &spec,
+            &project.path().to_string_lossy(),
+            true,
+            &built,
+            false,
+        )
+        .expect("the last build answers on its own");
+        assert!(out.contains("from the last build"), "{out}");
+    }
+
+    /// And the reader is not left holding it: the screen asks again for a real
+    /// run, which replaces whatever the last one said.
+    #[test]
+    fn asking_for_fresh_facts_runs_the_toolchain_over_what_was_there() {
+        let project = tempfile::tempdir().expect("a project directory");
+        let spec = project.path().join("route-check.report.json");
+        std::fs::write(&spec, CLEAN_SPEC).expect("write the spec");
+        let built = project.path().join("route-check.json");
+        std::fs::write(&built, "{\"title\":\"from the last build\"}").expect("write the last build");
+
+        let out =
+            report_output(&real_tools_dir(), &spec, &project.path().to_string_lossy(), true, &built, true)
+                .expect("a clean spec builds");
+        assert!(!out.contains("from the last build"), "{out}");
+        let doc: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(doc["title"], "Route Check");
+    }
+
+    #[test]
+    fn a_report_never_built_before_is_built_on_the_spot() {
+        let project = tempfile::tempdir().expect("a project directory");
+        let spec = project.path().join("route-check.report.json");
+        std::fs::write(&spec, CLEAN_SPEC).expect("write the spec");
+        let built = project.path().join("route-check.json");
+
+        let out =
+            report_output(&real_tools_dir(), &spec, &project.path().to_string_lossy(), true, &built, false)
+                .expect("nothing built yet, so it builds");
+        let doc: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(doc["title"], "Route Check");
+    }
+
+    /// Four readers opening one report at the same moment run the toolchain
+    /// once between them. Two runs at once are also two writers of one file,
+    /// which is how a reader used to be handed a half-written report.
+    #[test]
+    fn readers_arriving_together_share_one_run() {
+        let project = tempfile::tempdir().expect("a project directory");
+        let tools = tempfile::tempdir().expect("a tools directory");
+        // Stands in for build.py: slow enough that the others are all waiting
+        // on it, and it records that it ran.
+        std::fs::write(tools.path().join("build.py"), STAND_IN_BUILDER).expect("write the stand-in");
+        let spec = project.path().join("route-check.report.json");
+        std::fs::write(&spec, CLEAN_SPEC).expect("write the spec");
+        let built = project.path().join("route-check.json");
+        let tally = project.path().join("runs");
+
+        let cwd = project.path().to_string_lossy().to_string();
+        let hands: Vec<_> = (0..4)
+            .map(|_| {
+                let (tools, spec, built, cwd) =
+                    (tools.path().to_path_buf(), spec.clone(), built.clone(), cwd.clone());
+                std::thread::spawn(move || report_output(&tools, &spec, &cwd, true, &built, true))
+            })
+            .collect();
+        for hand in hands {
+            let out = hand.join().expect("the thread lived").expect("every reader is answered");
+            assert!(out.contains("built once"), "{out}");
+        }
+
+        let ran = std::fs::read_to_string(&tally).expect("the tally");
+        assert_eq!(ran.len(), 1, "the toolchain ran {} times for one report", ran.len());
     }
 }

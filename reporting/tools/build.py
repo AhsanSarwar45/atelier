@@ -763,7 +763,13 @@ def main() -> int:
         print(f"the {args.emit} is {len(payload) / 1e6:.1f} MB — shrink the pictures", file=sys.stderr)
         return 1
 
-    args.out.write_text(payload, encoding="utf-8")
+    # Two readers can ask for the same report at the same moment, and the
+    # server hands this file straight back the moment it is there — so it
+    # must never be caught half-written. Write beside it and rename, which
+    # is one step for anyone reading (bw-7ks.21.9).
+    part = args.out.with_name(f"{args.out.name}.{os.getpid()}.part")
+    part.write_text(payload, encoding="utf-8")
+    os.replace(part, args.out)
 
     if args.emit == "json":
         # A machine reads this file next, not a manager in chat — the path is

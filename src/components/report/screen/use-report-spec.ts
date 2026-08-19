@@ -30,6 +30,22 @@ export function reportQuery(project: string, slug: string, fsPath: string): stri
   return new URLSearchParams({ project, slug, path: fsPath }).toString();
 }
 
+/**
+ * The server turning the report down — a question naming a card the board has
+ * finished, say — as opposed to not answering at all. The difference decides
+ * whether a report already on the screen is taken away: a refusal means what is
+ * on the screen is no longer true, a dropped connection means nothing.
+ */
+class Refused extends Error {}
+
+/** The report's facts. `fresh` waits for a run of the toolchain. */
+async function facts(query: string, fresh: boolean): Promise<string> {
+  const res = await fetch(apiUrl(`/api/reports/spec?${query}${fresh ? '&fresh=1' : ''}`));
+  const body = await res.text();
+  if (!res.ok) throw new Refused(body.trim() || `the server answered ${res.status}`);
+  return body;
+}
+
 export function useReportSpec(project: string, slug: string | null, fsPath: string): ReportSpecState {
   const [spec, setSpec] = useState<ReportSpec | null>(null);
   const [isLoading, setIsLoading] = useState(!!slug);
@@ -48,24 +64,39 @@ export function useReportSpec(project: string, slug: string | null, fsPath: stri
     let live = true;
     setIsLoading(true);
     setError(null);
-    fetch(apiUrl(`/api/reports/spec?${reportQuery(project, slug, fsPath)}`))
-      .then(async (res) => {
-        const body = await res.text();
-        if (!live) return;
-        if (!res.ok) {
-          setSpec(null);
-          setError(body.trim() || `the server answered ${res.status}`);
-          return;
-        }
+    const query = reportQuery(project, slug, fsPath);
+
+    // Two asks, on purpose (bw-7ks.21.9). The first takes whatever the server
+    // built last time, so the report is on the screen at once instead of after
+    // ten seconds of toolchain. The second waits for a real run, and replaces
+    // what is shown only if the report has actually changed — so a card closed
+    // on the board a minute ago still reaches the reader, a few seconds behind
+    // the words.
+    facts(query, false)
+      .then((body) => {
+        if (!live) return body;
         setSpec(JSON.parse(body) as ReportSpec);
+        setIsLoading(false);
+        return body;
       })
-      .catch((e: unknown) => {
-        if (!live) return;
-        setSpec(null);
-        setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (live) setIsLoading(false);
+      .catch(() => null)
+      .then(async (shown) => {
+        try {
+          const current = await facts(query, true);
+          if (!live) return;
+          if (current !== shown) setSpec(JSON.parse(current) as ReportSpec);
+          setError(null);
+        } catch (e: unknown) {
+          if (!live) return;
+          // A refusal is shown either way: the words on the screen came from a
+          // build that no longer holds, and the builder's reason names the fix.
+          // A server that simply did not answer takes nothing away.
+          if (shown !== null && !(e instanceof Refused)) return;
+          setSpec(null);
+          setError(e instanceof Error ? e.message : String(e));
+        } finally {
+          if (live) setIsLoading(false);
+        }
       });
     return () => {
       live = false;
