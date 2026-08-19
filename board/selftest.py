@@ -2404,6 +2404,15 @@ def main():
     assert closing('bd update tst-aaa --claim --notes="under tst-bbb"')[1] \
         == ["tst-aaa"], "a claim took its card from its own notes: %r" \
         % closing('bd update tst-aaa --claim --notes="under tst-bbb"')[1]
+    # The card need not come first. Every doc here teaches it first, but a line
+    # typed by hand or written by a script may put the switches in front of it,
+    # and a close nobody records leaves the gate calling a finished card open.
+    assert closing('bd close --reason="follows tst-bbb" tst-aaa')[0] == ["tst-aaa"], \
+        "a close with its reason written before the card recorded %r" \
+        % closing('bd close --reason="follows tst-bbb" tst-aaa')[0]
+    assert closing("bd update --claim tst-aaa")[1] == ["tst-aaa"], \
+        "a claim with its switch written before the card recorded %r" \
+        % closing("bd update --claim tst-aaa")[1]
     # A find is closed by nobody's report, so neither gate asks for one of it.
     assert closing("bd close tst-aaa", labels=["find"])[0] == [], \
         "closing a find was put down as work needing a report"

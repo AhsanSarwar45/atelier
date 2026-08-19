@@ -66,13 +66,19 @@ def card_ids(text, prefix):
 
 
 def aimed_at(cmd, verb, prefix):
-    """The cards a board command is aimed at: what stands between its verb and
-    its first switch, and never what a switch carries.
+    """The cards a board command is aimed at: the words after its verb that are a
+    card id and nothing else, and never a switch or what one carries.
 
     A close names the card it closes; the reason it carries names whatever the
     session was thinking about — a card the work follows on from, one a brief
     quotes — and a card merely spoken of in a reason was ticked off by nobody.
     Read once by the gates as if it had been, it costs a whole turn.
+
+    An id standing on its own is what tells the two apart, rather than where it
+    stands in the line: a reason is a sentence and a sentence is not an id, so a
+    switch may come before the card as easily as after it and the card is still
+    found. The one line this cannot read is a reason that is nothing but a card
+    id, which is a reason that says nothing.
     """
     found = []
     for seg in bc.segments(cmd):
@@ -81,8 +87,8 @@ def aimed_at(cmd, verb, prefix):
             continue
         for word in argv[argv.index(verb) + 1:]:
             if word.startswith("-"):
-                break
-            found += card_ids(word, prefix)
+                continue
+            found += [c for c in card_ids(word, prefix) if c == word]
     return found
 
 
