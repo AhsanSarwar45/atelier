@@ -105,6 +105,11 @@ pub struct BeadsParams {
     /// Optional ISO 8601 timestamp — only return beads updated after this time.
     /// Used for incremental polling (subsequent fetches after initial full load).
     pub updated_after: Option<String>,
+    /// Ask for the counts rather than the cards. The list of projects wants to
+    /// know how many cards sit in each column, not what any of them says, and
+    /// downloading a whole card database to count it cost the reader megabytes
+    /// per project (bw-uiyz.2). Present at all means counts.
+    pub counts: Option<String>,
 }
 
 /// A dependency relationship in the JSONL file (old format).
@@ -325,6 +330,19 @@ fn upsert_counts_cache(
         }
     };
 
+    let counts = counts_of(beads, data_source);
+
+    if let Err(e) = db.upsert_cached_counts(&project.id, &counts) {
+        tracing::warn!(
+            "Failed to upsert cached counts for project {}: {}",
+            project.id,
+            e
+        );
+    }
+}
+
+/// How many cards sit in each column, worked out from the cards themselves.
+fn counts_of(beads: &[Bead], data_source: &str) -> CachedCounts {
     let mut open = 0i64;
     let mut in_progress = 0i64;
     let mut inreview = 0i64;
@@ -347,7 +365,7 @@ fn upsert_counts_cache(
         }
     }
 
-    let counts = CachedCounts {
+    CachedCounts {
         open,
         in_progress,
         inreview,
@@ -356,14 +374,6 @@ fn upsert_counts_cache(
         cancelled,
         data_source: Some(data_source.to_string()),
         updated_at: Utc::now().to_rfc3339(),
-    };
-
-    if let Err(e) = db.upsert_cached_counts(&project.id, &counts) {
-        tracing::warn!(
-            "Failed to upsert cached counts for project {}: {}",
-            project.id,
-            e
-        );
     }
 }
 
@@ -521,6 +531,14 @@ const LIVE_STAGES: [(&str, &[&str]); 3] = [
 /// tells the screen a file moved, which is why it may be kept this long.
 const BOARD_MEMO: Duration = Duration::from_secs(30);
 
+/// The answer to a read: the cards themselves, or only how many there are.
+fn board_answer(beads: Vec<Bead>, source: &str, counted: bool) -> Json<serde_json::Value> {
+    if counted {
+        return Json(serde_json::json!({ "counts": counts_of(&beads, source), "source": source }));
+    }
+    Json(serde_json::json!({ "beads": beads, "source": source }))
+}
+
 /// A board as it was last read, by the path it was read from.
 type Boards = Mutex<HashMap<String, (Instant, String, Vec<Bead>)>>;
 
@@ -580,6 +598,8 @@ pub async fn read_beads(
     // Normalize Windows backslashes to forward slashes
     let path = params.path.replace('\\', "/");
 
+    let counted = params.counts.is_some();
+
     // Direct Dolt read for dolt:// paths (no filesystem needed)
     if let Some(db_name) = path.strip_prefix(DOLT_PATH_PREFIX) {
         if !dolt_manager.is_available() && !dolt_manager.check_server().await {
@@ -592,7 +612,7 @@ pub async fn read_beads(
             Ok(beads) => {
                 let beads = post_process_beads(beads);
                 upsert_counts_cache(&db, &path, "dolt-direct", &beads);
-                (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": "dolt-direct" })))
+                (StatusCode::OK, board_answer(beads, "dolt-direct", counted))
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -629,7 +649,7 @@ pub async fn read_beads(
     let whole_read = params.updated_after.is_none();
     if whole_read {
         if let Some((beads, source)) = kept_board(&path) {
-            return (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": source })));
+            return (StatusCode::OK, board_answer(beads, &source, counted));
         }
     }
     let gate = if whole_read { Some(gate_for(&path)) } else { None };
@@ -640,7 +660,7 @@ pub async fn read_beads(
     // Whoever we waited behind has read it by now.
     if whole_read {
         if let Some((beads, source)) = kept_board(&path) {
-            return (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": source })));
+            return (StatusCode::OK, board_answer(beads, &source, counted));
         }
     }
 
@@ -672,7 +692,7 @@ pub async fn read_beads(
                         if whole_read {
                             keep_board(&path, "dolt-project", &beads);
                         }
-                        return (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": "dolt-project" })));
+                        return (StatusCode::OK, board_answer(beads, "dolt-project", counted));
                     }
                     Err(e) => {
                         tracing::warn!("Per-project Dolt server on port {} failed: {}, falling back", port, e);
@@ -739,7 +759,7 @@ pub async fn read_beads(
     if whole_read {
         keep_board(&path, source, &beads);
     }
-    (StatusCode::OK, Json(serde_json::json!({ "beads": beads, "source": source })))
+    (StatusCode::OK, board_answer(beads, source, counted))
 }
 
 /// Request body for creating a new bead.

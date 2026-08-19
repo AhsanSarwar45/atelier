@@ -8,34 +8,25 @@ import { NO_COUNTS, type Project } from '@/types';
 // `useProjects` composes two dependencies:
 //   - `getProjectsWithTags` (src/lib/db) — returns the project list with
 //     `cachedCounts` attached by the backend.
-//   - `loadProjectBeads` (src/lib/beads-parser) — fetches fresh beads per
-//     project and normally overwrites the cached seed.
+//   - `api.beads.counts` — asks the server how many cards sit in each column,
+//     and normally overwrites the cached seed.
 //
-// We mock both. `loadProjectBeads` is made to never resolve so the hook
-// stays in the "cached seed only" state and we can assert the initial
-// render uses the cached counts, not zeros.
+// We mock both. The counts call is made to never resolve so the hook stays in
+// the "cached seed only" state and we can assert the initial render uses the
+// cached counts, not zeros.
 
 const getProjectsWithTagsMock = vi.fn();
-const loadProjectBeadsMock = vi.fn();
+const countsMock = vi.fn();
 
 vi.mock('@/lib/db', () => ({
   getProjectsWithTags: (...args: unknown[]) => getProjectsWithTagsMock(...args),
   createProject: vi.fn(),
 }));
 
-vi.mock('@/lib/beads-parser', () => ({
-  loadProjectBeads: (...args: unknown[]) => loadProjectBeadsMock(...args),
-  // Not called in these tests because loadProjectBeads never resolves, but
-  // keep a stub so importers don't crash.
-  groupBeadsByStatus: vi.fn(() => ({
-    open: [],
-    in_progress: [],
-    inreview: [],
-    closed: [],
-  })),
-}));
-
 vi.mock('@/lib/api', () => ({
+  beads: {
+    counts: (...args: unknown[]) => countsMock(...args),
+  },
   projects: {
     archive: vi.fn(),
     unarchive: vi.fn(),
@@ -49,9 +40,9 @@ import { useProjects } from '../use-projects';
 
 beforeEach(() => {
   getProjectsWithTagsMock.mockReset();
-  loadProjectBeadsMock.mockReset();
+  countsMock.mockReset();
   // Never resolve — lets us observe the cached-seed state in isolation.
-  loadProjectBeadsMock.mockImplementation(() => new Promise(() => {}));
+  countsMock.mockImplementation(() => new Promise(() => {}));
 });
 
 describe('useProjects — cached counts seeding', () => {
@@ -63,11 +54,16 @@ describe('useProjects — cached counts seeding', () => {
       tags: [],
       lastOpened: '2026-04-22T00:00:00Z',
       createdAt: '2026-04-22T00:00:00Z',
+      // Named the way the server names them, not the way the states are named
+      // here: reading these by the state's own name gave nought for the two
+      // that differ, and nothing caught it (bw-uiyz.2).
       cachedCounts: {
-        ...NO_COUNTS(),
         open: 3,
-        in_progress: 1,
+        inProgress: 1,
+        inreview: 0,
+        managerReview: 2,
         closed: 5,
+        cancelled: 0,
         dataSource: 'dolt-direct',
         updatedAt: '2026-04-22T00:00:00Z',
       },
@@ -89,6 +85,7 @@ describe('useProjects — cached counts seeding', () => {
       ...NO_COUNTS(),
       open: 3,
       in_progress: 1,
+      manager_review: 2,
       closed: 5,
     });
     expect(seeded.countsLoaded).toBe(true);

@@ -5,7 +5,7 @@
 
 import { apiUrl } from '@/lib/api-base';
 import { BeadsResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
-import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, MemoryEntry, Agent, AgentModel } from '@/types';
+import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, MemoryEntry, Agent, AgentModel, CachedCounts } from '@/types';
 
 /**
  * Input for creating a new project
@@ -216,6 +216,20 @@ export interface CreateBeadInput {
 }
 
 export const beads = {
+  /**
+   * How many cards sit in each column of a board, without the cards.
+   *
+   * The list of projects wants the numbers, not the work — and downloading a
+   * whole card database to count it cost megabytes per project on a screen
+   * that draws a handful of names (bw-uiyz.2). The server counts what it
+   * already has to read and sends back the figures.
+   */
+  counts: async (path: string) => {
+    const params = new URLSearchParams({ path, counts: '1' });
+    const data = await fetchApi<{ counts: CachedCounts; source?: string }>(`/api/beads?${params}`);
+    return data;
+  },
+
   read: async (path: string, updatedAfter?: string) => {
     const params = new URLSearchParams({ path });
     if (updatedAfter) params.set('updated_after', updatedAfter);

@@ -3,17 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 import * as api from "@/lib/api";
-import { loadProjectBeads, groupBeadsByStatus } from "@/lib/beads-parser";
 import {
   getProjectsWithTags,
   createProject,
   type CreateProjectInput,
 } from "@/lib/db";
-import { NO_COUNTS, STATES, type Project, type Tag, type BeadCounts, type CachedCounts } from "@/types";
-
-/** The counts a cache row carries, one per state, dropping its other fields. */
-const countsOf = (cached: CachedCounts): BeadCounts =>
-  Object.fromEntries(STATES.map((s) => [s.id, cached[s.id] ?? 0])) as BeadCounts;
+import { NO_COUNTS, countsFrom, type Project, type Tag, type BeadCounts } from "@/types";
 
 interface UseProjectsResult {
   projects: Project[];
@@ -77,7 +72,7 @@ export function useProjects(): UseProjectsResult {
           const beadCounts: BeadCounts = hasPrev
             ? prevProject!.beadCounts!
             : cached
-              ? countsOf(cached)
+              ? countsFrom(cached)
               : zeroCounts;
 
           const dataSource = hasPrev
@@ -106,16 +101,22 @@ export function useProjects(): UseProjectsResult {
       let loaded = 0;
       const total = activeData.length;
 
+      // The counts, not the cards. This screen draws a handful of names and a
+      // ring of numbers beside each; it used to download every project's whole
+      // card database to work those numbers out, which was megabytes per
+      // project for six figures on screen (bw-uiyz.2). The server counts what
+      // it has to read anyway and sends back the figures.
       const loadBeads = async (project: Project) => {
         try {
           if (beadsSignal.aborted) return null;
-          const result = await loadProjectBeads(project.path, { withSource: true });
+          const result = await api.beads.counts(project.path);
           if (beadsSignal.aborted) return null;
-          const grouped = groupBeadsByStatus(result.beads);
-          const beadCounts: BeadCounts = Object.fromEntries(
-            STATES.map((s) => [s.id, grouped[s.id].length]),
-          ) as BeadCounts;
-          return { id: project.id, beadCounts, dataSource: result.source, beadError: undefined };
+          return {
+            id: project.id,
+            beadCounts: countsFrom(result.counts),
+            dataSource: result.source,
+            beadError: undefined,
+          };
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') return null;
           const message = err instanceof Error ? err.message : 'Unknown error';

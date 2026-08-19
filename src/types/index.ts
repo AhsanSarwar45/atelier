@@ -8,18 +8,40 @@ export const NO_COUNTS = (): BeadCounts =>
   Object.fromEntries(STATES.map((s) => [s.id, 0])) as BeadCounts;
 
 /**
- * Cached per-project bead counts served by `GET /api/projects`.
+ * Counts as the server sends them, from `GET /api/projects` and from a read of
+ * a board asked for its counts.
  *
- * Populated by the backend after any successful `/api/beads` read and
- * used by the home page to render donut charts immediately on first
- * paint, before fresh counts finish loading.
+ * The server names its fields the way the rest of its answers are named, which
+ * is not how the states are named here: `in_progress` arrives as `inProgress`
+ * and `manager_review` as `managerReview`. Reading them by the state's own name
+ * silently gave nought for both of those columns, which nobody saw only because
+ * a whole-board read landed a second later and wrote over it (bw-uiyz.2). Use
+ * {@link countsFrom} rather than reading these fields by hand.
  */
-export interface CachedCounts extends BeadCounts {
+export interface CachedCounts {
+  open?: number;
+  inProgress?: number;
+  in_progress?: number;
+  inreview?: number;
+  managerReview?: number;
+  manager_review?: number;
+  closed?: number;
+  cancelled?: number;
   /** Source that produced these cached counts (e.g. 'dolt-direct', 'jsonl'). */
   dataSource?: string | null;
   /** ISO-8601 timestamp of when the cache row was last refreshed. */
-  updatedAt: string;
+  updatedAt?: string;
 }
+
+/** Counts as the server sends them, as one number per state named here. */
+export const countsFrom = (sent: CachedCounts): BeadCounts => ({
+  open: sent.open ?? 0,
+  in_progress: sent.inProgress ?? sent.in_progress ?? 0,
+  inreview: sent.inreview ?? 0,
+  manager_review: sent.managerReview ?? sent.manager_review ?? 0,
+  closed: sent.closed ?? 0,
+  cancelled: sent.cancelled ?? 0,
+});
 
 /**
  * Project stored in local SQLite
