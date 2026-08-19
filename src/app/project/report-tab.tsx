@@ -103,6 +103,19 @@ export default function ReportTab({
     document.getElementById(section)?.scrollIntoView({ block: 'start' });
   }, [spec, section]);
 
+  // A report with a question waiting opens on the question (bw-7ks.21.7): the
+  // ask is why the manager was handed the link, and the title it sits under is
+  // one scroll up. Once per report, and never over an address that already
+  // names the part to land on.
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!spec || section || !report) return;
+    if (opened.current === report) return;
+    opened.current = report;
+    if (!spec.actions.questions.some((q) => q.live)) return;
+    document.getElementById('act')?.scrollIntoView({ block: 'start' });
+  }, [spec, section, report]);
+
   const standaloneUrl = apiUrl(`/api/reports/page?${reportQuery(projectName, report ?? '', fsPath)}`);
 
   // No report named: the tab is this project's list of them.

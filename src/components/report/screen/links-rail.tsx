@@ -31,7 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { apiUrl } from '@/lib/api-base';
 import { cn } from '@/lib/utils';
-import type { Bead } from '@/types';
+import { STATE_BY_ID, type Bead, type BeadStatus } from '@/types';
 import type { LinkedChat } from '@/workbench/protocol';
 
 import type { ReportSpec } from '../types';
@@ -39,6 +39,19 @@ import type { ReportSpec } from '../types';
 interface CardLink {
   id: string;
   title: string;
+  /** The board heading this card is filed under — "Todo", "In Progress", … */
+  column: string;
+}
+
+/**
+ * The column a card is drawn in, read the one way the board itself reads it
+ * (`STATES` in `src/types/index.ts`). A status no state names falls to Todo,
+ * which is the board's own fallback and the report builder's (`board.py`'s
+ * `COLUMN`), so a card reads the same wherever it is shown.
+ */
+function columnOf(status: string | undefined): string {
+  if (!status) return 'Todo';
+  return STATE_BY_ID[status as BeadStatus]?.column ?? 'Todo';
 }
 
 export function LinksRail({
@@ -62,7 +75,8 @@ export function LinksRail({
   const primary: CardLink | null = useMemo(() => {
     const id = spec.status.card;
     if (!id) return null;
-    return { id, title: beadsById.get(id)?.title ?? id };
+    const bead = beadsById.get(id);
+    return { id, title: bead?.title ?? id, column: columnOf(bead?.status) };
   }, [spec.status.card, beadsById]);
 
   const questionCards: CardLink[] = useMemo(() => {
@@ -71,10 +85,15 @@ export function LinksRail({
     for (const q of spec.actions.questions) {
       if (!q.card || seen.has(q.card.id)) continue;
       seen.add(q.card.id);
-      out.push({ id: q.card.id, title: q.card.title });
+      const bead = beadsById.get(q.card.id);
+      out.push({
+        id: q.card.id,
+        title: bead?.title ?? q.card.title,
+        column: bead ? columnOf(bead.status) : q.card.column,
+      });
     }
     return out;
-  }, [spec.actions.questions]);
+  }, [spec.actions.questions, beadsById]);
 
   const statusItemCards: CardLink[] = useMemo(() => {
     const seen = new Set<string>(questionCards.map((c) => c.id));
@@ -85,7 +104,7 @@ export function LinksRail({
       seen.add(item.card);
       const bead = beadsById.get(item.card);
       if (!bead) continue;
-      out.push({ id: item.card, title: bead.title });
+      out.push({ id: item.card, title: bead.title, column: columnOf(bead.status) });
     }
     return out;
   }, [spec.status.items, primary, questionCards, beadsById]);
@@ -132,14 +151,20 @@ export function LinksRail({
       size="sm"
       data-testid={testid}
       data-card-id={card.id}
-      className="w-full min-w-0 justify-start gap-2"
+      data-card-column={card.column}
+      className="h-auto w-full min-w-0 justify-start gap-2 py-1.5"
       onClick={() => onOpenCard(card.id)}
     >
       <FileText className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
-      <span className="min-w-0 truncate">{card.title}</span>
-      <Badge variant="secondary" appearance="outline" size="xs" shape="circle" className="ml-auto shrink-0 font-mono">
-        {card.id}
-      </Badge>
+      <span className="flex min-w-0 flex-col items-start gap-0.5">
+        <span className="min-w-0 max-w-full truncate">{card.title}</span>
+        <span className="flex items-center gap-1.5 text-xs font-normal text-t-muted">
+          <span data-testid="report-link-column">{card.column}</span>
+          <Badge variant="secondary" appearance="outline" size="xs" shape="circle" className="font-mono">
+            {card.id}
+          </Badge>
+        </span>
+      </span>
     </Button>
   );
 

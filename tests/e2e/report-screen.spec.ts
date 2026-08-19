@@ -1,3 +1,7 @@
+import { existsSync, rmSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
+import { basename, join } from 'path';
+
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
@@ -219,5 +223,181 @@ test.describe('a report is a place under its project', () => {
         timeout: 5_000,
       })
       .toBeGreaterThan(before);
+  });
+});
+
+/**
+ * A report of our own, so the three things below can be measured rather than
+ * waited for: a question that is holding up a card the board really is
+ * working on, and enough sections that the last one is well below the fold.
+ *
+ * It is written where the instance keeps its reports and taken away again
+ * afterwards — there is no address for putting a report in, and a report the
+ * manager already has says nothing about a question, which is the case worth
+ * proving (bw-7ks.21.7).
+ */
+const FIXTURE = 'zz-screen-check';
+
+function reportsHome(project: string): string {
+  const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+  return join(data, 'kanban-ui', 'reports', project);
+}
+
+function fixturePaths(project: string): string[] {
+  const home = reportsHome(project);
+  return [`${FIXTURE}.report.json`, `${FIXTURE}.json`, `${FIXTURE}.html`].map((n) => join(home, n));
+}
+
+interface Fixture {
+  /** The project the report is filed under, as the reports folder names it. */
+  project: string;
+  /** The folder its board lives in. */
+  dir: string;
+  card: string;
+  column: string;
+}
+
+function section(label: string, text: string) {
+  return {
+    label,
+    blocks: [
+      { kind: 'note', tone: 'good', label: 'Result', text },
+      {
+        kind: 'table',
+        columns: ['Where', { name: 'Reading', align: 'num' }],
+        rows: [
+          ['Before', { num: '2.4' }],
+          ['After', { num: '9.1' }],
+        ],
+      },
+    ],
+  };
+}
+
+/** Writes the fixture report and says what it is holding up. */
+async function writeFixture(request: APIRequestContext, id: string): Promise<Fixture> {
+  const row = (await projects(request)).find((p) => p.id === id);
+  const dir = row?.localPath || row?.path || '';
+  const project = basename(dir);
+  const home = reportsHome(project);
+  expect(existsSync(home), `this instance keeps no reports at ${home}`).toBe(true);
+
+  const board = (await (
+    await request.get(`${api()}/api/beads?path=${encodeURIComponent(dir)}`)
+  ).json()) as { beads: { id: string; status: string }[] };
+  const working = board.beads.find((b) => b.status === 'in_progress');
+  const live = working ?? board.beads.find((b) => b.status === 'open');
+  expect(live, 'the board holds no card that is still open').toBeTruthy();
+
+  writeFileSync(
+    join(home, `${FIXTURE}.report.json`),
+    JSON.stringify({
+      title: 'Screen Check',
+      actions: {
+        questions: [
+          {
+            ask: 'Keep the wider column, or go back to the narrow one?',
+            options: [
+              { label: 'Keep it', say: 'Keep the wider column.', pick: true },
+              { label: 'Go back', say: 'Go back to the narrow column.' },
+            ],
+            note: 'A morning of work either way',
+            holds: live!.id,
+          },
+        ],
+      },
+      status: {
+        now: 'Waiting on your answer above.',
+        next_up: 'The narrow column comes back the moment you say so.',
+        items: [
+          { state: 'done', text: 'Measured the old column' },
+          { state: 'todo', text: 'Read a long report at the new width' },
+        ],
+      },
+      content: [
+        section('What changed', 'The column is wider and the eye keeps its place.'),
+        section('What it cost', 'A morning, and nothing else moved.'),
+        section('What is left', 'The narrow column is still there behind a setting.'),
+        section('What we watched', 'Every width from a phone to a wall screen.'),
+      ],
+      decisions: [
+        { id: 'D1', title: 'The column is as wide as a page of a book', why: 'The eye loses its place past that.' },
+        { id: 'D2', title: 'The contents stay at the left edge' },
+      ],
+      next: {
+        if_nothing: 'The wider column stays.',
+        steps: [{ step: 'Read a long report at the new width', cost: 'small', starting: true }],
+      },
+    }),
+  );
+
+  return { project, dir, card: live!.id, column: working ? 'In Progress' : 'Todo' };
+}
+
+test.describe('a report says what it is holding up, and lands where it is pointed', () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  let fixture: Fixture | null = null;
+
+  test.afterAll(() => {
+    if (!fixture) return;
+    for (const path of fixturePaths(fixture.project)) rmSync(path, { force: true });
+  });
+
+  test('the rail says which column each card it names is in', async ({ page, request }) => {
+    const id = await projectId(request);
+    fixture = await writeFixture(request, id);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openReport(page, id, FIXTURE);
+
+    const link = page.getByTestId('report-link-question-card').first();
+    await expect(link).toHaveAttribute('data-card-id', fixture.card);
+    await expect(link).toHaveAttribute('data-card-column', fixture.column);
+    await expect(link.getByTestId('report-link-column')).toHaveText(fixture.column);
+  });
+
+  test('a report with a question waiting opens on the question', async ({ page, request }) => {
+    const id = await projectId(request);
+    fixture = await writeFixture(request, id);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openReport(page, id, FIXTURE);
+
+    // The ask is why the manager was handed the link, so the report opens
+    // there rather than on its own title.
+    const asks = page.locator('[data-part-kind="action"]');
+    await expect(asks).toBeVisible();
+    await expect
+      .poll(async () => (await asks.boundingBox())?.y ?? 0, {
+        message: 'the report opened on its title, not on the question',
+        timeout: 10_000,
+      })
+      .toBeLessThan(220);
+    const scrolled = await page.getByTestId('report-pane').evaluate((el) => el.scrollTop);
+    expect(scrolled, 'nothing scrolled, so the question was never sought out').toBeGreaterThan(0);
+  });
+
+  test('a link that names one section lands on that section', async ({ page, request }) => {
+    const id = await projectId(request);
+    fixture = await writeFixture(request, id);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const facts = (await (
+      await request.get(
+        `${api()}/api/reports/spec?project=${fixture.project}&slug=${FIXTURE}` +
+          `&path=${encodeURIComponent(fixture.dir)}`,
+      )
+    ).json()) as { content: { id: string; label: string }[] };
+    const last = facts.content[facts.content.length - 1];
+
+    await page.goto(`/project?id=${id}&tab=reports&report=${FIXTURE}&section=${last.id}`);
+    await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
+
+    const pane = await box(page, 'report-pane');
+    await expect
+      .poll(async () => (await page.locator(`#${last.id}`).boundingBox())?.y ?? 0, {
+        message: `the address named ${last.id} and the report stayed where it was`,
+        timeout: 10_000,
+      })
+      .toBeLessThan(pane.y + 60);
   });
 });
