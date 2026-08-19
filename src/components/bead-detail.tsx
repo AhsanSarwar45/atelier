@@ -209,7 +209,11 @@ export function BeadDetail({
    * for one job in the first place.
    */
   const progress = useMemo(
-    () => computeEpicProgress(bead as Epic, allBeads ?? []),
+    () => computeEpicProgress(
+      bead as Epic,
+      allBeads ?? [],
+      new Map((allBeads ?? []).map((b) => [b.id, b.status])),
+    ),
     [bead, allBeads],
   );
 

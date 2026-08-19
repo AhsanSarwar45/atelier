@@ -292,13 +292,3 @@ export function groupByEpicStatus(beads: Bead[]): {
 
   return { epics, standalone, children };
 }
-
-/*
- * Whether a job is finished is asked in one place, `progressPercent` in
- * `epic-parser.ts`, and answered off the one list of states. A second rule used
- * to live here, along with its own way of resolving a job's pieces: it asked
- * every piece for the finished status by name, so a job of ten finished and
- * four dropped read unfinished. Nothing imported it, so it was a wrong answer
- * sitting in wait; it is gone rather than corrected, because two rules for one
- * question is how the two come to disagree.
- */

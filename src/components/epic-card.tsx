@@ -19,7 +19,7 @@ import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
 import { cn, isDoltProject } from "@/lib/utils";
 import { CardLiveChat } from "@/workbench/card-live";
 import { WORKING, standing } from "@/types";
-import type { Bead, Epic, EpicProgress } from "@/types";
+import type { Bead, Epic } from "@/types";
 
 export interface EpicCardProps {
   /** Epic bead with children */
@@ -48,14 +48,6 @@ export interface EpicCardProps {
   onUpdate?: () => void;
   /** Sits with the card's other facts, beside the comment count. */
   report?: ReactNode;
-}
-
-/**
- * Compute epic progress from children
- * Uses epic-parser utility for proper dependency resolution
- */
-function computeProgress(epic: Epic, allBeads: Bead[]): EpicProgress {
-  return computeEpicProgress(epic, allBeads);
 }
 
 /**
@@ -165,7 +157,13 @@ export function EpicCard({
     };
   }, [fetchChildPRStatuses]);
 
-  const progress = computeProgress(epic, allBeads);
+  // Worked out once per change of the board, not once per redraw: this card
+  // redraws on every poll, and walking the whole board each time cost more than
+  // three times what the walk itself costs.
+  const progress = useMemo(
+    () => computeEpicProgress(epic, allBeads, statusById),
+    [epic, allBeads, statusById],
+  );
   const progressPercentage = progressPercent(progress);
 
   const commentCount = (epic.comments ?? []).length;

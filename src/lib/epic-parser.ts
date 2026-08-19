@@ -109,16 +109,23 @@ const NOTHING: EpicProgress = {
  *
  * @param epic - Epic bead with children
  * @param allBeads - Array of all beads to resolve children from
+ * @param statusById - Every bead's state by id, which the board builds once and
+ *   hands down. Building it here meant a fresh table of the whole board per job
+ *   card on every redraw, on top of a second one for the pieces themselves.
  * @returns EpicProgress object with computed metrics
  *
  * @example
  * ```typescript
- * const progress = computeEpicProgress(epic, allBeads);
+ * const progress = computeEpicProgress(epic, allBeads, statusById);
  * console.log(`${progress.completed}/${progress.total} children completed`);
  * console.log(`${progress.blocked} children blocked`);
  * ```
  */
-export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress {
+export function computeEpicProgress(
+  epic: Epic,
+  allBeads: Bead[],
+  statusById: ReadonlyMap<string, string>,
+): EpicProgress {
   if (!epic.children || epic.children.length === 0) {
     return NOTHING;
   }
@@ -131,16 +138,9 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
     return NOTHING;
   }
 
-  // Create lookup map for children
-  const beadMap = new Map<string, Bead>();
-  for (const bead of allBeads) {
-    beadMap.set(bead.id, bead);
-  }
-
-  // Resolve child beads
-  const children = epic.children
-    .map((childId) => beadMap.get(childId))
-    .filter((child): child is Bead => child !== undefined);
+  // One pass over the board, against the ids this job claims.
+  const wanted = new Set(epic.children);
+  const children = allBeads.filter((bead) => wanted.has(bead.id));
 
   // The pieces this job is actually made of, and the ones it dropped.
   const pieces = children.filter((c) => counted(c.status));
@@ -150,10 +150,7 @@ export function computeEpicProgress(epic: Epic, allBeads: Bead[]): EpicProgress 
   const inProgress = pieces.filter((c) => c.status === WORKING).length;
 
   // What blocks a piece is the board's one rule, asked here rather than spelled
-  // again.
-  const statusById = new Map(
-    Array.from(beadMap, ([id, bead]) => [id, bead.status] as const),
-  );
+  // again, off the table the board already built.
   const blocked = pieces.filter((child) => isBlockedBy(child, statusById)).length;
 
   return {
@@ -194,13 +191,6 @@ export function progressPercent(progress: EpicProgress): number {
   if (progress.completed === 0) return 0;
   return Math.min(99, Math.max(1, Math.round((progress.completed / progress.total) * 100)));
 }
-
-/*
- * A third way of asking what is blocked used to live here, over the whole
- * board. Nothing called it, and it was the copy that had to be taught in step
- * with the other two every time the rule moved. `isBlockedBy` in
- * `bead-utils.ts` is the rule now, and it is the only one.
- */
 
 /**
  * Computes which beads the given bead blocks (inverse of deps)

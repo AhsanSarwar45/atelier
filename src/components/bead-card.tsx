@@ -233,7 +233,9 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
 
   // A card nobody is waiting on is dimmed and struck through, whether the work
   // was finished or dropped. Dimming only the finished ones drew abandoned work
-  // as the live work of the board.
+  // as the live work of the board, and all three shapes say it the same way:
+  // one of them struck the title and the other two did not, so the same card
+  // read as two different things depending on the theme in use.
   const isSettled = !standing(bead.status);
 
   // ─── Layout: compact-row (Linear Minimal) ───
@@ -264,7 +266,10 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
             <span className="text-xs text-t-muted font-mono shrink-0 tabular-nums">
               {formatBeadId(bead.id)}
             </span>
-            <span className="text-[13px] font-medium text-t-primary truncate">
+            <span className={cn(
+              "text-[13px] font-medium text-t-primary truncate",
+              isSettled && "line-through decoration-t-faint"
+            )}>
               {bead.title}
             </span>
           </div>
@@ -377,9 +382,6 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
       className={cn(
         "theme-card cursor-pointer bg-card border border-border/40 flex",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        // The two denser shapes dimmed a card nobody is waiting on and this one
-        // never did, so on the default theme — the one actually being run —
-        // dropped and finished work was drawn exactly like live work.
         isSettled && "opacity-45",
         blocked ? "border-l-4 border-l-danger" : "",
         isSelected && "ring-2 ring-ring ring-offset-2 ring-offset-background"
@@ -438,7 +440,10 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, prSta
           </div>
 
           {/* Row 2: Title */}
-          <div className="font-semibold text-sm leading-tight">
+          <div className={cn(
+            "font-semibold text-sm leading-tight",
+            isSettled && "line-through decoration-t-faint"
+          )}>
             {truncate(bead.title, 60)}
           </div>
 

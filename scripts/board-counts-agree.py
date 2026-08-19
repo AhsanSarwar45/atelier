@@ -27,7 +27,6 @@ protocol instead: navigate, settle, read the DOM.
 """
 import argparse
 import json
-import re
 import subprocess
 import sys
 import time

@@ -35,9 +35,13 @@ function job(...states: BeadStatus[]): { epic: Epic; pieces: Bead[] } {
 
 const many = (n: number, status: BeadStatus): BeadStatus[] => Array(n).fill(status);
 
+/** The lookup the board builds once and hands every card. */
+const lookup = (beads: Bead[]): ReadonlyMap<string, string> =>
+  new Map(beads.map((b) => [b.id, b.status]));
+
 const progressOf = (states: BeadStatus[]) => {
   const { epic, pieces } = job(...states);
-  return computeEpicProgress(epic, pieces);
+  return computeEpicProgress(epic, pieces, lookup(pieces));
 };
 
 /** What the card draws — the app's own reading, not a second copy of it. */
@@ -81,7 +85,7 @@ describe('what a job counts', () => {
       issue_type: 'epic', owner: 'someone', created_at: '', updated_at: '',
       comments: [], children: [],
     };
-    const p = computeEpicProgress(epic, []);
+    const p = computeEpicProgress(epic, [], lookup([]));
     expect(p.total).toBe(0);
     expect(p.dropped).toBe(0);
     expect(percentOf(p)).toBe(0);
@@ -118,7 +122,7 @@ describe('what a job counts', () => {
     // dropped, so the size is not known — and reporting the raw count of
     // references is exactly the rule this counter exists to remove.
     const { epic } = job(...[...many(10, 'closed'), ...many(4, 'cancelled')]);
-    const p = computeEpicProgress(epic, []);
+    const p = computeEpicProgress(epic, [], lookup([]));
     expect(p.total).toBe(0);
     expect(p.completed).toBe(0);
     expect(p.dropped).toBe(0);
@@ -143,7 +147,7 @@ describe('what a job counts as blocked', () => {
       issue_type: 'epic', owner: 'someone', created_at: '', updated_at: '',
       comments: [], children: [dropped.id, waiting.id],
     };
-    const p = computeEpicProgress(epic, [dropped, waiting]);
+    const p = computeEpicProgress(epic, [dropped, waiting], lookup([dropped, waiting]));
     expect(p.blocked).toBe(0);
     expect(p.total).toBe(1);
     expect(p.dropped).toBe(1);
@@ -157,7 +161,7 @@ describe('what a job counts as blocked', () => {
       issue_type: 'epic', owner: 'someone', created_at: '', updated_at: '',
       comments: [], children: [blocker.id, waiting.id],
     };
-    expect(computeEpicProgress(epic, [blocker, waiting]).blocked).toBe(1);
+    expect(computeEpicProgress(epic, [blocker, waiting], lookup([blocker, waiting])).blocked).toBe(1);
   });
 
   it('never counts a dropped piece as blocked, whatever it waited on', () => {
@@ -168,6 +172,6 @@ describe('what a job counts as blocked', () => {
       issue_type: 'epic', owner: 'someone', created_at: '', updated_at: '',
       comments: [], children: [blocker.id, abandoned.id],
     };
-    expect(computeEpicProgress(epic, [blocker, abandoned]).blocked).toBe(0);
+    expect(computeEpicProgress(epic, [blocker, abandoned], lookup([blocker, abandoned])).blocked).toBe(0);
   });
 });

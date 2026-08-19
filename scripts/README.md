@@ -76,6 +76,27 @@ The numbers come off the progress bar's own label and the block around it, never
 off the card's whole text — a job whose title says "reads 100% on the board"
 would otherwise be measured against its own description.
 
+## `finish-button-shows.py`
+
+Builds a throwaway board in a temp directory, registers it with the running app
+as a project, opens it in a browser and looks at the button that finishes a job.
+
+The rule it encodes: **the manager is offered the finish on his own column, and
+nowhere else.** A job whose every counted piece is finished — with some of its
+pieces dropped — reads 100% and draws `Mark Done` in Manager Review; the same
+job in Agent Review draws nothing, because a job nobody has read yet has been
+signed by nobody, and a finish offered there is how unsigned work reaches Done.
+
+It builds its own board because it has to: the Manager Review column on the real
+board is usually empty, so waiting for such a job to turn up is not a check.
+The two jobs it pours are identical apart from the column they sit in, which is
+what makes the contrast a real one rather than two separate readings.
+
+The board lives under `~/.cache/beads-web-checks` and the project is removed on
+the way out, pass or fail — the server refuses to read a board from outside the
+home directory, which is why it is not in the system temp directory. `--keep`
+leaves both standing to be looked at.
+
 ## `panel-drawers-agree.py <project-path>`
 
 Opens each side panel and samples it 120 ms later, while it should still be

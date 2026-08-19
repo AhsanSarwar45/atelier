@@ -138,13 +138,6 @@ export function isBlockedBy(
   });
 }
 
-/*
- * A second way in used to sit here, taking the board as a list and building the
- * lookup itself. Once the board built the lookup once and handed it down,
- * nothing called it — and a second entry point nobody calls is the one that
- * goes quietly wrong when the rule next moves.
- */
-
 /**
  * Card shapes that are mechanism rather than work. A gate is a lock the board
  * puts on a step; it is never something a person picks up and does.
