@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 
 import { BeadChip, BeadChipRow } from '@/components/bead-chip-row';
+import { reads, TIGHT } from '@/workbench/context-window';
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { useReports } from '@/components/report-panel';
 import { TabTools, ToolButton } from '@/components/shell';
@@ -1084,10 +1085,31 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {facts.folder}
           </Badge>
         )}
-        {view.cost && (
-          <Badge variant="secondary" appearance="light" size="sm" data-testid="cost-chip" className="ml-auto font-mono">
-            {costLabel(view.cost)}
-          </Badge>
+        {/* What this turn is costing him, in the two currencies that matter:
+            money, and the room the conversation has left before the kit
+            compacts it out from under the agent (bw-4wcd.4). */}
+        {(view.context || view.cost) && (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {view.context && (
+              <Badge
+                variant={view.context.used / view.context.window >= TIGHT ? 'warning' : 'secondary'}
+                appearance="light"
+                size="sm"
+                data-testid="context-chip"
+                data-used={view.context.used}
+                data-window={view.context.window}
+                title={`${view.context.used.toLocaleString()} of ${view.context.window.toLocaleString()} tokens of this conversation are in use`}
+                className="font-mono"
+              >
+                {reads(view.context.used, view.context.window)}
+              </Badge>
+            )}
+            {view.cost && (
+              <Badge variant="secondary" appearance="light" size="sm" data-testid="cost-chip" className="font-mono">
+                {costLabel(view.cost)}
+              </Badge>
+            )}
+          </div>
         )}
       </div>
 

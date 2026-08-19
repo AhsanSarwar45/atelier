@@ -21,6 +21,7 @@ import {
   trimInput,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
+import { latest, type Recorded } from '../../src/workbench/context-window.ts';
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -36,11 +37,13 @@ type Subscriber = (e: WbpEvent) => void;
  * 1 was the words alone. 2 is the words and the commands, which is what the
  * manager asked for after photographing the difference (§6.3.2). 3 adds the
  * change each edit made, so a chat begun in a terminal draws its edits as
- * red-and-green rather than as the new text alone (bw-4wcd.1). Raise it
- * whenever the import would produce a different transcript from the same
- * record: every chat read in by a lower one is read again on its next open.
+ * red-and-green rather than as the new text alone (bw-4wcd.1). 4 adds how full
+ * the conversation stands, which a chat begun in a terminal has no driver here
+ * to say (bw-4wcd.4). Raise it whenever the import would produce a different
+ * transcript from the same record: every chat read in by a lower one is read
+ * again on its next open.
  */
-const IMPORT_RECIPE = 3;
+const IMPORT_RECIPE = 4;
 
 /**
  * How often a chat another program is driving is looked at again.
@@ -72,6 +75,8 @@ export class Sessions {
    * to the call that stops watching (bw-dmxj.6).
    */
   private followers = new Map<string, () => void>();
+  /** The last fullness said for each chat, so an unchanged one is not said twice. */
+  private fullness = new Map<string, number>();
   // Declared, not a parameter property: Node's strip-only TypeScript mode
   // rejects `constructor(private store: Store)`.
   private store: Store;
@@ -283,6 +288,10 @@ export class Sessions {
     } catch {
       return null; // No record to read: the chat keeps whatever it already has.
     }
+    // Said the moment the record is read, because it is true of the record and
+    // not of the drawing: a chat whose record holds nothing to draw still has a
+    // size, and returning before saying it left the line blank (bw-4wcd.4).
+    this.sayFullness(summary.id, messages);
     // The words AND the commands, in one order: a past chat drawn as sentences
     // alone is the fault the manager photographed (§6.3.2).
     const all = pastTranscript(messages);
@@ -358,6 +367,24 @@ export class Sessions {
   }
 
   /**
+   * How full that conversation stands, taken from its own record.
+   *
+   * A chat begun in a terminal has no driver here to say it, and it is exactly
+   * the chat whose reader most needs to know — his own long-running jobs are
+   * the ones that fill up and get compacted (bw-4wcd.4).
+   */
+  private sayFullness(sessionId: string, messages: readonly Recorded[]): void {
+    const now = latest(messages);
+    if (!now) return;
+    // Only when it has moved: this is read off the disk every few seconds while
+    // anyone is watching, and the log IS the transcript — saying the same
+    // figure again would grow the record without telling the reader anything.
+    if (this.fullness.get(sessionId) === now.used) return;
+    this.fullness.set(sessionId, now.used);
+    this.publish(sessionId, { type: 'context', used: now.used, window: now.window });
+  }
+
+  /**
    * Is a live process on this machine holding this conversation right now?
    *
    * Read fresh, not remembered: this answer decides once and for all whether
@@ -405,6 +432,9 @@ export class Sessions {
       } catch {
         return; // Being written to this instant, or moved: try the next beat.
       }
+      // How full it stands, on every beat: the figure is the reader's only
+      // warning that a job he is watching is about to be compacted (bw-4wcd.4).
+      this.sayFullness(summary.id, messages);
       const past = pastTranscript(messages);
       const upto = settledUpTo(past);
       // The first look at a chat whose record was not imported: where it has

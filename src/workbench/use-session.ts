@@ -110,6 +110,11 @@ export interface SessionView {
   state: SessionState;
   stateLabel: string;
   cost: Cost | null;
+  /**
+   * How full the conversation is, as the model last reported it, against the
+   * window it has. Null until it has answered once (bw-4wcd.4).
+   */
+  context: { used: number; window: number } | null;
   todos: TodoItem[];
   /** Cards this chat has touched, as the machine recorded them. */
   beads: string[];
@@ -139,6 +144,7 @@ export const EMPTY: SessionView = {
   state: 'starting',
   stateLabel: 'Starting',
   cost: null,
+  context: null,
   todos: [],
   beads: [],
   permissionMode: null,
@@ -297,6 +303,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
 
     case 'cost':
       next.cost = e.cost;
+      return next;
+
+    case 'context':
+      next.context = { used: e.used, window: e.window };
       return next;
 
     case 'error':

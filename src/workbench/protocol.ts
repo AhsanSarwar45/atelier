@@ -146,6 +146,13 @@ export type WbpEvent = EventBase &
     | { type: 'ask.permission'; askId: string; toolName: string; input: Record<string, unknown>; title: string; options: AskOption[] }
     | { type: 'ask.resolved'; askId: string; chosen: string }
     | { type: 'cost'; cost: Cost }
+    /**
+     * How full the conversation is: the tokens the model was last sent, against
+     * the window it has. A reader watching an agent work has no other way to
+     * know it is about to be compacted, and being compacted mid-job is the one
+     * thing that loses a session's own memory of what it was doing (bw-4wcd.4).
+     */
+    | { type: 'context'; used: number; window: number }
     | { type: 'link.bead'; beadId: string; via: 'tool' | 'brief' | 'manual' }
     | { type: 'report.available'; project: string; slug: string }
     | { type: 'error'; message: string; fatal: boolean }
