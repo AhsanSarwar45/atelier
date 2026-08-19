@@ -167,7 +167,7 @@ export class Sessions {
       if (existing.state === 'dormant' || existing.state === 'ended') {
         this.publish(existing.id, { type: 'session.state', state: existing.state, label: 'Asleep' });
       }
-      if (live) this.follow(existing, read);
+      this.follow(existing, read);
       return { ...existing };
     }
 
@@ -196,7 +196,7 @@ export class Sessions {
     const live = this.heldElsewhere(summary);
     const read = await this.importPast(summary, live);
     this.publish(summary.id, { type: 'session.state', state: 'dormant', label: 'Asleep' });
-    if (live) this.follow(summary, read);
+    this.follow(summary, read);
     return summary;
   }
 
@@ -408,7 +408,11 @@ export class Sessions {
    *
    * A beat is one stat. The record is re-read only when that stat has moved,
    * and only entries past the mark are said, so a chat nothing is happening in
-   * costs a stat and nothing else.
+   * costs a stat and nothing else. Every chat being read here that this app is
+   * not driving is watched, whether or not a terminal is holding it at the
+   * moment it is opened: the manager opens a conversation and types into it in
+   * a terminal afterwards, and a rule that decided once at the click left that
+   * chat frozen (bw-4wcd.20).
    *
    * `from` is where the import left off, or `null` when it did not read the
    * record at all — a chat with live turns of its own keeps them, and the first
@@ -418,7 +422,7 @@ export class Sessions {
   private follow(summary: SessionSummary, from: number | null): void {
     const externalId = summary.externalId;
     if (externalId === null) return;
-    if (this.followers.has(summary.id)) return;
+    if (this.followers.has(summary.id) || this.drivers.has(summary.id)) return;
 
     let mark = from;
     let stamp = '';
@@ -465,7 +469,6 @@ export class Sessions {
       if (reading) return;
       reading = true;
       try {
-        const still = runningNow().has(externalId);
         let now = '';
         try {
           const info = await getSessionInfo(externalId, { dir: summary.cwd });
@@ -473,13 +476,15 @@ export class Sessions {
         } catch {
           now = stamp; // Unreadable this beat; not a reason to re-read it all.
         }
-        // Read on a change, and once more when the other program has gone: its
-        // last words may have landed after the beat that saw it still there.
-        if (now !== stamp || !still) {
+        // The stat alone says whether there is anything new, whoever wrote it
+        // and whether or not that program is still there. Stopping the moment
+        // the terminal exited lost every later turn: the manager answers a
+        // prompt, walks away, and comes back to a chat that stopped growing at
+        // the first answer (bw-4wcd.20).
+        if (now !== stamp) {
           stamp = now;
           await draw();
         }
-        if (!still) this.unfollow(summary.id);
       } finally {
         reading = false;
       }
@@ -656,7 +661,14 @@ export class Sessions {
   subscribe(sessionId: string, fn: Subscriber): () => void {
     if (!this.subs.has(sessionId)) this.subs.set(sessionId, new Set());
     this.subs.get(sessionId)!.add(fn);
-    return () => this.subs.get(sessionId)?.delete(fn);
+    return () => {
+      const subs = this.subs.get(sessionId);
+      subs?.delete(fn);
+      // Watched only while somebody is looking at it: a chat whose last reader
+      // has gone is caught up the next time it is opened, and the disk is left
+      // alone until then (bw-4wcd.20).
+      if (!subs || subs.size === 0) this.unfollow(sessionId);
+    };
   }
 
   /**
