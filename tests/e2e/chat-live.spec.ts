@@ -367,6 +367,12 @@ test.describe('a chat another program is running', () => {
       await expect(page.getByTestId('composer')).toBeDisabled();
       await expect(page.getByTestId('send-button')).toBeDisabled();
 
+      // And the top of the chat says what its row in the list says. "Asleep" is
+      // true of our own agent and false of what is on the screen, which is a
+      // conversation being worked in as the reader watches (bw-dmxj.10).
+      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'working');
+      await expect(page.getByTestId('session-state')).toHaveText('working');
+
       // The whole of it: something said over there turns up here, with nobody
       // reloading anything.
       const said = 'the suite came back green, 282 passed';
@@ -384,6 +390,7 @@ test.describe('a chat another program is running', () => {
     // That program has stopped: the chat is the reader's to take up.
     await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
+    await expect(page.getByTestId('session-state')).not.toHaveText('working');
     chat.forget();
   });
 });

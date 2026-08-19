@@ -931,16 +931,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {/* One line, whatever it carries: the words naming the agent never give
           way to the cards it has touched (docs/agent-workbench.md §8.2.1). */}
       <div className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/60 px-4 text-sm">
+        {/* A chat another program is working in has no agent of OURS attached,
+            which is what "Asleep" describes and not what the reader is looking
+            at: the messages arrive as that program works. It says the same word
+            its row in the list says, and it clears itself when that program
+            stops, because the stream it is read from does (bw-dmxj.10). */}
         <Badge
-          variant={busy ? 'warning' : 'secondary'}
-          appearance="light"
+          variant={held ? 'success' : busy ? 'warning' : 'secondary'}
+          appearance={held ? 'default' : 'light'}
           size="sm"
           shape="circle"
           data-testid="session-state"
-          data-state={view.state}
+          data-state={held ? 'working' : view.state}
           className="shrink-0"
         >
-          {view.stateLabel}
+          {held ? 'working' : view.stateLabel}
         </Badge>
         <span data-testid="session-meta" className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
           claude
