@@ -213,6 +213,10 @@ report cannot reach the cloud by being renamed or lightly edited.
 
 ## Debt
 
+- Every spec written before questions named a card carries one that names none,
+  and is refused on its next build until someone names the card it is waiting
+  on — 19 of the 66 specs on this machine the day the rule landed. There is no
+  sweep; each is fixed the next time its page is built.
 - The phrasebook is seeded from the terms one project used most; it is not a
   complete list of what a report should not say.
 - Charts are static pictures. No hover readouts, no live data.
