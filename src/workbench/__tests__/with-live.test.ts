@@ -110,3 +110,41 @@ describe('the list keeps up', () => {
     expect(merged[0]!.runningElsewhere).toBe(true);
   });
 });
+
+/**
+ * The mark keeps up on its own. Nobody reloads the tab to find out that a
+ * terminal has been opened, so the set of conversations live processes are
+ * holding arrives on the stream and is applied over the list as it stands.
+ */
+describe('the working mark keeps up', () => {
+  it('a chat that starts being worked in is marked, without the list being asked again', () => {
+    const marked = withLive([row({ externalId: 'x1' })], [], PROJECT, new Set(['x1']));
+    expect(marked[0]!.runningElsewhere).toBe(true);
+  });
+
+  it('and it goes when the work stops', () => {
+    const marked = withLive([row({ externalId: 'x1', runningElsewhere: true })], [], PROJECT, new Set<string>());
+    expect(marked[0]!.runningElsewhere).toBe(false);
+  });
+
+  it('a chat that starts being worked in climbs over one with a newer date', () => {
+    const rows = [
+      row({ sessionId: 's1', externalId: 'x1', lastActiveAt: '2026-08-16T09:00:00.000Z' }),
+      row({ sessionId: 's2', externalId: 'x2', lastActiveAt: '2026-08-16T12:00:00.000Z' }),
+    ];
+    expect(withLive(rows, [], PROJECT, new Set<string>()).map((r) => r.sessionId)).toEqual(['s2', 's1']);
+    expect(withLive(rows, [], PROJECT, new Set(['x1'])).map((r) => r.sessionId)).toEqual(['s1', 's2']);
+  });
+
+  // Until the stream has spoken there is nothing to apply, and the list has
+  // already arrived marked from the sidecar.
+  it('says nothing before the stream has, rather than saying nothing is running', () => {
+    const merged = withLive([row({ externalId: 'x1', runningElsewhere: true })], [], PROJECT, null);
+    expect(merged[0]!.runningElsewhere).toBe(true);
+  });
+
+  it('a chat this app started itself is left alone: the stream names conversations', () => {
+    const merged = withLive([row({ externalId: null, runningElsewhere: true })], [], PROJECT, new Set<string>());
+    expect(merged[0]!.runningElsewhere).toBe(true);
+  });
+});

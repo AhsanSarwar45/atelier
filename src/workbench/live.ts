@@ -60,6 +60,14 @@ let sessions: LiveSession[] = [];
 let source: EventSource | null = null;
 /** Rebuilt on every change so `useSyncExternalStore` sees a new reference. */
 let snapshot: LiveSession[] = sessions;
+/**
+ * The conversations a live process is holding, by the tool's own id.
+ *
+ * `null` until the stream has said — which is not the same as "none", and the
+ * difference matters: the list arrives from a fetch already marked, and an
+ * empty set would rub those marks out before the stream had spoken.
+ */
+let running: Set<string> | null = null;
 
 function announce(): void {
   snapshot = sessions;
@@ -89,6 +97,11 @@ function patch(id: string, change: Partial<LiveSession>): void {
 }
 
 function absorb(frame: WatchFrame): void {
+  if (frame.kind === 'running') {
+    running = new Set(frame.conversations);
+    announce();
+    return;
+  }
   if (frame.kind === 'snapshot') {
     sessions = frame.sessions.map(fromSummary);
     announce();
@@ -186,5 +199,21 @@ export function useLiveSessions(): LiveSession[] {
     subscribe,
     () => snapshot,
     () => EMPTY,
+  );
+}
+
+/**
+ * The conversations somebody is working in right now, by the tool's own id, or
+ * `null` while the stream has not yet said.
+ *
+ * These are not this app's sessions. A chat being typed at in a terminal is the
+ * one the list most needs to mark and the one it knows least about, so the fact
+ * arrives on its own frame rather than on a session's (protocol.ts, WatchFrame).
+ */
+export function useRunningElsewhere(): Set<string> | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => running,
+    () => null,
   );
 }

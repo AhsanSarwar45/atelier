@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { useLiveSessions, type LiveSession } from '@/workbench/live';
+import { useLiveSessions, useRunningElsewhere, type LiveSession } from '@/workbench/live';
 import { byWhatIsWorking, folderOf, laterOf, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -71,7 +71,18 @@ function rowKey(row: RestoreRow): string {
  * stream, and this is where it joins the list. Without it the owner starts a
  * chat and does not see it.
  */
-export function withLive(rows: RestoreRow[], live: LiveSession[], projectId: string): RestoreRow[] {
+export function withLive(
+  rows: RestoreRow[],
+  live: LiveSession[],
+  projectId: string,
+  /**
+   * The conversations a live process is holding, as the stream last said, or
+   * `null` while it has not said anything. Null leaves each row's own answer
+   * alone: the list arrives from the sidecar already marked, and an empty set
+   * would rub those marks out before the stream had spoken.
+   */
+  running: ReadonlySet<string> | null = null,
+): RestoreRow[] {
   const byId = new Map(rows.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
   const merged = [...rows];
 
@@ -112,7 +123,13 @@ export function withLive(rows: RestoreRow[], live: LiveSession[], projectId: str
     });
   }
 
-  return merged.sort(byWhatIsWorking);
+  // The mark last, and over everything: a chat that starts or stops being worked
+  // in changes nothing else about its row, and the reader is not reloading.
+  const marked = running
+    ? merged.map((r) => (r.externalId ? { ...r, runningElsewhere: running.has(r.externalId) } : r))
+    : merged;
+
+  return marked.sort(byWhatIsWorking);
 }
 
 interface ChatSidebarProps {
@@ -127,7 +144,11 @@ interface ChatSidebarProps {
 export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, everything = false }: ChatSidebarProps) {
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
-  const rows = useMemo(() => withLive(fetched, live, projectId), [fetched, live, projectId]);
+  const running = useRunningElsewhere();
+  const rows = useMemo(
+    () => withLive(fetched, live, projectId, running),
+    [fetched, live, projectId, running],
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 

@@ -299,6 +299,17 @@ export type WatchFrame =
   | { kind: 'snapshot'; sessions: (SessionSummary & { activity: string; beads: string[] })[] }
   /** A chat that has just come into existence, before it has said anything. */
   | { kind: 'opened'; session: SessionSummary & { activity: string; beads: string[] } }
+  /**
+   * Every conversation a live process is holding right now, by the tool's own
+   * id for it — sent once when the stream opens and again whenever the set
+   * changes. Unlike the other frames this is not about sessions this app
+   * drives: a chat being typed at in a terminal has no row in our store to
+   * carry an event, and it is exactly the chat the reader is looking for
+   * (bw-dmxj.5). The whole set each time, because it is small — one entry per
+   * running chat on the machine — and a set is unambiguous where a
+   * started/stopped pair after a missed frame is not.
+   */
+  | { kind: 'running'; conversations: string[] }
   | { kind: 'event'; event: WbpEvent };
 
 /** A chat that touched a card, as the card's own side of the join lists it. */

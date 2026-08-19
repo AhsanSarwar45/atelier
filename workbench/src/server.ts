@@ -13,6 +13,7 @@ import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesByActor, issuesForSession, sessionsForIssue } from './bd.ts';
 import { knownSessions, restoreList } from './registry.ts';
+import { runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 
@@ -68,6 +69,50 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: stri
 }
 
 /**
+ * How often the marker files are re-read while anyone is watching.
+ *
+ * Nobody sends us an event when a person opens a terminal, so this is a look
+ * rather than a wait: a directory listing of a handful of small files and one
+ * signal-0 per process, which is why it can afford to be this often. The
+ * reader caches for the same span, so a look never costs twice.
+ */
+const RUNNING_BEAT_MS = 2_000;
+
+const runningWatchers = new Set<(conversations: string[]) => void>();
+let runningBeat: ReturnType<typeof setInterval> | null = null;
+/** The last set announced, joined, purely to tell a change from a repeat. */
+let announced = '';
+
+function whatIsRunning(): string[] {
+  return [...runningNow().keys()].sort();
+}
+
+function lookAtRunning(): void {
+  const conversations = whatIsRunning();
+  const key = conversations.join(',');
+  if (key === announced) return;
+  announced = key;
+  runningWatchers.forEach((tell) => tell(conversations));
+}
+
+/**
+ * Tells the caller which conversations live processes are holding, and again
+ * whenever that changes. One timer for every browser watching rather than one
+ * each, and none at all when nobody is.
+ */
+function watchRunning(tell: (conversations: string[]) => void): () => void {
+  runningWatchers.add(tell);
+  if (!runningBeat) runningBeat = setInterval(lookAtRunning, RUNNING_BEAT_MS);
+  return () => {
+    runningWatchers.delete(tell);
+    if (runningWatchers.size > 0 || !runningBeat) return;
+    clearInterval(runningBeat);
+    runningBeat = null;
+    announced = '';
+  };
+}
+
+/**
  * Every session at once: a snapshot, then the live tail. The tray, the glance
  * strip and the board's live dots all read this one stream, so a browser holds
  * one connection however many of them are on screen.
@@ -91,14 +136,19 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
       beads: store.beadsForSession(s.id),
     })),
   });
+  // Straight after the snapshot, because a chat somebody is working in has no
+  // row in our store to appear in one, and the rail marks its rows off this.
+  write({ kind: 'running', conversations: whatIsRunning() });
   const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
   const unopen = sessions.watchOpen((s) => write({ kind: 'opened', session: { ...s, activity: '', beads: [] } }));
+  const unwatchRunning = watchRunning((conversations) => write({ kind: 'running', conversations }));
 
   const beat = setInterval(() => res.write(': keep-alive\n\n'), 30_000);
   const done = () => {
     clearInterval(beat);
     unsubscribe();
     unopen();
+    unwatchRunning();
   };
   req.on('close', done);
   req.on('error', done);
