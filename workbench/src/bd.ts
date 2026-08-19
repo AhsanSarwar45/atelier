@@ -13,13 +13,21 @@ export interface BdResult {
   stderr: string;
 }
 
-function run(args: string[], cwd: string): Promise<BdResult> {
+/**
+ * How a `bd` command is run.
+ *
+ * Every call here takes one, so a test can count what a single screen costs the
+ * tracker without a board to run against.
+ */
+export type BdRunner = (args: string[], cwd: string) => Promise<BdResult>;
+
+export const run: BdRunner = (args, cwd) => {
   return new Promise((resolve) => {
     execFile('bd', args, { cwd, timeout: 20_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' });
     });
   });
-}
+};
 
 /**
  * True only when `bd` knows this id.
@@ -28,8 +36,8 @@ function run(args: string[], cwd: string): Promise<BdResult> {
  * `{"error":"no issues found matching the provided IDs"}`, so the exit code
  * proves nothing. The answer must be an array carrying the id back.
  */
-export async function issueExists(id: string, cwd: string): Promise<{ exists: boolean; title?: string }> {
-  const { stdout } = await run(['show', id, '--json'], cwd);
+export async function issueExists(id: string, cwd: string, exec: BdRunner = run): Promise<{ exists: boolean; title?: string }> {
+  const { stdout } = await exec(['show', id, '--json'], cwd);
   try {
     const parsed = JSON.parse(stdout) as unknown;
     if (!Array.isArray(parsed)) return { exists: false };
@@ -55,8 +63,9 @@ export async function recordTranscriptLink(
   sessionId: string,
   cwd: string,
   source: string,
+  exec: BdRunner = run,
 ): Promise<boolean> {
-  const { ok } = await run(
+  const { ok } = await exec(
     ['provenance', 'record', '--issue', issue, '--kind', 'used', '--source', source, '--ref', sessionId, '--ref-kind', 'transcript'],
     cwd,
   );
@@ -64,8 +73,8 @@ export async function recordTranscriptLink(
 }
 
 /** Every issue bound to this session — the chat's own list of cards. */
-export async function issuesForSession(sessionId: string, cwd: string): Promise<string[]> {
-  const { stdout } = await run(['provenance', 'by-ref', sessionId, '--json'], cwd);
+export async function issuesForSession(sessionId: string, cwd: string, exec: BdRunner = run): Promise<string[]> {
+  const { stdout } = await exec(['provenance', 'by-ref', sessionId, '--json'], cwd);
   try {
     const rows = JSON.parse(stdout) as { issue_id?: string; ref_kind?: string }[];
     if (!Array.isArray(rows)) return [];
@@ -76,34 +85,32 @@ export async function issuesForSession(sessionId: string, cwd: string): Promise<
 }
 
 /**
- * The cards a chat worked on according to the board's own record of who
- * touched what.
+ * Every card the board says somebody claimed, with the name it was claimed
+ * under.
  *
- * The board stamps every card with the name of whoever claimed it, and that
- * name ends in the first eight characters of the agent's session — `main-31397e3e`,
+ * The board stamps a card with the name of whoever claimed it, and that name
+ * ends in the first eight characters of the agent's session — `main-31397e3e`,
  * `bw-ccm-31397e3e`. It is the only link a chat run in a terminal has, since
- * nothing in this app watched it work. Measured: reading the whole board and
- * matching the ending costs 0.14 s on a board of 1544 cards, which is why it
- * is done in one pass rather than asked card by card.
+ * nothing in this app watched it work, and the tracker matches a claimant by
+ * its exact name only, which a session does not know. So the whole board is
+ * read — 0.4 s and a megabyte on a board of 933 cards, measured — and that is
+ * why it is read for every chat at once and never while one is being opened
+ * (chat-cards.ts).
  */
-export async function issuesByActor(sessionShortId: string, cwd: string): Promise<string[]> {
-  if (sessionShortId.length < 8) return [];
-  const { stdout } = await run(['list', '--status', 'all', '--json'], cwd);
+export async function claimedCards(cwd: string, exec: BdRunner = run): Promise<{ id: string; claimant: string }[]> {
+  const { stdout } = await exec(['list', '--status', 'all', '--json', '--brief', '--skip-labels'], cwd);
   try {
     const rows = JSON.parse(stdout) as { id?: string; assignee?: string }[];
     if (!Array.isArray(rows)) return [];
-    const mine = rows.filter(
-      (r) => r.id && r.assignee && (r.assignee === sessionShortId || r.assignee.endsWith(`-${sessionShortId}`)),
-    );
-    return [...new Set(mine.map((r) => r.id!))];
+    return rows.filter((r) => r.id && r.assignee).map((r) => ({ id: r.id!, claimant: r.assignee! }));
   } catch {
     return [];
   }
 }
 
 /** Every session bound to this issue — the card's own list of chats. */
-export async function sessionsForIssue(issue: string, cwd: string): Promise<string[]> {
-  const { stdout } = await run(['provenance', 'log', issue, '--json'], cwd);
+export async function sessionsForIssue(issue: string, cwd: string, exec: BdRunner = run): Promise<string[]> {
+  const { stdout } = await exec(['provenance', 'log', issue, '--json'], cwd);
   try {
     const rows = JSON.parse(stdout) as { ref?: string; ref_kind?: string }[];
     if (!Array.isArray(rows)) return [];
