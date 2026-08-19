@@ -5578,6 +5578,17 @@ def main():
             joiner.board = was
         return asked, spoke
 
+    # And joining runs it, after the word it needs: putting jobs back into a
+    # column the board has not been told about is the same refusal all over again.
+    assert "replace(root, said.append)" in wiring, \
+        "joining never puts back the jobs the board refused while it did not " \
+        "know the manager's column, so each of them waits there for a signature " \
+        "nobody can see is owed"
+    assert wiring.index("replace(root, said.append)") \
+        > wiring.index("states(root, said.append)"), \
+        "joining puts the jobs back before it tells the board the column they " \
+        "go to, so the board refuses every one of them exactly as it did before"
+
     asked, spoke = parked(PARKED)
     put = [a[1] for a in asked if a[:1] == ["update"]]
     assert put == ["j1", "j2"], \
