@@ -351,8 +351,16 @@ await check(6, 'a clicked chip keeps its size and draws no ring outside its edge
   must(after.outline === '0px', `it drew a ${after.outline} ring outside itself`);
   must(after.shadow === 'none', `it drew a shadow ring outside itself (${after.shadow})`);
   must(after.border !== 'rgba(0, 0, 0, 0)', 'the chip has no border of its own to brighten');
+  // The half that matters: it must CHANGE. A chip that already carries a visible
+  // border passes "not transparent" whether the click did anything or not, and a
+  // rule hung on the browser's keyboard-only highlight does exactly nothing here
+  // — the reading of this job found the check green over that very fault.
+  must(
+    after.border !== before.border,
+    `the click brightened nothing: the border was ${before.border} and stayed ${after.border}`,
+  );
   await openChat();
-  return `border ${after.border}, no ring, same ${Math.round(after.w)}x${Math.round(after.h)}`;
+  return `border ${before.border} to ${after.border}, no ring, same ${Math.round(after.w)}x${Math.round(after.h)}`;
 });
 
 await check(7, 'a card chip and a report chip both draw a picture before their words', async () => {
@@ -370,12 +378,19 @@ await check(7, 'a card chip and a report chip both draw a picture before their w
   return `card ${card}, report ${rep}`;
 });
 
-await check(8, 'the button that starts a chat says New Chat', async () => {
+await check(8, 'the button that starts a chat says New Chat behind a drawn plus', async () => {
   const button = page.locator('[aria-label="New Chat"]').first();
   await button.waitFor();
   const words = (await button.textContent()).trim();
   must(/new chat/i.test(words), `the button reads "${words}"`);
-  return `"${words}"`;
+  // The plus is a picture, not a letter of the label: typed, it rides the text's
+  // own baseline and reads a size small beside the words (bw-4wcd.14).
+  const plus = button.locator('[data-testid="new-chat-plus"]');
+  must(await plus.count() > 0, `the button has no drawn plus, only the words "${words}"`);
+  must(!words.includes('+'), `the plus is still typed into the label: "${words}"`);
+  const box = await plus.first().boundingBox();
+  must(box !== null && box.width > 6 && box.height > 6, 'the drawn plus takes up no room');
+  return `"${words}" behind a ${Math.round(box.width)}x${Math.round(box.height)} drawn plus`;
 });
 
 await check(9, 'reading a chat leaves it where it was, and its row keeps its own time', async () => {

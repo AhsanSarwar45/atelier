@@ -32,7 +32,14 @@ const badgeVariants = cva(
   // halo over the chips either side of it and read as an error box — the manager
   // saw one and asked for the outline gone (bw-4wcd.6). The border is already
   // there and already transparent, so lighting it moves nothing.
-  'inline-flex items-center whitespace-nowrap justify-center border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus-visible:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
+  //
+  // On `focus`, not `focus-visible`: the browser's visible-focus rule is defined
+  // to stay OFF for a pointer click on a button — hiding the ring for the mouse
+  // is the whole reason it exists — so a chip hung on it brightened for the
+  // keyboard alone and did nothing at all for the click he described
+  // (bw-4wcd.12). The ring stays suppressed either way, so the keyboard reader
+  // loses nothing: the same brightened border is what marks it.
+  'inline-flex items-center whitespace-nowrap justify-center border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
   {
     variants: {
       variant: {

@@ -22,6 +22,7 @@ import {
   Loader2,
   PanelLeft,
   Paperclip,
+  Plus,
   Receipt,
   Search,
   ShieldCheck,
@@ -983,8 +984,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           disabled={starting}
           onClick={() => void start()}
         >
-          {starting ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
-          {starting ? 'Starting…' : '+ New Chat'}
+          {starting ? (
+            <Loader2 className="animate-spin" aria-hidden="true" />
+          ) : (
+            /* The plus is drawn, not typed: a typed one is a letter of the
+               label and sits on the text's own baseline, a hair small and a
+               hair low against the words beside it (bw-4wcd.14). */
+            <Plus data-testid="new-chat-plus" aria-hidden="true" />
+          )}
+          {starting ? 'Starting…' : 'New Chat'}
         </Button>
       </TabTools>
 
@@ -1026,7 +1034,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat open for this project.</p>
         <Button variant="primary" onClick={() => void start()} disabled={starting} data-testid="new-chat">
-          {starting ? 'Starting…' : '+ New Chat'}
+          {starting ? null : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
+          {starting ? 'Starting…' : 'New Chat'}
         </Button>
         {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}
       </div>,
