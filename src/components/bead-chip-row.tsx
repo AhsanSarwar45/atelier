@@ -17,6 +17,7 @@ import { CircleDot } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { addressWith, cardWasPushed } from '@/lib/address';
+import { cn } from '@/lib/utils';
 import { CARDS_ON_A_ROW, CARDS_ON_THE_LINE, cardsOnTheLine } from '@/workbench/cards-on-the-line';
 
 /** Where the chips are drawn, which sets how many fit and what they are called. */
@@ -27,36 +28,38 @@ const PLACES = {
   row: { room: CARDS_ON_A_ROW, size: 'xs', chip: 'row-bead-chip', more: 'row-bead-more' },
 } as const;
 
-export function BeadChipRow({
-  ids,
+/**
+ * One card, as a chip that opens it. Drawn on a chat's line, on a row in the
+ * list, and wherever a message names a card in its own words (bw-4wcd.3), so
+ * all three look the same and all three open the card the same way.
+ */
+export function BeadChip({
+  id,
   projectId,
-  place = 'line',
+  size = 'sm',
+  testId = 'bead-chip',
   className,
 }: {
-  ids: string[];
+  id: string;
   projectId: string | null;
-  place?: ChipPlace;
+  size?: 'sm' | 'xs';
+  testId?: string;
   className?: string;
 }) {
   const router = useRouter();
   const params = useSearchParams();
-  const spec = PLACES[place];
-  const { shown, rest } = cardsOnTheLine(ids, spec.room);
-  if (!ids.length) return null;
-
-  const chip = (id: string, testid: string) => (
+  return (
     <Badge
-      key={id}
       asChild
       variant="primary"
       appearance="outline"
-      size={spec.size}
+      size={size}
       shape="circle"
-      className="shrink-0 font-mono"
+      className={cn('shrink-0 font-mono', className)}
     >
       <button
         type="button"
-        data-testid={testid}
+        data-testid={testId}
         data-bead-id={id}
         title={`Open ${id}`}
         onClick={(e) => {
@@ -73,6 +76,26 @@ export function BeadChipRow({
         {id}
       </button>
     </Badge>
+  );
+}
+
+export function BeadChipRow({
+  ids,
+  projectId,
+  place = 'line',
+  className,
+}: {
+  ids: string[];
+  projectId: string | null;
+  place?: ChipPlace;
+  className?: string;
+}) {
+  const spec = PLACES[place];
+  const { shown, rest } = cardsOnTheLine(ids, spec.room);
+  if (!ids.length) return null;
+
+  const chip = (id: string, testid: string) => (
+    <BeadChip key={id} id={id} projectId={projectId} size={spec.size} testId={testid} />
   );
 
   return (

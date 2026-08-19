@@ -29,8 +29,8 @@ import {
   X,
 } from 'lucide-react';
 
-import { BeadChipRow } from '@/components/bead-chip-row';
-import { MarkdownBody } from '@/components/markdown-body';
+import { BeadChip, BeadChipRow } from '@/components/bead-chip-row';
+import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { useReports } from '@/components/report-panel';
 import { TabTools, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -49,6 +49,8 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { languageOf, languagesOf, paint } from '@/workbench/colouring';
+import { useKnownCards } from '@/workbench/known-cards';
+import { mentionsIn } from '@/workbench/mentions';
 import { diffLines } from '@/workbench/line-diff';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
 import type { AskOption, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
@@ -741,6 +743,32 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const { reports } = useReports();
   const owned = new Set(cards.flatMap((id) => [id, id.split('.')[0]!]));
   const ours = reports.filter((r) => r.card !== null && owned.has(r.card));
+
+  // A card or a report the agent NAMED in its own words opens from where it is
+  // written. Only ones that exist: English is full of hyphenated words shaped
+  // like a card id, so the board's own list and the reports this project has
+  // are what decide (bw-4wcd.3, src/workbench/mentions.ts).
+  const knownCards = useKnownCards(projectPath);
+  const byName = useMemo(() => new Map(reports.map((r) => [r.slug, r])), [reports]);
+  const mentions = useMemo<Mentions>(
+    () => ({
+      split: (text) =>
+        mentionsIn(text, { card: (id) => knownCards.has(id), report: (slug) => byName.has(slug) }),
+      card: (id) => (
+        <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5 align-baseline" />
+      ),
+      report: (slug) => {
+        const found = byName.get(slug);
+        if (!found) return slug;
+        return (
+          <span className="mx-0.5 inline-flex align-baseline">
+            <ReportChip project={found.project} slug={found.slug} title={found.title} fsPath={projectPath ?? ''} />
+          </span>
+        );
+      },
+    }),
+    [knownCards, byName, projectId, projectPath],
+  );
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** The picture being looked at, from the tray or from a message. */
@@ -1127,7 +1155,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   className="mb-2 max-h-64 max-w-full cursor-zoom-in rounded border border-border/60"
                 />
               ))}
-              <MarkdownBody className="text-sm">{item.text}</MarkdownBody>
+              <MarkdownBody className="text-sm" mentions={mentions}>
+                {item.text}
+              </MarkdownBody>
             </div>
           );
         })}

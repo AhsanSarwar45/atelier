@@ -5,6 +5,8 @@
  * a fenced block or an address looks the same wherever it was written. There is
  * no second renderer; a place that needs different spacing passes `tight`.
  */
+import type { ReactNode } from "react";
+
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
@@ -13,6 +15,18 @@ import remarkGfm from "remark-gfm";
 import "highlight.js/styles/github-dark.css";
 
 import { cn } from "@/lib/utils";
+import { rehypeMentions, type Piece } from "@/workbench/mentions";
+
+/**
+ * What a name written in the words should become. Absent — everywhere but a
+ * chat — the text is drawn exactly as it always was (bw-4wcd.3).
+ */
+export interface Mentions {
+  /** The text, split into plain words and the things in it that open. */
+  split: (text: string) => Piece[];
+  card: (id: string) => ReactNode;
+  report: (slug: string) => ReactNode;
+}
 
 const PROSE_CLASSES =
   "prose prose-sm dark:prose-invert max-w-none " +
@@ -27,7 +41,15 @@ const PROSE_CLASSES =
   // A pasted path or a long address must not push the column wider than its box.
   "prose-pre:overflow-x-auto break-words";
 
-export function MarkdownBody({ children, className }: { children: string; className?: string }) {
+export function MarkdownBody({
+  children,
+  className,
+  mentions,
+}: {
+  children: string;
+  className?: string;
+  mentions?: Mentions;
+}) {
   return (
     <div className={cn(PROSE_CLASSES, className)}>
       <ReactMarkdown
@@ -35,12 +57,22 @@ export function MarkdownBody({ children, className }: { children: string; classN
         // fields are written in: tables, task lists, strikethrough, and a bare
         // address becoming a link without anyone having to bracket it.
         remarkPlugins={[remarkGfm, remarkBreaks]}
-        rehypePlugins={[rehypeHighlight]}
+        rehypePlugins={mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]}
         components={{
           // A link leaves for its own tab and cannot reach back into this one.
           a: ({ node, ...props }) => (
             <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />
           ),
+          // A name the rewriting step marked. Everything else drawn as a span
+          // stays a span, so nothing about ordinary text changes.
+          span: ({ node, ...props }) => {
+            const marks = props as Record<string, string | undefined>;
+            const card = marks['data-card-mention'];
+            if (card && mentions) return <>{mentions.card(card)}</>;
+            const report = marks['data-report-mention'];
+            if (report && mentions) return <>{mentions.report(report)}</>;
+            return <span {...props} />;
+          },
         }}
       >
         {children}
