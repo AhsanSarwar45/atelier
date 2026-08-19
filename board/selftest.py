@@ -5489,6 +5489,21 @@ def main():
         "joining took away a state the board had of its own instead of adding to " \
         "it: %s" % kept
 
+    # A step nobody runs is a step that is not there. The cases above hold what
+    # joining does when it is called; this holds that joining calls it at all —
+    # and after the line settling who this checkout is, because one still
+    # inferring a contributor points its board at a planning store, and the
+    # states would be told to that instead.
+    wiring = inspect.getsource(joiner.main)
+    assert "states(root, said.append)" in wiring, \
+        "joining never tells its board about the review states, so a project " \
+        "joins and the review half of every job on it is refused one card at a " \
+        "time from that day on"
+    assert wiring.index("states(root, said.append)") > wiring.index("beads.role"), \
+        "joining tells the board about the review states before it settles who " \
+        "this checkout is, so they go to whatever store a contributor's board is " \
+        "inferred to be rather than to the board itself"
+
     def check(had):
         """What the joining check says about a board holding these states."""
         was = project.custom_states
