@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import board as board_mod  # noqa: E402
 import build  # noqa: E402
 from blocks import ReportError  # noqa: E402
 
@@ -25,6 +26,7 @@ GOOD = {
             "options": [{"label": "Ship", "say": "Ship the sharper mirrors.", "pick": True},
                         {"label": "Hold", "say": "Hold the mirrors."}],
             "note": "One day of work either way",
+            "holds": "x.2",
         }],
     },
     "status": {
@@ -79,6 +81,10 @@ def one_option(s):
 def no_pick(s):
     for o in s["actions"]["questions"][0]["options"]:
         o.pop("pick", None)
+
+
+def no_card_held(s):
+    s["actions"]["questions"][0].pop("holds", None)
 
 
 def bad_state(s):
@@ -153,6 +159,7 @@ case("a missing slot", drop_slot, "slot 'status' is missing")
 case("a title that is a sentence", long_title, "title is")
 case("a question pointing at a decision number", points_at_decision, "points at D2")
 case("a question with one answer", one_option, "at least two answers")
+case("a question holding up nothing", no_card_held, "names no card it is holding up")
 case("a question with no recommendation", no_pick, "exactly one recommended")
 case("an invented checklist state", bad_state, "state done, draft or todo")
 case("no next-up named", no_next_up, "next_up")
@@ -174,6 +181,9 @@ def run() -> int:
     tmp = Path(tempfile.mkdtemp())
     spec_path = tmp / "case.report.json"
     build.previous = lambda _p: None
+    # Every question names a card, so every build here asks the board about one.
+    # The cases that are not about that rule get a board that says "still open".
+    build.card_state = lambda card, project, base=None: "open"
 
     for name, mutate, expect, kind in CASES:
         spec = copy.deepcopy(GOOD)
@@ -242,6 +252,9 @@ def run() -> int:
     if not any("D2 now says" in p for p in build.validate(spec, spec_path)[0]):
         failures.append("a decision rewritten under its old number went unnoticed")
     build.previous = lambda _p: None
+    # Every question names a card, so every build here asks the board about one.
+    # The cases that are not about that rule get a board that says "still open".
+    build.card_state = lambda card, project, base=None: "open"
 
     # a card with nothing under it refuses, rather than quietly showing no work
     spec = copy.deepcopy(GOOD)
@@ -419,9 +432,41 @@ def run() -> int:
     if any("mirrors" in w for w in ctx.warnings):
         failures.append("a plainly titled card was flagged")
 
+    # a question is refused once the card it is holding up is finished, and the
+    # same question builds while that card is still open
+    for finished in ("closed", "cancelled"):
+        build.card_state = lambda card, project, base=None: finished
+        try:
+            build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+            failures.append(f"a question holding up a {finished} card: printed anyway")
+        except ReportError as e:
+            if "x.2" not in str(e):
+                failures.append(f"a question holding up a {finished} card: did not name it — {e}")
+    build.card_state = lambda card, project, base=None: None
+    try:
+        build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+        failures.append("a question holding up a card the board never heard of: printed anyway")
+    except ReportError:
+        pass
+    build.card_state = lambda card, project, base=None: "open"
+    build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+
+    # a machine with no board cannot say either way, so it says so and builds
+    def no_board(card, project, base=None):
+        raise board_mod.NoBoard
+
+    build.card_state = no_board
+    ctx = build.Ctx([], tmp)
+    build.build(copy.deepcopy(GOOD), ctx)
+    if not any("no board" in n for n in ctx.notes):
+        failures.append("a build with no board to ask said nothing about what it could not check")
+    if ctx.warnings:
+        failures.append("what the build could not check was counted as words to plain up")
+    build.card_state = lambda card, project, base=None: "open"
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 30 - len(failures)}/{len(CASES) + 30} report gates hold")
+    print(f"{len(CASES) + 35 - len(failures)}/{len(CASES) + 35} report gates hold")
     return 1 if failures else 0
 
 
