@@ -226,10 +226,14 @@ report cannot reach the cloud by being renamed or lightly edited.
 ## Debt
 
 - Every spec written before this rule carries a question that names nothing, or
-  names a whole job — 21 pages and 35 questions on this machine the day it
-  landed, 26 of them naming nothing and 9 naming a job. Each is refused on its
-  next build until someone names the piece of work that is waiting. There is no
-  sweep; each is fixed the next time its page is built.
+  names a card with work under it — 20 pages and 33 questions of the 72 specs
+  on this machine the day the second half landed, 26 naming nothing and 7
+  naming a card that carries work. Each is refused on its next build until
+  someone names the piece of work that is waiting. There is no sweep; each is
+  fixed the next time its page is built.
+- A next step's cost is checked for being there and not for being one of the
+  four words the reader draws, so a spec that writes a plain duration builds
+  clean and hands over a link to a blank screen. Filed as bw-6of0.
 - The phrasebook is seeded from the terms one project used most; it is not a
   complete list of what a report should not say.
 - Charts are static pictures. No hover readouts, no live data.
