@@ -24,7 +24,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { ExternalLink, FileText, MessagesSquare } from 'lucide-react';
+import { FileText, MessagesSquare } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -65,7 +65,6 @@ export function LinksRail({
   projectPath,
   beadsById,
   onOpenCard,
-  standaloneUrl,
   className,
 }: {
   spec: ReportSpec;
@@ -73,8 +72,6 @@ export function LinksRail({
   projectPath: string;
   beadsById: Map<string, Bead>;
   onOpenCard: (id: string) => void;
-  /** The old self-contained page (`report-panel.tsx`'s `reportUrl()`), for the reader who wants it as it was. */
-  standaloneUrl: string;
   className?: string;
 }) {
   const primary: CardLink | null = useMemo(() => {
@@ -214,19 +211,6 @@ export function LinksRail({
         </Panel>
       )}
 
-      <Button
-        asChild
-        type="button"
-        variant="outline"
-        size="sm"
-        data-testid="report-link-standalone"
-        className="w-full max-w-[18rem] shrink-0 justify-start gap-2 self-start"
-      >
-        <a href={standaloneUrl} target="_blank" rel="noreferrer">
-          <ExternalLink className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
-          Open on its own page
-        </a>
-      </Button>
     </aside>
   );
 }

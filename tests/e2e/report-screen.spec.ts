@@ -130,6 +130,11 @@ test.describe('a report is a place under its project', () => {
     // Not a page held in a frame: the report is drawn by the app itself.
     await expect(page.locator('iframe')).toHaveCount(0);
 
+    // And nothing offers to leave it: the report IS its own page here, so the
+    // old self-contained one is only what the builder falls back to when the
+    // app cannot show a report at all (bw-7ks.21.11).
+    await expect(page.getByTestId('report-link-standalone')).toHaveCount(0);
+
     // The window itself never scrolls — the report's own pane does.
     const overflow = await page.evaluate(() => {
       const el = document.scrollingElement ?? document.documentElement;

@@ -27,10 +27,9 @@ import { LinksRail } from '@/components/report/screen/links-rail';
 import { ReportsList } from '@/components/report/screen/reports-list';
 import { TableOfContents, type TocEntry } from '@/components/report/screen/toc';
 import { useActiveSection } from '@/components/report/screen/use-active-section';
-import { reportQuery, useReportSpec } from '@/components/report/screen/use-report-spec';
+import { useReportSpec } from '@/components/report/screen/use-report-spec';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
-import { apiUrl } from '@/lib/api-base';
 import { addressWith, cardWasPushed } from '@/lib/address';
 import { projectDir } from '@/lib/utils';
 
@@ -137,8 +136,6 @@ export default function ReportTab({
     document.getElementById('act')?.scrollIntoView({ block: 'start' });
   }, [spec, section, report]);
 
-  const standaloneUrl = apiUrl(`/api/reports/page?${reportQuery(projectName, report ?? '', fsPath)}`);
-
   // No report named: the tab is this project's list of them.
   if (!report) {
     return (
@@ -186,7 +183,6 @@ export default function ReportTab({
           cardWasPushed();
           go({ card: id });
         }}
-        standaloneUrl={standaloneUrl}
         className={[
           // A strip, whatever it holds: the tallest group in it — a card that
           // half a dozen chats have touched — would otherwise stand the links
