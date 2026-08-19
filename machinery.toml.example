@@ -27,10 +27,6 @@ brand = "EXAMPLE"
 # Other registered projects a job here may say its change lands in
 # (`lands:<name>` on the goal).
 lands_elsewhere = []
-# When this project's pour began asking a job why it drops a step. A job poured
-# before it was never asked and is not held to an answer. Leave it out if the
-# project joined after the question existed.
-# guard_asked_from = "2026-08-12T17:56:47Z"
 # Where this project's own quality-rule modules live, relative to its root.
 # Empty runs `quality.py` with the shared measures only.
 rules = ""

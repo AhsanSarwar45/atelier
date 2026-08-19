@@ -18,7 +18,6 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "board"))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import board_common as bc  # noqa: E402
-import project  # noqa: E402
 import reading  # noqa: E402
 import run  # noqa: E402
 import sections  # noqa: E402
@@ -57,42 +56,6 @@ UNREAD = (
     " The reading is not one of them — it has no card. The board sends a reader when "
     "a job's last piece closes and it signs the goal itself; if that one died, "
     "`%s --rerun` sends another."
-)
-
-# The step a bug job may not drop on its own say-so, and the one test for the
-# manager's approval — the design step's, borrowed rather than copied, so his
-# words are recognised in one place and a second spelling of "he agreed" cannot
-# drift into being.
-GUARD = "test"
-MANAGER_SAID, MANAGER_WANTS = spine.NOTE_SHAPE["design"]
-
-# When this project's pour began asking a job to say why it drops a step. A job
-# poured before that was never asked, and a job cannot answer a question nobody
-# put to it. The moment differs by project — one that joined the machinery after
-# the question existed has no such jobs at all — so it is declared rather than
-# written here (`machinery.toml`, `guard_asked_from`).
-#
-# The pour time is what is asked, not whether a reason is stored, because a stored
-# reason comes off again in one command and the refusal would be a formality.
-def asked_from(root):
-    return stamp(project.of(root).guard_asked_from) or 0.0
-
-
-WAIVER = (
-    "%(cid)s belongs to a bug job that dropped the Guard step, and what stands on "
-    "the goal in place of a guard is not the manager's:\n\n  %(why)s\n\nA fault "
-    "nothing catches is a fault that comes back, so dropping that step is his call "
-    "and not yours. Every waiver this board has on record was the agent's own "
-    "reasoning, accepted because nothing ever read it back.\n\n"
-    "This fires at the first step to close, so nothing is built yet either way. "
-    "Two ways on:\n\n"
-    "  put the guard back into this job's run — the board opens the card itself "
-    "when its turn comes\n    bd update %(goal)s --set-metadata spine=%(order)s\n\n"
-    "  or, if he has actually said the fault needs no guard, store what he said\n"
-    "    bd update %(goal)s --set-metadata skip.%(guard)s=\"<his words>\"\n\n"
-    "The second is read for %(wants)s — the words, not who typed them. It catches a "
-    "reason that never claims his yes; it cannot tell a claimed yes from a real one. "
-    "If you have not asked him, take the first route."
 )
 
 
@@ -202,69 +165,6 @@ def tally(name):
         cost.record(name)
     except Exception:
         pass
-
-
-def _at(sid):
-    """Where a stored step id sits in the catalogue; past the end if it names none."""
-    sid = spine.now(sid)
-    return spine.ORDER.index(sid) if sid in spine.ORDER else len(spine.ORDER)
-
-
-def with_guard(order):
-    """This job's own order with the guard step back in its catalogue place.
-
-    Built out of the ids as they are stored rather than out of the catalogue: a job
-    poured before a step was renamed runs the order written on it, and respelling
-    that here would hand the agent a command that moves the job onto a different
-    run than the one it has been working.
-    """
-    out = [s for s in (order or "").split(",") if s]
-    at = next((i for i, sid in enumerate(out) if _at(sid) > _at(GUARD)), len(out))
-    return ",".join(out[:at] + [GUARD] + out[at:])
-
-
-def guard_waived(cid, card, root):
-    """The job this card belongs to, when it dropped the guard on words that are
-    not the manager's. (goal id, goal, the stored reason), or None.
-
-    Three things let a job past. It runs the guard. It is not a bug, so there is no
-    measured fault for a check to hold shut. Or it was poured before the pour began
-    asking, which is not a waiver anybody took — it is a question nobody put.
-    """
-    labels = card.get("labels") or []
-    kind = next((l[5:] for l in labels if l.startswith("kind:")), None)
-    if kind and kind != "bug":
-        # Every card of a job wears its job's kind, copied down at the pour
-        # (spine.step_labels, `job under`), so most closes settle without a query.
-        return None
-    # `of:` is asked first and `job` only after it: creating with `--parent` copies
-    # the parent's labels down, so a step arrives wearing its goal's `job` too and
-    # would otherwise be read as its own goal — which carries no order, and so
-    # answers for nothing.
-    goal_id = next((l[3:] for l in labels if l.startswith("of:")), None)
-    if goal_id:
-        goal = show(goal_id, root)
-    elif "job" in labels:
-        goal_id, goal = cid, card
-    else:
-        return None
-    if not goal:
-        return None
-    meta = goal.get("metadata") or {}
-    if (meta.get("kind") or next((l[5:] for l in goal.get("labels") or []
-                                  if l.startswith("kind:")), "")) != "bug":
-        return None
-    order = spine.stored(meta.get("spine"))
-    if not order or GUARD in order:
-        return None
-    # A stored reason is itself proof the pour asked, so a job whose pour time the
-    # board will not say is judged on the reason after all rather than waved past.
-    why = meta.get("skip." + GUARD)
-    poured = stamp(goal.get("created_at"))
-    asked = poured >= asked_from(root) if poured is not None else why is not None
-    if not asked or MANAGER_SAID(why or ""):
-        return None
-    return goal_id, goal, why or ""
 
 
 def landing_names(cid, card, root):
@@ -813,22 +713,6 @@ def main():
                        bc.tool(root, "review"), cid)
                 )
                 tally("landing-gated")
-                return
-            # Asked at every close, which in practice is the first one: the job is
-            # refused at its opening step, before a line of it is designed. Held
-            # back to the last step it would arrive after the whole job had been
-            # built to a shape with no check in it, and the guard would then be
-            # written to fit work already finished — which is the one thing a
-            # guard must not be.
-            waived = guard_waived(cid, card, root)
-            if waived:
-                goal_id, goal, why = waived
-                deny(WAIVER % {
-                    "cid": cid, "goal": goal_id, "guard": GUARD, "wants": MANAGER_WANTS,
-                    "why": why or "nothing at all — no reason is stored on the goal",
-                    "order": with_guard((goal.get("metadata") or {}).get("spine")),
-                })
-                tally("guard-waiver")
                 return
             me = bc.actor(data.get("session_id"), bc.where(data))
             left = unfinished_spine(card, root, me) \

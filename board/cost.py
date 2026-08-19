@@ -49,9 +49,6 @@ REPO = os.path.dirname(HERE)
 # than believed, so a gate deleted or renamed goes back to reading `not built yet`
 # instead of reading as a refusal that never fires.
 FIRES = [
-    ("guard-waiver", "hooks/board-status-gate.py",
-     "cor-mx9d.7 refused a finish: nothing catches the fault, and no waiver in the "
-     "manager's words"),
     ("habit-cause", "hooks/board-gate.py",
      "cor-mx9d.8 refused a reply: a habit pointed at, and no card naming what "
      "produced it"),
@@ -78,7 +75,7 @@ RECORDS = re.compile(r"\b(?:tally|record)\(\s*[\"']([a-z][a-z0-9-]*)[\"']")
 
 # The step whose drop the closing gate will refuse.
 GUARD = "test"
-GUARD_HEAD = "\nGUARD STEP DROPPED — the baseline cor-mx9d.7 will change"
+GUARD_HEAD = "\nGUARD STEP DROPPED — what it cost while the playbook had one"
 # The manager's own words, by the same shape the design step is already held to.
 MANAGER = spine.NOTE_SHAPE["design"][0]
 
@@ -213,13 +210,14 @@ def guard_section(rows):
     """The baseline the closing gate changes: who dropped the guard step, and on
     whose words."""
     print(GUARD_HEAD)
-    print("%d jobs poured. Each answers for every droppable step at the pour."
-          % len(rows))
+    print("%d jobs poured. The guard is no longer a step at all — bw-510 cut it into "
+          "the checks step, which every job runs — so this is the record of what the "
+          "board got while dropping it was a thing a job could do." % len(rows))
     print("\n  %-9s %6s  %-22s  %s" % ("step", "ran it", "dropped, reason kept",
                                        "dropped, nothing kept"))
-    # The guard keeps its row once cor-mx9d.7 takes it out of the droppable tier:
-    # what it cost while it was droppable is the baseline that gate is judged on.
-    steps = spine.droppable()
+    # The guard keeps its row now that it is out of the playbook altogether: what
+    # it cost while a job could drop it is what the cut is judged against.
+    steps = spine.optional()
     every = {sid: drops(rows, sid) for sid in steps + ([] if GUARD in steps else [GUARD])}
     for sid, (ran, said, silent) in every.items():
         print("  %-9s %6d  %-22d  %d" % (sid, ran, len(said), len(silent)))

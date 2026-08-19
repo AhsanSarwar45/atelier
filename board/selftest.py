@@ -2389,95 +2389,6 @@ def main():
           "and behind a shell it is handed to, both gates read that list from one "
           "place, and a card's own words are still words")
 
-    # A bug job that runs no guard step, closing the FIRST step of its order. The
-    # words on the goal are the whole of the case: the same job is refused or let
-    # through on nothing else. `poured` before ASKED_FROM is a job from before the
-    # pour asked, which has no answer to give and is not held to one.
-    AGENT_SAID = "the case suite already carries the assertion that goes red"
-    HIS_WORDS = 'he approved dropping it: "that one is a throwaway, no guard"'
-
-    def guarded(why, kind="bug", poured="2026-08-14T07:00:00Z"):
-        """What the gate says to the opening step of such a job, and what it counted."""
-        meta = {"spine": "worktree,clarify,prove,design,work,verify,review,record,land",
-                "area": "board", "kind": kind}
-        if why is not None:
-            meta["skip.test"] = why
-        goal = {"id": "tst-bug", "issue_type": "epic", "status": "in_progress",
-                "created_at": poured, "metadata": meta,
-                "labels": ["job", "area:board", "kind:" + kind]}
-        # `job` on a step is not a mistake in the fixture: creating with `--parent`
-        # copies the goal's labels down, and a step is only stripped of them once
-        # `spine.settle` has run. Read that label first and the step answers as its
-        # own goal, which carries no order and so answers for nothing.
-        step = {"id": "tst-bug.1", "issue_type": "task", "status": "in_progress",
-                "notes": "", "labels": ["step:worktree", "of:tst-bug", "job",
-                                        "area:board", "kind:" + kind]}
-        # The manager's count of what this gate costs, kept out of the real file:
-        # a case that leaves rows behind inflates the number he is reading.
-        fired, was = [], status.tally
-        status.tally = fired.append
-        try:
-            said = refusal('bd close tst-bug.1 --reason="the tree is cut"', step,
-                           {"tst-bug": goal, "tst-bug.1": step})
-        finally:
-            status.tally = was
-        return said, fired
-
-    said, fired = guarded(AGENT_SAID)
-    assert "dropped the Guard step" in said and AGENT_SAID in said, \
-        "a bug job waived its own guard step and was allowed to start: %s" \
-        % (said or "ALLOWED")
-    assert fired == ["guard-waiver"], \
-        "the refusal fired without counting, so the manager's number stays a " \
-        "guess: %s" % fired
-    route = [l.strip() for l in said.splitlines() if l.strip().startswith("bd update")]
-    assert route and route[0] == "bd update tst-bug --set-metadata spine=worktree," \
-                                "clarify,prove,design,work,verify,test,review,record," \
-                                "land", \
-        "the way out puts the guard somewhere other than its own place: %s" % route
-
-    kept, _ = guarded(HIS_WORDS)
-    assert "dropped the Guard step" not in kept, \
-        "the same job was refused with the manager's own yes on the goal: %s" % kept
-
-    # What the check does is read the words a yes is given in, whoever typed them
-    # (cor-abv8) — so a waiver the agent wrote for itself in those words passes, and
-    # the refusal is held to promising no more than that.
-    mine, _ = guarded("approved: I decided myself that the suite covers this one")
-    assert "dropped the Guard step" not in mine, \
-        "the case is written against words the check refuses anyway, so it says " \
-        "nothing about what the refusal may claim: %s" % mine
-    assert "not who typed them" in said and "cannot tell a claimed yes" in said, \
-        "the refusal does not say what the check cannot catch: %s" % said
-    assert "will not pass" not in said, \
-        "the refusal promises the agent's own reasoning is stopped, and reading the " \
-        "words does not stop it: %s" % said
-
-    # The population this must not touch: a job whose fault is not a bug.
-    spared, counted_it = guarded(why=AGENT_SAID, kind="chore")
-    assert "dropped the Guard step" not in spared and not counted_it, \
-        "a chore was held to the guard rule anyway: %s" % spared
-
-    # And the one a project may declare out of it: the jobs it had already poured
-    # when its pour began asking. A project that declared no such date has none —
-    # which is what joining after the question existed means — so the case is the
-    # other way round for it, and the rule reaching back to the board's first day
-    # is the thing being held.
-    OLD = "2000-01-01T00:00:00Z"
-    old, counted_old = guarded(why=None, poured=OLD)
-    if DECL.guard_asked_from:
-        assert "dropped the Guard step" not in old and not counted_old, \
-            "a job poured before this project's pour asked was held to the guard " \
-            "rule anyway: %s" % old
-    else:
-        assert "dropped the Guard step" in old, \
-            "this project declared no date its pour began asking, so every job it " \
-            "has is held to the guard rule — and an old one was let through: %s" % old
-
-    print("ok: a bug job cannot start while the only thing standing where its guard "
-          "should be is the agent's own reasoning, the words of a yes are what let it "
-          "through, and the refusal promises no more than reading words can do")
-
     tmp = tempfile.mkdtemp(prefix="board-selftest-")
     try:
         second = scratch_repo(tmp, unmerged=True)
@@ -2878,6 +2789,132 @@ def main():
     print("ok: a card is refused unless what is wrong is observable, the finish line "
           "names a run and its outcome, the scope line was written for this job, a "
           "work item is held to its parent's bar, and a find says where and how")
+
+    # What a job costs before it is allowed to start. Eleven steps, of which four
+    # were ceremony a job paid in cards: a worktree card for a tree the gates
+    # already demand, a clarify and a prove card for what the pour had just asked
+    # for in --what and --evidence, a verify card and a guard card for two halves
+    # of one command. The run is work, checks, review, land, and the rest arrive
+    # only when the job says so (bw-510, bw-a6o.2).
+    #
+    # The real pour, run against a `bd` that answers and writes down what it was
+    # asked — the order is what the goal is stamped with, not what a helper here
+    # recomputes.
+    tmp = tempfile.mkdtemp(prefix="board-pour-")
+    try:
+        stub = os.path.join(tmp, "bd")
+        with open(stub, "w") as fh:
+            fh.write("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$BD_LOG\"\n"
+                     "case \"$*\" in *--json*) echo '{\"id\":\"tst-poured\"}';; esac\n")
+        os.chmod(stub, 0o755)
+        log = os.path.join(tmp, "asked.log")
+
+        def poured(*extra, **over):
+            open(log, "w").close()
+            args = {"--what": READABLE, "--evidence": "x" * 40, "--done": DONE,
+                    "--not": NOT_IN, "--area": LAST_AREA, "--kind": "bug",
+                    "--judge": "agent"}
+            args.update(over)
+            flat = ["new"]
+            for flag, value in args.items():
+                if value is not None:
+                    flat += [flag, value]
+            env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
+                       BD_LOG=log)
+            run = subprocess.run([sys.executable, os.path.join(HOME, "board", "job")]
+                                 + flat + list(extra), capture_output=True, text=True,
+                                 env=env, cwd=ROOT)
+            said = (run.stdout or "") + (run.stderr or "")
+            return run.returncode, said, open(log).read().splitlines()
+
+        code, said, asked = poured()
+        assert code == 0, "a pour that named no steps at all was refused: %s" % said
+        assert "runs: work → checks → review → land" in said, \
+            "a job that asked for nothing extra runs something other than its work, " \
+            "its checks, its reading and its landing: %s" % said
+        assert any("spine=work,checks,review,land" in line for line in asked), \
+            "the goal was stamped with an order other than the one it printed: %s" % asked
+        made = [l for l in asked if l.startswith("create ")]
+        assert len(made) == 1, \
+            "a job that has not been designed yet already has %d cards on the board, " \
+            "which is the ceremony the cut removed: %s" % (len(made), made)
+        assert "no first step to open" in said, \
+            "the pour opened a card at a position whose cards are the job's own work " \
+            "items: %s" % said
+        if DECL.checks:
+            assert any("checks=" + DECL.checks in line for line in asked), \
+                "the goal does not carry this project's checks command, so the step " \
+                "opened weeks later by a session standing somewhere else has no way " \
+                "to name it: %s" % asked
+
+        # The optional steps, which arrive two ways and no other: named, or asked
+        # for by the job's own words. Nothing is owed in writing.
+        code, said, asked = poured("--steps", "ground,design")
+        assert code == 0 and "runs: ground → design → work → checks → review → land" \
+            in said, "a job that named two optional steps did not get them: %s" % said
+        assert len([l for l in asked if l.startswith("create ")]) == 2, \
+            "a job whose run opens at a step of its own got no card for it: %s" % asked
+
+        _, said, _ = poured(**{"--done": "`cargo bench` reports the draw at 8 ms, "
+                                         "down from 30 ms"})
+        assert "benchmark" in said, \
+            "a job claiming a speed win was poured with nothing measuring it: %s" % said
+        _, said, _ = poured(**{"--done": "`cargo test` reports 0 failures with "
+                                         "docs/board.md rewritten to match"})
+        assert "record" in said, \
+            "a job whose finish line names the document it writes was poured with " \
+            "nothing writing it: %s" % said
+        _, said, _ = poured("--record", "docs/board.md")
+        assert "record" in said, \
+            "a job handed the document it writes was poured with nothing writing " \
+            "it: %s" % said
+
+        # An old caller, and a new one asking for what is gone. The pour written
+        # while the board demanded a written refusal per step still runs; asking to
+        # RUN a step the playbook no longer has is told what happened to it.
+        code, said, _ = poured("--skip", "test=this suite is itself the guard for it")
+        assert code == 0 and "runs: work → checks → review → land" in said, \
+            "a pour written while the board demanded a refusal per step stopped " \
+            "working: %s" % said
+        code, said, _ = poured("--steps", "guard")
+        assert code != 0 and "not a step of the playbook any more" in said, \
+            "a job was poured with a step nothing opens, closes or proves: %s" % said
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # A job already running keeps the order written on its own goal. The catalogue
+    # answers for every id those goals carry — a position it cannot answer for is a
+    # job that stops moving mid-run, with no card and nothing to open next.
+    OLD = "worktree,clarify,prove,ground,design,build,verify,benchmark,test,review,record,land"
+    for sid in spine.stored(OLD):
+        assert sid in spine.BY_ID, \
+            "a job poured under the old playbook carries %r, which the catalogue no " \
+            "longer answers for, so its run stops where it stands" % sid
+        assert spine.evidence(sid) and spine.tier(sid), \
+            "%s has no proof or no tier, so the close gate reads it as a commit step" % sid
+    assert spine.card("verify", "g", {"done": "x"}, 1), \
+        "an in-flight job cannot be handed the card its own order says comes next"
+    assert not set(spine.stored(OLD)) & set(spine.ORDER) - set(spine.order([])) - \
+        {"ground", "design", "benchmark", "record"}, \
+        "the cut left a retired step in the run a job is poured with"
+    assert [s for s in spine.stored(OLD) if spine.tier(s) == spine.GONE] == \
+        ["worktree", "clarify", "prove", "verify", "test"], \
+        "the steps the cut retired are not the ones the catalogue says it retired"
+
+    # What closes the one step that replaced them. A step whose whole proof is a
+    # note closes on what the note carries, and "the tests pass" is the sentence
+    # every unrun suite has also been described with.
+    ok, wanted = spine.note_ok("checks", "ran the tests and everything passed")
+    assert not ok and "command" in wanted, \
+        "the checks step closed on a claim that something was run, with no command " \
+        "and no count: %s" % wanted
+    assert spine.note_ok("checks", "`./check`: 0 failures, 100 faults red")[0], \
+        "the checks step cannot be closed by the command it ran and what came back"
+
+    print("ok: a job is poured with its work, its checks, its reading and its "
+          "landing and nothing else, the optional steps arrive named or asked for by "
+          "the job's own words, a pour that refuses a step in writing still runs, and "
+          "a job already running keeps every position of its own order")
 
     # A bar nobody calls is a bar that is not there. The cases above catch a bar
     # removed from a path they cover; this catches one written and never wired,
@@ -3734,10 +3771,10 @@ def main():
     assert rows["habit-cause"].split()[1] == "1", \
         "a refusal that fired once was not reported as one firing: %s" \
         % rows["habit-cause"]
-    assert "built, never fired" in rows["guard-waiver"], \
+    assert "built, never fired" in rows["landing-gated"], \
         "a refusal that is on disk and has caught nobody reads as one nobody built, " \
-        "so he cannot tell a quiet gate from a missing one: %s" % rows["guard-waiver"]
-    assert not cost.built("guard-waiver", "docs/board.md"), \
+        "so he cannot tell a quiet gate from a missing one: %s" % rows["landing-gated"]
+    assert not cost.built("landing-gated", "docs/board.md"), \
         "the report calls a counter built without finding the line that records it"
     assert cost.unlisted() == {}, \
         "a hook records a counter the report describes in no row, so it is counted " \

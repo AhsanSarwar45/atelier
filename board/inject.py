@@ -42,6 +42,8 @@ DECL = "project.py"
 SUITE = "board/selftest.py"
 LANDING = "hooks/landing-gate.py"
 HOOK = ".beads/hooks/pre-commit"
+SPINE = "board/spine.py"
+POUR = "board/job"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -367,6 +369,37 @@ FAULTS = [
     ("a project's own checks command is not read from its declaration", DECL,
      lambda s: s.replace('        self.checks = data.get("checks") or ""',
                          '        self.checks = ""')),
+
+    # What a job costs before it starts: the four steps the cut removed, the
+    # written refusal it used to demand for each optional one, and the words a job
+    # picks its own steps with (bw-a6o.2).
+    ("a step the cut retired is a card every job opens again", SPINE,
+     lambda s: s.replace("ORDER = [s[0] for s in STEPS]",
+                         "ORDER = [s[0] for s in RETIRED + STEPS]")
+                .replace("    return [s[0] for s in STEPS if s[4] == MUST]",
+                         "    return [s[0] for s in STEPS + RETIRED "
+                         "if s[4] in (MUST, GONE)]")),
+    ("a pour owes a written refusal for every step it does not run", POUR,
+     lambda s: s.replace(
+         '    earned = spine.auto(a.done, getattr(a, "record", "") or "")',
+         "    owed = [s for s in spine.optional() if s not in take "
+         "and s not in skips]\n"
+         "    if owed:\n"
+         '        sys.exit("This job has not said which steps it runs: %s"\n'
+         '                 % ", ".join(owed))\n'
+         '    earned = spine.auto(a.done, getattr(a, "record", "") or "")')),
+    ("a job's own words no longer select the step they ask for", SPINE,
+     lambda s: s.replace('    """Steps the job\'s own words select without being '
+                         'asked."""\n    picked = []',
+                         '    """Steps the job\'s own words select without being '
+                         'asked."""\n    return []\n    picked = []')),
+    ("the checks step closes on a note that ran nothing", SPINE,
+     lambda s: s.replace('    "checks": (_has_run, "the exact command you ran and '
+                         'the count it came back with"),\n', "")),
+    ("the goal never carries the checks command of the project it was poured in",
+     POUR,
+     lambda s: s.replace('    if DECL.checks:\n        meta["checks"] = DECL.checks\n',
+                         "")),
 ]
 
 

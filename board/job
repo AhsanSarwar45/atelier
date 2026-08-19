@@ -123,13 +123,22 @@ def rows(out):
 
 
 def chosen(a):
-    """Which steps this job runs. Nothing is guessed: every droppable step is either
-    taken or refused in writing, and the refusals stay on the goal where the manager
-    can count them."""
+    """Which steps this job runs: the mandatory ones, plus the optional steps this
+    pour named, plus the ones the job's own words select whether anybody named them
+    or not.
+
+    Nothing is owed. The board used to refuse a pour that had not answered for every
+    droppable step one by one, and what that bought was four written refusals per
+    job and no decision anybody read (bw-510). A step nobody asks for is a step
+    nobody has to talk their way out of.
+    """
     # A step is picked by its id, and its title is what a reader remembers, so the
-    # title is taken for the id too.
-    alias = {verb.lower(): sid for sid, verb, _, _, _ in spine.STEPS}
+    # title is taken for the id too. The retired steps answer here as well, so
+    # naming one is told what happened to it rather than "no step called that".
+    alias = {verb.lower(): sid for sid, verb, _, _, _ in spine.STEPS + spine.RETIRED}
     take = [alias.get(s.strip(), s.strip()) for s in (a.steps or "").split(",") if s.strip()]
+    # Still accepted, never demanded: the pours and the scripts written while the
+    # board asked for one still run, and what they say stays on the goal.
     skips = {}
     for item in a.skip or []:
         sid, _, why = item.partition("=")
@@ -142,24 +151,24 @@ def chosen(a):
         if spine.tier(sid) == spine.MUST:
             sys.exit("%s is mandatory — every job runs it, so it is neither picked nor "
                      "skipped." % sid)
+    for sid in take:
+        # Refused when it is asked for, and let by when it is refused: a caller
+        # dropping a step this playbook no longer has is asking for nothing, and
+        # a pour written before the cut still runs.
+        if spine.tier(sid) == spine.GONE:
+            sys.exit("%s is not a step of the playbook any more — the pour asks for "
+                     "what it used to ask for, and the gates hold the rest "
+                     "(board/spine.py, RETIRED). The run is: %s."
+                     % (sid, ", ".join(spine.ORDER)))
     clash = sorted(set(take) & set(skips))
     if clash:
         sys.exit("%s is both taken and skipped." % ", ".join(clash))
-    owed = [s for s in spine.droppable() if s not in take and s not in skips]
-    if owed:
-        sys.exit("This job has not said which playbook steps it runs, and the board no "
-                 "longer guesses. Unanswered: %s. For each one, either --steps %s to run "
-                 "it, or --skip %s=\"why this job does not need it\"."
-                 % (", ".join(owed), ",".join(owed), owed[0]))
-    earned = spine.auto(a.done)
+    earned = spine.auto(a.done, getattr(a, "record", "") or "")
     for sid, why in sorted(skips.items()):
         if sid in earned:
-            sys.exit("%s cannot be skipped: this job's success criteria claim a "
-                     "performance win, and a claim without a before and an after is "
-                     "the thing the step exists to stop." % sid)
-        if len(why) < 25:
-            sys.exit("--skip %s= must say why THIS job does not need that step. A step "
-                     "dropped without a reason is a step nobody chose." % sid)
+            sys.exit("%s cannot be skipped: this job's own success criteria ask for "
+                     "it — a speed claim with no before and after, or a finish line "
+                     "that names the document nobody would then write." % sid)
     return spine.order(take + earned), skips
 
 
@@ -234,6 +243,14 @@ def new(a):
 
     meta = {"subject": spine.subject(a.what), "area": a.area, "kind": a.kind,
             "done": a.done, "spine": ",".join(run), "judge": who}
+    # Written onto the goal at the pour rather than read when the step opens: the
+    # checks step is created by whichever session closed the one before it, standing
+    # in whatever checkout that was, and a command read from there is another
+    # project's command (project.py, `checks`).
+    if DECL.checks:
+        meta["checks"] = DECL.checks
+    if a.record:
+        meta["record"] = a.record
     if who == "manager":
         meta["judge_why"] = why
     meta.update({"skip." + sid: why for sid, why in skips.items()})
@@ -244,13 +261,22 @@ def new(a):
     if who == "manager":
         bd(["update", root, "--append-notes",
             "The manager signs this job off. What he has to look at: " + why])
-    first = json.loads(bd(spine.card(run[0], root, meta, a.priority) + ["--json"]))["id"]
-    bd(spine.settle(first, spine.step_labels(run[0], root, meta)))
+    # A job whose run opens at its own work items has no first card to open: the
+    # items are the position, and they are poured by hand because only whoever
+    # read the goal knows what they are.
+    if spine.evidence(run[0]) in (spine.WORK, spine.READ):
+        opening = ("no first step to open — this job begins at its own work items:\n"
+                   "  %s under %s --do \"<what to do>|<how we know it is done>\""
+                   % (sections.EG_POUR, root))
+    else:
+        first = json.loads(bd(spine.card(run[0], root, meta, a.priority)
+                              + ["--json"]))["id"]
+        bd(spine.settle(first, spine.step_labels(run[0], root, meta)))
+        opening = "%s  first step — the rest arrive as each closes" % first
     if a.source:
         bd(["close", a.source, "--reason", "promoted into %s" % root])
-    print("%s  goal\n%s  first step — the rest arrive as each closes\nruns: %s\n"
-          "signed off by: %s"
-          % (root, first, " → ".join(run),
+    print("%s  goal\n%s\nruns: %s\nsigned off by: %s"
+          % (root, opening, " → ".join(run),
              "the manager — " + why if who == "manager" else "an agent"))
 
 
@@ -457,10 +483,14 @@ p.add_argument("--kind", required=True, choices=KINDS)
 p.add_argument("--size", default="medium", choices=["small", "medium", "large"],
                help="how much work this is; it does not decide which steps exist")
 p.add_argument("--steps", default="",
-               help="comma list of the droppable playbook steps this job runs: "
-                    + ",".join(spine.droppable()))
+               help="comma list of the optional playbook steps this job runs; the "
+                    "rest of the run is mandatory and arrives without asking: "
+                    + ",".join(spine.optional()))
+p.add_argument("--record", default="", metavar="DOCUMENT",
+               help="the document this job writes into; it selects the record step")
 p.add_argument("--skip", action="append", metavar="STEP=WHY",
-               help="repeatable; a droppable step this job does not run, and why")
+               help="repeatable and no longer asked for; a step this job does not "
+                    "run, and why. What is said stays on the goal")
 p.add_argument("--judge", required=True, metavar="agent|manager=WHAT HE LOOKS AT",
                help="who signs this job off: `agent` when the success criteria settle "
                     "it, `manager=\"…\"` when nothing but his eye can")

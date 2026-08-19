@@ -108,10 +108,6 @@ class Declaration:
         # A project that declares none still runs the step; its note says what
         # was run by hand instead.
         self.checks = data.get("checks") or ""
-        # When this project's pour began asking a job why it drops a step. A job
-        # poured before it was never asked and is not held to an answer; a project
-        # that joined afterwards has no such jobs and leaves this empty.
-        self.guard_asked_from = data.get("guard_asked_from") or ""
         # Whether an agent may put work onto this project's shipping lines itself.
         # False everywhere it is not said, so a checkout that has never been
         # thought about is protected rather than open.
