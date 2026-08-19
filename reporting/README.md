@@ -91,7 +91,7 @@ Six, in this order, and none of them optional:
 | # | Slot | Holds |
 |---|------|-------|
 | 1 | Title | A short noun phrase, six words or fewer. Not a sentence, no explainer after a dash |
-| 2 | What I need from you | The questions themselves, each answerable by clicking. Never a pointer to a decision number |
+| 2 | What I need from you | The questions themselves, each answerable by clicking, each naming the card it is holding up. Never a pointer to a decision number |
 | 3 | Where we are | Read from the board — see below |
 | 4 | Content | One card per section. Format is free |
 | 5 | Decisions | Every call already made, each overridable by its number |
@@ -100,6 +100,21 @@ Six, in this order, and none of them optional:
 A question reaches slot 2 only when the manager's input is genuinely required.
 Everything else is decided and listed in slot 5, where a single button flags it
 for change.
+
+### A question names the work it is holding up
+
+`"holds": "<card id>"`, on every question. Slot 2 is the one part of a report
+nobody thinks to delete: the answer arrives in chat, the work carries on, and
+the question is rebuilt onto every page after it. The card is what kills it —
+the board closes the work, and the next build refuses the page rather than ask
+again, naming every dead question at once and telling you to put the call it
+settled in slot 5. A question naming no card, or one the board has never heard
+of, is refused the same way.
+
+A machine with no board cannot say either way, so it says so instead: the build
+prints what it could not check and the line handed over counts it, because a
+page still asking about unconfirmed work otherwise reads exactly like a
+finished one.
 
 ### Where we are, read from the board
 
@@ -179,6 +194,7 @@ explains each inline. Past six, the page is written for the wrong reader.
 | Rule | Enforced by |
 |------|-------------|
 | Slot order, completeness, one recommended answer per question | The builder refuses to emit a page |
+| Every question names a card, and dies when the board finishes it | The builder, against the board |
 | Decision numbers never move | The builder, against the committed spec |
 | No markup, colours or sizes in content | The builder refuses to emit a page |
 | Plain words | The builder warns, naming each term and its replacement |
