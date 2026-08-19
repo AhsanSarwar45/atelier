@@ -76,7 +76,22 @@ export const TIGHT = 0.8;
 
 /** As much of a recorded turn as this needs: what it spent and on what. */
 export interface Recorded {
-  message?: { usage?: Usage | null; model?: string | null } | null;
+  /**
+   * Whatever the kit calls a message. Deliberately unknown: the SDK's own
+   * `SessionMessage` types this as `unknown`, and a shape declared here that
+   * the SDK does not promise would be a lie the compiler enforced.
+   */
+  message?: unknown;
+}
+
+/** The two fields this reads off a recorded message, if the record has them. */
+interface Turn {
+  usage?: Usage | null;
+  model?: string | null;
+}
+
+function turnOf(message: unknown): Turn | null {
+  return message !== null && typeof message === 'object' ? (message as Turn) : null;
 }
 
 /**
@@ -90,8 +105,9 @@ export interface Recorded {
  */
 export function latest(messages: readonly Recorded[]): { used: number; window: number } | null {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const used = fullness(messages[i]?.message?.usage);
-    if (used !== null) return { used, window: windowOf(messages[i]?.message?.model) };
+    const turn = turnOf(messages[i]?.message);
+    const used = fullness(turn?.usage);
+    if (used !== null) return { used, window: windowOf(turn?.model) };
   }
   return null;
 }
