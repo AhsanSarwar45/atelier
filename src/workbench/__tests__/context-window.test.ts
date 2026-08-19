@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { fullness, latest, reads, TIGHT, windowOf, WINDOW } from '@/workbench/context-window';
+import { fullness, latest, reads, TIGHT, windowNamed, WINDOW } from '@/workbench/context-window';
 
 describe('what a turn used', () => {
   it('counts the cached prompt, which is most of a long conversation', () => {
@@ -27,13 +27,25 @@ describe('what a turn used', () => {
 });
 
 describe('the window that turn had', () => {
-  it('is the ordinary one unless the model says otherwise', () => {
-    expect(windowOf('claude-opus-5')).toBe(WINDOW);
-    expect(windowOf(null)).toBe(WINDOW);
+  it('says nothing about a message that does not state one', () => {
+    expect(windowNamed({ message: { model: 'claude-opus-5' } })).toBeNull();
+    // The name never carried it, whatever the earlier reading believed
+    // (bw-4wcd.15).
+    expect(windowNamed({ message: { model: 'claude-sonnet-4-5-20250929[1m]' } })).toBeNull();
+    expect(windowNamed(null)).toBeNull();
   });
 
-  it('is the wide one when the kit spelled it into the name', () => {
-    expect(windowOf('claude-sonnet-4-5-20250929[1m]')).toBe(1_000_000);
+  it('takes the window the kit states beside the message', () => {
+    expect(windowNamed({ context_usage: { raw_max_tokens: 1_000_000 } })).toBe(1_000_000);
+    // A compaction window is smaller than the model's own, and is still the
+    // one the conversation is measured against.
+    expect(windowNamed({ context_usage: { raw_max_tokens: 120_000 } })).toBe(120_000);
+  });
+
+  it('refuses a stated window that is not a number it can use', () => {
+    expect(windowNamed({ context_usage: { raw_max_tokens: 0 } })).toBeNull();
+    expect(windowNamed({ context_usage: { raw_max_tokens: '200000' } })).toBeNull();
+    expect(windowNamed({ context_usage: null })).toBeNull();
   });
 });
 
@@ -54,11 +66,13 @@ describe('reading it off a chat’s own record', () => {
     expect(latest([])).toBeNull();
   });
 
-  it('carries the wide window through from the turn that had it', () => {
-    expect(latest([said({ input_tokens: 500 }, 'claude-sonnet-4-5[1M]')])).toEqual({
-      used: 500,
-      window: 1_000_000,
-    });
+  it('takes a window the record states anywhere, not only on the turn it counts', () => {
+    const record = [
+      { context_usage: { raw_max_tokens: 1_000_000 }, message: { usage: null } },
+      said({ input_tokens: 500 }),
+      said(null),
+    ];
+    expect(latest(record)).toEqual({ used: 500, window: 1_000_000 });
   });
 });
 

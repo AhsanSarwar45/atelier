@@ -136,8 +136,12 @@ function say(sessionId, e, minutesAgo) {
 }
 
 const READ_FILE = 'src/workbench/context-window.ts';
-const BEFORE = ['export function reads(used: number): string {', '  return `${used}`;', '}'].join('\n');
-const AFTER = ['export function reads(used: number, window: number): string {', '  return `${used}/${window}`;', '}'].join('\n');
+// The comment runs over three lines, and the middle of it says something that
+// reads as code if the line is painted on its own — which is what the colouring
+// used to do to every comment and every long string in a chat (bw-4wcd.16).
+const COMMENT = ['/**', ' * How full it stands: const used = 1;', ' */'];
+const BEFORE = [...COMMENT, 'export function reads(used: number): string {', '  return `${used}`;', '}'].join('\n');
+const AFTER = [...COMMENT, 'export function reads(used: number, window: number): string {', '  return `${used}/${window}`;', '}'].join('\n');
 
 /** The chat the nine screen facts are read off. */
 function seedTranscript(sessionId, minutesAgo) {
@@ -260,7 +264,21 @@ await check(1, 'an edit reads as a diff, red and green, coloured for the languag
   must(/rgb.*\(2[0-9]{2}/.test(seen.left), `the removed side is not red (${seen.left})`);
   must(seen.language, 'the diff says nothing about the language it is in');
   must(seen.painted > 0, `nothing inside the diff is coloured for ${seen.language}`);
-  return `${seen.language}, ${seen.painted} coloured pieces, ${seen.left} vs ${seen.right}`;
+  // The middle of a comment that runs over several lines: painted a row at a
+  // time it came back picked apart for keywords, which is a worse reading than
+  // the grey it replaced (bw-4wcd.16).
+  const inside = await diff.evaluate((el) => {
+    const cell = [...el.querySelectorAll('td')].find((td) => td.textContent.includes('const used = 1;'));
+    if (!cell) return null;
+    return {
+      comment: cell.querySelectorAll('.hljs-comment').length,
+      keyword: cell.querySelectorAll('.hljs-keyword').length,
+    };
+  });
+  must(inside !== null, 'the comment that runs over several lines is not in the diff at all');
+  must(inside.comment > 0, 'a line in the middle of a comment is not drawn as a comment');
+  must(inside.keyword === 0, 'a line in the middle of a comment is drawn as code');
+  return `${seen.language}, ${seen.painted} coloured pieces, ${seen.left} vs ${seen.right}, comments whole`;
 });
 
 await check(2, 'a command and a file read are coloured, not one flat grey block', async () => {
@@ -275,7 +293,22 @@ await check(2, 'a command and a file read are coloured, not one flat grey block'
   }
   must(bodies.length > 0, 'no command or read body was drawn at all');
   must(painted.length >= 2, `only ${painted.length} of ${bodies.length} bodies were coloured`);
-  return painted.join(', ');
+  // Same again for a file read, which keeps its line numbers and is therefore
+  // cut into lines by a different path than the diff (bw-4wcd.16).
+  const inside = await page.evaluate(() => {
+    const line = [...document.querySelectorAll('[data-testid="numbered-line"]')].find((el) =>
+      el.textContent.includes('const used = 1;'),
+    );
+    if (!line) return null;
+    return {
+      comment: line.querySelectorAll('.hljs-comment').length,
+      keyword: line.querySelectorAll('.hljs-keyword').length,
+    };
+  });
+  must(inside !== null, 'the file read drew no line inside the comment');
+  must(inside.comment > 0, 'a numbered line inside a comment is not drawn as a comment');
+  must(inside.keyword === 0, 'a numbered line inside a comment is drawn as code');
+  return `${painted.join(', ')}, comments whole`;
 });
 
 await check(3, 'a card named in a message is a chip that opens it', async () => {
@@ -379,6 +412,15 @@ await check(7, 'a card chip and a report chip both draw a picture before their w
 });
 
 await check(8, 'the button that starts a chat says New Chat behind a drawn plus', async () => {
+  // With no chat open the screen carries two of these buttons at once — the
+  // one in the bar and the one in the middle — so this is also where a name
+  // shared between two elements shows up (bw-4wcd.18).
+  await page.goto(`${UI}/project?id=${project.id}&tab=chat`);
+  await page.getByTestId('new-chat').waitFor();
+  const named = await page.locator('[data-testid="new-chat-plus"]').count();
+  must(named === 1, `${named} elements answer to the same name at once`);
+  const own = await page.locator('[data-testid="new-chat-empty-plus"]').count();
+  must(own === 1, `the button in the middle of the empty screen has no plus of its own`);
   const button = page.locator('[aria-label="New Chat"]').first();
   await button.waitFor();
   const words = (await button.textContent()).trim();
@@ -390,7 +432,8 @@ await check(8, 'the button that starts a chat says New Chat behind a drawn plus'
   must(!words.includes('+'), `the plus is still typed into the label: "${words}"`);
   const box = await plus.first().boundingBox();
   must(box !== null && box.width > 6 && box.height > 6, 'the drawn plus takes up no room');
-  return `"${words}" behind a ${Math.round(box.width)}x${Math.round(box.height)} drawn plus`;
+  await openChat();
+  return `"${words}" behind a ${Math.round(box.width)}x${Math.round(box.height)} drawn plus, one name per button`;
 });
 
 await check(9, 'reading a chat leaves it where it was, and its row keeps its own time', async () => {

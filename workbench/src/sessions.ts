@@ -39,11 +39,13 @@ type Subscriber = (e: WbpEvent) => void;
  * change each edit made, so a chat begun in a terminal draws its edits as
  * red-and-green rather than as the new text alone (bw-4wcd.1). 4 adds how full
  * the conversation stands, which a chat begun in a terminal has no driver here
- * to say (bw-4wcd.4). Raise it whenever the import would produce a different
+ * to say (bw-4wcd.4). 5 takes the window off what the kit states in the record
+ * rather than off a marker in the model's name that the kit never writes
+ * (bw-4wcd.15). Raise it whenever the import would produce a different
  * transcript from the same record: every chat read in by a lower one is read
  * again on its next open.
  */
-const IMPORT_RECIPE = 4;
+const IMPORT_RECIPE = 5;
 
 /**
  * How often a chat another program is driving is looked at again.

@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import type { CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
-import { fullness, windowOf } from '../../../src/workbench/context-window.ts';
+import { fullness, WINDOW, windowNamed } from '../../../src/workbench/context-window.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
 /**
@@ -284,10 +284,10 @@ export class ClaudeDriver implements Driver {
   private models: ModelChoice[] = [];
   private terminalOnly = new Set<string>();
   /**
-   * The model in force, kept only to size the context window: the kit spells a
-   * wide window into the model's own name (bw-4wcd.4).
+   * The window the conversation is measured against, which the kit states only
+   * when it was asked for its own context report (bw-4wcd.15).
    */
-  private modelName: string | null = null;
+  private window = WINDOW;
   /**
    * True from the moment a turn is handed over until the brand says it is done.
    *
@@ -737,7 +737,6 @@ export class ClaudeDriver implements Driver {
           this.modeIsNow(m.permissionMode);
         }
         if (m.subtype === 'init') {
-          this.modelName = typeof m.model === 'string' ? m.model : this.modelName;
           this.emit({
             type: 'session.started',
             brand: 'claude',
@@ -839,9 +838,11 @@ export class ClaudeDriver implements Driver {
         }
         // How full the conversation now is, which only the kit knows and only
         // says here (bw-4wcd.4).
+        const named = windowNamed(m);
+        if (named !== null) this.window = named;
         const used = fullness(m.message?.usage);
         if (used !== null) {
-          this.emit({ type: 'context', used, window: windowOf(m.message?.model ?? this.modelName) });
+          this.emit({ type: 'context', used, window: this.window });
         }
         for (const b of m.message?.content ?? []) {
           if (b.type === 'tool_use') {

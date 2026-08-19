@@ -50,7 +50,7 @@ import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
-import { languageOf, languagesOf, paint } from '@/workbench/colouring';
+import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
 import { useKnownCards } from '@/workbench/known-cards';
 import { mentionsIn } from '@/workbench/mentions';
 import { diffLines } from '@/workbench/line-diff';
@@ -161,14 +161,16 @@ function PermissionCard({
 /**
  * One line of code, coloured, inside a cell that carries its own background.
  *
- * Painted a line at a time rather than a file at a time: each line lives in its
- * own table cell, and a single painted block cannot be cut across cells without
- * losing the tags it opened.
+ * Each line lives in its own table cell, so the colour has to arrive already
+ * cut into lines. `html` is that cut piece, painted from the whole file so a
+ * comment or a string running over several lines stays itself all the way down
+ * (bw-4wcd.16); leave it out and the line is painted alone, which is right for
+ * a line that never had a file around it.
  */
-function Line({ text, language }: { text: string; language: string | null }) {
-  const html = paint(text, language);
-  if (html === null) return <>{text}</>;
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+function Line({ text, language, html }: { text: string; language: string | null; html?: string | null }) {
+  const painted = html === undefined ? paint(text, language) : html;
+  if (painted === null || painted === undefined) return <>{text}</>;
+  return <span dangerouslySetInnerHTML={{ __html: painted }} />;
 }
 
 /**
@@ -178,6 +180,23 @@ function Line({ text, language }: { text: string; language: string | null }) {
 function DiffView({ path, before, after }: { path: string; before: string; after: string }) {
   const rows = diffLines(before, after);
   const language = languageOf(path);
+  // Each side is coloured whole and only then cut into its rows: painting a
+  // row on its own left the inside of every block comment and every long
+  // string read as fresh code (bw-4wcd.16). `diffLines` drops one trailing
+  // newline before it splits, so the same text is painted here.
+  const leftLines = paintLines(before.replace(/\n$/, ''), language);
+  const rightLines = paintLines(after.replace(/\n$/, ''), language);
+  let li = 0;
+  let ri = 0;
+  const painted = rows.map((r) => {
+    const cell = {
+      left: r.left === null || leftLines === null ? null : (leftLines[li] ?? null),
+      right: r.right === null || rightLines === null ? null : (rightLines[ri] ?? null),
+    };
+    if (r.left !== null) li++;
+    if (r.right !== null) ri++;
+    return cell;
+  });
   return (
     <div data-testid="diff-view" data-diff-path={path} data-diff-language={language ?? ''} className="mt-1.5 overflow-hidden rounded border border-border/50">
       <div className="flex items-center justify-between bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
@@ -196,7 +215,7 @@ function DiffView({ path, before, after }: { path: string; before: string; after
                     r.left === null && 'bg-muted/20',
                   )}
                 >
-                  {r.left === null ? '' : <Line text={r.left} language={language} />}
+                  {r.left === null ? '' : <Line text={r.left} language={language} html={painted[i]!.left} />}
                 </td>
                 <td
                   className={cn(
@@ -205,7 +224,7 @@ function DiffView({ path, before, after }: { path: string; before: string; after
                     r.right === null && 'bg-muted/20',
                   )}
                 >
-                  {r.right === null ? '' : <Line text={r.right} language={language} />}
+                  {r.right === null ? '' : <Line text={r.right} language={language} html={painted[i]!.right} />}
                 </td>
               </tr>
             ))}
@@ -273,16 +292,20 @@ function Numbered({ text, language }: { text: string; language: string | null })
     const html = paint(text, language);
     return html === null ? <>{text}</> : <span dangerouslySetInnerHTML={{ __html: html }} />;
   }
+  // The numbers off, the file put back together, coloured as one thing and
+  // then cut again — otherwise every line is read as if it were the first
+  // (bw-4wcd.16).
+  const code = lines.map((line) => (line.includes('\t') ? line.slice(line.indexOf('\t') + 1) : line));
+  const painted = paintLines(code.join('\n'), language);
   return (
     <>
       {lines.map((line, i) => {
         const at = line.indexOf('\t');
         const gutter = at >= 0 ? line.slice(0, at) : '';
-        const code = at >= 0 ? line.slice(at + 1) : line;
         return (
           <span key={i} data-testid="numbered-line">
             {at >= 0 && <span className="select-none text-muted-foreground/50">{gutter}{'\t'}</span>}
-            <Line text={code} language={language} />
+            <Line text={code[i]!} language={language} html={painted === null ? null : (painted[i] ?? null)} />
             {i < lines.length - 1 ? '\n' : ''}
           </span>
         );
@@ -1034,7 +1057,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat open for this project.</p>
         <Button variant="primary" onClick={() => void start()} disabled={starting} data-testid="new-chat">
-          {starting ? null : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
+          {starting ? null : <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />}
           {starting ? 'Starting…' : 'New Chat'}
         </Button>
         {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}

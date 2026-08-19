@@ -20,20 +20,31 @@ export interface Usage {
   cache_creation_input_tokens?: number | null;
 }
 
-/** What a Claude model holds, unless it says otherwise. */
+/** What a Claude model holds, unless the kit says otherwise. */
 export const WINDOW = 200_000;
 
-/** The wide window, which the kit asks for by suffixing the model's name. */
-const WIDE = 1_000_000;
+/** A message the kit may have stated the window on. */
+interface Stated {
+  context_usage?: { raw_max_tokens?: unknown } | null;
+}
 
 /**
- * The window this model is running with.
+ * The window the kit itself named, or null when this message does not name one.
  *
- * The kit spells the wide context by appending `[1m]` to the model name it
- * reports, so the name is the only thing that tells us which one is in force.
+ * A model's name never carries it. This used to look for a `[1m]` suffix on the
+ * name, on the belief that the kit spelled a wide context into it; the kit does
+ * no such thing — it reports a plain model id, and the wide window is asked for
+ * by a start option this app passes nowhere, so the test could only ever be
+ * false (bw-4wcd.15). The one place the kit states the window outright is the
+ * structured twin of its own context report, which rides beside a message
+ * rather than inside it and gives the window it is itself measuring against —
+ * a smaller compaction window included. Believe that when it comes, and use the
+ * ordinary window until it does.
  */
-export function windowOf(model: string | null | undefined): number {
-  return typeof model === 'string' && model.toLowerCase().includes('[1m]') ? WIDE : WINDOW;
+export function windowNamed(message: unknown): number | null {
+  if (message === null || typeof message !== 'object') return null;
+  const stated = (message as Stated).context_usage?.raw_max_tokens;
+  return typeof stated === 'number' && Number.isFinite(stated) && stated > 0 ? stated : null;
 }
 
 /**
@@ -84,10 +95,9 @@ export interface Recorded {
   message?: unknown;
 }
 
-/** The two fields this reads off a recorded message, if the record has them. */
+/** The one field this reads off a recorded message, if the record has it. */
 interface Turn {
   usage?: Usage | null;
-  model?: string | null;
 }
 
 function turnOf(message: unknown): Turn | null {
@@ -104,10 +114,20 @@ function turnOf(message: unknown): Turn | null {
  * unknown one.
  */
 export function latest(messages: readonly Recorded[]): { used: number; window: number } | null {
+  // The window is asked of the record as a whole, not of the turn that carries
+  // the count: the kit states it only when it was asked for its own context
+  // report, which is rarely the last thing in a chat (bw-4wcd.15).
+  let window = WINDOW;
   for (let i = messages.length - 1; i >= 0; i--) {
-    const turn = turnOf(messages[i]?.message);
-    const used = fullness(turn?.usage);
-    if (used !== null) return { used, window: windowOf(turn?.model) };
+    const named = windowNamed(messages[i]);
+    if (named !== null) {
+      window = named;
+      break;
+    }
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const used = fullness(turnOf(messages[i]?.message)?.usage);
+    if (used !== null) return { used, window };
   }
   return null;
 }

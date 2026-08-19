@@ -66,27 +66,49 @@ const BY_ENDING: Record<string, string> = {
   gql: 'graphql',
 };
 
-/** Files with no ending whose name is the whole answer. */
+/** Files whose name is the answer, whether or not an ending follows it. */
 const BY_NAME: Record<string, string> = {
   makefile: 'makefile',
   dockerfile: 'bash',
   gemfile: 'ruby',
   rakefile: 'ruby',
+  // A dotfile keeps its type in the name the dot hides, so these are read as
+  // names rather than endings: `.bashrc` is bash, `.babelrc` is JSON.
+  bashrc: 'bash',
+  bash_aliases: 'bash',
+  bash_profile: 'bash',
+  profile: 'bash',
+  zshenv: 'bash',
+  zprofile: 'bash',
+  zshrc: 'bash',
+  editorconfig: 'ini',
+  gitconfig: 'ini',
+  npmrc: 'ini',
+  babelrc: 'json',
+  eslintrc: 'json',
+  prettierrc: 'json',
 };
 
 /**
  * The language a path implies, or null when nothing here knows it.
  *
- * A dotfile is its own ending — `.bashrc` is bash — and a path is taken apart
- * from its last segment, so a directory called `src.rs` cannot decide it.
+ * A path is taken apart from its last segment, so a directory called `src.rs`
+ * cannot decide it. The leading dot of a dotfile marks the file hidden and says
+ * nothing about what is in it, so it is dropped before anything is asked:
+ * `.bashrc` is read as the name `bashrc`. The ending is asked first and the
+ * name second, which is what lets `Dockerfile.dev` still be a Dockerfile while
+ * `.eslintrc.json` is plain JSON. The earlier reading demanded a name carry no
+ * dot at all, which every dotfile fails by definition, so `.bashrc`, `.npmrc`
+ * and their like drew grey while the code claimed otherwise (bw-4wcd.17).
  */
 export function languageOf(path: string): string | null {
   const name = (path.split(/[\\/]/).pop() ?? '').toLowerCase();
-  if (!name) return null;
-  const named = BY_NAME[name.replace(/\..*$/, '')];
-  if (named && !name.includes('.')) return named;
-  const ending = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name.replace(/^\./, '');
-  const found = BY_ENDING[ending] ?? null;
+  const bare = name.replace(/^\.+/, '');
+  if (!bare) return null;
+  const dot = bare.lastIndexOf('.');
+  const ending = dot >= 0 ? bare.slice(dot + 1) : bare;
+  const head = dot >= 0 ? bare.slice(0, bare.indexOf('.')) : bare;
+  const found = BY_ENDING[ending] ?? BY_NAME[head] ?? null;
   return found && hljs.getLanguage(found) ? found : null;
 }
 
@@ -106,6 +128,50 @@ export function paint(text: string, language: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The same text, coloured whole, then handed back a line at a time.
+ *
+ * A line of code is not a language on its own: a block comment, a docstring or
+ * a template string opens on one line and closes several lines later, and a
+ * line lifted out of the middle of one reads as ordinary code. Painting each
+ * line by itself did exactly that — the inside of every long comment came back
+ * picked apart for keywords instead of staying comment-coloured, which is worse
+ * than the grey it replaced (bw-4wcd.16).
+ *
+ * So the whole text is painted once, with the colourer carrying its state
+ * across the newlines as it should, and only then cut: at each newline every
+ * tag still open is closed, and the next line starts by opening the same ones
+ * again. Every line therefore stands alone as HTML and can go in its own cell.
+ * Null when the text would be drawn plain, and always one entry per line.
+ */
+export function paintLines(text: string, language: string | null): string[] | null {
+  const html = paint(text, language);
+  if (html === null) return null;
+  // Only two things appear in what the colourer returns: its own spans, and
+  // text with `&`, `<` and `>` already escaped. Everything else is content.
+  const marks = /<span[^>]*>|<\/span>|\n/g;
+  const lines: string[] = [];
+  const open: string[] = [];
+  let line = '';
+  let last = 0;
+  for (let m = marks.exec(html); m !== null; m = marks.exec(html)) {
+    line += html.slice(last, m.index);
+    last = m.index + m[0].length;
+    if (m[0] === '\n') {
+      lines.push(line + '</span>'.repeat(open.length));
+      line = open.join('');
+    } else if (m[0] === '</span>') {
+      open.pop();
+      line += m[0];
+    } else {
+      open.push(m[0]);
+      line += m[0];
+    }
+  }
+  lines.push(line + html.slice(last) + '</span>'.repeat(open.length));
+  return lines;
 }
 
 /**
