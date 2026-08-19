@@ -144,11 +144,15 @@ def main():
         # the same moment, and before the merge, because leftovers are what the
         # merge would die on.
         said, refused = gate.clear_the_way(ROOT, trunk)
-        if said:
-            print(said)
         if refused:
+            # Carried to the exit rather than said here: the refusal already
+            # names the live session and every file it holds, and printing it
+            # now put that whole block on the screen twice for one failure
+            # (bw-a6o.3.11).
             blocked = said
         else:
+            if said:
+                print(said)
             _, code = git(["merge", "--ff-only", branch], main_tree, must=False)
             merged = code == 0
     finally:

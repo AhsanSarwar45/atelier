@@ -47,6 +47,8 @@ POUR = "board/job"
 RUN = "board/run.py"
 TOUCH = "hooks/board-touch.py"
 PRIME = "hooks/board-prime.py"
+LAND = "board/land"
+READING = "board/reading.py"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -320,6 +322,16 @@ FAULTS = [
                          "for verb, rest in folds):",
                          "    if any(verb == \"merge\" for verb, rest in folds) "
                          "and FF_ONLY not in bc.words(cmd):")),
+    # The one-command landing and what a reader is shown of a job (bw-a6o.3).
+    # Both are a message rather than a merge, and both were found by a reader
+    # and not by the suite, which is the argument for putting them here.
+    ("a blocked landing says the whole of its refusal twice", LAND,
+     lambda s: s.replace("        if refused:",
+                         "        if refused and print(said) is None:")),
+    ("a reading counts whatever the repository keeps a ref for", READING,
+     lambda s: s.replace('                ["git", "log", "--branches", "--tags", '
+                         '"--remotes",\n',
+                         '                ["git", "log", "--all",\n')),
     # The leftovers a landing lands into (bw-vb2). Both halves are here: a sweep
     # that takes what it should not is as bad as one that never happens, and a
     # refusal nobody can act on is the fault the whole thing was built for.

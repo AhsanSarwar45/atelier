@@ -41,13 +41,22 @@ def commits(goal_id, root):
     every job whose change lands elsewhere (mch-4cl, hooks/board_common.py
     `searched`). Every ref, not the main line: a reader is shown the branch as it
     stands.
+
+    Every branch, tag and remote branch, and nothing else a repository keeps refs
+    for. `--all` also walks the stash, the editor's own checkpoints and whatever
+    temporary refs are lying about; git titles a stash "On <branch>: …" itself,
+    so a stash taken on a job's branch names that job whatever it holds. The
+    reader of bw-a6o.3 was handed two such objects as commits of the job — the
+    stash a killed session left behind, and the index inside it — and neither was
+    ever on a branch (bw-a6o.3.10).
     """
     want = r"\b%s(\.[0-9a-z.]+)?\b" % re.escape(goal_id)
     found = []
     for where, _ in bc.searched(root):
         try:
             run = subprocess.run(
-                ["git", "log", "--all", "-E", "--grep", want, "--format=%H", "--reverse"],
+                ["git", "log", "--branches", "--tags", "--remotes",
+                 "-E", "--grep", want, "--format=%H", "--reverse"],
                 cwd=where, capture_output=True, text=True, timeout=GIT_TIMEOUT)
         except Exception:
             continue

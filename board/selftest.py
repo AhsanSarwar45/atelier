@@ -488,9 +488,10 @@ def reads_elsewhere():
     is the registry — a case cannot register a project on the machine it runs on.
 
     Comes back as (what a reading counts, what a close may be judged against, what
-    the goal's own label says): the first must find the commit, the second must
-    not have widened, and the third must be empty, or the case is passing on the
-    label rather than in spite of it.
+    the goal's own label says, what is parked in the stash): the first must find
+    the commit, the second must not have widened, the third must be empty, or the
+    case is passing on the label rather than in spite of it — and the fourth must
+    be nowhere in the first.
     """
     tmp = tempfile.mkdtemp()
     here, there = os.path.join(tmp, "here"), os.path.join(tmp, "there")
@@ -503,8 +504,34 @@ def reads_elsewhere():
                      ("commit", "-q", "--allow-empty", "-m", subject)):
             subprocess.run(["git"] + list(args), cwd=where, capture_output=True)
 
+    def park(where, note):
+        """Leave a stash on this checkout's branch and say what object it is.
+
+        Real git again, because the whole of it is the title git writes for a
+        stash — "On <branch>: <note>" — which names whatever job the branch is
+        named for, and the parent it hangs off is the branch tip rather than
+        anything anybody landed.
+        """
+        with open(os.path.join(where, "left.txt"), "w") as f:
+            f.write("a file to leave behind\n")
+        for args in (("add", "left.txt"),
+                     ("commit", "-q", "-m", "chore(board): nothing of this job"),):
+            subprocess.run(["git"] + list(args), cwd=where, capture_output=True)
+        with open(os.path.join(where, "left.txt"), "w") as f:
+            f.write("what a killed session left staged\n")
+        subprocess.run(["git", "stash", "push", "-q", "-m", note],
+                       cwd=where, capture_output=True)
+        at = subprocess.run(["git", "rev-parse", "refs/stash"], cwd=where,
+                            capture_output=True, text=True)
+        return (at.stdout or "").strip()
+
     build(here, "chore(board): nothing of this job")
     build(there, "fix(board): tst-x.2 the change this job made, landed elsewhere")
+    # The debris of a killed session, sitting on the job's own branch. It names
+    # the job because git titles it after the branch, and it is on no branch at
+    # all — a reader of bw-a6o.3 was handed two of these as commits of the job
+    # (bw-a6o.3.10).
+    parked = park(here, "tst-x.9 leftover staged hunk from a killed worker")
     bc = runner.reading.bc
     keep_e, keep_d = bc.elsewhere, bc.declared
     keep_c, runner.reading.commits = runner.reading.commits, REAL_COMMITS
@@ -520,7 +547,7 @@ def reads_elsewhere():
         bc.elsewhere, bc.declared = keep_e, keep_d
         runner.reading.commits = keep_c
         shutil.rmtree(tmp, ignore_errors=True)
-    return found, judged, labelled
+    return found, judged, labelled, parked
 
 
 def makes_card(sid):
@@ -2017,10 +2044,15 @@ def main():
     print("ok: the pour writes a job's landing itself and turns away a checkout "
           "this project never declared its work lands in")
 
-    found, judged, labelled = reads_elsewhere()
+    found, judged, labelled, parked = reads_elsewhere()
     assert not labelled, \
         "the case wrote the landing label itself, so it proves nothing about a job " \
         "without one"
+    assert parked, "the case never made the stash it is about"
+    assert parked not in found, \
+        "a reading counted a stash entry as a commit of the job: git names a stash " \
+        "after the branch it was taken on, so every scrap a killed session left on " \
+        "a job's branch reads as that job's work (%s in %s)" % (parked, found)
     assert len(found) == 1, \
         "a job whose change landed in a checkout this project declares it may land " \
         "in was read as having written nothing: %s" % found
@@ -2029,8 +2061,9 @@ def main():
         "against, which is a landing rule and not a search: %s" % judged
 
     print("ok: a reading counts the commits of every checkout this project declares "
-          "it may land in, label or no label, and closing is still judged against "
-          "the ones the job itself declared")
+          "it may land in, label or no label, counts what is on a branch and not "
+          "what is parked in the stash beside it, and closing is still judged "
+          "against the ones the job itself declared")
 
     cardless = sorted(s for s in spine.ORDER if not makes_card(s))
     assert cardless == ["review", "work"], \
@@ -4099,6 +4132,11 @@ def main():
     assert "bw-other-99" in theirs["said"] and "sweep" not in theirs["asked"], \
         "a landing blocked by somebody's work in the way swept it aside or named " \
         "nobody: %s" % theirs["said"]
+    # The refusal names the session and every file it holds, so saying it and
+    # then quoting the whole of it again in the exit is the same block of text
+    # twice for one failure (bw-a6o.3.11).
+    assert theirs["said"].count("is at work in") == 1, \
+        "one blocked landing said its refusal more than once: %s" % theirs["said"]
 
     print("ok: landing is one command that takes the slot under this session's own "
           "name and queues for it, sets aside leftovers no live session holds before "
