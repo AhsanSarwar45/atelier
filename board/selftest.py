@@ -2713,18 +2713,21 @@ def main():
         A_FIND = {"id": "tst-fff", "labels": ["find", "area:board", "kind:bug"]}
         A_GOAL = {"id": "tst-ggg", "labels": ["job", "area:board", "kind:bug"]}
         A_STEP = {"id": "tst-ggg.4", "labels": ["step:work", "of:tst-ggg"]}
-        for what, card in (("a find", A_FIND), ("a goal", A_GOAL)):
-            named, fired = pointed_at(
-                YES, said="That is %s already — it is on %s." % (what, card["id"]),
-                standing=[card])
-            assert named == "" and not fired, \
-                "a reply naming %s already carrying the cause was refused: %s" \
-                % (what, named or "ALLOWED")
-        stepped, _ = pointed_at(
-            YES, said="I am on it, see tst-ggg.4.", standing=[A_STEP])
-        assert "how you work" in stepped, \
-            "a step named instead of a cause stood the refusal down: %s" \
-            % (stepped or "ALLOWED")
+        named, fired = pointed_at(
+            YES, said="That is on the board already — it is tst-fff.",
+            standing=[A_FIND])
+        assert named == "" and not fired, \
+            "a reply naming the find already carrying the cause was refused: %s" \
+            % (named or "ALLOWED")
+        # Anything that is not a find. A session names the job it is running in
+        # almost every reply it writes, and a step is one move inside somebody's
+        # plan; neither is a fault anybody recorded.
+        for what, card in (("a goal", A_GOAL), ("a step", A_STEP)):
+            said, _ = pointed_at(
+                YES, said="I am on it, see %s." % card["id"], standing=[card])
+            assert "how you work" in said, \
+                "%s named instead of a cause stood the refusal down: %s" \
+                % (what, said or "ALLOWED")
         ghost, _ = pointed_at(YES, said="The cause is on tst-fff.", standing=[])
         assert "how you work" in ghost, \
             "a card named in the reply and nowhere on the board stood the " \
@@ -2819,7 +2822,7 @@ def main():
 
     print("ok: a habit the manager points at cannot end the turn with nothing on the "
           "board naming what produced it, a card in the same turn satisfies it, so "
-          "does pointing at a find or a goal already standing while a step or a card "
+          "does pointing at a find already standing while a goal, a step or a card "
           "that is not there does not, every reading that is not a plain yes lets the "
           "reply through, and either way of switching the gate off stops the refusal "
           "and the reading both")

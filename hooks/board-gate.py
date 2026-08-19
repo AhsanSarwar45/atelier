@@ -180,11 +180,13 @@ def rows(ids, root):
     return got if isinstance(got, list) else [got]
 
 
-# What a card has to be to answer for a cause: something wrong that was found, or
-# a job poured to put it right. A step is neither — it is one move inside somebody
-# else's plan, and pointing at it says how the work is being done rather than what
-# let the habit happen.
-CAUSES = ("find", "job")
+# What a card has to be to answer for a cause: a find, which is the one shape
+# something wrong is recorded in, and the shape this very refusal asks for. A job
+# is work rather than a fault, and a session names the work it is doing in almost
+# every reply it writes, so counting one would stand the refusal down on ordinary
+# business (found by the board's own reader). A cause promoted into a job leaves
+# its find standing and closed, and a closed card still answers here.
+CAUSES = ("find",)
 
 
 def cause_named(message, root):
@@ -192,10 +194,10 @@ def cause_named(message, root):
 
     What the refusal asks for is the cause recorded, not the cause recorded
     *this turn*. A habit he names twice is one cause and wants one card, so the
-    second turn's honest answer is to point at the card the first turn poured —
+    second turn's honest answer is to point at the find the first turn poured —
     and a session that poured nothing has nothing to point at, which is what the
     refusal is for. Read off the board and not off the wording: the card has to
-    be there, and it has to be one of the two shapes a cause is kept in.
+    be there, and it has to be the shape a cause is kept in.
     """
     named = set()
     for said in bc.prefixes(root):
