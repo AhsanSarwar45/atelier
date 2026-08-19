@@ -206,6 +206,50 @@ def storm(claimed=False):
     return len(fired)
 
 
+def handed_on(closing, rows, order="work,checks,review,land",
+              actor="tree-a1b2c3d4"):
+    """Every board command the run makes when `closing` closes, and who it names.
+
+    One claim a job: the session that closes a piece is handed whatever opens
+    after it, so the commands below are read for the hand-over and for the
+    `--claim` that must not be among them.
+    """
+    goal = {"id": "h", "priority": 1, "status": "in_progress", "notes": "",
+            "labels": ["job", "area:board", "kind:chore"],
+            "metadata": {"spine": order, "area": "board", "kind": "chore",
+                         "subject": "a job", "done": "`./check` reports 0 failures",
+                         "checks": "./check"}}
+    asked = []
+
+    def recorder(args, root=None):
+        asked.append(" ".join(args))
+        if args[:2] == ["list", "--parent"]:
+            return True, json.dumps(rows)
+        if args[0] == "show":
+            return True, json.dumps(goal if args[1] == "h" else
+                                    next((r for r in rows if r["id"] == args[1]), {}))
+        if args[0] == "create":
+            return True, json.dumps({"id": "h.next"})
+        if args[:2] == ["gate", "list"]:
+            return True, "[]"
+        return True, "{}"
+
+    keep_bd, keep_c, keep_w = runner.bc.bd, runner.reading.commits, runner.reading.wrote
+    keep_want = runner.reading.wanted
+    runner.bc.bd = recorder
+    runner.reading.commits = lambda gid, root: ["a1c0ffee"]
+    runner.reading.wrote = lambda gid, root: {"someone"}
+    # The reading is not what these cases are about: a job that owes one is held
+    # at that position and nothing after it opens at all.
+    runner.reading.wanted = lambda *a, **kw: False
+    try:
+        runner.advance(closing, ROOT, actor)
+    finally:
+        runner.bc.bd, runner.reading.commits, runner.reading.wrote = keep_bd, keep_c, keep_w
+        runner.reading.wanted = keep_want
+    return asked
+
+
 def script(name):
     """One of board's own commands, which carry no suffix to import by."""
     spec = importlib.util.spec_from_loader(
@@ -641,7 +685,7 @@ def answered(cmd):
 
     kept = (touch.bc.bd, touch.run.advance, touch.run.started)
     touch.bc.bd = recorder
-    touch.run.advance = lambda cid, root: None
+    touch.run.advance = lambda cid, root, actor=None: None
     touch.run.started = lambda cid, root: None
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": ROOT, "tool_name": "Bash",
@@ -1633,7 +1677,7 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False):
         if args[0] == "show":
             return True, json.dumps(goal if args[1] == "tst-old" else
                                     {"id": args[1], "issue_type": "task",
-                                     "labels": ["step:worktree", "of:tst-new"]})
+                                     "labels": ["step:work", "of:tst-new"]})
         if args[:2] == ["list", "--parent"]:
             # Only the old job has pieces; the card being claimed is a step, and
             # answering for it too would make it read as a container.
@@ -2000,6 +2044,90 @@ def main():
     print("ok: no position of the playbook but the work and the reading is cardless, "
           "and the catalogue refuses a review card outright")
 
+    # One claim a job, not one a step. Eleven steps meant eleven claims, every one
+    # of them a command somebody had to remember and a gate that refused the turn
+    # when they did not: the board knows who closed the last piece (bw-a6o.2).
+    ME = "tree-a1b2c3d4"
+    ITEMS = [{"id": "h.1", "status": "closed", "labels": ["step:work", "of:h"]},
+             {"id": "h.2", "status": "closed", "labels": ["step:work", "of:h"]}]
+    asked = handed_on("h.2", ITEMS)
+    assert any(a.startswith("create ") for a in asked), \
+        "the last piece of the work closed and the checks step never opened: %s" % asked
+    assert "update h.next -a %s -s in_progress" % ME in asked, \
+        "the step that opened was left for nobody, so the job is claimed again by " \
+        "hand or worked under no card at all: %s" % asked
+    assert not any("--claim" in a for a in asked), \
+        "the board handed the next step over with a claim, which names whoever runs " \
+        "it rather than the session it is being handed to: %s" % asked
+
+    # Mid-work: the pieces of a job are handed over one by one as each closes, and
+    # a reader's findings arrive as several at once — the first is nobody's until
+    # somebody takes it, and the rest follow that session.
+    open_two = [ITEMS[0], {"id": "h.2", "status": "open", "labels": ["step:work", "of:h"]}]
+    asked = handed_on("h.1", open_two)
+    assert "update h.2 -a %s -s in_progress --if-assignee " % ME in asked, \
+        "closing one piece of a job left the next for whoever remembers to claim " \
+        "it: %s" % asked
+    assert not any(a.startswith("create ") for a in asked), \
+        "a job still being built opened the step that comes after the work: %s" % asked
+
+    held_elsewhere = [ITEMS[0], {"id": "h.2", "status": "open", "assignee": "other-9f",
+                                 "labels": ["step:work", "of:h"]}]
+    assert not any("h.2" in a and "-a " in a for a in handed_on("h.1", held_elsewhere)), \
+        "the board took a piece off another session's desk: one claim a job is not " \
+        "one claim a board"
+
+    # The reader is not a hand. It opens what follows the reading, and a record
+    # step handed to the reader would be work assigned to something that has
+    # already let go of the job.
+    read = [dict(r, labels=["step:work", "of:h"]) for r in ITEMS] + [
+        {"id": "h.3", "status": "closed", "labels": ["step:checks", "of:h"]}]
+    asked = handed_on("h.3", read, order="work,checks,review,record,land", actor=None)
+    assert not any(" -a " in a for a in asked), \
+        "the step after the reading was assigned to the reader that opened it: %s" % asked
+
+    print("ok: closing a piece of a job hands the session the next one — the step "
+          "that opens after it, or the next piece nobody holds — never takes one "
+          "another session holds, never issues a claim, and names nobody when the "
+          "reader is what moved the run on")
+
+    # Who closed it is read off the line the hook saw, because the name the board
+    # holds claims under is the one hooks/board-actor.py stamped there: a command
+    # that moves into another checkout first is stamped for that checkout, and
+    # working the name out again here would hand the job to a name the board
+    # never sees it work under. Unstamped, the session's own name stands.
+    moved = []
+    keep_touch = (touch.bc.load, touch.bc.save, touch.bc.reviewing, touch.bc.prefix,
+                  touch.bc.actor, touch.bc.held, touch.run.card, touch.run.advance)
+    touch.bc.load = lambda sid: {}
+    touch.bc.save = lambda sid, state: None
+    touch.bc.reviewing = lambda: ""
+    touch.bc.prefix = lambda root=None: "tst"
+    touch.bc.actor = lambda sid, cwd: "here-99999999"
+    touch.bc.held = lambda name, root=None: []
+    touch.run.card = lambda cid, root: {"id": cid, "status": "closed",
+                                        "labels": ["step:work", "of:tst-h"]}
+    touch.run.advance = lambda cid, root, actor=None: moved.append((cid, actor))
+    said = io.StringIO()
+    keep_out, sys.stdout = sys.stdout, said
+    try:
+        for line in ('bd --actor tree-a1b2c3d4 close tst-h.3 --reason="built it"',
+                     'bd close tst-h.3 --reason="built it"'):
+            sys.stdin = io.StringIO(json.dumps({
+                "session_id": "selftest", "cwd": ROOT, "tool_name": "Bash",
+                "tool_input": {"command": line}, "tool_response": ""}))
+            touch.main()
+    finally:
+        sys.stdout = keep_out
+        (touch.bc.load, touch.bc.save, touch.bc.reviewing, touch.bc.prefix,
+         touch.bc.actor, touch.bc.held, touch.run.card, touch.run.advance) = keep_touch
+    assert moved == [("tst-h.3", "tree-a1b2c3d4"), ("tst-h.3", "here-99999999")], \
+        "the close moved the job on without the name the board holds this " \
+        "session's claims under: %s" % moved
+
+    print("ok: a close moves the run on under the name stamped on that very "
+          "command, and under the session's own name when nothing stamped it")
+
     assert stopping([{"id": "c", "t": T + 5}], [{"id": "c", "t": T + 40}], []), \
         "a turn that held a card through every edit and closed it was refused"
     assert stopping([{"id": "c", "t": T + 5}], [], ["c"]), \
@@ -2008,9 +2136,17 @@ def main():
         "a turn that never claimed anything was allowed to end"
     assert not stopping([{"id": "c", "t": T + 1}], [{"id": "c", "t": T + 5}], []), \
         "edits made after the card was closed were allowed to end the turn"
+    # The board hands the next step of a job to whoever closed the last one, so
+    # the session holds a card it never ran a claim command for: no claim of its
+    # own is on record and the log has nothing to date the edits against. The
+    # gate has to read that as it reads a hand claim (bw-a6o.2).
+    assert stopping([], [], ["c"]), \
+        "a card the board handed this session, with no claim of its own on " \
+        "record, did not cover the turn's edits"
 
     print("ok: the stop gate judges each edit against the cards standing over it "
-          "at that moment, and a turn under no card is still refused")
+          "at that moment, a turn under no card is still refused, and a card the "
+          "board handed over covers a turn exactly as a claimed one does")
 
     sent_back, _ = carrying_on(["c"])
     assert "c" in sent_back and "4f-when-a-session-may-stop" in sent_back, \

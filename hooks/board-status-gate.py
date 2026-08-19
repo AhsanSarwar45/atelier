@@ -936,21 +936,24 @@ def main():
                     "close it as not real." % (cid, bc.tool(root, "job"), cid)
                 )
                 return
-            if "step:worktree" in (card.get("labels") or []):
+            # Any piece of a job, not the card that used to cut the tree: the
+            # copy is made before a job's first claim now, and what this asks is
+            # whether the session is starting fresh work while still owning a
+            # finished job's copy (bw-a6o.2).
+            if any(l.startswith("of:") for l in (card.get("labels") or [])):
                 spent_ones = spent_copies(data.get("session_id"), root)
                 if spent_ones is UNREADABLE:
                     deny(
-                        "%s starts a job in a new copy of the work, and the board "
-                        "could not say whether this session already owns a finished "
-                        "one. A check that cannot run is not a check that passed: try "
+                        "%s is a piece of a job, and the board could not say "
+                        "whether this session already owns the finished copy of "
+                        "another. A check that cannot run is not a check that passed: try "
                         "again, or fix the board first." % cid
                     )
                     return
                 for path, (branch, goal) in spent_ones.items():
                     deny(
-                        "%s starts a job in a new copy of the work, and this session "
-                        "still owns %s, whose job (%s) has nothing left to build in "
-                        "it. Copies are the largest thing this project leaves behind: "
+                        "%s is a piece of a job, and this session still owns %s, "
+                        "whose own job (%s) has nothing left to build in it. Copies are the largest thing this project leaves behind: "
                         "they were 59 GB before anyone counted. Finish that one, then "
                         "start this. If it holds work worth keeping, put it on a "
                         "branch of its own first; otherwise:\n  %s"

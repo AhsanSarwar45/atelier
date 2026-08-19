@@ -312,7 +312,41 @@ def reading_over(goal_id, goal, order, rows, root):
     return True
 
 
-def open_next(rest, have, goal_id, goal, meta, root):
+def hand_over(cid, actor, root, only_if_free=False):
+    """Give this card to the session that closed the one before it.
+
+    One claim a job, not one a step. A job used to be claimed eleven times, and
+    every one of those was a command somebody had to remember: the board knows
+    who closed the last piece, and the next piece is that session's until it says
+    otherwise. `--claim` sets the assignee to whoever runs it, so the name is set
+    outright rather than claimed on somebody else's behalf.
+
+    `only_if_free` is for a card the board did not just create: another session
+    may already hold it, and handing it over would take work off somebody's desk.
+    bd writes nothing and exits 13 when the guard does not hold.
+    """
+    if not actor or not cid:
+        return
+    args = ["update", cid, "-a", actor, "-s", "in_progress"]
+    if only_if_free:
+        args += ["--if-assignee", ""]
+    bc.bd(args, root)
+
+
+def free_item(rows):
+    """The next piece of this job nobody is holding, in the order they were poured.
+
+    A reader's findings arrive as several at once and the session answering them
+    takes one; the rest are handed over as each closes. A piece somebody else has
+    already taken is never moved — one claim a job is not one claim a board.
+    """
+    for r in rows:
+        if r.get("status") == "open" and not (r.get("assignee") or ""):
+            return r.get("id")
+    return None
+
+
+def open_next(rest, have, goal_id, goal, meta, root, actor=None):
     """Open the first position of `rest` this job has no card for.
 
     A position with no card is stepped over rather than waited on: the work is
@@ -333,6 +367,7 @@ def open_next(rest, have, goal_id, goal, meta, root):
         if new_id:
             bc.bd(spine.settle(new_id, spine.step_labels(nxt, goal_id, meta)), root)
             column(goal_id, goal, nxt, root)
+            hand_over(new_id, actor, root)
         return
 
 
@@ -355,8 +390,14 @@ def after_reading(goal_id, root):
     open_next(rest, steps_of(rows), goal_id, goal, meta, root)
 
 
-def advance(cid, root):
-    """A closed step opens the next one, or hands the job to a reader."""
+def advance(cid, root, actor=None):
+    """A closed step opens the next one, or hands the job to a reader.
+
+    `actor` is the session that closed this one, and whatever opens next is its
+    work: the board hands the job on rather than asking for a claim per step.
+    Nobody is named when the reader is what called this — a reading is not a hand
+    that then owns the record step.
+    """
     step = card(cid, root) or {}
     if step.get("status") != "closed":
         return
@@ -379,6 +420,10 @@ def advance(cid, root):
                                         and spine.now(l[5:]) == "work"
                                         for l in r.get("labels") or [])]
         if not items or any(r.get("status") != "closed" for r in items):
+            # Still building. The next piece of this job nobody holds goes to the
+            # session that just finished one, so a job is claimed once however
+            # many pieces it was broken into.
+            hand_over(free_item(items), actor, root, only_if_free=True)
             return
     if reading_due(goal_id, goal, order, rows, root):
         open_reading(goal_id, goal, root)
@@ -388,4 +433,5 @@ def advance(cid, root):
     if which == order[-1]:
         park(goal_id, goal, meta, root)
         return
-    open_next(order[order.index(which) + 1:], steps_of(rows), goal_id, goal, meta, root)
+    open_next(order[order.index(which) + 1:], steps_of(rows), goal_id, goal, meta,
+              root, actor)

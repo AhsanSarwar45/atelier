@@ -24,6 +24,12 @@ CLAIMED = re.compile(r"\bbd\b[^|;&]*\bupdate\b[^|;&]*--claim\b")
 # A write to one card, whose answer is worth handing back rather than asked for
 # again in a turn of its own.
 WROTE = re.compile(r"\bbd\b[^|;&]*\b(?:update|close|reopen)\b")
+# The name the board knows this command by. Stamped on by hooks/board-actor.py in
+# front of every board command, and read back off the line rather than worked out
+# again here: a command that moves into another checkout first is stamped for that
+# checkout, and a job handed to the session's own name would be handed to a name
+# the board never sees it work under.
+ACTOR = re.compile(r"--actor[= ]\s*['\"]?([^\s'\"]+)")
 
 BEAT_EVERY = 90  # seconds of activity between lease refreshes; lease TTL is 300
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -47,6 +53,12 @@ def response_text(resp):
     if isinstance(resp, dict):
         return " ".join(str(resp.get(k) or "") for k in ("stdout", "stderr", "output"))
     return ""
+
+
+def closing_actor(cmd, data):
+    """Who closed this card, in the name the board holds claims under."""
+    got = ACTOR.search(cmd or "")
+    return got.group(1) if got else bc.actor(data.get("session_id"), bc.where(data))
 
 
 def main():
@@ -116,7 +128,9 @@ def main():
                     state["closed"] = (state.get("closed") or [])[-200:] + [
                         {"id": cid, "t": bc.now()}
                     ]
-                run.advance(cid, root)
+                # Whatever opens next is this session's: a job is claimed
+                # once, not once a step (board/run.py, hand_over).
+                run.advance(cid, root, closing_actor(cmd, data))
 
     # A write answers with the card it made, so nothing has to ask again. Two
     # sessions measured asked the board what they had just written to it 72 and

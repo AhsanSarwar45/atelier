@@ -44,6 +44,8 @@ LANDING = "hooks/landing-gate.py"
 HOOK = ".beads/hooks/pre-commit"
 SPINE = "board/spine.py"
 POUR = "board/job"
+RUN = "board/run.py"
+TOUCH = "hooks/board-touch.py"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -400,6 +402,27 @@ FAULTS = [
      POUR,
      lambda s: s.replace('    if DECL.checks:\n        meta["checks"] = DECL.checks\n',
                          "")),
+
+    # One claim a job: the four ways the hand-over goes back to one claim a step —
+    # the step nobody is given, the next piece nobody is given, a piece taken off
+    # another session's desk, and a close that moves the run on under no name at
+    # all (bw-a6o.2).
+    ("the step that opens after a close is left for somebody to claim by hand",
+     RUN,
+     lambda s: s.replace("            column(goal_id, goal, nxt, root)\n"
+                         "            hand_over(new_id, actor, root)\n",
+                         "            column(goal_id, goal, nxt, root)\n")),
+    ("a job being built hands out nothing, so every work item is claimed by hand",
+     RUN,
+     lambda s: s.replace("            hand_over(free_item(items), actor, root, "
+                         "only_if_free=True)\n", "")),
+    ("a hand-over takes the piece another session is already holding", RUN,
+     lambda s: s.replace('    if only_if_free:\n        args += ["--if-assignee", ""]\n',
+                         "")),
+    ("a close moves the job on under no name, so the next step is handed to nobody",
+     TOUCH,
+     lambda s: s.replace("run.advance(cid, root, closing_actor(cmd, data))",
+                         "run.advance(cid, root)")),
 ]
 
 
