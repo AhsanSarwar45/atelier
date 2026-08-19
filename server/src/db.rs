@@ -44,6 +44,9 @@ pub struct Project {
     pub last_opened: String,
     pub created_at: String,
     pub archived_at: Option<String>,
+    /// True when this project was registered by the e2e test suite rather
+    /// than a real user. Kept out of the default project listing.
+    pub is_test: bool,
 }
 
 /// A project with its associated tags
@@ -58,6 +61,9 @@ pub struct ProjectWithTags {
     pub last_opened: String,
     pub created_at: String,
     pub archived_at: Option<String>,
+    /// True when this project was registered by the e2e test suite rather
+    /// than a real user. Kept out of the default project listing.
+    pub is_test: bool,
 }
 
 /// A tag stored in the local database
@@ -97,6 +103,10 @@ pub struct CreateProjectInput {
     pub name: String,
     pub path: String,
     pub local_path: Option<String>,
+    /// Marks a project registered by the e2e test suite. Absent or false
+    /// for every normal, user-created project.
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 /// Input for updating a project
@@ -243,6 +253,7 @@ impl Database {
             ),
             (4, "ALTER TABLE project_bead_counts ADD COLUMN manager_review INTEGER NOT NULL DEFAULT 0"),
             (5, "ALTER TABLE project_bead_counts ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0"),
+            (6, "ALTER TABLE projects ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0"),
         ];
 
         let now = Utc::now().to_rfc3339();
@@ -262,9 +273,13 @@ impl Database {
 
     // ===== Project CRUD =====
 
-    /// Gets projects with their tags, optionally including archived
-    pub fn get_projects_with_tags_filtered(&self, include_archived: bool) -> Result<Vec<ProjectWithTags>, DbError> {
-        let projects = self.get_projects_filtered(include_archived)?;
+    /// Gets projects with their tags, optionally including archived and/or test projects
+    pub fn get_projects_with_tags_filtered(
+        &self,
+        include_archived: bool,
+        include_test: bool,
+    ) -> Result<Vec<ProjectWithTags>, DbError> {
+        let projects = self.get_projects_filtered(include_archived, include_test)?;
         let mut result = Vec::with_capacity(projects.len());
 
         for project in projects {
@@ -278,21 +293,32 @@ impl Database {
                 last_opened: project.last_opened,
                 created_at: project.created_at,
                 archived_at: project.archived_at,
+                is_test: project.is_test,
             });
         }
 
         Ok(result)
     }
 
-    /// Gets projects, optionally including archived
-    pub fn get_projects_filtered(&self, include_archived: bool) -> Result<Vec<Project>, DbError> {
+    /// Gets projects, optionally including archived and/or test projects
+    pub fn get_projects_filtered(&self, include_archived: bool, include_test: bool) -> Result<Vec<Project>, DbError> {
         let conn = self.conn.lock().unwrap();
-        let sql = if include_archived {
-            "SELECT id, name, path, local_path, last_opened, created_at, archived_at FROM projects ORDER BY last_opened DESC"
+        let mut conditions: Vec<&str> = Vec::new();
+        if !include_archived {
+            conditions.push("archived_at IS NULL");
+        }
+        if !include_test {
+            conditions.push("is_test = 0");
+        }
+        let sql = if conditions.is_empty() {
+            "SELECT id, name, path, local_path, last_opened, created_at, archived_at, is_test FROM projects ORDER BY last_opened DESC".to_string()
         } else {
-            "SELECT id, name, path, local_path, last_opened, created_at, archived_at FROM projects WHERE archived_at IS NULL ORDER BY last_opened DESC"
+            format!(
+                "SELECT id, name, path, local_path, last_opened, created_at, archived_at, is_test FROM projects WHERE {} ORDER BY last_opened DESC",
+                conditions.join(" AND ")
+            )
         };
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare(&sql)?;
 
         let projects = stmt
             .query_map([], |row| {
@@ -304,6 +330,7 @@ impl Database {
                     last_opened: row.get(4)?,
                     created_at: row.get(5)?,
                     archived_at: row.get(6)?,
+                    is_test: row.get(7)?,
                 })
             })?
             .collect::<SqliteResult<Vec<_>>>()?;
@@ -318,8 +345,8 @@ impl Database {
 
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO projects (id, name, path, local_path, last_opened, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, input.name, input.path, input.local_path, now, now],
+            "INSERT INTO projects (id, name, path, local_path, last_opened, created_at, is_test) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, input.name, input.path, input.local_path, now, now, input.is_test],
         )?;
 
         Ok(Project {
@@ -330,6 +357,7 @@ impl Database {
             last_opened: now.clone(),
             created_at: now,
             archived_at: None,
+            is_test: input.is_test,
         })
     }
 
@@ -379,7 +407,7 @@ impl Database {
 
         // Fetch and return updated project
         let project = conn.query_row(
-            "SELECT id, name, path, local_path, last_opened, created_at, archived_at FROM projects WHERE id = ?1",
+            "SELECT id, name, path, local_path, last_opened, created_at, archived_at, is_test FROM projects WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Project {
@@ -390,6 +418,7 @@ impl Database {
                     last_opened: row.get(4)?,
                     created_at: row.get(5)?,
                     archived_at: row.get(6)?,
+                    is_test: row.get(7)?,
                 })
             },
         )?;
@@ -462,7 +491,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let alt_path = path.replace('/', "\\");
         let row = conn.query_row(
-            "SELECT id, name, path, local_path, last_opened, created_at, archived_at
+            "SELECT id, name, path, local_path, last_opened, created_at, archived_at, is_test
              FROM projects WHERE path = ?1 OR path = ?2",
             params![path, alt_path],
             |row| {
@@ -474,6 +503,7 @@ impl Database {
                     last_opened: row.get(4)?,
                     created_at: row.get(5)?,
                     archived_at: row.get(6)?,
+                    is_test: row.get(7)?,
                 })
             },
         );
@@ -694,13 +724,14 @@ mod tests {
                 name: "Test Project".to_string(),
                 path: "/path/to/project".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
         assert_eq!(project.name, "Test Project");
         assert_eq!(project.path, "/path/to/project");
 
-        let projects = db.get_projects_filtered(false).unwrap();
+        let projects = db.get_projects_filtered(false, false).unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].id, project.id);
     }
@@ -714,6 +745,7 @@ mod tests {
                 name: "Original".to_string(),
                 path: "/path".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -741,12 +773,13 @@ mod tests {
                 name: "To Delete".to_string(),
                 path: "/delete/me".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
         db.delete_project(&project.id).unwrap();
 
-        let projects = db.get_projects_filtered(false).unwrap();
+        let projects = db.get_projects_filtered(false, false).unwrap();
         assert!(projects.is_empty());
     }
 
@@ -777,6 +810,7 @@ mod tests {
                 name: "Project".to_string(),
                 path: "/project".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -807,26 +841,72 @@ mod tests {
                 name: "Archivable".to_string(),
                 path: "/archive/me".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
         // Initially visible
-        let projects = db.get_projects_filtered(false).unwrap();
+        let projects = db.get_projects_filtered(false, false).unwrap();
         assert_eq!(projects.len(), 1);
 
         // Archive it
         db.archive_project(&project.id).unwrap();
-        let active = db.get_projects_filtered(false).unwrap();
+        let active = db.get_projects_filtered(false, false).unwrap();
         assert!(active.is_empty());
-        let all = db.get_projects_filtered(true).unwrap();
+        let all = db.get_projects_filtered(true, false).unwrap();
         assert_eq!(all.len(), 1);
         assert!(all[0].archived_at.is_some());
 
         // Unarchive it
         db.unarchive_project(&project.id).unwrap();
-        let active = db.get_projects_filtered(false).unwrap();
+        let active = db.get_projects_filtered(false, false).unwrap();
         assert_eq!(active.len(), 1);
         assert!(active[0].archived_at.is_none());
+    }
+
+    #[test]
+    fn test_test_project_excluded_by_default_and_included_on_request() {
+        let db = Database::new_in_memory().unwrap();
+
+        let real = db
+            .create_project(CreateProjectInput {
+                name: "Real".to_string(),
+                path: "/real/project".to_string(),
+                local_path: None,
+                is_test: false,
+            })
+            .unwrap();
+
+        let fixture = db
+            .create_project(CreateProjectInput {
+                name: "Fixture".to_string(),
+                path: "/fixture/project".to_string(),
+                local_path: None,
+                is_test: true,
+            })
+            .unwrap();
+
+        assert!(!real.is_test);
+        assert!(fixture.is_test);
+
+        // Default listing hides the test project
+        let default_list = db.get_projects_filtered(false, false).unwrap();
+        assert_eq!(default_list.len(), 1);
+        assert_eq!(default_list[0].id, real.id);
+
+        // Asking for test projects surfaces both
+        let with_test = db.get_projects_filtered(false, true).unwrap();
+        assert_eq!(with_test.len(), 2);
+        assert!(with_test.iter().any(|p| p.id == real.id));
+        assert!(with_test.iter().any(|p| p.id == fixture.id));
+
+        // Same behavior via the tags-joined variant used by the API
+        let default_with_tags = db.get_projects_with_tags_filtered(false, false).unwrap();
+        assert_eq!(default_with_tags.len(), 1);
+        assert_eq!(default_with_tags[0].id, real.id);
+
+        let all_with_tags = db.get_projects_with_tags_filtered(false, true).unwrap();
+        assert_eq!(all_with_tags.len(), 2);
     }
 
     #[test]
@@ -837,6 +917,7 @@ mod tests {
                 name: "Touchable".to_string(),
                 path: "/touch/me".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -846,7 +927,7 @@ mod tests {
 
         db.touch_project(&project.id).unwrap();
 
-        let projects = db.get_projects_filtered(false).unwrap();
+        let projects = db.get_projects_filtered(false, false).unwrap();
         let touched = projects
             .iter()
             .find(|p| p.id == project.id)
@@ -881,6 +962,7 @@ mod tests {
                 name: "Test".to_string(),
                 path: "/test".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -893,7 +975,7 @@ mod tests {
 
         db.add_tag_to_project(&project.id, &tag.id).unwrap();
 
-        let projects = db.get_projects_with_tags_filtered(false).unwrap();
+        let projects = db.get_projects_with_tags_filtered(false, false).unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].tags.len(), 1);
         assert_eq!(projects[0].tags[0].name, "Tag1");
@@ -909,6 +991,7 @@ mod tests {
                 name: "Lookup".to_string(),
                 path: "/lookup/by/path".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -935,6 +1018,7 @@ mod tests {
                 name: "Win".to_string(),
                 path: "M:\\repos\\win\\project".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -953,6 +1037,7 @@ mod tests {
                 name: "Counts".to_string(),
                 path: "/counts".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -991,6 +1076,7 @@ mod tests {
                 name: "Upsert".to_string(),
                 path: "/upsert".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 
@@ -1048,6 +1134,7 @@ mod tests {
                 name: "Cascade".to_string(),
                 path: "/cascade".to_string(),
                 local_path: None,
+                is_test: false,
             })
             .unwrap();
 

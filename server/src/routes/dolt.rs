@@ -79,8 +79,8 @@ pub async fn dolt_servers(
         }
     };
 
-    // Step 1: Get all registered projects (including archived)
-    let projects = db.get_projects_filtered(true).unwrap_or_default();
+    // Step 1: Get all registered projects (including archived and test)
+    let projects = db.get_projects_filtered(true, true).unwrap_or_default();
 
     // Step 2: Build port -> project_path map from .beads/dolt-server.port files
     let mut port_to_path: std::collections::HashMap<u16, String> =

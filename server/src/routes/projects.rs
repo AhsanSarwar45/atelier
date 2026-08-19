@@ -55,6 +55,9 @@ fn db_error_response(err: DbError) -> (StatusCode, Json<ErrorResponse>) {
 #[derive(Deserialize)]
 pub struct ListProjectsParams {
     pub include_archived: Option<bool>,
+    /// When true, includes projects marked `isTest` (registered by the e2e
+    /// suite). Defaults to false so fixture projects stay off the dashboard.
+    pub include_test: Option<bool>,
 }
 
 /// A project list entry — `ProjectWithTags` flattened with the cached
@@ -74,7 +77,8 @@ pub async fn list_projects(
     Query(params): Query<ListProjectsParams>,
 ) -> Result<Json<Vec<ProjectWithTagsAndCounts>>, (StatusCode, Json<ErrorResponse>)> {
     let include_archived = params.include_archived.unwrap_or(false);
-    let mut projects = db.get_projects_with_tags_filtered(include_archived).map_err(db_error_response)?;
+    let include_test = params.include_test.unwrap_or(false);
+    let mut projects = db.get_projects_with_tags_filtered(include_archived, include_test).map_err(db_error_response)?;
     // Normalize Windows backslashes in paths for consistent frontend behavior
     for p in &mut projects {
         p.path = p.path.replace('\\', "/");
@@ -124,6 +128,7 @@ pub async fn create_project(
         last_opened: project.last_opened,
         created_at: project.created_at,
         archived_at: project.archived_at,
+        is_test: project.is_test,
     };
 
     Ok((StatusCode::CREATED, Json(project_with_tags)))
@@ -147,6 +152,7 @@ pub async fn update_project(
         last_opened: project.last_opened,
         created_at: project.created_at,
         archived_at: project.archived_at,
+        is_test: project.is_test,
     }))
 }
 
@@ -271,6 +277,7 @@ mod tests {
             last_opened: "2026-04-22T10:00:00Z".to_string(),
             created_at: "2026-04-22T09:00:00Z".to_string(),
             archived_at: None,
+            is_test: false,
         }
     }
 

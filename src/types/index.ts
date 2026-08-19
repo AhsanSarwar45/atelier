@@ -33,6 +33,13 @@ export interface Project {
   lastOpened: string;
   createdAt: string;
   archivedAt?: string;
+  /**
+   * True for a project registered by the e2e test suite rather than a
+   * real user. The server excludes these from the default project list —
+   * this field exists only to match what `GET /api/projects` returns when
+   * asked for test projects explicitly; the frontend does not filter on it.
+   */
+  isTest?: boolean;
   beadCounts?: BeadCounts;
   dataSource?: string;
   beadError?: string;

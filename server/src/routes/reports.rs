@@ -242,7 +242,7 @@ fn project_dir(project: &Project) -> String {
 /// segment of the project's main checkout, which is `basename` of the
 /// folder `project_dir` resolves to.
 fn resolve_project_path(db: &Database, project: &str) -> Option<String> {
-    let projects = db.get_projects_filtered(true).ok()?;
+    let projects = db.get_projects_filtered(true, true).ok()?;
     projects.into_iter().find_map(|p| {
         let dir = project_dir(&p);
         let matches = Path::new(&dir).file_name().is_some_and(|n| n.to_string_lossy() == project);
@@ -589,6 +589,7 @@ mod tests {
                 name: name.to_string(),
                 path: path.to_string(),
                 local_path: local_path.map(str::to_string),
+                is_test: false,
             })
             .expect("create project");
         }
