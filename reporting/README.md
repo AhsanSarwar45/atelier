@@ -116,12 +116,15 @@ something nobody is going to do has stopped mattering just as hard.
 
 **What it may name is exactly the work that is standing still**: one piece of
 work, in a state that says nobody has started — waiting, blocked or put off.
-A whole job is refused, because a job is unfinished until everything under it
-is, so a question hung on one survives every answer it is ever given; that is
-how a settled question stayed on a page for a full day of work. Work already
-under way is refused too: work that did not wait was not waiting on this. In
-both cases the fix is the same — name the piece that cannot start until the
-answer arrives, or take the question off and put the call in slot 5.
+A card with other work under it is refused, because it is unfinished until
+everything beneath it is, so a question hung on one survives every answer it is
+ever given; that is how a settled question stayed on a page for a full day of
+work. Everything under it counts, a job's own steps included — they are the
+longest-lived thing under a goal, and on a real board they are usually all a
+goal has. Work already under way is refused too: work that did not wait was not
+waiting on this. In every case the fix is the same — name the piece that cannot
+start until the answer arrives, or take the question off and put the call in
+slot 5.
 
 A machine with no board cannot say either way, so it says so instead: the build
 prints what it could not check and the line handed over counts it, because a

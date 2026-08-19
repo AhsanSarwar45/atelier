@@ -298,12 +298,14 @@ def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | 
 
 
 def is_container(card: str, project: Path, spec_dir: Path | None = None) -> bool:
-    """Whether this card is a whole job rather than one piece of one.
+    """Whether this card carries other work underneath it rather than being one piece.
 
-    A job does not finish until everything under it does, so a question that
+    A card does not finish until everything under it does, so a question that
     names one outlives every answer it could ever be given — which is how a
     settled question keeps being printed for weeks. Work poured underneath is
-    what tells the two apart: a job carries pieces, a piece carries none.
+    what tells the two apart, and every kind of it counts: a job's own spine
+    steps are the longest-lived thing under a goal, so filtering them out by
+    their label would let back in exactly the goals this exists to refuse.
     """
     if spec_dir is not None:
         project = board_home(spec_dir, project)

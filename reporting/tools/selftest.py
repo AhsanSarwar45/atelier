@@ -467,15 +467,35 @@ def run() -> int:
     build.card_state = lambda card, project, base=None: "open"
     build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
 
-    # a question may only name work that is standing still: a whole job outlives
-    # every answer it could be given, and work already under way did not wait
+    # a question may only name work that is standing still: a card carrying
+    # other work outlives every answer it could be given, and work already
+    # under way did not wait
     build.is_container = lambda card, project, base=None: True
     try:
         build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
-        failures.append("a question naming a whole job: printed anyway")
+        failures.append("a question naming work that carries more work: printed anyway")
     except ReportError as e:
-        if "x.2" not in str(e) or "whole job" not in str(e):
-            failures.append(f"a question naming a whole job: unhelpful refusal — {e}")
+        if "x.2" not in str(e) or "carries other work" not in str(e):
+            failures.append(f"a question naming a card carrying work: unhelpful refusal — {e}")
+    build.is_container = lambda card, project, base=None: False
+
+    # a question about work the board has already finished is dead whatever is
+    # under it, so the board is never asked a second question nobody reads
+    def never(card, project, base=None):
+        raise AssertionError("the board was asked what is under finished work")
+
+    build.is_container = never
+    for over in ("closed", "cancelled"):
+        build.card_state = lambda card, project, base=None: over
+        try:
+            build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
+            failures.append(f"a question naming {over} work: printed anyway")
+        except ReportError as e:
+            if "x.2" not in str(e):
+                failures.append(f"a question naming {over} work: did not name it — {e}")
+        except AssertionError as e:
+            failures.append(f"a question naming {over} work: {e}")
+    build.card_state = lambda card, project, base=None: "open"
     build.is_container = lambda card, project, base=None: False
 
     for moving in ("in_progress", "in_review", "manager_review"):
@@ -536,7 +556,17 @@ def run() -> int:
         failures.append("a job with work poured under it did not read as a job")
     board_mod.subprocess.run = lambda *a, **k: Answer(0, "[]")
     if board_mod.is_container("x", tmp):
-        failures.append("one piece of work read as a whole job")
+        failures.append("one piece of work read as carrying work")
+
+    # a goal's spine steps are the longest-lived thing under it, and on a real
+    # board they are all a goal has: skipping cards by their step label would
+    # read every goal as one piece of work and let the old bug straight back in
+    board_mod.subprocess.run = lambda *a, **k: Answer(0, json.dumps([
+        {"id": "x.1", "status": "closed", "labels": ["step:worktree", "of:x"]},
+        {"id": "x.2", "status": "open", "labels": ["step:work", "of:x"]},
+    ]))
+    if not board_mod.is_container("x", tmp):
+        failures.append("a goal carrying only its own steps read as one piece of work")
 
     board_mod.subprocess.run = lambda *a, **k: Answer(1, "", "no beads database found")
     try:
@@ -635,7 +665,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 59 - len(failures)}/{len(CASES) + 59} report gates hold")
+    print(f"{len(CASES) + 62 - len(failures)}/{len(CASES) + 62} report gates hold")
     return 1 if failures else 0
 
 

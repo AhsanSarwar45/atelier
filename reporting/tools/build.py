@@ -475,10 +475,10 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
     so it warns instead.
 
     What a question may name is exactly the work that is still standing still:
-    not the whole job, which does not finish until everything under it does and
-    so outlives every answer, and not work already under way, because work that
-    did not wait was not waiting on this. Both of those printed a settled
-    question for weeks before this was written.
+    not a card carrying other work underneath it, which does not finish until
+    everything under it does and so outlives every answer, and not work already
+    under way, because work that did not wait was not waiting on this. Both of
+    those printed a settled question for weeks before this was written.
 
     Every question is read before anything is refused: a page carrying two dead
     questions that names one of them costs a second build to find the other.
@@ -488,7 +488,15 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
         held = str(q["holds"]).strip()
         try:
             state = card_state(held, ctx.project, ctx.base)
-            whole_job = state is not None and is_container(held, ctx.project, ctx.base)
+            # Asked only when the answer can still change the verdict: a card
+            # nobody has heard of has nothing to look under, and one the board
+            # has already finished is dead on the line below whatever it
+            # carries. Everything else pays one more question to the board.
+            carries = (
+                state is not None
+                and state not in ("closed", "cancelled")
+                and is_container(held, ctx.project, ctx.base)
+            )
         except NoBoard:
             ctx.notes.append(
                 f"question {i} says it is holding up {held}, and there is no board on this "
@@ -515,12 +523,12 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
                 "answer has stopped mattering, so take the question off the page, and put "
                 "the call it settled in the decisions slot"
             )
-        elif whole_job:
+        elif carries:
             dead.append(
-                f"question {i} names {held}, which is a whole job and not one piece of "
-                "one — a job is unfinished until everything under it is done, so the "
-                "question would sit there for weeks after it was answered. Name the piece "
-                "of work that cannot start until you have the answer"
+                f"question {i} names {held}, which carries other work underneath it — it "
+                "cannot finish until everything under it does, so the question would sit "
+                "there for weeks after it was answered. Name the one piece of work that "
+                "cannot start until you have the answer"
             )
         elif state not in WAITING:
             dead.append(
