@@ -348,9 +348,15 @@ export class Sessions {
     });
   }
 
-  /** Is a live process on this machine holding this conversation right now? */
+  /**
+   * Is a live process on this machine holding this conversation right now?
+   *
+   * Read fresh, not remembered: this answer decides once and for all whether
+   * the chat being opened is followed, and a chat that started being worked in
+   * a moment ago is missing from a two-second-old answer (running.ts).
+   */
   private heldElsewhere(summary: SessionSummary): boolean {
-    return summary.externalId !== null && runningNow().has(summary.externalId);
+    return summary.externalId !== null && runningNow(true).has(summary.externalId);
   }
 
   /**

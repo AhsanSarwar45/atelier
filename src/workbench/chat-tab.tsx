@@ -50,7 +50,7 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { diffLines } from '@/workbench/line-diff';
-import { useRunningElsewhere } from '@/workbench/live';
+import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
 import type { AskOption, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportCard, ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
@@ -761,7 +761,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    * rule is in running.ts with the rest of the reasoning about live chats.
    */
   const elsewhere = useRunningElsewhere();
-  const held = heldElsewhere(view.state, facts?.externalId, elsewhere);
+  // The stream first: it is already connected when a chat is opened, while the
+  // chat's own facts are a board query away and the box must refuse from the
+  // first frame it draws (live.ts, LiveSession.externalId).
+  const live = useLiveSessions().find((s) => s.id === sessionId);
+  const held = heldElsewhere(view.state, live?.externalId ?? facts?.externalId, elsewhere, facts?.runningElsewhere);
 
   /**
    * How long the agent has been at this. The brand's own count for the call it

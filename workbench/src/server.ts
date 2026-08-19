@@ -264,6 +264,9 @@ const server = createServer((req, res) => {
         json(res, 200, {
           sessionId,
           externalId: s.externalId,
+          // Said here as well as on the stream, because the writing box must
+          // refuse from the first frame it draws (protocol.ts, SessionFacts).
+          runningElsewhere: s.externalId !== null && runningNow(true).has(s.externalId),
           title: seen?.name ?? s.title,
           cwd,
           folder: folderOf(cwd),

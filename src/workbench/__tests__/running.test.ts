@@ -219,6 +219,27 @@ describe('when the writing box is not the reader’s to type in', () => {
     expect(heldElsewhere('dormant', OURS, null)).toBe(false);
   });
 
+  /**
+   * The gap this closes: the chat is drawn a beat before the stream says what
+   * is running, and a beat is long enough to type into a box that looks
+   * ordinary. What the chat said about itself when it was opened answers until
+   * then.
+   */
+  it('takes the chat’s own word for it while the stream has not spoken', () => {
+    expect(heldElsewhere('dormant', OURS, null, true)).toBe(true);
+    expect(heldElsewhere('dormant', OURS, null, false)).toBe(false);
+  });
+
+  it('lets the stream overrule what was true when the chat was opened', () => {
+    expect(heldElsewhere('dormant', OURS, new Set(), true)).toBe(false);
+    expect(heldElsewhere('dormant', OURS, new Set([OURS]), false)).toBe(true);
+  });
+
+  it('still leaves our own driving alone, whatever the chat said at open', () => {
+    expect(heldElsewhere('idle', OURS, null, true)).toBe(false);
+    expect(heldElsewhere('streaming', OURS, null, true)).toBe(false);
+  });
+
   it('claims nothing about a chat the brand has no id for', () => {
     expect(heldElsewhere('dormant', null, new Set([OURS]))).toBe(false);
     expect(heldElsewhere('dormant', undefined, new Set([OURS]))).toBe(false);

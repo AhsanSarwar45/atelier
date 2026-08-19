@@ -286,6 +286,17 @@ export interface SessionFacts {
    * running set is named in the brand's ids, not ours (bw-dmxj.6).
    */
   externalId: string | null;
+  /**
+   * Whether a live process was holding this conversation when the chat was
+   * opened.
+   *
+   * The same truth arrives on the app-wide stream, but a beat later, and the
+   * writing box has to refuse from the first frame it draws: a message sent in
+   * that gap wakes a SECOND agent on the conversation, which is the whole thing
+   * the box is there to prevent (bw-dmxj.8). The stream then keeps it current —
+   * this says only what was true at open.
+   */
+  runningElsewhere: boolean;
   title: string | null;
   cwd: string | null;
   folder: string | null;

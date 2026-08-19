@@ -136,10 +136,17 @@ let cachedAt = 0;
  *
  * Cheap to call: the answer is remembered for `REFRESH_MS`, so a caller in a
  * loop over forty rows costs one directory read, not forty.
+ *
+ * `fresh` reads the directory whatever the memory says, and a caller taking a
+ * decision ONCE must pass it. Whether to follow a chat being opened is such a
+ * decision: nothing revisits it, so a two-second-old answer leaves a chat that
+ * started being worked in a moment ago drawn as a dead record for as long as it
+ * stays open (bw-dmxj.8). A screen redrawing itself is the opposite case and
+ * wants the memory.
  */
-export function runningNow(): Map<string, RunningChat> {
+export function runningNow(fresh = false): Map<string, RunningChat> {
   const now = Date.now();
-  if (now - cachedAt < REFRESH_MS) return cached;
+  if (!fresh && now - cachedAt < REFRESH_MS) return cached;
   cachedAt = now;
   cached = runningChats(readMarkers(), processIsAlive);
   return cached;

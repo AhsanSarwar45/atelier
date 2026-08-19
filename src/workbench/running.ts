@@ -189,16 +189,22 @@ export function runningChats(markers: SessionMarker[], alive: IsAlive): Map<stri
  * turns and never dormant — and without that half the box would lock during
  * our own work, which is when steering matters most.
  *
- * `running` is null until the stream has said what is running. Null is not
- * "nothing is running": nothing is claimed until it has spoken.
+ * `running` is null until the app-wide stream has said what is running, which
+ * is a beat after the chat itself is drawn — and a beat is long enough to type
+ * a message into a box that looks ordinary. So the chat's own facts carry what
+ * was true when it was opened, and that answers until the stream speaks; once
+ * it has, the stream is the answer, because the other program may have
+ * stopped since (bw-dmxj.8).
  */
 export function heldElsewhere(
   state: string,
   externalId: string | null | undefined,
   running: ReadonlySet<string> | null,
+  saidAtOpen = false,
 ): boolean {
   const asleep = state === 'dormant' || state === 'ended';
   if (!asleep) return false;
   if (!externalId) return false;
-  return running !== null && running.has(externalId);
+  if (running === null) return saidAtOpen;
+  return running.has(externalId);
 }

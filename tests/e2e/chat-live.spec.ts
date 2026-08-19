@@ -344,6 +344,12 @@ test.describe('a chat another program is running', () => {
     const release = claimConversation(chat.id);
 
     try {
+      // The box has to refuse from the first frame it draws, so it may not wait
+      // on the chat's own facts: that answer is a board query away, most of a
+      // second, and a second is long enough to type into a box that looks
+      // ordinary. Blocked outright here — whatever locks the box, it is not
+      // that (bw-dmxj.8).
+      await page.route('**/api/workbench/session/*', (route) => route.abort());
       await openChatTab(page, project);
 
       // It is being worked in, so it is marked and at the top of the rail.
