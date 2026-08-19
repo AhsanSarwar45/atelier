@@ -47,13 +47,29 @@ export function clockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Rows in the order given, split into day groups without reordering them. */
-export function groupByDay(rows: RestoreRow[], now = new Date()): { heading: string; rows: RestoreRow[] }[] {
+/** What stands over the chats somebody is working in, in place of a date. */
+export const WORKING_NOW = 'Working now';
+
+/**
+ * Rows in the order given, split into the blocks they are drawn under, without
+ * reordering them.
+ *
+ * A chat being worked in sits at the top whatever its date (protocol.ts,
+ * byWhatIsWorking), so a day over it would be wrong twice over: it explains a
+ * row that is up there for another reason, and it leaves today's heading to be
+ * drawn a second time over the idle chats below it (bw-dmxj.11). Those rows get
+ * a heading that says why they are first, and the days start under them.
+ *
+ * A heading is never opened twice: a row joins the block already carrying its
+ * heading. With the list in its own order that is the block above it anyway,
+ * and it is a promise the reader can rely on rather than one the caller keeps.
+ */
+export function groupRows(rows: RestoreRow[], now = new Date()): { heading: string; rows: RestoreRow[] }[] {
   const groups: { heading: string; rows: RestoreRow[] }[] = [];
   for (const row of rows) {
-    const heading = dayHeading(row.lastActiveAt, now);
-    const last = groups[groups.length - 1];
-    if (last && last.heading === heading) last.rows.push(row);
+    const heading = row.runningElsewhere ? WORKING_NOW : dayHeading(row.lastActiveAt, now);
+    const already = groups.find((g) => g.heading === heading);
+    if (already) already.rows.push(row);
     else groups.push({ heading, rows: [row] });
   }
   return groups;
@@ -229,7 +245,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
     return () => watch.disconnect();
   }, [shown, rows.length]);
 
-  const groups = groupByDay(rows.slice(0, shown));
+  const groups = groupRows(rows.slice(0, shown));
 
   return (
     <aside

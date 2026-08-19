@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { groupRows, WORKING_NOW } from '@/workbench/chat-sidebar';
 import { byWhatIsWorking, laterOf, type RestoreRow } from '@/workbench/protocol';
 
 function row(over: Partial<RestoreRow> = {}): RestoreRow {
@@ -81,5 +82,50 @@ describe('what the list puts first', () => {
     const off = row({ sessionId: 'off', lastActiveAt: '2026-08-19T10:00:00.000Z', runningElsewhere: false });
     const none = row({ sessionId: 'none', lastActiveAt: '2026-08-19T11:00:00.000Z' });
     expect([off, none].sort(byWhatIsWorking).map((r) => r.sessionId)).toEqual(['none', 'off']);
+  });
+});
+
+/**
+ * The blocks the list is drawn in follow from that order: the chats being
+ * worked in are first whatever their date, so the heading over them says that,
+ * and the days start underneath.
+ *
+ * Written in local time, because a heading is a day as the reader's own clock
+ * counts it and the run may be anywhere.
+ */
+describe('the blocks the list is drawn in', () => {
+  const now = new Date(2026, 7, 19, 12, 0, 0);
+  const at = (day: number, hour: number) => new Date(2026, 7, day, hour, 0, 0).toISOString();
+
+  it('puts a chat being worked in under its own heading, not under a day', () => {
+    const working = row({ sessionId: 'busy', lastActiveAt: at(17, 16), runningElsewhere: true });
+    const idle = row({ sessionId: 'idle', lastActiveAt: at(19, 10) });
+    const groups = groupRows([working, idle], now);
+    expect(groups.map((g) => g.heading)).toEqual([WORKING_NOW, 'Today']);
+    expect(groups[0].rows.map((r) => r.sessionId)).toEqual(['busy']);
+  });
+
+  it('never draws a day twice', () => {
+    const working = row({ sessionId: 'busy', lastActiveAt: at(19, 8), runningElsewhere: true });
+    const rows = [
+      working,
+      row({ sessionId: 'a', lastActiveAt: at(19, 11) }),
+      row({ sessionId: 'b', lastActiveAt: at(18, 9) }),
+      row({ sessionId: 'c', lastActiveAt: at(19, 7) }),
+    ];
+    const headings = groupRows(rows, now).map((g) => g.heading);
+    expect(headings, 'a heading was opened twice').toEqual(Array.from(new Set(headings)));
+    expect(headings).toEqual([WORKING_NOW, 'Today', 'Yesterday']);
+  });
+
+  it('with nobody working it is the days alone, in the order given', () => {
+    const rows = [
+      row({ sessionId: 'a', lastActiveAt: at(19, 11) }),
+      row({ sessionId: 'b', lastActiveAt: at(19, 9) }),
+      row({ sessionId: 'c', lastActiveAt: at(18, 9) }),
+    ];
+    const groups = groupRows(rows, now);
+    expect(groups.map((g) => g.heading)).toEqual(['Today', 'Yesterday']);
+    expect(groups[0].rows.map((r) => r.sessionId)).toEqual(['a', 'b']);
   });
 });
