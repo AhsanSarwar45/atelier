@@ -15,6 +15,7 @@ its own right. It holds jobs and has no spine — see docs/board.md#4-the-shape-
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -214,6 +215,147 @@ def lands(names):
     return [bc.LANDS + n for n in dict.fromkeys(names)]
 
 
+def short(line, room=76):
+    """A card's line cut at a word, so a list of them can be read down."""
+    line = " ".join((line or "").split())
+    if len(line) <= room:
+        return line
+    return line[:room].rsplit(" ", 1)[0] + "…"
+
+
+def live(cards):
+    """The cards among these that are still somebody's problem."""
+    return [c for c in cards if c.get("status") in sections.LIVE
+            and c.get("issue_type") != "gate"]
+
+
+def folds_into(area, parent=None):
+    """The open goals of this area, which a new job could be a work item of instead.
+
+    Batching is decided here or nowhere. On the day this landed 16 of 38 open goals
+    carried two work items or fewer, because opening a job costs one command and
+    folding one into a goal already open costs a decision nobody was ever asked to
+    make — and each of those micro-jobs pays the whole run's fixed ceremony.
+    """
+    found = live(rows(bd(["list", "--status", "all", "--label", "job",
+                          "--label", "area:" + area, "--limit", "0", "--json"],
+                         must=False)))
+    return [(c["id"], (c.get("title") or "").strip()) for c in found
+            if c["id"] != parent]
+
+
+def stands_alone(a):
+    """Refuse a job that could be a work item of a goal already open in its area.
+
+    Never a bar on the work itself — the escape is one flag away and what it says
+    is written onto the card, so the choice is auditable rather than argued about
+    twice. It fires on `new` only: a work item poured `under` a goal IS the fold,
+    and a find carries no run to batch.
+    """
+    if a.alone:
+        if len(a.alone.strip()) < 25:
+            sys.exit("--alone must say why this cannot be a work item of a goal "
+                     "already open in %s. A job that stands alone for no stated "
+                     "reason is the batching this refusal exists to stop:\n  not "
+                     "--alone \"different\"\n  but --alone \"nothing open touches "
+                     "the pour; this rewrites the gate underneath it\"" % a.area)
+        return
+    goals = folds_into(a.area, a.parent)
+    if not goals:
+        return
+    fold = "\n".join(
+        "  %s\n    %s under %s --do \"<what to do>|<how we know it is done>\""
+        % (short(title), sections.EG_POUR, gid) for gid, title in goals)
+    sys.exit("%s already has %d open goal(s) this could be a work item of, and a "
+             "job of its own pays the whole run — its checks, its reading and its "
+             "landing — for one item:\n%s\n\nFold it into one of them with the "
+             "command beside it, or say why it stands alone:\n  --alone \"what no "
+             "open goal of %s covers\"" % (a.area, len(goals), fold, a.area))
+
+
+def second_half(card):
+    """How a work item says we will know it is done, wherever it was written.
+
+    A card poured `under` a goal carries it as a section of its body; one made by
+    hand or by an older tool carries it in the acceptance field. Both are read, so
+    the nudge below is not blind to half the board.
+    """
+    found = re.search(r"^##\s+Acceptance Criteria\s*$(.*?)(?=^##\s|\Z)",
+                      card.get("description") or "", re.M | re.S)
+    return (found.group(1).strip() if found else "") \
+        or (card.get("acceptance_criteria") or "").strip()
+
+
+def _runs(text):
+    """The commands a line names, each as the one string it was written as."""
+    return {" ".join(m.group(0).strip().strip("`").split()).lower()
+            for m in sections.COMMAND.finditer(text or "")} - {""}
+
+
+def _spots(text):
+    """The places a line names — a path, a file, or whatever this project calls a
+    place that is not a file (`machinery.toml`, place_re)."""
+    got = {m.group(0).lower() for m in sections.PATH.finditer(text or "")}
+    if sections.PLACE:
+        got |= {m.group(0).lower() for m in sections.PLACE.finditer(text or "")}
+    return got
+
+
+def already_landing(done, siblings):
+    """The open siblings whose second half is settled by the same run in the same
+    place as this one — the shape of two buttons and a checkbox on one page filed
+    as three items."""
+    runs, spots = _runs(done), _spots(done)
+    if not (runs and spots):
+        return []
+    return [(cid, title) for cid, title, half in siblings
+            if (_runs(half) & runs) and (_spots(half) & spots)]
+
+
+def siblings_of(parent):
+    """Every open piece of this parent, with the second half it will be judged by."""
+    out = []
+    for card in live(rows(bd(["list", "--parent", parent, "--status", "all",
+                              "--limit", "0", "--json"], must=False))):
+        half = second_half(card)
+        if half:
+            out.append((card["id"], (card.get("title") or "").strip(), half))
+    return out
+
+
+def promoted(root, sources, area, kind, priority):
+    """One work item per find this job was promoted from, and every find closed.
+
+    Promotion took one find at a time, so three faults on one page cost three jobs
+    and three whole runs of ceremony — which is why 54 finds sat unbatched. Naming
+    them together makes one job whose work items ARE the finds, each carrying the
+    words it was filed in, so nothing sends a reader back to the closed card.
+    """
+    made = []
+    labels = ["area:" + area, "kind:" + kind, "step:work", "of:" + root]
+    for src in sources:
+        card = next(iter(rows(bd(["show", src, "--json"], must=False))), None)
+        title = (card or {}).get("title") or ""
+        if not title.strip():
+            sys.exit("--source %s: no card of that name on this board (%s), so there "
+                     "is nothing to promote and nothing to carry its words." % (src, ROOT))
+        where = sections.part(card.get("description") or "", "where").strip()
+        args = ["create", "--title", title.strip(), "--type", "task",
+                "-p", str(priority), "--parent", root, "--json",
+                "-d", "## Acceptance Criteria\n%s\n\nPromoted from %s.\n"
+                      % (where or title.strip(), src)]
+        args += sum([["-l", lab] for lab in labels], [])
+        out = bd(args)
+        try:
+            cid = json.loads(out)["id"]
+        except Exception:
+            cid = out.strip()
+        bd(spine.settle(cid, labels))
+        bd(["close", src, "--reason", "promoted into %s as %s" % (root, cid)])
+        made.append((cid, src))
+    return made
+
+
 def new(a):
     tags_land = lands(a.lands)
     not_elsewhere(a.what, a.evidence, a.done, a.not_in)
@@ -233,6 +375,10 @@ def new(a):
     tags = ["job", "area:" + a.area, "kind:" + a.kind, "size:" + size] + tags_land
     if who == "manager":
         tags.append("judge:manager")
+    # Last, with the whole card built: every bar this pour is below is worth saying
+    # before the board is read, and a refusal about batching is about a card that
+    # would otherwise have been poured.
+    stands_alone(a)
     args = ["create", "--title", a.what, "--type", "epic", "-p", str(a.priority),
             "-d", body, "--acceptance", a.done, "--json"]
     args += sum([["-l", t] for t in tags], [])
@@ -251,6 +397,8 @@ def new(a):
         meta["checks"] = DECL.checks
     if a.record:
         meta["record"] = a.record
+    if a.alone:
+        meta["alone"] = a.alone.strip()
     if who == "manager":
         meta["judge_why"] = why
     meta.update({"skip." + sid: why for sid, why in skips.items()})
@@ -261,20 +409,26 @@ def new(a):
     if who == "manager":
         bd(["update", root, "--append-notes",
             "The manager signs this job off. What he has to look at: " + why])
+    if a.alone:
+        bd(["update", root, "--append-notes",
+            "Stands alone rather than folding into an open goal of %s: %s"
+            % (a.area, a.alone.strip())])
     # A job whose run opens at its own work items has no first card to open: the
     # items are the position, and they are poured by hand because only whoever
-    # read the goal knows what they are.
-    if spine.evidence(run[0]) in (spine.WORK, spine.READ):
-        opening = ("no first step to open — this job begins at its own work items:\n"
-                   "  %s under %s --do \"<what to do>|<how we know it is done>\""
-                   % (sections.EG_POUR, root))
-    else:
+    # read the goal knows what they are — unless the finds it was promoted from
+    # say, which is what makes several of them one job.
+    lines = ["%s  work item, promoted from %s" % pair
+             for pair in promoted(root, a.source, a.area, a.kind, a.priority)]
+    if spine.evidence(run[0]) not in (spine.WORK, spine.READ):
         first = json.loads(bd(spine.card(run[0], root, meta, a.priority)
                               + ["--json"]))["id"]
         bd(spine.settle(first, spine.step_labels(run[0], root, meta)))
-        opening = "%s  first step — the rest arrive as each closes" % first
-    if a.source:
-        bd(["close", a.source, "--reason", "promoted into %s" % root])
+        lines.append("%s  first step — the rest arrive as each closes" % first)
+    elif not lines:
+        lines.append("no first step to open — this job begins at its own work items:"
+                     "\n  %s under %s --do \"<what to do>|<how we know it is done>\""
+                     % (sections.EG_POUR, root))
+    opening = "\n".join(lines)
     print("%s  goal\n%s\nruns: %s\nsigned off by: %s"
           % (root, opening, " → ".join(run),
              "the manager — " + why if who == "manager" else "an agent"))
@@ -344,6 +498,10 @@ def under(a):
         # The work position: these items ARE the step, so they wear its label and the
         # run moves on when the last of them closes.
         labels += ["step:work", "of:" + a.parent]
+    # What is already open under this parent, so an item landing where one of them
+    # lands is said out loud. A nudge and never a refusal: whether two runs in one
+    # place are one piece of work is a judgement, and the pour does not have it.
+    kin = siblings_of(a.parent)
     made = []
     for item in a.do:
         title, _, done = item.partition("|")
@@ -362,6 +520,16 @@ def under(a):
             cid = out.strip()
         bd(spine.settle(cid, labels))
         made.append(cid)
+        # Onto the error stream, never the ids: `board/review` reads the last line
+        # of what this prints as the card it just filed.
+        for other, other_title in already_landing(done, kin):
+            print("WARNING: %s is settled by the same run in the same place as %s "
+                  "(%s), which is open. Two runs in one place are usually one work "
+                  "item — merge them with `bd close %s --reason \"merged into %s\"` "
+                  "and widen %s, or leave both if they are really two."
+                  % (cid, other, short(other_title, 60), cid, other, other),
+                  file=sys.stderr)
+        kin.append((cid, title.strip(), done.strip()))
     print("\n".join(made))
 
 
@@ -496,7 +664,13 @@ p.add_argument("--judge", required=True, metavar="agent|manager=WHAT HE LOOKS AT
                     "it, `manager=\"…\"` when nothing but his eye can")
 p.add_argument("-p", "--priority", type=int, default=2, choices=range(5))
 p.add_argument("--parent", help="a larger goal this job sits under")
-p.add_argument("--source", help="a find card this job was promoted from; it is closed")
+p.add_argument("--source", action="append", default=[], metavar="FIND",
+               help="repeatable; a find card this job was promoted from. Each becomes "
+                    "one work item carrying the words it was filed in, and each is "
+                    "closed as promoted — which is how several finds make one job")
+p.add_argument("--alone", default="", metavar="WHY IT IS NOT A WORK ITEM",
+               help="why this cannot fold into a goal already open in its system; "
+                    "what is said is written onto the card")
 p.add_argument("--lands", action="append", metavar="PROJECT", default=[],
                help="repeatable; another checkout this job's change lands in, from "
                     "the ones this project declares: "

@@ -416,6 +416,17 @@ FAULTS = [
      lambda s: s.replace('    if DECL.checks:\n        meta["checks"] = DECL.checks\n',
                          "")),
 
+    # Batching, which the opening command is the only place anybody is asked about:
+    # a job nobody was told could fold into an open goal, finds promoted one at a
+    # time, and an item poured where an open sibling already lands (bw-msdm).
+    ("a job is opened into a system already carrying an open goal", POUR,
+     lambda s: s.replace("    stands_alone(a)\n", "")),
+    ("only the first of the finds named on one opening is promoted", POUR,
+     lambda s: s.replace("    for src in sources:\n", "    for src in sources[:1]:\n")),
+    ("what is already open under a goal is nothing a new item is measured against",
+     POUR,
+     lambda s: s.replace("    kin = siblings_of(a.parent)\n", "    kin = []\n")),
+
     # One claim a job: the four ways the hand-over goes back to one claim a step —
     # the step nobody is given, the next piece nobody is given, a piece taken off
     # another session's desk, and a close that moves the run on under no name at
