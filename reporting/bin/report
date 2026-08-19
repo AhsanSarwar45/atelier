@@ -19,9 +19,22 @@ HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 TOOLS="$HERE/tools"
 
 # Reports are a person's own work, so they live where this computer keeps a
-# program's data and never inside a copy of the product. The three cases below
-# are the same rule the app itself follows (server/src/identity.rs).
+# program's data and never inside a copy of the product.
+#
+# The product itself is what knows where that is — one definition, in
+# server/src/identity.rs — so it is asked rather than second-guessed. Working
+# the three per-platform paths out again here made a second copy of the rule
+# that a rename would have silently split in two (bw-pqt.24). The cases below
+# are only for a checkout where nothing has been built or installed yet, and
+# `the-shell-tool-and-the-program-agree-on-where-data-goes` keeps them in step.
 data_home() {
+  local dir
+  for exe in beads-web beads-server; do
+    if command -v "$exe" >/dev/null 2>&1; then
+      dir="$("$exe" --data-dir 2>/dev/null)" || dir=""
+      if [ -n "$dir" ]; then echo "$dir"; return; fi
+    fi
+  done
   case "$(uname -s)" in
     Darwin) echo "$HOME/Library/Application Support/com.beads.kanban-ui" ;;
     MINGW*|MSYS*|CYGWIN*) echo "${APPDATA:-$HOME/AppData/Roaming}/beads/kanban-ui/data" ;;

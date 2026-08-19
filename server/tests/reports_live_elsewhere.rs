@@ -96,3 +96,58 @@ fn the_tools_are_baked_in_for_every_build_not_only_a_release() {
          The dependency reads: {line}"
     );
 }
+
+
+/// The shell tool and the program must land on the same folder.
+///
+/// `reporting/bin/report` writes specs where the app reads them, so the two
+/// have to agree. It worked the folder out in bash, which was a second copy of
+/// a rule `identity.rs` says lives in one place — a rename of `APPLICATION`
+/// there would have moved the app and left the shell tool writing to the old
+/// folder, with nothing to say so (bw-pqt.24). The tool now asks the program
+/// when one is installed; this is what holds its fallback in step.
+#[test]
+fn the_shell_tool_and_the_program_agree_on_where_data_goes() {
+    let tool = repo_root().join("reporting/bin/report");
+    // Only the function, never the whole script: sourcing it would run the
+    // command. The narrowed PATH is the state of a machine that has the source
+    // but has never built or installed it, so the fallback is what answers —
+    // and the fallback is the half that can drift. Where a copy IS installed
+    // there, it answers instead, and the same equality has to hold.
+    let script = format!(
+        "eval \"$(sed -n '/^data_home() {{/,/^}}/p' '{}')\"; PATH=/usr/bin:/bin data_home",
+        tool.display()
+    );
+    let out = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(&script)
+        .output()
+        .expect("bash reads the report command's own function");
+    assert!(
+        out.status.success(),
+        "the report command's data_home did not run: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let said = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let ours = beads_server::identity::data_dir().expect("a machine running tests has a home");
+    assert_eq!(
+        said,
+        ours.display().to_string(),
+        "the report command writes to {said} and the program reads from {}. They are the same \
+         folder or reports vanish: where it goes is decided in server/src/identity.rs, and the \
+         shell tool asks for it rather than working it out again",
+        ours.display()
+    );
+}
+
+/// And the tool must ask, not only happen to agree today.
+#[test]
+fn the_shell_tool_asks_the_program_before_falling_back() {
+    let tool = std::fs::read_to_string(repo_root().join("reporting/bin/report"))
+        .expect("the report command");
+    assert!(
+        tool.contains("--data-dir"),
+        "reporting/bin/report works the data folder out for itself instead of asking the \
+         program that owns the answer"
+    );
+}

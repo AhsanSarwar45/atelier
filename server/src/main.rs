@@ -91,6 +91,21 @@ async fn serve_static(req: Request<Body>) -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() {
+    // Where this computer keeps this program's data, printed and nothing else.
+    // The report command runs from a shell and needs the same answer this
+    // program uses; asking the program is what stops it working the three
+    // per-platform paths out a second time in bash (bw-pqt.24).
+    if env::args().nth(1).as_deref() == Some("--data-dir") {
+        match identity::data_dir() {
+            Some(dir) => println!("{}", dir.display()),
+            None => {
+                eprintln!("this computer names no folder for a program's data");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     // Initialize tracing subscriber for logging
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
