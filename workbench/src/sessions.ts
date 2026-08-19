@@ -12,6 +12,7 @@ import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
   cut,
+  diffOf,
   IMPORTED_MESSAGES,
   type PastEntry,
   pastTranscript,
@@ -33,11 +34,13 @@ type Subscriber = (e: WbpEvent) => void;
  * Which reading of a past chat's record this build does.
  *
  * 1 was the words alone. 2 is the words and the commands, which is what the
- * manager asked for after photographing the difference (§6.3.2). Raise it
+ * manager asked for after photographing the difference (§6.3.2). 3 adds the
+ * change each edit made, so a chat begun in a terminal draws its edits as
+ * red-and-green rather than as the new text alone (bw-4wcd.1). Raise it
  * whenever the import would produce a different transcript from the same
  * record: every chat read in by a lower one is read again on its next open.
  */
-const IMPORT_RECIPE = 2;
+const IMPORT_RECIPE = 3;
 
 /**
  * How often a chat another program is driving is looked at again.
@@ -340,6 +343,12 @@ export class Sessions {
       title: toolTitle(entry.name, entry.input),
       parentToolCallId: null,
     });
+    // A change is read off the same arguments the live watcher reads it off, so
+    // an edit in an imported chat is drawn as a change rather than as the new
+    // text alone — which is what the manager was looking at when he said there
+    // was no diff (bw-4wcd.1).
+    const change = diffOf(entry.name, entry.input);
+    if (change) this.publish(sessionId, { type: 'diff', toolCallId: entry.id, ...change });
     this.publish(sessionId, {
       type: 'tool.completed',
       toolCallId: entry.id,

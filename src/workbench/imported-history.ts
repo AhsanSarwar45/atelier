@@ -262,3 +262,50 @@ export function withoutMachineChatter<T extends { type: string; messageId?: stri
   if (chatter.size === 0) return events;
   return events.filter((e) => !(e.messageId && chatter.has(e.messageId)));
 }
+
+/** The change one tool call made to one file: what it took out, what it put in. */
+export interface ToolDiff {
+  path: string;
+  before: string;
+  after: string;
+}
+
+/**
+ * The change a tool call carries, or null when it changed no file.
+ *
+ * One rule for both halves of the app: the live watcher reads it off the call as
+ * it happens, and a chat read back out of the kit's own record reads it off the
+ * same arguments. Without the second, a conversation begun in a terminal drew
+ * every edit as bare text and never as a change — which is the whole of what the
+ * manager was looking at (bw-4wcd.1).
+ *
+ * Everything is cut where a command's arguments and its output are cut: a Write
+ * carries a whole file in one argument.
+ */
+export function diffOf(name: string, input: Record<string, unknown>): ToolDiff | null {
+  const path = String(input.file_path ?? '');
+  if (!path) return null;
+  if (name === 'Edit' && typeof input.old_string === 'string' && typeof input.new_string === 'string') {
+    return { path, before: cut(input.old_string), after: cut(input.new_string) };
+  }
+  if (name === 'Write' && typeof input.content === 'string') {
+    return { path, before: '', after: cut(input.content) };
+  }
+  // Several edits to one file arrive as a list, and each is a change of its own.
+  // Run together they read as one, which is how they were made.
+  if (name === 'MultiEdit' && Array.isArray(input.edits)) {
+    const edits = input.edits.filter(
+      (e): e is { old_string: string; new_string: string } =>
+        typeof e === 'object' && e !== null &&
+        typeof (e as { old_string?: unknown }).old_string === 'string' &&
+        typeof (e as { new_string?: unknown }).new_string === 'string',
+    );
+    if (!edits.length) return null;
+    return {
+      path,
+      before: cut(edits.map((e) => e.old_string).join('\n')),
+      after: cut(edits.map((e) => e.new_string).join('\n')),
+    };
+  }
+  return null;
+}

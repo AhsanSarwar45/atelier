@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
-import { cut, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
+import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
 /**
@@ -414,18 +414,16 @@ export class ClaudeDriver implements Driver {
     this.emit({ type: 'todo', items: this.todos.map((t) => ({ ...t })) });
   }
 
-  /** The before/after a change-viewer needs, taken from the tool's own arguments. */
+  /**
+   * The before/after a change-viewer needs, taken from the tool's own arguments.
+   *
+   * The rule itself is shared with the reading of a past chat, so an edit made
+   * while this app watched and the same edit read back out of the kit's record
+   * draw the identical change (src/workbench/imported-history.ts, `diffOf`).
+   */
   private emitDiff(toolCallId: string, name: string, input: Record<string, unknown>): void {
-    const path = String(input.file_path ?? '');
-    if (!path) return;
-    // Cut where a command's arguments and its output are cut. A Write carries
-    // the whole file here too, three lines after the arguments that were
-    // capped, and it went into the log whole (bw-1u1.40).
-    if (name === 'Edit' && typeof input.old_string === 'string' && typeof input.new_string === 'string') {
-      this.emit({ type: 'diff', toolCallId, path, before: cut(input.old_string), after: cut(input.new_string) });
-    } else if (name === 'Write' && typeof input.content === 'string') {
-      this.emit({ type: 'diff', toolCallId, path, before: '', after: cut(input.content) });
-    }
+    const change = diffOf(name, input);
+    if (change) this.emit({ type: 'diff', toolCallId, ...change });
   }
 
   async start(opts: StartOptions): Promise<void> {

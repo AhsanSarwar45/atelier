@@ -49,6 +49,7 @@ import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
+import { languageOf, languagesOf, paint } from '@/workbench/colouring';
 import { diffLines } from '@/workbench/line-diff';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
 import type { AskOption, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
@@ -154,35 +155,54 @@ function PermissionCard({
   );
 }
 
-/** Before and after in two columns, with only the lines that differ marked. */
+/**
+ * One line of code, coloured, inside a cell that carries its own background.
+ *
+ * Painted a line at a time rather than a file at a time: each line lives in its
+ * own table cell, and a single painted block cannot be cut across cells without
+ * losing the tags it opened.
+ */
+function Line({ text, language }: { text: string; language: string | null }) {
+  const html = paint(text, language);
+  if (html === null) return <>{text}</>;
+  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+/**
+ * Before and after in two columns, with only the lines that differ marked, and
+ * the language of the file itself coloured through both of them (bw-4wcd.1).
+ */
 function DiffView({ path, before, after }: { path: string; before: string; after: string }) {
   const rows = diffLines(before, after);
+  const language = languageOf(path);
   return (
-    <div data-testid="diff-view" data-diff-path={path} className="mt-1.5 overflow-hidden rounded border border-border/50">
+    <div data-testid="diff-view" data-diff-path={path} data-diff-language={language ?? ''} className="mt-1.5 overflow-hidden rounded border border-border/50">
       <div className="flex items-center justify-between bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
         <span className="truncate">{path}</span>
         <span className="shrink-0">before → after</span>
       </div>
       <div className="max-h-64 overflow-auto">
-        <table className="w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed">
+        <table className="w-full table-fixed border-collapse font-mono text-[11px] leading-relaxed text-foreground/80">
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} data-diff-kind={r.kind}>
                 <td
                   className={cn(
                     'w-1/2 whitespace-pre-wrap break-all border-r border-border/40 px-2 py-0.5 align-top',
-                    r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15 text-red-200' : 'text-muted-foreground',
+                    r.kind === 'removed' || r.kind === 'changed' ? 'bg-red-500/15' : '',
+                    r.left === null && 'bg-muted/20',
                   )}
                 >
-                  {r.left ?? ''}
+                  {r.left === null ? '' : <Line text={r.left} language={language} />}
                 </td>
                 <td
                   className={cn(
                     'w-1/2 whitespace-pre-wrap break-all px-2 py-0.5 align-top',
-                    r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15 text-emerald-200' : 'text-muted-foreground',
+                    r.kind === 'added' || r.kind === 'changed' ? 'bg-emerald-500/15' : '',
+                    r.right === null && 'bg-muted/20',
                   )}
                 >
-                  {r.right ?? ''}
+                  {r.right === null ? '' : <Line text={r.right} language={language} />}
                 </td>
               </tr>
             ))}
@@ -199,7 +219,18 @@ function DiffView({ path, before, after }: { path: string; before: string; after
  * Cut to a height a reader can skim past, scrolling inside itself rather than
  * pushing the conversation off the screen.
  */
-function Body({ label, text, testId }: { label: string; text: string; testId: string }) {
+function Body({
+  label,
+  text,
+  testId,
+  language = null,
+}: {
+  label: string;
+  text: string;
+  testId: string;
+  /** What to colour it as, when this body is code and we know which (§8.2.4). */
+  language?: string | null;
+}) {
   if (!text.trim()) return null;
   return (
     <div className="mt-1">
@@ -210,12 +241,50 @@ function Body({ label, text, testId }: { label: string; text: string; testId: st
       <Panel inset="none" className="max-h-72 overflow-auto">
         <pre
           data-testid={testId}
-          className="whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-xs leading-relaxed text-muted-foreground"
+          data-language={language ?? ''}
+          className={cn(
+            'whitespace-pre-wrap break-words px-2 py-1.5 font-mono text-xs leading-relaxed',
+            language ? 'text-foreground/85' : 'text-muted-foreground',
+          )}
         >
-          {text}
+          <Numbered text={text} language={language} />
         </pre>
       </Panel>
     </div>
+  );
+}
+
+/**
+ * A body's text, coloured, keeping the line numbers a file read hands back.
+ *
+ * The kit returns a file the way `cat -n` does — the number, a tab, the line —
+ * and colouring that whole thing paints every line number as a number literal.
+ * The numbers are lifted out, drawn grey, and only the code is painted
+ * (bw-4wcd.2).
+ */
+function Numbered({ text, language }: { text: string; language: string | null }) {
+  const lines = text.split('\n');
+  const numbered = lines.filter((l) => /^\s*\d+\t/.test(l)).length;
+  if (!language) return <>{text}</>;
+  if (numbered < lines.length / 2) {
+    const html = paint(text, language);
+    return html === null ? <>{text}</> : <span dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  return (
+    <>
+      {lines.map((line, i) => {
+        const at = line.indexOf('\t');
+        const gutter = at >= 0 ? line.slice(0, at) : '';
+        const code = at >= 0 ? line.slice(at + 1) : line;
+        return (
+          <span key={i} data-testid="numbered-line">
+            {at >= 0 && <span className="select-none text-muted-foreground/50">{gutter}{'\t'}</span>}
+            <Line text={code} language={language} />
+            {i < lines.length - 1 ? '\n' : ''}
+          </span>
+        );
+      })}
+    </>
   );
 }
 
@@ -278,7 +347,11 @@ function ToolRow({
   const [open, setOpen] = useOpen(openAll);
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
-  const asked = whatItWasAsked(item.input);
+  // A shell row's arguments ARE its command: written out as `key: value` it
+  // read as a form rather than as the line that was run (bw-4wcd.2).
+  const shell = item.name === 'Bash' && typeof item.input.command === 'string';
+  const asked = shell ? String(item.input.command) : whatItWasAsked(item.input);
+  const tongue = languagesOf(item.name, item.input);
   const hasBody = asked !== '' || Boolean(item.output?.trim());
 
   return (
@@ -313,8 +386,8 @@ function ToolRow({
         </button>
         {open && (
           <>
-            <Body label="asked" text={asked} testId="tool-input" />
-            <Body label="printed" text={item.output ?? ''} testId="tool-output" />
+            <Body label={shell ? 'ran' : 'asked'} text={asked} testId="tool-input" language={tongue.asked} />
+            <Body label="printed" text={item.output ?? ''} testId="tool-output" language={tongue.printed} />
           </>
         )}
       </Panel>
