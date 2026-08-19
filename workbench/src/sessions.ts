@@ -57,6 +57,13 @@ const IMPORT_RECIPE = 5;
  */
 const FOLLOW_BEAT_MS = 1_500;
 
+/**
+ * What the reader is told when the chat he typed into belongs to somebody else
+ * for the moment. The screen says the same thing under the writing box, so the
+ * refusal reads as the same rule twice rather than as a fault.
+ */
+export const HELD_ELSEWHERE = 'Another program is working in this chat. It draws here as it goes; you can type when it stops.';
+
 export class Sessions {
   private drivers = new Map<string, Driver>();
   private linkers = new Map<string, Linker>();
@@ -214,6 +221,16 @@ export class Sessions {
   }): Promise<SessionSummary> {
     const existing = params.sessionId ? this.store.getSession(params.sessionId) : undefined;
     if (existing && this.drivers.has(existing.id)) return existing;
+
+    // The door itself, not the sign on it. The screen refuses to type into a
+    // conversation another program is working in, but it learns that from a
+    // stream that can drop, and a dropped stream must not be all that stands
+    // between a reader and a SECOND agent on somebody else's conversation
+    // (bw-dmxj.12). Attaching is the only way a second one starts, and this is
+    // the only door into attaching, so the answer is taken here, from the
+    // directory, at the moment of the attempt. Nothing of ours is attached —
+    // the line above returned — so whoever is holding it is not us.
+    this.refuseIfHeld(params.externalId ?? existing?.externalId);
 
     const now = new Date().toISOString();
     const summary: SessionSummary =
@@ -393,6 +410,16 @@ export class Sessions {
    * the chat being opened is followed, and a chat that started being worked in
    * a moment ago is missing from a two-second-old answer (running.ts).
    */
+  /**
+   * Refuses to put a driver of ours on a conversation a live process is already
+   * holding. Read from the directory at the moment of the attempt, because the
+   * screen's own copy of this answer rides a stream that can drop, and the lock
+   * may not be only as good as that stream (bw-dmxj.12).
+   */
+  private refuseIfHeld(conversation: string | null | undefined): void {
+    if (conversation && runningNow(true).has(conversation)) throw new Error(HELD_ELSEWHERE);
+  }
+
   private heldElsewhere(summary: SessionSummary): boolean {
     return summary.externalId !== null && runningNow(true).has(summary.externalId);
   }
@@ -538,6 +565,9 @@ export class Sessions {
     if (!this.drivers.has(sessionId)) {
       const row = this.store.getSession(sessionId);
       if (!row) throw new Error(`session ${sessionId} is not running`);
+      // Before the notice below, not after it: that notice is the chat waking
+      // up, and a chat that is somebody else's does not wake (bw-dmxj.12).
+      this.refuseIfHeld(row.externalId);
       this.publish(sessionId, { type: 'notice', text: 'Continuing this chat.' });
       await this.resume({
         sessionId,

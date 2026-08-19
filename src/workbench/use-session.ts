@@ -342,13 +342,32 @@ export function readImage(file: File): Promise<ImagePayload> {
   });
 }
 
+/**
+ * What to put in front of the reader when the sidecar says no.
+ *
+ * A refusal is often a rule rather than a fault — the chat belongs to another
+ * program for the moment (sessions.ts, HELD_ELSEWHERE) — and those are written
+ * to be read. The status line is kept only for the failures that carry no words
+ * of their own.
+ */
+async function refusal(res: Response, command: string): Promise<string> {
+  const body = await res.text();
+  try {
+    const said = JSON.parse(body) as { error?: unknown };
+    if (typeof said.error === 'string' && said.error) return said.error;
+  } catch {
+    // Not JSON: the raw body is all there is.
+  }
+  return `${command} failed: ${res.status} ${body}`;
+}
+
 export async function sendCommand<T = unknown>(cmd: WbpCommand): Promise<T> {
   const res = await fetch(apiUrl('/api/workbench/command'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(cmd),
   });
-  if (!res.ok) throw new Error(`${cmd.type} failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(await refusal(res, cmd.type));
   return (await res.json()) as T;
 }
 

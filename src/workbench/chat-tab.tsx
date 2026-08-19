@@ -739,6 +739,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [startError, setStartError] = useState<string | null>(null);
   /** What went wrong the last time he changed the mode or the model. */
   const [steerError, setSteerError] = useState<string | null>(null);
+  /** Why the last thing he wrote did not go, if it did not go. */
+  const [sendError, setSendError] = useState<string | null>(null);
   const start = useCallback(async () => {
     if (!projectId || !projectPath) return;
     setStarting(true);
@@ -945,7 +947,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     const images = attached;
     setDraft('');
     setAttached([]);
-    await sendCommand({ type: 'prompt.send', sessionId, text, images });
+    setSendError(null);
+    try {
+      await sendCommand({ type: 'prompt.send', sessionId, text, images });
+    } catch (e) {
+      // The server can refuse this: another program took the conversation over
+      // between the box unlocking and the send, or the screen's own copy of who
+      // is working was stale (bw-dmxj.12). Either way what he wrote is his, and
+      // it goes back in the box he wrote it in rather than into the void.
+      setDraft(draft);
+      setAttached(images);
+      setSendError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   /** Pictures arrive by paste or by drop; both land in the same tray. */
@@ -1270,6 +1283,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {steerError && (
             <p data-testid="steer-error" className="mb-2 text-xs text-red-500">
               {steerError}
+            </p>
+          )}
+          {sendError && (
+            <p data-testid="send-error" className="mb-2 text-xs text-red-500">
+              {sendError}
             </p>
           )}
           {held && (

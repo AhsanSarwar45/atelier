@@ -202,19 +202,60 @@ function absorb(frame: WatchFrame): void {
   announce();
 }
 
+/**
+ * How long after a dropped stream we try again, and the ceiling it climbs to.
+ *
+ * The workbench may not be running at all — the board half of the app works
+ * without it — so the wait doubles up to half a minute rather than hammering a
+ * door nobody is behind. It never stops trying: a sidecar that comes back is
+ * the ordinary case (a rebuild, a restart), and until it does the screen is
+ * working from facts that stopped moving.
+ */
+const RETRY_MS = 2_000;
+const RETRY_CEILING_MS = 30_000;
+let retryIn = RETRY_MS;
+let retrying: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * The stream has stopped speaking, so what it said about who is working is no
+ * longer an answer — it is a memory.
+ *
+ * Back to `null`, which every reader of it treats as "not yet said" and answers
+ * from the chat's own facts instead. Keeping the last set would be worse than
+ * knowing nothing: a chat that started being worked in after the drop would be
+ * drawn as free, and the writing box would let a reader wake a second agent on
+ * somebody else's conversation (bw-dmxj.12). The server refuses that outright,
+ * which is what actually holds the door; this is the screen telling the truth
+ * about what it knows.
+ */
+function dropped(): void {
+  source?.close();
+  source = null;
+  if (running !== null) {
+    running = null;
+    announce();
+  }
+  if (retrying !== null || listeners.size === 0) return;
+  retrying = setTimeout(() => {
+    retrying = null;
+    retryIn = Math.min(retryIn * 2, RETRY_CEILING_MS);
+    connect();
+  }, retryIn);
+}
+
 function connect(): void {
   if (source) return;
   // A card is drawn in places with no live connection to be had at all — a
   // server render, a test bench. Those simply see no sessions.
   if (typeof EventSource === 'undefined') return;
+  if (listeners.size === 0) return;
   source = new EventSource(apiUrl('/api/workbench/watch'));
-  source.onmessage = (msg) => absorb(JSON.parse(msg.data) as WatchFrame);
-  // The workbench may not be running at all; the board half of the app is
-  // unaffected by that and must not be broken by a retry loop.
-  source.onerror = () => {
-    source?.close();
-    source = null;
+  source.onmessage = (msg) => {
+    // Speaking again: the next drop starts its own count from the short wait.
+    retryIn = RETRY_MS;
+    absorb(JSON.parse(msg.data) as WatchFrame);
   };
+  source.onerror = dropped;
 }
 
 function subscribe(fn: () => void): () => void {
@@ -225,6 +266,11 @@ function subscribe(fn: () => void): () => void {
     if (listeners.size === 0) {
       source?.close();
       source = null;
+      if (retrying !== null) {
+        clearTimeout(retrying);
+        retrying = null;
+      }
+      retryIn = RETRY_MS;
     }
   };
 }

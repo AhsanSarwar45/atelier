@@ -332,6 +332,86 @@ async function aProject(request: APIRequestContext): Promise<Project> {
   return project!;
 }
 
+/** One command to the sidecar, and what it said back. */
+async function command(request: APIRequestContext, cmd: Record<string, unknown>) {
+  const res = await request.post(`${backend()}/api/workbench/command`, { data: cmd });
+  const body = await res.text();
+  let said: { error?: string; id?: string } = {};
+  try {
+    said = JSON.parse(body) as { error?: string; id?: string };
+  } catch {
+    said = {};
+  }
+  return { ok: res.ok(), status: res.status(), body, said };
+}
+
+test.describe('the door into a conversation somebody else is in', () => {
+  /**
+   * The lock the reader sees is drawn by the browser, from a stream that can
+   * drop — and it did drop on the manager's machine, after which a chat the
+   * server itself called running opened with an ordinary writing box. So the
+   * refusal is asked of the server directly here, the way a browser with a dead
+   * stream asks it: no screen, no stream, just the message (bw-dmxj.12).
+   */
+  test('the server refuses a message into it, whatever the screen believes', async ({ request }) => {
+    const project = await aProject(request);
+    const chat = aChatSomebodyElseIsIn(project.path, 'Rework the restore list');
+    const release = claimConversation(chat.id);
+
+    let sessionId = '';
+    try {
+      const opened = await command(request, {
+        type: 'session.open',
+        externalId: chat.id,
+        brand: 'claude',
+        projectId: project.id,
+        projectPath: project.path,
+      });
+      expect(opened.ok, `opening it for reading failed: ${opened.body}`).toBe(true);
+      sessionId = opened.said.id!;
+
+      // Reading it is allowed; typing into it is not.
+      const sent = await command(request, { type: 'prompt.send', sessionId, text: 'do the thing' });
+      expect(sent.ok, 'the sidecar accepted a message into somebody else’s conversation').toBe(false);
+      expect(sent.said.error ?? sent.body).toContain('Another program is working in this chat');
+
+      // The other door into attaching, asked directly.
+      const resumed = await command(request, {
+        type: 'session.resume',
+        sessionId,
+        externalId: chat.id,
+        brand: 'claude',
+        projectId: project.id,
+        projectPath: project.path,
+      });
+      expect(resumed.ok, 'the sidecar attached a driver to somebody else’s conversation').toBe(false);
+      expect(resumed.said.error ?? resumed.body).toContain('Another program is working in this chat');
+    } finally {
+      release();
+    }
+
+    // That program has stopped, so the chat is the reader's to take up.
+    const facts = await request.get(`${backend()}/api/workbench/session/${sessionId}`);
+    expect(((await facts.json()) as { runningElsewhere?: boolean }).runningElsewhere).toBe(false);
+
+    // And the door is a door, not a wall: the same attach that was refused a
+    // moment ago is allowed now. Asked of attaching rather than of sending,
+    // because a message that went through would spend a real turn — attaching
+    // is the thing the refusal guards, and it is the thing checked.
+    const again = await command(request, {
+      type: 'session.resume',
+      sessionId,
+      externalId: chat.id,
+      brand: 'claude',
+      projectId: project.id,
+      projectPath: project.path,
+    });
+    expect(again.ok, `the chat stayed shut after the other program stopped: ${again.body}`).toBe(true);
+    await command(request, { type: 'session.stop', sessionId });
+    chat.forget();
+  });
+});
+
 test.describe('a chat another program is running', () => {
   test('follows a chat another program runs', async ({ page, request }) => {
     // Longer than the default: this case waits for the list, then for a chat to
