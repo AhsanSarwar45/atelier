@@ -92,6 +92,25 @@ async function reportSlug(request: APIRequestContext, id: string): Promise<strin
   return ours[0].slug;
 }
 
+/** The first of these reports the tools will actually draw, or null. */
+async function firstDrawable(
+  request: APIRequestContext,
+  id: string,
+  slugs: string[],
+): Promise<string | null> {
+  const row = (await projects(request)).find((p) => p.id === id);
+  const dir = row?.localPath || row?.path || '';
+  const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? '';
+  for (const slug of slugs) {
+    const res = await request.get(
+      `${api()}/api/reports/spec?project=${name}&slug=${slug}&path=${encodeURIComponent(dir)}`,
+      { timeout: 120_000 },
+    );
+    if (res.ok()) return slug;
+  }
+  return null;
+}
+
 async function openReport(page: Page, id: string, slug: string): Promise<void> {
   await page.goto(`/project?id=${id}&tab=reports&report=${slug}`);
   await expect(page.getByTestId('report-tab')).toBeVisible();
@@ -162,6 +181,39 @@ test.describe('a report is a place under its project', () => {
 
     // Back steps off the report, then off the tab, and the board is there.
     await page.goBack();
+    await page.goBack();
+    await expect(page).toHaveURL(/tab=board/);
+  });
+
+  test('a card on the board opens its report in that same place', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=board`);
+    await expect(page.getByTestId('project-tabs')).toBeVisible();
+    await expect(page.getByTestId('board-scroll')).toBeVisible({ timeout: 30_000 });
+
+    // Whichever of this board's cards wear a report, taken from the board
+    // itself rather than guessed: a report names a card, but the card has to be
+    // one this board is drawing for there to be anything to click.
+    // The links appear a beat after the cards do: which card wears a report is
+    // a second question, answered once for the whole screen.
+    const links = page.getByTestId('card-report-link');
+    await links.first().waitFor({ state: 'attached', timeout: 30_000 }).catch(() => {});
+    const worn = await links.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-report-slug') ?? ''),
+    );
+    test.skip(worn.length === 0, 'no card on this board wears a report');
+    const slug = await firstDrawable(request, id, worn);
+    test.skip(!slug, "the tools refuse every report this board's cards wear");
+
+    await page.locator(`[data-testid="card-report-link"][data-report-slug="${slug}"]`).first().click();
+
+    // The report's own place under this project — not a drawer over the board,
+    // and not a page held in a frame (bw-7ks.21.14).
+    await expect(page).toHaveURL(new RegExp(`tab=reports.*report=${slug}`));
+    await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator('iframe')).toHaveCount(0);
+
+    // And Back is the board he was reading it from.
     await page.goBack();
     await expect(page).toHaveURL(/tab=board/);
   });

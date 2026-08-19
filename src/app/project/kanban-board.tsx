@@ -10,7 +10,6 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { KanbanColumn } from "@/components/kanban-column";
 import { MemoryPanel } from "@/components/memory-panel";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
-import { ReportPanel } from "@/components/report-panel";
 import { TabTools } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
@@ -89,7 +88,6 @@ export default function KanbanBoard() {
   const [isAgentsOpen, setIsAgentsOpen] = useState(false);
 
   // Reports panel state
-  const [isReportsOpen, setIsReportsOpen] = useState(false);
 
   // Create bead dialog state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -314,8 +312,6 @@ export default function KanbanBoard() {
           // Agents
           isAgentsOpen={isAgentsOpen}
           onAgentsToggle={() => setIsAgentsOpen((prev) => !prev)}
-          isReportsOpen={isReportsOpen}
-          onReportsToggle={() => setIsReportsOpen((prev) => !prev)}
           // Filesystem features require a real project path
           hasProjectPath={!isDoltOnly}
           // Unknown status warning
@@ -372,14 +368,8 @@ export default function KanbanBoard() {
           panel for the whole app, over whichever tab is showing, and reads which
           card from the address (docs/designs/app-shell.md §1.8). */}
 
-      {/* Reports Panel */}
-      <ErrorBoundary label="Reports Panel">
-        <ReportPanel
-          open={isReportsOpen}
-          onOpenChange={setIsReportsOpen}
-          fsPath={fsPath ?? ""}
-        />
-      </ErrorBoundary>
+      {/* No reports drawer: reports are a tab of this project, in the bar
+          directly above this board (bw-7ks.21.14). */}
 
       {/* Memory Panel (requires filesystem path) */}
       <ErrorBoundary label="Memory Panel">

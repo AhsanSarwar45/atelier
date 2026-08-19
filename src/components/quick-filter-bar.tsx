@@ -3,7 +3,7 @@
 import * as React from 'react';
 import type { CSSProperties } from 'react';
 
-import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, FileText, Tag } from 'lucide-react';
+import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, Tag } from 'lucide-react';
 
 import { Toolbar } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -87,8 +87,6 @@ interface QuickFilterBarProps {
   /** Callback to toggle agents panel */
   onAgentsToggle?: () => void;
   /** Reports panel */
-  isReportsOpen?: boolean;
-  onReportsToggle?: () => void;
   /** Whether the project has a filesystem path (not dolt-only) */
   hasProjectPath?: boolean;
   /** Count of beads with truly unknown statuses */
@@ -139,8 +137,6 @@ export function QuickFilterBar({
   onMemoryToggle,
   isAgentsOpen,
   onAgentsToggle,
-  isReportsOpen,
-  onReportsToggle,
   hasProjectPath = true,
   unknownStatusCount = 0,
   unknownStatusNames = [],
@@ -364,23 +360,8 @@ export function QuickFilterBar({
         </button>
       )}
 
-      {/* Reports Toggle */}
-      {onReportsToggle && (
-        <button
-          type="button"
-          onClick={onReportsToggle}
-          aria-pressed={isReportsOpen}
-          className={cn(
-            'h-8 px-3 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised',
-            isReportsOpen
-              ? 'bg-epic/20 text-epic'
-              : 'bg-surface-overlay/50 text-t-tertiary hover:text-t-secondary'
-          )}
-        >
-          <FileText className="size-4" aria-hidden="true" />
-          Reports
-        </button>
-      )}
+      {/* No Reports button: this bar is the board's own, and reports are a tab
+          of the project in the bar above it (bw-7ks.21.14). */}
 
       {/* Unknown status warning indicator */}
       {unknownStatusCount > 0 && (
