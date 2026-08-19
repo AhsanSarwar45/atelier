@@ -192,6 +192,12 @@ waiting_choice · waiting_plan · stopped · errored · ended · dormant`
 The three `waiting_*` states plus `ended` are "blocked on the human". The tray
 is a filter over this and nothing more.
 
+Being worked in by another program is deliberately not one of these. It is not a
+state of a session of ours — the conversation may have no row here at all, and
+one this app drives can be held by a process of its own besides — so it rides
+beside the state rather than inside it, and `state` stays the authority on
+whether a driver of ours is attached (§6.3.4).
+
 ### 2.4 The Driver interface
 
 ```ts
@@ -505,7 +511,9 @@ asked for it gone.
 
 At startup the sidecar marks every non-`ended` session `dormant`. A dormant
 session has no child process until it is clicked. The sidebar groups by day —
-Today, Yesterday, then dates.
+Today, Yesterday, then dates — under one group that is not a day: the chats
+somebody is working in this minute, which stand above all of them and say so
+(§6.3.4).
 
 A row says three things and no more, because that is what tells two chats apart
 when a project has forty of them:
@@ -514,6 +522,7 @@ when a project has forty of them:
 |---|---|
 | first | the conversation's own **name** — the brand's title for it, not ours |
 | second | a **chip per card** it worked on, which opens that card, and a **chip naming the folder** it ran in |
+| beside them | **working**, when a live process is holding that conversation right now (§6.3.4) |
 
 The folder is the whole point of the second chip: a worktree's directory is
 named after the worktree, so two chats on the same project in different trees
@@ -582,11 +591,127 @@ which a browser already drawing the old one folds to exactly what a browser
 connecting fresh would (§4, bw-1u1.27). Only a chat this app has never driven is
 rewritten that way — one with live turns in it is the only copy of those.
 
+**A partial read is not a read.** The tail of a record is held back while its
+last calls have no result yet — what they will say is still being written, and
+drawing an unfinished command as if it had finished is a lie the reader cannot
+see. That held-back tail is then drawn by the live follower (§6.3.4) and by
+nothing else, so the moment the reader looks away it is nobody's: the follower
+goes with him, and a chat already marked as read is never read again. Whatever
+the other program was in the middle of would be dropped for good, along with
+everything said after it. So the mark is set only when the whole record was
+taken; a chat left mid-command is read afresh the next time it is opened, which
+costs one re-read and gains the finished work (bw-dmxj.14).
+
 #### 6.3.3 The way back in
 
 Constraint: a chat opens by being clicked, and a chat that is asleep is woken by
 the same click. Nothing else in the list starts an agent, so decision 8 holds:
 the click is the consent, and there is no second button to press.
+
+**Clicking reads; typing forks.** Opening a chat another program holds fetches
+its past and follows it (§6.3.4), and starts nothing. The second agent would
+start on the first message sent into it, and that is the thing being refused.
+
+**The refusal lives in the sidecar, at both doors.** A driver of ours is
+attached in exactly two places — resuming a chat, and sending into one that has
+no driver yet — and each asks the marker directory at the moment of the attempt,
+reading it fresh rather than taking the remembered answer. The browser shuts the
+writing box and says why as well, but the browser learns who is working from a
+stream, and a stream can drop: one did on the owner's machine, after which the
+screen kept the last thing it had heard as if it were still true, never
+reconnected, and a chat the sidecar itself called running opened with an
+ordinary writing box. A lock only as good as a stream is not a lock
+(bw-dmxj.12).
+
+So the screen tells the truth about what it knows. Whether the conversation is
+held arrives with the chat's own facts when it opens, rather than only from the
+stream, which closed the beat after opening in which a message would have woken
+a second agent (bw-dmxj.8). A dropped stream leaves the screen knowing nothing
+until it is back, which it arranges itself, waiting twice as long each time from
+two seconds up to half a minute so a sidecar that is down is not hammered. And a
+message the sidecar refuses comes back into the box it was typed in with the
+reason under it, because the conversation being taken over between unlocking the
+box and pressing send does not make what was written any less the owner's.
+
+#### 6.3.4 Which chats are being worked in right now
+
+Constraint: a row that is asleep is an offer to wake it, and the offer is wrong
+when somebody is already in there. Until this, every chat the app had not
+started was drawn asleep, so a conversation being typed at in a terminal looked
+exactly like one that died last week.
+
+**The signal is the tool's own markers, not a modification time.** Claude Code
+writes one file per running process at `<config>/sessions/<pid>.json`, naming
+the conversation that process is on; the config directory is resolved the way
+the tool resolves it, `CLAUDE_CONFIG_DIR` when set and `~/.claude` otherwise, so
+an install that moved its state does not read as a machine where nothing is
+running. The obvious-looking alternative was measured wrong for this: the SDK's
+`lastModified` is the conversation file's mtime and nothing more, and on this
+machine one genuinely working chat was silent for 488 seconds while another
+wrote every 5. `SDKSessionInfo` carries no liveness field at all, so it is not
+asked (bw-dmxj.3).
+
+**A marker is believed only while its process is.** Existence is asked with
+signal `0`, where a permission error still means a live process belonging to
+somebody else; and on Linux the kernel's own start time for that number, field
+22 of `/proc/<pid>/stat`, must still match what the marker recorded — process
+numbers are handed out again, and a marker a crash left behind can name a number
+the kernel has since given to something else. macOS and Windows are shipped
+targets with no `/proc`, so there existence is the whole test. A machine that
+answers neither reads every chat as not running, which is exactly the behaviour
+this replaces and the right way to degrade.
+
+**Nothing here writes, and one thing here is never opened.** The markers belong
+to Claude Code, which cleans up after itself; a reader that starts deleting
+another program's state is a race waiting to happen. The same directory holds
+`<pid>.<hash>.key` files, mode 0600, which are credentials for the tool's own
+messaging socket. Only `<pid>.json` is read.
+
+**A program driving a chat counts exactly as a person typing in one.** The
+marker says which it is, and nothing branches on it. Measured 2026-08-19: the
+one live host-driven marker on this machine was an editor's Claude agent, seven
+hours into a conversation in this repository. Somebody is working in there, and
+a rule that counted only terminals would have drawn it asleep and offered to
+wake a second agent on it — the whole of what this signal exists to prevent
+(bw-dmxj.13).
+
+**Cost.** A handful of files of a few hundred bytes, read at most once every two
+seconds however many callers ask, so a list of forty rows costs one look at the
+machine. A caller deciding something once must ask fresh instead: whether to
+follow the chat being opened is decided at the click and never revisited, and a
+two-second-old answer would leave a chat that started a moment ago drawn as a
+dead record for as long as it stays open.
+
+**What the list does with it.** A working chat says the word, sorts above every
+idle one, and stands under a heading that says so in place of a date — they sort
+above the days, so writing a day over them printed today twice on one list and
+explained nothing about why they were first (bw-dmxj.11). Date alone was the
+wrong order for the question the reader is asking, which is where the work is,
+not what happened most recently: a chat running for an hour writes no more often
+than one read a minute ago, and the list draws a screenful, so the running one
+was not merely lower down, it was not drawn at all. The date on a row is the
+later of our own log and the tool's index, because our log only moves when this
+app drives the chat and the chat worked on elsewhere is the one that matters
+most here (bw-dmxj.4). Both halves sort — the sidecar when it builds the list,
+the screen again after the stream has added to it.
+
+**It keeps up without a reload.** The set of held conversations is its own frame
+on the watch stream, sent when the stream opens and again whenever it changes,
+the whole set each time: it is one entry per running chat on the machine, and a
+set is unambiguous where a started/stopped pair after a missed frame is not. It
+cannot ride a session's own events, because a chat being typed at in a terminal
+has no row here to carry one (bw-dmxj.5).
+
+**Inside such a chat, the messages arrive.** The header says working rather than
+asleep and clears itself when that program stops (bw-dmxj.10), and opening one
+is no longer a photograph of the record at the moment of the click (bw-dmxj.6).
+There is no event to subscribe to — the other program answers to its own
+terminal, not to us — so the record is watched: a beat every second and a half
+is one stat, the record is re-read only when that stat has moved, and only
+entries past the mark are said, so a chat nothing is happening in costs a stat
+and nothing else. Every chat being read that this app is not driving is watched,
+whether or not a terminal held it at the moment it was opened, because the owner
+opens a conversation and types into it in a terminal afterwards (bw-4wcd.20).
 
 ---
 
@@ -991,6 +1116,23 @@ search, spend, report viewer), `tests/e2e/workbench.spec.ts`, this document.
   the model's decision and a standing browser check resting on it goes red for
   no reason. It was watched happening once by hand instead, 2026-08-19
   (`scripts/README.md`).
+- Who is working in a chat is Claude's answer only. Codex writes no markers we
+  read, so a Codex conversation somebody else is driving is drawn asleep and
+  offered like any other (§6.3.4).
+- The marker directory's shape is not a documented contract. It is read
+  defensively — a half-written or unrecognised file is no marker rather than an
+  error — and a version that moves or renames those files degrades to "nothing
+  is running", which is the state this feature replaced.
+- Only Linux tells a reused process number from a live one. On macOS and
+  Windows a marker a crash left behind whose number the system has since given
+  to something else reads as a working chat until that program exits.
+- The lock only sees this machine. Two copies of the app on one machine share
+  the markers and so agree; a conversation held on another machine is invisible
+  to both, which is a remote-machines question (§10, `bw-4rw`).
+- Following another program's chat is a poll, not a subscription: a stat every
+  second and a half per chat being read. It is bounded by what is on screen —
+  only chats somebody has open are followed — and the beat does not hold the
+  sidecar up.
 
 Three faults found under this section's work are filed rather than fixed, and
 each is still open: the menu of what a chat can do is republished whole every
