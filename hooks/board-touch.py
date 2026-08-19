@@ -65,6 +65,27 @@ def card_ids(text, prefix):
     return re.findall(r"\b%s-[0-9a-z.-]{2,16}\b" % re.escape(prefix), text or "")
 
 
+def aimed_at(cmd, verb, prefix):
+    """The cards a board command is aimed at: what stands between its verb and
+    its first switch, and never what a switch carries.
+
+    A close names the card it closes; the reason it carries names whatever the
+    session was thinking about — a card the work follows on from, one a brief
+    quotes — and a card merely spoken of in a reason was ticked off by nobody.
+    Read once by the gates as if it had been, it costs a whole turn.
+    """
+    found = []
+    for seg in bc.segments(cmd):
+        argv = bc.words(seg)
+        if verb not in argv or "bd" not in [os.path.basename(a) for a in argv]:
+            continue
+        for word in argv[argv.index(verb) + 1:]:
+            if word.startswith("-"):
+                break
+            found += card_ids(word, prefix)
+    return found
+
+
 def sent_off(state, answer):
     """One more helper out, by the name it answers to.
 
@@ -166,7 +187,7 @@ def main():
         if re.search(r"\bbd\b.*\b(update|close|comment|note|dep)\b", cmd):
             state["last_write"] = bc.now()
         if CLAIMED.search(cmd):
-            for cid in card_ids(cmd, bc.prefix(root)):
+            for cid in aimed_at(cmd, "update", bc.prefix(root)):
                 # When, not just that: the stop gate judges each edit against the
                 # cards standing over it at that moment (bc.unowned).
                 state["claims"] = (state.get("claims") or [])[-200:] + [
@@ -174,7 +195,11 @@ def main():
                 ]
                 run.started(cid, root)
         if CLOSED.search(cmd):
-            for cid in card_ids(cmd, bc.prefix(root)):
+            # Either spelling of it, and the ids are the words of the line that
+            # are a card and nothing else.
+            named = bc.prefix(root)
+            for cid in (aimed_at(cmd, "close", named)
+                        or aimed_at(cmd, "update", named)):
                 # Asked once and kept: the answer below is the same card, and a
                 # hook that asks the board twice for one thing pays twice.
                 answer = run.card(cid, root) or {}

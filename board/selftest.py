@@ -1492,6 +1492,40 @@ def helping(sends, backs, order="sent first"):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def closing(cmd, labels=()):
+    """The cards a board command run in a session is put down against: the ones
+    it closed, and the ones it claimed.
+
+    Everything the recorder reaches for outside its own state file — what a card
+    is labelled with, moving a job's run on, the heartbeat — is answered here, so
+    what a case shows is the reading of the command line and nothing besides.
+    """
+    tmp = tempfile.mkdtemp(prefix="board-close-")
+    was, touch.bc.STATE_DIR = touch.bc.STATE_DIR, tmp
+    load, save = touch.bc.load, touch.bc.save
+    kept = (touch.run.card, touch.run.advance, touch.run.started, touch.bc.held)
+    touch.bc.load, touch.bc.save = REAL_STATE
+    touch.bc.reviewing = lambda: ""
+    touch.bc.held = lambda name, root=None: []
+    touch.run.card = lambda cid, root=None: {"id": cid, "labels": list(labels)}
+    touch.run.advance = lambda cid, root=None: None
+    touch.run.started = lambda cid, root=None: None
+    try:
+        sys.stdin = io.StringIO(json.dumps(
+            {"tool_name": "Bash", "hook_event_name": "PostToolUse",
+             "session_id": "selftest-close", "cwd": ROOT,
+             "tool_input": {"command": cmd}, "tool_response": {"stdout": ""}}))
+        touch.main()
+        held = touch.bc.load("selftest-close")
+        return ([c["id"] for c in held.get("closed") or []],
+                [c["id"] for c in held.get("claims") or []])
+    finally:
+        touch.bc.STATE_DIR = was
+        touch.bc.load, touch.bc.save = load, save
+        touch.run.card, touch.run.advance, touch.run.started, touch.bc.held = kept
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # The reply a turn ends on, and the cards it poured while writing it. A fault named
 # in words has two homes and no third (docs/board.md#two-ways), so a card of either
 # shape satisfies the gate and neither being there is the refusal.
@@ -2334,6 +2368,29 @@ def main():
     finally:
         shutil.rmtree(room, ignore_errors=True)
         shutil.rmtree(quiet, ignore_errors=True)
+
+    # A close names the card it is aimed at. The reason it carries names whatever
+    # the session was thinking about — the card this follows on from, the one a
+    # brief quotes — and none of those was ticked off by anybody. Read as closed,
+    # each costs a turn: the gate then asks the session to hand over a card that
+    # is still open, and it has nothing to hand (bw-a6o.1).
+    shut, claimed = closing('bd close tst-aaa --reason="follows tst-bbb, filed earlier"')
+    assert shut == ["tst-aaa"], \
+        "a close whose reason names a second card was recorded against %r" % shut
+    assert claimed == [], \
+        "a close was recorded as a claim as well: %r" % claimed
+    assert closing("bd close tst-aaa tst-ccc --reason=x")[0] == ["tst-aaa", "tst-ccc"], \
+        "a close aimed at two cards did not name them both: %r" \
+        % closing("bd close tst-aaa tst-ccc --reason=x")[0]
+    assert closing('bd update tst-aaa --status closed --reason="see tst-bbb"')[0] \
+        == ["tst-aaa"], "the other spelling of a close named the wrong cards: %r" \
+        % closing('bd update tst-aaa --status closed --reason="see tst-bbb"')[0]
+    assert closing('bd update tst-aaa --claim --notes="under tst-bbb"')[1] \
+        == ["tst-aaa"], "a claim took its card from its own notes: %r" \
+        % closing('bd update tst-aaa --claim --notes="under tst-bbb"')[1]
+    # A find is closed by nobody's report, so neither gate asks for one of it.
+    assert closing("bd close tst-aaa", labels=["find"])[0] == [], \
+        "closing a find was put down as work needing a report"
 
     for order in ("sent first", "home first"):
         assert helping([FIRST, SECOND], [FIRST], order) == [SECOND], \
