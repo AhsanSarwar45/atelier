@@ -145,16 +145,37 @@ export function isBlockedBy(
 const NOT_WORK = new Set(["gate"]);
 
 /**
+ * The states that wait on a person rather than on work: a reader who did not
+ * write the card, and the manager's own signature. A card in one of these is
+ * drawn in its column wherever it sits in the tree, because that column is the
+ * only place anyone can pick it up.
+ */
+const AWAITED: ReadonlySet<string> = new Set<string>(
+  STATES.filter((s) => s.settled && s.live).map((s) => s.id),
+);
+
+/**
  * The beads the kanban columns draw as cards of their own: the goals and the
  * standalone tasks. A step belongs inside the goal it is a step of, which is
  * where the goal card already lists it with its own state.
+ *
+ * A card waiting on a reader or on the manager is the exception, part of a
+ * bigger job or not. Those two states are the board's own, written once nobody
+ * is building the card any more, and the only place either of them can be acted
+ * on is the column it names. Nested inside a parent that is still in progress,
+ * such a card is invisible: the manager's column drew nothing while the project
+ * list counted two cards in it, because both were sub-goals of larger jobs
+ * (bw-5hq8.1).
  *
  * @param beads - Beads whose status has already been mapped to a column.
  */
 export function drawnInColumns<T extends { status: string; parent_id?: string; issue_type?: string }>(
   beads: ReadonlyArray<T>,
 ): T[] {
-  return beads.filter((b) => !b.parent_id && !NOT_WORK.has(b.issue_type ?? ""));
+  return beads.filter(
+    (b) =>
+      (!b.parent_id || AWAITED.has(b.status)) && !NOT_WORK.has(b.issue_type ?? ""),
+  );
 }
 
 /**

@@ -78,6 +78,28 @@ describe("the columns draw one card per job", () => {
     const drawn = drawnInColumns([goal, gate]).map((b) => b.id);
     expect(drawn).toEqual(["g"]);
   });
+
+  // A sub-goal finished and waiting on a reader or on the manager is the one
+  // thing that has to escape its parent. Nested, it is drawn nowhere: the
+  // manager's column stood empty while the project list counted two cards in
+  // it, because both were sub-goals of jobs still in progress (bw-5hq8.1).
+  it("work waiting on a reader or on the manager is a card wherever it sits", () => {
+    const waiting = [
+      { id: "sub-agent", status: "inreview", parent_id: "g" },
+      { id: "sub-manager", status: "manager_review", parent_id: "g" },
+    ];
+    const drawn = drawnInColumns([goal, ...waiting, step("in_progress")]).map((b) => b.id);
+    expect(drawn).toEqual(["g", "sub-agent", "sub-manager"]);
+  });
+
+  it("a piece the board has settled for good stays inside its goal", () => {
+    const done = [
+      { id: "sub-closed", status: "closed", parent_id: "g" },
+      { id: "sub-cancelled", status: "cancelled", parent_id: "g" },
+    ];
+    const drawn = drawnInColumns([goal, ...done]).map((b) => b.id);
+    expect(drawn).toEqual(["g"]);
+  });
 });
 
 describe("a card sits where its own pieces put it", () => {
