@@ -211,18 +211,7 @@ const badgeButtonVariants = cva(
   },
 );
 
-function Badge({
-  className,
-  variant,
-  size,
-  appearance,
-  shape,
-  asChild = false,
-  disabled,
-  hue,
-  style,
-  ...props
-}: React.ComponentProps<'span'> &
+type BadgeOwnProps = React.ComponentProps<'span'> &
   VariantProps<typeof badgeVariants> & {
     asChild?: boolean;
     /**
@@ -231,12 +220,30 @@ function Badge({
      * theme in `globals.css` (docs/designs/app-shell.md §1.5).
      */
     hue?: number;
-  }) {
+  };
+
+/**
+ * Forwards its ref, and that is load-bearing rather than tidy.
+ *
+ * A chip is what the app hangs its pop-ups on — `<PopoverTrigger asChild><Badge
+ * asChild><button>` — and the thing that positions a pop-up learns where to put
+ * it by measuring the element the trigger's ref points at. React 18 drops a ref
+ * handed to a plain function, so that measurement never happened: the `+N` on a
+ * chat's line opened its list of the remaining cards a whole viewport above the
+ * screen, at the placeholder spot a popper sits at before it is placed, and the
+ * manager clicking it saw nothing happen at all (bw-4wcd.5, measured on the
+ * running copy 2026-08-19).
+ */
+const Badge = React.forwardRef<HTMLSpanElement, BadgeOwnProps>(function Badge(
+  { className, variant, size, appearance, shape, asChild = false, disabled, hue, style, ...props },
+  ref,
+) {
   const Comp = asChild ? SlotPrimitive.Slot : 'span';
   const hued = hue !== undefined;
 
   return (
     <Comp
+      ref={ref}
       data-slot="badge"
       className={cn(
         badgeVariants({ variant: hued ? 'outline' : variant, size, appearance, shape, disabled }),
@@ -247,7 +254,7 @@ function Badge({
       {...props}
     />
   );
-}
+});
 
 function BadgeButton({
   className,
