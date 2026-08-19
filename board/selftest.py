@@ -1791,9 +1791,15 @@ def teardown(tmp, answers=True, closed_only=True):
 REAL_SPINE = status.unfinished_spine
 
 
-def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False):
+def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
+             where=None):
     """What the gate says to a session claiming a new job's first step, while it
     still owns the scratch copy — whose own job either has work left, or does not.
+
+    `where` is the tree the claim is typed in, and it is the scratch copy rather
+    than the shared checkout because that is where a session claiming its next
+    piece actually stands. The claim gate refuses a code card claimed from the
+    shared tree outright, and every case here is about a different refusal.
 
     `order` empty is a goal poured before an order was ever recorded: nothing can
     be concluded about it, and concluding 'finished' refuses its owner the next
@@ -1838,7 +1844,8 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False)
     # An earlier case stubs this out; here it is the thing under test.
     status.unfinished_spine = REAL_SPINE
     sys.stdin = io.StringIO(json.dumps(
-        {"session_id": "selftest", "cwd": tmp,
+        {"session_id": "selftest",
+         "cwd": where or os.path.join(tmp, "worktrees", "second"),
          "tool_input": {"command": "bd update %s --claim"
                         % ("tst-old.9" if same else "tst-new.1")}}))
     out = io.StringIO()
@@ -1881,7 +1888,9 @@ def claim_of(tmp, deps):
     """What the gate says to a claim on a card the board reports as waiting.
 
     Drives the hook rather than the judgement underneath it, so removing the
-    judgement from the refusal is caught too.
+    judgement from the refusal is caught too. Typed from the scratch copy, like
+    every other claim a session makes: a code card claimed from the shared
+    checkout earns a refusal of its own, and this case is not about that one.
     """
     def board(args, root=None):
         if args[0] == "blocked":
@@ -1896,7 +1905,8 @@ def claim_of(tmp, deps):
     status.bc.bd = board
     status.bc.reviewing = lambda: ""
     sys.stdin = io.StringIO(json.dumps(
-        {"session_id": "selftest", "cwd": tmp,
+        {"session_id": "selftest",
+         "cwd": os.path.join(tmp, "worktrees", "second"),
          "tool_input": {"command": "bd update tst-j.1 --claim"}}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
@@ -1905,6 +1915,47 @@ def claim_of(tmp, deps):
         status.main()
     finally:
         sys.stdout = keep
+        if here is not None:
+            os.environ["CLAUDE_PROJECT_DIR"] = here
+    said = out.getvalue().strip()
+    return json.loads(said)["hookSpecificOutput"]["permissionDecisionReason"] \
+        if said else ""
+
+
+def copy_first(tmp, cwd, lands=(), no_code=False):
+    """What the gate says to a claim on a card that makes code, typed from `cwd`.
+
+    `lands` is the other checkouts the job declares its change lands in, handed
+    over rather than read off a declaration: a scratch repo declares nothing, and
+    what is under test is the judgement rather than the registry.
+    """
+    def board(args, root=None):
+        if args[0] == "show":
+            if args[1] == "tst-new":
+                return True, json.dumps({"id": "tst-new", "issue_type": "epic",
+                                         "labels": ["job"]})
+            return True, json.dumps(
+                {"id": args[1], "issue_type": "task",
+                 "labels": ["step:checks", "of:tst-new", "no-code"] if no_code
+                 else ["step:work", "of:tst-new"]})
+        return True, "[]"
+
+    status.bc.bd = board
+    status.bc.reviewing = lambda: ""
+    was = status.bc.landings
+    status.bc.landings = lambda root, cid=None: \
+        [(tmp, "main")] + [(p, "main") for p in lands]
+    sys.stdin = io.StringIO(json.dumps(
+        {"session_id": "selftest", "cwd": cwd,
+         "tool_input": {"command": "bd update tst-new.1 --claim"}}))
+    out = io.StringIO()
+    keep, sys.stdout = sys.stdout, out
+    here = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+    try:
+        status.main()
+    finally:
+        sys.stdout = keep
+        status.bc.landings = was
         if here is not None:
             os.environ["CLAUDE_PROJECT_DIR"] = here
     said = out.getvalue().strip()
@@ -3131,6 +3182,76 @@ def main():
     print("ok: a session cannot start a new job while it still owns a finished "
           "one's copy, is left alone while that copy is still being built in, and "
           "a stage with one piece closed and one open still counts as building")
+
+    tmp = tempfile.mkdtemp(prefix="board-owncopy-")
+    try:
+        second = scratch_repo(tmp)
+        os.makedirs(os.path.join(tmp, ".beads"), exist_ok=True)
+
+        # Nothing of its own anywhere, claimed from the tree every session shares.
+        # The refusal has to hand over the command, or it teaches the session
+        # nothing it did not already half-remember from the documents (bw-kcz).
+        bare = copy_first(tmp, tmp)
+        assert "no copy of its own" in bare, \
+            "a card that makes code was claimed from the shared checkout: %s" \
+            % (bare or "ALLOWED")
+        route = [l.strip() for l in bare.splitlines() if l.strip().startswith("git ")]
+        assert route == ["git -C %s worktree add worktrees/tst-new -b tst-new" % tmp], \
+            "the refusal named no command that cuts the copy: %s" % route
+
+        # The same claim from a copy is nobody's business but the session's.
+        inside = copy_first(tmp, second)
+        assert inside == "", \
+            "a claim made from the session's own copy was refused: %s" % inside
+
+        # A card that makes no code is read and written from wherever the session
+        # stands — and the landing, which is one of them, is closed from the shared
+        # tree by rule.
+        note = copy_first(tmp, tmp, no_code=True)
+        assert note == "", \
+            "a card that produces no code was refused a copy it never needed: %s" % note
+
+        # A job whose cards are on this board and whose change lands in another
+        # checkout types its board commands here, because that project's board has
+        # never heard of these ids. What is asked of it is that the copy is cut
+        # over there.
+        away = os.path.join(tmp, "away-repo")
+        os.makedirs(away)
+        for args in (("init", "-b", "main"),
+                     ("config", "user.email", "selftest@example.com"),
+                     ("config", "user.name", "selftest"),
+                     ("commit", "--allow-empty", "-m", "where the change lands")):
+            subprocess.run(["git"] + list(args), cwd=away, capture_output=True)
+        missing = copy_first(tmp, tmp, lands=(away,))
+        assert "no copy of its own" in missing and away in missing, \
+            "a job whose change lands in another checkout was let through with no " \
+            "copy there: %s" % (missing or "ALLOWED")
+        subprocess.run(["git", "worktree", "add",
+                        os.path.join(away, "worktrees", "tst-new"), "-b", "tst-new"],
+                       cwd=away, capture_output=True)
+        waiting = copy_first(tmp, tmp, lands=(away,))
+        assert waiting == "", \
+            "a job with its copy cut where its change lands was still refused the " \
+            "claim it has to type here: %s" % waiting
+
+        # Cut, and the session standing outside it anyway: the route is to step in,
+        # not to cut a second one.
+        subprocess.run(["git", "worktree", "add",
+                        os.path.join(tmp, "worktrees", "tst-new"), "-b", "tst-new"],
+                       cwd=tmp, capture_output=True)
+        outside = copy_first(tmp, tmp)
+        assert "cd %s" % os.path.join(tmp, "worktrees", "tst-new") in outside, \
+            "a session standing outside its job's own copy was not sent into it: %s" \
+            % (outside or "ALLOWED")
+        assert "worktree add" not in outside, \
+            "a session whose copy already exists was told to cut another: %s" % outside
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    print("ok: a card that makes code cannot be claimed without a copy of its own, "
+          "the refusal names the command that cuts it, a card that makes none is "
+          "left alone, and a job whose change lands elsewhere is asked for the copy "
+          "there")
 
     UNDER = [{"id": "tst-j", "status": "open", "issue_type": "epic",
               "dependency_type": "parent-child"}]

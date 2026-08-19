@@ -445,6 +445,90 @@ def removal(path, branch, root):
                      "branch": (" && git -C %s branch -d %s" % (main, branch)) if branch else ""}
 
 
+# The command that cuts a job its own copy, named with the checkout it is cut in.
+# A session reading this is standing in the shared tree or in somebody else's
+# copy, and a bare `worktree add` would be run in whichever of those it happens
+# to be — which is a copy of the wrong thing, or a copy inside a copy.
+CUT = "git -C %s worktree add worktrees/%s -b %s"
+
+
+def cut(where, goal):
+    return CUT % (where.rstrip("/"), goal, goal)
+
+
+def copy_places(goal, root):
+    """Every checkout this job's change may be made in, this one first.
+
+    A job's cards and its code do not always live in the same project: this board
+    issues the ids, and the job's own declaration says where the change lands
+    (`board_common.declared`). Both are answers, because a job that names a second
+    checkout still lands part of its change in this one.
+    """
+    return [where for where, _ in bc.landings(root, goal)]
+
+
+def own_copy(goal, spots):
+    """This job's own copy, in whichever of these checkouts already holds it.
+
+    Named after the goal, which is how everything downstream finds it again: a
+    board name opens with the folder it was claimed in (`board_common.actor`), and
+    the teardown looks the copies up by that same name (`owned_copies`).
+
+    Asked of git rather than of the folder, for the reason `copies` gives: a
+    directory somebody left behind by hand is not a checkout, and a checkout whose
+    folder was deleted is not gone until git is told.
+    """
+    for where in spots:
+        for path in copies(where):
+            if os.path.basename(path) == goal:
+                return path
+    return ""
+
+
+def without_a_copy(cid, goal, root, here):
+    """The refusal a claim earns for having nowhere of its own to make the change.
+
+    A job that makes code is worked in a copy of its own — two jobs editing one
+    tree overwrite each other and neither can see it happening. Nothing had asked
+    for one since the worktree step was cut out of the run (bw-a6o.2): the rule
+    survived in the documents alone, which is where bw-kcz found it. It is asked
+    here, at the last moment before a file is changed under the card.
+
+    Two shapes, because a job's cards and its code do not always live in the same
+    project. When the change lands in THIS checkout the session can stand in its
+    copy and type its board commands from there, so standing in one is what is
+    asked. When it lands in another, the claim has to be typed here — that
+    project's board has never heard of these ids — so the most that can be asked
+    is that the copy is over there, cut and waiting.
+    """
+    if "/worktrees/" in (here or ""):
+        return ""
+    spots = copy_places(goal, root)
+    mine = own_copy(goal, spots)
+    if mine and len(spots) > 1:
+        return ""
+    if mine:
+        return (
+            "%s is a piece of %s, which makes code, and this session is standing in "
+            "%s — the checkout every session here shares. That job already has a copy "
+            "of its own, so the work belongs in it: two jobs editing one tree "
+            "overwrite each other, and a claim made from here is recorded under the "
+            "shared tree's name, which owns nothing when the job is torn down.\n"
+            "  cd %s\n"
+            "Then claim it again." % (cid, goal, root.rstrip("/"), mine)
+        )
+    return (
+        "%s is a piece of %s, which makes code, and that job has no copy of its own "
+        "— so the change would be made in the checkout every session here shares, "
+        "where two jobs edit one file under each other and neither can see it "
+        "happening. Cut it one%s and work there:\n  %s\n"
+        "Then claim it again."
+        % (cid, goal,
+           " in whichever of these the change is made" if len(spots) > 1 else "",
+           "\n  ".join(cut(where, goal) for where in spots))
+    )
+
+
 LOOKABLE = re.compile(r"https?://|\b[\w./~-]+\.(?:png|jpg|jpeg|webp|gif|mp4|html)\b", re.I)
 
 
@@ -968,6 +1052,21 @@ def main():
                         % (cid, path, goal, removal(path, branch, root))
                     )
                     return
+                # Asked last of the claim, and after the copy this session already
+                # owns has been dealt with: a session told to make a copy while it
+                # still holds an abandoned one ends up holding two.
+                #
+                # Only of a card that makes code. A find, a question, a ruling and
+                # every step that declared it makes none are read and written from
+                # wherever the session stands — and so are the board's own commands,
+                # which is why the landing, itself a no-code step, is closed from
+                # the shared tree by rule (see the teardown above).
+                if not set(card.get("labels") or []) & set(NO_CODE) \
+                        and card.get("issue_type") not in ("decision", "epic"):
+                    nowhere = without_a_copy(cid, own, root, bc.where(data))
+                    if nowhere:
+                        deny(nowhere)
+                        return
 
 
 if __name__ == "__main__":
