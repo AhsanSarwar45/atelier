@@ -50,6 +50,7 @@ PRIME = "hooks/board-prime.py"
 LAND = "board/land"
 READING = "board/reading.py"
 JOIN = "join"
+DECL = "project.py"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -585,6 +586,15 @@ FAULTS = [
     ("a job waiting on the manager outside his column is not reported as "
      "waiting", JOIN,
      lambda s: s.replace("        said += unsigned(root)\n", "")),
+    # And the reading of what the board answers. Asked plainly, a board told
+    # nothing answers a sentence that reads as a state of its own name, and
+    # joining would write that sentence onto it (mch-up1g.16.8).
+    ("the states a board was told are asked for in words rather than as JSON",
+     DECL, lambda s: s.replace(
+         '["bd", "config", "get", CUSTOM_KEY, "--json"]',
+         '["bd", "config", "get", CUSTOM_KEY]')),
+    ("a board that could not be asked is read as having answered", DECL,
+     lambda s: s.replace('if run.returncode == 0 else ""', 'if True else ""')),
     ("the run swallows the board refusing a card into a review column", RUN,
      lambda s: s.replace("    ok, _ = bc.bd([\"update\", goal_id, \"-s\", want], root)\n"
                          "    if ok:\n        return True\n",

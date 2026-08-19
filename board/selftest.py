@@ -5622,10 +5622,70 @@ def main():
         "a board with nothing waiting outside his column is reported as having " \
         "some"
 
+    # AND THE ONE PLACE THAT TALKS TO bd IS HELD TO WHAT bd ACTUALLY PRINTS.
+    # Every check above hands the answer straight in, so nothing held the reading
+    # of it — and the reading is where the trap is. Asked plainly, a board told
+    # no states of its own answers the sentence "status.custom (not set)", which
+    # read as a list is one state of that name: the joining that follows would
+    # write that sentence onto the board as a state, and the check would never
+    # go quiet. Asked as JSON it answers an empty value and nothing else
+    # (mch-up1g.16.8).
+    class Ran(object):
+        def __init__(self, code, out):
+            self.returncode, self.stdout, self.stderr = code, out, ""
+
+    def bd_answers(states, code=0):
+        """What custom_states makes of the board bd describes, bd's own way.
+
+        The stub answers as bd does rather than as the code hopes: JSON only
+        when JSON was asked for, and the (not set) sentence when it was not.
+        """
+        def answer(args, **kw):
+            if "--json" in args:
+                out = ('{\n  "key": "status.custom",\n  "schema_version": 1,\n'
+                       '  "value": "%s"\n}\n' % ",".join(states))
+            else:
+                out = ",".join(states) + "\n" if states else "status.custom (not set)\n"
+            return Ran(code, out)
+        was = project.subprocess
+        try:
+            project.subprocess = type("bd", (object,), {"run": staticmethod(answer)})
+            return project.custom_states("/nowhere")
+        finally:
+            project.subprocess = was
+
+    assert bd_answers(project.REVIEW_STATES) == list(project.REVIEW_STATES), \
+        "the states a board says it was told are not read back out of bd's own " \
+        "answer: %s" % bd_answers(project.REVIEW_STATES)
+    assert bd_answers([]) == [], \
+        "a board that was told no states of its own is read as having one, so " \
+        "joining writes bd's way of saying nothing onto it as a state and the " \
+        "check never goes quiet: %s" % bd_answers([])
+    assert bd_answers(["waiting", " in_review "]) == ["waiting", "in_review"], \
+        "a board's own states are lost or carry the spacing bd printed them " \
+        "with: %s" % bd_answers(["waiting", " in_review "])
+    assert bd_answers(project.REVIEW_STATES, code=1) == [], \
+        "a board that could not be asked at all is read as having answered, so " \
+        "whatever was on stdout is taken for the states it was told"
+
+    was = project.custom_states
+    try:
+        project.custom_states = lambda root: ["waiting"]
+        assert joiner.project.untold("/nowhere") == list(project.REVIEW_STATES), \
+            "a board carrying only its own state is not counted as missing both " \
+            "review states"
+        project.custom_states = lambda root: list(project.REVIEW_STATES) + ["waiting"]
+        assert joiner.project.untold("/nowhere") == [], \
+            "a board told both review states is still counted as missing one"
+    finally:
+        project.custom_states = was
+
     print("ok: joining tells a board about the two review states this machinery "
           "invented, keeps the ones it already had, says so when it has not been "
           "told, puts back the jobs it refused into the manager's column and says "
-          "which, and the run no longer swallows the refusal")
+          "which, reads what bd actually prints rather than the sentence it "
+          "prints for a board with nothing, and the run no longer swallows the "
+          "refusal")
 
 
     # The suite under its own way out — the one thing the cases above cannot say
