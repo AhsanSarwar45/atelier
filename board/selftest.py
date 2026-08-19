@@ -2487,7 +2487,7 @@ def main():
         "the opening text still tells a session that a commit moves its card " \
         "into the agents' review column, which nothing writes and the status " \
         "gate refuses"
-    assert re.search(r"(?:review column|%s)[^.]*last piece" % bc.AGENT_REVIEW, told), \
+    assert re.search(r"(?:review column|%s)[^.]*last piece" % project.AGENT_REVIEW, told), \
         "the opening text does not say what actually puts a job in the agents' " \
         "review column: its last piece closing"
 
