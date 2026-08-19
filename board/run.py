@@ -24,6 +24,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import board_common as bc  # noqa: E402
 import inflight  # noqa: E402
+import project  # noqa: E402
 import reading  # noqa: E402
 import spine  # noqa: E402
 
@@ -94,6 +95,30 @@ def started(cid, root):
         bc.bd(["update", goal_id, "-s", "in_progress", "--if-status", "open"], root)
 
 
+def moved(goal_id, want, root):
+    """Move a job into a column, and say so when the board will not have it.
+
+    Two of the six columns are words this machinery invented rather than words bd
+    ships with, and a board is told about them when its project joins. A board
+    nobody told refuses the move and hands the refusal back to whoever asked —
+    so swallowing it here is how the whole review half of a run went missing on
+    two of three projects with nobody noticing. Said on stderr because this is a
+    library the hooks call, and stderr is the one channel a session reads.
+    """
+    ok, _ = bc.bd(["update", goal_id, "-s", want], root)
+    if ok:
+        return True
+    if want in project.untold(root):
+        sys.stderr.write("the board would not move %s to %s: nobody ever told it "
+                         "that state exists, so it refuses every card sent there. "
+                         "`machinery/join %s` tells it, and until then the review "
+                         "half of every job here does nothing.\n"
+                         % (goal_id, want, root))
+    else:
+        sys.stderr.write("the board would not move %s to %s.\n" % (goal_id, want))
+    return False
+
+
 def column(goal_id, goal, live, root):
     """Where a job draws while `live` is the position it is at.
 
@@ -101,10 +126,10 @@ def column(goal_id, goal, live, root):
     the job has closed, which is what put it there. Manager's ruling, 2026-08-13:
     docs/board.md#3a.
     """
-    want = "in_review" if live == "review" else "in_progress"
+    want = bc.AGENT_REVIEW if live == "review" else "in_progress"
     if goal.get("status") in ("closed", bc.MANAGER_REVIEW, want):
         return
-    bc.bd(["update", goal_id, "-s", want], root)
+    moved(goal_id, want, root)
 
 
 def park(goal_id, goal, meta, root):
@@ -115,7 +140,8 @@ def park(goal_id, goal, meta, root):
     """
     if meta.get("judge") != "manager" or goal.get("status") in ("closed", bc.MANAGER_REVIEW):
         return
-    bc.bd(["update", goal_id, "-s", bc.MANAGER_REVIEW], root)
+    if not moved(goal_id, bc.MANAGER_REVIEW, root):
+        return
     # When his wait started, which is not when the job was opened: his column is
     # drawn longest-waiting first, and a job poured months ago is not one he has
     # been kept waiting on.

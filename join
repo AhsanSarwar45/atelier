@@ -106,6 +106,48 @@ exec python3 "$GUARD" "$@"
 GUARD_REL = os.path.join("hooks", "landing-gate.py")
 
 
+def board(args, root):
+    """Ask this project's own board something. Whether it answered, and what it said."""
+    try:
+        run = subprocess.run(["bd"] + args, cwd=root, capture_output=True,
+                             text=True, timeout=30)
+        return run.returncode == 0, (run.stdout or run.stderr).strip()
+    except Exception as why:
+        return False, str(why)
+
+
+def states(root, say):
+    """Tell this board about the two states the machinery moves cards into.
+
+    Four of the six columns are bd's own words and cost nothing. These two are
+    this machinery's own, and bd refuses a status it was never told about — with
+    the refusal going back to whatever asked for the move and to nobody else. So
+    a board that was never told runs the review half of every job into silence,
+    and it is installed here for the same reason the landing guard is: a project
+    that has to be set up by hand is a project that is set up wrong.
+
+    Merged and never overwritten: a board may carry custom states of its own, and
+    joining is not the moment to take them away.
+    """
+    have = project.custom_states(root)
+    want = [s for s in project.REVIEW_STATES if s not in have]
+    if not want:
+        return
+    ok, out = board(["config", "set", project.CUSTOM_KEY, ",".join(have + want)], root)
+    say("states %s knows %s" % (root, ", ".join(want)) if ok else
+        "states %s would not take %s: %s" % (root, ", ".join(want), out))
+
+
+def unstated(root):
+    """The review states this board was never told about, so a project running
+    without them is told rather than finding out one refused card at a time."""
+    gone = project.untold(root)
+    return ["this board has never been told about %s, so every move into it is "
+            "refused and nobody sees the refusal — the review half of a job here "
+            "does nothing at all; `machinery/join %s` tells it"
+            % (" or ".join(gone), root)] if gone else []
+
+
 def git(args, cwd):
     run = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
     return run.returncode, run.stdout.strip()
@@ -297,13 +339,15 @@ def standing(root):
             said.append("machinery.toml names no %s (%s)" % (field, what))
     if not os.path.isdir(os.path.join(root, ".beads")):
         said.append("no board at %s/.beads — `bd init --prefix %s`" % (root, decl.prefix))
-    elif decl.lands_on in decl.protected:
-        said.append("machinery.toml does not say who lands work here, so %s is "
-                    "protected — and a card here closes only once a commit naming "
-                    "it reaches %s. Nothing can finish until this project answers: "
-                    "`agent_merges = true` if agents land their own work, or a line "
-                    "they may land on in `lands_on` with only what they may not in "
-                    "`protected`" % (decl.lands_on, decl.lands_on))
+    else:
+        said += unstated(root)
+        if decl.lands_on in decl.protected:
+            said.append("machinery.toml does not say who lands work here, so %s is "
+                        "protected — and a card here closes only once a commit naming "
+                        "it reaches %s. Nothing can finish until this project answers: "
+                        "`agent_merges = true` if agents land their own work, or a "
+                        "line they may land on in `lands_on` with only what they may "
+                        "not in `protected`" % (decl.lands_on, decl.lands_on))
     if decl.name not in project.registry():
         said.append("not in the register (%s)" % project.REGISTRY)
     code, role = git(["config", "--get", "beads.role"], root)
@@ -408,6 +452,9 @@ def main():
     if role != "maintainer":
         git(["config", "beads.role", "maintainer"], root)
         said.append("role   %s is a maintainer of its own board" % root)
+    # After the role, never before it: a checkout still inferring a contributor
+    # routes bd at a planning store, and the states would be told to that.
+    states(root, said.append)
     print("\n".join(said) or "nothing to do — %s was already joined" % decl.name)
     left, _ = standing(root)
     if left:

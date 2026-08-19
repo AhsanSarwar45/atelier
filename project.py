@@ -15,6 +15,7 @@ answer for where the repository really is: `.beads` and `machinery.toml` are bot
 checked in, so a copy carries them and reading them there answers with a project
 that has its own board and its own name.
 """
+import json
 import os
 import re
 import subprocess
@@ -32,6 +33,21 @@ DEFAULT_LANDS_ON = "main"
 # else's, so silence means protected. Manager's ruling, 2026-08-16.
 DEFAULT_PROTECTED = ("main", "master", "staging", "production", "release")
 GIT_TIMEOUT = 10
+BD_TIMEOUT = 30
+
+# The two board states this machinery invented, named here because every tool and
+# every gate that moves a card between them reads this file already.
+#
+# bd ships open, in_progress, blocked, deferred, closed, pinned and hooked, and
+# refuses a move into any word it was not told about. So these are not free: a
+# board is told about them once, by `machinery/join`, and a board that was never
+# told refuses the whole review half of the run — one card at a time, and the
+# refusal is swallowed by whatever asked for the move. `join --check` says which
+# boards are missing them.
+AGENT_REVIEW = "in_review"          # waiting on a reader who did not write it
+MANAGER_REVIEW = "manager_review"   # waiting on the manager's own signature
+REVIEW_STATES = (AGENT_REVIEW, MANAGER_REVIEW)
+CUSTOM_KEY = "status.custom"        # where a board keeps the states it was told about
 
 _ROOTS, _DECLS = {}, {}
 
@@ -43,6 +59,27 @@ def _git(args, cwd):
         return run.stdout.strip() if run.returncode == 0 else ""
     except Exception:
         return ""
+
+
+def custom_states(root):
+    """The card states this board was told about, beyond the ones bd ships with.
+
+    Asked as JSON: what bd prints for a board that has none is the sentence
+    "status.custom (not set)", and read as a list that is a state of that name.
+    """
+    try:
+        run = subprocess.run(["bd", "config", "get", CUSTOM_KEY, "--json"],
+                             cwd=root, capture_output=True, text=True,
+                             timeout=BD_TIMEOUT)
+        said = json.loads(run.stdout).get("value") if run.returncode == 0 else ""
+    except Exception:
+        return []
+    return [w for w in (part.strip() for part in (said or "").split(",")) if w]
+
+
+def untold(root):
+    """The review states this board was never told about, so it refuses them."""
+    return [s for s in REVIEW_STATES if s not in custom_states(root)]
 
 
 def checkout(path):

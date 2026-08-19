@@ -210,7 +210,7 @@ BARS = ("what_is_wrong", "finish_line", "left_out", "where_it_is")
 
 # A card that is still somebody's problem. A closed card is history and keeps the
 # words it was written in — the sweep's own decision, cor-dlby.
-LIVE = {"open", "in_progress", "manager_review", "blocked", "deferred"}
+LIVE = {"open", "in_progress", project.MANAGER_REVIEW, "blocked", "deferred"}
 # What the pour writes above each part of a card's body, so a card can be read
 # back apart the same way it was written (`board/job`).
 HEADINGS = {"what": "What is wrong", "evidence": "Evidence it is real",

@@ -46,7 +46,7 @@ AMEND = re.compile(r"--amend\b")
 CREATE = re.compile(VERB + r"(?:create|create-form|q|todo\s+add)\b", re.M)
 RESOLVE = re.compile(VERB + r"gate\s+resolve\b", re.M)
 RESTATUS = re.compile(VERB + r"(?:update\b[^|;&\n]*(?:-s|--status)[= ]|reopen\b)", re.M)
-REVIEWING = re.compile(r"(?:-s|--status)[= ]in_review\b")
+REVIEWING = re.compile(r"(?:-s|--status)[= ]%s\b" % bc.AGENT_REVIEW)
 # What a close is already carrying. `bd close` stores this as a field of its own
 # rather than in the card's notes, so a step judged only by its notes has to be
 # written to twice with the same substance (mch-aa9). Both quotings, because the

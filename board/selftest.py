@@ -69,6 +69,18 @@ def hook(name):
     return mod
 
 
+def tool(name):
+    """A tool of this machinery loaded by path — its file carries no extension,
+    so it cannot be imported by name the way a hook can."""
+    spec = importlib.util.spec_from_loader(
+        name.replace("-", "_"),
+        importlib.machinery.SourceFileLoader(name.replace("-", "_"),
+                                             os.path.join(HOME, name)))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 touch = hook("board-touch")
 gate = hook("board-gate")
 # One `board_common` answers every hook here, so a case that stands a recorder in
@@ -5441,6 +5453,82 @@ def main():
 
     print("ok: the machinery's commit hook no longer runs its suite or its fault "
           "put-back, and a project names the command its checks step runs")
+
+    # THE TWO REVIEW COLUMNS ARE NOT WORDS BD SHIPS WITH. Four of the six are its
+    # own and cost nothing; Agent Review and Manager Review are this machinery's,
+    # and bd refuses a status it was never told about — handing the refusal to
+    # whoever asked for the move and to nobody else. So a board nobody told runs
+    # the review half of every job into silence, which is what two of the three
+    # registered projects had been doing since they joined (bw-n5k4). Three
+    # things are held here: joining tells the board, the joining check says so
+    # when it has not, and the run does not swallow the refusal.
+    joiner = tool("join")
+
+    def told(had):
+        """What joining asks of a board that already had these states."""
+        asked = []
+        was = (joiner.board, project.custom_states)
+        try:
+            project.custom_states = lambda root: list(had)
+            joiner.board = lambda args, root: (asked.append(args), (True, ""))[1]
+            joiner.states("/nowhere", lambda line: None)
+        finally:
+            joiner.board, project.custom_states = was
+        return asked
+
+    fresh = told([])
+    assert fresh and fresh[0] == ["config", "set", "status.custom",
+                                  "in_review,manager_review"], \
+        "joining a project does not tell its board about the states this machinery " \
+        "moves cards into, so every move into either is refused: %s" % fresh
+    assert told(project.REVIEW_STATES) == [], \
+        "joining a board that already knows both states writes to it again: %s" \
+        % told(project.REVIEW_STATES)
+    kept = told(["parked"])
+    assert kept and kept[0][-1] == "parked,in_review,manager_review", \
+        "joining took away a state the board had of its own instead of adding to " \
+        "it: %s" % kept
+
+    def check(had):
+        """What the joining check says about a board holding these states."""
+        was = project.custom_states
+        try:
+            project.custom_states = lambda root: list(had)
+            return [l for l in joiner.standing(ROOT)[0] if "told about" in l]
+        finally:
+            project.custom_states = was
+
+    missing = check([])
+    assert missing and "in_review" in missing[0] and "machinery/join" in missing[0], \
+        "a project whose board was never told about the review states is not told " \
+        "so by the joining check, so it finds out one refused card at a time: %s" \
+        % missing
+    assert check(project.REVIEW_STATES) == [], \
+        "a board that knows both states is still reported as missing them"
+
+    def refused(want):
+        """What the run says when the board will not take a card to `want`."""
+        err = io.StringIO()
+        was = (runner.bc.bd, project.custom_states, runner.sys.stderr)
+        try:
+            runner.bc.bd = lambda args, root=None: (False, "")
+            project.custom_states = lambda root: []
+            runner.sys.stderr = err
+            runner.moved("g", want, ROOT)
+        finally:
+            runner.bc.bd, project.custom_states, runner.sys.stderr = was
+        return err.getvalue()
+
+    silent = refused(project.MANAGER_REVIEW)
+    assert "manager_review" in silent and "machinery/join" in silent, \
+        "the run swallowed the board refusing a card into a review column, which " \
+        "is how the review half of a job goes missing without anyone noticing: %r" \
+        % silent
+
+    print("ok: joining tells a board about the two review states this machinery "
+          "invented, keeps the ones it already had, says so when it has not been "
+          "told, and the run no longer swallows the refusal")
+
 
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a

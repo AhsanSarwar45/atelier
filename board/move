@@ -42,7 +42,7 @@ import project  # noqa: E402
 # A card somebody is working is not a card to move: the session holding it has a
 # tree, a branch and a commit message with that id in it. `deferred` is not held
 # — it is work put off, and it travels.
-HELD = ("in_progress", "in_review", "manager_review")
+HELD = ("in_progress",) + project.REVIEW_STATES
 
 # Every status that means the board still counts the card as work to be done.
 LIVE = HELD + ("open", "blocked", "deferred", "pinned", "hooked")

@@ -511,8 +511,12 @@ def waived(session_id):
 
 
 # Where a job waits for the manager's own signature. A custom board status rather
-# than a label, because a label can be taken off by whoever put it on.
-MANAGER_REVIEW = "manager_review"
+# than a label, because a label can be taken off by whoever put it on. The word
+# itself is declared once, with the other state bd does not ship (project.py).
+MANAGER_REVIEW = project.MANAGER_REVIEW
+# Where a job waits for a reader who did not write it. Custom for the same reason,
+# and refused by the same board that was never told about either.
+AGENT_REVIEW = project.AGENT_REVIEW
 
 # What a goal wears to say its change lands somewhere else.
 LANDS = "lands:"

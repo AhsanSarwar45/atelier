@@ -49,6 +49,7 @@ TOUCH = "hooks/board-touch.py"
 PRIME = "hooks/board-prime.py"
 LAND = "board/land"
 READING = "board/reading.py"
+JOIN = "join"
 
 FAULTS = [
     ("the guard stands aside where no board is running", GATE,
@@ -561,6 +562,20 @@ FAULTS = [
      "claimed", CLOSE,
      lambda s: s.replace('"Then claim it from there."',
                          '"Then claim it again."')),
+    # The two states bd does not ship. Both halves of the fault are here — the
+    # board never told, and the refusal never said — because either one alone
+    # puts the review half of a job back into silence (bw-n5k4).
+    ("joining a project never tells its board about the review states", JOIN,
+     lambda s: s.replace("    states(root, said.append)\n", "")),
+    ("joining takes away the states a board already had of its own", JOIN,
+     lambda s: s.replace('",".join(have + want)', '",".join(want)')),
+    ("a board that was never told about the review states is not told so", JOIN,
+     lambda s: s.replace("        said += unstated(root)\n", "")),
+    ("the run swallows the board refusing a card into a review column", RUN,
+     lambda s: s.replace("    ok, _ = bc.bd([\"update\", goal_id, \"-s\", want], root)\n"
+                         "    if ok:\n        return True\n",
+                         "    ok, _ = bc.bd([\"update\", goal_id, \"-s\", want], root)\n"
+                         "    if True:\n        return ok\n")),
 ]
 
 
