@@ -530,9 +530,35 @@ def run() -> int:
     if "nobody could confirm" in build.tally("x" * 1024, GOOD, [], []):
         failures.append("a fully checked page was reported as unconfirmed")
 
+    # --emit json runs live_questions first, same as the page — a spec refused
+    # for one is refused for the other, because both call the very same gate
+    build.card_state = lambda card, project, base=None: "closed"
+    try:
+        build.facts(copy.deepcopy(GOOD), build.Ctx([], tmp), spec_path)
+        failures.append("a question holding up a finished card: the facts document built anyway")
+    except ReportError as e:
+        if "x.2" not in str(e):
+            failures.append(f"the facts document's refusal did not name the card — {e}")
+
+    # and a spec the page accepts comes back as the same report, read as data
+    build.card_state = lambda card, project, base=None: "open"
+    build.card_info = lambda card, project, base=None: {
+        "id": card, "title": "Fix the mirrors", "status": "open", "column": "In Progress",
+    }
+    doc = build.facts(copy.deepcopy(GOOD), build.Ctx([], tmp), spec_path)
+    if doc["title"] != GOOD["title"]:
+        failures.append("the facts document lost the report's own title")
+    q = doc["actions"]["questions"][0]
+    if not q["live"] or q["card"]["status"] != "open":
+        failures.append(f"a question holding up an open card did not read as live — {q}")
+    if doc["content"][0]["blocks"][0]["kind"] != "table":
+        failures.append("the facts document lost a block's own kind")
+    build.card_state = lambda card, project, base=None: "open"
+    build.card_info = board_mod.card_info
+
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 45 - len(failures)}/{len(CASES) + 45} report gates hold")
+    print(f"{len(CASES) + 47 - len(failures)}/{len(CASES) + 47} report gates hold")
     return 1 if failures else 0
 
 

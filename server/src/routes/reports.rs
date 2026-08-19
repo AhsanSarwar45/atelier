@@ -29,12 +29,14 @@ fn reports_dir() -> Option<PathBuf> {
     crate::identity::reports_dir()
 }
 
-/// `/api/reports` and `/api/reports/page`, carrying the database so a page
-/// can be opened without the caller naming the folder its board lives in.
+/// `/api/reports`, `/api/reports/page` and `/api/reports/spec`, carrying the
+/// database so a report can be opened without the caller naming the folder
+/// its board lives in.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/reports", get(list_reports))
         .route("/reports/page", get(report_page))
+        .route("/reports/spec", get(report_spec))
 }
 
 /// One report, as the screen lists it.
@@ -53,6 +55,14 @@ pub struct PageParams {
     pub slug: String,
     /// The project folder the report is about — pictures and the board resolve there.
     pub path: Option<String>,
+}
+
+/// Both report routes take the same `project`/`slug` pair, and neither may
+/// carry a path separator or (for the project) a dot — the names are joined
+/// straight onto a filesystem path below, with nothing else standing between
+/// a caller and `../../etc/passwd`.
+fn bad_name(p: &PageParams) -> bool {
+    p.project.contains(['/', '\\', '.']) || p.slug.contains(['/', '\\'])
 }
 
 fn read_spec(spec: &Path) -> Option<(String, Option<String>)> {
@@ -142,9 +152,63 @@ pub async fn list_reports() -> impl IntoResponse {
     Json(out.into_iter().map(|(_, e)| e).collect::<Vec<_>>())
 }
 
+/// Runs the report builder and hands back what it wrote — the built page, or
+/// the same report's resolved facts when `emit_json` asks for those instead —
+/// or the response that explains why it could not.
+///
+/// `report_page` and `report_spec` are the same report read two ways, so this
+/// is the one place either of them runs the builder: a failure reads the same
+/// (422, with the builder's own stderr) whichever route hit it.
+fn run_builder(
+    tools: &Path,
+    spec: &Path,
+    cwd: &str,
+    emit_json: bool,
+    built: &Path,
+) -> Result<String, (StatusCode, String)> {
+    let mut cmd = Command::new("python3");
+    cmd.arg(tools.join("build.py")).arg(spec).arg("--project").arg(cwd).current_dir(cwd);
+    if emit_json {
+        cmd.arg("--emit").arg("json");
+    }
+
+    match cmd.output() {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => {
+            let why = String::from_utf8_lossy(&o.stderr).to_string();
+            return Err((StatusCode::UNPROCESSABLE_ENTITY, format!("this report does not build:\n{why}")));
+        }
+        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("the report builder did not run: {e}"))),
+    }
+
+    std::fs::read_to_string(built).map_err(|e| {
+        let what = if emit_json { "facts" } else { "page" };
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("built {what} unreadable: {e}"))
+    })
+}
+
+/// Where the build runs, worked out the one way both report routes share.
+///
+/// An explicit `path` wins while it is still there; otherwise it is looked up
+/// from the app's own project list by the name the report is filed under —
+/// not every report names a project the app knows (the data folder also holds
+/// `keystone`, filed by hand), so that can come up empty.
+fn cwd_or_404(p: &PageParams, db: &Database) -> Result<String, (StatusCode, String)> {
+    resolve_cwd(p.path.as_deref(), db, &p.project).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!(
+                "this computer's project list names no folder for {}, so this report cannot be \
+                 built without &path=<the folder that holds its board>",
+                p.project
+            ),
+        )
+    })
+}
+
 /// One report, rebuilt from its spec so the board it shows is current.
 pub async fn report_page(State(db): State<AppState>, Query(p): Query<PageParams>) -> impl IntoResponse {
-    if p.project.contains(['/', '\\', '.']) || p.slug.contains(['/', '\\']) {
+    if bad_name(&p) {
         return (StatusCode::BAD_REQUEST, "bad name".to_string()).into_response();
     }
     let Some(root) = reports_dir() else {
@@ -169,52 +233,64 @@ pub async fn report_page(State(db): State<AppState>, Query(p): Query<PageParams>
             .into_response();
     };
 
-    // The build reads the board and the pictures from the project it is
-    // about. An explicit `path` wins while it is still there; otherwise it
-    // is looked up from the app's own project list by the name the report is
-    // filed under — not every report names a project the app knows (the data
-    // folder also holds `keystone`, filed by hand), so that can come up empty.
-    let Some(cwd) = resolve_cwd(p.path.as_deref(), &db, &p.project) else {
-        return (
-            StatusCode::NOT_FOUND,
-            format!(
-                "this computer's project list names no folder for {}, so this report cannot be \
-                 built without &path=<the folder that holds its board>",
-                p.project
-            ),
-        )
-            .into_response();
+    let cwd = match cwd_or_404(&p, &db) {
+        Ok(cwd) => cwd,
+        Err(resp) => return resp.into_response(),
     };
     let built = spec.with_file_name(format!("{}.html", p.slug));
-    let out = Command::new("python3")
-        .arg(tools.join("build.py"))
-        .arg(&spec)
-        .arg("--project")
-        .arg(&cwd)
-        .current_dir(&cwd)
-        .output();
-
-    match out {
-        Ok(o) if o.status.success() => {}
-        Ok(o) => {
-            let why = String::from_utf8_lossy(&o.stderr).to_string();
-            return (StatusCode::UNPROCESSABLE_ENTITY, format!("this report does not build:\n{why}"))
-                .into_response();
-        }
-        Err(e) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("the report builder did not run: {e}"))
-                .into_response()
-        }
-    }
-
-    match std::fs::read_to_string(&built) {
+    match run_builder(&tools, &spec, &cwd, false, &built) {
         // Without the charset the browser reads the page as windows-1252.
         Ok(html) => (
             [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
             html,
         )
             .into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("built page unreadable: {e}")).into_response(),
+        Err(resp) => resp.into_response(),
+    }
+}
+
+/// The same report as `report_page`, but handed over as the facts a page is
+/// drawn from, not the drawn page — the React screen reads this so it can
+/// draw a report out of its own components instead of an iframe.
+///
+/// Every gate `report_page` runs, runs here too: `--emit json` walks the same
+/// spec through the same validation and the same board reads, so a spec
+/// refused for the page is refused here as well, with the same builder stderr
+/// in the 422.
+pub async fn report_spec(State(db): State<AppState>, Query(p): Query<PageParams>) -> impl IntoResponse {
+    if bad_name(&p) {
+        return (StatusCode::BAD_REQUEST, "bad name".to_string()).into_response();
+    }
+    let Some(root) = reports_dir() else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "this computer names no folder for a program's data, so there is nowhere to keep reports"
+                .to_string(),
+        )
+            .into_response();
+    };
+    let spec = root.join(&p.project).join(format!("{}{}", p.slug, SPEC_SUFFIX));
+    if !spec.is_file() {
+        return (StatusCode::NOT_FOUND, format!("no report called {}", p.slug)).into_response();
+    }
+
+    let Some(tools) = crate::identity::tools_dir() else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "this computer names no folder for a program's data, so the report tools have nowhere to live"
+                .to_string(),
+        )
+            .into_response();
+    };
+
+    let cwd = match cwd_or_404(&p, &db) {
+        Ok(cwd) => cwd,
+        Err(resp) => return resp.into_response(),
+    };
+    let built = spec.with_file_name(format!("{}.json", p.slug));
+    match run_builder(&tools, &spec, &cwd, true, &built) {
+        Ok(json) => ([(axum::http::header::CONTENT_TYPE, "application/json")], json).into_response(),
+        Err(resp) => resp.into_response(),
     }
 }
 
@@ -282,5 +358,76 @@ mod tests {
             resolve_cwd(Some("/home/ahsan/code/beads-web/worktrees/landed"), &db, "beads-web"),
             Some("/home/ahsan/code/beads-web".to_string())
         );
+    }
+
+    fn params(project: &str, slug: &str) -> PageParams {
+        PageParams { project: project.to_string(), slug: slug.to_string(), path: None }
+    }
+
+    #[test]
+    fn a_name_carrying_a_path_separator_or_a_dot_is_refused() {
+        assert!(bad_name(&params("../etc", "x")));
+        assert!(bad_name(&params("beads-web", "../x")));
+        assert!(bad_name(&params("be.ads", "x")));
+        assert!(bad_name(&params("beads-web", "x\\y")));
+        assert!(!bad_name(&params("beads-web", "some-report")));
+    }
+
+    /// The real report toolchain, exactly as `crate::report_tools` embeds it —
+    /// so a test that runs the builder is exercising the same `build.py` a
+    /// live server would have laid down, not a stand-in.
+    fn real_tools_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../reporting/tools")
+    }
+
+    /// A spec with no card, no questions and one of every content shape the
+    /// builder needs to see at least once — clean enough that `validate`
+    /// never has to ask the board about anything.
+    const CLEAN_SPEC: &str = r#"{
+        "title": "Route Check",
+        "actions": {"none": true, "fyi": "Nothing needs your input right now."},
+        "status": {"now": "Building the new address.", "next_up": "Ship it."},
+        "content": [{
+            "label": "What changed",
+            "blocks": [{"kind": "note", "tone": "good", "label": "Result", "text": "The new address hands back the same facts, not a page."}]
+        }],
+        "decisions": [{"id": "D1", "title": "Add the new address", "why": "The app needs facts, not a page."}],
+        "next": {"if_nothing": "Nothing changes."}
+    }"#;
+
+    #[test]
+    fn a_clean_spec_builds_into_the_same_facts_the_json_contract_names() {
+        let project = tempfile::tempdir().expect("a project directory");
+        let spec = project.path().join("route-check.report.json");
+        std::fs::write(&spec, CLEAN_SPEC).expect("write the spec");
+        let built = project.path().join("route-check.json");
+
+        let json = run_builder(&real_tools_dir(), &spec, &project.path().to_string_lossy(), true, &built)
+            .expect("a clean spec builds");
+        let doc: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+        assert_eq!(doc["title"], "Route Check");
+        assert_eq!(doc["actions"]["questions"].as_array().unwrap().len(), 0);
+        assert_eq!(doc["content"][0]["blocks"][0]["kind"], "note");
+        assert_eq!(doc["decisions"][0]["id"], "D1");
+        assert_eq!(doc["board"]["reachable"], true);
+    }
+
+    #[test]
+    fn a_spec_the_builder_refuses_surfaces_as_a_422_with_its_own_reason() {
+        let project = tempfile::tempdir().expect("a project directory");
+        let spec = project.path().join("no-next.report.json");
+        // Drops the required `next` slot, which `validate` refuses before it
+        // ever asks the board about anything.
+        let mut broken: serde_json::Value = serde_json::from_str(CLEAN_SPEC).expect("valid fixture JSON");
+        broken.as_object_mut().expect("an object").remove("next");
+        std::fs::write(&spec, serde_json::to_string(&broken).expect("serialize")).expect("write the spec");
+        let built = project.path().join("no-next.json");
+
+        let err = run_builder(&real_tools_dir(), &spec, &project.path().to_string_lossy(), true, &built)
+            .expect_err("a spec missing a required slot must not build");
+        assert_eq!(err.0, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(err.1.contains("this report does not build"), "{}", err.1);
+        assert!(err.1.contains("next"), "{}", err.1);
     }
 }

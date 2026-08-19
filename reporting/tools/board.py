@@ -178,7 +178,9 @@ def status(card: str, project: Path, spec_dir: Path | None = None) -> dict:
         state = STATE.get(k.get("status", "open"), "todo")
         if state != "done" and (state == "draft" or _under_way(k["id"], project)):
             state = "draft"
-        items.append({"state": state, "text": _title(k, shared)})
+        # The card behind this row, so a reader of the facts document can look
+        # it up on the board itself rather than only the text printed here.
+        items.append({"state": state, "text": _title(k, shared), "card": k["id"]})
 
     doing = [i["text"] for i in items if i["state"] == "draft"]
     waiting = [i["text"] for i in items if i["state"] == "todo"]
@@ -210,18 +212,13 @@ class BoardSilent(Exception):
     """The board is here and could not answer; it carries its own reason."""
 
 
-def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | None:
-    """The board's own word for one card, or None when it does not know it.
+def _ask(card: str, project: Path) -> dict | None:
+    """The board's raw answer for one card, or None when it has never heard of it.
 
-    Three answers, and the difference between them is the whole point. A card
-    the board knows comes back as its state. A card it has never heard of comes
-    back as None, which is a real answer and gets the reader told to name a card
-    that exists. Anything that stopped the board answering at all — none
-    installed, none of this project's own to read — raises, because a report
-    built where nothing could be checked must not read as one that was.
+    `card_state` and `card_info` both need to tell an unknown card apart from a
+    board that could not answer at all, so this is the one place that asks `bd`
+    and reads what came back; each caller then decides what to keep.
     """
-    if spec_dir is not None:
-        project = board_home(spec_dir, project)
     try:
         out = subprocess.run(
             ["bd", "show", card, "--json"],
@@ -245,9 +242,76 @@ def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | 
         return None
     if data.get("error") or not data.get("id"):
         return None
-    # A board drops a card by status or by putting the word on it and closing
-    # it, and either way the work is not happening — so it cannot be holding a
-    # question open either. Watching only the label leaves half the drops alive.
+    return data
+
+
+# Same raw-status -> board-column reading the app's own kanban screen uses
+# (src/types/index.ts's STATUS_MAP): a card's column is what a reader would
+# see it filed under, not only whether it is still open. A status this map
+# has never heard of lands on Todo, matching that screen's own fallback.
+COLUMN = {
+    "open": "Todo",
+    "pending": "Todo",
+    "blocked": "Todo",
+    "deferred": "Todo",
+    "pinned": "Todo",
+    "in_progress": "In Progress",
+    "hooked": "In Progress",
+    "inreview": "Agent Review",
+    "in_review": "Agent Review",
+    "manager_review": "Manager Review",
+    "closed": "Done",
+    "done": "Done",
+    "resolved": "Done",
+    "cancelled": "Cancelled",
+}
+
+
+def _status_of(data: dict) -> str:
+    """A card's status, a dropped card read as `cancelled` whichever way it was dropped.
+
+    A board drops a card by status or by putting the word on it and closing it,
+    and either way the work is not happening — so it cannot be holding a
+    question open either. Watching only the label leaves half the drops alive.
+    """
     if data.get("status") in DROPPED or set(data.get("labels") or []) & set(DROPPED):
         return "cancelled"
     return data.get("status") or "open"
+
+
+def card_state(card: str, project: Path, spec_dir: Path | None = None) -> str | None:
+    """The board's own word for one card, or None when it does not know it.
+
+    Three answers, and the difference between them is the whole point. A card
+    the board knows comes back as its state. A card it has never heard of comes
+    back as None, which is a real answer and gets the reader told to name a card
+    that exists. Anything that stopped the board answering at all — none
+    installed, none of this project's own to read — raises, because a report
+    built where nothing could be checked must not read as one that was.
+    """
+    if spec_dir is not None:
+        project = board_home(spec_dir, project)
+    data = _ask(card, project)
+    if data is None:
+        return None
+    return _status_of(data)
+
+
+def card_info(card: str, project: Path, spec_dir: Path | None = None) -> dict | None:
+    """The board's fuller word on one card: id, title and status, not only the state.
+
+    Same three answers as `card_state` — this is for a reader that wants to
+    show which card a question is about, not only whether it is still open.
+    """
+    if spec_dir is not None:
+        project = board_home(spec_dir, project)
+    data = _ask(card, project)
+    if data is None:
+        return None
+    status = _status_of(data)
+    return {
+        "id": data["id"],
+        "title": data.get("title", data["id"]),
+        "status": status,
+        "column": COLUMN.get(status, "Todo"),
+    }

@@ -51,8 +51,14 @@ def markup(text: str) -> list[str]:
     return [f"{label} ({m.group(0)!r})" for rx, label in MARKUP for m in [rx.search(text)] if m]
 
 
-def jargon(text: str, glossed: set[str]) -> list[str]:
-    """Every term the manager would have to decode, with what to say instead."""
+def jargon_hits(text: str, glossed: set[str]) -> list[dict]:
+    """Every plain-words problem in this string, as data rather than a sentence.
+
+    `jargon` below is the gate: it turns each hit into the line a human reads
+    on the page's build log. The facts document wants the same hits apart —
+    the word and what to say instead — so this is the one place that finds
+    them; `jargon` only formats what this returns.
+    """
     hits, seen = [], set()
     lowered = {g.lower() for g in glossed}
 
@@ -61,7 +67,7 @@ def jargon(text: str, glossed: set[str]) -> list[str]:
             continue
         if re.search(rf"\b{re.escape(term)}\b", text, re.I) and term not in seen:
             seen.add(term)
-            hits.append(f"{term!r} — say {plain!r}")
+            hits.append({"term": term, "instead": plain, "text": f"{term!r} — say {plain!r}"})
 
     for rx, label in SHAPES:
         for m in rx.finditer(text):
@@ -69,6 +75,15 @@ def jargon(text: str, glossed: set[str]) -> list[str]:
             if word in SHAPE_EXEMPT or word.lower() in lowered or word.lower() in seen:
                 continue
             seen.add(word.lower())
-            hits.append(f"{word!r} is {label} — name what it does, not what it is called")
+            hits.append({
+                "term": word,
+                "instead": "name what it does, not what it is called",
+                "text": f"{word!r} is {label} — name what it does, not what it is called",
+            })
 
     return hits
+
+
+def jargon(text: str, glossed: set[str]) -> list[str]:
+    """Every term the manager would have to decode, with what to say instead."""
+    return [h["text"] for h in jargon_hits(text, glossed)]

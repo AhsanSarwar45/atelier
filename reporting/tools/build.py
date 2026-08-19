@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime
 import hashlib
 import html
 import json
@@ -30,8 +31,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blocks import OPAQUE, ReportError, render as render_block  # noqa: E402
-from board import BoardSilent, NoBoard, card_state, status as board_status  # noqa: E402
-from jargon import jargon, markup  # noqa: E402
+from board import BoardSilent, NoBoard, card_info, card_state, status as board_status  # noqa: E402
+from jargon import jargon, jargon_hits, markup  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 STAMP = "@@REPORT-BUILD@@"
@@ -325,23 +326,38 @@ def starting_step(spec: dict) -> str:
     return next((s["step"] for s in steps if s.get("starting")), steps[0]["step"])
 
 
-def status_card(spec: dict, ctx: Ctx) -> str:
+def resolve_status(spec: dict, ctx: Ctx) -> dict:
+    """The status slot's facts: read off the board when it names a card, the spec's own words otherwise.
+
+    Shared by the page and the facts document, so the two readings of the
+    board can never say something different — this is the one place that asks.
+    """
     s = spec["status"]
     if s.get("card"):
-        s = board_status(s["card"], ctx.project, ctx.base)
+        read = board_status(s["card"], ctx.project, ctx.base)
         # README, "Next-up is the exception". A job with nothing left keeps the
         # list's own last word: a plan step advertised under a full set of ticks
         # reads as work still to come.
-        if any(i["state"] != "done" for i in s.get("items", [])):
-            s["next_up"] = starting_step(spec) or s["next_up"]
+        if any(i["state"] != "done" for i in read.get("items", [])):
+            read["next_up"] = starting_step(spec) or read["next_up"]
         # A card's title is written on the board and reaches the manager here
         # unedited, so it answers to the same phrasebook as the rest of the page.
         glossed = set(ctx.gloss)
-        for where, text in [("now", s["now"]), ("next up", s["next_up"])] + \
-                [("a checklist row", i["text"]) for i in s.get("items", [])]:
+        for where, text in [("now", read["now"]), ("next up", read["next_up"])] + \
+                [("a checklist row", i["text"]) for i in read.get("items", [])]:
             for problem in jargon(text, glossed):
                 ctx.warnings.append(f"{where} {text[:44]!r}: {problem}")
-    items = s.get("items", [])
+        items = [{"state": i["state"], "text": i["text"], "tag": None, "card": i.get("card")}
+                 for i in read.get("items", [])]
+        return {"card": s["card"], "now": read["now"], "next_up": read["next_up"], "items": items}
+    items = [{"state": it["state"], "text": it["text"], "tag": it.get("tag"), "card": None}
+             for it in s.get("items", [])]
+    return {"card": None, "now": s.get("now"), "next_up": s.get("next_up"), "items": items}
+
+
+def status_card(spec: dict, ctx: Ctx) -> str:
+    s = resolve_status(spec, ctx)
+    items = s["items"]
     n = max(len(items), 1)
     done = sum(1 for i in items if i["state"] == "done") / n * 100
     draft = sum(1 for i in items if i["state"] == "draft") / n * 100
@@ -456,6 +472,166 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
         raise ReportError("\n  · ".join(["this page asks about work that is over:"] + dead))
 
 
+# ── facts (--emit json) ─────────────────────────────────────────────────────
+# The page and the facts document are the same report read two ways, so
+# everything that decides what a report IS — the gates above, `resolve_status`,
+# `Ctx.image` — stays shared. Only how each fact is written out differs: here,
+# as data a block was given rather than the markup `render_block` makes of it.
+
+def resolve_shot(shot: dict, ctx: Ctx) -> dict:
+    """One picture, its `path` resolved to a `src` the way `Ctx.image` resolves it.
+
+    `Ctx.image` returns an HTML attribute value, so an explicit `src` comes
+    back escaped; the facts document is not markup, so this keeps it raw.
+    """
+    out = {k: v for k, v in shot.items() if k != "path"}
+    out["src"] = shot["src"] if "src" in shot else ctx.image(shot)
+    return out
+
+
+def resolve_block(block: dict, ctx: Ctx) -> dict:
+    """A block's own fields, kind intact, with every image resolved to a `src`.
+
+    Everything else — a chart's labels, values and tones included — is already
+    the data React draws from, so it passes through untouched. Called only
+    after `render_block` has already run the block's own gates.
+    """
+    kind = block.get("kind")
+    if kind == "images":
+        return {**block, "shots": [resolve_shot(s, ctx) for s in block["shots"]]}
+    if kind in ("compare", "wipe"):
+        out = dict(block)
+        out["before"] = resolve_shot(block["before"], ctx)
+        out["after"] = resolve_shot(block["after"], ctx)
+        return out
+    return dict(block)
+
+
+def question_facts(q: dict, i: int, ctx: Ctx) -> dict:
+    """One action-slot question, resolved: its own words plus the board's read of its card.
+
+    `live_questions` has already refused the build if this card turned out
+    closed, cancelled, or unknown to the board — so by the time this runs, the
+    card is either confirmed open or could not be asked about at all (`ctx.notes`
+    says why), and `live` follows straight from that.
+    """
+    held = str(q["holds"]).strip()
+    try:
+        info = card_info(held, ctx.project, ctx.base)
+    except (NoBoard, BoardSilent):
+        info = None
+    return {
+        "id": f"q{i}",
+        "ask": q["ask"],
+        "options": [
+            {
+                "label": o["label"],
+                "say": o.get("say") or (o["label"].rstrip(".") + "."),
+                "pick": bool(o.get("pick")),
+            }
+            for o in q["options"]
+        ],
+        "note": q.get("note"),
+        "holds": held,
+        "live": info is None or info["status"] not in ("closed", "cancelled"),
+        "card": info,
+    }
+
+
+def spec_warnings(spec: dict, status: dict) -> list[dict]:
+    """Every plain-words hit found while building, as data — content and, when
+    the status slot reads a card, the board's own words too.
+
+    Walks the same text `validate` and `resolve_status` walk, so this list
+    never disagrees with the warnings the page's own build already prints.
+    """
+    glossed = {g["term"] for g in spec.get("glossary", [])}
+    out = []
+    for where, s in strings(spec):
+        for h in jargon_hits(s, glossed):
+            out.append({"kind": "plain-words", "term": h["term"], "instead": h["instead"], "where": where})
+    if status["card"]:
+        sources = [("now", status["now"]), ("next up", status["next_up"])] + \
+            [("a checklist row", it["text"]) for it in status["items"]]
+        for where, text in sources:
+            for h in jargon_hits(text, glossed):
+                out.append({"kind": "plain-words", "term": h["term"], "instead": h["instead"], "where": where})
+    return out
+
+
+def facts(spec: dict, ctx: Ctx, spec_path: Path) -> dict:
+    """The report's resolved facts, as data — everything the page draws, before it is drawn.
+
+    Runs the identical gates `build` runs (`live_questions`, then every
+    block's own checks in `render_block`), so a spec refused for the page is
+    refused here too; nothing here is allowed to decide differently.
+    """
+    live_questions(spec, ctx)
+
+    a = spec["actions"]
+    actions = {
+        "none": bool(a.get("none")) and not a.get("questions"),
+        "fyi": a.get("fyi") if a.get("none") else None,
+        "questions": [question_facts(q, i, ctx) for i, q in enumerate(a.get("questions", []), 1)],
+    }
+
+    status = resolve_status(spec, ctx)
+
+    content = []
+    for i, section in enumerate(spec["content"], 1):
+        blocks = []
+        for b in section.get("blocks", []):
+            render_block(b, ctx)  # the page's own gate; its markup is thrown away
+            blocks.append(resolve_block(b, ctx))
+        content.append({
+            "id": f"s{i}",
+            "label": section["label"],
+            "lead": section.get("lead"),
+            "blocks": blocks,
+        })
+
+    decisions = [
+        {
+            "id": d["id"],
+            "title": d["title"],
+            "why": d.get("why", ""),
+            "tag": d.get("tag"),
+            "needs_you": bool(d.get("needs_you")),
+        }
+        for d in spec["decisions"]
+    ]
+
+    nxt = spec["next"]
+    next_facts = {
+        "if_nothing": nxt["if_nothing"],
+        "steps": [
+            {"step": s["step"], "cost": s["cost"], "starting": bool(s.get("starting"))}
+            for s in nxt.get("steps", [])
+        ],
+    }
+
+    glossary = [{"term": g["term"], "plain": g["plain"]} for g in spec.get("glossary", [])]
+
+    return {
+        "slug": spec_path.name.replace(".report.json", ""),
+        "project": spec_path.resolve().parent.name,
+        "title": spec["title"],
+        "eyebrow": spec.get("eyebrow"),
+        "actions": actions,
+        "status": status,
+        "content": content,
+        "decisions": decisions,
+        "next": next_facts,
+        "glossary": glossary,
+        "warnings": spec_warnings(spec, status),
+        "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        # What this build could and could not check against the board — one
+        # note per unreachable card would repeat the same reason for every
+        # question on a machine with no `bd`, so this says it once.
+        "board": {"reachable": not ctx.notes, "why": "; ".join(ctx.notes) or None},
+    }
+
+
 def build(spec: dict, ctx: Ctx) -> str:
     live_questions(spec, ctx)
     cards, nav = [], []
@@ -544,11 +720,12 @@ def main() -> int:
                     help="where the page lands; beside the spec by default")
     ap.add_argument("--project", type=Path, default=Path.cwd(),
                     help="the project the report is about; its pictures resolve from here")
+    ap.add_argument("--emit", choices=("html", "json"), default="html",
+                    help="the built page (default), or the same report's resolved facts as data")
     args = ap.parse_args()
     if args.out is None:
-        args.out = args.spec.resolve().with_name(
-            args.spec.name.replace(".report.json", "").replace(".json", "") + ".html"
-        )
+        stem = args.spec.name.replace(".report.json", "").replace(".json", "")
+        args.out = args.spec.resolve().with_name(f"{stem}.{'json' if args.emit == 'json' else 'html'}")
 
     try:
         spec = json.loads(args.spec.read_text(encoding="utf-8"))
@@ -565,7 +742,10 @@ def main() -> int:
 
     ctx = Ctx(spec.get("glossary", []), args.spec.resolve().parent, args.project.resolve())
     try:
-        page = stamped(build(spec, ctx))
+        if args.emit == "json":
+            payload = json.dumps(facts(spec, ctx, args.spec), ensure_ascii=False, indent=2)
+        else:
+            payload = stamped(build(spec, ctx))
     except ReportError as e:
         print(f"this report does not build: {e}", file=sys.stderr)
         return 1
@@ -579,12 +759,19 @@ def main() -> int:
             print(f"  · {w}", file=sys.stderr)
         print("  Rewrite them, or gloss the ones that must stay.", file=sys.stderr)
 
-    if len(page.encode("utf-8")) > MAX_BYTES:
-        print(f"the page is {len(page) / 1e6:.1f} MB — shrink the pictures", file=sys.stderr)
+    if len(payload.encode("utf-8")) > MAX_BYTES:
+        print(f"the {args.emit} is {len(payload) / 1e6:.1f} MB — shrink the pictures", file=sys.stderr)
         return 1
 
-    args.out.write_text(page, encoding="utf-8")
-    said = tally(page, spec, warnings, ctx.notes)
+    args.out.write_text(payload, encoding="utf-8")
+
+    if args.emit == "json":
+        # A machine reads this file next, not a manager in chat — the path is
+        # what a caller needs, not a link to open.
+        print(f"{args.out}  ({len(payload) / 1024:.0f} KB)")
+        return 0
+
+    said = tally(payload, spec, warnings, ctx.notes)
     link, why = handover(args.spec, args.out)
     if why:
         said += f", {why}"
