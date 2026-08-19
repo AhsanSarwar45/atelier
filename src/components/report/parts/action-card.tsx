@@ -124,10 +124,10 @@ function ReplyRow({ questionIds }: { questionIds: string[] }) {
   );
 }
 
-export function ActionCard({ actions }: { actions: ReportActions }) {
+export function ActionCard({ actions, id }: { actions: ReportActions; id?: string }) {
   if (actions.none && actions.questions.length === 0) {
     return (
-      <ReportCard kind="action" label="What I need from you">
+      <ReportCard id={id} kind="action" label="What I need from you">
         <div className={cn('grid gap-1 rounded-md bg-success/15 px-3.5 py-3 text-sm text-success')}>
           <b className="text-[11px] font-bold uppercase tracking-wide">No action needed</b>
           <span>{actions.fyi || 'For your information only.'}</span>
@@ -139,7 +139,7 @@ export function ActionCard({ actions }: { actions: ReportActions }) {
   const questionIds = actions.questions.map((q) => q.id);
 
   return (
-    <ReportCard kind="action" label="What I need from you">
+    <ReportCard id={id} kind="action" label="What I need from you">
       <div className="grid gap-4">
         {actions.questions.map((q, i) =>
           q.live ? (

@@ -4,12 +4,20 @@
  * Everything a reader could arrive at is in the address and nothing that a link
  * could carry is held in a component's own state:
  *
- *   /project?id=<project>&tab=chat|board&chat=<sessionId>&card=<cardId>
+ *   /project?id=<project>&tab=chat|board|reports&chat=<sessionId>&card=<cardId>
+ *     &report=<slug>&section=<id>
+ *
+ * A report lives under its project, the same as the board and the chats do
+ * (bw-7ks.21.4): naming `report` is asking for the Reports tab with that report
+ * open, the same way naming `chat` asks for the Chat tab, and `section` is
+ * which part of it the reader had scrolled to. The back button, a pasted
+ * address opened in a fresh window, and a link from a card or a chat all have
+ * to land on the same place, so all three read this one function.
  *
  * Design: docs/designs/app-shell.md §1.7.
  */
 
-export type Tab = 'chat' | 'board';
+export type Tab = 'chat' | 'board' | 'reports';
 
 export interface Where {
   /** The project. Null only while the screen is being sent back to the list. */
@@ -19,6 +27,10 @@ export interface Where {
   chat: string | null;
   /** The card whose panel is over the top of whichever tab is showing. */
   card: string | null;
+  /** The report drawn in the Reports tab. Null shows the list of reports instead. */
+  report: string | null;
+  /** Which part of the open report the reader had scrolled to. */
+  section: string | null;
 }
 
 /** What a chip and a link used to spell `card` as. Still read, never written. */
@@ -27,14 +39,31 @@ const OLD_CARD = 'bead';
 /** Where the address says we are. */
 export function whereFrom(params: URLSearchParams): Where {
   const chat = params.get('chat');
-  // Naming a chat is asking for the chat tab: a link from a card, the tray or
-  // the board lands on the conversation it names rather than beside it.
-  const tab: Tab = params.get('tab') === 'chat' || (chat && params.get('tab') !== 'board') ? 'chat' : 'board';
+  const report = params.get('report');
+  const rawTab = params.get('tab');
+  // Naming a chat or a report is asking for its own tab: a link from a card,
+  // the tray or the board lands on the thing it names rather than beside it.
+  // An explicit `tab=` always wins, so switching tabs by hand never gets
+  // pulled back by a `chat` or `report` left over from an earlier visit.
+  const tab: Tab =
+    rawTab === 'chat'
+      ? 'chat'
+      : rawTab === 'board'
+        ? 'board'
+        : rawTab === 'reports'
+          ? 'reports'
+          : report
+            ? 'reports'
+            : chat
+              ? 'chat'
+              : 'board';
   return {
     id: params.get('id'),
     tab,
     chat,
     card: params.get('card') ?? params.get(OLD_CARD),
+    report,
+    section: params.get('section'),
   };
 }
 

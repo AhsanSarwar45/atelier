@@ -53,12 +53,12 @@ function ChecklistRow({ item }: { item: StatusItem }) {
   );
 }
 
-export function StatusCard({ status }: { status: ReportStatus }) {
+export function StatusCard({ status, id }: { status: ReportStatus; id?: string }) {
   const done = pct(status.items, 'done');
   const draft = pct(status.items, 'draft');
 
   return (
-    <ReportCard kind="status" label="Where we are">
+    <ReportCard id={id} kind="status" label="Where we are">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-md bg-surface-overlay px-3.5 py-3 text-sm">
           <b className="text-[11px] font-bold uppercase tracking-wide text-t-muted">Now</b>{' '}

@@ -47,6 +47,8 @@ export function ReportCard({
   return (
     <section
       id={id}
+      data-testid="report-part"
+      data-part-kind={kind}
       className={cn(
         'theme-card flex flex-col gap-4 border border-b-default bg-surface-raised px-5 py-5',
         'border-l-4 scroll-mt-5',

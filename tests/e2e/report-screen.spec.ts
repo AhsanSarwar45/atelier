@@ -1,0 +1,223 @@
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+
+/**
+ * A report as a place under its project (bw-7ks.21.4).
+ *
+ * What this proves, and what the manager asked for in his own words: a report
+ * opens INSIDE the app — the same two bars the board and the chats sit under,
+ * never a page of its own held in a frame — with its contents pinned at the
+ * window's left edge, the report itself at a reading width, and its links
+ * beside it. Three shapes, decided by how wide the window is:
+ *
+ *   1440  contents at the left edge | reading column | links on the right
+ *   1150  contents at the left edge, links beneath them | reading column
+ *    800  contents and links in a strip across the top, report beneath
+ *
+ * Needs an instance holding a project that has at least one report built for
+ * it. Pick the project with BEADS_E2E_PROJECT and the report with
+ * BEADS_E2E_REPORT, or the first of each the instance lists.
+ *
+ * Run: BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3017 \
+ *      npx playwright test tests/e2e/report-screen.spec.ts
+ */
+
+/** Where the photographs the job is judged on are written. */
+const SHOTS = 'tests/results';
+
+/** The widest a reading column may be before the eye starts losing its place. */
+const READING_MAX = 780;
+
+function api(): string {
+  return process.env.BEADS_E2E_BACKEND ?? '';
+}
+
+interface ProjectRow {
+  id: string;
+  path?: string;
+  localPath?: string | null;
+}
+
+/** Every project the instance holds — there is no address for one on its own. */
+async function projects(request: APIRequestContext): Promise<ProjectRow[]> {
+  const rows = (await (await request.get(`${api()}/api/projects`)).json()) as ProjectRow[];
+  expect(rows.length, 'the instance lists no projects').toBeGreaterThan(0);
+  return rows;
+}
+
+async function projectId(request: APIRequestContext): Promise<string> {
+  if (process.env.BEADS_E2E_PROJECT) return process.env.BEADS_E2E_PROJECT;
+  return (await projects(request))[0].id;
+}
+
+/** A report the instance actually holds for that project. */
+async function reportSlug(request: APIRequestContext, id: string): Promise<string> {
+  if (process.env.BEADS_E2E_REPORT) return process.env.BEADS_E2E_REPORT;
+  const row = (await projects(request)).find((p) => p.id === id);
+  const dir = row?.localPath || row?.path || '';
+  const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? '';
+  const reports = (await (await request.get(`${api()}/api/reports`)).json()) as {
+    project: string;
+    slug: string;
+  }[];
+  const ours = reports.filter((r) => r.project === name);
+  expect(ours.length, `the instance holds no report for ${name}`).toBeGreaterThan(0);
+  return ours[0].slug;
+}
+
+async function openReport(page: Page, id: string, slug: string): Promise<void> {
+  await page.goto(`/project?id=${id}&tab=reports&report=${slug}`);
+  await expect(page.getByTestId('report-tab')).toBeVisible();
+  // The document itself, not the loading line: everything below measures the
+  // drawn report.
+  await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
+}
+
+/** The box a part of the screen occupies, in window coordinates. */
+async function box(page: Page, testId: string) {
+  const found = await page.getByTestId(testId).first().boundingBox();
+  expect(found, `${testId} is not on the screen`).not.toBeNull();
+  return found!;
+}
+
+test.describe('a report is a place under its project', () => {
+  // Opening a report runs the report tools against the board, which takes
+  // seconds, and the suite runs its own tests side by side — so the wait here
+  // is the builder's, not the screen's (bw-7ks.21.9 makes the second visit
+  // instant).
+  test.describe.configure({ timeout: 120_000 });
+
+  test('it opens inside the app, under the same two bars as the board', async ({ page, request }) => {
+    const id = await projectId(request);
+    const slug = await reportSlug(request, id);
+    await openReport(page, id, slug);
+
+    // The shell, unchanged: the project's own bar and the tab bar, and nothing
+    // else above the work.
+    await expect(page.locator('[data-shell-bar]')).toHaveCount(2);
+    await expect(page.getByTestId('project-name')).toBeVisible();
+    await expect(page.getByTestId('project-menu')).toBeVisible();
+    await expect(page.getByTestId('project-tabs')).toBeVisible();
+    await expect(page.getByTestId('tab-reports')).toBeVisible();
+
+    // Not a page held in a frame: the report is drawn by the app itself.
+    await expect(page.locator('iframe')).toHaveCount(0);
+
+    // The window itself never scrolls — the report's own pane does.
+    const overflow = await page.evaluate(() => {
+      const el = document.scrollingElement ?? document.documentElement;
+      return el.scrollHeight - el.clientHeight;
+    });
+    expect(overflow, 'the window itself scrolls').toBeLessThanOrEqual(1);
+  });
+
+  test('the address carries the report, so Back and a pasted link both work', async ({ page, request }) => {
+    const id = await projectId(request);
+    const slug = await reportSlug(request, id);
+
+    await page.goto(`/project?id=${id}&tab=board`);
+    await expect(page.getByTestId('project-tabs')).toBeVisible();
+
+    await page.getByTestId('tab-reports').click();
+    await expect(page.getByTestId('report-tab')).toBeVisible();
+    await page.getByTestId('reports-list-item').first().click();
+    await expect(page).toHaveURL(/report=/);
+    await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
+
+    // A fresh window on the same address lands on the same report.
+    await page.reload();
+    await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
+
+    // Back steps off the report, then off the tab, and the board is there.
+    await page.goBack();
+    await page.goBack();
+    await expect(page).toHaveURL(/tab=board/);
+    expect(slug.length, 'a report slug was resolved').toBeGreaterThan(0);
+  });
+
+  test('wide: contents at the left edge, a reading column, links on the right', async ({ page, request }) => {
+    const id = await projectId(request);
+    const slug = await reportSlug(request, id);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openReport(page, id, slug);
+
+    const toc = await box(page, 'report-toc');
+    const pane = await box(page, 'report-pane');
+    const links = await box(page, 'report-links');
+    const column = await box(page, 'report-column');
+
+    expect(toc.x, 'the contents are not pinned to the window edge').toBeLessThanOrEqual(1);
+    expect(pane.x, 'the report starts left of the contents').toBeGreaterThan(toc.x + toc.width - 1);
+    expect(links.x, 'the links are not right of the report').toBeGreaterThan(pane.x);
+    expect(column.width, 'the reading column is too wide').toBeLessThanOrEqual(READING_MAX);
+    // Wider than the drawer it replaces, which never took more than half.
+    expect(column.width).toBeGreaterThan(480);
+
+    await page.screenshot({ path: `${SHOTS}/bw-7ks.21-report-1440.png`, fullPage: false });
+  });
+
+  test('middle: the links move under the contents', async ({ page, request }) => {
+    const id = await projectId(request);
+    const slug = await reportSlug(request, id);
+    await page.setViewportSize({ width: 1150, height: 900 });
+    await openReport(page, id, slug);
+
+    const toc = await box(page, 'report-toc');
+    const links = await box(page, 'report-links');
+    const pane = await box(page, 'report-pane');
+    const column = await box(page, 'report-column');
+
+    expect(toc.x, 'the contents left the window edge').toBeLessThanOrEqual(1);
+    expect(links.y, 'the links are not under the contents').toBeGreaterThanOrEqual(toc.y + toc.height - 1);
+    expect(links.x, 'the links left the contents column').toBeLessThan(pane.x);
+    expect(column.width, 'the reading column is too wide').toBeLessThanOrEqual(READING_MAX);
+
+    await page.screenshot({ path: `${SHOTS}/bw-7ks.21-report-1150.png`, fullPage: false });
+  });
+
+  test('narrow: contents and links in a strip across the top', async ({ page, request }) => {
+    const id = await projectId(request);
+    const slug = await reportSlug(request, id);
+    await page.setViewportSize({ width: 800, height: 900 });
+    await openReport(page, id, slug);
+
+    const toc = await box(page, 'report-toc');
+    const links = await box(page, 'report-links');
+    const pane = await box(page, 'report-pane');
+
+    expect(toc.x, 'the contents left the window edge').toBeLessThanOrEqual(1);
+    expect(pane.y, 'the report is not beneath the strip').toBeGreaterThanOrEqual(links.y + links.height - 1);
+    expect(pane.x, 'the report does not take the full width').toBeLessThanOrEqual(1);
+    expect(pane.width, 'the report does not take the full width').toBeGreaterThan(760);
+
+    // A strip, not a banner: a card whose title is a whole sentence must not
+    // grow the links into a block, nor push the window sideways.
+    expect(links.height, 'the links are a block rather than a strip').toBeLessThanOrEqual(140);
+    const sideways = await page.evaluate(() => {
+      const el = document.scrollingElement ?? document.documentElement;
+      return el.scrollWidth - el.clientWidth;
+    });
+    expect(sideways, 'something pushes the whole window sideways').toBeLessThanOrEqual(1);
+
+    await page.screenshot({ path: `${SHOTS}/bw-7ks.21-report-800.png`, fullPage: false });
+  });
+
+  test('the contents scroll the report to the part they name', async ({ page, request }) => {
+    const id = await projectId(request);
+    const slug = await reportSlug(request, id);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openReport(page, id, slug);
+
+    const items = page.getByTestId('report-toc-item');
+    const count = await items.count();
+    expect(count, 'the contents name no part of the report').toBeGreaterThan(2);
+
+    const before = await page.getByTestId('report-pane').evaluate((el) => el.scrollTop);
+    await items.nth(count - 1).click();
+    await expect
+      .poll(async () => page.getByTestId('report-pane').evaluate((el) => el.scrollTop), {
+        message: 'clicking the last entry moved nothing',
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(before);
+  });
+});

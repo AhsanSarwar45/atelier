@@ -21,6 +21,7 @@ import { WorkbenchStatus } from '@/workbench/globals';
 
 import { BoardCards } from './board-cards';
 import KanbanBoard from './kanban-board';
+import ReportTab from './report-tab';
 
 function LoadingFallback() {
   return (
@@ -36,7 +37,7 @@ function ProjectTabs() {
   // The address decides which tab is showing, which chat is drawn in it and
   // which card is over the top, so every one of them survives a link, a fresh
   // tab and the Back button (docs/designs/app-shell.md §1.7).
-  const { id: projectId, tab, chat: openChat, card: openCard } = whereFrom(params);
+  const { id: projectId, tab, chat: openChat, card: openCard, report: openReport, section: openSection } = whereFrom(params);
   const { project, refetch } = useProject(projectId);
   const { theme } = useTheme();
   const terminal = theme.headerVariant === 'terminal';
@@ -121,10 +122,12 @@ function ProjectTabs() {
       tabs={
         <Tabs
           value={tab}
-          // Pushed, so the tab he left is a step back. It also keeps the chat it
-          // was pointed at: coming back to Chat should be the conversation he
-          // was reading, not an empty tab.
-          onValueChange={(next) => go({ tab: next === 'chat' ? 'chat' : 'board' })}
+          // Pushed, so the tab he left is a step back. It also keeps the chat or
+          // report it was pointed at: coming back to a tab should be what he was
+          // reading, not an empty one.
+          onValueChange={(next) =>
+            go({ tab: next === 'chat' ? 'chat' : next === 'reports' ? 'reports' : 'board' })
+          }
         >
           <TabsList data-testid="project-tabs">
             <TabsTrigger value="chat" data-testid="tab-chat">
@@ -132,6 +135,9 @@ function ProjectTabs() {
             </TabsTrigger>
             <TabsTrigger value="board" data-testid="tab-board">
               Board
+            </TabsTrigger>
+            <TabsTrigger value="reports" data-testid="tab-reports">
+              Reports
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -141,12 +147,13 @@ function ProjectTabs() {
         <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
       )}
 
-      {/* The board and the card panel read ONE list, held here: an edit in the
-          panel moves the card behind it, and the list is fetched once
-          (src/app/project/board-cards.tsx). It is mounted only when one of them
-          is on screen, so the chat tab alone still pays nothing for the board
-          (docs/designs/app-shell.md §1.6). */}
-      {(tab === 'board' || openCard) && project && (
+      {/* The board, the report screen and the card panel read ONE list, held
+          here: an edit in the panel moves the card behind it, a report's status
+          card gets its title from the same list instead of a fetch of its own,
+          and the list is fetched once (src/app/project/board-cards.tsx). It is
+          mounted only when one of them is on screen, so the chat tab alone
+          still pays nothing for the board (docs/designs/app-shell.md §1.6). */}
+      {(tab === 'board' || tab === 'reports' || openCard) && project && (
         <BoardCards projectPath={project.path}>
           {/* Only the tab in front is mounted: a board kept alive behind the
               chat is paid for on every switch, both ways. */}
@@ -154,6 +161,17 @@ function ProjectTabs() {
             <div className="flex min-h-0 flex-1 flex-col">
               <KanbanBoard />
             </div>
+          )}
+          {/* A report opens under its own project, in the app's own shell — not
+              a drawer, not a lookalike page (bw-7ks.21.4). */}
+          {tab === 'reports' && (
+            <ReportTab
+              projectId={projectId}
+              projectPath={project.path}
+              projectLocalPath={project.localPath}
+              report={openReport}
+              section={openSection}
+            />
           )}
           {/* One card panel for the whole screen, over whichever tab is showing
               (docs/designs/app-shell.md §1.8). */}

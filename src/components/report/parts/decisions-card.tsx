@@ -80,9 +80,9 @@ function DecisionRow({ decision }: { decision: Decision }) {
   );
 }
 
-export function DecisionsCard({ decisions }: { decisions: Decision[] }) {
+export function DecisionsCard({ decisions, id }: { decisions: Decision[]; id?: string }) {
   return (
-    <ReportCard kind="decisions" label="Decisions · press override on any you want changed">
+    <ReportCard id={id} kind="decisions" label="Decisions · press override on any you want changed">
       <div className="grid gap-1.5">
         {decisions.map((d) => (
           <DecisionRow key={d.id} decision={d} />

@@ -17,9 +17,9 @@ const COST_TONE: Record<Cost, keyof typeof TONE_CLASSES> = {
   large: 'red',
 };
 
-export function NextCard({ next }: { next: NextSlot }) {
+export function NextCard({ next, id }: { next: NextSlot; id?: string }) {
   return (
-    <ReportCard kind="next" label="Next">
+    <ReportCard id={id} kind="next" label="Next">
       <div className={cn('grid gap-1 rounded-md bg-surface-overlay px-3.5 py-3 text-sm')}>
         <b className="text-[11px] font-bold uppercase tracking-wide text-t-muted">If you say nothing</b>
         <span className="text-t-primary">
