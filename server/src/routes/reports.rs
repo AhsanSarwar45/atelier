@@ -301,8 +301,12 @@ fn spec_home(spec: &Path) -> String {
 /// reader opens, long enough that a hundred cards cost one read between them.
 const MEMO: std::time::Duration = std::time::Duration::from_secs(3);
 
-fn memo() -> &'static Mutex<Option<(SystemTime, Vec<ReportEntry>)>> {
-    static MEMO_CELL: OnceLock<Mutex<Option<(SystemTime, Vec<ReportEntry>)>>> = OnceLock::new();
+/// The list as it was last read, and when: named, because the whole of it
+/// spelled out inline is a type nobody can read at a glance.
+type Memo = Mutex<Option<(SystemTime, Vec<ReportEntry>)>>;
+
+fn memo() -> &'static Memo {
+    static MEMO_CELL: OnceLock<Memo> = OnceLock::new();
     MEMO_CELL.get_or_init(|| Mutex::new(None))
 }
 
