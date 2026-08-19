@@ -2246,7 +2246,11 @@ def main():
     # holds claims under is the one hooks/board-actor.py stamped there: a command
     # that moves into another checkout first is stamped for that checkout, and
     # working the name out again here would hand the job to a name the board
-    # never sees it work under. Unstamped, the session's own name stands.
+    # never sees it work under. Unstamped, the session's own name stands. The stamp
+    # is an argument of the command and is read as one: everything a close carries
+    # is free text, and a reason that speaks of the stamp — as the cards building
+    # this very thing all do — would otherwise hand the job to whatever word
+    # follows those letters in a sentence (bw-a6o.2.11).
     moved = []
     keep_touch = (touch.bc.load, touch.bc.save, touch.bc.reviewing, touch.bc.prefix,
                   touch.bc.actor, touch.bc.held, touch.run.card, touch.run.advance)
@@ -2263,7 +2267,8 @@ def main():
     keep_out, sys.stdout = sys.stdout, said
     try:
         for line in ('bd --actor tree-a1b2c3d4 close tst-h.3 --reason="built it"',
-                     'bd close tst-h.3 --reason="built it"'):
+                     'bd close tst-h.3 --reason="built it"',
+                     'bd close tst-h.3 --reason="wired up the --actor flag"'):
             sys.stdin = io.StringIO(json.dumps({
                 "session_id": "selftest", "cwd": ROOT, "tool_name": "Bash",
                 "tool_input": {"command": line}, "tool_response": ""}))
@@ -2272,12 +2277,15 @@ def main():
         sys.stdout = keep_out
         (touch.bc.load, touch.bc.save, touch.bc.reviewing, touch.bc.prefix,
          touch.bc.actor, touch.bc.held, touch.run.card, touch.run.advance) = keep_touch
-    assert moved == [("tst-h.3", "tree-a1b2c3d4"), ("tst-h.3", "here-99999999")], \
+    assert moved == [("tst-h.3", "tree-a1b2c3d4"), ("tst-h.3", "here-99999999"),
+                     ("tst-h.3", "here-99999999")], \
         "the close moved the job on without the name the board holds this " \
-        "session's claims under: %s" % moved
+        "session's claims under, or under a name read out of what the close said " \
+        "rather than off the stamp: %s" % moved
 
     print("ok: a close moves the run on under the name stamped on that very "
-          "command, and under the session's own name when nothing stamped it")
+          "command, under the session's own name when nothing stamped it, and "
+          "never under a word out of the reason it carried")
 
     # The opening text is the only place most of this is written down, and it is
     # handed to every session before it reads a line of code. A run of steps typed

@@ -24,13 +24,6 @@ CLAIMED = re.compile(r"\bbd\b[^|;&]*\bupdate\b[^|;&]*--claim\b")
 # A write to one card, whose answer is worth handing back rather than asked for
 # again in a turn of its own.
 WROTE = re.compile(r"\bbd\b[^|;&]*\b(?:update|close|reopen)\b")
-# The name the board knows this command by. Stamped on by hooks/board-actor.py in
-# front of every board command, and read back off the line rather than worked out
-# again here: a command that moves into another checkout first is stamped for that
-# checkout, and a job handed to the session's own name would be handed to a name
-# the board never sees it work under.
-ACTOR = re.compile(r"--actor[= ]\s*['\"]?([^\s'\"]+)")
-
 BEAT_EVERY = 90  # seconds of activity between lease refreshes; lease TTL is 300
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
@@ -126,10 +119,38 @@ def response_text(resp):
     return ""
 
 
+def stamped_name(cmd):
+    """The name a board command was stamped with, or None.
+
+    Stamped on by hooks/board-actor.py in front of every board command, and read
+    back off the line rather than worked out again here: a command that moves into
+    another checkout first is stamped for that checkout, and a job handed to the
+    session's own name would be handed to a name the board never sees it work
+    under.
+
+    Read off the words of a bd command the way aimed_at reads a card id, never off
+    the line it is written on. Everything a close carries is free text, and a
+    reason that speaks of the stamp — `--reason="wired up the --actor flag"`, which
+    the cards building this very thing all say — hands the next step of the job to
+    whatever word follows those letters in a sentence, under a name nobody works
+    under. Quotes are what tells a value from a sentence, and quotes are what a
+    search over the raw line cannot see.
+    """
+    for seg in bc.segments(cmd or ""):
+        argv = bc.words(seg)
+        if "bd" not in [os.path.basename(a) for a in argv]:
+            continue
+        for i, word in enumerate(argv):
+            if word.startswith("--actor="):
+                return word.split("=", 1)[1]
+            if word == "--actor" and i + 1 < len(argv):
+                return argv[i + 1]
+    return None
+
+
 def closing_actor(cmd, data):
     """Who closed this card, in the name the board holds claims under."""
-    got = ACTOR.search(cmd or "")
-    return got.group(1) if got else bc.actor(data.get("session_id"), bc.where(data))
+    return stamped_name(cmd) or bc.actor(data.get("session_id"), bc.where(data))
 
 
 def main():

@@ -436,6 +436,14 @@ FAULTS = [
      TOUCH,
      lambda s: s.replace("run.advance(cid, root, closing_actor(cmd, data))",
                          "run.advance(cid, root)")),
+    ("whoever closed a card is read off the whole line, so a reason that speaks of "
+     "the stamp hands the job to a word out of a sentence", TOUCH,
+     lambda s: s.replace(
+         "    return stamped_name(cmd) or bc.actor(",
+         '    got = re.search(r"--actor[= ]+(\\S+)", cmd or "")\n'
+         "    if got:\n"
+         "        return got.group(1)\n"
+         "    return bc.actor(")),
 
     # The opening text every session is handed before it reads any code: a run of
     # steps written out there by hand, and the refusal the cut stopped asking for
