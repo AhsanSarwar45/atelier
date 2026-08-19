@@ -11,6 +11,8 @@ closes no card, and nothing else on the board would move the run past it.
 See docs/board.md#4c-the-steps-a-job-picked.
 """
 import datetime
+import importlib.machinery
+import importlib.util
 import json
 import os
 import subprocess
@@ -29,6 +31,13 @@ GATE_TITLE = "Gate: read by someone who did not write it"
 GATE_WHY = ("A review is done by someone else; the board's own reader resolves "
             "this gate when one has read the change, and cancelling the job "
             "resolves it as a reading that was never owed.")
+
+# The gate that asks a claim its questions. A hook's filename is not an
+# identifier, so it is loaded the way board/land loads the merge gate — and
+# lazily, at the one moment a hand-over needs it: that gate imports this module,
+# and loading it from here at import time would be the two of them in a ring.
+CLAIM_GATE = os.path.join(os.path.dirname(HERE), "hooks", "board-status-gate.py")
+_RULES = None
 
 
 def card(cid, root):
@@ -312,7 +321,56 @@ def reading_over(goal_id, goal, order, rows, root):
     return True
 
 
-def hand_over(cid, actor, root, only_if_free=False):
+def rules():
+    """The claim gate, as a module, for the questions it asks about a copy.
+
+    Loaded once and kept: reading a hook off disk is cheap, and doing it for
+    every piece of a job that closes is not.
+    """
+    global _RULES
+    if _RULES is None:
+        spec = importlib.util.spec_from_loader(
+            "board_status_gate",
+            importlib.machinery.SourceFileLoader("board_status_gate", CLAIM_GATE))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _RULES = mod
+    return _RULES
+
+
+def nowhere_to_work(piece, root, here):
+    """The refusal handing this card over earns for having nowhere to change code.
+
+    Asked of the claim's own code rather than of a second copy of the rule: what
+    a job's own copy is, which checkout it has to stand in and what to say when
+    it has none are written down once, in the gate that asks a claim the same
+    question (hooks/board-status-gate.py).
+
+    Nothing is asked of a card that makes none — a note, a ruling, the landing —
+    and nothing is asked when the caller cannot say where the session is
+    standing: the board's own reader opens steps from outside any session, and a
+    directory nobody named is not a directory in the shared tree.
+    """
+    if not here:
+        return ""
+    gate = rules()
+    if not gate.makes_code(piece):
+        return ""
+    goal = next((l[3:] for l in piece.get("labels") or [] if l.startswith("of:")),
+                None)
+    if not goal:
+        return ""
+    return gate.without_a_copy(piece.get("id"), goal, root, here)
+
+
+# What a session is told about the piece it was not handed. The refusal is the
+# claim's own, word for word — it names the one command that cuts the copy — and
+# this line says why it arrived without anybody having claimed anything.
+HELD_BACK = ("%s is open and owned by nobody: the run does not hand a piece that "
+             "makes code to a session with nowhere to make it.\n%s")
+
+
+def hand_over(piece, actor, root, only_if_free=False, here=None):
     """Give this card to the session that closed the one before it.
 
     One claim a job, not one a step. A job used to be claimed eleven times, and
@@ -321,20 +379,39 @@ def hand_over(cid, actor, root, only_if_free=False):
     otherwise. `--claim` sets the assignee to whoever runs it, so the name is set
     outright rather than claimed on somebody else's behalf.
 
+    A step that makes code is handed over only where the change can be made, and
+    `here` is the directory the session that closed the last piece typed from.
+    That question is asked here because a hand-over is not a claim: nothing types
+    a command for it, so the gate standing in front of `--claim` never sees one,
+    and a job that opened with a step making no code reached its first code step
+    already held — from whatever checkout that session happened to be standing in
+    (bw-kszy). A step that earns the refusal is left open and unowned, and the
+    refusal is what comes back, so the session is told how to cut the copy
+    instead of being handed work it has nowhere to do.
+
     `only_if_free` is for a card the board did not just create: another session
     may already hold it, and handing it over would take work off somebody's desk.
     bd writes nothing and exits 13 when the guard does not hold.
     """
+    cid = (piece or {}).get("id")
     if not actor or not cid:
-        return
+        return ""
+    nowhere = nowhere_to_work(piece, root, here)
+    if nowhere:
+        return HELD_BACK % (cid, nowhere)
     args = ["update", cid, "-a", actor, "-s", "in_progress"]
     if only_if_free:
         args += ["--if-assignee", ""]
     bc.bd(args, root)
+    return ""
 
 
 def free_item(rows):
     """The next piece of this job nobody is holding, in the order they were poured.
+
+    The card itself rather than its id: what is asked before it is handed to
+    anybody is whether it makes code, and that is read off the labels the listing
+    already carries (`hand_over`).
 
     A reader's findings arrive as several at once and the session answering them
     takes one; the rest are handed over as each closes. A piece somebody else has
@@ -342,11 +419,11 @@ def free_item(rows):
     """
     for r in rows:
         if r.get("status") == "open" and not (r.get("assignee") or ""):
-            return r.get("id")
+            return r
     return None
 
 
-def open_next(rest, have, goal_id, goal, meta, root, actor=None):
+def open_next(rest, have, goal_id, goal, meta, root, actor=None, here=None):
     """Open the first position of `rest` this job has no card for.
 
     A position with no card is stepped over rather than waited on: the work is
@@ -358,6 +435,7 @@ def open_next(rest, have, goal_id, goal, meta, root, actor=None):
             continue
         if spine.evidence(nxt) == spine.WORK or nxt in have:
             return
+        labels = spine.step_labels(nxt, goal_id, meta)
         ok, out = bc.bd(spine.card(nxt, goal_id, meta, goal.get("priority", 2))
                         + ["--json"], root)
         try:
@@ -365,9 +443,13 @@ def open_next(rest, have, goal_id, goal, meta, root, actor=None):
         except Exception:
             new_id = None
         if new_id:
-            bc.bd(spine.settle(new_id, spine.step_labels(nxt, goal_id, meta)), root)
+            bc.bd(spine.settle(new_id, labels), root)
             column(goal_id, goal, nxt, root)
-            hand_over(new_id, actor, root)
+            # The card as it now stands rather than asked for again: the pour
+            # above made it a task and the line before this one is what its
+            # labels are, which is everything the hand-over asks about it.
+            return hand_over({"id": new_id, "issue_type": "task", "labels": labels},
+                             actor, root, here=here)
         return
 
 
@@ -390,13 +472,17 @@ def after_reading(goal_id, root):
     open_next(rest, steps_of(rows), goal_id, goal, meta, root)
 
 
-def advance(cid, root, actor=None):
+def advance(cid, root, actor=None, here=None):
     """A closed step opens the next one, or hands the job to a reader.
 
     `actor` is the session that closed this one, and whatever opens next is its
     work: the board hands the job on rather than asking for a claim per step.
     Nobody is named when the reader is what called this — a reading is not a hand
     that then owns the record step.
+
+    `here` is where that session typed from, and what comes back is the refusal a
+    hand-over earned there, if one did: a step making code goes to nobody unless
+    the job has a copy of its own to make it in (`hand_over`).
     """
     step = card(cid, root) or {}
     if step.get("status") != "closed":
@@ -423,8 +509,8 @@ def advance(cid, root, actor=None):
             # Still building. The next piece of this job nobody holds goes to the
             # session that just finished one, so a job is claimed once however
             # many pieces it was broken into.
-            hand_over(free_item(items), actor, root, only_if_free=True)
-            return
+            return hand_over(free_item(items), actor, root, only_if_free=True,
+                             here=here)
     if reading_due(goal_id, goal, order, rows, root):
         open_reading(goal_id, goal, root)
         return
@@ -433,5 +519,5 @@ def advance(cid, root, actor=None):
     if which == order[-1]:
         park(goal_id, goal, meta, root)
         return
-    open_next(order[order.index(which) + 1:], steps_of(rows), goal_id, goal, meta,
-              root, actor)
+    return open_next(order[order.index(which) + 1:], steps_of(rows), goal_id, goal,
+                     meta, root, actor, here)

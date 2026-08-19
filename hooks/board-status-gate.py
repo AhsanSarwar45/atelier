@@ -503,6 +503,19 @@ def stood_in(here, root):
     return got.group(2), "%s, which was cut for %s" % (got.group(1), got.group(2))
 
 
+def makes_code(card):
+    """Whether this card's own work is a change to code.
+
+    One place answers it, because two would be two places to change the day a
+    card learns a new way of saying it makes none: the claim asks before it lets
+    a session start, and the run's own hand-over asks before it gives a step to
+    one (board/run.py). A find, a question, a ruling and every step that declared
+    it makes no code are read and written from wherever the session stands.
+    """
+    return (not set(card.get("labels") or []) & set(NO_CODE)
+            and card.get("issue_type") not in ("decision", "epic"))
+
+
 def without_a_copy(cid, goal, root, here):
     """The refusal a claim earns for having nowhere of its own to make the change.
 
@@ -1081,13 +1094,11 @@ def main():
                 # owns has been dealt with: a session told to make a copy while it
                 # still holds an abandoned one ends up holding two.
                 #
-                # Only of a card that makes code. A find, a question, a ruling and
-                # every step that declared it makes none are read and written from
-                # wherever the session stands — and so are the board's own commands,
+                # Only of a card that makes code (`makes_code`) — the board's own
+                # commands are read and written from wherever the session stands,
                 # which is why the landing, itself a no-code step, is closed from
                 # the shared tree by rule (see the teardown above).
-                if not set(card.get("labels") or []) & set(NO_CODE) \
-                        and card.get("issue_type") not in ("decision", "epic"):
+                if makes_code(card):
                     nowhere = without_a_copy(cid, own, root, bc.where(data))
                     if nowhere:
                         deny(nowhere)

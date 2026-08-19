@@ -167,6 +167,7 @@ def main():
     # become claims and closes.
     cmd = bc.said(data) if tool == "Bash" else ""
     answer = None
+    held_back = ""
 
     # A helper that has come back is struck off by name; until then the session
     # is waiting on it, however many turns that takes. A return that arrives
@@ -248,8 +249,13 @@ def main():
                         {"id": cid, "t": bc.now()}
                     ]
                 # Whatever opens next is this session's: a job is claimed
-                # once, not once a step (board/run.py, hand_over).
-                run.advance(cid, root, closing_actor(cmd, data))
+                # once, not once a step (board/run.py, hand_over). Where this
+                # session is standing goes with the name, because a step that
+                # makes code is handed to nobody who has nowhere to make it — and
+                # this hook is the only thing that knows the directory the close
+                # was typed from.
+                held_back = run.advance(cid, root, closing_actor(cmd, data),
+                                        bc.where(data)) or held_back
 
     # A write answers with the card it made, so nothing has to ask again. Two
     # sessions measured asked the board what they had just written to it 72 and
@@ -273,11 +279,17 @@ def main():
             bc.bd(["heartbeat", "--actor", name] + mine, root)
 
     bc.save(sid, state)
-    if answer:
+    told = "%s is now %s: %s" % (answer.get("id"), answer.get("status"),
+                                 answer.get("title") or "") if answer else ""
+    # A step the run would not hand over is said here or nowhere. Nothing typed a
+    # command for that hand-over, so there is no refusal for a gate to carry back
+    # and the card would otherwise just sit there, open and owned by nobody.
+    if held_back:
+        told = (told + "\n\n" + held_back).strip()
+    if told:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PostToolUse",
-            "additionalContext": "%s is now %s: %s" % (
-                answer.get("id"), answer.get("status"), answer.get("title") or ""),
+            "additionalContext": told,
         }}))
 
 

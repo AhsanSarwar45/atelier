@@ -422,20 +422,42 @@ FAULTS = [
     # all (bw-a6o.2).
     ("the step that opens after a close is left for somebody to claim by hand",
      RUN,
-     lambda s: s.replace("            column(goal_id, goal, nxt, root)\n"
-                         "            hand_over(new_id, actor, root)\n",
-                         "            column(goal_id, goal, nxt, root)\n")),
+     lambda s: s.replace(
+         '            return hand_over({"id": new_id, "issue_type": "task", '
+         '"labels": labels},\n                             actor, root, here=here)\n',
+         "            return\n")),
     ("a job being built hands out nothing, so every work item is claimed by hand",
      RUN,
-     lambda s: s.replace("            hand_over(free_item(items), actor, root, "
-                         "only_if_free=True)\n", "")),
+     lambda s: s.replace("            return hand_over(free_item(items), actor, root, "
+                         "only_if_free=True,\n                             here=here)\n",
+                         "            return\n")),
     ("a hand-over takes the piece another session is already holding", RUN,
      lambda s: s.replace('    if only_if_free:\n        args += ["--if-assignee", ""]\n',
                          "")),
     ("a close moves the job on under no name, so the next step is handed to nobody",
      TOUCH,
-     lambda s: s.replace("run.advance(cid, root, closing_actor(cmd, data))",
-                         "run.advance(cid, root)")),
+     lambda s: s.replace("held_back = run.advance(cid, root, closing_actor(cmd, data),\n"
+                         "                                        bc.where(data))",
+                         "held_back = run.advance(cid, root, None,\n"
+                         "                                        bc.where(data))")),
+
+    # The copy rule reached by the one door that is not a claim: a step the run
+    # hands over on its own, which nobody types a command for and so no gate in
+    # front of a command ever sees (bw-n1x5).
+    ("the run hands out a step that makes code without asking where the session "
+     "stands", RUN,
+     lambda s: s.replace("    nowhere = nowhere_to_work(piece, root, here)\n"
+                         "    if nowhere:\n"
+                         "        return HELD_BACK % (cid, nowhere)\n", "")),
+    ("a close moves the run on from nowhere in particular, so the copy question is "
+     "asked of no directory", TOUCH,
+     lambda s: s.replace("held_back = run.advance(cid, root, closing_actor(cmd, data),\n"
+                         "                                        bc.where(data))",
+                         "held_back = run.advance(cid, root, "
+                         "closing_actor(cmd, data))")),
+    ("a step the run would not hand over is refused in silence", TOUCH,
+     lambda s: s.replace("    if held_back:\n"
+                         '        told = (told + "\\n\\n" + held_back).strip()\n', "")),
     ("whoever closed a card is read off the whole line, so a reason that speaks of "
      "the stamp hands the job to a word out of a sentence", TOUCH,
      lambda s: s.replace(
@@ -476,10 +498,9 @@ FAULTS = [
     ("a copy of its own is asked of every card, not only the ones that make code",
      CLOSE,
      lambda s: s.replace(
-         '                if not set(card.get("labels") or []) & set(NO_CODE) \\\n'
-         '                        and card.get("issue_type") not in '
-         '("decision", "epic"):',
-         '                if card.get("issue_type") not in ("decision", "epic"):')),
+         '    return (not set(card.get("labels") or []) & set(NO_CODE)\n'
+         '            and card.get("issue_type") not in ("decision", "epic"))',
+         "    return True")),
     ("a job whose change lands in another checkout is asked to stand in the copy "
      "it cut there", CLOSE,
      lambda s: s.replace(

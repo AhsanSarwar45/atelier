@@ -211,12 +211,17 @@ def storm(claimed=False):
 
 
 def handed_on(closing, rows, order="work,checks,review,land",
-              actor="tree-a1b2c3d4"):
+              actor="tree-a1b2c3d4", here=None, root=None):
     """Every board command the run makes when `closing` closes, and who it names.
 
     One claim a job: the session that closes a piece is handed whatever opens
     after it, so the commands below are read for the hand-over and for the
     `--claim` that must not be among them.
+
+    `here` is where the session that closed it is standing and `root` the
+    checkout it answers to; what comes back beside the commands is whatever the
+    run refused to hand over from there, which is a refusal that is never a
+    command because nothing typed one for it.
     """
     goal = {"id": "h", "priority": 1, "status": "in_progress", "notes": "",
             "labels": ["job", "area:board", "kind:chore"],
@@ -247,11 +252,11 @@ def handed_on(closing, rows, order="work,checks,review,land",
     # at that position and nothing after it opens at all.
     runner.reading.wanted = lambda *a, **kw: False
     try:
-        runner.advance(closing, ROOT, actor)
+        said = runner.advance(closing, root or ROOT, actor, here)
     finally:
         runner.bc.bd, runner.reading.commits, runner.reading.wrote = keep_bd, keep_c, keep_w
         runner.reading.wanted = keep_want
-    return asked
+    return asked, said or ""
 
 
 def script(name):
@@ -700,11 +705,15 @@ def counted(issued):
     return turns.count("a session")
 
 
-def answered(cmd):
+def answered(cmd, held_back=""):
     """What the board hands back after a write, if anything.
 
     A session that has to ask what it just wrote spends a turn on the answer;
     two sessions measured did it 105 times in a day (mch-aa9).
+
+    `held_back` is what the run refused to hand this session on the back of the
+    write. It is said here or nowhere: nothing types a command for a hand-over,
+    so no gate carries its refusal back the way one carries a claim's.
     """
     card = {"id": "tst-j.4", "status": "closed", "title": "the work item",
             "labels": ["step:work", "of:tst-j"], "metadata": {}}
@@ -716,7 +725,7 @@ def answered(cmd):
 
     kept = (touch.bc.bd, touch.run.advance, touch.run.started)
     touch.bc.bd = recorder
-    touch.run.advance = lambda cid, root, actor=None: None
+    touch.run.advance = lambda cid, root, actor=None, here=None: held_back
     touch.run.started = lambda cid, root: None
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": ROOT, "tool_name": "Bash",
@@ -2254,7 +2263,7 @@ def main():
     ME = "tree-a1b2c3d4"
     ITEMS = [{"id": "h.1", "status": "closed", "labels": ["step:work", "of:h"]},
              {"id": "h.2", "status": "closed", "labels": ["step:work", "of:h"]}]
-    asked = handed_on("h.2", ITEMS)
+    asked, _ = handed_on("h.2", ITEMS)
     assert any(a.startswith("create ") for a in asked), \
         "the last piece of the work closed and the checks step never opened: %s" % asked
     assert "update h.next -a %s -s in_progress" % ME in asked, \
@@ -2268,7 +2277,7 @@ def main():
     # a reader's findings arrive as several at once — the first is nobody's until
     # somebody takes it, and the rest follow that session.
     open_two = [ITEMS[0], {"id": "h.2", "status": "open", "labels": ["step:work", "of:h"]}]
-    asked = handed_on("h.1", open_two)
+    asked, _ = handed_on("h.1", open_two)
     assert "update h.2 -a %s -s in_progress --if-assignee " % ME in asked, \
         "closing one piece of a job left the next for whoever remembers to claim " \
         "it: %s" % asked
@@ -2277,7 +2286,8 @@ def main():
 
     held_elsewhere = [ITEMS[0], {"id": "h.2", "status": "open", "assignee": "other-9f",
                                  "labels": ["step:work", "of:h"]}]
-    assert not any("h.2" in a and "-a " in a for a in handed_on("h.1", held_elsewhere)), \
+    assert not any("h.2" in a and "-a " in a
+                   for a in handed_on("h.1", held_elsewhere)[0]), \
         "the board took a piece off another session's desk: one claim a job is not " \
         "one claim a board"
 
@@ -2286,7 +2296,8 @@ def main():
     # already let go of the job.
     read = [dict(r, labels=["step:work", "of:h"]) for r in ITEMS] + [
         {"id": "h.3", "status": "closed", "labels": ["step:checks", "of:h"]}]
-    asked = handed_on("h.3", read, order="work,checks,review,record,land", actor=None)
+    asked, _ = handed_on("h.3", read, order="work,checks,review,record,land",
+                         actor=None)
     assert not any(" -a " in a for a in asked), \
         "the step after the reading was assigned to the reader that opened it: %s" % asked
 
@@ -2294,6 +2305,71 @@ def main():
           "that opens after it, or the next piece nobody holds — never takes one "
           "another session holds, never issues a claim, and names nobody when the "
           "reader is what moved the run on")
+
+    # And a hand-over is not a claim: nothing types a command for one, so the gate
+    # standing in front of `--claim` never sees it. A job that opened with a step
+    # making no code reached its first code step already held, from whatever
+    # checkout that session happened to be standing in — the copy rule walked
+    # round without anybody meaning to (bw-kszy, found by the bw-1tgx shakedown).
+    tmp = tempfile.mkdtemp(prefix="board-handover-")
+    try:
+        for args in (("init", "-b", "main"),
+                     ("config", "user.email", "selftest@example.com"),
+                     ("config", "user.name", "selftest"),
+                     ("commit", "--allow-empty", "-m", "where the change lands")):
+            subprocess.run(["git"] + list(args), cwd=tmp, capture_output=True)
+        CUTS = "git -C %s worktree add worktrees/h -b h" % tmp
+        MINE = os.path.join(tmp, "worktrees", "h")
+        keep_lands = runner.bc.landings
+        runner.bc.landings = lambda root, cid=None: [(tmp, "main")]
+        try:
+            # The step after the work makes code, and the session that closed the
+            # last item is standing in the tree every session here shares.
+            asked, held = handed_on("h.2", ITEMS, order="work,record,land",
+                                    here=tmp, root=tmp)
+            assert any(a.startswith("create ") for a in asked), \
+                "the step after the work never opened at all: %s" % asked
+            assert not any(" -a " in a for a in asked), \
+                "a step that makes code was handed to a session standing in the "\
+                "shared checkout, which is the claim's own refusal walked round "\
+                "by the one hand-over nobody types a command for: %s" % asked
+            assert CUTS in held, \
+                "the step was left unowned and the session told nothing about the "\
+                "copy it has to cut: %s" % (held or "SAID NOTHING")
+
+            # The pieces of the work are the code itself, and they are handed on
+            # one by one as each of them closes.
+            asked, held = handed_on("h.1", open_two, here=tmp, root=tmp)
+            assert not any("h.2" in a and " -a " in a for a in asked), \
+                "the next piece of the work was handed to a session with nowhere "\
+                "to write it: %s" % asked
+            assert CUTS in held, \
+                "the piece was left unowned and the session told nothing about "\
+                "the copy: %s" % (held or "SAID NOTHING")
+
+            # A step that makes no code is read and written from wherever the
+            # session stands, and is handed over with nothing said about copies.
+            asked, held = handed_on("h.2", ITEMS, here=tmp, root=tmp)
+            assert "update h.next -a %s -s in_progress" % ME in asked and not held, \
+                "a step that makes no code was held back for want of a copy it "\
+                "never needed: %s" % (held or asked)
+
+            subprocess.run(["git", "worktree", "add", MINE, "-b", "h"],
+                           cwd=tmp, capture_output=True)
+            inside, held = handed_on("h.2", ITEMS, order="work,record,land",
+                                     here=MINE, root=tmp)
+            assert "update h.next -a %s -s in_progress" % ME in inside and not held, \
+                "a session standing in the job's own copy was refused the step it "\
+                "closed the one before: %s" % (held or inside)
+        finally:
+            runner.bc.landings = keep_lands
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    print("ok: the run asks a step that makes code the same copy question a claim "
+          "is asked — a session with nowhere to make the change is handed nothing "
+          "and told the command that cuts the copy, while a no-code step and a "
+          "session inside the job's own copy are handed theirs as before")
 
     # Who closed it is read off the line the hook saw, because the name the board
     # holds claims under is the one hooks/board-actor.py stamped there: a command
@@ -2315,7 +2391,8 @@ def main():
     touch.bc.held = lambda name, root=None: []
     touch.run.card = lambda cid, root: {"id": cid, "status": "closed",
                                         "labels": ["step:work", "of:tst-h"]}
-    touch.run.advance = lambda cid, root, actor=None: moved.append((cid, actor))
+    touch.run.advance = lambda cid, root, actor=None, here=None: \
+        moved.append((cid, actor, here))
     said = io.StringIO()
     keep_out, sys.stdout = sys.stdout, said
     try:
@@ -2330,15 +2407,18 @@ def main():
         sys.stdout = keep_out
         (touch.bc.load, touch.bc.save, touch.bc.reviewing, touch.bc.prefix,
          touch.bc.actor, touch.bc.held, touch.run.card, touch.run.advance) = keep_touch
-    assert moved == [("tst-h.3", "tree-a1b2c3d4"), ("tst-h.3", "here-99999999"),
-                     ("tst-h.3", "here-99999999")], \
+    assert moved == [("tst-h.3", "tree-a1b2c3d4", ROOT),
+                     ("tst-h.3", "here-99999999", ROOT),
+                     ("tst-h.3", "here-99999999", ROOT)], \
         "the close moved the job on without the name the board holds this " \
-        "session's claims under, or under a name read out of what the close said " \
-        "rather than off the stamp: %s" % moved
+        "session's claims under, without the directory it was typed from, or " \
+        "under a name read out of what the close said rather than off the " \
+        "stamp: %s" % moved
 
     print("ok: a close moves the run on under the name stamped on that very "
-          "command, under the session's own name when nothing stamped it, and "
-          "never under a word out of the reason it carried")
+          "command, under the session's own name when nothing stamped it, never "
+          "under a word out of the reason it carried, and always from the "
+          "directory the close was typed in")
 
     # The opening text is the only place most of this is written down, and it is
     # handed to every session before it reads a line of code. A run of steps typed
@@ -4578,9 +4658,20 @@ def main():
         "a write naming several cards answered with one of them, which reads as all"
     assert not answered("bd show tst-j.4"), \
         "reading the board was answered as though something had been written"
+    # And the step the run would not hand over on the back of that close. The
+    # refusal names the command that cuts the copy, and this is the only place a
+    # session ever hears it: nothing typed a command for that hand-over (bw-n1x5).
+    kept = answered('bd close tst-j.4 --reason="done well"',
+                    held_back="tst-j.5 opened and was left for nobody: cut it one\n"
+                              "  git -C /somewhere worktree add worktrees/tst-j -b tst-j")
+    assert "tst-j.4 is now closed" in kept and "worktree add worktrees/tst-j" in kept, \
+        "a step the run would not hand over was refused in silence, so the card " \
+        "sits open and owned by nobody with the session none the wiser: %s" \
+        % (kept or "SAID NOTHING")
 
     print("ok: a write to one card answers with that card, a write naming several "
-          "answers with none, and reading the board answers with nothing")
+          "answers with none, reading the board answers with nothing, and a step "
+          "the run would not hand over comes back with the refusal that says why")
 
     # The number this job is judged by, and the tool that reads it. A session
     # rebases and merges for its own reasons all day, and counting those as turns
