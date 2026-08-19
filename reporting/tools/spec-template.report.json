@@ -4,7 +4,8 @@
 
   "actions": {
     "none": true,
-    "fyi": "Nothing is waiting on you. Override any decision below if you disagree with one."
+    "fyi": "Nothing is waiting on you. Override any decision below if you disagree with one.",
+    "questions": []
   },
 
   "status": {

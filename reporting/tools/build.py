@@ -186,6 +186,15 @@ def validate(spec: dict, spec_path: Path) -> tuple[list[str], list[str]]:
             bad.append(f"question {i} needs at least two answers to click")
         if sum(1 for o in q.get("options", []) if o.get("pick")) != 1:
             bad.append(f"question {i} needs exactly one recommended answer")
+        # A question outlives its own answer unless something can kill it. The
+        # card it is holding up does that: the work lands, the board closes it,
+        # and the next build refuses to print the question again.
+        if not str(q.get("holds", "")).strip():
+            bad.append(
+                f"question {i} names no card it is holding up — add "
+                '"holds": "<card id>", or it will still be on the page long '
+                "after the answer stopped mattering"
+            )
 
     status = spec["status"]
     if status.get("card"):
