@@ -21,7 +21,7 @@ export function CompareBlockView({ block }: { block: CompareBlock }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {pair.map((shot, i) => (
-        <figure key={i} className="grid gap-1.5">
+        <figure key={i} className="grid grid-cols-1 gap-1.5">
           {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary data: URIs from the report spec */}
           <img
             src={shot.src}

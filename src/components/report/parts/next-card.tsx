@@ -20,14 +20,14 @@ const COST_TONE: Record<Cost, keyof typeof TONE_CLASSES> = {
 export function NextCard({ next, id }: { next: NextSlot; id?: string }) {
   return (
     <ReportCard id={id} kind="next" label="Next">
-      <div className={cn('grid gap-1 rounded-md bg-surface-overlay px-3.5 py-3 text-sm')}>
+      <div className={cn('grid grid-cols-1 gap-1 rounded-md bg-surface-overlay px-3.5 py-3 text-sm')}>
         <b className="text-[11px] font-bold uppercase tracking-wide text-t-muted">If you say nothing</b>
         <span className="text-t-primary">
           <Gloss text={next.if_nothing} />
         </span>
       </div>
       <div className="-mx-5 overflow-x-auto px-5">
-        <table className="w-full min-w-max border-collapse text-sm">
+        <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="bg-surface-overlay">
               <th className="whitespace-nowrap px-3.5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-t-muted">
@@ -47,7 +47,7 @@ export function NextCard({ next, id }: { next: NextSlot; id?: string }) {
               return (
                 <tr key={i} className="border-b border-b-subtle last:border-b-0">
                   <td className="px-3.5 py-3 align-middle text-t-muted">{i + 1}</td>
-                  <td className="px-3.5 py-3 align-middle text-t-primary">
+                  <td className="px-3.5 py-3 align-middle text-t-primary [overflow-wrap:anywhere]">
                     <Gloss text={s.step} />
                     {s.starting && (
                       <span

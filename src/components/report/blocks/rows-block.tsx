@@ -14,12 +14,12 @@ import type { RowsBlock } from '../types';
 
 export function RowsBlockView({ block }: { block: RowsBlock }) {
   return (
-    <div className="grid gap-1.5">
+    <div className="grid grid-cols-1 gap-1.5">
       {block.rows.map((row, i) => (
         <div
           key={i}
           className={cn(
-            'grid grid-cols-[auto_1fr] items-center gap-3 rounded-md bg-surface-overlay px-3.5 py-2.5',
+            'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-surface-overlay px-3.5 py-2.5',
             row.tone === 'hot' && TONE_CLASSES.teal.soft,
             row.tone === 'gone' && 'opacity-60',
           )}

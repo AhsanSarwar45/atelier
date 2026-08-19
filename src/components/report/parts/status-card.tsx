@@ -70,7 +70,7 @@ export function StatusCard({ status, id }: { status: ReportStatus; id?: string }
         </div>
       </div>
 
-      <div className="grid gap-2.5">
+      <div className="grid grid-cols-1 gap-2.5">
         <div className="flex h-1.5 overflow-hidden rounded-full bg-b-subtle" role="img" aria-label="Progress">
           <i className="block bg-success" style={{ width: `${done}%` }} />
           <u className="block bg-warning no-underline" style={{ width: `${draft}%` }} />
@@ -91,7 +91,7 @@ export function StatusCard({ status, id }: { status: ReportStatus; id?: string }
         </div>
       </div>
 
-      <ul className="grid gap-2.5">
+      <ul className="grid grid-cols-1 gap-2.5">
         {status.items.map((item, i) => (
           <ChecklistRow key={i} item={item} />
         ))}

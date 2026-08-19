@@ -50,7 +50,7 @@ export function ReportCard({
       data-testid="report-part"
       data-part-kind={kind}
       className={cn(
-        'theme-card flex flex-col gap-4 border border-b-default bg-surface-raised px-5 py-5',
+        'theme-card flex min-w-0 flex-col gap-4 border border-b-default bg-surface-raised px-5 py-5',
         'border-l-4 scroll-mt-5',
         ACCENT[kind],
         className,

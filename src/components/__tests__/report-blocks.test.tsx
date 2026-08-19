@@ -69,11 +69,14 @@ describe('report block kinds', () => {
     expect(screen.getByText('40')).toBeInTheDocument();
   });
 
-  it('bars: draws one rect per series item, labelled by alt text', () => {
+  it('bars: draws one bar per series item, labelled by alt text', () => {
     const { container } = renderBlockOf('bars');
-    const svg = screen.getByRole('img', { name: 'bars alt text' });
-    expect(svg.tagName.toLowerCase()).toBe('svg');
-    expect(container.querySelectorAll('rect')).toHaveLength(2);
+    screen.getByRole('img', { name: 'bars alt text' });
+    // Boxes rather than an SVG: inside a fixed viewBox a long label or a long
+    // number is clipped away, and those are the chart (bw-7ks.21.10).
+    const bars = container.querySelectorAll('[data-bar]');
+    expect(bars).toHaveLength(2);
+    expect((bars[0] as HTMLElement).style.width.endsWith('%')).toBe(true);
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(container.textContent).toContain('12pt');
   });

@@ -17,7 +17,7 @@ export function BreakdownBlockView({ block }: { block: BreakdownBlock }) {
   });
 
   return (
-    <div className="grid gap-2.5">
+    <div className="grid grid-cols-1 gap-2.5">
       <svg className="block h-auto w-full" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={alt || 'breakdown'}>
         {segments.map((seg, i) => (
           <rect key={i} x={seg.x} y={0} width={seg.width} height={H} fill={seg.fill} />

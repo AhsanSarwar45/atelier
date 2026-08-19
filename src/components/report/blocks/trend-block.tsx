@@ -35,7 +35,7 @@ export function TrendBlockView({ block }: { block: TrendBlock }) {
   });
 
   return (
-    <div className="grid gap-2.5">
+    <div className="grid grid-cols-1 gap-2.5">
       <svg className="block h-auto w-full" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={alt || 'trend'}>
         {gridlines.map((g, i) => (
           <g key={i}>
@@ -47,7 +47,18 @@ export function TrendBlockView({ block }: { block: TrendBlock }) {
           </g>
         ))}
         {xs.map((label, i) => (
-          <text key={i} x={px(i)} y={H - 10} textAnchor="middle" fontSize={11} fill="hsl(var(--text-muted))">
+          // The first and last labels lean in rather than centring on their
+          // point: centred, half of each hangs outside the chart's box, and an
+          // SVG clips whatever leaves it — the two labels that say where the
+          // line starts and ends were the two being cut (bw-7ks.21.10).
+          <text
+            key={i}
+            x={px(i)}
+            y={H - 10}
+            textAnchor={i === 0 ? 'start' : i === xs.length - 1 ? 'end' : 'middle'}
+            fontSize={11}
+            fill="hsl(var(--text-muted))"
+          >
             {label}
           </text>
         ))}

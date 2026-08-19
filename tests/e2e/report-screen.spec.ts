@@ -53,9 +53,20 @@ async function projectId(request: APIRequestContext): Promise<string> {
   return (await projects(request))[0].id;
 }
 
-/** A report the instance actually holds for that project. */
+/**
+ * A report of that project's that the instance can actually draw.
+ *
+ * Not simply the first one it lists: the report tools refuse a spec that
+ * breaks one of their rules — a question about work already under way, a
+ * paragraph where a block belongs — and a report they refuse has nothing to
+ * measure. So the list is walked until one builds, and the answer is kept for
+ * the rest of the file, since each try costs a run of the toolchain.
+ */
+let drawable: string | null = null;
+
 async function reportSlug(request: APIRequestContext, id: string): Promise<string> {
   if (process.env.BEADS_E2E_REPORT) return process.env.BEADS_E2E_REPORT;
+  if (drawable) return drawable;
   const row = (await projects(request)).find((p) => p.id === id);
   const dir = row?.localPath || row?.path || '';
   const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? '';
@@ -65,6 +76,19 @@ async function reportSlug(request: APIRequestContext, id: string): Promise<strin
   }[];
   const ours = reports.filter((r) => r.project === name);
   expect(ours.length, `the instance holds no report for ${name}`).toBeGreaterThan(0);
+  const refused: string[] = [];
+  for (const r of ours) {
+    const res = await request.get(
+      `${api()}/api/reports/spec?project=${r.project}&slug=${r.slug}&path=${encodeURIComponent(dir)}`,
+      { timeout: 120_000 },
+    );
+    if (res.ok()) {
+      drawable = r.slug;
+      return r.slug;
+    }
+    refused.push(r.slug);
+  }
+  expect(refused, `the tools refuse every report ${name} has`).toEqual([]);
   return ours[0].slug;
 }
 
@@ -123,7 +147,7 @@ test.describe('a report is a place under its project', () => {
 
     await page.getByTestId('tab-reports').click();
     await expect(page.getByTestId('report-tab')).toBeVisible();
-    await page.getByTestId('reports-list-item').first().click();
+    await page.locator(`[data-report-slug="${slug}"]`).click();
     await expect(page).toHaveURL(/report=/);
     await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
 
@@ -135,7 +159,6 @@ test.describe('a report is a place under its project', () => {
     await page.goBack();
     await page.goBack();
     await expect(page).toHaveURL(/tab=board/);
-    expect(slug.length, 'a report slug was resolved').toBeGreaterThan(0);
   });
 
   test('wide: contents at the left edge, a reading column, links on the right', async ({ page, request }) => {
@@ -274,6 +297,50 @@ function section(label: string, text: string) {
   };
 }
 
+/**
+ * A section built to be too wide for the column: a table of nine columns whose
+ * headings do not wrap, a word with nothing in it to break on, and a chart
+ * label longer than any chart ever gives room for. Everything here has to stay
+ * inside the reading column anyway — the table by scrolling in its own strip
+ * (bw-7ks.21.10).
+ */
+function wideSection() {
+  const heads = [
+    'Where it ran',
+    'Runs',
+    'Waited',
+    'Read',
+    'Wrote',
+    'Failed',
+    'Retried',
+    'Gave up',
+    'Left over',
+    'Queued',
+    'Skipped',
+    'Total',
+  ];
+  const row = (where: string, n: number) => [where, ...heads.slice(1).map((_, i) => ({ num: String(n + i) }))];
+  return {
+    label: 'Too wide to fit',
+    blocks: [
+      { kind: 'table', columns: heads, rows: [row('Before', 12), row('After', 34)] },
+      {
+        kind: 'text',
+        text: 'One unbreakable word: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+      {
+        kind: 'bars',
+        unit: 'ms',
+        alt: 'how long each step took',
+        series: [
+          { label: 'A label far longer than any chart leaves room for, and then some more of it', value: 1240 },
+          { label: 'Short', value: 120, tone: 'green' },
+        ],
+      },
+    ],
+  };
+}
+
 /** Writes the fixture report and says what it is holding up. */
 async function writeFixture(request: APIRequestContext, id: string): Promise<Fixture> {
   const row = (await projects(request)).find((p) => p.id === id);
@@ -285,9 +352,11 @@ async function writeFixture(request: APIRequestContext, id: string): Promise<Fix
   const board = (await (
     await request.get(`${api()}/api/beads?path=${encodeURIComponent(dir)}`)
   ).json()) as { beads: { id: string; status: string }[] };
-  const working = board.beads.find((b) => b.status === 'in_progress');
-  const live = working ?? board.beads.find((b) => b.status === 'open');
-  expect(live, 'the board holds no card that is still open').toBeTruthy();
+  // Not a card already under way: the builder refuses a question that names
+  // work nobody is waiting on to start (bw-a9x6), so the fixture asks about a
+  // card that has not been picked up.
+  const live = board.beads.find((b) => b.status === 'open');
+  expect(live, 'the board holds no card nobody has started').toBeTruthy();
 
   writeFileSync(
     join(home, `${FIXTURE}.report.json`),
@@ -319,6 +388,7 @@ async function writeFixture(request: APIRequestContext, id: string): Promise<Fix
         section('What it cost', 'A morning, and nothing else moved.'),
         section('What is left', 'The narrow column is still there behind a setting.'),
         section('What we watched', 'Every width from a phone to a wall screen.'),
+        wideSection(),
       ],
       decisions: [
         { id: 'D1', title: 'The column is as wide as a page of a book', why: 'The eye loses its place past that.' },
@@ -331,7 +401,7 @@ async function writeFixture(request: APIRequestContext, id: string): Promise<Fix
     }),
   );
 
-  return { project, dir, card: live!.id, column: working ? 'In Progress' : 'Todo' };
+  return { project, dir, card: live!.id, column: 'Todo' };
 }
 
 test.describe('a report says what it is holding up, and lands where it is pointed', () => {
@@ -346,7 +416,7 @@ test.describe('a report says what it is holding up, and lands where it is pointe
   test.afterAll(async () => {
     if (!fixture) return;
     const paths = fixturePaths(fixture.project);
-    for (let sweep = 0; sweep < 10; sweep += 1) {
+    for (let sweep = 0; sweep < 40; sweep += 1) {
       for (const path of paths) rmSync(path, { force: true });
       await new Promise((done) => setTimeout(done, 500));
       if (!paths.some((path) => existsSync(path))) return;
@@ -384,6 +454,63 @@ test.describe('a report says what it is holding up, and lands where it is pointe
       .toBeLessThan(220);
     const scrolled = await page.getByTestId('report-pane').evaluate((el) => el.scrollTop);
     expect(scrolled, 'nothing scrolled, so the question was never sought out').toBeGreaterThan(0);
+  });
+
+  test('nothing reaches past the reading column, and a wide table scrolls in its own strip', async ({
+    page,
+    request,
+  }) => {
+    const id = await projectId(request);
+    fixture = await writeFixture(request, id);
+
+    for (const width of [1440, 1150, 800]) {
+      await page.setViewportSize({ width, height: 900 });
+      await openReport(page, id, FIXTURE);
+
+      const look = () => {
+        const pane = document.querySelector('[data-testid="report-pane"]')!;
+        const column = document.querySelector('[data-testid="report-column"]')!;
+        const edge = column.getBoundingClientRect();
+        const scrolls = (el: Element) => {
+          const how = getComputedStyle(el).overflowX;
+          return how === 'auto' || how === 'scroll';
+        };
+        const past: string[] = [];
+        const strips: number[] = [];
+        for (const el of Array.from(column.querySelectorAll('*'))) {
+          if (scrolls(el)) strips.push(el.scrollWidth - el.clientWidth);
+          // Whatever is inside a strip of its own is allowed to be wider than
+          // the strip: that is what the strip is for.
+          let held = false;
+          for (let up = el.parentElement; up && up !== column; up = up.parentElement) {
+            if (scrolls(up)) held = true;
+          }
+          if (held) continue;
+          const box = el.getBoundingClientRect();
+          if (box.width === 0) continue;
+          const over = Math.max(box.right - edge.right, edge.left - box.left);
+          if (over > 1) past.push(`${el.tagName.toLowerCase()} by ${Math.round(over)}px`);
+        }
+        return {
+          sideways: pane.scrollWidth - pane.clientWidth,
+          past,
+          widestStrip: Math.max(0, ...strips),
+        };
+      };
+
+      // The screen paints the last build and swaps in fresh facts a moment
+      // later, so the table that cannot fit may not be on the page yet.
+      await expect
+        .poll(async () => (await page.evaluate(look)).widestStrip, {
+          message: `at ${width} the table that cannot fit is not scrolling in a strip of its own`,
+          timeout: 30_000,
+        })
+        .toBeGreaterThan(0);
+      const seen = await page.evaluate(look);
+
+      expect(seen.past, `at ${width} something reached past the reading column`).toEqual([]);
+      expect(seen.sideways, `at ${width} the report itself scrolls sideways`).toBeLessThanOrEqual(1);
+    }
   });
 
   test('a link that names one section lands on that section', async ({ page, request }) => {

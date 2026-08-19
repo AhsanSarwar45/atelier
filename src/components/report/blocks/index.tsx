@@ -59,9 +59,11 @@ export function renderBlock(block: Block, key?: string | number) {
 
 export function BlockList({ blocks }: { blocks: Block[] }) {
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-1 gap-4">
       {blocks.map((block, i) => (
-        <div key={i}>{renderBlock(block)}</div>
+        <div key={i} className="min-w-0">
+          {renderBlock(block)}
+        </div>
       ))}
     </div>
   );

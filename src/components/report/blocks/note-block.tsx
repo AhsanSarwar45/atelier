@@ -8,7 +8,7 @@ import type { NoteBlock } from '../types';
 export function NoteBlockView({ block }: { block: NoteBlock }) {
   const tone = NOTE_CLASSES[block.tone ?? 'info'];
   return (
-    <div className={cn('grid gap-1 rounded-md px-3.5 py-3 text-sm', tone.soft, tone.text)}>
+    <div className={cn('grid grid-cols-1 gap-1 rounded-md px-3.5 py-3 text-sm', tone.soft, tone.text)}>
       {block.label && <b className="text-[11px] font-bold uppercase tracking-wide">{block.label}</b>}
       <span>
         <Gloss text={block.text} />

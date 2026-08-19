@@ -9,7 +9,7 @@ export function ImagesBlockView({ block }: { block: ImagesBlock }) {
   return (
     <div className={`grid gap-3 ${twoUp ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
       {block.shots.map((shot, i) => (
-        <figure key={i} className="grid gap-1.5">
+        <figure key={i} className="grid grid-cols-1 gap-1.5">
           {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary data: URIs from the report spec */}
           <img
             src={shot.src}

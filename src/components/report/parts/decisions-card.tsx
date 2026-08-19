@@ -30,7 +30,7 @@ function DecisionRow({ decision }: { decision: Decision }) {
       )}
     >
       <span className="font-mono text-xs text-t-muted">{decision.id}</span>
-      <span className="grid gap-0.5">
+      <span className="grid grid-cols-1 gap-0.5">
         <span>
           <b className="font-semibold text-t-primary">
             <Gloss text={decision.title} />
@@ -83,7 +83,7 @@ function DecisionRow({ decision }: { decision: Decision }) {
 export function DecisionsCard({ decisions, id }: { decisions: Decision[]; id?: string }) {
   return (
     <ReportCard id={id} kind="decisions" label="Decisions · press override on any you want changed">
-      <div className="grid gap-1.5">
+      <div className="grid grid-cols-1 gap-1.5">
         {decisions.map((d) => (
           <DecisionRow key={d.id} decision={d} />
         ))}

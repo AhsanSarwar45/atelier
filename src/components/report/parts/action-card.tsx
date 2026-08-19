@@ -39,11 +39,11 @@ function QuestionChips({ question, index }: { question: ReportQuestion; index: n
   }, [question.id]);
 
   return (
-    <div className="grid grid-cols-[auto_1fr] items-start gap-3">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
       <span className="mt-0.5 flex size-6 items-center justify-center rounded-full bg-surface-overlay text-xs font-bold text-t-secondary">
         {index}
       </span>
-      <div className="grid gap-2">
+      <div className="grid grid-cols-1 gap-2">
         <p className="text-sm font-semibold text-t-primary">
           <Gloss text={question.ask} />
         </p>
@@ -75,11 +75,11 @@ function QuestionChips({ question, index }: { question: ReportQuestion; index: n
 
 function ResolvedQuestion({ question, index }: { question: ReportQuestion; index: number }) {
   return (
-    <div className="grid grid-cols-[auto_1fr] items-start gap-3 opacity-60">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 opacity-60">
       <span className="mt-0.5 flex size-6 items-center justify-center rounded-full bg-surface-overlay text-xs font-bold text-t-muted">
         {index}
       </span>
-      <div className="grid gap-1">
+      <div className="grid grid-cols-1 gap-1">
         <p className="text-sm font-semibold text-t-muted line-through">{question.ask}</p>
         <p className="text-xs text-t-muted">Settled on the board — this no longer needs an answer.</p>
       </div>
@@ -128,7 +128,7 @@ export function ActionCard({ actions, id }: { actions: ReportActions; id?: strin
   if (actions.none && actions.questions.length === 0) {
     return (
       <ReportCard id={id} kind="action" label="What I need from you">
-        <div className={cn('grid gap-1 rounded-md bg-success/15 px-3.5 py-3 text-sm text-success')}>
+        <div className={cn('grid grid-cols-1 gap-1 rounded-md bg-success/15 px-3.5 py-3 text-sm text-success')}>
           <b className="text-[11px] font-bold uppercase tracking-wide">No action needed</b>
           <span>{actions.fyi || 'For your information only.'}</span>
         </div>
@@ -140,7 +140,7 @@ export function ActionCard({ actions, id }: { actions: ReportActions; id?: strin
 
   return (
     <ReportCard id={id} kind="action" label="What I need from you">
-      <div className="grid gap-4">
+      <div className="grid grid-cols-1 gap-4">
         {actions.questions.map((q, i) =>
           q.live ? (
             <QuestionChips key={q.id} question={q} index={i + 1} />

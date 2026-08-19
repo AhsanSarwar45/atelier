@@ -42,7 +42,7 @@ function CellView({ cell }: { cell: TableCell }) {
 export function TableBlockView({ block }: { block: TableBlock }) {
   return (
     <div className="-mx-5 overflow-x-auto px-5">
-      <table className="w-full min-w-max border-collapse text-sm">
+      <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="bg-surface-overlay">
             {block.columns.map((col, i) => (
@@ -67,7 +67,7 @@ export function TableBlockView({ block }: { block: TableBlock }) {
                   <td
                     key={j}
                     className={cn(
-                      'px-3.5 py-3 align-middle',
+                      'px-3.5 py-3 align-middle [overflow-wrap:anywhere]',
                       align === 'num' && 'text-right font-mono tabular-nums text-t-secondary',
                       align === 'right' && 'text-right',
                     )}

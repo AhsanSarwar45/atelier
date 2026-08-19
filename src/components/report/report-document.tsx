@@ -24,8 +24,16 @@ export function ReportDocument({ spec }: { spec: ReportSpec }) {
       <GlossaryProvider terms={spec.glossary}>
         <LightboxProvider>
           <ReplyProvider>
-            <div data-testid="report-column" className="mx-auto flex w-full max-w-[72ch] flex-col gap-5">
-              <header className="grid gap-1">
+            {/*
+              `break-words` all the way down: a path, an id or a URL written
+              into a sentence has nothing in it to break on, and a word wider
+              than the column pushes the whole report sideways (bw-7ks.21.10).
+            */}
+            <div
+              data-testid="report-column"
+              className="mx-auto flex w-full min-w-0 max-w-[72ch] flex-col gap-5 break-words"
+            >
+              <header className="grid grid-cols-1 gap-1">
                 {spec.eyebrow && (
                   <p className="text-xs font-bold uppercase tracking-wide text-t-muted">{spec.eyebrow}</p>
                 )}
