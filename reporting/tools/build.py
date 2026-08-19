@@ -417,7 +417,11 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
     page after it. Each one names the card it is holding up, and that card
     finishing is what takes it off. A machine with no board cannot say either
     way, so it warns instead.
+
+    Every question is read before anything is refused: a page carrying two dead
+    questions that names one of them costs a second build to find the other.
     """
+    dead = []
     for i, q in enumerate(spec["actions"].get("questions", []), 1):
         held = str(q["holds"]).strip()
         try:
@@ -429,16 +433,18 @@ def live_questions(spec: dict, ctx: Ctx) -> None:
             )
             continue
         if state is None:
-            raise ReportError(
+            dead.append(
                 f"question {i} says it is holding up {held}, and the board has never heard "
                 "of it — name the card that is actually waiting on this answer"
             )
-        if state in ("closed", "cancelled"):
-            raise ReportError(
+        elif state in ("closed", "cancelled"):
+            dead.append(
                 f"question {i} is holding up {held}, which the board has finished — the "
                 "answer has stopped mattering, so take the question off the page, and put "
                 "the call it settled in the decisions slot"
             )
+    if dead:
+        raise ReportError("\n  · ".join(["this page asks about work that is over:"] + dead))
 
 
 def build(spec: dict, ctx: Ctx) -> str:

@@ -448,6 +448,18 @@ def run() -> int:
         failures.append("a question holding up a card the board never heard of: printed anyway")
     except ReportError:
         pass
+
+    # two dead questions are both named, or the second costs another build to find
+    spec = copy.deepcopy(GOOD)
+    spec["actions"]["questions"].append(copy.deepcopy(spec["actions"]["questions"][0]))
+    spec["actions"]["questions"][1]["holds"] = "x.3"
+    build.card_state = lambda card, project, base=None: "closed"
+    try:
+        build.build(spec, build.Ctx([], tmp))
+        failures.append("two questions holding up finished cards: printed anyway")
+    except ReportError as e:
+        if "x.2" not in str(e) or "x.3" not in str(e):
+            failures.append(f"two dead questions, and the refusal named one of them — {e}")
     build.card_state = lambda card, project, base=None: "open"
     build.build(copy.deepcopy(GOOD), build.Ctx([], tmp))
 
@@ -466,7 +478,7 @@ def run() -> int:
 
     for f in failures:
         print("FAIL  " + f)
-    print(f"{len(CASES) + 35 - len(failures)}/{len(CASES) + 35} report gates hold")
+    print(f"{len(CASES) + 36 - len(failures)}/{len(CASES) + 36} report gates hold")
     return 1 if failures else 0
 
 
