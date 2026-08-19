@@ -463,6 +463,26 @@ FAULTS = [
                          "the goal and its first step.",
                          "  --steps <the ones it runs> --skip <one it does not>="
                          '"why"`, which creates the goal.')),
+
+    # The rule the retired worktree step used to carry, asked of the claim
+    # instead (bw-1tgx). A refusal that names no command leaves the session with
+    # what it already half-remembered from the documents, which is the state
+    # bw-kcz found this rule in.
+    ("a session with nowhere to make the change is told so and not told how",
+     CLOSE,
+     lambda s: s.replace(
+         '           "\\n  ".join(cut(where, goal) for where in spots))',
+         '           "")')),
+    ("a copy of its own is asked of every card, not only the ones that make code",
+     CLOSE,
+     lambda s: s.replace(
+         '                if not set(card.get("labels") or []) & set(NO_CODE) \\\n'
+         '                        and card.get("issue_type") not in '
+         '("decision", "epic"):',
+         '                if card.get("issue_type") not in ("decision", "epic"):')),
+    ("a job whose change lands in another checkout is asked to stand in the copy "
+     "it cut there", CLOSE,
+     lambda s: s.replace('    if mine and len(spots) > 1:\n        return ""\n', "")),
 ]
 
 
