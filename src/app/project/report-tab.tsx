@@ -65,6 +65,9 @@ export default function ReportTab({
     [projectPath, projectLocalPath],
   );
   const projectName = useMemo(() => basenameOf(fsPath), [fsPath]);
+  // Where an answer given in this report is posted: the project's own
+  // directory, held steady so picking a chip does not re-read the chats.
+  const delivery = useMemo(() => ({ projectPath: fsPath }), [fsPath]);
   const { spec, isLoading, error, reload } = useReportSpec(projectName, report, fsPath);
 
   // The board's own list, read once for the whole screen: the links rail names
@@ -223,7 +226,7 @@ export default function ReportTab({
           </Panel>
         )}
 
-        {!isLoading && !error && spec && <ReportDocument spec={spec} />}
+        {!isLoading && !error && spec && <ReportDocument spec={spec} delivery={delivery} />}
       </div>
     </div>
   );

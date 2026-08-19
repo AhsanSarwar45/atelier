@@ -8,6 +8,7 @@
  */
 import { TooltipProvider } from '@/components/ui/tooltip';
 
+import { DeliveryProvider, type Delivery } from './delivery';
 import { GlossaryProvider } from './glossary';
 import { LightboxProvider } from './lightbox';
 import { ActionCard } from './parts/action-card';
@@ -18,41 +19,43 @@ import { StatusCard } from './parts/status-card';
 import { ReplyProvider } from './reply';
 import type { ReportSpec } from './types';
 
-export function ReportDocument({ spec }: { spec: ReportSpec }) {
+export function ReportDocument({ spec, delivery = null }: { spec: ReportSpec; delivery?: Delivery | null }) {
   return (
     <TooltipProvider>
       <GlossaryProvider terms={spec.glossary}>
         <LightboxProvider>
-          <ReplyProvider>
-            {/*
-              `break-words` all the way down: a path, an id or a URL written
-              into a sentence has nothing in it to break on, and a word wider
-              than the column pushes the whole report sideways (bw-7ks.21.10).
-            */}
-            <div
-              data-testid="report-column"
-              className="mx-auto flex w-full min-w-0 max-w-[72ch] flex-col gap-5 break-words"
-            >
-              <header className="grid grid-cols-1 gap-1">
-                {spec.eyebrow && (
-                  <p className="text-xs font-bold uppercase tracking-wide text-t-muted">{spec.eyebrow}</p>
-                )}
-                <h1 className="text-2xl font-bold tracking-tight text-t-primary">{spec.title}</h1>
-              </header>
+          <DeliveryProvider value={delivery}>
+            <ReplyProvider>
+              {/*
+                `break-words` all the way down: a path, an id or a URL written
+                into a sentence has nothing in it to break on, and a word wider
+                than the column pushes the whole report sideways (bw-7ks.21.10).
+              */}
+              <div
+                data-testid="report-column"
+                className="mx-auto flex w-full min-w-0 max-w-[72ch] flex-col gap-5 break-words"
+              >
+                <header className="grid grid-cols-1 gap-1">
+                  {spec.eyebrow && (
+                    <p className="text-xs font-bold uppercase tracking-wide text-t-muted">{spec.eyebrow}</p>
+                  )}
+                  <h1 className="text-2xl font-bold tracking-tight text-t-primary">{spec.title}</h1>
+                </header>
 
-              {/* Stable ids on the fixed parts, matching the Reports tab's table of
-                  contents (bw-7ks.21.4) — the same five names it scrolls to. */}
-              <ActionCard actions={spec.actions} id="act" />
-              <StatusCard status={spec.status} id="stat" />
+                {/* Stable ids on the fixed parts, matching the Reports tab's table of
+                    contents (bw-7ks.21.4) — the same five names it scrolls to. */}
+                <ActionCard actions={spec.actions} id="act" reportTitle={spec.title} />
+                <StatusCard status={spec.status} id="stat" />
 
-              {spec.content.map((section) => (
-                <ContentSectionCard key={section.id} section={section} />
-              ))}
+                {spec.content.map((section) => (
+                  <ContentSectionCard key={section.id} section={section} />
+                ))}
 
-              <DecisionsCard decisions={spec.decisions} id="dec" />
-              <NextCard next={spec.next} id="next" />
-            </div>
-          </ReplyProvider>
+                <DecisionsCard decisions={spec.decisions} id="dec" />
+                <NextCard next={spec.next} id="next" />
+              </div>
+            </ReplyProvider>
+          </DeliveryProvider>
         </LightboxProvider>
       </GlossaryProvider>
     </TooltipProvider>

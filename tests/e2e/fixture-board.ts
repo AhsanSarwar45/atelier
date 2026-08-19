@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /**
  * A throwaway project for a test to drive an agent against: its own git repo,
@@ -11,6 +11,8 @@ import { join } from 'node:path';
  */
 
 export const PARENT_CARD = 'wl-demo1';
+/** The open child a question can hold up: the builder refuses one naming work already under way. */
+export const OPEN_CARD = 'wl-kid2';
 export const REPORT_PROJECT = 'linkdemo';
 export const REPORT_SLUG = 'link-demo';
 
@@ -52,13 +54,77 @@ function spec(card: string): unknown {
   };
 }
 
+/** The question a report can put to the manager, and the answer he can pick. */
+export const ASK = 'Keep the wider reading column, or go back to the narrow one?';
+export const SAY_KEEP = 'Keep the wider column.';
+export const SAY_BACK = 'Go back to the narrow column.';
+
+/**
+ * A spec that ASKS something, for the runs that answer it from the page.
+ *
+ * Same six slots; the difference is the first one, which carries a live
+ * question holding up a card the board has not started.
+ */
+export function askingSpec(card: string): unknown {
+  return {
+    title: 'A Question For You',
+    eyebrow: 'Answered from the page, not from the clipboard.',
+    actions: {
+      questions: [
+        {
+          ask: ASK,
+          options: [
+            { label: 'Keep it', say: SAY_KEEP, pick: true },
+            { label: 'Go back', say: SAY_BACK },
+          ],
+          note: 'A morning of work either way.',
+          holds: card,
+        },
+      ],
+    },
+    status: { card: PARENT_CARD },
+    content: [
+      {
+        label: 'What changed',
+        lead: 'The column is wider and the eye keeps its place.',
+        blocks: [
+          {
+            kind: 'table',
+            columns: ['', 'Before', 'After'],
+            rows: [['Letters on a line', '52', '72']],
+          },
+        ],
+      },
+    ],
+    decisions: [
+      {
+        id: 'D1',
+        title: 'The column is as wide as a page of a book',
+        why: 'The eye loses its place past that.',
+      },
+    ],
+    next: {
+      if_nothing: 'The wider column stays.',
+      steps: [{ step: 'Read a long report at the new width', cost: 'small', starting: true }],
+    },
+  };
+}
+
+/** What a run may change about the fixture it builds. */
+export interface FixtureOptions {
+  /** The spec to write, when the default telling-report is not what the run needs. */
+  spec?: unknown;
+  /** Where to write it, when it must go where a running server reads its specs. */
+  specPath?: string;
+}
+
 /**
  * Builds the fixture and returns its path.
  *
  * `reporting/tools` is a symlink to the real builder so the page is built the
  * way the app builds it, while every page and spec stays inside the fixture.
  */
-export function makeFixtureProject(dir: string, reportsDir: string): string {
+export function makeFixtureProject(dir: string, reportsDir: string, opts: FixtureOptions = {}): string {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 
@@ -85,7 +151,9 @@ export function makeFixtureProject(dir: string, reportsDir: string): string {
   } catch {
     // Already linked from a previous run.
   }
-  writeFileSync(join(pages, `${REPORT_SLUG}.report.json`), JSON.stringify(spec(PARENT_CARD), null, 2) + '\n');
+  const written = opts.specPath ?? join(pages, `${REPORT_SLUG}.report.json`);
+  mkdirSync(dirname(written), { recursive: true });
+  writeFileSync(written, JSON.stringify(opts.spec ?? spec(PARENT_CARD), null, 2) + '\n');
 
   return dir;
 }

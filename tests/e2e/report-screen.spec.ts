@@ -465,6 +465,10 @@ test.describe('a report says what it is holding up, and lands where it is pointe
     page,
     request,
   }) => {
+    // Three widths, each waiting on a fresh build of the fixture: with another
+    // suite driving the same instance the toolchain queues, and the default two
+    // minutes is spent waiting rather than measuring.
+    test.setTimeout(300_000);
     const id = await projectId(request);
     fixture = await writeFixture(request, id);
 
