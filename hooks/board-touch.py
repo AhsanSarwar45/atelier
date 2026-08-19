@@ -167,7 +167,11 @@ def main():
     # become claims and closes.
     cmd = bc.said(data) if tool == "Bash" else ""
     answer = None
-    held_back = ""
+    # Every refusal the run hands back, not the last of them: one command closes
+    # as many cards as it names, `aimed_at` finds them all, and each is a card of
+    # its own that may be left open and owned by nobody. A refusal overwritten is
+    # a card nobody was ever told about (bw-n1x5.4).
+    held_back = []
 
     # A helper that has come back is struck off by name; until then the session
     # is waiting on it, however many turns that takes. A return that arrives
@@ -254,8 +258,10 @@ def main():
                 # makes code is handed to nobody who has nowhere to make it — and
                 # this hook is the only thing that knows the directory the close
                 # was typed from.
-                held_back = run.advance(cid, root, closing_actor(cmd, data),
-                                        bc.where(data)) or held_back
+                said = run.advance(cid, root, closing_actor(cmd, data),
+                                   bc.where(data))
+                if said:
+                    held_back.append(said)
 
     # A write answers with the card it made, so nothing has to ask again. Two
     # sessions measured asked the board what they had just written to it 72 and
@@ -285,7 +291,7 @@ def main():
     # command for that hand-over, so there is no refusal for a gate to carry back
     # and the card would otherwise just sit there, open and owned by nobody.
     if held_back:
-        told = (told + "\n\n" + held_back).strip()
+        told = "\n\n".join([told] + held_back).strip()
     if told:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PostToolUse",

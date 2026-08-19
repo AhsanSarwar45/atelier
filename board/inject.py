@@ -436,10 +436,10 @@ FAULTS = [
                          "")),
     ("a close moves the job on under no name, so the next step is handed to nobody",
      TOUCH,
-     lambda s: s.replace("held_back = run.advance(cid, root, closing_actor(cmd, data),\n"
-                         "                                        bc.where(data))",
-                         "held_back = run.advance(cid, root, None,\n"
-                         "                                        bc.where(data))")),
+     lambda s: s.replace("said = run.advance(cid, root, closing_actor(cmd, data),\n"
+                         "                                   bc.where(data))",
+                         "said = run.advance(cid, root, None,\n"
+                         "                                   bc.where(data))")),
 
     # The copy rule reached by the one door that is not a claim: a step the run
     # hands over on its own, which nobody types a command for and so no gate in
@@ -451,13 +451,19 @@ FAULTS = [
                          "        return HELD_BACK % (cid, nowhere)\n", "")),
     ("a close moves the run on from nowhere in particular, so the copy question is "
      "asked of no directory", TOUCH,
-     lambda s: s.replace("held_back = run.advance(cid, root, closing_actor(cmd, data),\n"
-                         "                                        bc.where(data))",
-                         "held_back = run.advance(cid, root, "
+     lambda s: s.replace("said = run.advance(cid, root, closing_actor(cmd, data),\n"
+                         "                                   bc.where(data))",
+                         "said = run.advance(cid, root, "
                          "closing_actor(cmd, data))")),
     ("a step the run would not hand over is refused in silence", TOUCH,
      lambda s: s.replace("    if held_back:\n"
-                         '        told = (told + "\\n\\n" + held_back).strip()\n', "")),
+                         '        told = "\\n\\n".join([told] + held_back)'
+                         ".strip()\n", "")),
+    ("a close that shuts several cards at once keeps only the last refusal, so "
+     "the cards before it are held back in silence", TOUCH,
+     lambda s: s.replace("                if said:\n"
+                         "                    held_back.append(said)",
+                         "                held_back = [said] if said else held_back")),
     ("whoever closed a card is read off the whole line, so a reason that speaks of "
      "the stamp hands the job to a word out of a sentence", TOUCH,
      lambda s: s.replace(

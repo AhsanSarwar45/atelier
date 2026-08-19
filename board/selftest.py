@@ -713,7 +713,8 @@ def answered(cmd, held_back=""):
 
     `held_back` is what the run refused to hand this session on the back of the
     write. It is said here or nowhere: nothing types a command for a hand-over,
-    so no gate carries its refusal back the way one carries a claim's.
+    so no gate carries its refusal back the way one carries a claim's. Given a
+    callable it is asked per card, for a line that closes more than one.
     """
     card = {"id": "tst-j.4", "status": "closed", "title": "the work item",
             "labels": ["step:work", "of:tst-j"], "metadata": {}}
@@ -725,7 +726,8 @@ def answered(cmd, held_back=""):
 
     kept = (touch.bc.bd, touch.run.advance, touch.run.started)
     touch.bc.bd = recorder
-    touch.run.advance = lambda cid, root, actor=None, here=None: held_back
+    touch.run.advance = lambda cid, root, actor=None, here=None: (
+        held_back(cid) if callable(held_back) else held_back)
     touch.run.started = lambda cid, root: None
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest", "cwd": ROOT, "tool_name": "Bash",
@@ -4674,10 +4676,22 @@ def main():
         "a step the run would not hand over was refused in silence, so the card " \
         "sits open and owned by nobody with the session none the wiser: %s" \
         % (kept or "SAID NOTHING")
+    # One command closes as many cards as it names, and each of them is a card
+    # that may be left open and owned by nobody. Whichever refusal is dropped is
+    # a card the session is never told about (bw-n1x5.4).
+    several = answered('bd close tst-j.4 tst-j.5 --reason="both of them"',
+                       held_back=lambda cid: "%s was left for nobody: cut the copy"
+                                             % cid)
+    assert ("tst-j.4 was left for nobody" in several
+            and "tst-j.5 was left for nobody" in several), \
+        "a close that shut two cards told the session about one of them, so the " \
+        "other sits open and owned by nobody exactly as before: %s" \
+        % (several or "SAID NOTHING")
 
     print("ok: a write to one card answers with that card, a write naming several "
-          "answers with none, reading the board answers with nothing, and a step "
-          "the run would not hand over comes back with the refusal that says why")
+          "answers with none, reading the board answers with nothing, and every "
+          "step the run would not hand over comes back with the refusal that says "
+          "why — one of them or all of them")
 
     # The number this job is judged by, and the tool that reads it. A session
     # rebases and merges for its own reasons all day, and counting those as turns
