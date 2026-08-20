@@ -12,6 +12,74 @@
 /** How much of a chat's past is drawn when it is opened. */
 export const IMPORTED_MESSAGES = 200;
 
+/**
+ * Which reading of a past chat's record this build does.
+ *
+ * 1 was the words alone. 2 is the words and the commands, which is what the
+ * manager asked for after photographing the difference (§6.3.2). 3 adds the
+ * change each edit made, so a chat begun in a terminal draws its edits as
+ * red-and-green rather than as the new text alone (bw-4wcd.1). 4 adds how full
+ * the conversation stands, which a chat begun in a terminal has no driver here
+ * to say (bw-4wcd.4). 5 takes the window off what the kit states in the record
+ * rather than off a marker in the model's name that the kit never writes
+ * (bw-4wcd.15). Raise it whenever the reading would produce a different
+ * transcript from the same record: every chat read in by a lower one is read
+ * again on its next open.
+ *
+ * It lives beside the reading it numbers, so raising the reading and raising
+ * the number are one edit in one file (bw-khe.11).
+ */
+export const IMPORT_RECIPE = 5;
+
+/** What opening a chat does about a past it may or may not have read already. */
+export type ReadingChoice =
+  /** Read the record and draw it, replacing whatever older copy is there. */
+  | 'read-it'
+  /** Already read by this reading; a re-read would change nothing. */
+  | 'leave-it'
+  /**
+   * Read once by an older reading AND spoken to here since. Those live turns
+   * exist nowhere but the log, so reading the record again would throw away the
+   * only copy; the chat keeps its older drawing and is written off as current.
+   */
+  | 'keep-what-it-has';
+
+/**
+ * What is already known about a chat before its record is opened.
+ *
+ * The two facts that cost a question to the log are asked as questions, not
+ * handed over as answers, because the common case — a chat already read by this
+ * very reading — is decided without either of them, and asking anyway put a
+ * count over the whole log on every single open (bw-m8o.14).
+ */
+export interface ReadSoFarState {
+  /** The reading that last read this chat in, or null if none ever did. */
+  readBy: number | null;
+  /** Whether this is the follower catching up rather than a reader opening it. */
+  live: boolean;
+  /** How many rows its log already holds. */
+  drawn: () => number;
+  /** Whether any of those rows came from a turn driven here rather than read in. */
+  drivenHere: () => boolean;
+}
+
+/**
+ * What to do with a chat's past when it is opened.
+ *
+ * A chat read in under an older reading has to be read again, or the reader
+ * goes on seeing the transcript the old rules made — harness lines and all —
+ * with no way to ask for the new one short of deleting the chat. But a chat
+ * that was ALSO driven here holds turns that exist in no record, and reading
+ * its record again would drop them, so that one keeps what it has and is
+ * simply written off as current (bw-1u1.26, bw-khe.11).
+ */
+export function howToRead(was: ReadSoFarState): ReadingChoice {
+  if (!was.live && was.readBy !== null && was.readBy >= IMPORT_RECIPE) return 'leave-it';
+  const drawnAlready = was.readBy !== null || was.drawn() > 0;
+  if (drawnAlready && was.drivenHere()) return 'keep-what-it-has';
+  return 'read-it';
+}
+
 /** Openings that mark a line the harness wrote rather than a person or an agent. */
 const MACHINE_CHATTER =
   /^<(task-notification|system-reminder|local-command-[a-z-]+|command-name|command-message|command-args|user-prompt-submit-hook|function_results|budget)\b/;

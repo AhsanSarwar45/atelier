@@ -13,6 +13,8 @@ import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
   cut,
   diffOf,
+  howToRead,
+  IMPORT_RECIPE,
   IMPORTED_MESSAGES,
   linkPast,
   type PastEntry,
@@ -31,22 +33,6 @@ import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
 
 type Subscriber = (e: WbpEvent) => void;
-
-/**
- * Which reading of a past chat's record this build does.
- *
- * 1 was the words alone. 2 is the words and the commands, which is what the
- * manager asked for after photographing the difference (§6.3.2). 3 adds the
- * change each edit made, so a chat begun in a terminal draws its edits as
- * red-and-green rather than as the new text alone (bw-4wcd.1). 4 adds how full
- * the conversation stands, which a chat begun in a terminal has no driver here
- * to say (bw-4wcd.4). 5 takes the window off what the kit states in the record
- * rather than off a marker in the model's name that the kit never writes
- * (bw-4wcd.15). Raise it whenever the import would produce a different
- * transcript from the same record: every chat read in by a lower one is read
- * again on its next open.
- */
-const IMPORT_RECIPE = 5;
 
 /**
  * How often a chat another program is driving is looked at again.
@@ -352,15 +338,23 @@ export class Sessions {
     // read the whole conversation off the disk again and re-ran the card scan,
     // which forks the board's own tool per candidate (bw-m8o.14).
     const readBy = this.store.importedBy(summary.id);
-    if (!live && readBy !== null && readBy >= IMPORT_RECIPE) return NOTHING_READ;
-
-    const drawnAlready = readBy !== null || this.store.messageCount(summary.id) > 0;
-    // Read in by an older build, so it has words and no commands. Its live
-    // turns, if it has any, cannot be re-made from the record.
-    if (drawnAlready && this.store.wasDrivenHere(summary.id)) {
+    // Counted at most once, and only if the choice actually turns on it.
+    let counted: number | null = null;
+    const drawn = () => (counted ??= this.store.messageCount(summary.id));
+    const choice = howToRead({
+      readBy,
+      live,
+      drawn,
+      // Read in by an older build, so it has words and no commands. Its live
+      // turns, if it has any, cannot be re-made from the record.
+      drivenHere: () => this.store.wasDrivenHere(summary.id),
+    });
+    if (choice === 'leave-it') return NOTHING_READ;
+    if (choice === 'keep-what-it-has') {
       this.store.markImported(summary.id, IMPORT_RECIPE);
       return NOTHING_READ;
     }
+    const drawnAlready = readBy !== null || drawn() > 0;
 
     // Where the record stands before a byte of it is read: what arrives while
     // the reading is going on is the follower's, and it can only know that if
