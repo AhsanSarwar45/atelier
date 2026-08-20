@@ -512,14 +512,15 @@ const LIVE_STAGES: [(&str, &[&str]); 3] = [
 /// On every successful read, the computed per-status bead counts are upserted
 /// into the local SQLite cache (`project_bead_counts`) so `/api/projects` can
 /// return them for instant home-page rendering. Cache writes are best-effort.
-/// How long a board that has just been read is handed out again unread.
+/// How long a board that has just been read is handed out again before it is
+/// worth reading afresh.
 ///
-/// Reading one costs a `bd` run and about a second, and a screen asks for the
-/// same board from several places at once — the columns, the counts, the search
-/// — so the reader used to wait for that second more than once for one screen
-/// (bw-uiyz.9). The answer is thrown away the moment anything can have changed
-/// it: this app's own writes clear it, and so does the watcher that already
-/// tells the screen a file moved, which is why it may be kept this long.
+/// Reading one costs a `bd` run — 0.6s on a quiet machine, 4.3s while other
+/// agents are writing — and a screen asks for the same board from several
+/// places at once: the columns, the counts, the search (bw-uiyz.9). Past this,
+/// the board we hold is still handed back at once and the fresh read runs
+/// behind the answer instead of in front of it (bw-uiyz.17). This app's own
+/// writes clear what we hold outright, so the read after one of those waits.
 const BOARD_MEMO: Duration = Duration::from_secs(30);
 
 /// The answer to a read: the cards themselves, or only how many there are.
@@ -575,6 +576,21 @@ fn boards() -> &'static Boards {
     BOARDS.get_or_init(Boards::default)
 }
 
+/// Every board that has just been read again, for the screens watching it.
+///
+/// A read that happens behind a reader's back has nobody waiting on it, so the
+/// screens have to be told it landed — otherwise a board read before the last
+/// card moved would sit there until something else moved (bw-uiyz.17).
+fn changed_boards() -> &'static tokio::sync::broadcast::Sender<String> {
+    static CHANGED: OnceLock<tokio::sync::broadcast::Sender<String>> = OnceLock::new();
+    CHANGED.get_or_init(|| tokio::sync::broadcast::channel(64).0)
+}
+
+/// Every board read again from now on, for a screen that wants telling.
+pub fn boards_read_again() -> tokio::sync::broadcast::Receiver<String> {
+    changed_boards().subscribe()
+}
+
 /// One reader per board at a time, so two arriving together cost one `bd` run:
 /// the second waits, and then finds the first one's answer already kept.
 type Gates = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
@@ -586,11 +602,14 @@ fn gate_for(path: &str) -> Arc<tokio::sync::Mutex<()>> {
     held.entry(path.to_string()).or_default().clone()
 }
 
-/// The board as it was last read, if that was recent enough to hand out again.
-fn kept_board(path: &str) -> Option<(Vec<Bead>, String)> {
+/// The board as it was last read, and whether that was recent enough to stand
+/// on its own. An old one is still handed back — waiting for a `bd` run is the
+/// whole of what a board open used to cost — but the caller reads it again
+/// behind the answer (bw-uiyz.17).
+fn kept_board(path: &str) -> Option<(Vec<Bead>, String, bool)> {
     let kept = boards().lock().unwrap_or_else(|e| e.into_inner());
     let (at, source, beads) = kept.get(path)?;
-    (at.elapsed() < BOARD_MEMO).then(|| (beads.clone(), source.clone()))
+    Some((beads.clone(), source.clone(), at.elapsed() < BOARD_MEMO))
 }
 
 fn keep_board(path: &str, source: &str, beads: &[Bead]) {
@@ -680,6 +699,11 @@ pub async fn read_beads(
     // in four milliseconds. The board is read whole and kept whole; what changed
     // is a question about what we already hold.
     //
+    // A board we have read before is answered from it whatever its age, and if
+    // it is old enough to be worth reading again that read runs behind the
+    // answer (bw-uiyz.17). Only a board nobody has ever read is worth waiting
+    // for, and the screens are told when the read behind lands.
+    //
     // A count is always of the whole board: how many cards changed in the last
     // minute is not a count of anything the screen shows.
     let since = if counted {
@@ -687,7 +711,10 @@ pub async fn read_beads(
     } else {
         params.updated_after.as_deref()
     };
-    if let Some((beads, source)) = kept_board(&path) {
+    if let Some((beads, source, fresh)) = kept_board(&path) {
+        if !fresh {
+            read_behind(dolt_manager.clone(), db.clone(), path.clone());
+        }
         return (
             StatusCode::OK,
             board_answer(changed_since(beads, since), &source, counted),
@@ -696,15 +723,71 @@ pub async fn read_beads(
     let gate = gate_for(&path);
     let _hold = gate.lock().await;
     // Whoever we waited behind has read it by now.
-    if let Some((beads, source)) = kept_board(&path) {
+    if let Some((beads, source, _)) = kept_board(&path) {
         return (
             StatusCode::OK,
             board_answer(changed_since(beads, since), &source, counted),
         );
     }
 
+    match read_board(&dolt_manager, &db, &path, &project_path, &beads_dir).await {
+        Ok((beads, source)) => (
+            StatusCode::OK,
+            board_answer(changed_since(beads, since), source, counted),
+        ),
+        Err(failed) => failed,
+    }
+}
+
+/// Reads a board again with nobody waiting on it, and tells the screens
+/// watching it when that lands (bw-uiyz.17).
+///
+/// Answers whether anything was told. A board already being read has nothing
+/// to gain from a second reader, so this stands aside for the one in flight.
+pub async fn refresh_board(dolt_manager: &Arc<DoltManager>, db: &Arc<Database>, path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let project_path = PathBuf::from(&path);
+    if validate_path_security(&project_path).is_err() {
+        return false;
+    }
+    let beads_dir = project_path.join(".beads");
+    if !beads_dir.exists() {
+        return false;
+    }
+
+    let gate = gate_for(&path);
+    let Ok(_hold) = gate.try_lock() else { return false };
+
+    match read_board(dolt_manager, db, &path, &project_path, &beads_dir).await {
+        Ok(_) => {
+            let _ = changed_boards().send(path);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Reads a board behind whoever just asked for it, so they wait for nothing.
+fn read_behind(dolt_manager: Arc<DoltManager>, db: Arc<Database>, path: String) {
+    tokio::spawn(async move {
+        refresh_board(&dolt_manager, &db, &path).await;
+    });
+}
+
+/// Reads a board from wherever it actually lives, and keeps what it read.
+///
+/// The caller holds the board's gate: this is the expensive part, and only one
+/// of these runs per board at a time.
+async fn read_board(
+    dolt_manager: &Arc<DoltManager>,
+    db: &Arc<Database>,
+    path: &str,
+    project_path: &Path,
+    beads_dir: &Path,
+) -> Result<(Vec<Bead>, &'static str), (StatusCode, Json<serde_json::Value>)> {
     // Tier 0: Try per-project Dolt server via port file or log
-    if let Some(port) = resolve_dolt_port(&beads_dir) {
+    // Tier 0: Try per-project Dolt server via port file or log
+    if let Some(port) = resolve_dolt_port(beads_dir) {
         // Quick TCP probe: skip Tier 0 if port is dead (avoids slow SQL timeout)
         let port_alive = tokio::time::timeout(
             std::time::Duration::from_millis(500),
@@ -713,7 +796,7 @@ pub async fn read_beads(
 
         if port_alive {
             // Try known db name first, then discover via SHOW DATABASES
-            let db_name = match dolt::database_name_for_project(&project_path) {
+            let db_name = match dolt::database_name_for_project(project_path) {
                 Some(name) => Some(name),
                 None => {
                     tracing::info!("No db name from metadata for port {}, discovering...", port);
@@ -727,12 +810,9 @@ pub async fn read_beads(
                     Ok(beads) => {
                         tracing::info!("Read {} beads from per-project Dolt (port {})", beads.len(), port);
                         let beads = post_process_beads(beads);
-                        upsert_counts_cache(&db, &path, "dolt-project", &beads);
-                        keep_board(&path, "dolt-project", &beads);
-                        return (
-                            StatusCode::OK,
-                            board_answer(changed_since(beads, since), "dolt-project", counted),
-                        );
+                        upsert_counts_cache(db, path, "dolt-project", &beads);
+                        keep_board(path, "dolt-project", &beads);
+                        return Ok((beads, "dolt-project"));
                     }
                     Err(e) => {
                         tracing::warn!("Per-project Dolt server on port {} failed: {}, falling back", port, e);
@@ -749,7 +829,7 @@ pub async fn read_beads(
     // Tier 1: Try Dolt SQL (direct MySQL connection)
     let (beads, source) = 'fallback: {
         if dolt_manager.is_available() {
-            if let Some(db_name) = dolt::database_name_for_project(&project_path) {
+            if let Some(db_name) = dolt::database_name_for_project(project_path) {
                 match dolt_manager.read_beads(&db_name).await {
                     Ok(b) => break 'fallback (b, "dolt-central"),
                     Err(crate::dolt::DoltError::DatabaseNotFound(_)) => {
@@ -764,7 +844,7 @@ pub async fn read_beads(
         }
 
         // Tier 2: Try bd CLI
-        match read_beads_from_cli(&project_path).await {
+        match read_beads_from_cli(project_path).await {
             Ok(b) => {
                 tracing::info!("Read {} beads from bd CLI for {}", b.len(), path);
                 break 'fallback (b, "cli");
@@ -775,31 +855,28 @@ pub async fn read_beads(
         }
 
         // Tier 3: JSONL file
-        let issues_path = resolve_issues_path(&project_path);
+        let issues_path = resolve_issues_path(project_path);
         if !issues_path.exists() {
-            return (
+            return Err((
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({ "error": "No data source available: Dolt SQL, bd CLI, and JSONL all failed" })),
-            );
+            ));
         }
         match read_beads_from_jsonl(&issues_path) {
             Ok(b) => (b, "jsonl"),
             Err(e) => {
-                return (
+                return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({ "error": e })),
-                );
+                ));
             }
         }
     };
 
     let beads = post_process_beads(beads);
-    upsert_counts_cache(&db, &path, source, &beads);
-    keep_board(&path, source, &beads);
-    (
-        StatusCode::OK,
-        board_answer(changed_since(beads, since), source, counted),
-    )
+    upsert_counts_cache(db, path, source, &beads);
+    keep_board(path, source, &beads);
+    Ok((beads, source))
 }
 
 /// Request body for creating a new bead.
@@ -1465,13 +1542,36 @@ mod tests {
             ],
         );
 
-        let (beads, source) = kept_board(path).expect("the board just read is kept");
+        let (beads, source, fresh) = kept_board(path).expect("the board just read is kept");
         assert_eq!(source, "cli");
+        assert!(fresh, "a board read a moment ago stands on its own");
         assert_eq!(
             ids(changed_since(beads, Some("2026-08-20T00:00:00Z"))),
             vec!["moved-1"],
             "only what moved since the moment asked about"
         );
+    }
+
+    #[test]
+    fn a_board_read_once_is_handed_back_however_old_it_is() {
+        // The whole of what a board open used to wait for is a `bd` run —
+        // 0.6s quiet, 4.3s while other agents write. Past the memo the board
+        // we hold is still handed back at once; it is only marked stale, and
+        // the caller reads it again behind the answer (bw-uiyz.17).
+        let path = "/tmp/a-board-nobody-has-read-lately";
+        keep_board(path, "cli", &[stamped("still-here", Some("2026-08-19T10:00:00Z"))]);
+        {
+            let mut kept = boards().lock().unwrap();
+            let held = kept.get_mut(path).expect("kept");
+            held.0 = Instant::now()
+                .checked_sub(BOARD_MEMO + Duration::from_secs(1))
+                .expect("a moment before the memo ran out");
+        }
+
+        let (beads, source, fresh) = kept_board(path).expect("an old board is still a board");
+        assert_eq!(source, "cli");
+        assert_eq!(ids(beads), vec!["still-here"]);
+        assert!(!fresh, "and the caller is told to read it again behind the answer");
     }
 
     #[test]

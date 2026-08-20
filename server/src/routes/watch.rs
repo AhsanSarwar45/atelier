@@ -21,12 +21,16 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast::error::RecvError, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
-use super::beads::{forget_board, recompute_epic_statuses, resolve_issues_path};
+use super::beads::{boards_read_again, recompute_epic_statuses, refresh_board, resolve_issues_path};
 use super::validate_path_security;
+use crate::db::Database;
+use crate::dolt::DoltManager;
+use axum::Extension;
+use std::sync::Arc;
 
 /// How long a burst of writes must be quiet before it is reported, in ms.
 /// A single logical board write produces several filesystem writes.
@@ -138,6 +142,8 @@ pub struct FileChangeEvent {
 /// Takes the project directory as `path`, and returns a Server-Sent Events
 /// stream of board change notifications.
 pub async fn watch_beads(
+    Extension(dolt_manager): Extension<Arc<DoltManager>>,
+    Extension(db): Extension<Arc<Database>>,
     Query(params): Query<WatchParams>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let project_path = PathBuf::from(&params.path);
@@ -160,7 +166,7 @@ pub async fn watch_beads(
     // Spawn the watcher task
     let watched = project_path.to_string_lossy().to_string();
     tokio::spawn(async move {
-        if let Err(e) = run_watcher(store, watched, tx).await {
+        if let Err(e) = run_watcher(store, watched, tx, dolt_manager, db).await {
             error!("Board watcher error: {}", e);
         }
     });
@@ -178,6 +184,8 @@ async fn run_watcher(
     store: BoardStore,
     watched: String,
     tx: mpsc::Sender<Result<Event, Infallible>>,
+    dolt_manager: Arc<DoltManager>,
+    db: Arc<Database>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create a channel for notify events
     let (notify_tx, mut notify_rx) = mpsc::channel(100);
@@ -226,6 +234,7 @@ async fn run_watcher(
     // client always refetches after the final write rather than before it.
     let debounce = Duration::from_millis(DEBOUNCE_MS);
     let mut pending: Option<&'static str> = None;
+    let mut read_again = boards_read_again();
 
     loop {
         tokio::select! {
@@ -251,21 +260,34 @@ async fn run_watcher(
                 pending = Some(change_type);
             }
 
+            // A board read again behind everyone's back, ours or another
+            // screen's: whoever is watching this one is told, and asks for
+            // what changed out of a board that is already read (bw-uiyz.17).
+            read_again = read_again.recv() => {
+                match read_again {
+                    Ok(board) if board == watched => {
+                        let sse_event = Event::default().data(
+                            serde_json::to_string(&FileChangeEvent {
+                                path: reported_path.clone(),
+                                change_type: "modified".to_string(),
+                            })
+                            .unwrap_or_default(),
+                        );
+                        if tx.send(Ok(sse_event)).await.is_err() {
+                            info!("Client disconnected, stopping watcher");
+                            break;
+                        }
+                    }
+                    // Another project's board, or we fell behind the others'.
+                    Ok(_) | Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
+                }
+            }
+
             _ = tokio::time::sleep(debounce), if pending.is_some() => {
                 let change_type = pending.take().unwrap_or("modified");
 
-                // The board on disk moved, so what the read path last read of
-                // it is no longer the truth. Throw it away before telling the
-                // screen to come back for it, or the screen is handed the very
-                // answer the change made wrong.
-                forget_board(&watched);
-
-                let file_event = FileChangeEvent {
-                    path: reported_path.clone(),
-                    change_type: change_type.to_string(),
-                };
-
-                info!("Board change detected: {:?}", file_event);
+                info!("Board change detected: {:?}", reported_path);
 
                 // Only the jsonl store has a file to recompute epic status
                 // from; a Dolt board is served from the database.
@@ -284,13 +306,25 @@ async fn run_watcher(
                     }
                 }
 
-                let sse_event = Event::default()
-                    .data(serde_json::to_string(&file_event).unwrap_or_default());
-
-                // If send fails, client disconnected
-                if tx.send(Ok(sse_event)).await.is_err() {
-                    info!("Client disconnected, stopping watcher");
-                    break;
+                // The board on disk moved, so what we last read of it is no
+                // longer the truth — but throwing it away only moves the wait
+                // onto the next reader. It is read again here, with nobody
+                // waiting, and the screen is told once that read has landed
+                // (bw-uiyz.17). The telling is the arm above; if the read
+                // could not run we say so ourselves rather than leave the
+                // screen holding an answer the change made wrong.
+                if !refresh_board(&dolt_manager, &db, &watched).await {
+                    let sse_event = Event::default().data(
+                        serde_json::to_string(&FileChangeEvent {
+                            path: reported_path.clone(),
+                            change_type: change_type.to_string(),
+                        })
+                        .unwrap_or_default(),
+                    );
+                    if tx.send(Ok(sse_event)).await.is_err() {
+                        info!("Client disconnected, stopping watcher");
+                        break;
+                    }
                 }
             }
         }
