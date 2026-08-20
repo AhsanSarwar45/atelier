@@ -78,9 +78,16 @@ for (const held of SIZES) {
   await page.goto(`${base}/project?id=${encodeURIComponent(project.id)}&tab=chat&chat=probe`, {
     waitUntil: 'domcontentloaded',
   });
+  // The newest message, not a count of them: a chat draws the screenful the
+  // reader is looking at and reaches back for older ones as he scrolls up
+  // (bw-2lzj.2), so waiting for every message ever said would wait forever.
   await page.waitForFunction(
-    (want) => document.querySelectorAll('[data-testid$="-message"]').length >= want,
-    held,
+    (want) => {
+      const said = document.querySelectorAll('[data-testid$="-message"]');
+      const last = said[said.length - 1];
+      return Boolean(last?.textContent?.includes(`Message ${want}`));
+    },
+    held - 1,
     { timeout: 180000 },
   );
 

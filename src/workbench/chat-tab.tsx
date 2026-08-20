@@ -63,7 +63,8 @@ import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
 import { AgentView } from '@/workbench/agent-view';
-import { MachineLine, TranscriptRow, WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
+import { DrawnTranscript } from '@/workbench/drawn-transcript';
+import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
@@ -466,6 +467,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const drawn = useMemo(() => drawnRows(rows), [rows]);
 
   const endRef = useRef<HTMLDivElement>(null);
+  /** The pane the conversation scrolls in, which the window keeps the place of. */
+  const pane = useRef<HTMLDivElement>(null);
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
 
@@ -806,6 +809,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
       <SplitPaths.Provider value={splitPaths}>
       <div
+        ref={pane}
         className="mx-auto flex w-full max-w-[110ch] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
         data-testid="transcript"
         // One listener for every file chip in the conversation, wherever it was
@@ -823,22 +827,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         {rows.length === 0 && view.items.length > 0 && (
           <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
-        {drawn.map((drawnRow) =>
-          // A machine line and one of the app's own asides are the same shape:
-          // both are the chat talking about itself rather than someone in it,
-          // and a run of one kind arrives here already folded into one row.
-          drawnRow.row === 'machine' ? (
-            <MachineLine key={drawnRow.id} row={drawnRow} />
-          ) : (
-            <TranscriptRow
-              key={drawnRow.item.id}
-              item={drawnRow.item}
-              sessionId={sessionId}
-              mentions={mentions}
-              onLook={setLooking}
-            />
-          ),
-        )}
+        <DrawnTranscript
+          rows={drawn}
+          sessionId={sessionId}
+          mentions={mentions}
+          onLook={setLooking}
+          pane={pane}
+        />
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes
             an answer (docs/agent-workbench.md §8.2.2). */}
