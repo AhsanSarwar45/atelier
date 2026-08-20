@@ -94,6 +94,10 @@ const RECORD_PROJECT = join(RECORD_RUN, 'project');
 const SPEND_RUN = join(__dirname, '..', '.workbench-run-spend');
 const SPEND_PROJECT = join(SPEND_RUN, 'project');
 
+/** And where the case that watches a chat send an agent off builds its own. */
+const GROWS_RUN = join(__dirname, '..', '.workbench-run-grows');
+const GROWS_PROJECT = join(GROWS_RUN, 'project');
+
 /**
  * A project of this run's own, marked as a test project so it stays off the
  * owner's dashboard and is swept up rather than living on his machine.
@@ -710,6 +714,96 @@ test.describe('the agents a chat sends off', () => {
       expect(Number(await chip.getAttribute('data-total'))).toBeGreaterThan(written.spend.own);
 
       await page.screenshot({ path: `${SHOTS}/chat-agents-spend.png`, fullPage: false });
+    } finally {
+      written.remove();
+      await request.delete(`/api/projects/${project.id}`);
+    }
+  });
+
+  /**
+   * An agent sent off while the reader is watching a chat somebody else drives.
+   *
+   * The follower reads the record's tail, and a helper's turns are not in it:
+   * the kit files them beside it and puts nothing but the call and the answer in
+   * the record itself. So a chat opened for reading grew rows for its own
+   * commands and stayed silent about every agent it sent off from then on — the
+   * row appeared only if the reader shut the chat and opened it again
+   * (bw-7ks.22.19).
+   *
+   * Written rather than run, because what is being proved is a chat ANOTHER
+   * program is driving: a live case here would be this app driving it, which is
+   * the path that already worked. The record and the agent's own file are moved
+   * in the order the kit moves them — the call first, the agent's own words as
+   * it says them, the answer last — so the three things asserted below are
+   * three separate arrivals and not one reading of a finished chat.
+   */
+  test('follows an agent a chat sends off while it is being read', async ({ page, request }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    rmSync(GROWS_RUN, { recursive: true, force: true });
+    mkdirSync(GROWS_RUN, { recursive: true });
+    makeFixtureProject(GROWS_PROJECT, join(GROWS_RUN, 'reporting'));
+    const project = await projectAt(request, 'workbench-grows', GROWS_PROJECT);
+    // A chat that has sent nothing off, so every row on its panel arrived after
+    // it was opened.
+    const written = writeChatWithHelper({
+      cwd: GROWS_PROJECT,
+      sessionId: randomUUID(),
+      card: PARENT_CARD,
+      sentOff: 0,
+    });
+
+    try {
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: HELLO_MS });
+      const listed = page.locator(`[data-testid="restore-row"][data-external-id="${written.sessionId}"]`);
+      await listed.waitFor({ timeout: HELLO_MS });
+      await listed.getByTestId('row-name').click();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+      // What it said before anyone opened it is here, and nothing was sent away.
+      await expect(page.getByTestId('transcript').getByText(CHAT_SAID)).toBeVisible({ timeout: HELLO_MS });
+      await expect(page.getByTestId('sent-away-row')).toHaveCount(0);
+
+      // The other program sends one off. Its answer is not in the record yet,
+      // which is the shape a record ends in while an agent is working.
+      const sent = written.sendsOff('Read the board and report');
+      const row = page.locator(`[data-testid="sent-away-row"][data-agent="${sent.agentId}"]`);
+      await expect(row, 'the chat grew no row for the agent it sent off').toHaveCount(1, { timeout: HELLO_MS });
+      await expect(row).toHaveAttribute('data-kind', 'helper');
+      await expect(row.getByTestId('sent-away-what')).toContainText('Read the board and report');
+      // Still going: nothing has come back to the chat about it.
+      expect(OVER, 'the row was over before its answer reached the chat').not.toContain(
+        await row.getAttribute('data-state'),
+      );
+
+      // Its own words, into its own file and nowhere near the record — and they
+      // arrive under its row without the reader touching anything.
+      sent.says(HELPER_SAID);
+      await expect(row.getByTestId('sent-away-model'), 'the row never learned which model it runs').toContainText(
+        'fable',
+        { timeout: HELLO_MS },
+      );
+      await row.getByTestId('sent-away-open').click();
+      const pane = page.getByTestId('agent-view');
+      await pane.waitFor({ timeout: HELLO_MS });
+      await expect(pane).toHaveAttribute('data-agent', sent.agentId);
+      await expect(pane.getByTestId('agent-view-said'), 'the agent’s own turns are not under its row').toContainText(
+        HELPER_SAID,
+        { timeout: HELLO_MS },
+      );
+      await page.screenshot({ path: `${SHOTS}/chat-agents-follows.png`, fullPage: false });
+
+      // And the answer coming back to the chat is the row ending, with what it
+      // said kept on it.
+      sent.answers(HELPER_ANSWERED);
+      await expect(pane.getByTestId('agent-view-result')).toContainText(HELPER_ANSWERED, { timeout: HELLO_MS });
+      await page.getByTestId('agent-view-close').click();
+      await expect
+        .poll(async () => row.getAttribute('data-state'), {
+          message: 'the row never ended once the chat had its answer',
+          timeout: HELLO_MS,
+        })
+        .toBe('done');
+      await expect(row.getByTestId('sent-away-result')).toContainText(HELPER_ANSWERED);
     } finally {
       written.remove();
       await request.delete(`/api/projects/${project.id}`);

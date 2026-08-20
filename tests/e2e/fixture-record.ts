@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -72,6 +72,26 @@ export interface WrittenSpend {
   total: number;
 }
 
+/**
+ * An agent the chat sends off AFTER somebody has opened it for reading
+ * (bw-7ks.22.19).
+ *
+ * The two files move the way the kit moves them: the call goes into the chat's
+ * own record the moment it is sent, everything the agent says goes into its own
+ * file beside it as it says it, and the answer comes back into the chat's
+ * record last of all.
+ */
+export interface SentOffLater {
+  /** The call in the chat that sent it off. */
+  call: string;
+  /** The kit's name for it, which is also its file's name. */
+  agentId: string;
+  /** It says something of its own, into its own file and nowhere else. */
+  says(text: string): void;
+  /** It answers, and the chat hears that answer back: the row is over. */
+  answers(text: string): void;
+}
+
 export interface WrittenRecord {
   /** The conversation's own id, which is what a row is found by. */
   sessionId: string;
@@ -81,6 +101,8 @@ export interface WrittenRecord {
   calls: string[];
   /** What was written, added up both ways. */
   spend: WrittenSpend;
+  /** The chat sends another agent off, as it would while a reader watched. */
+  sendsOff(brief?: string): SentOffLater;
   /** Everything written, so a run can take it away again. */
   remove: () => void;
 }
@@ -283,6 +305,117 @@ export function writeChatWithHelper(opts: {
 
   writeFileSync(path, asLines(chat));
 
+  // From here the chat is on disk and can be opened. What follows happens while
+  // somebody is reading it: the record and the agents' own files are appended
+  // to, exactly as the kit appends to them.
+  let last = `fixture-u${many * 2 + 2}`;
+  let later = 0;
+  const now = (): string => new Date().toISOString();
+  const append = (file: string, row: Record<string, unknown>): void =>
+    appendFileSync(file, JSON.stringify(row) + '\n');
+
+  const sendsOff = (brief = HELPER_BRIEF): SentOffLater => {
+    const n = later++;
+    const call = `${SENT_OFF_CALL}Later${n}`;
+    const agentId = `${HELPER_AGENT}-later-${n}`;
+    const file = join(helpers, `agent-${agentId}.jsonl`);
+    let mine = `${agentId}-h0`;
+
+    // The call, in the chat's own record. Its answer is not here yet, which is
+    // the shape a record ends in while an agent is still working.
+    const sent = `fixture-later-u${n}`;
+    append(path, {
+      sessionId,
+      cwd,
+      gitBranch: branch,
+      version: '2.1.237',
+      userType: 'external',
+      timestamp: now(),
+      parentUuid: last,
+      uuid: sent,
+      type: 'assistant',
+      message: {
+        id: `msg_fixture_later_${n}`,
+        model: 'claude-opus-5',
+        role: 'assistant',
+        usage: SPENT,
+        content: [
+          { type: 'tool_use', id: call, name: 'Task', input: { subagent_type: 'general-purpose', description: brief, prompt: brief } },
+        ],
+      },
+    });
+    last = sent;
+
+    /** One line of the agent's own conversation, into its own file. */
+    let saidSoFar = 0;
+    const mineIs = (extra: Record<string, unknown>): void => {
+      const uuid = `${agentId}-h${++saidSoFar}`;
+      append(file, {
+        sessionId,
+        cwd,
+        gitBranch: branch,
+        version: '2.1.237',
+        userType: 'external',
+        timestamp: now(),
+        isSidechain: true,
+        agentId,
+        parentUuid: mine,
+        uuid,
+        ...extra,
+      });
+      mine = uuid;
+    };
+
+    // Its file exists from the moment it is sent, holding the brief it was
+    // given — which is how anything watching knows it went off at all.
+    writeFileSync(file, '');
+    append(file, {
+      sessionId,
+      cwd,
+      timestamp: now(),
+      isSidechain: true,
+      agentId,
+      parentUuid: null,
+      uuid: mine,
+      type: 'user',
+      message: { role: 'user', content: brief },
+    });
+    writeFileSync(
+      join(helpers, `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: 'general-purpose', description: brief, toolUseId: call, spawnDepth: 1 }) + '\n',
+    );
+
+    return {
+      call,
+      agentId,
+      says: (text: string): void =>
+        mineIs({
+          type: 'assistant',
+          message: { id: `msg_${agentId}_said`, model: 'claude-fable-5', role: 'assistant', usage: SPENT, content: [{ type: 'text', text }] },
+        }),
+      answers: (text: string): void => {
+        mineIs({
+          type: 'assistant',
+          message: { id: `msg_${agentId}_answer`, model: 'claude-fable-5', role: 'assistant', usage: SPENT, content: [{ type: 'text', text }] },
+        });
+        const back = `fixture-later-u${n}-back`;
+        append(path, {
+          sessionId,
+          cwd,
+          gitBranch: branch,
+          version: '2.1.237',
+          userType: 'external',
+          timestamp: now(),
+          parentUuid: last,
+          uuid: back,
+          type: 'user',
+          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: call, content: text }] },
+        });
+        last = back;
+      },
+    };
+  };
+
   // The chat answered once per helper it sent off and once at the end; each
   // helper answered three times of its own.
   const own = (many + 1) * A_CALL;
@@ -292,6 +425,7 @@ export function writeChatWithHelper(opts: {
     path,
     calls,
     spend: { own, helpers: sentAway, total: own + sentAway },
+    sendsOff,
     remove: () => {
       rmSync(path, { force: true });
       rmSync(join(dir, sessionId), { recursive: true, force: true });

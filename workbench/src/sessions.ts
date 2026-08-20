@@ -28,7 +28,7 @@ import { latest, type Recorded, spentOn, windowNamed } from '../../src/workbench
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
-import { type HelperPast, helpersOf } from './helper-records.ts';
+import { type HelperPast, helperNamed, helpersNow, helpersOf } from './helper-records.ts';
 import { spokenAsEvents } from './reading-back.ts';
 import { findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
@@ -650,7 +650,9 @@ export class Sessions {
       agentType: helper.agentType,
       model: helper.model,
     });
-    for (const entry of helper.entries) this.draw(sessionId, entry, under);
+    // The tail of it: a first reading of a chat draws the last few turns of
+    // each of its own messages, and a helper's conversation is no different.
+    for (const entry of helper.entries.slice(-IMPORTED_MESSAGES)) this.draw(sessionId, entry, under);
     this.publish(sessionId, {
       type: 'agent.finished',
       agentId: helper.agentId,
@@ -834,6 +836,104 @@ export class Sessions {
     const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
 
     /**
+     * Every agent this chat has sent off, and how much of each one is drawn.
+     *
+     * A helper's turns are in a file of its own beside the record, and the tail
+     * this follower reads is the record. So a chat somebody else was driving
+     * grew rows for its own commands and never one for an agent it sent off
+     * while the reader watched: the row appeared only if the reader shut the
+     * chat and opened it again (bw-7ks.22.19).
+     *
+     * Seeded with what is on disk at the click, all of it counted as drawn: the
+     * reading that just ran drew exactly those, and drawing them again would
+     * say every turn of every agent twice.
+     */
+    const sentOff = new Map<string, { size: number; drawn: number; over: boolean }>();
+    /** Which agent each call sent off, so the answer to that call ends its row. */
+    const startedBy = new Map<string, string>();
+    for (const [agentId, size] of helpersNow(path)) {
+      const helper = helperNamed(path, agentId);
+      sentOff.set(agentId, { size, drawn: helper?.entries.length ?? 0, over: false });
+      if (helper?.toolCallId) startedBy.set(helper.toolCallId, agentId);
+    }
+
+    /** The turns of one agent the reader has not been shown, and its numbers. */
+    const sayTurns = (helper: HelperPast, size: number, over: boolean): void => {
+      const under = helper.toolCallId ?? helper.agentId;
+      for (const entry of helper.entries.slice(sentOff.get(helper.agentId)?.drawn ?? 0)) {
+        if (entry.kind === 'call') links.observe(entry.name, entry.input);
+        this.draw(summary.id, entry, under);
+      }
+      sentOff.set(helper.agentId, { size, drawn: helper.entries.length, over });
+    };
+
+    /**
+     * The agents that have gone off, or said something more, since the last beat.
+     *
+     * A listing and one stat each, and a file is read only when it has grown —
+     * so a chat whose agents are quiet costs about what a chat with none does.
+     * Looked at before the record's own tail, so a call that settles this beat
+     * already has its row to end.
+     */
+    const lookAtSentOff = (): void => {
+      for (const [agentId, size] of helpersNow(path)) {
+        const had = sentOff.get(agentId);
+        if (had && had.size === size) continue;
+        const helper = helperNamed(path, agentId);
+        if (!helper) continue;
+        if (!had) {
+          this.publish(summary.id, {
+            type: 'agent.started',
+            agentId: helper.agentId,
+            toolCallId: helper.toolCallId,
+            kind: 'helper',
+            what: helper.what,
+            agentType: helper.agentType,
+            model: helper.model,
+          });
+          if (helper.toolCallId !== null) startedBy.set(helper.toolCallId, agentId);
+        }
+        sayTurns(helper, size, had?.over ?? false);
+        // Its own file says what it has spent and how long it has been at it,
+        // and says nothing anywhere about being finished: it is running until
+        // the chat gets its answer back.
+        this.publish(summary.id, {
+          type: 'agent.progress',
+          agentId: helper.agentId,
+          seconds: helper.seconds,
+          tokens: helper.tokens,
+          calls: helper.calls,
+          model: helper.model ?? undefined,
+          state: had?.over ? undefined : 'running',
+        });
+      }
+    };
+
+    /**
+     * The answer to a call landing, which is the only thing that says an agent
+     * is over: nothing in its own file marks a last line as last.
+     */
+    const answered = (callId: string): void => {
+      const agentId = startedBy.get(callId);
+      if (agentId === undefined || sentOff.get(agentId)?.over) return;
+      const helper = helperNamed(path, agentId);
+      if (helper === null) return;
+      sayTurns(helper, helpersNow(path).get(agentId) ?? 0, true);
+      this.publish(summary.id, {
+        type: 'agent.finished',
+        agentId,
+        // What it did is in its own file; whether the chat was happy with it is
+        // nowhere, and a helper that gave up said so in words.
+        state: 'done',
+        seconds: helper.seconds,
+        tokens: helper.tokens,
+        calls: helper.calls,
+        model: helper.model,
+        result: helper.result,
+      });
+    };
+
+    /**
      * The byte the lines now in hand begin at — the ones in `carry` when there
      * are any, and otherwise the next ones to arrive. Minus one while it is not
      * known, which is the one beat where lines are being dropped by name.
@@ -928,6 +1028,7 @@ export class Sessions {
       for (const entry of said) {
         if (entry.kind === 'call') links.observe(entry.name, entry.input);
         this.draw(summary.id, entry);
+        if (entry.kind === 'call') answered(entry.id);
       }
       mark();
     };
@@ -937,6 +1038,8 @@ export class Sessions {
       reading = true;
       try {
         await placed;
+        // What it has sent off, before what it has said itself (bw-7ks.22.19).
+        lookAtSentOff();
         // The stat inside the read alone says whether there is anything new,
         // whoever wrote it and whether or not that program is still there.
         // Stopping the moment the terminal exited lost every later turn: the

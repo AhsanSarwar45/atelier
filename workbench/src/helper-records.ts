@@ -13,12 +13,11 @@
  * helper's own file: which model it ran, how long it took, what it spent, how
  * many calls it made and what it answered.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { type Spend, spentOn } from '../../src/workbench/context-window.ts';
 import {
-  IMPORTED_MESSAGES,
   type PastEntry,
   pastTranscript,
   textOf,
@@ -57,7 +56,7 @@ export interface HelperPast {
   calls: number;
   /** Its last word, which is what the row shows once it has finished. */
   result: string | null;
-  /** Its conversation, in the rows a reader sees. */
+  /** Its whole conversation, in the rows a reader sees, oldest first. */
   entries: PastEntry[];
   /** When it started, so the panel lists them in the order they went off. */
   at: string;
@@ -109,12 +108,80 @@ export function helperFrom(agentId: string, meta: HelperMeta, lines: HelperLine[
     spend,
     calls,
     result: oneLine(answer) || null,
-    // The tail of it, on the same terms as the chat's own: a conversation drawn
-    // whole is the one thing that makes opening a chat slow, and what the row
-    // says about the work is the brief, which is on the row already.
-    entries: pastTranscript(lines).slice(-IMPORTED_MESSAGES),
+    // Whole, and cut down by whoever draws it. A first reading shows the tail of
+    // it — a conversation drawn whole is the one thing that makes opening a chat
+    // slow — but a reader watching one arrive is handed the turns it has not
+    // seen, and that count only means anything against the whole (bw-7ks.22.19).
+    entries: pastTranscript(lines),
     at: first,
   };
+}
+
+/** Where the kit files the conversations of the agents one chat sent off. */
+const sentOffDir = (record: string): string => join(record.replace(/\.jsonl$/, ''), 'subagents');
+
+/**
+ * Every agent a chat has sent off as the files stand this instant, and how many
+ * bytes each one has written.
+ *
+ * A directory listing and one stat each, no file read. It is asked on every
+ * beat of the follower, of every chat somebody is reading — so a chat whose
+ * agents have said nothing new since the last look has to cost about nothing
+ * (bw-7ks.22.19). The size is what says whether one has.
+ */
+export function helpersNow(record: string): Map<string, number> {
+  const dir = sentOffDir(record);
+  const sizes = new Map<string, number>();
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return sizes; // A chat that has sent nothing off has no such directory.
+  }
+  for (const name of names) {
+    const named = /^agent-(.+)\.jsonl$/.exec(name);
+    if (!named) continue;
+    try {
+      sizes.set(named[1]!, statSync(join(dir, name)).size);
+    } catch {
+      // Taken away between the listing and the stat: it is not there to draw.
+    }
+  }
+  return sizes;
+}
+
+/**
+ * One agent's row and conversation, read from its own file.
+ *
+ * Null when there is no such file, or none that can be read: one helper being
+ * unreadable loses that helper and not the chat around it.
+ */
+export function helperNamed(record: string, agentId: string): HelperPast | null {
+  const dir = sentOffDir(record);
+  let lines: HelperLine[];
+  try {
+    lines = readFileSync(join(dir, `agent-${agentId}.jsonl`), 'utf8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '')
+      .map((line) => {
+        try {
+          return JSON.parse(line) as HelperLine;
+        } catch {
+          return null; // Half a line at the end of a file still being written.
+        }
+      })
+      .filter((line): line is HelperLine => line !== null);
+  } catch {
+    return null;
+  }
+  let meta: HelperMeta = {};
+  try {
+    meta = JSON.parse(readFileSync(join(dir, `agent-${agentId}.meta.json`), 'utf8')) as HelperMeta;
+  } catch {
+    // No meta means no call to hang it off; the row still says what it spent.
+  }
+  return helperFrom(agentId, meta, lines);
 }
 
 /**
@@ -125,42 +192,10 @@ export function helperFrom(agentId: string, meta: HelperMeta, lines: HelperLine[
  * unreadable loses that helper and not the rest: the chat is drawn either way.
  */
 export function helpersOf(record: string): HelperPast[] {
-  const dir = join(record.replace(/\.jsonl$/, ''), 'subagents');
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
-  }
   const found: HelperPast[] = [];
-  for (const name of names) {
-    const named = /^agent-(.+)\.jsonl$/.exec(name);
-    if (!named) continue;
-    const agentId = named[1]!;
-    let lines: HelperLine[];
-    try {
-      lines = readFileSync(join(dir, name), 'utf8')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line !== '')
-        .map((line) => {
-          try {
-            return JSON.parse(line) as HelperLine;
-          } catch {
-            return null; // Half a line at the end of a file still being written.
-          }
-        })
-        .filter((line): line is HelperLine => line !== null);
-    } catch {
-      continue;
-    }
-    let meta: HelperMeta = {};
-    try {
-      meta = JSON.parse(readFileSync(join(dir, `agent-${agentId}.meta.json`), 'utf8')) as HelperMeta;
-    } catch {
-      // No meta means no call to hang it off; the row still says what it spent.
-    }
-    found.push(helperFrom(agentId, meta, lines));
+  for (const agentId of helpersNow(record).keys()) {
+    const helper = helperNamed(record, agentId);
+    if (helper) found.push(helper);
   }
   return found.sort((a, b) => a.at.localeCompare(b.at));
 }
