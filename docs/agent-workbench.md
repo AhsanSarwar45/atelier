@@ -1159,7 +1159,12 @@ missing today rather than merely thin:
 - a helper's words are never forwarded, because the driver does not ask for them
   (bw-7ks.22.2);
 - "sent off" is filed as `detail`, so the one line that exists is hidden by
-  default (bw-7ks.22.6);
+  default, and the line saying it came back is not drawn at all: the driver
+  skips a quiet line a line just before it already said — meant for the kit
+  reporting one thing in two shapes — and a helper's own words were kept in that
+  same breath, so a helper answering "DONE" ate "DONE (completed)", which quotes
+  it by design. The panel then said finished while the conversation never said
+  it came home (bw-7ks.22.6);
 - reading a chat back from the record **flattens** a helper's turns into the
   parent's speech, because the read-back path never looks at what a message's
   parent was (bw-7ks.22.7);

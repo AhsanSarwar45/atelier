@@ -468,25 +468,33 @@ export class ClaudeDriver implements Driver {
    * lines those subtypes already draw are the record of what happened, and the
    * panel is a reading of it. One does not replace the other.
    *
+   * The exception is work a HELPER sent away, and the answer is true twice.
+   * `true` means this chat has nothing to say about the message: not a row on
+   * its panel, and not a line in its conversation either. A helper's own
+   * command was announced in the parent's transcript as `Sent off: …` with
+   * nobody named as having sent it, and finished there as a second unattributed
+   * line — the same lie the panel was telling, one layer along (bw-7ks.22.6).
+   * That work is on the helper's own conversation, which is where it belongs.
+   *
    * Nothing here is a delta. The kit's messages each carry a different corner
    * of the picture — a status change with no numbers, a result with no elapsed
    * — so what it does not say this time is what it said last time, kept in
    * `sentAway` rather than blanked.
    */
-  private sawTask(m: Record<string, any>): void {
+  private sawTask(m: Record<string, any>): boolean {
     // Nothing more is heard about a helper's own work: not its progress, not
     // its ending. A finish for a row that was never opened opens one.
-    if (this.tasksOfHelpers.has(String(m.task_id ?? ''))) return;
+    if (this.tasksOfHelpers.has(String(m.task_id ?? ''))) return true;
     const numbers = (id: string) =>
       this.sentAway.get(id) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' as AgentState };
 
     switch (m.subtype) {
       case 'task_started': {
         const id = String(m.task_id ?? '');
-        if (!id) return;
+        if (!id) return false;
         if (sentAwayByAHelper(m, this.callsOfHelpers)) {
           this.tasksOfHelpers.add(id);
-          return;
+          return true;
         }
         const call = typeof m.tool_use_id === 'string' && m.tool_use_id ? m.tool_use_id : null;
         if (call) this.taskOfCall.set(call, id);
@@ -502,12 +510,12 @@ export class ClaudeDriver implements Driver {
           // words, or with its result — both fill this row in later.
           model: null,
         });
-        return;
+        return false;
       }
 
       case 'task_progress': {
         const id = String(m.task_id ?? '');
-        if (!id) return;
+        if (!id) return false;
         const was = numbers(id);
         const now = {
           ...was,
@@ -526,7 +534,7 @@ export class ClaudeDriver implements Driver {
           ...(doing ? { doing } : {}),
           ...(now.model ? { model: now.model } : {}),
         });
-        return;
+        return false;
       }
 
       case 'task_updated': {
@@ -534,7 +542,7 @@ export class ClaudeDriver implements Driver {
         // it already had, which is why they are kept here at all.
         const id = String(m.task_id ?? '');
         const patch = (m.patch ?? {}) as { status?: string; is_backgrounded?: boolean };
-        if (!id || (!patch.status && patch.is_backgrounded === undefined)) return;
+        if (!id || (!patch.status && patch.is_backgrounded === undefined)) return false;
         const was = numbers(id);
         // Parked beats the status it is still running under: a helper left to
         // run in the background is exactly a running one nobody is waiting at.
@@ -550,12 +558,12 @@ export class ClaudeDriver implements Driver {
           calls: was.calls,
           state,
         });
-        return;
+        return false;
       }
 
       case 'task_notification': {
         const id = String(m.task_id ?? '');
-        if (!id) return;
+        if (!id) return false;
         const was = numbers(id);
         const state = TASK_STATE[String(m.status ?? '')] ?? 'done';
         this.emit({
@@ -570,7 +578,7 @@ export class ClaudeDriver implements Driver {
           // answer away is a row the reader has to go looking for it.
           result: oneLine(m.summary ?? '') || null,
         });
-        return;
+        return false;
       }
 
       case 'background_tasks_changed': {
@@ -597,11 +605,11 @@ export class ClaudeDriver implements Driver {
             model: null,
           });
         }
-        return;
+        return false;
       }
 
       default:
-        return;
+        return false;
     }
   }
 
@@ -1106,8 +1114,10 @@ export class ClaudeDriver implements Driver {
           this.modeIsNow(m.permissionMode);
         }
         // What the chat has sent away, read from the same messages the lines
-        // below are drawn from rather than instead of them (§8.2.7).
-        this.sawTask(m);
+        // below are drawn from rather than instead of them (§8.2.7). It answers
+        // whether the message was a helper's own work, which this chat says
+        // nothing at all about — see `sawTask`.
+        const helpers = this.sawTask(m);
         if (m.subtype === 'init') {
           this.emit({
             type: 'session.started',
@@ -1160,7 +1170,7 @@ export class ClaudeDriver implements Driver {
           this.emit({ type: 'message.completed', messageId });
           this.awaitingAnswer = false;
           this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
-        } else {
+        } else if (!helpers) {
           // Every other thing the session says about itself.
           const note = noteFor(m);
           if (note) this.note(note);
@@ -1237,8 +1247,14 @@ export class ClaudeDriver implements Driver {
               return;
             }
             if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
-            // The status that came just before may already have said this.
-            if (this.saidAlready(String(b.text))) return;
+            // The status that came just before may already have said this —
+            // this chat's status, about this chat's own words. A helper speaks
+            // under its own heading and its words are not lines of this
+            // conversation, so they are not kept in this window either: shared,
+            // a helper answering "DONE" silenced the very line saying that
+            // helper had come back, because that line quotes its answer
+            // (bw-7ks.22.6).
+            if (sentBy === undefined && this.saidAlready(String(b.text))) return;
             this.emit({ type: 'message.started', messageId: id, role: 'assistant', parentToolCallId: sentBy });
             this.emit({ type: 'text.delta', messageId: id, text: String(b.text) });
             this.emit({ type: 'message.completed', messageId: id });

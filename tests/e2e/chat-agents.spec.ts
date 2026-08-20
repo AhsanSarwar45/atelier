@@ -321,6 +321,78 @@ test.describe('the agents a chat sends off', () => {
   });
 
   /**
+   * The lines the conversation itself writes about work the chat sent away,
+   * read exactly as a reader has them: nothing switched on, nothing clicked.
+   *
+   * The panel says three helpers are running; only the conversation says the
+   * second one went off between the two commands he is looking at. So the lines
+   * are the record and the panel is a reading of it, and a record filed under
+   * the machine's own breathing — which starts switched off — is a chat that
+   * delegated its whole turn reading as a chat that fell silent (bw-7ks.22.6).
+   *
+   * The helper is told to wait, because a foreground command that takes a
+   * moment is what the kit opens a task of its own for: the count below is only
+   * a claim about whose work is announced if the helper's work is announceable
+   * in the first place. What the four other kinds of line say — retrying,
+   * failed, given up on — is held next door in the sidecar's own suite, where
+   * a failure and a busy service can be produced on demand and here they cannot.
+   */
+  test('the lines about work it sent away are on the page with nothing switched on', async ({ page, request }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const chat = await freshChat(request, page);
+    await say(
+      request,
+      chat,
+      'Use the Task tool exactly once to launch one general-purpose subagent, and do no work yourself. ' +
+        'Tell that subagent, in its prompt, to run the shell command ' +
+        `"python3 -c 'import time; time.sleep(${HELPER_WAITS})'" in the foreground, wait for it, ` +
+        'and then reply with the single word DONE. ' +
+        'When it comes back, reply with the single word FINISHED and nothing else.',
+    );
+
+    // Waited out to the end of the turn: the finishing line is the second half
+    // of what this case is about, and it does not exist until the helper is home.
+    await expect
+      .poll(
+        async () =>
+          await page.locator('[data-testid="note-row"][data-note-kind="system/task_notification"]').count(),
+        { message: 'the chat never said its helper had finished', timeout: DELEGATED_MS },
+      )
+      .toBeGreaterThan(0);
+
+    const lines = await page
+      .locator('[data-testid="note-row"]')
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          kind: el.getAttribute('data-note-kind') ?? '',
+          family: el.getAttribute('data-family') ?? '',
+          text: (el.querySelector('[data-testid="note-toggle"]') as HTMLElement | null)?.innerText.trim() ?? '',
+        })),
+      );
+    const said = JSON.stringify(lines, null, 2);
+
+    // One line saying it went and one saying it came home — and exactly one of
+    // each, because the helper opened a piece of work of its own and that is
+    // the helper's news, not this chat's (bw-7ks.22.18).
+    const went = lines.filter((l) => l.kind === 'system/task_started');
+    const home = lines.filter((l) => l.kind === 'system/task_notification');
+    expect(went.length, `not one line saying work was sent off: ${said}`).toBe(1);
+    expect(home.length, `not one line saying it finished: ${said}`).toBe(1);
+    expect(went[0].text, `the line does not say what was sent off: ${said}`).toMatch(/Sent off: \S/);
+
+    // And they are drawn, which is the claim: the filter was never touched, so
+    // what is on the page is what a reader who has never opened it has.
+    expect(
+      [...went, ...home].every((l) => l.family !== 'breathing'),
+      `a line about sent-off work is filed as the machine's own breathing: ${said}`,
+    ).toBe(true);
+
+    await page.screenshot({ path: `${SHOTS}/chat-sent-away-lines.png`, fullPage: false });
+
+    await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
+  });
+
+  /**
    * One agent's own conversation, opened from its row — while it works, and
    * again after the program has been stopped and started.
    *

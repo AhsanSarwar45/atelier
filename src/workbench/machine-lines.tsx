@@ -141,6 +141,13 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
 
   // News: an agent sent off, an agent home, the run changing under the reader,
   // and anything the machine wanted him to know rather than to act on.
+  //
+  // Sending one off is ranked `detail` on purpose — the driver skips a repeated
+  // `note` and three helpers sent off on one brief would lose two of their
+  // lines — so both ranks are spelled out here. Left to the default, a `detail`
+  // this map did not name would fall to breathing and start switched off, which
+  // is a chat that delegated its whole turn reading as a chat that fell silent
+  // (bw-7ks.22.6).
   'system/task_started': { note: 'background', detail: 'background' },
   'system/task_notification': 'background',
   'system/informational': { note: 'background', detail: 'breathing' },
