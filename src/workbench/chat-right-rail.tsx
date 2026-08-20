@@ -13,7 +13,7 @@
  * Shut, it is a thin edge with a handle, so the way back is where the rail was
  * rather than in a toolbar the reader has to go looking through. The choice is
  * remembered for the browser rather than for one chat: it is a way of looking,
- * the same reason the "show everything" switch is (§8.2.4).
+ * the same reason the kind filter's switches are (bw-qdim).
  *
  * It folds rather than jumps: the width moves and the eye follows the edge, so
  * the transcript is not two different widths on two consecutive frames. Anyone
@@ -40,7 +40,7 @@ const RIGHT_RAIL = 'workbench.right-rail';
  * Written where it is CHANGED, never mirrored from an effect: an effect that
  * writes the state back runs once with the value the screen started at and
  * overwrites what was remembered before the effect that reads it has run — the
- * fault that lost the "show everything" choice on every reload (§8.2.4).
+ * fault that lost the reader's kind filter on every reload (bw-qdim).
  */
 export function useRightRail(): [boolean, () => void] {
   const [open, setOpen] = useState(true);

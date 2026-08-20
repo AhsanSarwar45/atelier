@@ -186,10 +186,11 @@ and into the chat that worked it, so nothing is copied by hand.
 
 Constraint: a busy chat is mostly the agent's own working — files read, commands
 run, quiet notes about itself — and what it SAID is a handful of rows buried in
-it. The chat's toolbar carries a second control beside Show everything, opening
-a tree of switches: you and the agent at the top; the agent's replies, thinking,
-commands, status lines, questions and reports beneath it; and under commands one
-entry for every tool this conversation actually used.
+it. The chat's toolbar carries one control over all of it, opening a tree of
+switches: you and the agent at the top; the agent's replies, thinking, commands,
+status lines, questions and reports beneath it; under commands one entry for
+every tool this conversation actually used, and under status lines one for every
+family of machine line it holds (bw-jkh2.14).
 
 Four rules make the tree behave the way a reader expects rather than the way a
 set of checkboxes does.
@@ -198,7 +199,7 @@ set of checkboxes does.
 switch nobody has touched is on, so a tool used here for the first time — and a
 kind the chat grows next month — arrives visible rather than silently missing
 from a conversation he thought he was reading whole. It is remembered for the
-browser, not for one chat, the way Show everything beside it is.
+browser, not for one chat.
 
 **A group off is one entry, and forgets what was off inside it**, so turning it
 back on hands him all of it rather than whatever remained of it last time. The
@@ -218,9 +219,12 @@ chat that dispatched a subagent (bw-qdim.12).
 **Every line carries its count for THIS conversation**, zero included: it is what
 lets him see the cost of turning something off before he turns it off, and what
 tells him a group is empty here without opening it. So the count is taken over
-the rows the chat could draw at all — a note the chat files as detail is only on
-screen with Show everything on, and counting it the rest of the time prices
-Status lines by rows he cannot see (bw-qdim.10). Switching everything off leaves
+the rows as the page DRAWS them: a folded run of eight retries is one chip with
+an 8 on it and counts once, because one row is what turning it off would remove.
+There was once a second control holding the quiet lines back, and the count was
+taken over what it let through — so a chat carrying thirty-three status lines
+reported none and the panel said there was nothing there (bw-qdim.10,
+bw-jkh2.13). Switching everything off leaves
 the window empty, which is indistinguishable from a broken chat, so the
 conversation says which it is and offers one click back (bw-qdim.6).
 

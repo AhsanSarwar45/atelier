@@ -886,7 +886,7 @@ next one just as quietly.
 |---|---|---|
 | `say` | the agent's answer, his own turn | a bubble, as now |
 | `note` | what the machine says about itself: compaction, retries, refusals, denials, mode changes, a hook that failed, a subagent starting | a chip on a hairline rule, coloured by its family, its body behind a click |
-| `detail` | the machine's own breathing: `status: "requesting"`, hook starts, rate-limit pings, and any kind this app has no name for | nothing, until "show everything" is on |
+| `detail` | the machine's own breathing: `status: "requesting"`, hook starts, rate-limit pings, and any kind this app has no name for | a grey chip, under the Routine switch |
 
 The kit's `system/informational` carries its own `level`, and its documentation
 already names the treatment the manager asked for — "'info' shows only in
@@ -972,9 +972,13 @@ base64. Turning the lot into JSON put thousands of characters of encoding where
 the picture belongs — invisible while the browser was discarding output, and
 unmissable the moment the row started opening onto it (bw-1u1.30).
 
-**One control opens everything, and it is Ctrl+O**, because that is the key that
-does it in his terminal. It opens every call and every `detail` line at once,
-and the choice is remembered for the browser rather than the chat.
+**There is no control that opens everything.** There was: Ctrl+O opened every
+call and every `detail` line at once. It also GATED the quiet lines, and the
+kind filter counted only what it let through — so a chat carrying thirty-three
+status lines reported none, and the reader was told to press a button he did not
+want to exist. Every line is drawn now, and the kind filter alone decides which
+of them he sees: one switch per family under Status lines (bw-jkh2.13, §1.11 of
+the app-shell design). A row opens on its own click.
 
 **A message with no stream behind it is still drawn.** Text has only ever come
 from `stream_event` deltas, so a message the kit writes itself — a compaction
@@ -1024,7 +1028,8 @@ sidecar stores it, so the chat does not wake up back in the old mode
 #### 8.2.5 What this costs the log
 
 Every rank is stored; only the drawing differs (§4 — the log is the transcript,
-and a `detail` line hidden today must still be there when he presses Ctrl+O).
+and the rank now decides a line's family and its colour rather than whether it
+is drawn at all).
 
 Measured rather than assumed, with `scripts/measure-quiet.mjs`, 2026-08-19 —
 two turns **in the mode that asks**, one running a command and one writing a
@@ -1103,7 +1108,7 @@ here* without leaving the words that sent it.
 
 Constraint: work a chat hands to another agent is a **row you can see, open and
 steer**, from the moment it is sent to the moment it answers. Today it is a grey
-line ranked `detail` — hidden unless "show everything" is on — and then silence
+line ranked `detail` — grey and easy to scroll past — and then silence
 until a result appears in the parent's speech as if the parent had done it.
 
 **One row per piece of sent-off work**, and the panel is a work panel rather
