@@ -267,15 +267,25 @@ export function ProjectCard({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {archivedAt ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={(e) => { e.stopPropagation(); onUnarchive?.(); }}
-              aria-label="Restore project"
-            >
-              <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
-              Restore
-            </Button>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    mode="icon"
+                    className="shrink-0"
+                    onClick={(e) => { e.stopPropagation(); onUnarchive?.(); }}
+                    aria-label="Restore project"
+                  >
+                    <ArchiveRestore className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Restore project</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           ) : (
             <>
               <TooltipProvider delayDuration={300}>
