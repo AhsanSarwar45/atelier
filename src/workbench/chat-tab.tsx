@@ -645,7 +645,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {/* The chat's own column. Only when there IS a chat: an empty rail beside
           an empty screen says nothing and takes width to say it. */}
       {sessionId && (
-        <ChatRightRail projectId={projectId} cards={cards} reports={ours} open={rightOpen} onToggle={flipRight} />
+        <ChatRightRail
+          projectId={projectId}
+          cards={cards}
+          reports={ours}
+          agents={view.agents}
+          open={rightOpen}
+          onToggle={flipRight}
+        />
       )}
       {sessionId && (
         <button

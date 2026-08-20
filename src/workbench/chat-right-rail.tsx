@@ -29,7 +29,9 @@ import { PanelRight, PanelRightClose } from 'lucide-react';
 import { BeadChip } from '@/components/bead-chip-row';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
+import type { SentAway } from '@/workbench/fold';
 import { ReportChip } from '@/workbench/report-view';
+import { SentAwayPanel } from '@/workbench/sent-away';
 
 /** Where the rail's open-or-shut is remembered between visits. */
 const RIGHT_RAIL = 'workbench.right-rail';
@@ -79,13 +81,15 @@ export interface ChatRightRailProps {
   cards: string[];
   /** The reports this chat's work produced. */
   reports: { project: string; slug: string; title: string }[];
+  /** Everything it handed to something else, oldest first (§8.2.7). */
+  agents: SentAway[];
   open: boolean;
   onToggle: () => void;
 }
 
-export function ChatRightRail({ projectId, cards, reports, open, onToggle }: ChatRightRailProps) {
+export function ChatRightRail({ projectId, cards, reports, agents, open, onToggle }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
-  const empty = cards.length === 0 && reports.length === 0;
+  const empty = cards.length === 0 && reports.length === 0 && agents.length === 0;
   return (
     <div
       data-testid="chat-right-rail"
@@ -137,6 +141,16 @@ export function ChatRightRail({ projectId, cards, reports, open, onToggle }: Cha
           open ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
       >
+          {/* First in the column because it is the only part of it that moves.
+              Cards and reports are a record and will still be there; a helper
+              that has been going four minutes is the thing the reader opened
+              this rail to look at (§8.2.7). */}
+          {agents.length > 0 && (
+            <Section title="Sent away">
+              <SentAwayPanel agents={agents} />
+            </Section>
+          )}
+
           {jobs.length > 0 && (
             <Section title="Cards it has touched">
               {/* One chip per JOB, and all of them: the column exists so nothing

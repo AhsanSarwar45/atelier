@@ -1,0 +1,336 @@
+/**
+ * Everything the chat handed to something else, as rows beside it.
+ *
+ * The kit was always saying this and the screen was always throwing it away: a
+ * chat that sent four helpers off drew four grey commands and no answer to
+ * "what is running, on which model, for how long, at what price"
+ * (bw-7ks.22.3).
+ *
+ * Both folds are checked on the same events, because the live tail and the
+ * replay are two paths to one conversation and a difference between them is a
+ * panel that changes when you reload it (§4).
+ *
+ * The clock is held still for the drawing, because a row counts its own seconds
+ * between the kit's reports and a test that reads the real clock proves only
+ * what time it was when it ran.
+ */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
+import type { WbpEvent } from '@/workbench/protocol';
+import { KINDS, SentAwayPanel, STATES, forHowLong, modelNamed, spend } from '@/workbench/sent-away';
+
+/** When everything below was sent away. */
+const OFF = '2026-08-20T09:00:00.000Z';
+
+/** A minute and two seconds later, which is when the panel is drawn. */
+const NOW = '2026-08-20T09:01:02.000Z';
+
+let stamped = 0;
+type Said<T> = T extends unknown ? Omit<T, 'seq' | 'sessionId' | 'at'> : never;
+function said(e: Said<WbpEvent>): WbpEvent {
+  stamped += 1;
+  return { ...e, seq: stamped, sessionId: 'chat-1', at: OFF } as WbpEvent;
+}
+
+/**
+ * A turn that sends all four kinds of work away: a helper given a brief, a
+ * command left running, a watch, and a scripted run of agents.
+ */
+function sentAway(): WbpEvent[] {
+  return [
+    // The helper, named twice on purpose — the kit's level list and its edge
+    // both name a task and the SDK says either may arrive first.
+    said({
+      type: 'agent.started',
+      agentId: 'task-1',
+      toolCallId: 'call-1',
+      kind: 'helper',
+      what: 'find the callers',
+      agentType: 'general-purpose',
+      model: null,
+    }),
+    said({
+      type: 'agent.started',
+      agentId: 'task-1',
+      toolCallId: null,
+      kind: 'helper',
+      what: '',
+      agentType: null,
+      model: 'claude-opus-4-5-20251101',
+    }),
+    said({ type: 'agent.progress', agentId: 'task-1', seconds: 31, tokens: 12_400, calls: 6, doing: 'Reading the router' }),
+    said({ type: 'agent.progress', agentId: 'task-1', seconds: 90, tokens: 20_100, calls: 9 }),
+
+    said({
+      type: 'agent.started',
+      agentId: 'bash-1',
+      toolCallId: 'call-2',
+      kind: 'command',
+      what: 'npm test',
+      agentType: null,
+      model: null,
+    }),
+    said({ type: 'agent.progress', agentId: 'bash-1', seconds: 20, tokens: 0, calls: 0, state: 'parked' }),
+
+    said({
+      type: 'agent.started',
+      agentId: 'watch-1',
+      toolCallId: 'call-3',
+      kind: 'watch',
+      what: 'tests/results',
+      agentType: null,
+      model: null,
+    }),
+
+    said({
+      type: 'agent.started',
+      agentId: 'run-1',
+      toolCallId: 'call-4',
+      kind: 'run',
+      what: 'review the branch',
+      agentType: null,
+      model: 'claude-sonnet-4-5-20250929',
+    }),
+    said({ type: 'agent.progress', agentId: 'run-1', seconds: 45, tokens: 88_000, calls: 12, doing: 'Judging findings' }),
+    // Finished carrying nothing but the verdict, which is how the kit's own
+    // notification arrives.
+    said({
+      type: 'agent.finished',
+      agentId: 'run-1',
+      state: 'done',
+      seconds: 0,
+      tokens: 0,
+      calls: 0,
+      model: null,
+      result: 'Three findings, one real.',
+    }),
+  ];
+}
+
+/** The same events down the live tail, one at a time. */
+function live(events: WbpEvent[]): SessionView {
+  return events.reduce(reduce, EMPTY);
+}
+
+const bothWays: [string, (events: WbpEvent[]) => SessionView][] = [
+  ['the live tail', live],
+  ['a replay', (events) => foldAll(events)],
+];
+
+describe.each(bothWays)('what the chat sent away, down %s', (_name, build) => {
+  const view = build(sentAway());
+  const row = (id: string) => view.agents.find((a) => a.id === id)!;
+
+  it('keeps one row per piece of work, in the order it was sent', () => {
+    expect(view.agents.map((a) => a.id)).toEqual(['task-1', 'bash-1', 'watch-1', 'run-1']);
+  });
+
+  it('draws one row for a helper the kit names twice', () => {
+    expect(view.agents.filter((a) => a.id === 'task-1')).toHaveLength(1);
+    expect(row('task-1')).toMatchObject({
+      toolCallId: 'call-1',
+      what: 'find the callers',
+      agentType: 'general-purpose',
+      model: 'claude-opus-4-5-20251101',
+    });
+  });
+
+  it('carries the kind, the clock and the spend the kit reported', () => {
+    expect(row('task-1')).toMatchObject({ kind: 'helper', state: 'running', seconds: 90, tokens: 20_100, calls: 9 });
+    expect(row('task-1').startedAt).toBe(Date.parse(OFF));
+  });
+
+  it('keeps the last thing it said when a later beat says nothing new', () => {
+    expect(row('task-1').doing).toBe('Reading the router');
+  });
+
+  it('takes the state a beat reports without touching the rest', () => {
+    expect(row('bash-1')).toMatchObject({ kind: 'command', state: 'parked', what: 'npm test' });
+  });
+
+  it('leaves work nobody has reported on at nothing spent', () => {
+    expect(row('watch-1')).toMatchObject({ kind: 'watch', state: 'running', seconds: 0, tokens: 0, doing: null });
+  });
+
+  it('keeps the last figures it was given when the finish carries none', () => {
+    expect(row('run-1')).toMatchObject({
+      state: 'done',
+      seconds: 45,
+      tokens: 88_000,
+      calls: 12,
+      model: 'claude-sonnet-4-5-20250929',
+      result: 'Three findings, one real.',
+    });
+  });
+
+  it('forgets them all when the conversation is replaced', () => {
+    expect(build([...sentAway(), said({ type: 'transcript.reset' })]).agents).toEqual([]);
+  });
+});
+
+describe('the live tail and a replay', () => {
+  it('agree on every row', () => {
+    expect(live(sentAway()).agents).toEqual(foldAll(sentAway()).agents);
+  });
+});
+
+describe('the numbers, said short enough to sit in a column', () => {
+  it('rounds time to the unit a glance needs', () => {
+    expect(forHowLong(0)).toBe('0s');
+    expect(forHowLong(59)).toBe('59s');
+    expect(forHowLong(60)).toBe('1m 00s');
+    expect(forHowLong(124)).toBe('2m 04s');
+    expect(forHowLong(4800)).toBe('1h 20m');
+  });
+
+  it('rounds spend, keeping a digit while the figure is small', () => {
+    expect(spend(940)).toBe('940');
+    expect(spend(1240)).toBe('1.2k');
+    expect(spend(20_100)).toBe('20k');
+    expect(spend(1_240_000)).toBe('1.2M');
+  });
+
+  it('says the model without the vendor or the date', () => {
+    expect(modelNamed('claude-opus-4-5-20251101')).toBe('opus-4-5');
+    expect(modelNamed('gpt-5-codex')).toBe('gpt-5-codex');
+    expect(modelNamed(null)).toBeNull();
+  });
+});
+
+describe('the panel', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function drawn() {
+    const agents = foldAll(sentAway()).agents;
+    render(<SentAwayPanel agents={agents} />);
+    return Object.fromEntries(
+      screen.getAllByTestId('sent-away-row').map((el) => [el.getAttribute('data-agent')!, el]),
+    );
+  }
+
+  it('draws nothing at all when the chat has sent nothing away', () => {
+    const { container } = render(<SentAwayPanel agents={[]} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('gives every piece of sent-off work a row of its own', () => {
+    drawn();
+    const panel = screen.getByTestId('sent-away-panel');
+    expect(panel).toHaveAttribute('data-rows', '4');
+    expect(panel, 'the finished run is still counted as running').toHaveAttribute('data-running', '3');
+    expect(screen.getAllByTestId('sent-away-row').map((el) => el.getAttribute('data-kind'))).toEqual([
+      'helper',
+      'command',
+      'watch',
+      'run',
+    ]);
+  });
+
+  it('carries what it is, which model, how long and what it spent', () => {
+    const rows = drawn();
+    const helper = rows['task-1']!;
+    expect(helper).toHaveAttribute('data-state', 'running');
+    expect(helper.querySelector('[data-testid="sent-away-kind"]')).toHaveTextContent('helper');
+    expect(helper.querySelector('[data-testid="sent-away-what"]')).toHaveTextContent('find the callers');
+    expect(helper.querySelector('[data-testid="sent-away-model"]')).toHaveTextContent('opus-4-5');
+    // The kit's own count, which is ahead of the row's: it knows about pauses.
+    expect(helper.querySelector('[data-testid="sent-away-for"]')).toHaveTextContent('1m 30s');
+    expect(helper.querySelector('[data-testid="sent-away-spend"]')).toHaveTextContent('20k');
+    expect(helper.querySelector('[data-testid="sent-away-calls"]')).toHaveTextContent('9 calls');
+    expect(helper.querySelector('[data-testid="sent-away-doing"]')).toHaveTextContent('Reading the router');
+  });
+
+  it('counts its own seconds between the kit’s reports', () => {
+    const rows = drawn();
+    const command = rows['bash-1']!;
+    const clock = () => command.querySelector('[data-testid="sent-away-for"]')!.textContent;
+
+    // The kit last said 20s a minute ago, and a clock that jumps in
+    // half-minutes reads as a clock that has stopped.
+    expect(clock()).toBe('1m 02s');
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(clock()).toBe('1m 07s');
+  });
+
+  it('goes quiet when the work is over, and keeps its answer', () => {
+    const rows = drawn();
+    const run = rows['run-1']!;
+    expect(run).toHaveAttribute('data-state', 'done');
+    expect(run.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('done');
+    expect(run.querySelector('[data-testid="sent-away-result"]')).toHaveTextContent('Three findings, one real.');
+    expect(run.querySelector('[data-testid="sent-away-doing"]'), 'a finished row is still saying what it is doing').toBeNull();
+
+    // And its clock has stopped: what it took is what it took.
+    expect(run.querySelector('[data-testid="sent-away-for"]')).toHaveTextContent('45s');
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(run.querySelector('[data-testid="sent-away-for"]')).toHaveTextContent('45s');
+  });
+
+  it('says which of them are waiting on you', () => {
+    const rows = drawn();
+    expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('parked');
+    expect(rows['task-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('running');
+  });
+});
+
+/**
+ * The half of this that lives in the sidecar, read out of the sidecar itself.
+ *
+ * Read rather than listed, because the driver runs in its own process against
+ * the kit's own messages: a list here would go stale the first time a task
+ * message is handled over there, and the row it should have drawn would simply
+ * not appear with nothing going red.
+ */
+describe('the driver, which is where these rows come from', () => {
+  const source = readFileSync(resolve(__dirname, '../../../workbench/src/drivers/claude.ts'), 'utf8');
+
+  /** Every task message the kit sends, from the SDK's own list. */
+  const KIT_SAYS = ['task_started', 'task_progress', 'task_updated', 'task_notification', 'background_tasks_changed'];
+
+  it('puts all three of these on the wire', () => {
+    for (const word of ['agent.started', 'agent.progress', 'agent.finished']) {
+      expect(source, `the driver never sends ${word}, so no row could ever appear`).toContain(`type: '${word}'`);
+    }
+  });
+
+  it('reads every task message the kit sends', () => {
+    const from = source.indexOf('private sawTask(');
+    expect(from, 'the driver no longer reads task messages under that name').toBeGreaterThan(-1);
+    const block = source.slice(from, source.indexOf('\n  private ', from + 1));
+    const heard = Array.from(block.matchAll(/case '(\w+)':/g)).map((m) => m[1]!);
+    expect(KIT_SAYS.filter((word) => !heard.includes(word)), 'the kit says these and the driver ignores them').toEqual(
+      [],
+    );
+  });
+
+  it('never names a kind the panel cannot draw', () => {
+    const from = source.indexOf('function kindOfTask(');
+    const block = source.slice(from, source.indexOf('\n}', from));
+    const named = Array.from(block.matchAll(/return '(\w+)'/g)).map((m) => m[1]!);
+    expect(named.length, 'the sorting function no longer names its kinds').toBeGreaterThan(3);
+    expect(named.filter((kind) => !(kind in KINDS))).toEqual([]);
+  });
+
+  it('never names a state the panel cannot draw', () => {
+    const from = source.indexOf('const TASK_STATE');
+    const block = source.slice(from, source.indexOf('\n}', from));
+    const named = Array.from(block.matchAll(/: '(\w+)',/g)).map((m) => m[1]!);
+    expect(named.length, 'the state table no longer reads as one').toBeGreaterThan(4);
+    expect(named.filter((state) => !(state in STATES))).toEqual([]);
+  });
+});

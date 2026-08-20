@@ -1,0 +1,229 @@
+/**
+ * Everything the chat handed to something else, as rows beside the conversation
+ * (docs/agent-workbench.md §8.2.7).
+ *
+ * A work panel, not a subagent panel: the kit's own list of background work
+ * names four kinds — a helper given a brief, a command left running, a watch, a
+ * scripted run of agents — and all four are work this chat is waiting on, so
+ * all four get a row and the kind is a mark on the row rather than a list of
+ * its own.
+ *
+ * The numbers were always arriving and were always thrown away: elapsed, spend
+ * and call count come from the kit's own progress messages, and the model from
+ * the helper's own words. Nothing here asks for anything new.
+ *
+ * A row counts its own seconds between the kit's reports, because those arrive
+ * about twice a minute and a clock that moves in half-minute jumps reads as a
+ * clock that has stopped. The kit's own count wins the moment it arrives: it
+ * knows about pauses, and this does not.
+ *
+ * A finished row goes quiet — dimmed, its live line dropped — and keeps its
+ * result, because a row that throws the answer away is a row the reader has to
+ * go and find the answer for.
+ */
+'use client';
+
+import { useEffect, useState } from 'react';
+
+import { Bot, Clock, Coins, Eye, Terminal, Workflow } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
+import { Panel } from '@/components/ui/panel';
+import { cn } from '@/lib/utils';
+import type { SentAway } from '@/workbench/fold';
+import type { AgentKind, AgentState } from '@/workbench/protocol';
+
+/** How often a running row re-reads the clock. */
+const TICK_MS = 1000;
+
+/**
+ * What each kind is called on its row, and what it is drawn with.
+ *
+ * Exported so the sidecar's own words can be checked against it: a kind the
+ * driver invents and this does not know draws an empty row.
+ */
+export const KINDS: Record<AgentKind, { label: string; Icon: typeof Bot }> = {
+  helper: { label: 'helper', Icon: Bot },
+  command: { label: 'command', Icon: Terminal },
+  watch: { label: 'watch', Icon: Eye },
+  run: { label: 'run', Icon: Workflow },
+};
+
+/** What each state is called, and how loudly it is drawn. Exported for the same reason as the kinds above. */
+export const STATES: Record<AgentState, { label: string; variant: 'secondary' | 'warning' | 'destructive' | 'success' }> = {
+  running: { label: 'running', variant: 'secondary' },
+  waiting: { label: 'waiting on you', variant: 'warning' },
+  parked: { label: 'parked', variant: 'secondary' },
+  done: { label: 'done', variant: 'success' },
+  failed: { label: 'failed', variant: 'destructive' },
+  stopped: { label: 'stopped', variant: 'secondary' },
+};
+
+/** The states that are over: the row stops counting and starts keeping. */
+const OVER: AgentState[] = ['done', 'failed', 'stopped'];
+
+export function isOver(state: AgentState): boolean {
+  return OVER.includes(state);
+}
+
+/**
+ * Seconds, rounded to the unit a glance needs.
+ *
+ * Minutes keep their seconds — a helper is usually gone for two or three of
+ * them, and `2m` for anything between two and three minutes is the whole scale
+ * a reader has.
+ */
+export function forHowLong(seconds: number): string {
+  const secs = Math.max(0, Math.round(seconds));
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`;
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+}
+
+/**
+ * Tokens, short enough to sit beside a clock.
+ *
+ * Rounded rather than exact, because the exact figure is on the row's own title
+ * and nobody reads seven digits at a glance.
+ */
+export function spend(tokens: number): string {
+  if (tokens < 1000) return `${Math.max(0, Math.round(tokens))}`;
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
+  return `${(tokens / 1_000_000).toFixed(1)}M`;
+}
+
+/**
+ * The model, as short as it can be said.
+ *
+ * The kit answers with the full name it resolved to — `claude-opus-4-5-20251101`
+ * — and the column is about 90px wide. The date and the vendor are the parts a
+ * reader already knows.
+ */
+export function modelNamed(model: string | null): string | null {
+  if (!model) return null;
+  const short = model
+    .replace(/^claude-/, '')
+    .replace(/-\d{8}$/, '')
+    .replace(/-(latest|v\d+)$/, '');
+  return short || model;
+}
+
+/** How long this row has been going, live between the kit's own reports. */
+function running(row: SentAway, now: number): number {
+  if (isOver(row.state)) return row.seconds;
+  const mine = row.startedAt ? (now - row.startedAt) / 1000 : 0;
+  // The kit's count knows about pauses and this one does not, so it wins
+  // whenever it is the larger of the two.
+  return Math.max(row.seconds, mine);
+}
+
+function Row({ row, now }: { row: SentAway; now: number }) {
+  const { label: kind, Icon } = KINDS[row.kind];
+  const state = STATES[row.state];
+  const model = modelNamed(row.model);
+  const over = isOver(row.state);
+
+  return (
+    <Panel
+      role="listitem"
+      inset="none"
+      data-testid="sent-away-row"
+      data-agent={row.id}
+      data-kind={row.kind}
+      data-state={row.state}
+      className={cn(
+        'flex flex-col gap-1 px-2 py-1.5 text-xs',
+        // Over is quiet: the eye belongs on whatever is still moving.
+        over && 'opacity-60',
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span data-testid="sent-away-kind" className="sr-only">
+          {kind}
+        </span>
+        <span data-testid="sent-away-what" className="min-w-0 flex-1 truncate" title={row.what}>
+          {row.what || kind}
+        </span>
+        <Badge variant={state.variant} appearance="light" size="xs" data-testid="sent-away-state" className="shrink-0">
+          {state.label}
+        </Badge>
+      </div>
+
+      {/* The three numbers, in the order they are asked for: which model, how
+          long, what it has spent. Each wears its own mark — three bare numbers
+          in a row read as one (bw-7ks.22.13). */}
+      <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+        {model && (
+          <span data-testid="sent-away-model" className="max-w-24 shrink truncate" title={row.model ?? undefined}>
+            {model}
+          </span>
+        )}
+        <span data-testid="sent-away-for" className="flex shrink-0 items-center gap-1">
+          <Clock className="h-3 w-3" aria-hidden="true" />
+          {forHowLong(running(row, now))}
+        </span>
+        <span
+          data-testid="sent-away-spend"
+          className="flex shrink-0 items-center gap-1"
+          title={`${row.tokens.toLocaleString()} tokens over ${row.calls} call${row.calls === 1 ? '' : 's'}`}
+        >
+          <Coins className="h-3 w-3" aria-hidden="true" />
+          {spend(row.tokens)}
+        </span>
+        {row.calls > 0 && (
+          <span data-testid="sent-away-calls" className="shrink-0">
+            {row.calls} call{row.calls === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+
+      {/* Its own last line while it works, its answer once it is done. Never
+          both: the present tense of a thing that has finished is a lie. */}
+      {!over && row.doing && (
+        <p data-testid="sent-away-doing" className="line-clamp-2 text-[11px] italic text-muted-foreground">
+          {row.doing}
+        </p>
+      )}
+      {over && row.result && (
+        <p data-testid="sent-away-result" className="line-clamp-2 text-[11px] text-muted-foreground" title={row.result}>
+          {row.result}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+export interface SentAwayPanelProps {
+  agents: SentAway[];
+}
+
+export function SentAwayPanel({ agents }: SentAwayPanelProps) {
+  const live = agents.some((a) => !isOver(a.state));
+  const [now, setNow] = useState(() => Date.now());
+
+  // Only while something is running: a panel of finished rows that re-renders
+  // every second is a panel that costs a frame a second to say nothing.
+  useEffect(() => {
+    if (!live) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(tick);
+  }, [live]);
+
+  if (agents.length === 0) return null;
+
+  return (
+    <div
+      role="list"
+      data-testid="sent-away-panel"
+      data-rows={agents.length}
+      data-running={agents.filter((a) => !isOver(a.state)).length}
+      className="flex flex-col gap-1.5"
+    >
+      {agents.map((row) => (
+        <Row key={row.id} row={row} now={now} />
+      ))}
+    </div>
+  );
+}

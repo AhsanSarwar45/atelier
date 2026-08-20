@@ -12,7 +12,7 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
-import type { CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
 import { fullness, WINDOW, windowNamed } from '../../../src/workbench/context-window.ts';
@@ -102,6 +102,32 @@ function oneLine(value: unknown, limit = 200): string {
  * its comment promised a cross-check that no longer existed — a safety net made
  * of a sentence (bw-1u1.34).
  */
+/**
+ * Which kind of sent-off work this is (docs/agent-workbench.md §8.2.7).
+ *
+ * The kit names its own kinds and is free to invent more, so this reads the
+ * name rather than matching a closed list: anything it has no word for is a
+ * helper, which is what most of them are and what the row then says.
+ */
+function kindOfTask(taskType: unknown, agentType: unknown): AgentKind {
+  const said = `${String(taskType ?? '')} ${String(agentType ?? '')}`.toLowerCase();
+  if (said.includes('workflow')) return 'run';
+  if (said.includes('bash') || said.includes('command') || said.includes('shell')) return 'command';
+  if (said.includes('watch') || said.includes('monitor')) return 'watch';
+  return 'helper';
+}
+
+/** What the kit's own word for a task's state means on a row. */
+const TASK_STATE: Record<string, AgentState> = {
+  pending: 'running',
+  running: 'running',
+  paused: 'parked',
+  completed: 'done',
+  failed: 'failed',
+  killed: 'stopped',
+  stopped: 'stopped',
+};
+
 function noteFor(m: Record<string, any>): Note | null {
   const note = noteBody(m);
   // A line cut at two hundred characters with nothing behind it is a line whose
@@ -321,6 +347,21 @@ export class ClaudeDriver implements Driver {
    * screen back to rest over a working agent (bw-f1q).
    */
   private awaitingAnswer = false;
+  /**
+   * Every piece of work this chat has sent away, by the kit's own task id
+   * (docs/agent-workbench.md §8.2.7).
+   *
+   * Kept because the kit's later messages about a task each carry only part of
+   * the picture — a status change carries no numbers, a result carries no
+   * elapsed — and a row that blanked what it was not told again would flicker
+   * every time one arrived.
+   */
+  private sentAway = new Map<
+    string,
+    { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState }
+  >();
+  /** Which task a call sent off, so a helper's own words can find its row. */
+  private taskOfCall = new Map<string, string>();
   /** When the last thinking-progress line was sent, so a long think is not a flood. */
   private lastThinkingAt = 0;
   /**
@@ -369,6 +410,222 @@ export class ClaudeDriver implements Driver {
   }
 
   /** A line about the chat's own machinery, and the whole message behind it. */
+  /**
+   * Everything the kit says about work this chat handed to something else,
+   * translated into the three lines the panel is drawn from
+   * (docs/agent-workbench.md §8.2.7).
+   *
+   * Read before the rest of the `system` arm and never instead of it: the grey
+   * lines those subtypes already draw are the record of what happened, and the
+   * panel is a reading of it. One does not replace the other.
+   *
+   * Nothing here is a delta. The kit's messages each carry a different corner
+   * of the picture — a status change with no numbers, a result with no elapsed
+   * — so what it does not say this time is what it said last time, kept in
+   * `sentAway` rather than blanked.
+   */
+  private sawTask(m: Record<string, any>): void {
+    const numbers = (id: string) =>
+      this.sentAway.get(id) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' as AgentState };
+
+    switch (m.subtype) {
+      case 'task_started': {
+        const id = String(m.task_id ?? '');
+        if (!id) return;
+        const call = typeof m.tool_use_id === 'string' && m.tool_use_id ? m.tool_use_id : null;
+        if (call) this.taskOfCall.set(call, id);
+        if (!this.sentAway.has(id)) this.sentAway.set(id, numbers(id));
+        this.emit({
+          type: 'agent.started',
+          agentId: id,
+          toolCallId: call,
+          kind: kindOfTask(m.task_type, m.subagent_type),
+          what: oneLine(m.description ?? m.workflow_name ?? m.prompt ?? ''),
+          agentType: typeof m.subagent_type === 'string' ? m.subagent_type : null,
+          // The kit names no model here. It arrives with the helper's first
+          // words, or with its result — both fill this row in later.
+          model: null,
+        });
+        return;
+      }
+
+      case 'task_progress': {
+        const id = String(m.task_id ?? '');
+        if (!id) return;
+        const was = numbers(id);
+        const now = {
+          ...was,
+          seconds: Math.round(Number(m.usage?.duration_ms ?? 0) / 1000) || was.seconds,
+          tokens: Number(m.usage?.total_tokens ?? 0) || was.tokens,
+          calls: Number(m.usage?.tool_uses ?? 0) || was.calls,
+        };
+        this.sentAway.set(id, now);
+        const doing = oneLine(m.summary ?? m.last_tool_name ?? m.description ?? '');
+        this.emit({
+          type: 'agent.progress',
+          agentId: id,
+          seconds: now.seconds,
+          tokens: now.tokens,
+          calls: now.calls,
+          ...(doing ? { doing } : {}),
+          ...(now.model ? { model: now.model } : {}),
+        });
+        return;
+      }
+
+      case 'task_updated': {
+        // A status change and nothing else: the numbers on the row are the ones
+        // it already had, which is why they are kept here at all.
+        const id = String(m.task_id ?? '');
+        const patch = (m.patch ?? {}) as { status?: string; is_backgrounded?: boolean };
+        if (!id || (!patch.status && patch.is_backgrounded === undefined)) return;
+        const was = numbers(id);
+        // Parked beats the status it is still running under: a helper left to
+        // run in the background is exactly a running one nobody is waiting at.
+        const state: AgentState = patch.is_backgrounded
+          ? 'parked'
+          : (patch.status && TASK_STATE[patch.status]) || was.state;
+        this.sentAway.set(id, { ...was, state });
+        this.emit({
+          type: 'agent.progress',
+          agentId: id,
+          seconds: was.seconds,
+          tokens: was.tokens,
+          calls: was.calls,
+          state,
+        });
+        return;
+      }
+
+      case 'task_notification': {
+        const id = String(m.task_id ?? '');
+        if (!id) return;
+        const was = numbers(id);
+        const state = TASK_STATE[String(m.status ?? '')] ?? 'done';
+        this.emit({
+          type: 'agent.finished',
+          agentId: id,
+          state: state === 'failed' ? 'failed' : state === 'stopped' ? 'stopped' : 'done',
+          seconds: Math.round(Number(m.usage?.duration_ms ?? 0) / 1000) || was.seconds,
+          tokens: Number(m.usage?.total_tokens ?? 0) || was.tokens,
+          calls: Number(m.usage?.tool_uses ?? 0) || was.calls,
+          model: was.model,
+          // Its last word, kept on the row. A finished row that throws the
+          // answer away is a row the reader has to go looking for it.
+          result: oneLine(m.summary ?? '') || null,
+        });
+        return;
+      }
+
+      case 'background_tasks_changed': {
+        // The level list, which is the only place a command left running ever
+        // appears: it was never a call of this chat's own, so no row would be
+        // drawn for it from the edges alone. REPLACE semantics on the kit's
+        // side; here it only ever opens rows, because what closes one is the
+        // edge that says how it ended.
+        for (const task of (m.tasks ?? []) as { task_id: string; task_type: string; description: string }[]) {
+          const id = String(task.task_id ?? '');
+          if (!id || this.sentAway.has(id)) continue;
+          this.sentAway.set(id, numbers(id));
+          this.emit({
+            type: 'agent.started',
+            agentId: id,
+            toolCallId: null,
+            kind: kindOfTask(task.task_type, null),
+            what: oneLine(task.description ?? ''),
+            agentType: null,
+            model: null,
+          });
+        }
+        return;
+      }
+
+      default:
+        return;
+    }
+  }
+
+  /**
+   * The model a helper is actually running, which the kit states nowhere except
+   * on the helper's own messages. Sent up once, when it is first seen: the row
+   * has an empty model column until then, and a row per message would be a
+   * hundred events saying the same word.
+   */
+  private helperModel(callId: string, model: unknown): void {
+    const id = this.taskOfCall.get(callId);
+    if (!id || typeof model !== 'string' || !model) return;
+    const was = this.sentAway.get(id);
+    if (!was || was.model === model) return;
+    this.sentAway.set(id, { ...was, model });
+    this.emit({
+      type: 'agent.progress',
+      agentId: id,
+      seconds: was.seconds,
+      tokens: was.tokens,
+      calls: was.calls,
+      model,
+    });
+  }
+
+  /**
+   * What a helper's own result says about the run, when the kit sends it.
+   *
+   * `tool_use_result` is the structured Agent output — the report without the
+   * model-directed trailer, plus totals — and is the only place the model a
+   * helper actually resolved to is stated outright. Read from the result rather
+   * than parsed out of the text it hands the model, which is what the kit's own
+   * documentation says to do.
+   */
+  private helperFinished(callId: string, ok: boolean, result: unknown, output: string): void {
+    const id = this.taskOfCall.get(callId);
+    if (!id) return;
+    const was = this.sentAway.get(id) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' as AgentState };
+    const totals = (result ?? {}) as {
+      resolvedModel?: string;
+      totalTokens?: number;
+      totalToolUseCount?: number;
+      totalDurationMs?: number;
+    };
+    const model = totals.resolvedModel ?? was.model;
+
+    // A launch is not an answer. Work the kit runs in the background — a
+    // command, a workflow, a helper started asynchronously — answers its own
+    // call IMMEDIATELY with an acknowledgement carrying an id and no usage at
+    // all, and the thing itself goes on running for minutes. Read as a finish,
+    // every row on the panel went grey seconds after it opened and wore the
+    // acknowledgement as its result (measured 2026-08-20, all three kinds).
+    // What ends such a row is the kit's own notification, which arrives when
+    // the work actually ends. An error is still an ending: a call that came
+    // back red is over however little it spent.
+    const spent = Number(totals.totalDurationMs ?? 0) + Number(totals.totalTokens ?? 0) + Number(totals.totalToolUseCount ?? 0);
+    if (ok && !spent) {
+      if (model && model !== was.model) {
+        this.sentAway.set(id, { ...was, model });
+        this.emit({
+          type: 'agent.progress',
+          agentId: id,
+          seconds: was.seconds,
+          tokens: was.tokens,
+          calls: was.calls,
+          model,
+        });
+      }
+      return;
+    }
+
+    this.sentAway.set(id, { ...was, model, state: ok ? 'done' : 'failed' });
+    this.emit({
+      type: 'agent.finished',
+      agentId: id,
+      state: ok ? 'done' : 'failed',
+      seconds: Math.round(Number(totals.totalDurationMs ?? 0) / 1000) || was.seconds,
+      tokens: Number(totals.totalTokens ?? 0) || was.tokens,
+      calls: Number(totals.totalToolUseCount ?? 0) || was.calls,
+      model,
+      result: oneLine(output) || null,
+    });
+  }
+
   private note(note: Note): void {
     // A quiet line is skipped when the same sentence has just been drawn; a
     // `detail` is not, because it is the record rather than the reading.
@@ -788,6 +1045,9 @@ export class ClaudeDriver implements Driver {
         if (m.subtype === 'status' && typeof m.permissionMode === 'string' && m.permissionMode) {
           this.modeIsNow(m.permissionMode);
         }
+        // What the chat has sent away, read from the same messages the lines
+        // below are drawn from rather than instead of them (§8.2.7).
+        this.sawTask(m);
         if (m.subtype === 'init') {
           this.emit({
             type: 'session.started',
@@ -893,6 +1153,8 @@ export class ClaudeDriver implements Driver {
         // and every event below is stamped with the call that sent them, so the
         // rows nest instead of interleaving (bw-7ks.22.2).
         const sentBy: string | undefined = m.parent_tool_use_id ?? undefined;
+        // Which model this helper is on. Nothing else in the stream says it.
+        if (sentBy) this.helperModel(sentBy, m.message?.model);
 
         // Words that never came down the stream — the kit wrote this message
         // itself, so there was no `message_start` and nothing was drawn
@@ -983,6 +1245,11 @@ export class ClaudeDriver implements Driver {
               ok: !b.is_error,
               output: cut(output),
             });
+            // A helper's run totals, which the kit sends structured rather than
+            // in the words it hands the model: the model it settled on, what it
+            // spent and how many calls it made. The row's own edge message says
+            // it finished; this says what it finished having done (§8.2.7).
+            this.helperFinished(b.tool_use_id, !b.is_error, m.tool_use_result, output);
           }
         }
         break;

@@ -19,6 +19,8 @@
  * Design: docs/agent-workbench.md §4.
  */
 import type {
+  AgentKind,
+  AgentState,
   AskOption,
   CommandInfo,
   Cost,
@@ -123,6 +125,40 @@ export type TranscriptItem =
   | TranscriptNote
   | TranscriptNotice;
 
+/**
+ * One piece of work the chat sent away, as the panel draws it
+ * (docs/agent-workbench.md §8.2.7).
+ *
+ * It is kept apart from the conversation rather than as another item in it,
+ * because it is not something that was said: a helper started ten minutes ago
+ * is a row whose numbers are still moving, and a row that moves cannot be a
+ * line in a transcript that only ever grows at the bottom.
+ *
+ * `startedAt` is when the chat let go of it, so a row can count its own seconds
+ * between the kit's reports; `seconds` is the kit's own count, which is the one
+ * that is right when the two disagree.
+ */
+export interface SentAway {
+  id: string;
+  /** The call that sent it, where there was one. A helper's row opens onto it. */
+  toolCallId: string | null;
+  kind: AgentKind;
+  what: string;
+  agentType: string | null;
+  model: string | null;
+  state: AgentState;
+  /** Milliseconds since the epoch, from the event that started it. */
+  startedAt: number;
+  /** How long the kit says it has been going. */
+  seconds: number;
+  tokens: number;
+  calls: number;
+  /** Its own last present-tense line, or null until it has said one. */
+  doing: string | null;
+  /** Its last word, kept once it is finished. */
+  result: string | null;
+}
+
 export interface SessionView {
   items: TranscriptItem[];
   state: SessionState;
@@ -134,6 +170,8 @@ export interface SessionView {
    */
   context: { used: number; window: number } | null;
   todos: TodoItem[];
+  /** Everything this chat sent away, oldest first (docs/agent-workbench.md §8.2.7). */
+  agents: SentAway[];
   /** Cards this chat has touched, as the machine recorded them. */
   beads: string[];
   /** What the session is actually pinned to, as the agent reported it. */
@@ -164,6 +202,7 @@ export const EMPTY: SessionView = {
   cost: null,
   context: null,
   todos: [],
+  agents: [],
   beads: [],
   permissionMode: null,
   model: null,
@@ -282,6 +321,75 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       );
       return next;
 
+    case 'agent.started': {
+      // Named work: a kit that says the same thing twice — the level list and
+      // the edge, which the SDK's own note says may arrive in either order —
+      // must not draw two rows for one helper (bw-7ks.22.3).
+      const known = view.agents.some((a) => a.id === e.agentId);
+      next.agents = known
+        ? view.agents.map((a) =>
+            a.id === e.agentId
+              ? { ...a, toolCallId: a.toolCallId ?? e.toolCallId, what: a.what || e.what, model: a.model ?? e.model }
+              : a,
+          )
+        : [
+            ...view.agents,
+            {
+              id: e.agentId,
+              toolCallId: e.toolCallId,
+              kind: e.kind,
+              what: e.what,
+              agentType: e.agentType,
+              model: e.model,
+              state: 'running' as AgentState,
+              startedAt: Date.parse(e.at) || 0,
+              seconds: 0,
+              tokens: 0,
+              calls: 0,
+              doing: null,
+              result: null,
+            },
+          ];
+      return next;
+    }
+
+    case 'agent.progress':
+      next.agents = view.agents.map((a) =>
+        a.id === e.agentId
+          ? {
+              ...a,
+              seconds: e.seconds,
+              tokens: e.tokens,
+              calls: e.calls,
+              // Absent means "still whatever it last said", the same bargain
+              // tool.progress makes: a blank line would erase it.
+              doing: e.doing || a.doing,
+              model: e.model || a.model,
+              state: e.state ?? a.state,
+            }
+          : a,
+      );
+      return next;
+
+    case 'agent.finished':
+      next.agents = view.agents.map((a) =>
+        a.id === e.agentId
+          ? {
+              ...a,
+              state: e.state,
+              // The kit's own numbers where it sent them, and what the row
+              // already had where it did not: a finished row that blanks its
+              // spend is worse than one carrying the last figure it was given.
+              seconds: e.seconds || a.seconds,
+              tokens: e.tokens || a.tokens,
+              calls: e.calls || a.calls,
+              model: e.model ?? a.model,
+              result: e.result,
+            }
+          : a,
+      );
+      return next;
+
     case 'diff':
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId
@@ -361,6 +469,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'transcript.reset':
       next.items = [];
       next.beads = [];
+      next.agents = [];
       return next;
 
     default:
@@ -394,8 +503,10 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
   const reportSeen = new Set<string>();
   const beads: string[] = [];
   const beadSeen = new Set<string>();
+  const agents: SentAway[] = [];
+  const agentAt = new Map<string, number>();
 
-  const view: SessionView = { ...EMPTY, items, beads, todos: [] };
+  const view: SessionView = { ...EMPTY, items, beads, agents, todos: [] };
 
   const forget = () => {
     items.length = 0;
@@ -406,6 +517,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
     reportSeen.clear();
     beads.length = 0;
     beadSeen.clear();
+    agents.length = 0;
+    agentAt.clear();
   };
 
   for (const e of events) {
@@ -509,6 +622,62 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           const it = items[at] as TranscriptTool;
           it.seconds = e.seconds;
           if (e.summary) it.summary = e.summary;
+        }
+        break;
+      }
+
+      case 'agent.started': {
+        const at = agentAt.get(e.agentId);
+        if (at === undefined) {
+          agentAt.set(e.agentId, agents.length);
+          agents.push({
+            id: e.agentId,
+            toolCallId: e.toolCallId,
+            kind: e.kind,
+            what: e.what,
+            agentType: e.agentType,
+            model: e.model,
+            state: 'running',
+            startedAt: Date.parse(e.at) || 0,
+            seconds: 0,
+            tokens: 0,
+            calls: 0,
+            doing: null,
+            result: null,
+          });
+        } else {
+          const row = agents[at]!;
+          row.toolCallId = row.toolCallId ?? e.toolCallId;
+          row.what = row.what || e.what;
+          row.model = row.model ?? e.model;
+        }
+        break;
+      }
+
+      case 'agent.progress': {
+        const at = agentAt.get(e.agentId);
+        if (at !== undefined) {
+          const row = agents[at]!;
+          row.seconds = e.seconds;
+          row.tokens = e.tokens;
+          row.calls = e.calls;
+          if (e.doing) row.doing = e.doing;
+          if (e.model) row.model = e.model;
+          if (e.state) row.state = e.state;
+        }
+        break;
+      }
+
+      case 'agent.finished': {
+        const at = agentAt.get(e.agentId);
+        if (at !== undefined) {
+          const row = agents[at]!;
+          row.state = e.state;
+          row.seconds = e.seconds || row.seconds;
+          row.tokens = e.tokens || row.tokens;
+          row.calls = e.calls || row.calls;
+          row.model = e.model ?? row.model;
+          row.result = e.result;
         }
         break;
       }

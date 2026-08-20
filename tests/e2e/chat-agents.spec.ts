@@ -57,6 +57,19 @@ const DELEGATED_MS = 300_000;
  */
 const HELPER_WAITS = 45;
 
+/**
+ * How long the helper in the panel case is told to wait. Longer than the one
+ * above, because the panel is read while it is still working and everything
+ * else in that turn has to have happened first.
+ */
+const HELPER_WAITS_LONGER = 120;
+
+/** How long the command left in the background is told to run. */
+const LEFT_RUNNING = 240;
+
+/** The states that mean a piece of sent-off work is over. */
+const OVER = ['done', 'failed', 'stopped'];
+
 /** A folder of its own, so this case never runs an agent in someone's work. */
 const FIXTURE = join(__dirname, '..', '.workbench-run-agents');
 
@@ -190,6 +203,118 @@ test.describe('the agents a chat sends off', () => {
     await page.screenshot({ path: `${SHOTS}/chat-agent-own-words.png`, fullPage: false });
 
     // Stopped when the case is over, so a run leaves no agent behind.
+    await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
+  });
+
+  /**
+   * The panel beside the conversation, with three different kinds of sent-off
+   * work on it at once.
+   *
+   * The order in the prompt is the order it has to be in: a command left in the
+   * background does not block, a small run of agents finishes while the chat
+   * waits, and the helper is sent last and told to wait — so the picture this
+   * leaves behind is one row still running, one parked in the background and
+   * one finished and quiet, which is the whole claim.
+   *
+   * The three kinds are asked for by name because they arrive by three
+   * different roads inside the kit: a helper from the call that sent it, a
+   * background command from the level list only (it was never a call of this
+   * chat's own), and a run of agents from its own task messages. A case that
+   * sent three helpers would prove one road three times.
+   */
+  test('a panel of everything the chat sent away', async ({ page, request }) => {
+    // The width this is claimed at: the panel lives in the right column, and
+    // the right column is closed on a narrow screen.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const chat = await freshChat(request, page);
+    await say(
+      request,
+      chat,
+      'Do exactly these three things, in this order, and do no other work of your own. ' +
+        `First, run the shell command "python3 -c 'import time; time.sleep(${LEFT_RUNNING})'" in the BACKGROUND ` +
+        'and do not wait for it. ' +
+        'Second, use a workflow with exactly two agents, each of them told only to reply with the single word ONE. ' +
+        'Keep that workflow as small as it can possibly be. ' +
+        'Third, use the Task tool exactly once to launch one general-purpose subagent, and tell it in its prompt to ' +
+        `run "python3 -c 'import time; time.sleep(${HELPER_WAITS_LONGER})'" in the foreground, wait for it, ` +
+        'and then reply with the single word DONE. ' +
+        'When that subagent comes back, reply with the single word FINISHED and nothing else.',
+    );
+
+    // Three rows at once, one of them over and one of them still going, which
+    // is the picture — and it only exists while the helper sent last is still
+    // working. Waited for as one condition rather than three, because each of
+    // them alone is true at moments when the picture is not there.
+    const rows = page.locator('[data-testid="sent-away-row"]');
+    await expect
+      .poll(
+        async () => {
+          const states = await rows.evaluateAll((els) => els.map((el) => el.getAttribute('data-state') ?? ''));
+          return {
+            rows: states.length,
+            over: states.some((s) => OVER.includes(s)),
+            going: states.some((s) => !OVER.includes(s)),
+          };
+        },
+        {
+          message: 'the panel never carried three pieces of sent-off work with one over and one still going',
+          timeout: DELEGATED_MS,
+        },
+      )
+      .toMatchObject({ rows: 3, over: true, going: true });
+
+    const drawn = await rows.evaluateAll((els) =>
+      els.map((el) => ({
+        kind: el.getAttribute('data-kind'),
+        state: el.getAttribute('data-state'),
+        what: (el.querySelector('[data-testid="sent-away-what"]') as HTMLElement | null)?.innerText.trim() ?? '',
+        model: (el.querySelector('[data-testid="sent-away-model"]') as HTMLElement | null)?.innerText.trim() ?? '',
+        forHowLong: (el.querySelector('[data-testid="sent-away-for"]') as HTMLElement | null)?.innerText.trim() ?? '',
+        spend: (el.querySelector('[data-testid="sent-away-spend"]') as HTMLElement | null)?.innerText.trim() ?? '',
+        doing: (el.querySelector('[data-testid="sent-away-doing"]') as HTMLElement | null)?.innerText.trim() ?? '',
+        result: (el.querySelector('[data-testid="sent-away-result"]') as HTMLElement | null)?.innerText.trim() ?? '',
+      })),
+    );
+    const said = JSON.stringify(drawn, null, 2);
+
+    // Three different kinds of work, not the same kind three times.
+    expect(new Set(drawn.map((r) => r.kind)).size, `every row is the same kind of work: ${said}`).toBeGreaterThanOrEqual(
+      3,
+    );
+
+    // Every row says what it is, how long it has been going and what it has
+    // spent. A model is asked of the rows that run one: a shell command left in
+    // the background has no model to name, and saying one would be a lie.
+    for (const row of drawn) {
+      expect(row.what, `a row with nothing on it: ${said}`).not.toBe('');
+      expect(row.forHowLong, `a row with no clock: ${said}`).toMatch(/\d+[smh]/);
+      expect(row.spend, `a row with no spend: ${said}`).toMatch(/\d/);
+    }
+    // The model is asked of the helper, which is the row that runs one and the
+    // row this was asked for. Measured 2026-08-20: the kit names no model for a
+    // command left running (it runs none), and none for a scripted run either
+    // (each of ITS agents has one; the run itself does not) — so asking those
+    // rows for a model would be asking them to invent one.
+    expect(
+      drawn.filter((r) => r.kind === 'helper').every((r) => r.model !== ''),
+      `the helper does not say which model it runs: ${said}`,
+    ).toBe(true);
+
+    // One of them is over — and is quiet about the present tense while keeping
+    // what it answered — while another is still going.
+    const over = drawn.filter((r) => OVER.includes(r.state ?? ''));
+    expect(over.every((r) => r.doing === ''), `a finished row is still saying what it is doing: ${said}`).toBe(true);
+    expect(over.every((r) => r.result !== ''), `a finished row threw its answer away: ${said}`).toBe(true);
+    // Nothing went grey the moment it was sent: a row is over because the work
+    // ended, never because the kit acknowledged the launch (bw-7ks.22.3).
+    expect(over.every((r) => r.forHowLong !== '0s'), `a row finished having taken no time at all: ${said}`).toBe(true);
+
+    const rail = page.getByTestId('chat-right-rail');
+    await expect(rail).toHaveAttribute('data-open', 'true');
+    await page.screenshot({ path: `${SHOTS}/chat-sent-away.png`, clip: (await rail.boundingBox())! });
+
+    // Stopped when the case is over, so a run leaves no agent behind — and no
+    // command of its own left running in the background.
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
   });
 });

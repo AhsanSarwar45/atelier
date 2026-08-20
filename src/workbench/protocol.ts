@@ -160,6 +160,71 @@ export type WbpEvent = EventBase &
      * transcript (bw-7ks.22.2).
      */
     | { type: 'tool.progress'; toolCallId: string; seconds: number; summary?: string }
+    /**
+     * A piece of work the chat handed to something else, from the moment it is
+     * sent (docs/agent-workbench.md §8.2.7). One row in the panel, whatever the
+     * kind: a helper agent, a command left running, a watch, a scripted run are
+     * all work the chat is waiting on, and the kind is a mark on the row rather
+     * than a different list.
+     *
+     * `toolCallId` names the call that sent it where there was one — a helper
+     * agent is a Task call and its row opens onto the same conversation the
+     * transcript nests under that call. A command left running in the
+     * background was never a call of its own, so it carries none.
+     *
+     * `model` is what the sender knew at the time, which for a helper is
+     * usually nothing: the model it actually ran arrives with its first words
+     * (their `message.model`) or with its result, and `agent.progress` carries
+     * it up when it does.
+     */
+    | {
+        type: 'agent.started';
+        agentId: string;
+        toolCallId: string | null;
+        kind: AgentKind;
+        /** The brief, in the sender's own words. One line. */
+        what: string;
+        /** Which kind of helper the kit was asked for, when it says. */
+        agentType: string | null;
+        model: string | null;
+      }
+    /**
+     * The numbers on a row, refreshed while it runs. Every field is what the
+     * kit last said, not a delta: a reader that missed one is not wrong after
+     * the next.
+     *
+     * `doing` is the helper's own present-tense line, asked of its own
+     * conversation about twice a minute (bw-7ks.22.2). Left out rather than
+     * sent empty, on the same terms as `tool.progress`: an absent line means
+     * "still whatever it last said".
+     */
+    | {
+        type: 'agent.progress';
+        agentId: string;
+        seconds: number;
+        tokens: number;
+        /** How many calls it has made of its own. */
+        calls: number;
+        doing?: string;
+        model?: string;
+        /** Set when the kit says this row is now running elsewhere, or parked. */
+        state?: AgentState;
+      }
+    /**
+     * It answered, gave up, or was stopped. `result` is its last word — kept on
+     * the row, because a finished row that throws its answer away is a row the
+     * reader has to go and find the answer for.
+     */
+    | {
+        type: 'agent.finished';
+        agentId: string;
+        state: 'done' | 'failed' | 'stopped';
+        seconds: number;
+        tokens: number;
+        calls: number;
+        model: string | null;
+        result: string | null;
+      }
     | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }
@@ -209,6 +274,26 @@ export type WbpEvent = EventBase &
      */
     | { type: 'transcript.reset' }
   );
+
+/**
+ * What kind of thing the chat sent away (docs/agent-workbench.md §8.2.7).
+ *
+ * The kit's own list of background work names four, and all four are work the
+ * chat is waiting on: `helper` is an agent given a brief, `command` is a shell
+ * command left running, `watch` is something reporting back on a change, `run`
+ * is a script that drives agents of its own. Anything the kit invents later is
+ * drawn as `helper`, which is what most of them are.
+ */
+export type AgentKind = 'helper' | 'command' | 'watch' | 'run';
+
+/**
+ * Where a piece of sent-off work has got to.
+ *
+ * `waiting` is waiting on the reader — a helper that raised a permission ask —
+ * and is the reason this is not a boolean: a row nobody is going to answer is
+ * not a row that is working.
+ */
+export type AgentState = 'running' | 'waiting' | 'parked' | 'done' | 'failed' | 'stopped';
 
 /** How loudly a `note` is drawn. See the rank table in §8.2.4. */
 export type NoteRank = 'note' | 'detail';
