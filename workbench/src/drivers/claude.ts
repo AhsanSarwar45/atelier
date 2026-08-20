@@ -89,6 +89,30 @@ function oneLine(value: unknown, limit = 200): string {
 }
 
 /**
+ * What a helper actually answered.
+ *
+ * The text a finished helper hands back is written for the model, not for a
+ * reader: the kit appends the helper's own id and a sentence about how to send
+ * it another message, and on a row about eighty characters wide that trailer is
+ * most of what there is room for (measured 2026-08-20 — a helper that answered
+ * DONE drew `DONE agentId: ac8d…3 (use SendMessage with to: …`).
+ *
+ * The structured output beside it carries the report on its own, so the answer
+ * is read from there and the model-directed text is only the fallback for a
+ * kit that did not send one.
+ */
+export function answerOf(result: unknown, output: string): string {
+  const said = (result as { content?: { type?: string; text?: string }[] } | null | undefined)?.content;
+  if (!Array.isArray(said)) return output;
+  const words = said
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text as string)
+    .join('\n')
+    .trim();
+  return words || output;
+}
+
+/**
  * Everything the machine says about itself, as one line and a body.
  *
  * Reached only from the last arm of `draw()`, so everything translated properly
@@ -622,7 +646,7 @@ export class ClaudeDriver implements Driver {
       tokens: Number(totals.totalTokens ?? 0) || was.tokens,
       calls: Number(totals.totalToolUseCount ?? 0) || was.calls,
       model,
-      result: oneLine(output) || null,
+      result: oneLine(answerOf(result, output)) || null,
     });
   }
 
