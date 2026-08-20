@@ -300,3 +300,25 @@ node scripts/measure-quiet.mjs
 ```
 
 Needs a signed-in `claude` and spends two short turns.
+
+## `chat-typing-cost.mjs`
+
+What one keystroke costs on a long conversation, and a check that it stays
+cheap. Typing into the composer redraws the chat around the transcript — the
+same redraw an arriving word causes, and the same one the busy clock caused once
+a second while an agent worked. On two hundred messages that redraw was the
+whole conversation: every message's markdown parsed again, every diff coloured
+again. A quarter of a second per character, which is what made a chat feel
+broken (bw-uiyz.5).
+
+The conversation is fed to the app's own event stream rather than taken from
+whatever chats the machine happens to hold, so the number means the same thing
+on any machine and the run needs no agent.
+
+```
+node scripts/chat-typing-cost.mjs http://127.0.0.1:3008 200
+```
+
+It exits red above 40ms a keystroke. Injected against the fault it was written
+for: 268ms a keystroke with the rows drawn inline in the chat, 4ms with each row
+remembered against its own item.

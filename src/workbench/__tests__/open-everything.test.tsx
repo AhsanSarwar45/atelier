@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { useOpen } from '@/workbench/chat-tab';
+import { useOpen } from '@/workbench/transcript-rows';
 
 /** One row and the control above it, which is the whole of the disagreement. */
 function Rows() {
