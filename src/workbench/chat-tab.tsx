@@ -51,10 +51,12 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
+import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { mentionsIn } from '@/workbench/mentions';
 import { diffLines } from '@/workbench/line-diff';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
+import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { AskOption, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportCard, ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
@@ -840,6 +842,26 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }, []);
 
   /**
+   * Which kinds of message the conversation draws. Remembered for the browser
+   * rather than the chat for the same reason as the switch above it: it is a
+   * way of reading, not a property of one conversation (bw-qdim).
+   */
+  const [offKinds, setOffKinds] = useState<ReadonlySet<KindId>>(EVERYTHING);
+
+  useEffect(() => {
+    setOffKinds(remembered());
+  }, []);
+
+  /** Written where it is changed, for the reason spelled out on `flipOpenAll`. */
+  const changeKinds = useCallback((off: ReadonlySet<KindId>) => {
+    remember(off);
+    setOffKinds(off);
+  }, []);
+
+  /** The rows this conversation draws, once the reader's switches are obeyed. */
+  const rows = useMemo(() => stillShowing(view.items, offKinds), [view.items, offKinds]);
+
+  /**
    * Written where it is CHANGED, never mirrored from an effect: an effect that
    * writes the state back runs once with the value the screen started at, which
    * overwrites what was remembered before the effect that reads it has taken —
@@ -1007,6 +1029,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-open-all={openAll}
           onClick={flipOpenAll}
         />
+        <KindFilter items={view.items} off={offKinds} onChange={changeKinds} />
         {/* The one control on this bar that says what it does in words. Every
             other tool here is a picture, and a picture is right for a thing you
             reach for once you know the bar; starting a conversation is the first
@@ -1168,7 +1191,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         className="mx-auto flex w-full max-w-[110ch] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
         data-testid="transcript"
       >
-        {view.items.map((item) => {
+        {rows.length === 0 && view.items.length > 0 && (
+          <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
+        )}
+        {rows.map((item) => {
           if (item.kind === 'tool') {
             return <ToolRow key={item.id} item={item} nested={item.parentId !== null} openAll={openAll} />;
           }

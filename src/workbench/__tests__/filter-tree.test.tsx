@@ -12,7 +12,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { KindFilter, KindTree } from '@/workbench/filter-tree';
+import { KindFilter, KindTree, NothingShowing } from '@/workbench/filter-tree';
 import { toolKind, type KindId } from '@/workbench/message-filter';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -124,5 +124,21 @@ describe('the button on the toolbar', () => {
 
     fireEvent.click(screen.getByTestId('show-every-kind'));
     expect(screen.getByTestId('open-kind-filter')).toHaveAttribute('data-filtered', 'false');
+  });
+});
+
+describe('when the filter has left nothing standing', () => {
+  it('says the conversation is switched off rather than empty, and offers it back', () => {
+    let back = 0;
+    render(<NothingShowing hidden={12} onShowAll={() => (back += 1)} />);
+    expect(screen.getByTestId('nothing-showing').textContent).toContain('All 12 rows here are switched off');
+
+    fireEvent.click(screen.getByTestId('show-every-kind-back'));
+    expect(back).toBe(1);
+  });
+
+  it('counts one row as one row', () => {
+    render(<NothingShowing hidden={1} onShowAll={() => {}} />);
+    expect(screen.getByTestId('nothing-showing').textContent).toContain('The one row here is switched off');
   });
 });

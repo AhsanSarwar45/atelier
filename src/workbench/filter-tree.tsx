@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, ListFilter, Minus } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
+import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import {
@@ -187,5 +188,25 @@ export function KindFilter({ items, off, onChange }: TreeProps) {
         </button>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * What the conversation says when the filter has left nothing standing.
+ *
+ * A reader who switches his last kind off is looking at an empty window, and
+ * without this he has no way of telling a filtered conversation from a broken
+ * one — so it says which it is, and puts everything back in one click.
+ */
+export function NothingShowing({ hidden, onShowAll }: { hidden: number; onShowAll: () => void }) {
+  return (
+    <div data-testid="nothing-showing" className="m-auto flex flex-col items-center gap-2 py-8 text-center">
+      <p className="text-sm text-t-tertiary">
+        {hidden === 1 ? 'The one row here is switched off.' : `All ${hidden} rows here are switched off.`}
+      </p>
+      <Button size="xs" variant="outline" data-testid="show-every-kind-back" onClick={onShowAll}>
+        Show every kind
+      </Button>
+    </div>
   );
 }
