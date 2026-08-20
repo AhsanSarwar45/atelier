@@ -233,6 +233,6 @@ export function taskSpend(lines: readonly Recorded[], helpers: readonly HelperSp
     // A model that spent nothing is not a row: the kit files its own synthetic
     // turns under a model name and they cost nothing, and a zero in this list
     // reads as a model that was asked for and came back free.
-    models: [...byModel.values()].filter((m) => m.spend.total > 0).sort((a, b) => b.spend.total - a.spend.total),
+    models: Array.from(byModel.values()).filter((m) => m.spend.total > 0).sort((a, b) => b.spend.total - a.spend.total),
   };
 }

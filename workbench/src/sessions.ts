@@ -24,7 +24,8 @@ import {
   trimInput,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
-import { latest, type Recorded, spentOn, windowNamed } from '../../src/workbench/context-window.ts';
+import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
+import { type Split, taskSpend } from '../../src/workbench/token-picture.ts';
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -745,15 +746,24 @@ export class Sessions {
    * (measured against the kit's per-model totals, 2026-08-20: a delegated turn
    * reported $0.2399167, exactly its own $0.232197 plus the helper's $0.007720).
    *
+   * Each turn counted once, which it was not: the kit writes one answer into
+   * the record as several lines — its thinking, its words, each of its calls —
+   * and every one of them repeats that answer's usage, so adding the lines up
+   * billed a turn once per block it was made of and this chip read 36 percent
+   * high on the manager's own record (token-picture.ts, bw-3ug7).
+   *
    * Said only when it moves, like the fullness beside it: a chat is re-read
    * whenever anyone looks at it, and repeating a figure grows the record and
    * tells the reader nothing.
    */
   private saySpend(sessionId: string, messages: readonly Recorded[], helpers: readonly HelperPast[]): void {
-    const own = spentOn(messages);
-    const input = own.input + helpers.reduce((sum, helper) => sum + helper.spend.input, 0);
-    const output = own.output + helpers.reduce((sum, helper) => sum + helper.spend.output, 0);
-    const total = input + output;
+    const spent = taskSpend(messages, helpers);
+    // The chip's two halves: everything that went into the calls — words sent,
+    // words kept ready and words read back — against the words written.
+    const wentIn = (split: Split): number => split.input + split.cacheWrite + split.cacheRead;
+    const input = wentIn(spent.total);
+    const output = spent.total.output;
+    const total = spent.total.total;
     // Nothing to say rather than a conversation that cost nothing: a record
     // whose turns state no usage is a record we cannot read a spend out of.
     if (total === 0) return;

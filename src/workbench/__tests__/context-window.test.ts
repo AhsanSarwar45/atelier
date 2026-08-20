@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { fullness, latest, reads, spentOn, TIGHT, windowNamed, WINDOW } from '@/workbench/context-window';
+import { fullness, latest, reads, TIGHT, windowNamed, WINDOW } from '@/workbench/context-window';
 
 describe('what a turn used', () => {
   it('counts the cached prompt, which is most of a long conversation', () => {
@@ -23,32 +23,6 @@ describe('what a turn used', () => {
     expect(fullness({})).toBeNull();
     expect(fullness(null)).toBeNull();
     expect(fullness({ input_tokens: 0 })).toBeNull();
-  });
-});
-
-describe('what a conversation spent', () => {
-  const turn = (usage: Record<string, number>) => ({ message: { usage } });
-
-  it('adds every turn up, not only the last one', () => {
-    expect(
-      spentOn([
-        turn({ input_tokens: 10, cache_read_input_tokens: 100, output_tokens: 5 }),
-        { message: { role: 'user', content: 'and this one cost nothing' } },
-        turn({ input_tokens: 20, cache_creation_input_tokens: 200, output_tokens: 7 }),
-      ]),
-    ).toEqual({ input: 330, output: 12, total: 342 });
-  });
-
-  it('counts the cache on the same terms the gauge does', () => {
-    // Whatever a turn is worth to the gauge is what it adds to the bill: one
-    // reading of a turn, so a chat's own spend and a helper's are comparable.
-    const one = { input_tokens: 4, cache_read_input_tokens: 150_000, output_tokens: 900 };
-    expect(spentOn([turn(one)]).total).toBe(fullness(one));
-  });
-
-  it('comes back empty when no turn says what it cost', () => {
-    expect(spentOn([{ message: { role: 'user', content: 'hello' } }])).toEqual({ input: 0, output: 0, total: 0 });
-    expect(spentOn([])).toEqual({ input: 0, output: 0, total: 0 });
   });
 });
 

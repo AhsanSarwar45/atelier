@@ -16,7 +16,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type Spend, spentOn } from '../../src/workbench/context-window.ts';
+import { type Split, spendIn } from '../../src/workbench/token-picture.ts';
 import {
   type PastEntry,
   pastTranscript,
@@ -52,7 +52,7 @@ export interface HelperPast {
   seconds: number;
   tokens: number;
   /** The same spend split the way the kit reports one call, for a chat's total. */
-  spend: Spend;
+  spend: Split;
   calls: number;
   /** Its last word, which is what the row shows once it has finished. */
   result: string | null;
@@ -96,7 +96,7 @@ export function helperFrom(agentId: string, meta: HelperMeta, lines: HelperLine[
   const ended = Date.parse(last);
   const seconds =
     Number.isFinite(began) && Number.isFinite(ended) ? Math.max(0, Math.round((ended - began) / 1000)) : 0;
-  const spend = spentOn(lines);
+  const spend = spendIn(lines);
   return {
     agentId,
     toolCallId: typeof meta.toolUseId === 'string' && meta.toolUseId ? meta.toolUseId : null,
