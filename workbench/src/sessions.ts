@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
+  carryOnAt,
   cut,
   diffOf,
   howToRead,
@@ -27,7 +28,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
-import { findRecord, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
+import { findRecord, lineBegins, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
@@ -108,6 +109,30 @@ function readState(at: number | null, messages: readonly SessionMessage[], held:
   while (take < messages.length && pastTranscript(messages.slice(-take)).length < held) take += 1;
   const carry = messages.slice(-take);
   return { at, through, carry, drawn: pastTranscript(carry).length - held };
+}
+
+/**
+ * The same state, saying where the held-back lines BEGIN instead of holding
+ * them.
+ *
+ * A whole-record read stops at a byte that is already past those lines, so a
+ * follower handed them in a list has no byte for them and cannot say where it
+ * stands — and a chat being written never settles, so it never got to say it at
+ * all. Every click on the chats the manager watches read the whole record
+ * again. Handed their byte instead, the follower reads those same lines back
+ * off the record itself, skips the rows already drawn, and has a byte to mark
+ * from its very first beat (bw-uiyz.19).
+ *
+ * The lines stay in hand if the record cannot be searched: correct either way,
+ * only slower next time.
+ */
+async function carryByByte(read: ReadSoFar, sessionId: string | null): Promise<ReadSoFar> {
+  if (read.carry.length === 0 || sessionId === null) return read;
+  const head = read.carry[0]?.uuid;
+  if (head === undefined) return read;
+  const begins = await lineBegins(sessionId, head);
+  if (begins === null) return read;
+  return { at: begins, through: null, carry: [], drawn: read.drawn };
 }
 
 export class Sessions {
@@ -392,6 +417,27 @@ export class Sessions {
     return queued;
   }
 
+  /**
+   * Where a live chat's reading picks up, if it can pick up at all.
+   *
+   * Three things have to hold: this build's own reading is what drew it, the
+   * follower reached a settled byte before the reader last looked away, and the
+   * record is still at least that long — one shorter than that has been
+   * compacted under us and the byte means nothing in the new one (bw-uiyz.19).
+   */
+  private carryOnFrom(summary: SessionSummary, readBy: number | null): ReadSoFar | null {
+    const followedTo = this.store.followedTo(summary.id);
+    // Asked for only when there is a byte to weigh it against: finding the
+    // record is a listing of the projects directory.
+    const recordNow =
+      followedTo === null || summary.externalId === null ? null : recordSize(summary.externalId);
+    const on = carryOnAt({ readBy, followedTo, recordNow });
+    // `carry` stays empty: the lines it would hold are still in the record at
+    // that byte, and the follower reads them again from there. `drawn` is what
+    // keeps them from being drawn a second time.
+    return on === null ? null : { at: on.at, through: null, carry: [], drawn: on.drawn };
+  }
+
   /** One reading of a chat's record, with nothing else reading the same one. */
   private async importOnce(summary: SessionSummary, live = false): Promise<ReadSoFar> {
     if (!summary.externalId) return NOTHING_READ;
@@ -399,7 +445,25 @@ export class Sessions {
     // touched: a chat that touched none failed that test forever, so every click
     // read the whole conversation off the disk again and re-ran the card scan,
     // which forks the board's own tool per candidate (bw-m8o.14).
+    // A mark left with rows still held back says the record holds lines nobody
+    // has drawn: the follower stopped mid-turn. While the chat is being driven
+    // the follower picks them up; once it is not, nothing ever will, so the
+    // record is read again from the top and the mark dropped (bw-dmxj.14).
+    if (!live) {
+      const held = this.store.followedTo(summary.id);
+      if (held !== null && held.drawn > 0) this.store.forgetImported(summary.id);
+    }
     const readBy = this.store.importedBy(summary.id);
+    // A chat another program is driving is never finished being read, so it was
+    // read from its first byte again on EVERY click: the whole record parsed,
+    // the drawing thrown away and published afresh. That is the several seconds
+    // the manager waits on exactly the chats he watches most. The follower
+    // stopped at a byte last time; carrying on from it draws only what has
+    // arrived since, and what is already drawn stays on the screen (bw-uiyz.19).
+    if (live) {
+      const on = this.carryOnFrom(summary, readBy);
+      if (on) return on;
+    }
     // Counted at most once, and only if the choice actually turns on it.
     let counted: number | null = null;
     const drawn = () => (counted ??= this.store.messageCount(summary.id));
@@ -449,8 +513,19 @@ export class Sessions {
     // follower is torn down, and a chat already marked read is never read again,
     // so what the other program was mid-way through when he left is dropped for
     // good. A partial read is therefore not a read (bw-dmxj.14).
-    if (upto === all.length) this.store.markImported(summary.id, IMPORT_RECIPE);
-    const read = readState(at, messages, all.length - upto);
+    if (upto === all.length) {
+      this.store.markImported(summary.id, IMPORT_RECIPE);
+      // And, when nothing was written while the reading was going on, the byte
+      // that reading consumed is known exactly — so the NEXT open of this chat
+      // carries on from it rather than reading the record again, without
+      // waiting for a follower to settle one (bw-uiyz.19). A record that grew
+      // under the read leaves the mark to the follower, which knows which of
+      // those lines it has taken in.
+      if (at !== null && recordSize(summary.externalId) === at) {
+        this.store.rememberFollowed(summary.id, at, 0, IMPORT_RECIPE);
+      }
+    }
+    const read = await carryByByte(readState(at, messages, all.length - upto), summary.externalId);
     if (past.length === 0) return read;
 
     // Only now is the old copy thrown away: there is something to put in its
@@ -597,10 +672,15 @@ export class Sessions {
     if (path === null) return; // No record on this machine to follow.
 
     const tail = new RecordTail(path);
-    // Set before the first beat, so a record that grows in between is read from
-    // here and not from where it has got to by then.
-    if (read.at === null) void tail.toEnd();
-    else tail.seek(read.at);
+    // Where reading starts, settled before the first beat reads a byte: a
+    // record that grows in between is read from here and not from where it has
+    // got to by then. Awaited rather than launched, because a beat that got in
+    // first would find the tail still at zero and read the whole record
+    // (bw-uiyz.19).
+    const placed = (async (): Promise<void> => {
+      if (read.at === null) await tail.toEnd();
+      else tail.seek(read.at);
+    })();
     // Lines the import already took in, thrown away by name the first time they
     // come round again.
     let through = read.at === null ? null : read.through;
@@ -611,7 +691,38 @@ export class Sessions {
     // the cards and reports a command names are found here or not at all.
     const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
 
+    /**
+     * The byte the lines now in hand begin at — the ones in `carry` when there
+     * are any, and otherwise the next ones to arrive. Minus one while it is not
+     * known, which is the one beat where lines are being dropped by name.
+     */
+    let carryAt = -1;
+    let markedAt = -1;
+    let markedDrawn = -1;
+    /**
+     * Leaves the mark a later open carries on from: the byte, and how many rows
+     * of what stands there are already drawn (bw-uiyz.19).
+     *
+     * The rows are half of it because the busiest chats are never settled — a
+     * record being written ends in commands whose answers have not landed, and
+     * those rows wait for them. A mark that named a byte alone was never
+     * written for exactly the chats the manager watches.
+     */
+    const mark = (): void => {
+      if (carryAt < 0) return;
+      // Written only when it has moved: a chat nothing is happening in is
+      // looked at every beat, and saying the same thing again is a write to the
+      // store for no reader.
+      if (carryAt === markedAt && drawn === markedDrawn) return;
+      markedAt = carryAt;
+      markedDrawn = drawn;
+      this.store.rememberFollowed(summary.id, markedAt, markedDrawn, IMPORT_RECIPE);
+    };
+
     const draw = async (): Promise<void> => {
+      // Where the lines this look is about to read begin, taken before it reads
+      // them.
+      const from = tail.throughLine;
       const grown = await tail.grown();
       // Compaction rewrites the record shorter than it was. What is already
       // drawn stays drawn — it is the only copy of those turns — and reading
@@ -621,15 +732,39 @@ export class Sessions {
         drawn = 0;
         through = null;
         await tail.toEnd();
+        carryAt = tail.throughLine;
+        mark();
         return;
       }
       let fresh = grown.fresh;
+      // Nothing held back yet, so these lines are the first this follower has
+      // in hand and `from` is where they begin.
+      const holding = carry.length > 0;
+      if (!holding) carryAt = from;
       if (through !== null) {
         const already = fresh.findIndex((line) => line.uuid === through);
-        if (already !== -1) fresh = fresh.slice(already + 1);
+        if (already !== -1) {
+          const had = fresh.slice(0, already + 1);
+          fresh = fresh.slice(already + 1);
+          if (holding) {
+            // The rows held back cover these same lines: taking them again
+            // would say each of them twice.
+            carryAt = -1;
+          } else {
+            // Kept and counted rather than thrown away. Their rows are on the
+            // screen either way; keeping the LINES is what keeps `carryAt`
+            // meaningful, and a byte a later open can carry on from is the
+            // whole point of the mark (bw-uiyz.19).
+            carry = had;
+            drawn = pastTranscript(had).length;
+          }
+        }
         through = null;
       }
-      if (fresh.length === 0) return;
+      if (fresh.length === 0) {
+        mark();
+        return;
+      }
       // How full it stands: the figure is the reader's only warning that a job
       // he is watching is about to be compacted (bw-4wcd.4).
       this.sayFullness(summary.id, fresh);
@@ -643,6 +778,7 @@ export class Sessions {
       if (upto === entries.length) {
         carry = [];
         drawn = 0;
+        carryAt = tail.throughLine;
       } else {
         carry = all;
         drawn = upto;
@@ -651,12 +787,14 @@ export class Sessions {
         if (entry.kind === 'call') links.observe(entry.name, entry.input);
         this.draw(summary.id, entry);
       }
+      mark();
     };
 
     const look = async (): Promise<void> => {
       if (reading) return;
       reading = true;
       try {
+        await placed;
         // The stat inside the read alone says whether there is anything new,
         // whoever wrote it and whether or not that program is still there.
         // Stopping the moment the terminal exited lost every later turn: the
@@ -688,6 +826,11 @@ export class Sessions {
     // This app is driving it now, and the driver says everything the record
     // would: watching both would say each turn twice.
     this.unfollow(summary.id);
+    // And where the record had been read to is no longer where the drawing has
+    // been read to: the driver's own turns go on the screen without passing
+    // through the record's byte count, so a later open carrying on from that
+    // byte would draw them a second time (bw-uiyz.19).
+    this.store.forgetFollowed(summary.id);
     const driver = new ClaudeDriver();
     this.drivers.set(summary.id, driver);
     this.linkers.set(

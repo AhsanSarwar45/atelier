@@ -128,3 +128,43 @@ describe('following a chat somebody else is driving', () => {
     expect(findRecord('nobody', dir)).toBe(null);
   });
 });
+
+/**
+ * The byte a later open carries on from.
+ *
+ * `position` is how far the reader has READ, and a look that caught a line
+ * half-written holds the rest of it in hand rather than in the file — so
+ * remembering that byte across opens would start the next reader inside a line
+ * and lose it. What is remembered is the byte after the last whole line
+ * (bw-uiyz.19).
+ */
+describe('where a chat has been read up to, between opens', () => {
+  it('stops before a line that is still being written, and the next open reads it whole', async () => {
+    const tail = new RecordTail(path);
+    await tail.toEnd();
+
+    const whole = line('assistant', 'a finished thing', 'new-1');
+    const half = line('assistant', 'still being written', 'new-2').slice(0, 30);
+    appendFileSync(path, whole + half);
+    const first = await tail.grown();
+    expect(first.fresh.map((l) => l.uuid)).toEqual(['new-1']);
+    // Read past the half line, but only settled before it.
+    expect(tail.position).toBeGreaterThan(tail.throughLine);
+    expect(tail.throughLine).toBe(tail.position - Buffer.byteLength(half));
+
+    // The rest of that line lands, and a reader starting where the last one
+    // settled gets it whole and gets nothing it has already had.
+    appendFileSync(path, line('assistant', 'still being written', 'new-2').slice(30));
+    const next = new RecordTail(path);
+    next.seek(tail.throughLine);
+    const second = await next.grown();
+    expect(second.fresh.map((l) => l.uuid)).toEqual(['new-2']);
+  });
+
+  it('is the whole file once everything in it has been taken in', async () => {
+    const tail = new RecordTail(path);
+    tail.seek(0);
+    await tail.grown();
+    expect(tail.throughLine).toBe(recordSize('sess', dir));
+  });
+});

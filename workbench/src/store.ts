@@ -117,6 +117,16 @@ const MIGRATIONS: string[] = [
   // the manager is talking in slide about under his cursor. Only `send` stamps
   // this one, and nothing else may (bw-zhs9).
   `ALTER TABLE session ADD COLUMN last_spoke_at TEXT;`,
+
+  // Where a chat's record has been read up to, kept between opens. A chat
+  // another program is driving is never finished being read, so every click
+  // used to read the whole record again, throw the drawing away and publish it
+  // afresh — seconds at a time, on exactly the chats the manager watches most.
+  // The follower already reads from a byte and knows how many rows of what
+  // stands there are drawn; remembering both turns every later open into "what
+  // has arrived since" (bw-uiyz.19).
+  `ALTER TABLE session ADD COLUMN followed_to INTEGER;
+   ALTER TABLE session ADD COLUMN followed_drawn INTEGER;`,
 ];
 
 export class Store {
@@ -220,9 +230,57 @@ export class Store {
   }
 
   markImported(id: string, recipe: number): void {
+    // The mark and the byte are set together, and the byte is cleared: a whole
+    // record has just been read, so any byte an older follower stopped at is
+    // behind what is now drawn and carrying on from it would say those lines
+    // twice (bw-uiyz.19).
     this.db
-      .prepare('UPDATE session SET imported_at = ?, imported_recipe = ? WHERE id = ?')
+      .prepare(
+        'UPDATE session SET imported_at = ?, imported_recipe = ?, followed_to = NULL, followed_drawn = NULL WHERE id = ?',
+      )
       .run(new Date().toISOString(), recipe, id);
+  }
+
+  /**
+   * Where this chat's record has been read up to, or null if nothing has
+   * followed it yet.
+   *
+   * `at` is always a line boundary. `drawn` is how many rows of the transcript
+   * built FROM that byte are already on the screen — which is not always zero:
+   * a record still being written ends in commands whose answers have not landed,
+   * and those rows are read again with the answers rather than drawn twice. The
+   * busiest chats are permanently in that state, so a mark that only ever named
+   * a settled byte never got written for them at all (bw-uiyz.19).
+   */
+  followedTo(id: string): { at: number; drawn: number } | null {
+    const r = this.db.prepare('SELECT followed_to, followed_drawn FROM session WHERE id = ?').get(id) as
+      | { followed_to: number | null; followed_drawn: number | null }
+      | undefined;
+    if (!r || r.followed_to === null) return null;
+    return { at: r.followed_to, drawn: r.followed_drawn ?? 0 };
+  }
+
+  /** Says where the follower has read to, for the next open to carry on from. */
+  rememberFollowed(id: string, at: number, drawn: number, recipe: number): void {
+    // Read, in the same breath. A record being written always ends in commands
+    // whose answers have not landed, so a chat another program is working in
+    // never finished being read and was never marked — which is exactly why it
+    // was read from its first byte on every click. The mark says where it
+    // stopped AND how much of what stands there is drawn, so stopping there is
+    // no longer losing anything, and the reading counts (bw-uiyz.19).
+    this.db
+      .prepare(
+        `UPDATE session
+            SET followed_to = ?, followed_drawn = ?,
+                imported_at = COALESCE(imported_at, ?), imported_recipe = ?
+          WHERE id = ?`,
+      )
+      .run(at, drawn, new Date().toISOString(), recipe, id);
+  }
+
+  /** Drops that mark: what is drawn and what the record holds no longer line up. */
+  forgetFollowed(id: string): void {
+    this.db.prepare('UPDATE session SET followed_to = NULL, followed_drawn = NULL WHERE id = ?').run(id);
   }
 
   /**
@@ -253,6 +311,7 @@ export class Store {
    */
   forgetImported(id: string): void {
     this.db.prepare('DELETE FROM message WHERE session_id = ?').run(id);
+    this.forgetFollowed(id);
   }
 
   getSession(id: string): SessionSummary | undefined {

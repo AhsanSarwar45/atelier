@@ -80,6 +80,45 @@ export function howToRead(was: ReadSoFarState): ReadingChoice {
   return 'read-it';
 }
 
+/** Where a chat's record had been read up to when the reader last looked away. */
+export interface ReadUpTo {
+  /** A line boundary in the record. */
+  at: number;
+  /** How many rows of the transcript built from that byte are already drawn. */
+  drawn: number;
+}
+
+/** What is known about how far a live chat's record has already been read. */
+export interface ReadUpToState {
+  /** The reading that last read this chat in, or null if none ever did. */
+  readBy: number | null;
+  /** Where its follower left off last time, or null if none ever did. */
+  followedTo: ReadUpTo | null;
+  /** How long the record stands right now, or null if it is not on this machine. */
+  recordNow: number | null;
+}
+
+/**
+ * Where opening a live chat picks up in its own record, or null to read the lot.
+ *
+ * A chat another program is driving is never finished being read, so it fell
+ * through every "already read" test and was read from its first byte on every
+ * single click — the whole record parsed, the drawing thrown away, the
+ * conversation published again. That is the several seconds the manager waits
+ * on exactly the chats he watches most (bw-uiyz.19).
+ *
+ * Three things have to hold to skip it: this build's own reading is what drew
+ * what is on the screen, its follower left a mark before the reader looked
+ * away, and the record is still at least that long — one that came back SHORTER
+ * has been compacted under us, and the byte means nothing in the new one.
+ */
+export function carryOnAt(was: ReadUpToState): ReadUpTo | null {
+  if (was.readBy === null || was.readBy < IMPORT_RECIPE) return null;
+  if (was.followedTo === null) return null;
+  if (was.recordNow === null || was.recordNow < was.followedTo.at) return null;
+  return was.followedTo;
+}
+
 /** Openings that mark a line the harness wrote rather than a person or an agent. */
 const MACHINE_CHATTER =
   /^<(task-notification|system-reminder|local-command-[a-z-]+|command-name|command-message|command-args|user-prompt-submit-hook|function_results|budget)\b/;

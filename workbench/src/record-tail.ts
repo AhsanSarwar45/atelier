@@ -91,6 +91,51 @@ export function recordSize(sessionId: string, config?: string): number | null {
 }
 
 /**
+ * The byte the line naming this one begins at, looked for from the END.
+ *
+ * A whole-record read holds back the rows whose commands have no answers yet,
+ * and those lines are the last few of the file. Handing the follower the byte
+ * they begin at — rather than the byte the read stopped at, which is past them
+ * — is what lets it say where it stands after a beat, and so what lets the
+ * NEXT open of a chat that is being written carry on instead of reading the
+ * whole record again (bw-uiyz.19).
+ *
+ * The window starts small and doubles, so the usual case reads a page and the
+ * unusual one still finds it. Null when the record, or the line, is not there.
+ */
+export async function lineBegins(sessionId: string, name: string, config?: string): Promise<number | null> {
+  const path = findRecord(sessionId, config);
+  if (path === null) return null;
+  let size: number;
+  try {
+    size = (await stat(path)).size;
+  } catch {
+    return null;
+  }
+  // Written by the kit as the line's own field. The leading quote is what keeps
+  // it from matching the NEXT line's `parentUuid`, which names this same line.
+  const needle = `"uuid":"${name}"`;
+  const handle = await open(path, 'r');
+  try {
+    for (let window = 1 << 16; ; window *= 2) {
+      const from = Math.max(0, size - window);
+      const buf = Buffer.alloc(size - from);
+      await handle.read(buf, 0, buf.length, from);
+      const text = buf.toString('utf8');
+      const found = text.indexOf(needle);
+      const line = found === -1 ? -1 : text.lastIndexOf('\n', found);
+      // A hit in the window's first line is only trustworthy when that line is
+      // whole — either the window reaches the start of the file, or a newline
+      // stands before it.
+      if (found !== -1 && (line !== -1 || from === 0)) return from + line + 1;
+      if (from === 0) return null;
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * A record being read a piece at a time.
  *
  * Holds one number — where it has read to — and whatever trailing bytes did not
@@ -112,6 +157,18 @@ export class RecordTail {
   /** The byte the next look starts from. */
   get position(): number {
     return this.at;
+  }
+
+  /**
+   * The byte after the last WHOLE line taken in.
+   *
+   * `position` counts the bytes read, and a look that caught a line
+   * half-written holds the rest of it in hand rather than in the file. A later
+   * reader carrying on from that byte would start inside a line and lose it, so
+   * what is remembered between opens is this one (bw-uiyz.19).
+   */
+  get throughLine(): number {
+    return this.at - Buffer.byteLength(this.partial, 'utf8');
   }
 
   /** Carry on from a byte a previous reader stopped at. */
