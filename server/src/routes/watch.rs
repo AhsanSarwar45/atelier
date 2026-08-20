@@ -2,7 +2,8 @@
 //!
 //! Provides Server-Sent Events for monitoring changes to a project's board.
 //! What counts as a change is derived from where the board is actually stored:
-//! a `.beads/issues.jsonl` file, or a Dolt database under `.beads/dolt/`.
+//! a `.beads/issues.jsonl` file, or a Dolt database under `.beads/dolt/` or
+//! `.beads/embeddeddolt/`.
 //! For the jsonl store this module also recomputes epic statuses based on
 //! their children's statuses.
 
@@ -31,13 +32,17 @@ use super::validate_path_security;
 /// A single logical board write produces several filesystem writes.
 const DEBOUNCE_MS: u64 = 100;
 
+/// The names a Dolt board is kept under, inside `.beads`.
+const DOLT_DIRS: [&str; 2] = ["dolt", "embeddeddolt"];
+
 /// Where a project's board is stored, and therefore what has to change on disk
 /// for the board itself to have changed.
 enum BoardStore {
     /// Issues live in a `.beads/issues.jsonl` file.
     Jsonl { file: PathBuf },
-    /// Issues live in a Dolt database under `.beads/dolt/`. Rows are persisted
-    /// into the database's chunk journal, so that is what moves on a write.
+    /// Issues live in a Dolt database, run by a server under `.beads/dolt/` or
+    /// by beads itself under `.beads/embeddeddolt/`. Rows are persisted into
+    /// the database's chunk journal, so that is what moves on a write.
     Dolt { root: PathBuf },
 }
 
@@ -45,14 +50,22 @@ impl BoardStore {
     /// Decides a project's store from what exists on disk. A Dolt database
     /// takes precedence: when one is present the read path serves the board
     /// from it, so it is also what the board changes with.
+    ///
+    /// A Dolt board sits under one of two names: `dolt` when it belongs to a
+    /// server, `embeddeddolt` when beads runs the database itself. Looking for
+    /// only the first left a board of the second kind waiting on a
+    /// `.beads/issues.jsonl` that is never written, so no card another agent
+    /// moved ever reached the screen (bw-uiyz.15).
     fn resolve(project_path: &Path) -> Self {
-        let dolt_root = project_path.join(".beads").join("dolt");
-        if dolt_root.is_dir() {
-            BoardStore::Dolt { root: dolt_root }
-        } else {
-            BoardStore::Jsonl {
-                file: resolve_issues_path(project_path),
+        let beads = project_path.join(".beads");
+        for name in DOLT_DIRS {
+            let root = beads.join(name);
+            if root.is_dir() {
+                return BoardStore::Dolt { root };
             }
+        }
+        BoardStore::Jsonl {
+            file: resolve_issues_path(project_path),
         }
     }
 
@@ -349,6 +362,21 @@ mod tests {
         std::fs::create_dir_all(dir.join(".beads").join("dolt")).unwrap();
 
         assert!(matches!(BoardStore::resolve(&dir), BoardStore::Dolt { .. }));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_board_dolt_runs_itself_resolves_to_the_dolt_store() {
+        // The board this app is built on is one of these, and it was being
+        // watched as a jsonl board that has no file (bw-uiyz.15).
+        let dir = std::env::temp_dir().join("beads-web-watch-store-test-embedded");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".beads").join("embeddeddolt").join("bw")).unwrap();
+
+        let store = BoardStore::resolve(&dir);
+        assert!(matches!(store, BoardStore::Dolt { .. }));
+        assert!(store.is_board_change(&dir.join(".beads/embeddeddolt/bw/.dolt/noms/journal.idx")));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
