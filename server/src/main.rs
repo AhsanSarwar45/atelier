@@ -186,6 +186,11 @@ async fn main() {
 
     routes::workbench::spawn_sidecar();
 
+    // The first read of a board costs a `bd` run, and the reader used to pay
+    // it on whichever board they opened first. It is paid here instead, with
+    // nobody waiting (bw-uiyz.18).
+    routes::beads::read_boards_ahead(dolt_manager.clone(), database.clone());
+
     // Build the router
     let app = Router::new()
         .route("/api/health", get(routes::health))

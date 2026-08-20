@@ -744,6 +744,42 @@ pub async fn read_beads(
 ///
 /// Answers whether anything was told. A board already being read has nothing
 /// to gain from a second reader, so this stands aside for the one in flight.
+/// Every board the reader has, read once behind their back as the program
+/// starts.
+///
+/// The first read of a board costs a `bd` run whoever pays for it — 3.0s on
+/// this machine — and until now the reader paid it, on whichever board they
+/// opened first. Nobody is waiting here.
+///
+/// One at a time, most-recently-opened first: two `bd` runs at once fight
+/// over the same board and each comes back slower, and the board the reader
+/// is about to click is the one they left open last (bw-uiyz.18). A reader
+/// who beats us to a board takes its gate, and the read ahead skips it rather
+/// than queueing a second run behind theirs.
+pub fn read_boards_ahead(dolt_manager: Arc<DoltManager>, db: Arc<Database>) {
+    tokio::spawn(async move {
+        let projects = match db.get_projects_filtered(false, false) {
+            Ok(projects) => projects,
+            Err(e) => {
+                tracing::warn!("No boards read ahead, so the first board open waits: {e}");
+                return;
+            }
+        };
+        let started = Instant::now();
+        let mut read = 0usize;
+        for project in &projects {
+            if refresh_board(&dolt_manager, &db, &project.path).await {
+                read += 1;
+            }
+        }
+        tracing::info!(
+            "{read} of {} board(s) read ahead in {:?}",
+            projects.len(),
+            started.elapsed()
+        );
+    });
+}
+
 pub async fn refresh_board(dolt_manager: &Arc<DoltManager>, db: &Arc<Database>, path: &str) -> bool {
     let path = path.replace('\\', "/");
     let project_path = PathBuf::from(&path);
