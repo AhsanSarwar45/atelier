@@ -198,6 +198,13 @@ export interface MachineRow {
 
 export type DrawnRow = MachineRow | { row: 'other'; item: TranscriptItem };
 
+/**
+ * The family one row of a conversation draws as, or nothing if it is not the
+ * machine talking. The filter asks this so that its switches stand for what is
+ * on the page rather than for the shape the event happened to arrive in.
+ */
+export const familyIn = (item: TranscriptItem): MachineFamily | null => machineLine(item)?.family ?? null;
+
 /** What the chip says: where the run had got to. */
 export const saidBy = (row: MachineRow): string => row.lines[row.lines.length - 1]?.text ?? '';
 
@@ -218,11 +225,12 @@ export const opensOn = (row: MachineRow): boolean =>
  * meant for different families would otherwise fold, and the chip would wear
  * the first one's colour over the last one's words.
  *
- * The quiet lines go before the folding rather than after it, because a status
- * ping landing in the middle of a run of retries would otherwise cut the run in
- * two and draw the same thing twice with nothing between them.
+ * Nothing is dropped here on grounds of loudness. A quiet line used to be held
+ * back unless a second control was on, so the filter counted status lines the
+ * reader could not reach and reported none where there were thirty-three
+ * (bw-jkh2.13). What he does not want to see, he switches off by name.
  */
-export function drawnRows(items: TranscriptItem[], everything: boolean): DrawnRow[] {
+export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
   const rows: DrawnRow[] = [];
   for (const item of items) {
     const line = machineLine(item);
@@ -230,7 +238,6 @@ export function drawnRows(items: TranscriptItem[], everything: boolean): DrawnRo
       rows.push({ row: 'other', item });
       continue;
     }
-    if (line.rank === 'detail' && !everything) continue;
     const last = rows[rows.length - 1];
     if (
       last?.row === 'machine' &&
@@ -254,6 +261,25 @@ export function drawnRows(items: TranscriptItem[], everything: boolean): DrawnRo
 }
 
 /**
+ * A line the kit wrote in the reader's name rather than one he typed.
+ *
+ * Stopping a turn puts "[Request interrupted by user]" into the conversation as
+ * a message FROM him, and every such marker the kit writes has the same shape:
+ * one line, wrapped in square brackets, standing alone. Drawn as a message it
+ * wore his own colour and his own side of the page, so the thing that stopped
+ * the work read as the thing he said — which is the complaint this whole job
+ * began with (bw-jkh2.12).
+ *
+ * Recognised by shape rather than by wording, because the wordings are the
+ * kit's and change without us. The live driver already flags these as they
+ * arrive; this is what catches the ones read back from a chat's own record,
+ * where the flag was never written down. A message he really did type that is
+ * nothing but one bracketed line costs him a grey chip, which is the whole
+ * price of it.
+ */
+export const writtenInHisName = (text: string): boolean => /^\[[^\n\]]+\]$/.test(text.trim());
+
+/**
  * A note, or one of the app's own asides, as the same kind of row.
  *
  * An aside is the app talking about the chat rather than the machine talking
@@ -265,6 +291,16 @@ export function drawnRows(items: TranscriptItem[], everything: boolean): DrawnRo
 function machineLine(
   item: TranscriptItem,
 ): { id: string; family: MachineFamily; kind: string; rank: NoteRank; text: string; body: string | null } | null {
+  if (item.kind === 'message' && item.role === 'user' && writtenInHisName(item.text)) {
+    return {
+      id: item.id,
+      family: familyOf('user/synthetic', 'note'),
+      kind: 'user/synthetic',
+      rank: 'note',
+      text: item.text.trim(),
+      body: null,
+    };
+  }
   if (item.kind === 'note') {
     return {
       id: item.id,

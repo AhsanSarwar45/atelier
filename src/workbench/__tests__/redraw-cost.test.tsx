@@ -80,7 +80,7 @@ function Chat({ view, busy, since }: { view: SessionView; busy: boolean; since: 
   return (
     <div>
       {view.items.map((item) => (
-        <TranscriptRow key={item.id} item={item} openAll={false} sessionId="s" mentions={MENTIONS} onLook={LOOK} />
+        <TranscriptRow key={item.id} item={item} sessionId="s" mentions={MENTIONS} onLook={LOOK} />
       ))}
       {busy && <WorkingLine label="Thinking" since={since} reported={0} waiting={false} thought={0} />}
     </div>

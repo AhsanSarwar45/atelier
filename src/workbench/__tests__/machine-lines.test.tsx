@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import postcss from 'postcss';
 import tailwind from 'tailwindcss';
 import { describe, expect, it } from 'vitest';
@@ -56,6 +56,7 @@ const said = (text: string): TranscriptItem => ({
   id: `msg-${text}`,
   role: 'assistant',
   text,
+  parentId: null,
   images: [],
   done: true,
   parentId: null,
@@ -119,7 +120,7 @@ describe('every kind has a family', () => {
 describe('a run collapses', () => {
   it('draws eight retries as one chip reading eight', () => {
     const items = Array.from({ length: 8 }, (_, i) => note('system/api_retry', `Retrying (${i + 1} of 8)`));
-    const rows = drawnRows(items, false);
+    const rows = drawnRows(items);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ row: 'machine', family: 'waiting' });
     const row = rows[0] as Extract<(typeof rows)[number], { row: 'machine' }>;
@@ -132,7 +133,6 @@ describe('a run collapses', () => {
   it('keeps two different kinds as two chips', () => {
     const rows = drawnRows(
       [note('system/api_retry', 'Retrying (1 of 5)'), note('system/compact_boundary', 'Compacted (manual): 90k tokens')],
-      false,
     );
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => (r.row === 'machine' ? r.family : 'other'))).toEqual(['waiting', 'memory']);
@@ -141,42 +141,76 @@ describe('a run collapses', () => {
   it('does not fold across what was said in between', () => {
     const rows = drawnRows(
       [note('system/api_retry', 'Retrying (1 of 5)'), said('Back on it.'), note('system/api_retry', 'Retrying (2 of 5)')],
-      false,
     );
     expect(rows.map((r) => r.row)).toEqual(['machine', 'other', 'machine']);
   });
 
-  it('drops the quiet lines before folding, not after', () => {
-    // A status ping landing mid-run used to cut the run in two and draw the same
-    // thing twice with nothing between them.
+  it('draws a quiet line where it happened, between two halves of a run', () => {
+    // Nothing is held back for being quiet any more, so a ping in the middle of
+    // a run is on the page and the run either side of it is two chips. Reading
+    // it as one again is what switching that family off is for (bw-jkh2.13).
     const rows = drawnRows(
       [
         note('system/api_retry', 'Retrying (1 of 5)'),
         note('system/status', 'Status: requesting', 'detail'),
         note('system/api_retry', 'Retrying (2 of 5)'),
       ],
-      false,
     );
-    expect(rows).toHaveLength(1);
-    const row = rows[0] as Extract<(typeof rows)[number], { row: 'machine' }>;
-    expect(row.lines).toHaveLength(2);
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => (r.row === 'machine' ? r.family : 'other'))).toEqual([
+      'waiting',
+      'breathing',
+      'waiting',
+    ]);
   });
 
-  it('shows the quiet lines when the reader asks for everything', () => {
-    const rows = drawnRows([note('system/status', 'Status: requesting', 'detail')], true);
+  it('draws a quiet line without being asked to', () => {
+    const rows = drawnRows([note('system/status', 'Status: requesting', 'detail')]);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ row: 'machine', family: 'breathing' });
   });
 });
 
+/** A message as it arrives from the chat: his own, or one written in his name. */
+const typed = (text: string): TranscriptItem => ({
+  kind: 'message',
+  id: `typed-${text}`,
+  role: 'user',
+  text,
+  parentId: null,
+  images: [],
+  done: true,
+});
+
+describe('a line the kit wrote in his name', () => {
+  it('is the machine talking, and never his own message', () => {
+    const rows = drawnRows([typed('[Request interrupted by user]')]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ row: 'machine', family: 'stopped', kind: 'user/synthetic' });
+    expect(rows.some((r) => r.row === 'other')).toBe(false);
+  });
+
+  it('leaves what he really typed alone', () => {
+    const rows = drawnRows([typed('do the thing'), typed('see [the note] about it')]);
+    expect(rows.map((r) => r.row)).toEqual(['other', 'other']);
+  });
+
+  it('folds a run of them the way it folds any other kind', () => {
+    const rows = drawnRows([typed('[Request interrupted by user]'), typed('[Request interrupted by user for tool use]')]);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as Extract<(typeof rows)[number], { row: 'machine' }>;
+    expect(row.lines).toHaveLength(2);
+  });
+});
+
 describe('an app aside is a chip too', () => {
   it('takes the family the sidecar gave it', () => {
-    const rows = drawnRows([aside('12 earlier messages … are not drawn here.', 'memory')], false);
+    const rows = drawnRows([aside('12 earlier messages … are not drawn here.', 'memory')]);
     expect(rows[0]).toMatchObject({ row: 'machine', family: 'memory', kind: 'app/notice' });
   });
 
   it('is the app speaking when it was recorded before there were families', () => {
-    const rows = drawnRows([aside('Continuing this chat.')], false);
+    const rows = drawnRows([aside('Continuing this chat.')]);
     expect(rows[0]).toMatchObject({ row: 'machine', family: 'background' });
   });
 
@@ -184,7 +218,7 @@ describe('an app aside is a chip too', () => {
     // Every aside arrives under the one kind and carries its family beside it,
     // so kind and loudness alone would merge these and draw the second one's
     // words in the first one's colour.
-    const rows = drawnRows([aside('one', 'memory'), aside('two', 'background')], false);
+    const rows = drawnRows([aside('one', 'memory'), aside('two', 'background')]);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => (r.row === 'machine' ? r.family : 'other'))).toEqual(['memory', 'background']);
   });
@@ -192,7 +226,6 @@ describe('an app aside is a chip too', () => {
   it('keeps every chip wearing the colour of the words it shows', () => {
     const rows = drawnRows(
       [aside('one', 'memory'), aside('two', 'background'), aside('three', 'background')],
-      false,
     );
     for (const row of rows) {
       if (row.row !== 'machine') continue;
@@ -205,7 +238,6 @@ describe('an app aside is a chip too', () => {
   it('folds with the aside beside it, and not with a note', () => {
     const rows = drawnRows(
       [aside('one', 'memory'), aside('two', 'memory'), note('system/api_retry', 'Retrying (1 of 5)')],
-      false,
     );
     expect(rows).toHaveLength(2);
     const first = rows[0] as Extract<(typeof rows)[number], { row: 'machine' }>;
@@ -278,14 +310,14 @@ describe('the colours survive the build', () => {
 
 /** The row as the transcript hands it over. */
 const machineRow = (items: TranscriptItem[]) => {
-  const row = drawnRows(items, true)[0]!;
+  const row = drawnRows(items)[0]!;
   if (row.row !== 'machine') throw new Error('not a machine row');
   return row;
 };
 
 describe('the chat draws them as chips', () => {
   it('carries its family, its mark and what it said', () => {
-    render(<MachineLine row={machineRow([note('user/synthetic', '[Request interrupted by user]')])} openAll={false} />);
+    render(<MachineLine row={machineRow([note('user/synthetic', '[Request interrupted by user]')])} />);
     const row = screen.getByTestId('note-row');
     expect(row).toHaveAttribute('data-family', 'stopped');
     expect(row).toHaveAttribute('data-note-kind', 'user/synthetic');
@@ -296,23 +328,25 @@ describe('the chat draws them as chips', () => {
 
   it('says how many times a folded run happened, and only then', () => {
     const many = Array.from({ length: 8 }, (_, i) => note('system/api_retry', `Retrying (${i + 1} of 8)`));
-    const { unmount } = render(<MachineLine row={machineRow(many)} openAll={false} />);
+    const { unmount } = render(<MachineLine row={machineRow(many)} />);
     expect(screen.getByTestId('note-times').textContent).toBe('8');
     expect(screen.getByTestId('note-row')).toHaveAttribute('data-times', '8');
     unmount();
 
-    render(<MachineLine row={machineRow([note('system/api_retry', 'Retrying (1 of 5)')])} openAll={false} />);
+    render(<MachineLine row={machineRow([note('system/api_retry', 'Retrying (1 of 5)')])} />);
     expect(screen.queryByTestId('note-times')).toBeNull();
   });
 
   it('hands over every folded line once it is opened', () => {
     const many = Array.from({ length: 3 }, (_, i) => note('system/api_retry', `Retrying (${i + 1} of 3)`));
-    render(<MachineLine row={machineRow(many)} openAll />);
+    render(<MachineLine row={machineRow(many)} />);
+    expect(screen.queryAllByTestId('note-body')).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('note-toggle'));
     expect(screen.getAllByTestId('note-body')).toHaveLength(3);
   });
 
   it('does not open a single line with nothing behind it', () => {
-    render(<MachineLine row={machineRow([note('conversation_reset', 'This chat was started over.')])} openAll />);
+    render(<MachineLine row={machineRow([note('conversation_reset', 'This chat was started over.')])} />);
     expect(screen.getByTestId('note-toggle')).toBeDisabled();
   });
 });

@@ -20,6 +20,7 @@
  *    inside it, so turning the group back on gives him all of it back rather
  *    than whatever remained of it the last time he was in there.
  */
+import { drawnRows, FAMILIES, familyIn, type MachineFamily } from '@/workbench/machine-lines';
 import type { TranscriptItem } from '@/workbench/use-session';
 
 /** Where the reader's choice is remembered between visits. */
@@ -48,6 +49,17 @@ export const toolKind = (name: string): KindId => `tool:${name}`;
 export const toolName = (id: KindId): string => id.slice('tool:'.length);
 export const isTool = (id: KindId): boolean => id.startsWith('tool:');
 
+/**
+ * One family of machine line, under status the way a tool sits under commands.
+ *
+ * Hook chatter and a chat that ran out of room are both status lines and are
+ * not remotely the same news, so one switch over the pair of them is no switch
+ * at all: turning the noise off took the announcements with it (bw-jkh2.14).
+ */
+export const statusKind = (family: MachineFamily): KindId => `status:${family}`;
+export const familyOfKind = (id: KindId): MachineFamily => id.slice('status:'.length) as MachineFamily;
+export const isStatus = (id: KindId): boolean => id.startsWith('status:');
+
 /** What each fixed kind is called on screen, in the reader's words. */
 const LABELS: Record<string, string> = {
   [YOU]: 'You',
@@ -60,11 +72,23 @@ const LABELS: Record<string, string> = {
   [REPORTS]: 'Reports',
 };
 
-export const labelOf = (id: KindId): string => (isTool(id) ? toolName(id) : (LABELS[id] ?? id));
+/** What each family is called on screen — severity and cause, in his words. */
+const FAMILY_LABELS: Record<MachineFamily, string> = {
+  stopped: 'Stopped',
+  failed: 'Failed',
+  waiting: 'Waiting on a service',
+  memory: 'Memory',
+  background: 'News',
+  breathing: 'Routine',
+};
+
+export const labelOf = (id: KindId): string =>
+  isTool(id) ? toolName(id) : isStatus(id) ? FAMILY_LABELS[familyOfKind(id)] : (LABELS[id] ?? id);
 
 /** The kind directly above this one, or null for the two at the top. */
 export function above(id: KindId): KindId | null {
   if (isTool(id)) return COMMANDS;
+  if (isStatus(id)) return STATUS;
   if (id === YOU || id === AGENT) return null;
   return AGENT;
 }
@@ -78,6 +102,11 @@ export function upward(id: KindId): KindId[] {
 
 /** Which switch one row of the conversation answers to. */
 export function kindOf(item: TranscriptItem): KindId {
+  // Asked of the drawing first: an interrupt arrives shaped like something he
+  // typed and is drawn as a machine line, and the switch has to follow the
+  // page rather than the wire (bw-jkh2.12).
+  const family = familyIn(item);
+  if (family !== null) return statusKind(family);
   switch (item.kind) {
     case 'message':
       return item.role === 'user' ? YOU : REPLIES;
@@ -89,8 +118,8 @@ export function kindOf(item: TranscriptItem): KindId {
       return QUESTIONS;
     case 'report':
       return REPORTS;
-    // A notice is the chat talking about itself in one grey line, which is the
-    // same thing to a reader as a note however differently the two arrive.
+    // Never reached: a note and a notice both draw as machine lines and were
+    // answered above. Kept so the switch stays exhaustive over the kinds.
     case 'note':
     case 'notice':
       return STATUS;
@@ -116,9 +145,12 @@ const UNDER_AGENT = [REPLIES, THINKING, COMMANDS, STATUS, QUESTIONS, REPORTS];
  * exactly the tools it used, in the order a reader scans a list — by name.
  */
 export function treeOf(items: TranscriptItem[]): KindNode[] {
+  // Counted as the page draws it, not as the record holds it: a run of eight
+  // retries is one row with an 8 on it, and a count of 8 beside a switch that
+  // removes one row would be a lie about what turning it off costs.
   const tally = new Map<KindId, number>();
-  for (const item of items) {
-    const id = kindOf(item);
+  for (const row of drawnRows(items)) {
+    const id = row.row === 'machine' ? statusKind(row.family) : kindOf(row.item);
     tally.set(id, (tally.get(id) ?? 0) + 1);
   }
 
@@ -127,8 +159,15 @@ export function treeOf(items: TranscriptItem[]): KindNode[] {
     .sort((a, b) => toolName(a).localeCompare(toolName(b)))
     .map((id) => leaf(id, tally));
 
+  // In the families' own order, which runs from what stopped the work down to
+  // what the machine says while it breathes — not alphabetically, which would
+  // put the noise first.
+  const families = FAMILIES.map(statusKind)
+    .filter((id) => tally.has(id))
+    .map((id) => leaf(id, tally));
+
   const branches = UNDER_AGENT.map((id) =>
-    id === COMMANDS ? group(COMMANDS, tools) : leaf(id, tally),
+    id === COMMANDS ? group(COMMANDS, tools) : id === STATUS ? group(STATUS, families) : leaf(id, tally),
   );
 
   return [leaf(YOU, tally), group(AGENT, branches)];
@@ -225,19 +264,6 @@ const descend = (node: KindNode): KindId[] =>
 
 /** Nothing switched off — what the reader gets before he touches anything. */
 export const EVERYTHING: ReadonlySet<KindId> = new Set<KindId>();
-
-/**
- * The rows a conversation could draw at all, before any of these switches.
- *
- * A note the chat files as detail is only on screen with Show everything on. A
- * count that includes those the rest of the time prices Status lines by rows
- * the reader cannot see, and the count exists precisely to tell him what
- * turning a switch off would cost him (bw-qdim.10).
- */
-export function drawable(items: TranscriptItem[], openAll: boolean): TranscriptItem[] {
-  if (openAll) return items;
-  return items.filter((item) => item.kind !== 'note' || item.rank !== 'detail');
-}
 
 /**
  * The rows this conversation draws. Everything a sent-off agent produced goes

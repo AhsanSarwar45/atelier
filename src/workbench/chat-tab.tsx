@@ -17,7 +17,6 @@ import {
   Coins,
   Cpu,
   Gauge,
-  ListTree,
   Loader2,
   PanelLeft,
   Paperclip,
@@ -59,7 +58,7 @@ import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
-import { EVERYTHING, drawable, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
+import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
@@ -71,8 +70,6 @@ import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type Trans
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
-/** Whether the transcript is showing every command's body and every quiet line. */
-const CHAT_OPEN_ALL = 'workbench.open-all';
 
 /**
  * Everything one row of a conversation actually says, for going through once
@@ -429,22 +426,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     });
   }, []);
   /**
-   * Everything open: every command showing what it ran and printed, and every
-   * line the machine says about itself. Ctrl+O, because that is the key that
-   * does it in his terminal, and remembered for the browser rather than the
-   * chat — it is a way of reading, not a property of one conversation
-   * (docs/agent-workbench.md §8.2.4).
-   */
-  const [openAll, setOpenAll] = useState(false);
-
-  useEffect(() => {
-    setOpenAll(localStorage.getItem(CHAT_OPEN_ALL) === '1');
-  }, []);
-
-  /**
    * Which kinds of message the conversation draws. Remembered for the browser
-   * rather than the chat for the same reason as the switch above it: it is a
-   * way of reading, not a property of one conversation (bw-qdim).
+   * rather than the chat: it is a way of reading, not a property of one
+   * conversation (bw-qdim).
    */
   const [offKinds, setOffKinds] = useState<ReadonlySet<KindId>>(EVERYTHING);
 
@@ -458,41 +442,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setOffKinds(off);
   }, []);
 
-  /** Every row this conversation could draw, before any switch is read. */
-  const canDraw = useMemo(() => drawable(view.items, openAll), [view.items, openAll]);
-
   /** The rows this conversation draws, once the reader's switches are obeyed. */
-  const rows = useMemo(() => stillShowing(canDraw, offKinds), [canDraw, offKinds]);
+  const rows = useMemo(() => stillShowing(view.items, offKinds), [view.items, offKinds]);
 
   /**
    * The same rows as they are drawn: every machine line carrying the family that
    * decides its colour and its mark, and a run of one kind folded into a single
    * chip (bw-jkh2).
    */
-  const drawn = useMemo(() => drawnRows(rows, openAll), [rows, openAll]);
+  const drawn = useMemo(() => drawnRows(rows), [rows]);
 
-  /**
-   * Written where it is CHANGED, never mirrored from an effect: an effect that
-   * writes the state back runs once with the value the screen started at, which
-   * overwrites what was remembered before the effect that reads it has taken —
-   * so the choice was lost on every reload.
-   */
-  const flipOpenAll = useCallback(() => {
-    setOpenAll((was) => {
-      localStorage.setItem(CHAT_OPEN_ALL, was ? '0' : '1');
-      return !was;
-    });
-  }, []);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (!e.ctrlKey || e.metaKey || e.altKey || e.key.toLowerCase() !== 'o') return;
-      e.preventDefault();
-      flipOpenAll();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [flipOpenAll]);
   const endRef = useRef<HTMLDivElement>(null);
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -619,15 +578,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-showing-everything={everything}
           onClick={flipEverything}
         />
-        <ToolButton
-          icon={<ListTree />}
-          label={openAll ? 'Show less (Ctrl+O)' : 'Show everything (Ctrl+O)'}
-          emphasis={openAll ? 'loud' : 'quiet'}
-          data-testid="toggle-open-all"
-          data-open-all={openAll}
-          onClick={flipOpenAll}
-        />
-        <KindFilter items={canDraw} off={offKinds} onChange={changeKinds} />
+        <KindFilter items={view.items} off={offKinds} onChange={changeKinds} />
         {/* The one control on this bar that says what it does in words. Every
             other tool here is a picture, and a picture is right for a thing you
             reach for once you know the bar; starting a conversation is the first
@@ -849,20 +800,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         // it, which the browser check proves.
         onClickCapture={(e) => openPathClicked(e)}
       >
-        {rows.length === 0 && canDraw.length > 0 && (
-          <NothingShowing hidden={canDraw.length} onShowAll={() => changeKinds(EVERYTHING)} />
+        {rows.length === 0 && view.items.length > 0 && (
+          <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
         {drawn.map((drawnRow) =>
           // A machine line and one of the app's own asides are the same shape:
           // both are the chat talking about itself rather than someone in it,
           // and a run of one kind arrives here already folded into one row.
           drawnRow.row === 'machine' ? (
-            <MachineLine key={drawnRow.id} row={drawnRow} openAll={openAll} />
+            <MachineLine key={drawnRow.id} row={drawnRow} />
           ) : (
             <TranscriptRow
               key={drawnRow.item.id}
               item={drawnRow.item}
-              openAll={openAll}
               sessionId={sessionId}
               mentions={mentions}
               onLook={setLooking}

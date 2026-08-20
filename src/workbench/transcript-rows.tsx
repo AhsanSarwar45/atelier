@@ -282,22 +282,13 @@ export function whatItWasAsked(input: Record<string, unknown>): string {
 }
 
 /**
- * Whether one row is open: the reader's own click, until the control that opens
- * everything moves — which then wins, in both directions.
- *
- * A hand-opened row used to pin itself for good, so "show less" stopped reaching
- * it and did not show less (bw-1u1.24). The last position of the control is kept
- * rather than watched with an effect, so the row is right on the render that
- * shows it, never one frame late.
+ * Whether one row is open. Closed until the reader opens it, and his click is
+ * the only thing that decides — there is no longer a control that opens every
+ * row at once, and what he does not want to read he switches off by name
+ * (bw-jkh2.13).
  */
-export function useOpen(openAll: boolean): [boolean, (open: boolean) => void] {
-  const [byHand, setByHand] = useState<boolean | null>(null);
-  const [lastAll, setLastAll] = useState(openAll);
-  if (lastAll !== openAll) {
-    setLastAll(openAll);
-    setByHand(null);
-  }
-  return [byHand ?? openAll, setByHand];
+export function useOpen(): [boolean, (open: boolean) => void] {
+  return useState(false);
 }
 
 /**
@@ -315,16 +306,26 @@ export function useOpen(openAll: boolean): [boolean, (open: boolean) => void] {
  */
 export const SENT_OFF = 'ml-6 border-l-2 border-violet-500/50 pl-3';
 
+/**
+ * Whether a helper produced this row, from the call it says it came from.
+ *
+ * Asked loosely on purpose. A row folded from a chat's own record — and a row
+ * that reached the browser in a frame an older sidecar wrote — carries no such
+ * field at all rather than an empty one, and a strict `!== null` reads that
+ * absence as a helper. Every message in the chat then wore the rail, and the
+ * indent it adds beats the margin that holds the reader's own words to the
+ * right, so his messages moved to the wrong end of the page (bw-jkh2.15).
+ */
+export const sentOff = (parentId: string | null | undefined): boolean => parentId != null;
+
 export const ToolRow = memo(function ToolRow({
   item,
   nested,
-  openAll,
 }: {
   item: Extract<TranscriptItem, { kind: 'tool' }>;
   nested: boolean;
-  openAll: boolean;
 }) {
-  const [open, setOpen] = useOpen(openAll);
+  const [open, setOpen] = useOpen();
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
   // A shell row's arguments ARE its command: written out as `key: value` it
@@ -414,8 +415,8 @@ export const ToolRow = memo(function ToolRow({
  * every chip above it (bw-uiyz.5).
  */
 export const MachineLine = memo(
-  function MachineLine({ row, openAll }: { row: MachineRow; openAll: boolean }) {
-    const [open, setOpen] = useOpen(openAll);
+  function MachineLine({ row }: { row: MachineRow }) {
+    const [open, setOpen] = useOpen();
     const look = lookOf(row.family);
     const Mark = markOf(row.family);
     const opens = opensOn(row);
@@ -472,7 +473,7 @@ export const MachineLine = memo(
       </div>
     );
   },
-  (before, now) => before.openAll === now.openAll && sameRow(before.row, now.row),
+  (before, now) => sameRow(before.row, now.row),
 );
 
 /** Whether two folded rows would draw the same chip over the same words. */
@@ -506,7 +507,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
       data-testid="thinking-block"
       data-done={item.done}
       data-sent-by={item.parentId ?? undefined}
-      className={cn('text-sm', item.parentId !== null && SENT_OFF)}
+      className={cn('text-sm', sentOff(item.parentId) && SENT_OFF)}
     >
       <button
         type="button"
@@ -619,12 +620,19 @@ const MessageRow = memo(function MessageRow({
       data-sent-by={sentBy ?? undefined}
       // The answer takes the column; what he typed stays narrower and to
       // the right, which is what tells the two apart without a label.
+      //
+      // Each also wears an edge in its own colour, on the side it is anchored
+      // to. A conversation is mostly commands, and a tint alone did not carry
+      // far enough down a page of them to find a sentence by — the edge is what
+      // makes a message findable at a scroll's speed (bw-jkh2.16). The violet
+      // rail is not used here: it means a HELPER wrote the row, and it wins
+      // over the speaker's own edge when both are true.
       className={cn(
         'rounded-lg px-3 py-2 text-sm leading-relaxed',
         item.role === 'user'
-          ? 'ml-auto max-w-[75ch] bg-primary/15 text-foreground'
-          : 'w-full bg-muted/40 text-foreground',
-        sentBy !== null && SENT_OFF,
+          ? 'ml-auto max-w-[75ch] border-r-2 border-primary/70 bg-primary/15 text-foreground'
+          : 'w-full border-l-2 border-muted-foreground/40 bg-muted/40 text-foreground',
+        sentOff(sentBy) && SENT_OFF,
       )}
     >
       {item.images.map((img, i) => (
@@ -655,20 +663,18 @@ const MessageRow = memo(function MessageRow({
  */
 export const TranscriptRow = memo(function TranscriptRow({
   item,
-  openAll,
   sessionId,
   mentions,
   onLook,
 }: {
   item: TranscriptItem;
-  openAll: boolean;
   sessionId: string;
   mentions: Mentions;
   onLook: (image: ImagePayload) => void;
 }) {
   switch (item.kind) {
     case 'tool':
-      return <ToolRow item={item} nested={item.parentId !== null} openAll={openAll} />;
+      return <ToolRow item={item} nested={sentOff(item.parentId)} />;
     case 'thinking':
       return <ThinkingBlock item={item} />;
     case 'report':
@@ -684,8 +690,9 @@ export const TranscriptRow = memo(function TranscriptRow({
           chosen={item.chosen}
         />
       );
-    // Notes and asides never reach here: the chat folds them into machine lines
-    // before it draws, which is the only shape they have.
+    // Notes, asides, and the lines the kit writes in the reader's name never
+    // reach here: the chat folds them into machine lines before it draws, which
+    // is the only shape they have.
     case 'note':
     case 'notice':
       return null;

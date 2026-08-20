@@ -9,6 +9,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 
 import {
+  above,
   AGENT,
   CHAT_FILTER,
   COMMANDS,
@@ -16,13 +17,13 @@ import {
   REPLIES,
   STATUS,
   THINKING,
-  drawable,
   flip,
   kindOf,
   remember,
   remembered,
   showing,
   switchOf,
+  statusKind,
   toolKind,
   treeOf,
 } from '@/workbench/message-filter';
@@ -126,9 +127,17 @@ describe('which switch a row answers to', () => {
     expect(kindOf(ran('Edit'))).toBe(toolKind('Edit'));
   });
 
-  it('reads a notice and a note as the same kind of line', () => {
-    expect(kindOf(noted())).toBe(STATUS);
-    expect(kindOf({ kind: 'notice', id: 'n', text: 'reconnected' })).toBe(STATUS);
+  it('reads a notice and a note as status lines, each under its own family', () => {
+    expect(kindOf(noted())).toBe(statusKind('background'));
+    expect(kindOf({ kind: 'notice', id: 'n', text: 'reconnected' })).toBe(statusKind('background'));
+    expect(above(kindOf(noted()))).toBe(STATUS);
+  });
+
+  it('reads a line the kit wrote in his name as the machine talking, not as him', () => {
+    // The complaint this job began with: stopping a turn put
+    // "[Request interrupted by user]" on the page wearing his own colour.
+    expect(kindOf(said('user', '[Request interrupted by user]'))).toBe(statusKind('stopped'));
+    expect(kindOf(said('user', 'do the thing'))).toBe('you');
   });
 });
 
@@ -302,21 +311,33 @@ describe('a switch inside a group that is off', () => {
 });
 
 describe('what a count is counting', () => {
-  it('leaves out a line the screen never draws', () => {
+  it('counts the lines as the page draws them, a folded run once', () => {
+    // Two quiet lines in a row are one chip with a 2 on it, and a count of 2
+    // beside a switch that removes one row would misprice what it costs him.
     const items = [...conversation(), filed(), filed()];
-    const tree = treeOf(drawable(items, false));
-    expect(find(tree, STATUS).count).toBe(1);
+    const tree = treeOf(items);
+    expect(find(tree, STATUS).count).toBe(2);
     expect(find(tree, AGENT).count).toBe(find(tree, AGENT).children.reduce((n, c) => n + c.count, 0));
   });
 
-  it('counts it once Show everything is on, because then it is on screen', () => {
+  it('carries one switch per family the conversation has, in the families’ own order', () => {
     const items = [...conversation(), filed(), filed()];
-    expect(find(treeOf(drawable(items, true)), STATUS).count).toBe(3);
+    const under = find(treeOf(items), STATUS).children;
+    expect(under.map((c) => c.id)).toEqual([statusKind('background'), statusKind('breathing')]);
+    expect(under.map((c) => c.count)).toEqual([1, 1]);
+  });
+
+  it('switches one family off and leaves the other standing', () => {
+    const items = [...conversation(), filed(), filed()];
+    const off = flipped(EVERYTHING, items, statusKind('breathing'));
+    const drawn = showing(items, off);
+    expect(drawn.some((i) => i.kind === 'note' && i.rank === 'detail')).toBe(false);
+    expect(drawn.some((i) => i.kind === 'note' && i.rank === 'note')).toBe(true);
   });
 
   it('keeps every other kind exactly as it was', () => {
     const items = [...conversation(), filed()];
-    const tree = treeOf(drawable(items, false));
+    const tree = treeOf(items);
     expect(find(tree, COMMANDS).count).toBe(3);
     expect(find(tree, 'you').count).toBe(1);
   });
