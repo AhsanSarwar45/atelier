@@ -35,14 +35,16 @@ export const IMPORTED_MESSAGES = 200;
  * in their place and nothing to click (bw-uu9x.1). 7 reads the agents the chat
  * sent off, whose turns the kit files beside the record rather than in it, so a
  * chat read back has the rows and the conversations a chat watched live has
- * (bw-7ks.22.7). Raise it whenever the reading would produce a different
+ * (bw-7ks.22.7). 8 says what the chat spent, counting its own turns and the
+ * whole of every agent it sent off — a chat nothing here is driving reported no
+ * spend at all before it (bw-7ks.22.8). Raise it whenever the reading would produce a different
  * transcript from the same record: every chat read in by a lower one is read
  * again on its next open.
  *
  * It lives beside the reading it numbers, so raising the reading and raising
  * the number are one edit in one file (bw-khe.11).
  */
-export const IMPORT_RECIPE = 7;
+export const IMPORT_RECIPE = 8;
 
 /** What opening a chat does about a past it may or may not have read already. */
 export type ReadingChoice =

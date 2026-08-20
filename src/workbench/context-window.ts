@@ -131,3 +131,41 @@ export function latest(messages: readonly Recorded[]): { used: number; window: n
   }
   return null;
 }
+
+/** What a conversation has spent, split the way the kit reports one call. */
+export interface Spend {
+  /** Everything that went INTO the calls: words sent, and words the cache held. */
+  input: number;
+  /** Everything the model wrote back. */
+  output: number;
+  /** The two added up — the same reading of a turn `fullness` makes. */
+  total: number;
+}
+
+/**
+ * What a conversation spent, added up over every turn the model answered.
+ *
+ * The same reading of a turn as the gauge above, summed instead of taken from
+ * the last one: the gauge asks how much room is left NOW, and this asks what
+ * the whole conversation cost. Both count the cache — a cached prompt is
+ * cheaper, not smaller — so the two numbers are one arithmetic and a chat's own
+ * spend is comparable with what its helpers report spending (bw-7ks.22.8).
+ *
+ * A record whose turns state no usage comes back as zeros, which a caller reads
+ * as nothing to say rather than as a conversation that cost nothing.
+ */
+export function spentOn(messages: readonly Recorded[]): Spend {
+  let input = 0;
+  let output = 0;
+  for (const message of messages) {
+    const usage = turnOf(message.message)?.usage;
+    if (!usage) continue;
+    for (const part of [usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens]) {
+      if (typeof part === 'number' && Number.isFinite(part)) input += part;
+    }
+    if (typeof usage.output_tokens === 'number' && Number.isFinite(usage.output_tokens)) {
+      output += usage.output_tokens;
+    }
+  }
+  return { input, output, total: input + output };
+}

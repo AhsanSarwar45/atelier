@@ -16,7 +16,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { fullness, type Usage } from '../../src/workbench/context-window.ts';
+import { type Spend, spentOn } from '../../src/workbench/context-window.ts';
 import {
   IMPORTED_MESSAGES,
   type PastEntry,
@@ -52,6 +52,8 @@ export interface HelperPast {
   model: string | null;
   seconds: number;
   tokens: number;
+  /** The same spend split the way the kit reports one call, for a chat's total. */
+  spend: Spend;
   calls: number;
   /** Its last word, which is what the row shows once it has finished. */
   result: string | null;
@@ -75,7 +77,6 @@ const oneLine = (text: string): string => text.trim().split('\n')[0]?.trim() ?? 
  */
 export function helperFrom(agentId: string, meta: HelperMeta, lines: HelperLine[]): HelperPast {
   let model: string | null = null;
-  let tokens = 0;
   let calls = 0;
   let first = '';
   let last = '';
@@ -86,9 +87,8 @@ export function helperFrom(agentId: string, meta: HelperMeta, lines: HelperLine[
       last = line.timestamp;
     }
     if (line.type !== 'assistant') continue;
-    const message = line.message as { model?: unknown; usage?: Usage } | null;
+    const message = line.message as { model?: unknown } | null;
     if (model === null && typeof message?.model === 'string') model = message.model;
-    tokens += fullness(message?.usage) ?? 0;
     calls += toolCallsOf(line.message).length;
     const said = textOf(line.message);
     if (said) answer = said;
@@ -97,6 +97,7 @@ export function helperFrom(agentId: string, meta: HelperMeta, lines: HelperLine[
   const ended = Date.parse(last);
   const seconds =
     Number.isFinite(began) && Number.isFinite(ended) ? Math.max(0, Math.round((ended - began) / 1000)) : 0;
+  const spend = spentOn(lines);
   return {
     agentId,
     toolCallId: typeof meta.toolUseId === 'string' && meta.toolUseId ? meta.toolUseId : null,
@@ -104,7 +105,8 @@ export function helperFrom(agentId: string, meta: HelperMeta, lines: HelperLine[
     what: oneLine(typeof meta.description === 'string' ? meta.description : ''),
     model,
     seconds,
-    tokens,
+    tokens: spend.total,
+    spend,
     calls,
     result: oneLine(answer) || null,
     // The tail of it, on the same terms as the chat's own: a conversation drawn

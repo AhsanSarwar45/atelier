@@ -119,6 +119,10 @@ describe('the agents a chat sent off, read back from the record', () => {
     // both of them twice here — and a call is a call it made itself.
     expect(helper!.seconds).toBe(45);
     expect(helper!.tokens).toBe(4000);
+    // Split the way the kit reports one call, so a chat can add its helpers'
+    // spend to its own and still say what went in and what came out
+    // (bw-7ks.22.8).
+    expect(helper!.spend).toEqual({ input: 3200, output: 800, total: 4000 });
     expect(helper!.calls).toBe(1);
     expect(helper!.result).toBe('412 rows.');
     // Its conversation, in the order it happened: the brief it was given, the

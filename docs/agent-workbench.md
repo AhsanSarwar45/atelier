@@ -813,7 +813,10 @@ model, mode, state — none of which grows, so the constraint holds by
 construction rather than by a count. What it has spent stays here too, beside
 how full the conversation is and how much of the account's own allowance is
 left — three numbers that do not grow, each wearing its own mark so a row of
-them does not read as one figure (bw-7ks.22.13).
+them does not read as one figure (bw-7ks.22.13). The spend is the brand's own
+dollars while a chat is being driven and the record's own tokens on a chat that
+is not, and both count every agent the chat sent off (§8.2.7, bw-7ks.22.8). The
+two are never converted into one another and never added together.
 
 #### 8.2.2 What a working chat shows (bw-f1q)
 
@@ -1177,9 +1180,22 @@ missing today rather than merely thin:
   measured 2026-08-20; the tail reader's line discarding sidechain messages is
   vestigial — no such line reaches a parent's record on this version, and it
   still guards against pointing the tail at a helper's own file);
-- what a turn cost counts the main loop only and excludes every helper, so the
-  cost shown under a delegated turn is wrong by however much was delegated
-  (bw-7ks.22.8).
+- a chat nobody is driving says nothing about what it cost, and what it cost is
+  mostly the work it sent away. The claim this job opened with — that a turn's
+  cost counts the main loop only — is **false for a live Claude chat** and was
+  measured false on the way past (2026-08-20, kit 2.1.237): a turn that sent one
+  agent off reported `$0.2399167`, which is its own `$0.232197` plus that
+  helper's `$0.007720` exactly, and the kit's own contract says the dollars
+  cover the same calls as its per-model totals — main loop, Task subagents,
+  sidechains and workflow agents alike. Only its `usage` field is main-loop-only,
+  and that is the field the fullness gauge wants. What was genuinely missing is
+  the other chat: one found on disk has no result message to read a figure off,
+  so it showed no spend at all. It now says one, worked out from the record —
+  every turn the chat itself was answered on, plus the whole of every helper's
+  own file — and in tokens, because tokens are what a record states and a price
+  worked out here from a table of our own would be a guess wearing a dollar sign
+  (bw-7ks.22.8, and see bw-wg89 for what the same misreading does to the spend
+  view).
 
 **One seam, both brands** (§2.1). The vocabulary grows by three lines and a
 command family, and a brand is still one driver file:

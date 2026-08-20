@@ -789,7 +789,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               appearance="light"
               size="sm"
               data-testid="cost-chip"
-              title="What this conversation has spent so far"
+              data-kind={view.cost.kind}
+              data-total={view.cost.kind === 'usd' ? view.cost.usd : view.cost.total}
+              title="What this conversation has spent so far, counting every agent it sent off"
               className="font-mono"
             >
               <Coins />

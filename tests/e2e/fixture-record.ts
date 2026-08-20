@@ -46,6 +46,12 @@ const SPENT = {
   output_tokens: 180,
 };
 
+/** The whole of one call, on the reading the rows and the chip both use. */
+export const A_CALL = SPENT.input_tokens + SPENT.cache_creation_input_tokens + SPENT.cache_read_input_tokens + SPENT.output_tokens;
+
+/** How many turns of its own each helper below is written with. */
+export const HELPER_TURNS = 3;
+
 /** Where the kit keeps its records, honouring a config dir set for a run. */
 export function configDir(): string {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
@@ -56,11 +62,25 @@ export function projectSlug(cwd: string): string {
   return cwd.replace(/[/.]/g, '-');
 }
 
+/** What the chat below was written having spent, so a case can check the sum. */
+export interface WrittenSpend {
+  /** The chat's own turns, and nothing it sent away. */
+  own: number;
+  /** Every agent it sent off, added up. */
+  helpers: number;
+  /** The two together, which is what the chat's own line has to say. */
+  total: number;
+}
+
 export interface WrittenRecord {
   /** The conversation's own id, which is what a row is found by. */
   sessionId: string;
   /** The chat's own file. */
   path: string;
+  /** The calls that sent each helper off, in the order they went. */
+  calls: string[];
+  /** What was written, added up both ways. */
+  spend: WrittenSpend;
   /** Everything written, so a run can take it away again. */
   remove: () => void;
 }
@@ -78,9 +98,12 @@ export function writeChatWithHelper(opts: {
   branch?: string;
   card: string;
   at?: Date;
+  /** How many agents this chat sent off. One unless a case needs a panel. */
+  sentOff?: number;
 }): WrittenRecord {
   const { cwd, sessionId, card } = opts;
   const branch = opts.branch ?? 'main';
+  const many = opts.sentOff ?? 1;
   const began = opts.at ?? new Date(Date.now() - 60 * 60 * 1000);
   const when = (seconds: number): string => new Date(began.getTime() + seconds * 1000).toISOString();
 
@@ -99,156 +122,176 @@ export function writeChatWithHelper(opts: {
     ...extra,
   });
 
-  // The chat's own record: it asks, it delegates, it hears one answer back, it
-  // replies. The helper's own words are in none of it — that is the point.
-  const chat = [
+  /** The call that sends off the nth helper, and the file that helper writes. */
+  const callOf = (n: number): string => (n === 0 ? SENT_OFF_CALL : `${SENT_OFF_CALL}${n + 1}`);
+  const agentOf = (n: number): string => (n === 0 ? HELPER_AGENT : `${HELPER_AGENT}-${n + 1}`);
+  const calls = Array.from({ length: many }, (_, n) => callOf(n));
+
+  // The chat's own record: it asks, it delegates, it hears each answer back, it
+  // replies. No helper's own words are in any of it — that is the point.
+  const chat: Record<string, unknown>[] = [
     stamp(
       {
         parentUuid: null,
         uuid: 'fixture-u1',
         type: 'user',
-        message: { role: 'user', content: `${HELPER_BRIEF}, by sending one agent off to do it.` },
+        message: { role: 'user', content: `${HELPER_BRIEF}, by sending ${many} agent(s) off to do it.` },
       },
       0,
     ),
+  ];
+  for (let n = 0; n < many; n++) {
+    chat.push(
+      stamp(
+        {
+          parentUuid: `fixture-u${n * 2 + 1}`,
+          uuid: `fixture-u${n * 2 + 2}`,
+          type: 'assistant',
+          message: {
+            id: `msg_fixture_sent_${n}`,
+            model: 'claude-opus-5',
+            role: 'assistant',
+            usage: SPENT,
+            content: [
+              {
+                type: 'tool_use',
+                id: callOf(n),
+                name: 'Task',
+                input: { subagent_type: 'general-purpose', description: HELPER_BRIEF, prompt: HELPER_BRIEF },
+              },
+            ],
+          },
+        },
+        2 + n,
+      ),
+      stamp(
+        {
+          parentUuid: `fixture-u${n * 2 + 2}`,
+          uuid: `fixture-u${n * 2 + 3}`,
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: callOf(n), content: HELPER_ANSWERED }],
+          },
+        },
+        50 + n,
+      ),
+    );
+  }
+  chat.push(
     stamp(
       {
-        parentUuid: 'fixture-u1',
-        uuid: 'fixture-u2',
+        parentUuid: `fixture-u${many * 2 + 1}`,
+        uuid: `fixture-u${many * 2 + 2}`,
         type: 'assistant',
         message: {
-          id: 'msg_fixture_1',
-          model: 'claude-opus-5',
-          role: 'assistant',
-          usage: SPENT,
-          content: [
-            {
-              type: 'tool_use',
-              id: SENT_OFF_CALL,
-              name: 'Task',
-              input: { subagent_type: 'general-purpose', description: HELPER_BRIEF, prompt: HELPER_BRIEF },
-            },
-          ],
-        },
-      },
-      2,
-    ),
-    stamp(
-      {
-        parentUuid: 'fixture-u2',
-        uuid: 'fixture-u3',
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: SENT_OFF_CALL, content: HELPER_ANSWERED }],
-        },
-      },
-      50,
-    ),
-    stamp(
-      {
-        parentUuid: 'fixture-u3',
-        uuid: 'fixture-u4',
-        type: 'assistant',
-        message: {
-          id: 'msg_fixture_2',
+          id: 'msg_fixture_last',
           model: 'claude-opus-5',
           role: 'assistant',
           usage: SPENT,
           content: [{ type: 'text', text: CHAT_SAID }],
         },
       },
-      52,
+      52 + many,
     ),
-  ];
-
-  // The helper's own conversation, in its own file: what it was told, a
-  // sentence of its own, the command it ran — which names the card nothing
-  // else in this chat names — and what it answered.
-  const sidechain = (extra: Record<string, unknown>, seconds: number): Record<string, unknown> =>
-    stamp({ isSidechain: true, agentId: HELPER_AGENT, ...extra }, seconds);
-  const helper = [
-    sidechain(
-      { parentUuid: null, uuid: 'fixture-h1', type: 'user', message: { role: 'user', content: HELPER_BRIEF } },
-      3,
-    ),
-    sidechain(
-      {
-        parentUuid: 'fixture-h1',
-        uuid: 'fixture-h2',
-        type: 'assistant',
-        message: {
-          id: 'msg_fixture_h1',
-          model: 'claude-fable-5',
-          role: 'assistant',
-          usage: SPENT,
-          content: [{ type: 'text', text: HELPER_SAID }],
-        },
-      },
-      8,
-    ),
-    sidechain(
-      {
-        parentUuid: 'fixture-h2',
-        uuid: 'fixture-h3',
-        type: 'assistant',
-        message: {
-          id: 'msg_fixture_h2',
-          model: 'claude-fable-5',
-          role: 'assistant',
-          usage: SPENT,
-          content: [
-            { type: 'tool_use', id: 'toolu_fixtureHelperRan', name: 'Bash', input: { command: `bd show ${card}` } },
-          ],
-        },
-      },
-      20,
-    ),
-    sidechain(
-      {
-        parentUuid: 'fixture-h3',
-        uuid: 'fixture-h4',
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{ type: 'tool_result', tool_use_id: 'toolu_fixtureHelperRan', content: `${card} is open.` }],
-        },
-      },
-      30,
-    ),
-    sidechain(
-      {
-        parentUuid: 'fixture-h4',
-        uuid: 'fixture-h5',
-        type: 'assistant',
-        message: {
-          id: 'msg_fixture_h3',
-          model: 'claude-fable-5',
-          role: 'assistant',
-          usage: SPENT,
-          content: [{ type: 'text', text: HELPER_ANSWERED }],
-        },
-      },
-      48,
-    ),
-  ];
-
-  const asLines = (rows: Record<string, unknown>[]): string => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
-  writeFileSync(path, asLines(chat));
-  writeFileSync(join(helpers, `agent-${HELPER_AGENT}.jsonl`), asLines(helper));
-  writeFileSync(
-    join(helpers, `agent-${HELPER_AGENT}.meta.json`),
-    JSON.stringify({
-      agentType: 'general-purpose',
-      description: HELPER_BRIEF,
-      toolUseId: SENT_OFF_CALL,
-      spawnDepth: 1,
-    }) + '\n',
   );
 
+  // Each helper's own conversation, in its own file: what it was told, a
+  // sentence of its own, the command it ran — which names the card nothing
+  // else in this chat names — and what it answered.
+  const asLines = (rows: Record<string, unknown>[]): string => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  for (let n = 0; n < many; n++) {
+    const agentId = agentOf(n);
+    const sidechain = (extra: Record<string, unknown>, seconds: number): Record<string, unknown> =>
+      stamp({ isSidechain: true, agentId, ...extra }, seconds);
+    const helper = [
+      sidechain(
+        { parentUuid: null, uuid: 'fixture-h1', type: 'user', message: { role: 'user', content: HELPER_BRIEF } },
+        3 + n,
+      ),
+      sidechain(
+        {
+          parentUuid: 'fixture-h1',
+          uuid: 'fixture-h2',
+          type: 'assistant',
+          message: {
+            id: 'msg_fixture_h1',
+            model: 'claude-fable-5',
+            role: 'assistant',
+            usage: SPENT,
+            content: [{ type: 'text', text: HELPER_SAID }],
+          },
+        },
+        8 + n,
+      ),
+      sidechain(
+        {
+          parentUuid: 'fixture-h2',
+          uuid: 'fixture-h3',
+          type: 'assistant',
+          message: {
+            id: 'msg_fixture_h2',
+            model: 'claude-fable-5',
+            role: 'assistant',
+            usage: SPENT,
+            content: [
+              { type: 'tool_use', id: `toolu_fixtureHelperRan${n}`, name: 'Bash', input: { command: `bd show ${card}` } },
+            ],
+          },
+        },
+        20 + n,
+      ),
+      sidechain(
+        {
+          parentUuid: 'fixture-h3',
+          uuid: 'fixture-h4',
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: `toolu_fixtureHelperRan${n}`, content: `${card} is open.` }],
+          },
+        },
+        30 + n,
+      ),
+      sidechain(
+        {
+          parentUuid: 'fixture-h4',
+          uuid: 'fixture-h5',
+          type: 'assistant',
+          message: {
+            id: 'msg_fixture_h3',
+            model: 'claude-fable-5',
+            role: 'assistant',
+            usage: SPENT,
+            content: [{ type: 'text', text: HELPER_ANSWERED }],
+          },
+        },
+        48 + n,
+      ),
+    ];
+    writeFileSync(join(helpers, `agent-${agentId}.jsonl`), asLines(helper));
+    writeFileSync(
+      join(helpers, `agent-${agentId}.meta.json`),
+      JSON.stringify({
+        agentType: 'general-purpose',
+        description: HELPER_BRIEF,
+        toolUseId: callOf(n),
+        spawnDepth: 1,
+      }) + '\n',
+    );
+  }
+
+  writeFileSync(path, asLines(chat));
+
+  // The chat answered once per helper it sent off and once at the end; each
+  // helper answered three times of its own.
+  const own = (many + 1) * A_CALL;
+  const sentAway = many * HELPER_TURNS * A_CALL;
   return {
     sessionId,
     path,
+    calls,
+    spend: { own, helpers: sentAway, total: own + sentAway },
     remove: () => {
       rmSync(path, { force: true });
       rmSync(join(dir, sessionId), { recursive: true, force: true });

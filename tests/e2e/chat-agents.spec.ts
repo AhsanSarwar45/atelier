@@ -90,6 +90,10 @@ const FIXTURE = join(__dirname, '..', '.workbench-run-agents');
 const RECORD_RUN = join(__dirname, '..', '.workbench-run-record');
 const RECORD_PROJECT = join(RECORD_RUN, 'project');
 
+/** And where the spend case builds its own, for a chat that sent three off. */
+const SPEND_RUN = join(__dirname, '..', '.workbench-run-spend');
+const SPEND_PROJECT = join(SPEND_RUN, 'project');
+
 /**
  * A project of this run's own, marked as a test project so it stays off the
  * owner's dashboard and is swept up rather than living on his machine.
@@ -628,6 +632,70 @@ test.describe('the agents a chat sends off', () => {
       expect(said, 'what the helper DID is not in its pane').toContain(`bd show ${PARENT_CARD}`);
       await expect(page.getByTestId('agent-view-result')).toContainText(HELPER_ANSWERED);
       await page.screenshot({ path: `${SHOTS}/chat-agents-read-back-opened.png`, fullPage: false });
+    } finally {
+      written.remove();
+      await request.delete(`/api/projects/${project.id}`);
+    }
+  });
+
+  /**
+   * What a chat spent, on a chat that delegated most of its work.
+   *
+   * Written rather than run, and that is the point of it. What a delegated turn
+   * costs cannot be checked against a live run: the figures come back different
+   * every time, so a case could only ever assert that some number is bigger than
+   * some other number. Here every turn's spend is written down, so the chat's
+   * own line can be held to the exact sum — the chat's four turns of its own
+   * plus the whole of all three helpers — and a reading that quietly dropped
+   * the helpers would be off by a number this case names (bw-7ks.22.8).
+   *
+   * What the kit reports to a LIVE chat already counts what it delegated:
+   * measured 2026-08-20, a turn that sent one agent off reported $0.2399167,
+   * which is its own $0.232197 plus that agent's $0.007720 exactly, and the
+   * kit's own per-model totals name the helper's model separately. The gap this
+   * closes is the other one — a chat nobody is driving, which had no spend at
+   * all.
+   */
+  test('the spend on a turn counts the three agents it sent away', async ({ page, request }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    rmSync(SPEND_RUN, { recursive: true, force: true });
+    mkdirSync(SPEND_RUN, { recursive: true });
+    makeFixtureProject(SPEND_PROJECT, join(SPEND_RUN, 'reporting'));
+    const project = await projectAt(request, 'workbench-spend', SPEND_PROJECT);
+    const written = writeChatWithHelper({
+      cwd: SPEND_PROJECT,
+      sessionId: randomUUID(),
+      card: PARENT_CARD,
+      sentOff: 3,
+    });
+
+    try {
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: HELLO_MS });
+      const listed = page.locator(`[data-testid="restore-row"][data-external-id="${written.sessionId}"]`);
+      await listed.waitFor({ timeout: HELLO_MS });
+      await listed.getByTestId('row-name').click();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+
+      // Three agents on the panel, so the sum below is a sum over three rows
+      // and not over an empty list that happened to add up.
+      await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', '3', { timeout: HELLO_MS });
+
+      // The whole of it: the chat's own turns AND every one of theirs.
+      const chip = page.getByTestId('cost-chip');
+      await expect(chip).toBeVisible();
+      await expect(chip).toHaveAttribute('data-kind', 'tokens');
+      await expect(chip).toHaveAttribute('data-total', String(written.spend.total));
+      // Said as a sum rather than as one number, so a failure says which half
+      // went missing: the delegated work is most of this chat's bill.
+      expect(written.spend.total, 'the fixture spent nothing on its helpers').toBe(
+        written.spend.own + written.spend.helpers,
+      );
+      expect(written.spend.helpers, 'nothing was delegated, so nothing is being proved').toBeGreaterThan(0);
+      // And the chat's own turns alone are not what is on the line.
+      expect(Number(await chip.getAttribute('data-total'))).toBeGreaterThan(written.spend.own);
+
+      await page.screenshot({ path: `${SHOTS}/chat-agents-spend.png`, fullPage: false });
     } finally {
       written.remove();
       await request.delete(`/api/projects/${project.id}`);

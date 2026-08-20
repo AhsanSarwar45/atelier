@@ -24,7 +24,7 @@ import {
   trimInput,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
-import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
+import { latest, type Recorded, spentOn, windowNamed } from '../../src/workbench/context-window.ts';
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -159,6 +159,8 @@ export class Sessions {
   private followers = new Map<string, () => void>();
   /** The last fullness said for each chat, so an unchanged one is not said twice. */
   private fullness = new Map<string, number>();
+  /** The last spend said for each chat, on the same terms as the fullness above. */
+  private spend = new Map<string, number>();
   /**
    * The window each chat was last known to be measured against. The kit states
    * it once, in one line of the record; a later handful of lines names none, and
@@ -589,6 +591,7 @@ export class Sessions {
         if (entry.kind === 'call') links.observe(entry.name, entry.input);
       }
     }
+    this.saySpend(summary.id, messages, helpers);
 
     const shown = past.slice(-IMPORTED_MESSAGES);
     if (past.length > shown.length) {
@@ -717,6 +720,41 @@ export class Sessions {
     if (this.fullness.get(sessionId) === now.used) return;
     this.fullness.set(sessionId, now.used);
     this.publish(sessionId, { type: 'context', used: now.used, window });
+  }
+
+  /**
+   * What a chat found on disk has spent, counting every agent it sent off.
+   *
+   * A chat nothing here is driving has no result message to read a figure off,
+   * so until now it showed no spend at all — and the one figure the kit does
+   * report to a driver, its dollars, is only ever about the run that is
+   * happening. This is the record's own arithmetic instead: every turn the chat
+   * itself was answered on, plus the whole of every helper's own file, which is
+   * where the delegated work's spend lives and where nothing was looking
+   * (bw-7ks.22.8).
+   *
+   * Tokens and not dollars, because tokens are what the record states. The kit
+   * prices nothing into a conversation's file, and a price worked out here from
+   * a table of our own would be a guess wearing a dollar sign. A live chat goes
+   * on saying the kit's own dollars, which already count what it delegated
+   * (measured against the kit's per-model totals, 2026-08-20: a delegated turn
+   * reported $0.2399167, exactly its own $0.232197 plus the helper's $0.007720).
+   *
+   * Said only when it moves, like the fullness beside it: a chat is re-read
+   * whenever anyone looks at it, and repeating a figure grows the record and
+   * tells the reader nothing.
+   */
+  private saySpend(sessionId: string, messages: readonly Recorded[], helpers: readonly HelperPast[]): void {
+    const own = spentOn(messages);
+    const input = own.input + helpers.reduce((sum, helper) => sum + helper.spend.input, 0);
+    const output = own.output + helpers.reduce((sum, helper) => sum + helper.spend.output, 0);
+    const total = input + output;
+    // Nothing to say rather than a conversation that cost nothing: a record
+    // whose turns state no usage is a record we cannot read a spend out of.
+    if (total === 0) return;
+    if (this.spend.get(sessionId) === total) return;
+    this.spend.set(sessionId, total);
+    this.publish(sessionId, { type: 'cost', cost: { kind: 'tokens', input, output, total } });
   }
 
   /**
