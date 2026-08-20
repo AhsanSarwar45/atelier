@@ -4,7 +4,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Agent",
+        "matcher": "Agent|Skill",
         "hooks": [
           { "type": "command", "command": "/home/ahsan/dev/machinery/hooks/agent-fence.py" }
         ]

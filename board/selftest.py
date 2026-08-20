@@ -4232,16 +4232,48 @@ def main():
     print("ok: the sweep refuses to write a section that the pour would have refused "
           "on a new card")
 
-    # The Opus worker answers the lead and nobody else. A rule that only ever runs
-    # on calls it lets through proves nothing, so it is driven from both ends: the
-    # case the manager caught, the case that must keep working, and everything the
-    # rule must not touch.
+    # The Opus worker answers the lead, and the lead answers the manager. A rule
+    # that only ever runs on calls it lets through proves nothing, so both are
+    # driven from both ends: the two cases the manager caught, the cases that must
+    # keep working, and everything the rule must not touch.
     fence = os.path.join(HOME, "hooks", "agent-fence.py")
 
-    def asks(subagent, caller=None, tool="Agent"):
-        payload = {"tool_name": tool, "tool_input": {"subagent_type": subagent}}
+    def turn(*said):
+        """A transcript of one turn: the manager's words, then what was called.
+
+        A string is him typing; a pair is a tool call recorded after him. Written
+        as the recording writes it, because reading that recording correctly is
+        the whole of what the lead half of this fence does.
+        """
+        lines = []
+        for it in said:
+            if it == "answer":
+                lines.append({"type": "user", "message": {"role": "user", "content": [
+                    {"type": "tool_result", "content": "ok"}]}})
+            elif isinstance(it, str):
+                lines.append({"type": "user", "userType": "external",
+                              "message": {"role": "user", "content": it}})
+            else:
+                name, got = it
+                lines.append({"type": "assistant", "message": {
+                    "role": "assistant", "content": [
+                        {"type": "tool_use", "name": name, "input": got}]}})
+        fd, path = tempfile.mkstemp(prefix="fence-turn-", suffix=".jsonl")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            for line in lines:
+                fh.write(json.dumps(line) + "\n")
+        return path
+
+    TYPED = ("<command-name>/lead</command-name>\n"
+             "<command-args>fix the thing</command-args>")
+
+    def asks(subagent, caller=None, tool="Agent", skill=None, said=None):
+        got = {"skill": skill} if skill else {"subagent_type": subagent}
+        payload = {"tool_name": tool, "tool_input": got}
         if caller:
             payload["agent_type"] = caller
+        if said is not None:
+            payload["transcript_path"] = said
         out = subprocess.run([sys.executable, fence], input=json.dumps(payload),
                              capture_output=True, text=True).stdout
         return json.loads(out)["hookSpecificOutput"] if out.strip() else None
@@ -4251,18 +4283,52 @@ def main():
         "a session that is not the lead asked for builder and was let through"
     assert "lead" in said["permissionDecisionReason"], \
         "builder was refused without naming the lead as the way through: %s" % said
+    # The refusal that caused the trouble: it told the reader to start a lead with
+    # the Agent tool, which is the one thing he may not do (mch-1p2).
+    for route in ("subagent_type", "Agent tool"):
+        assert route not in said["permissionDecisionReason"], \
+            "the builder's refusal still names %r, a route the reader may not take" % route
     assert asks("builder", "scout") is not None, \
         "another agent asked for builder and was let through"
     assert asks("builder", "lead") is None, \
         "the lead asked for its own worker and was refused"
-    for other in ("scout", "verify-render", "lead"):
+    for other in ("scout", "verify-render"):
         assert asks(other) is None and asks(other, "lead") is None, \
-            "%s was caught by a rule that is only about builder" % other
+            "%s was caught by a rule that is about builder and lead" % other
     assert asks("builder", tool="Bash") is None, \
         "a call that is not the Agent tool was read as one"
 
-    print("ok: the Opus worker is refused to everyone but the lead, and no other "
-          "agent is touched")
+    # The lead half. Each way of asking for one is driven against the same turns,
+    # because a fence that closes one door and leaves the other open is no fence.
+    for how in ({"subagent": "lead"}, {"subagent": None, "skill": "lead", "tool": "Skill"}):
+        plain = asks(said=turn("please sort the chat list out"), **how)
+        assert plain and plain["permissionDecision"] == "deny", \
+            "a session started a lead the manager never asked for: %s" % how
+        assert "/lead" in plain["permissionDecisionReason"], \
+            "the lead was refused without saying who starts one: %s" % plain
+        assert asks(said=turn(TYPED), **how) is None, \
+            "the manager typed /lead himself and was refused: %s" % how
+        assert asks(said=turn(TYPED, "answer"), **how) is None, \
+            "a tool's answer after /lead hid the fact that he typed it: %s" % how
+        second = asks(said=turn(TYPED, ("Agent", {"subagent_type": "lead"})), **how)
+        assert second and second["permissionDecision"] == "deny", \
+            "one /lead started a second lead: %s" % how
+        by_skill = asks(said=turn(TYPED, ("Skill", {"skill": "lead"})), **how)
+        assert by_skill and by_skill["permissionDecision"] == "deny", \
+            "a lead started by its skill name did not count as one: %s" % how
+        assert asks(caller="lead", said=turn(TYPED), **how) is not None, \
+            "a helper agent started a lead of its own: %s" % how
+        assert asks(said=turn(TYPED, ("Agent", {"subagent_type": "scout"})), **how) is None, \
+            "sending a scout after /lead was read as having started the lead: %s" % how
+        assert asks(**how) is not None, \
+            "a turn that could not be read let a lead through: %s" % how
+
+    assert asks(None, skill="report", tool="Skill",
+                said=turn("write that up")) is None, \
+        "another skill was caught by a rule that is only about the lead"
+
+    print("ok: the Opus worker is refused to everyone but the lead, the lead is "
+          "refused to everyone but the manager, and no other agent is touched")
 
     # The slot is taken in one tree and the merge run from another, which is what a
     # session doing this job actually does — so the hold is recognised by session
