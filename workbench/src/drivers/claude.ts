@@ -699,6 +699,21 @@ export class ClaudeDriver implements Driver {
     this.emit({ type: 'session.state', state: 'stopped', label: 'Stopped' });
   }
 
+  /**
+   * The account's plan allowance, as the kit's own `/usage` reports it.
+   *
+   * Answered by any live session at no cost — the kit fetches it from the
+   * claude.ai usage endpoint and scans this machine's own records; no turn is
+   * taken and no tokens are spent (measured 2026-08-20: 1.6s cold, 0 tokens).
+   * The method name is the SDK's, shouting that the shape may change; it is
+   * quarantined here so exactly one line moves when it does (bw-malh).
+   */
+  async usage(): Promise<unknown | null> {
+    const q = this.q as { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<unknown> } | null;
+    if (!q?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET) return null;
+    return await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     this.wake?.();

@@ -723,6 +723,28 @@ export class Sessions {
     await this.require(sessionId).interrupt();
   }
 
+  /**
+   * The account's plan allowance, from whichever live session will answer.
+   *
+   * The figure is the account's, so any running chat's channel is as good as
+   * any other's and the first one that answers wins. Null when nothing is
+   * running or nothing running can say — the caller then asks the kit itself
+   * (plan-usage.ts, bw-malh).
+   */
+  async planUsage(): Promise<unknown | null> {
+    for (const driver of this.drivers.values()) {
+      if (!driver.usage) continue;
+      try {
+        const got = await driver.usage();
+        if (got) return got;
+      } catch {
+        // A session dying mid-question is not this reader's problem; the next
+        // one, or the kit itself, answers.
+      }
+    }
+    return null;
+  }
+
   private require(sessionId: string): Driver {
     const d = this.drivers.get(sessionId);
     if (!d) throw new Error(`session ${sessionId} is not running`);

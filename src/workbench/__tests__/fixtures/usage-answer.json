@@ -1,0 +1,236 @@
+{
+  "session": {
+    "total_cost_usd": 0,
+    "total_api_duration_ms": 0,
+    "total_duration_ms": 1599,
+    "total_lines_added": 0,
+    "total_lines_removed": 0,
+    "model_usage": {}
+  },
+  "subscription_type": "max",
+  "rate_limits_available": true,
+  "rate_limits": {
+    "five_hour": {
+      "utilization": 74,
+      "resets_at": "2026-08-20T09:49:59.833280+00:00",
+      "limit_dollars": null,
+      "used_dollars": null,
+      "remaining_dollars": null
+    },
+    "seven_day": {
+      "utilization": 60,
+      "resets_at": "2026-08-23T07:59:59.833299+00:00",
+      "limit_dollars": null,
+      "used_dollars": null,
+      "remaining_dollars": null
+    },
+    "seven_day_oauth_apps": null,
+    "seven_day_opus": null,
+    "seven_day_sonnet": null,
+    "seven_day_cowork": null,
+    "seven_day_omelette": null,
+    "tangelo": null,
+    "iguana_necktie": null,
+    "omelette_promotional": null,
+    "nimbus_quill": {
+      "utilization": 0,
+      "resets_at": null,
+      "limit_dollars": null,
+      "used_dollars": null,
+      "remaining_dollars": null
+    },
+    "cinder_cove": null,
+    "amber_ladder": null,
+    "extra_usage": {
+      "is_enabled": false,
+      "monthly_limit": null,
+      "used_credits": null,
+      "utilization": null,
+      "currency": null,
+      "decimal_places": null,
+      "disabled_reason": null,
+      "user_disabled": true,
+      "spend_limit_reached": false,
+      "credits_ever_enabled": true,
+      "daily": null,
+      "weekly": null
+    },
+    "limits": [
+      {
+        "kind": "session",
+        "group": "session",
+        "percent": 74,
+        "severity": "normal",
+        "resets_at": "2026-08-20T09:49:59.833280+00:00",
+        "scope": null,
+        "is_active": true
+      },
+      {
+        "kind": "weekly_all",
+        "group": "weekly",
+        "percent": 60,
+        "severity": "normal",
+        "resets_at": "2026-08-23T07:59:59.833299+00:00",
+        "scope": null,
+        "is_active": false
+      },
+      {
+        "kind": "weekly_scoped",
+        "group": "weekly",
+        "percent": 13,
+        "severity": "normal",
+        "resets_at": "2026-08-23T07:59:59.833470+00:00",
+        "scope": {
+          "model": {
+            "id": null,
+            "display_name": "Fable"
+          },
+          "surface": null
+        },
+        "is_active": false
+      }
+    ],
+    "spend": {
+      "used": {
+        "amount_minor": 0,
+        "currency": "USD",
+        "exponent": 2
+      },
+      "limit": null,
+      "percent": 0,
+      "severity": "normal",
+      "enabled": false,
+      "disabled_reason": null,
+      "cap": null,
+      "balance": null,
+      "auto_reload": null,
+      "disclaimer": "Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)",
+      "can_purchase_credits": false,
+      "can_toggle": false
+    },
+    "member_dashboard_available": false,
+    "model_scoped": [
+      {
+        "display_name": "Fable",
+        "utilization": 13,
+        "resets_at": "2026-08-23T07:59:59.833470+00:00"
+      }
+    ]
+  },
+  "behaviors": {
+    "day": {
+      "request_count": 10107,
+      "session_count": 128,
+      "behaviors": [
+        {
+          "key": "high_parallel",
+          "pct": 78,
+          "count": 8010
+        },
+        {
+          "key": "subagent_heavy",
+          "pct": 69,
+          "count": 15
+        },
+        {
+          "key": "cron",
+          "pct": 36,
+          "count": 2
+        },
+        {
+          "key": "long_context",
+          "pct": 22,
+          "count": 1634
+        }
+      ],
+      "agents": [
+        {
+          "name": "general-purpose",
+          "pct": 19
+        },
+        {
+          "name": "builder",
+          "pct": 1
+        },
+        {
+          "name": "lead",
+          "pct": 1
+        },
+        {
+          "name": "screen-check",
+          "pct": 1
+        },
+        {
+          "name": "scout",
+          "pct": 1
+        }
+      ],
+      "skills": [
+        {
+          "name": "report",
+          "pct": 3
+        }
+      ],
+      "plugins": [],
+      "mcp_servers": [
+        {
+          "name": "chrome-devtools",
+          "pct": 1
+        }
+      ]
+    },
+    "week": {
+      "request_count": 37672,
+      "session_count": 606,
+      "behaviors": [
+        {
+          "key": "subagent_heavy",
+          "pct": 68,
+          "count": 42
+        },
+        {
+          "key": "high_parallel",
+          "pct": 61,
+          "count": 23906
+        },
+        {
+          "key": "long_context",
+          "pct": 61,
+          "count": 16342
+        },
+        {
+          "key": "cron",
+          "pct": 51,
+          "count": 10
+        }
+      ],
+      "agents": [
+        {
+          "name": "general-purpose",
+          "pct": 7
+        },
+        {
+          "name": "builder",
+          "pct": 5
+        },
+        {
+          "name": "lead",
+          "pct": 3
+        }
+      ],
+      "skills": [
+        {
+          "name": "report",
+          "pct": 5
+        }
+      ],
+      "plugins": [],
+      "mcp_servers": [
+        {
+          "name": "chrome-devtools",
+          "pct": 2
+        }
+      ]
+    }
+  }
+}

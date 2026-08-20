@@ -49,4 +49,13 @@ export interface Driver {
   interrupt(): Promise<void>;
   /** Tear the session down. */
   close(): Promise<void>;
+  /**
+   * What the brand says about the ACCOUNT'S allowance — not this session's.
+   *
+   * Optional, because it is a plan's question and not an agent's: a brand
+   * billed per token has no such thing to report, and the app draws nothing
+   * rather than inventing a window for it (bw-malh). The answer is the brand's
+   * own shape; `plan-usage.ts` reads it.
+   */
+  usage?(): Promise<unknown | null>;
 }

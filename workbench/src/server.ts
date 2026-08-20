@@ -14,6 +14,7 @@ import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { watchOutside } from './outside.ts';
+import { planUsage } from './plan-usage.ts';
 import { knownSessions, restoreList } from './registry.ts';
 import { runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
@@ -222,6 +223,10 @@ const server = createServer((req, res) => {
         json(res, 200, q ? sessions.found(q) : []);
       } else if (path === '/spend' && req.method === 'GET') {
         json(res, 200, store.spend());
+      } else if (path === '/usage' && req.method === 'GET') {
+        // The account's allowance, not this chat's: one cached answer serves
+        // every chat open in the browser (bw-malh).
+        json(res, 200, await planUsage(sessions));
       } else if (path === '/watch' && req.method === 'GET') {
         streamAll(req, res);
       } else if (path.startsWith('/links/bead/') && req.method === 'GET') {
