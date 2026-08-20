@@ -113,8 +113,14 @@ test.describe('the list of chats', () => {
     await page.getByTestId('chat-tab').waitFor({ timeout: 60_000 });
     await page.waitForTimeout(1000);
 
-    const chips = await page.getByTestId('bead-chip').count();
-    expect(chips, `${chips} cards were drawn on the line`).toBeLessThanOrEqual(3);
+    // None of them, now: the cards are in the rail, which is a column, and the
+    // line keeps only what names the agent (docs/agent-workbench.md §8.2.1).
+    const onTheLine = await page
+      .getByTestId('session-state')
+      .locator('xpath=..')
+      .getByTestId('bead-chip')
+      .count();
+    expect(onTheLine, `${onTheLine} cards were drawn on the line`).toBe(0);
 
     const line = await page.evaluate(() => {
       const state = document.querySelector('[data-testid="session-state"]');
