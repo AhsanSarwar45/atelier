@@ -16,7 +16,6 @@ import {
   Bot,
   Coins,
   Cpu,
-  Gauge,
   Loader2,
   PanelLeft,
   Paperclip,
@@ -47,7 +46,6 @@ import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
-import { reads, TIGHT } from '@/workbench/context-window';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
@@ -66,6 +64,7 @@ import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
 import { AgentView } from '@/workbench/agent-view';
 import { MachineLine, TranscriptRow, WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
+import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 
@@ -418,7 +417,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The chat's own column on the right, remembered between visits. */
   const [rightOpen, flipRight] = useRightRail();
   /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
-  const [showing, setShowing] = useState<'search' | 'spend' | 'usage' | null>(null);
+  const [showing, setShowing] = useState<'search' | 'spend' | 'usage' | 'tokens' | null>(null);
   /** The ACCOUNT'S allowance — the same figure in every chat, not this one's (bw-malh). */
   const plan = usePlanUsage();
   /**
@@ -621,6 +620,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
       {showing === 'spend' && <SpendView onClose={() => setShowing(null)} />}
       {showing === 'usage' && <UsageView onClose={() => setShowing(null)} />}
+      {showing === 'tokens' && sessionId && (
+        <TokenView sessionId={sessionId} onClose={() => setShowing(null)} />
+      )}
 
       <div
         data-testid="chat-rail"
@@ -771,19 +773,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             own mark, because three bare numbers in a row read as one. */}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {view.context && (
-            <Badge
-              variant={view.context.used / view.context.window >= TIGHT ? 'warning' : 'secondary'}
-              appearance="light"
-              size="sm"
-              data-testid="context-chip"
-              data-used={view.context.used}
-              data-window={view.context.window}
-              title={`${view.context.used.toLocaleString()} of ${view.context.window.toLocaleString()} tokens of this conversation are in use`}
-              className="font-mono"
-            >
-              <Gauge />
-              {reads(view.context.used, view.context.window)}
-            </Badge>
+            <ContextChip
+              used={view.context.used}
+              window={view.context.window}
+              onOpen={() => setShowing('tokens')}
+            />
           )}
           {view.cost && (
             <Badge
