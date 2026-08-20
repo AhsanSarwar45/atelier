@@ -492,6 +492,19 @@ export class ClaudeDriver implements Driver {
         allowDangerouslySkipPermissions: true,
         // Word-by-word text. Without this only whole messages arrive.
         includePartialMessages: true,
+        // What a sent-off agent SAYS, not only what it runs. The kit's default
+        // forwards a helper's tool calls and nothing else — which is why a chat
+        // that delegated its work showed a column of commands with no reasoning
+        // anywhere near them, and why the manager could not tell a stuck helper
+        // from a thinking one (bw-7ks.22.2, §8.2.2). Its words and its thinking
+        // arrive as ordinary assistant messages carrying `parent_tool_use_id`,
+        // and every one of them is drawn under the call that sent it.
+        forwardSubagentText: true,
+        // A short present-tense line about what each helper is doing now, asked
+        // of the helper's own conversation about twice a minute. It reuses that
+        // conversation's model and prompt cache, so it costs a fork of something
+        // already warm rather than a new session.
+        agentProgressSummaries: true,
         // His own rules, when they fire and when they fail. The kit's default
         // is false, and only SessionStart and Setup arrive without it — so the
         // grey line this app promises for "a hook that failed" could not fire
@@ -777,6 +790,22 @@ export class ClaudeDriver implements Driver {
             this.lastThinkingAt = now;
             this.emit({ type: 'thinking.progress', tokens: Number(m.estimated_tokens ?? 0) });
           }
+        } else if (m.subtype === 'task_progress' && typeof m.tool_use_id === 'string' && m.tool_use_id) {
+          // What a sent-off agent is doing now, in its own words, asked of its
+          // own conversation about twice a minute. It belongs on the row that
+          // sent it — a helper working for ten minutes would otherwise write
+          // twenty grey lines into the middle of the conversation, and the
+          // reader would still have to guess which helper each one was about
+          // (bw-7ks.22.2, §8.2.2).
+          const doing = oneLine(m.summary ?? m.last_tool_name ?? m.description ?? '');
+          this.emit({
+            type: 'tool.progress',
+            toolCallId: m.tool_use_id,
+            seconds: Math.round(Number(m.usage?.duration_ms ?? 0) / 1000),
+            // Left out rather than sent empty: an absent line means "still
+            // whatever it last said", and a blank one would erase it.
+            ...(doing ? { summary: doing } : {}),
+          });
         } else if (m.subtype === 'local_command_output') {
           // A local command answers by itself and the query loop is bypassed,
           // so no result message will close this turn — the chat is put back
@@ -835,6 +864,12 @@ export class ClaudeDriver implements Driver {
       }
 
       case 'assistant': {
+        // Whose words these are. A sent-off agent's arrive on this arm and
+        // nowhere else — the stream carries only the agent you are talking to —
+        // and every event below is stamped with the call that sent them, so the
+        // rows nest instead of interleaving (bw-7ks.22.2).
+        const sentBy: string | undefined = m.parent_tool_use_id ?? undefined;
+
         // Words that never came down the stream — the kit wrote this message
         // itself, so there was no `message_start` and nothing was drawn
         // (bw-1u1). His own turns are unaffected: those always stream.
@@ -842,22 +877,38 @@ export class ClaudeDriver implements Driver {
         if (messageId && !this.streamed.has(messageId)) {
           this.streamed.add(messageId);
           (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
+            const id = `${messageId}:${index}`;
+            // A helper's reasoning, which no stream ever carries. Drawn the same
+            // way the main agent's is, dim and under its own heading.
+            if (b.type === 'thinking' && String(b.thinking ?? '').trim()) {
+              this.emit({
+                type: 'thinking.delta',
+                messageId: id,
+                text: String(b.thinking),
+                parentToolCallId: sentBy,
+              });
+              this.emit({ type: 'message.completed', messageId: id });
+              return;
+            }
             if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
             // The status that came just before may already have said this.
             if (this.saidAlready(String(b.text))) return;
-            const id = `${messageId}:${index}`;
-            this.emit({ type: 'message.started', messageId: id, role: 'assistant' });
+            this.emit({ type: 'message.started', messageId: id, role: 'assistant', parentToolCallId: sentBy });
             this.emit({ type: 'text.delta', messageId: id, text: String(b.text) });
             this.emit({ type: 'message.completed', messageId: id });
           });
         }
         // How full the conversation now is, which only the kit knows and only
-        // says here (bw-4wcd.4).
-        const named = windowNamed(m);
-        if (named !== null) this.window = named;
-        const used = fullness(m.message?.usage);
-        if (used !== null) {
-          this.emit({ type: 'context', used, window: this.window });
+        // says here (bw-4wcd.4). A helper's own usage is not this conversation's:
+        // reading it here would make the gauge jump to whatever the last
+        // delegated turn happened to be holding (bw-7ks.22.2).
+        if (sentBy === undefined) {
+          const named = windowNamed(m);
+          if (named !== null) this.window = named;
+          const used = fullness(m.message?.usage);
+          if (used !== null) {
+            this.emit({ type: 'context', used, window: this.window });
+          }
         }
         for (const b of m.message?.content ?? []) {
           if (b.type === 'tool_use') {

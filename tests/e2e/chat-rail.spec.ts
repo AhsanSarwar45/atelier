@@ -113,8 +113,19 @@ test.describe('the right rail', () => {
     const rail = page.locator('[data-testid="chat-right-rail"]');
     await expect(rail).toHaveAttribute('data-open', 'true');
 
-    // Every one of them, drawn — not the first few and a count.
-    await expect(rail.getByTestId('bead-chip')).toHaveCount(many.length, { timeout: 30_000 });
+    // Every one of them, drawn — not the first few and a count. Counted by
+    // which cards are there rather than how many: the chat this opens is the
+    // instance's own, and a card named in its conversation is drawn beside the
+    // ones this case put there.
+    await expect(rail.getByTestId('bead-chip').first()).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () =>
+          (await rail.getByTestId('bead-chip').evaluateAll((els) => els.map((e) => e.getAttribute('data-bead-id'))))
+            .filter((id) => many.includes(id ?? '')).length,
+        { message: 'a card this chat touched is missing from the column', timeout: 30_000 },
+      )
+      .toBe(many.length);
     await expect(page.getByTestId('bead-chip-more'), 'the column is still crowding').toHaveCount(0);
     await page.screenshot({ path: `${SHOTS}/chat-right-rail-cards.png` });
 
@@ -147,19 +158,21 @@ test.describe('the right rail', () => {
     const rail = page.locator('[data-testid="chat-right-rail"]');
     await expect(rail).toHaveAttribute('data-open', 'true');
 
-    // Two jobs, two chips — and the rail says how many pieces it folded.
+    // Two jobs, two chips — and the rail says how many pieces it folded. Only
+    // this case's own cards are counted: the chat it opens is the instance's
+    // own, and a card named in its conversation is drawn beside them.
     const chips = rail.getByTestId('bead-chip');
-    await expect(chips, 'the pieces were drawn one chip each').toHaveCount(2, { timeout: 30_000 });
-    await expect(rail).toHaveAttribute('data-pieces', String(pieces.length));
-    expect(await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-bead-id')))).toEqual([
-      'bw-rail1',
-      'bw-rail2',
-    ]);
-    // A piece is never drawn as its own chip.
+    const ours = async () =>
+      (await chips.evaluateAll((els) => els.map((e) => e.getAttribute('data-bead-id') ?? ''))).filter((id) =>
+        id.startsWith('bw-rail'),
+      );
+    await expect
+      .poll(ours, { message: 'the pieces were not folded into their two jobs', timeout: 30_000 })
+      .toEqual(['bw-rail1', 'bw-rail2']);
     expect(
-      await chips.evaluateAll((els) => els.filter((e) => (e.getAttribute('data-bead-id') ?? '').includes('.')).length),
-      'a piece of a job is still a chip of its own',
-    ).toBe(0);
+      Number(await rail.getAttribute('data-pieces')),
+      'the column does not say how many pieces it folded',
+    ).toBeGreaterThanOrEqual(pieces.length);
 
     // Nothing is lost: the pointer names every piece the chip stands for.
     const said = (await chips.first().getAttribute('title')) ?? '';

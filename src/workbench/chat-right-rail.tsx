@@ -1,7 +1,8 @@
 /**
- * The chat's own second column: what this conversation has touched, what it
- * produced and what it cost, beside the conversation instead of crammed onto
- * the one line above it.
+ * The chat's own second column: what this conversation has touched and what it
+ * produced, beside the conversation instead of crammed onto the one line above
+ * it. What it has spent stays on that line, where a reader watching it work can
+ * see the number without opening anything (bw-7ks.22.13).
  *
  * The cards used to ride on the open chat's own line, which is a row, and a row
  * is the axis there is least of: twenty-six of them drew 2277px inside a pane
@@ -26,11 +27,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PanelRight, PanelRightClose } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
-import { reads, TIGHT } from '@/workbench/context-window';
-import type { Cost } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 
 /** Where the rail's open-or-shut is remembered between visits. */
@@ -81,17 +79,13 @@ export interface ChatRightRailProps {
   cards: string[];
   /** The reports this chat's work produced. */
   reports: { project: string; slug: string; title: string }[];
-  /** What the conversation has cost so far, in the brand's own currency. */
-  cost: Cost | null;
-  /** How much of the agent's memory this conversation is using. */
-  context: { used: number; window: number } | null;
   open: boolean;
   onToggle: () => void;
 }
 
-export function ChatRightRail({ projectId, cards, reports, cost, context, open, onToggle }: ChatRightRailProps) {
+export function ChatRightRail({ projectId, cards, reports, open, onToggle }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
-  const empty = cards.length === 0 && reports.length === 0 && !cost && !context;
+  const empty = cards.length === 0 && reports.length === 0;
   return (
     <div
       data-testid="chat-right-rail"
@@ -173,32 +167,6 @@ export function ChatRightRail({ projectId, cards, reports, cost, context, open, 
             </Section>
           )}
 
-          {(context || cost) && (
-            <Section title="What it has cost">
-              <div className="flex flex-wrap items-center gap-2">
-                {context && (
-                  <Badge
-                    variant={context.used / context.window >= TIGHT ? 'warning' : 'secondary'}
-                    appearance="light"
-                    size="sm"
-                    data-testid="context-chip"
-                    data-used={context.used}
-                    data-window={context.window}
-                    title={`${context.used.toLocaleString()} of ${context.window.toLocaleString()} tokens of this conversation are in use`}
-                    className="font-mono"
-                  >
-                    {reads(context.used, context.window)}
-                  </Badge>
-                )}
-                {cost && (
-                  <Badge variant="secondary" appearance="light" size="sm" data-testid="cost-chip" className="font-mono">
-                    {costLabel(cost)}
-                  </Badge>
-                )}
-              </div>
-            </Section>
-          )}
-
           {empty && (
             <p className="px-3 py-3 text-xs text-muted-foreground" data-testid="rail-empty">
               Nothing from this chat yet.
@@ -207,9 +175,4 @@ export function ChatRightRail({ projectId, cards, reports, cost, context, open, 
       </div>
     </div>
   );
-}
-
-/** Money on the brands that bill in money, tokens on the ones that do not. */
-export function costLabel(cost: Cost): string {
-  return cost.kind === 'usd' ? `$${cost.usd.toFixed(4)}` : `${cost.total.toLocaleString()} tokens`;
 }

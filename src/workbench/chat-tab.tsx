@@ -14,7 +14,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowUp,
   Bot,
+  Coins,
   Cpu,
+  Gauge,
   ListTree,
   Loader2,
   PanelLeft,
@@ -46,6 +48,7 @@ import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
+import { reads, TIGHT } from '@/workbench/context-window';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
@@ -53,7 +56,7 @@ import { drawnRows } from '@/workbench/machine-lines';
 import { mentionsIn } from '@/workbench/mentions';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, drawable, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { CommandInfo, ImagePayload, TodoItem } from '@/workbench/protocol';
+import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -259,6 +262,14 @@ function TodoPanel({ items }: { items: TodoItem[] }) {
       </ul>
     </Panel>
   );
+}
+
+/**
+ * What a conversation has spent, in whatever the brand bills in: money on the
+ * ones that charge money, tokens on the ones that do not.
+ */
+function costLabel(cost: Cost): string {
+  return cost.kind === 'usd' ? `$${cost.usd.toFixed(4)}` : `${cost.total.toLocaleString()} tokens`;
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
@@ -633,15 +644,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {/* The chat's own column. Only when there IS a chat: an empty rail beside
           an empty screen says nothing and takes width to say it. */}
       {sessionId && (
-        <ChatRightRail
-          projectId={projectId}
-          cards={cards}
-          reports={ours}
-          cost={view.cost}
-          context={view.context}
-          open={rightOpen}
-          onToggle={flipRight}
-        />
+        <ChatRightRail projectId={projectId} cards={cards} reports={ours} open={rightOpen} onToggle={flipRight} />
       )}
       {sessionId && (
         <button
@@ -719,12 +722,41 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {facts.folder}
           </Badge>
         )}
-        {/* The one figure on this line that is not about THIS chat: how much
-            of the account's own five-hour allowance is gone, and when it comes
-            back. It stays on the line the cost and context chips left for the
-            rail (bw-7ks.22.9), because it is what actually stops the work and
-            a reader must see it without opening anything (bw-malh). */}
+        {/* What this chat is using and what it has spent, then how much of the
+            account's own five-hour allowance is gone. All three are numbers a
+            reader watching the work has to see without opening anything, so
+            they live on the line and not in the column beside it — the column
+            holds what the chat produced (bw-7ks.22.13, bw-malh). Each wears its
+            own mark, because three bare numbers in a row read as one. */}
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {view.context && (
+            <Badge
+              variant={view.context.used / view.context.window >= TIGHT ? 'warning' : 'secondary'}
+              appearance="light"
+              size="sm"
+              data-testid="context-chip"
+              data-used={view.context.used}
+              data-window={view.context.window}
+              title={`${view.context.used.toLocaleString()} of ${view.context.window.toLocaleString()} tokens of this conversation are in use`}
+              className="font-mono"
+            >
+              <Gauge />
+              {reads(view.context.used, view.context.window)}
+            </Badge>
+          )}
+          {view.cost && (
+            <Badge
+              variant="secondary"
+              appearance="light"
+              size="sm"
+              data-testid="cost-chip"
+              title="What this conversation has spent so far"
+              className="font-mono"
+            >
+              <Coins />
+              {costLabel(view.cost)}
+            </Badge>
+          )}
           <PlanChip usage={plan} onOpen={() => setShowing('usage')} />
         </div>
       </div>

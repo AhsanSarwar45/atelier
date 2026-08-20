@@ -38,6 +38,8 @@ export interface TranscriptMessage {
   text: string;
   images: ImagePayload[];
   done: boolean;
+  /** Set when a sent-off agent said this — the row nests under the call that sent it. */
+  parentId: string | null;
 }
 
 /** What the agent worked out on its way to an answer, as it arrived. */
@@ -46,6 +48,8 @@ export interface TranscriptThinking {
   id: string;
   text: string;
   done: boolean;
+  /** Set when a sent-off agent was working this out, not the agent you are talking to. */
+  parentId: string | null;
 }
 
 export interface TranscriptTool {
@@ -56,6 +60,12 @@ export interface TranscriptTool {
   status: 'running' | 'ok' | 'failed';
   /** How long it has been running, as the brand counts it. */
   seconds: number;
+  /**
+   * What the agent this call sent away is doing NOW, in its own words. Null on
+   * every other kind of call, and on a sent-off one until the first summary
+   * arrives (bw-7ks.22.2).
+   */
+  summary: string | null;
   /** Set when a subagent made this call — the row nests under that call. */
   parentId: string | null;
   diff: { path: string; before: string; after: string } | null;
@@ -182,7 +192,18 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'message.started':
-      next.items = [...items, { kind: 'message', id: e.messageId, role: e.role, text: '', images: [], done: false }];
+      next.items = [
+        ...items,
+        {
+          kind: 'message',
+          id: e.messageId,
+          role: e.role,
+          text: '',
+          images: [],
+          done: false,
+          parentId: e.parentToolCallId ?? null,
+        },
+      ];
       return next;
 
     case 'image':
@@ -205,7 +226,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         ? items.map((it) =>
             it.kind === 'thinking' && it.id === e.messageId ? { ...it, text: it.text + e.text } : it,
           )
-        : [...items, { kind: 'thinking', id: e.messageId, text: e.text, done: false }];
+        : [
+            ...items,
+            { kind: 'thinking', id: e.messageId, text: e.text, done: false, parentId: e.parentToolCallId ?? null },
+          ];
       return next;
     }
 
@@ -225,6 +249,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           title: e.title,
           status: 'running',
           seconds: 0,
+          summary: null,
           parentId: e.parentToolCallId,
           diff: null,
           input: e.input,
@@ -248,8 +273,12 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'tool.progress':
+      // A summary that did not come with this one leaves the last one standing:
+      // the line says what the helper is doing, and it is still doing it.
       next.items = items.map((it) =>
-        it.kind === 'tool' && it.id === e.toolCallId ? { ...it, seconds: e.seconds } : it,
+        it.kind === 'tool' && it.id === e.toolCallId
+          ? { ...it, seconds: e.seconds, summary: e.summary || it.summary }
+          : it,
       );
       return next;
 
@@ -396,7 +425,15 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
       case 'message.started':
         messageAt.set(e.messageId, items.length);
-        items.push({ kind: 'message', id: e.messageId, role: e.role, text: '', images: [], done: false });
+        items.push({
+          kind: 'message',
+          id: e.messageId,
+          role: e.role,
+          text: '',
+          images: [],
+          done: false,
+          parentId: e.parentToolCallId ?? null,
+        });
         break;
 
       case 'image': {
@@ -418,7 +455,13 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         const at = thinkingAt.get(e.messageId);
         if (at === undefined) {
           thinkingAt.set(e.messageId, items.length);
-          items.push({ kind: 'thinking', id: e.messageId, text: e.text, done: false });
+          items.push({
+            kind: 'thinking',
+            id: e.messageId,
+            text: e.text,
+            done: false,
+            parentId: e.parentToolCallId ?? null,
+          });
         } else {
           (items[at] as TranscriptThinking).text += e.text;
         }
@@ -442,6 +485,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           title: e.title,
           status: 'running',
           seconds: 0,
+          summary: null,
           parentId: e.parentToolCallId,
           diff: null,
           input: e.input,
@@ -461,7 +505,11 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
       case 'tool.progress': {
         const at = toolAt.get(e.toolCallId);
-        if (at !== undefined) (items[at] as TranscriptTool).seconds = e.seconds;
+        if (at !== undefined) {
+          const it = items[at] as TranscriptTool;
+          it.seconds = e.seconds;
+          if (e.summary) it.summary = e.summary;
+        }
         break;
       }
 

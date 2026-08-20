@@ -240,19 +240,19 @@ export function drawable(items: TranscriptItem[], openAll: boolean): TranscriptI
 }
 
 /**
- * The rows this conversation draws. A command run inside another command goes
- * with its parent: hiding the subagent's call and leaving the work it spawned
- * standing loose in the transcript would read as the agent doing that work
- * itself.
+ * The rows this conversation draws. Everything a sent-off agent produced goes
+ * with the call that sent it — its commands, its sentences and its thinking:
+ * hiding the call and leaving the work it spawned standing loose in the
+ * transcript would read as the agent doing that work itself (bw-7ks.22.2).
  */
 export function showing(items: TranscriptItem[], off: ReadonlySet<KindId>): TranscriptItem[] {
   if (off.size === 0) return items;
   const gone = new Set<string>();
   const kept: TranscriptItem[] = [];
   for (const item of items) {
-    const hidden =
-      upward(kindOf(item)).some((id) => off.has(id)) ||
-      (item.kind === 'tool' && item.parentId !== null && gone.has(item.parentId));
+    const sentBy =
+      item.kind === 'tool' || item.kind === 'message' || item.kind === 'thinking' ? item.parentId : null;
+    const hidden = upward(kindOf(item)).some((id) => off.has(id)) || (sentBy !== null && gone.has(sentBy));
     if (hidden) gone.add(item.id);
     else kept.push(item);
   }

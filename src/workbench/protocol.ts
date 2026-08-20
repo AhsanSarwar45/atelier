@@ -117,10 +117,24 @@ export type WbpEvent = EventBase &
      */
     | { type: 'session.pinned'; permissionMode: string | null; model: string | null }
     | { type: 'session.ended'; reason: string }
-    | { type: 'message.started'; messageId: string; role: 'user' | 'assistant' }
+    /**
+     * `parentToolCallId` is set when a SENT-OFF agent said this, and names the
+     * call that sent it — the same attribution `tool.started` carries, so a
+     * helper's words draw under the call they belong to instead of in the middle
+     * of its owner's answer (bw-7ks.22.2).
+     *
+     * Written only when there is a parent to name, which is why it is optional
+     * rather than nullable: almost every message in a log is the main agent's,
+     * and a field on every one of them is paid a million times over.
+     */
+    | { type: 'message.started'; messageId: string; role: 'user' | 'assistant'; parentToolCallId?: string }
     | { type: 'text.delta'; messageId: string; text: string }
-    /** The agent's own reasoning, word by word. Drawn dim, and collapsed once it answers. */
-    | { type: 'thinking.delta'; messageId: string; text: string }
+    /**
+     * The agent's own reasoning, word by word. Drawn dim, and collapsed once it
+     * answers. A thinking block has no `message.started` of its own — the first
+     * delta creates it — so the attribution rides here, on the same terms.
+     */
+    | { type: 'thinking.delta'; messageId: string; text: string; parentToolCallId?: string }
     /**
      * How much thinking has been done, when the thinking itself is withheld.
      * The API sends only pings during redacted thinking, and this is the brand's
@@ -138,8 +152,14 @@ export type WbpEvent = EventBase &
         parentToolCallId: string | null;
       }
     | { type: 'tool.completed'; toolCallId: string; ok: boolean; output: string }
-    /** How long this call has been running, as the brand counts it. */
-    | { type: 'tool.progress'; toolCallId: string; seconds: number }
+    /**
+     * How long this call has been running, as the brand counts it, and — when the call sent an agent
+     * away — what that agent is doing now, in its own words. The brand asks the
+     * helper's own conversation for a short present-tense line every half
+     * minute; it belongs on the row that sent it, not as another line in the
+     * transcript (bw-7ks.22.2).
+     */
+    | { type: 'tool.progress'; toolCallId: string; seconds: number; summary?: string }
     | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }

@@ -39,6 +39,7 @@ const said = (role: 'user' | 'assistant', text: string): TranscriptItem => ({
   text,
   images: [],
   done: true,
+  parentId: null,
 });
 
 const ran = (name: string, parentId: string | null = null): TranscriptItem => ({
@@ -48,13 +49,14 @@ const ran = (name: string, parentId: string | null = null): TranscriptItem => ({
   title: name,
   status: 'ok',
   seconds: 0,
+  summary: null,
   parentId,
   diff: null,
   input: {},
   output: null,
 });
 
-const thought = (): TranscriptItem => ({ kind: 'thinking', id: id(), text: 'hmm', done: true });
+const thought = (): TranscriptItem => ({ kind: 'thinking', id: id(), text: 'hmm', done: true, parentId: null });
 
 const noted = (): TranscriptItem => ({
   kind: 'note',

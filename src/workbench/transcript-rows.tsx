@@ -303,6 +303,14 @@ export function useOpen(openAll: boolean): [boolean, (open: boolean) => void] {
  * a command could be seen running and never read — the manager's "i don't get
  * output in chat for that" (bw-1u1, docs/agent-workbench.md §8.2.4).
  */
+/**
+ * The mark every row a SENT-OFF agent produced carries: stepped in, with a line
+ * down its left. One constant for the three kinds of row it can be — a command,
+ * a sentence, a thought — because a helper's work reading as one block is the
+ * whole point, and three hand-written indents drift (bw-7ks.22.2).
+ */
+export const SENT_OFF = 'ml-6 border-l-2 border-violet-500/50 pl-3';
+
 export const ToolRow = memo(function ToolRow({
   item,
   nested,
@@ -325,10 +333,13 @@ export const ToolRow = memo(function ToolRow({
   return (
     <div
       data-testid={nested ? 'subagent-tool-row' : 'tool-row'}
+      // The call's own id, so a helper's words can be shown to hang off THIS
+      // row rather than merely to be indented near it (bw-7ks.22.2).
+      data-tool-id={item.id}
       data-tool-status={item.status}
       data-tool-name={item.name}
       data-open={open}
-      className={cn(nested && 'ml-6 border-l-2 border-violet-500/50 pl-3')}
+      className={cn(nested && SENT_OFF)}
     >
       <Panel inset="none" className="px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
         <button
@@ -352,6 +363,14 @@ export const ToolRow = memo(function ToolRow({
           )}
           <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
         </button>
+        {/* What the agent this call sent away is doing NOW, in its own words.
+            Only while it is still going: once the call is over, what it did is
+            in its answer and this line is a stale guess (bw-7ks.22.2). */}
+        {item.summary && item.status === 'running' && (
+          <p data-testid="tool-doing-now" className="truncate pl-4 pt-0.5 font-sans text-muted-foreground/80">
+            {item.summary}
+          </p>
+        )}
         {open && (
           <>
             <Body label={shell ? 'ran' : 'asked'} text={asked} testId="tool-input" language={tongue.asked} />
@@ -472,7 +491,12 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
   if (!item.text.trim()) return null;
 
   return (
-    <div data-testid="thinking-block" data-done={item.done} className="text-sm">
+    <div
+      data-testid="thinking-block"
+      data-done={item.done}
+      data-sent-by={item.parentId ?? undefined}
+      className={cn('text-sm', item.parentId !== null && SENT_OFF)}
+    >
       <button
         type="button"
         data-testid="thinking-toggle"
@@ -575,9 +599,13 @@ const MessageRow = memo(function MessageRow({
   mentions: Mentions;
   onLook: (image: ImagePayload) => void;
 }) {
+  const sentBy = item.parentId;
   return (
     <div
       data-testid={item.role === 'assistant' ? 'assistant-message' : 'user-message'}
+      // Which call this came from, when it came from a helper rather than from
+      // the agent you are talking to (bw-7ks.22.2).
+      data-sent-by={sentBy ?? undefined}
       // The answer takes the column; what he typed stays narrower and to
       // the right, which is what tells the two apart without a label.
       className={cn(
@@ -585,6 +613,7 @@ const MessageRow = memo(function MessageRow({
         item.role === 'user'
           ? 'ml-auto max-w-[75ch] bg-primary/15 text-foreground'
           : 'w-full bg-muted/40 text-foreground',
+        sentBy !== null && SENT_OFF,
       )}
     >
       {item.images.map((img, i) => (

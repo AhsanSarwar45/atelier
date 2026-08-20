@@ -26,6 +26,7 @@ const ran = (name: string): TranscriptItem => ({
   title: name,
   status: 'ok',
   seconds: 0,
+  summary: null,
   parentId: null,
   diff: null,
   input: {},
@@ -33,11 +34,11 @@ const ran = (name: string): TranscriptItem => ({
 });
 
 const items: TranscriptItem[] = [
-  { kind: 'message', id: id(), role: 'user', text: 'go', images: [], done: true },
+  { kind: 'message', id: id(), role: 'user', text: 'go', images: [], done: true, parentId: null },
   ran('Bash'),
   ran('Read'),
   ran('Read'),
-  { kind: 'message', id: id(), role: 'assistant', text: 'done', images: [], done: true },
+  { kind: 'message', id: id(), role: 'assistant', text: 'done', images: [], done: true, parentId: null },
 ];
 
 /** The panel, holding the reader's choice the way the chat holds it. */

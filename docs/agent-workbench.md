@@ -810,7 +810,10 @@ now carries **no** cards at all: they move into the right rail (§8.2.6), which
 is a column, so twenty-six of them cost height nobody is competing for instead
 of width everything is. What stays on the line is what names the chat — brand,
 model, mode, state — none of which grows, so the constraint holds by
-construction rather than by a count.
+construction rather than by a count. What it has spent stays here too, beside
+how full the conversation is and how much of the account's own allowance is
+left — three numbers that do not grow, each wearing its own mark so a row of
+them does not read as one figure (bw-7ks.22.13).
 
 #### 8.2.2 What a working chat shows (bw-f1q)
 
@@ -1087,8 +1090,11 @@ What it holds, in this order:
   is drawn nowhere.
 - **The agents it sent off** — §8.2.7. The tallest thing in the rail, and the
   reason the rail exists.
-- **What the work cost** — the running spend, counting the delegated work
-  (§8.2.7).
+What it has spent does **not** live here. Manager's ruling, 2026-08-20
+(bw-7ks.22.13): the running spend and how full the conversation is are numbers
+that say whether the work can go on at all, so they stay on the chat's own line
+(§8.2.1) where nothing has to be opened to see them. The rail is the reader's to
+shut, and a number behind a shut rail is a number nobody reads.
 
 A rail and not a tab: its whole job is to answer *what is happening away from
 here* without leaving the words that sent it.

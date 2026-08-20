@@ -4,7 +4,12 @@
 # its own ports and its own XDG_DATA_HOME, so it shares neither settings.db
 # nor workbench.db with them.
 #
-# Usage: scripts/workbench-e2e.sh [-g <grep>]
+# Usage: scripts/workbench-e2e.sh [<spec> ...] [-g <grep>]
+#
+# With no spec named it runs the workbench case. Any argument that is a path to
+# a test file is taken as the spec to run instead — the stack is the same one
+# whatever is being proved on it, and a case that needs an instance built from
+# THIS worktree has no other way in.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -72,4 +77,11 @@ curl -sf "$BEADS_E2E_URL/api/workbench/health" || { echo "sidecar did not come u
 echo
 
 cd "$ROOT"
-npx playwright test tests/e2e/workbench.spec.ts "$@"
+# A named spec wins; naming none runs the workbench case.
+specs=()
+rest=()
+for arg in "$@"; do
+  if [ -f "$arg" ]; then specs+=("$arg"); else rest+=("$arg"); fi
+done
+[ ${#specs[@]} -eq 0 ] && specs=(tests/e2e/workbench.spec.ts)
+npx playwright test "${specs[@]}" ${rest[@]+"${rest[@]}"}
