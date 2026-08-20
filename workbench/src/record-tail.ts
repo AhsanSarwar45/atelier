@@ -91,19 +91,23 @@ export function recordSize(sessionId: string, config?: string): number | null {
 }
 
 /**
- * The byte the line naming this one begins at, looked for from the END.
+ * Where the line naming this one sits in the record, looked for from the END.
  *
- * A whole-record read holds back the rows whose commands have no answers yet,
- * and those lines are the last few of the file. Handing the follower the byte
- * they begin at — rather than the byte the read stopped at, which is past them
- * — is what lets it say where it stands after a beat, and so what lets the
- * NEXT open of a chat that is being written carry on instead of reading the
- * whole record again (bw-uiyz.19).
+ * `begins` is its first byte and `after` the first byte of whatever follows it.
+ * Both are answers to the same question a reader has when it has to say where
+ * it stands: a whole-record read holds back the rows whose commands have no
+ * answers yet, and it stops at a byte PAST them, so neither the lines it held
+ * nor the ones it finished can be named in bytes without this (bw-uiyz.19).
  *
- * The window starts small and doubles, so the usual case reads a page and the
- * unusual one still finds it. Null when the record, or the line, is not there.
+ * The lines in question are the last few of a record, so the search starts at
+ * the end with a small window and doubles it. Null when the record, or the
+ * line, is not there.
  */
-export async function lineBegins(sessionId: string, name: string, config?: string): Promise<number | null> {
+export async function linePlace(
+  sessionId: string,
+  name: string,
+  config?: string,
+): Promise<{ begins: number; after: number } | null> {
   const path = findRecord(sessionId, config);
   if (path === null) return null;
   let size: number;
@@ -123,11 +127,19 @@ export async function lineBegins(sessionId: string, name: string, config?: strin
       await handle.read(buf, 0, buf.length, from);
       const text = buf.toString('utf8');
       const found = text.indexOf(needle);
-      const line = found === -1 ? -1 : text.lastIndexOf('\n', found);
+      const before = found === -1 ? -1 : text.lastIndexOf('\n', found);
       // A hit in the window's first line is only trustworthy when that line is
       // whole — either the window reaches the start of the file, or a newline
       // stands before it.
-      if (found !== -1 && (line !== -1 || from === 0)) return from + line + 1;
+      if (found !== -1 && (before !== -1 || from === 0)) {
+        const ends = text.indexOf('\n', found);
+        return {
+          begins: from + before + 1,
+          // The record's last line is written without its newline until the
+          // next one lands, so there is nothing after it yet.
+          after: ends === -1 ? size : from + ends + 1,
+        };
+      }
       if (from === 0) return null;
     }
   } finally {

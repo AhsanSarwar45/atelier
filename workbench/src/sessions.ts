@@ -28,7 +28,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
-import { findRecord, lineBegins, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
+import { findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
@@ -130,9 +130,9 @@ async function carryByByte(read: ReadSoFar, sessionId: string | null): Promise<R
   if (read.carry.length === 0 || sessionId === null) return read;
   const head = read.carry[0]?.uuid;
   if (head === undefined) return read;
-  const begins = await lineBegins(sessionId, head);
-  if (begins === null) return read;
-  return { at: begins, through: null, carry: [], drawn: read.drawn };
+  const place = await linePlace(sessionId, head);
+  if (place === null) return read;
+  return { at: place.begins, through: null, carry: [], drawn: read.drawn };
 }
 
 export class Sessions {
@@ -365,14 +365,21 @@ export class Sessions {
     let read = 0;
     for (const summary of this.store.listSessions()) {
       if (this.drivers.has(summary.id)) continue;
+      // Read the way a click would read it. A chat another program is driving
+      // read as if it were quiet leaves no byte to carry on from, so the
+      // reader's first click on it read the whole record a second time — 876ms
+      // on his longest, which is the one case the timing run still failed
+      // (bw-uiyz.20).
+      const live = this.heldElsewhere(summary);
       const readBy = this.store.importedBy(summary.id);
-      if (readBy !== null && readBy >= IMPORT_RECIPE) continue;
+      const already = readBy !== null && readBy >= IMPORT_RECIPE;
+      if (already && !(live && this.store.followedTo(summary.id) === null)) continue;
       // Nothing here is worth a reader waiting behind. Reading all of them
       // takes the better part of a minute of this thread, and a click that
       // arrived in the middle of that waited 7.8s for it (bw-uiyz.12).
       while (busy()) await new Promise((wake) => setTimeout(wake, READ_AHEAD_PAUSE_MS));
       try {
-        await this.importPast(summary);
+        await this.importPast(summary, live);
         read += 1;
       } catch {
         // A record that has been moved, pruned, or never existed. The click
@@ -505,6 +512,11 @@ export class Sessions {
     // rule and no row is drawn twice or missed between them.
     const upto = live ? settledUpTo(all) : all.length;
     const past = all.slice(0, upto);
+    // The byte this reading ends at, left on the chat once the rest of the
+    // reading has been done — never before, because dropping the old drawing
+    // below clears every mark the chat carries, and a mark written above it was
+    // wiped a dozen lines later (bw-uiyz.20).
+    let settledAfter: number | null = null;
     // From here the record HAS been read, whatever it turned out to hold — an
     // empty one is still a read, and reading it again would find it empty again.
     //
@@ -515,18 +527,39 @@ export class Sessions {
     // good. A partial read is therefore not a read (bw-dmxj.14).
     if (upto === all.length) {
       this.store.markImported(summary.id, IMPORT_RECIPE);
-      // And, when nothing was written while the reading was going on, the byte
-      // that reading consumed is known exactly — so the NEXT open of this chat
-      // carries on from it rather than reading the record again, without
-      // waiting for a follower to settle one (bw-uiyz.19). A record that grew
-      // under the read leaves the mark to the follower, which knows which of
-      // those lines it has taken in.
-      if (at !== null && recordSize(summary.externalId) === at) {
-        this.store.rememberFollowed(summary.id, at, 0, IMPORT_RECIPE);
-      }
+      // And the byte after the last line this reading took in, so the NEXT open
+      // carries on from there rather than reading the record again
+      // (bw-uiyz.19). Asked of the record by name rather than taken from its
+      // size, because an active chat is written to WHILE it is being read and
+      // those lines were read too: the size is a byte this reading is already
+      // past, and a mark left there would say the lines between twice
+      // (bw-uiyz.20).
+      const ended = messages[messages.length - 1]?.uuid;
+      const last = ended === undefined ? null : await linePlace(summary.externalId, ended);
+      settledAfter = last?.after ?? null;
     }
     const read = await carryByByte(readState(at, messages, all.length - upto), summary.externalId);
-    if (past.length === 0) return read;
+    /**
+     * Where this reading got to, written on the chat so the next open carries
+     * on from it instead of reading the record again (bw-uiyz.19).
+     *
+     * Two ways to know it, and a chat being written is the reason for both: the
+     * byte after the last line taken in when the reading settled, and the byte
+     * the held-back lines BEGIN at when it did not. Kept whether or not anyone
+     * follows this chat, because a chat read AHEAD of the reader has no
+     * follower and its reading would otherwise count for nothing (bw-uiyz.20).
+     */
+    const leaveMark = (): void => {
+      if (read.through === null && read.at !== null) {
+        this.store.rememberFollowed(summary.id, read.at, read.drawn, IMPORT_RECIPE);
+      } else if (settledAfter !== null) {
+        this.store.rememberFollowed(summary.id, settledAfter, 0, IMPORT_RECIPE);
+      }
+    };
+    if (past.length === 0) {
+      leaveMark();
+      return read;
+    }
 
     // Only now is the old copy thrown away: there is something to put in its
     // place (bw-1u1.26). A browser already drawing that copy is told to drop it
@@ -552,6 +585,7 @@ export class Sessions {
       });
     }
     for (const entry of shown) this.draw(summary.id, entry);
+    leaveMark();
     return read;
   }
 
