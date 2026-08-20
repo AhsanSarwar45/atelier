@@ -1,31 +1,50 @@
 #!/usr/bin/env python3
 """Put a project on this machinery, and say whether one already is.
 
-Nothing is ever copied into a project. A project runs the tools and the gates in
-place, out of this one home, and joining is four things:
+One command, run once in a project, and that project is on the machinery whole.
+Nothing is ever copied into it: it runs the tools and the gates in place, out of
+this one home. Joining is these things, and each of them is fixed rather than
+merely reported —
 
-  the declaration      `machinery.toml` at the project root — the project writes
-                       it, this only checks it is there and is readable
+  the declaration      `machinery.toml` at the project root. A project that has
+                       none is written one from the example kept here, with what
+                       a directory can answer for itself already answered; it
+                       stops on the prefix, which nothing can guess, because that
+                       goes into every card id the board will ever issue
   the register         one line in `projects.toml` here, so `lands:<name>` on a
                        goal means something and a commit in one checkout may name
                        the ids of a project whose work lands there
-  the shared .claude    Claude Code reads agents, skills and output styles out
+  the board            on a database server, never one beads runs in its own
+                       process: the board screen reads a served board straight
+                       over SQL and otherwise falls back to spawning `bd` once
+                       per read, and `bd doctor` refuses its deep checks on an
+                       unserved one. A board already here is MOVED, and the move
+                       counts its cards on both sides and puts itself back if the
+                       count changes
+  the session gates    the project's own `.claude/settings.json`, merged never
+                       overwritten, from the one table below that also feeds
+                       `--check` — plus the history ceiling and the house voice
+  the board screen     one row in the screen's own list of projects, found by
+                       where the project lives, so its cards are on the screen
+                       without anybody typing a path into it
+  the shared .claude   Claude Code reads agents, skills and output styles out
                        of the machine-wide `~/.claude/`, so the canonical copies
                        are versioned here and that home holds symlinks at them —
                        a link, never a copy. One install serves every project; a
                        project that wants a subject-flavoured variant keeps its
                        own beside it, which overrides the shared one by name.
-  the board's own role  a fork infers a contributor and routes `bd list` at a
+  the board's role    a fork infers a contributor and routes `bd list` at a
                        planning store; a project that pours work is a maintainer
-  the landing guard     git only runs a hook it finds in the checkout itself, so
+  the landing guard    git only runs a hook it finds in the checkout itself, so
                        a one-line pointer at the guard kept here goes wherever
                        this project's git looks for its ref-transaction hook —
                        still not a copy, and a re-join puts it back if the board
                        tooling rewrote that directory
 
-Forwarders are the sixth and are optional (`--forward`): a project that already
-had the tools under `scripts/` keeps those paths working, so settings and running
-sessions are not disturbed. They are one line of pointing and no logic.
+Forwarders are the last of them and are optional (`--forward`): a project
+that already had the tools under `scripts/` keeps those paths working, so
+settings and running sessions are not disturbed. They are one line of
+pointing and no logic.
 
     machinery/join <project>              join it, or say what is missing
     machinery/join <project> --forward    and leave forwarders at the old paths
@@ -53,6 +72,9 @@ FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
 # Claude Code reads these out of a project's own `.claude/`, so a project shares
 # them by pointing at this home rather than by holding a copy.
 SHARED = ("agents", "skills", "output-styles", "commands")
+# The shape of a declaration, kept beside this file. A project that declares
+# nothing is given a copy of it rather than a sentence about where to find one.
+EXAMPLE = "machinery.toml.example"
 # The board screen's own list of projects. A project whose board runs perfectly
 # is still not on the screen until a row here names where it lives, and typing
 # that path into the screen by hand is the last piece of joining anybody was
@@ -538,6 +560,32 @@ def register(root, decl, say):
     say("listed %s as %s" % (root, decl.name))
 
 
+def declaring(root):
+    """Give a project that declares nothing the shape of one, and say so.
+
+    The example beside this file is the shape; what a directory can answer for
+    itself is answered in the copy, and the one line it cannot is left empty.
+
+    A prefix is not guessable. It goes into every card id this board will ever
+    issue, so a wrong one is undone by rewriting all of them — which is why this
+    writes the file and stops rather than picking something and carrying on.
+    """
+    base = os.path.basename(root.rstrip("/")) or "project"
+    brand = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_").upper()
+    text = open(os.path.join(HOME, EXAMPLE)).read()
+    for was, now in ((r'^name = "example"$', 'name = "%s"' % base),
+                     (r'^prefix = "ex"$', 'prefix = ""'),
+                     (r'^brand = "EXAMPLE"$', 'brand = "%s"' % brand),
+                     (r'^checks = ".*"$', 'checks = ""'),
+                     (r'^persona = ".*"$',
+                      'persona = "the %s project — what it is, in one line"' % base)):
+        text = re.sub(was, now.replace("\\", "\\\\"), text, count=1, flags=re.M)
+    where = os.path.join(root, project.DECLARATION)
+    with open(where, "w") as fh:
+        fh.write(text)
+    return where
+
+
 def project_list():
     """Where the board screen keeps this machine's list of projects."""
     if sys.platform == "darwin":
@@ -904,11 +952,20 @@ def main():
 
     root = os.path.abspath(os.path.expanduser(a.path))
     decl = project.of(root)
-    if not decl.declared:
-        sys.exit("no machinery.toml at %s. A project says its own prefix, systems "
-                 "and branch before it can run these tools — %s/machinery.toml.example "
-                 "is the shape of it." % (root, HOME))
     said = []
+    if not decl.declared:
+        said.append("wrote  %s — a declaration of this project's own, from the "
+                    "shape kept beside these tools" % declaring(root))
+        project._DECLS.clear()
+        project._ROOTS.clear()
+        decl = project.of(root)
+    if not decl.prefix:
+        print("\n".join(said))
+        sys.exit("%s/%s says nothing on the `prefix` line, and nothing here can "
+                 "answer it for you: it is written into every card id this board "
+                 "will ever issue, so a guess is undone by rewriting all of them. "
+                 "Fill it in — two or three letters, no dash — and run this again."
+                 % (root, project.DECLARATION))
     register(root, decl, said.append)
     project._DECLS.clear()
     project._ROOTS.clear()

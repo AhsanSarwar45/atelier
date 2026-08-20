@@ -5023,6 +5023,123 @@ def main():
           "marked a test without renaming it, and says so rather than building a "
           "list of its own where the screen has never run")
 
+    # A directory nobody has declared (bw-aisw.5). Joining used to stop at a
+    # sentence about where the example lived; a person then had to find it, copy
+    # it and edit it. It writes the copy now — with what a directory can answer
+    # for itself answered — and stops on the one line it cannot answer, because a
+    # prefix goes into every card id the board will ever issue.
+    def declared_by_join(fill=None):
+        """A brand-new directory put through the real `join`: what it exits, what
+        it wrote, and whether it went on to build a board.
+
+        `fill` is the prefix written into the declaration before a second join,
+        for the case that answers the line and comes back.
+        """
+        tmp = tempfile.mkdtemp(prefix="board-join-declared-")
+        root = os.path.join(tmp, "brand-new-thing")
+        env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
+        env.pop("XDG_DATA_HOME", None)
+        try:
+            mine = os.path.join(tmp, "machinery")
+            os.makedirs(os.path.join(mine, "hooks"))
+            for near in ("join", "project.py", "machinery.toml.example",
+                         os.path.join("hooks", "landing-gate.py")):
+                shutil.copy(os.path.join(HOME, near), os.path.join(mine, near))
+            os.makedirs(root)
+            subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=root,
+                           env=env, timeout=120)
+            first = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
+                                   text=True, capture_output=True, timeout=600, env=env)
+            made = os.path.join(root, project.DECLARATION)
+            wrote = open(made).read() if os.path.exists(made) else ""
+            boarded = os.path.isdir(os.path.join(root, ".beads"))
+            again = None
+            if fill and wrote:
+                with open(made, "w") as fh:
+                    fh.write(wrote.replace('prefix = ""', 'prefix = "%s"' % fill))
+                again = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
+                                       text=True, capture_output=True, timeout=600,
+                                       env=env)
+                boarded = os.path.isdir(os.path.join(root, ".beads"))
+            return (first.returncode, first.stdout + first.stderr, wrote, boarded,
+                    (again.stdout + again.stderr) if again else "")
+        finally:
+            subprocess.run(["bd", "dolt", "stop"], cwd=root, env=env,
+                           capture_output=True, text=True, timeout=120)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    code, first_said, wrote, boarded, _ = declared_by_join()
+    assert wrote, \
+        "joining a directory that declares nothing left it declaring nothing, so " \
+        "the person joining it still has to find the example and copy it: %r" \
+        % first_said
+    assert 'name = "brand-new-thing"' in wrote and 'prefix = ""' in wrote, \
+        "the declaration joining wrote does not name the directory it is for, or " \
+        "guessed the one line nobody can guess: %r" % wrote
+    assert code != 0 and "prefix" in first_said, \
+        "joining an undeclared directory came back saying nothing about the line " \
+        "a person has to fill (exit %r): %r" % (code, first_said)
+    assert not boarded, \
+        "joining built a board before its prefix was answered, so every card it " \
+        "ever issues carries an id nobody chose: %r" % first_said
+
+    code, first_said, wrote, boarded, again_said = declared_by_join(fill="bn")
+    assert boarded and "on a server" in again_said, \
+        "a project whose declaration was answered did not then join: %r" % again_said
+
+    print("ok: joining a directory that declares nothing writes it a declaration "
+          "from the shape kept beside the tools, with its own name in it, and "
+          "stops on the prefix rather than guessing one — and joins it in full "
+          "once that line is answered")
+
+    # And the other half of the rule: `--check` says so about a board only a
+    # command line can open, wherever it finds one.
+    def check_over_an_embedded_board():
+        """A registered project whose board beads runs itself, and what
+        `join --check` says about it."""
+        tmp = tempfile.mkdtemp(prefix="board-check-embedded-")
+        root = os.path.join(tmp, "by-hand")
+        env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
+        env.pop("XDG_DATA_HOME", None)
+        try:
+            mine = os.path.join(tmp, "machinery")
+            os.makedirs(os.path.join(mine, "hooks"))
+            for near in ("join", "project.py",
+                         os.path.join("hooks", "landing-gate.py")):
+                shutil.copy(os.path.join(HOME, near), os.path.join(mine, near))
+            os.makedirs(root)
+            with open(os.path.join(root, project.DECLARATION), "w") as fh:
+                fh.write('name = "by-hand"\nprefix = "bh"\nlands_on = "main"\n'
+                         'areas = ["tooling"]\nagent_merges = true\n')
+            # Registered without joining, which is the state this is about: the
+            # project is known and its board is one only a command line opens.
+            with open(os.path.join(mine, "projects.toml"), "w") as fh:
+                fh.write('[projects]\nby-hand = "%s"\n' % root)
+            made = subprocess.run(["bd", "init", "--prefix", "bh"], cwd=root,
+                                  text=True, capture_output=True, timeout=300, env=env)
+            assert os.path.isdir(os.path.join(root, ".beads", "embeddeddolt")), \
+                "the case meant to start from a board beads runs itself did not " \
+                "get one, so it proves nothing: %r" % (made.stdout + made.stderr)
+            check = subprocess.run(
+                [sys.executable, os.path.join(mine, "join"), "--check"],
+                text=True, capture_output=True, timeout=600, env=env)
+            return check.returncode, check.stdout + check.stderr
+        finally:
+            subprocess.run(["bd", "dolt", "stop"], cwd=root, env=env,
+                           capture_output=True, text=True, timeout=120)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    code, embedded_check = check_over_an_embedded_board()
+    assert "not on a database server" in embedded_check, \
+        "`join --check` walked a project whose board only a command line can " \
+        "open and said nothing about it: %r" % embedded_check
+    assert code != 0, \
+        "`join --check` came back clean over a project it had just complained " \
+        "about: %r" % embedded_check
+
+    print("ok: `join --check` names a registered project whose board beads runs "
+          "itself, so no project is left on one the board screen cannot read")
+
     # Litter in the checkout a landing lands in. Left to git, any tracked change
     # there refuses the landing with "Working directory has staged changes" and
     # names nobody (bw-vb2.3), so the gate looks first: leftovers nobody live is
