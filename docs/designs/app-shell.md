@@ -182,6 +182,59 @@ project — for exactly as long as the board still holds open the card that
 question names. And clicking an answer posts it as his own words onto that card
 and into the chat that worked it, so nothing is copied by hand.
 
+### 1.11 A chat draws only the kinds asked for (bw-qdim)
+
+Constraint: a busy chat is mostly the agent's own working — files read, commands
+run, quiet notes about itself — and what it SAID is a handful of rows buried in
+it. The chat's toolbar carries a second control beside Show everything, opening
+a tree of switches: you and the agent at the top; the agent's replies, thinking,
+commands, status lines, questions and reports beneath it; and under commands one
+entry for every tool this conversation actually used.
+
+Four rules make the tree behave the way a reader expects rather than the way a
+set of checkboxes does.
+
+**What is remembered is what he switched OFF** (`workbench.chat-filter`). A
+switch nobody has touched is on, so a tool used here for the first time — and a
+kind the chat grows next month — arrives visible rather than silently missing
+from a conversation he thought he was reading whole. It is remembered for the
+browser, not for one chat, the way Show everything beside it is.
+
+**A group off is one entry, and forgets what was off inside it**, so turning it
+back on hands him all of it rather than whatever remained of it last time. The
+cost is that a switch inside a group that is off has nothing of its own to
+remove, and clicking it would do nothing at all — so flipping one on opens each
+group above it and switches that group's other children off individually,
+leaving the one he asked for standing and the group reading half-on (bw-qdim.9).
+That is why flipping a switch needs the whole tree and not just the switch.
+
+**A command run inside another command goes with its parent.** Hiding the row
+that sent a subagent off while leaving the work it spawned standing loose would
+read as the agent doing that work itself. The count beside a switch counts those
+rows too, because the screen draws them too — a check that counted only the rows
+at the top compared its number against a different set and came apart on any
+chat that dispatched a subagent (bw-qdim.12).
+
+**Every line carries its count for THIS conversation**, zero included: it is what
+lets him see the cost of turning something off before he turns it off, and what
+tells him a group is empty here without opening it. So the count is taken over
+the rows the chat could draw at all — a note the chat files as detail is only on
+screen with Show everything on, and counting it the rest of the time prices
+Status lines by rows he cannot see (bw-qdim.10). Switching everything off leaves
+the window empty, which is indistinguishable from a broken chat, so the
+conversation says which it is and offers one click back (bw-qdim.6).
+
+Two things the panel has to look like. The toolbar button goes loud the moment
+anything is off, because a reader who has forgotten he filtered a conversation is
+reading one with holes in it and no way of knowing (bw-qdim.5). And a switch that
+is off draws its empty box in the edge the app gives a box you type into: the
+fainter edge is a shade off the panel behind it, which on a dark theme is no box
+at all, and a switch nobody can see is a switch nobody knows they can turn back
+on (bw-qdim.11).
+
+Held by `tests/e2e/chat-filter.spec.ts` against a real past conversation on the
+reader's own instance, and by `src/workbench/__tests__/`.
+
 ## 2. Deliberate drops
 
 - The app-wide bar is gone. Its four pieces moved: the tray and the live strip
@@ -218,3 +271,11 @@ table above.
 
 - Nothing tells a chat's row that the chat has begun touching a new card until
   the row is opened; a row shows the cards already known for it (`bw-ccm.7`).
+- A conversation read back from its record never draws an indented subagent row:
+  the parent a command was run under reaches the screen on the live event stream
+  and is not in what the sidecar restores. So the rule that a subagent's commands
+  go with the row that sent them off is exercised by the unit suite only, and the
+  browser check has no conversation on this machine that can exercise it
+  (`bw-qdim.12`).
+- The filter's edit to the chat screen was kept to a button and one call because
+  another job is rewriting that same row loop (`bw-uiyz.5`); the two meet there.
