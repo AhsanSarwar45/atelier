@@ -1347,19 +1347,34 @@ refusing to run.
 
 Three decisions worth keeping:
 
-**Account-wide, so it is read once and served whole.** Every chat on the machine
-spends the same allowance. The figure is therefore a sidecar endpoint —
-`GET /api/workbench/usage`, cached just under a minute — and not an event on any
-session's stream: a per-session event would write account state into every
-chat's transcript and let two chats disagree about one number. The browser polls
-it once a minute for the whole window, however many chats are open.
+**Account-wide, so the server owns it and no screen asks.** Every chat on the
+machine spends the same allowance. The sidecar reads it on a beat of its own —
+every thirty seconds, for as long as any page is connected and not once when
+none is — and says it down `/watch` as a `usage` frame. That frame belongs to no
+session: it is never written into a chat's transcript, and a page opening is
+told the figure in hand immediately, so two chats cannot disagree about one
+number. `GET /api/workbench/usage` remains for a caller that wants it once.
 
-**The kit is asked, and nothing is derived.** The five-hour and weekly figures
-are the server's, reached through the Claude SDK's own `/usage` channel. A live
-chat answers it down a channel already open, for no tokens and no turn. When no
-chat is running, the sidecar starts a session of its own with nothing to say,
-asks it, and shuts it down again after four idle minutes — measured 2026-08-20:
-1.9s cold, 0 tokens. Nothing here counts tokens or adds up dollars to guess at a
+Polling from the browser is what this replaced. The chips then moved only when
+the chat they sat on moved, so a conversation left sitting while another spent
+showed a figure minutes old (bw-dmoe).
+
+**The kit is asked through one helper of ours, and nothing is derived.** The
+five-hour and weekly figures are the server's, reached through the Claude SDK's
+own `/usage` channel. The sidecar keeps a session of its own with nothing to say
+for the purpose, and shuts it down after four idle minutes — measured
+2026-08-20: 1.9s cold, 0 tokens. Asking whichever chat happens to be running was
+tried and removed: the answer then depended on which chat that was, and the kit
+serves a five-minute-old snapshot from disk, without saying so, when its live
+read fails.
+
+That snapshot is why an answer is weighed before it is drawn (`believable()`).
+A window whose percentage has FALLEN while its reset time has not moved cannot
+be true — an allowance is not un-spent inside its own window — and neither can
+an answer that has dropped the five-hour or weekly figure altogether. Either is
+refused, the last good reading stands, and the next read is five seconds later
+rather than a full beat. A real fall comes with a new reset time and is
+believed. Nothing here counts tokens or adds up dollars to guess at a
 percentage; a guessed allowance is worse than none.
 
 **A window nobody has draws nothing.** On an API key, on Bedrock, on Vertex,
@@ -1582,14 +1597,17 @@ document.
   no chips at all — the state this feature replaced — and never to a wrong
   number. The alternative was adding up tokens to guess at a percentage, and a
   guessed allowance is worse than none.
-- When no chat is running, the reading costs a session of its own: the sidecar
-  starts one with nothing to say, asks it, and shuts it down after four idle
-  minutes. It sends no message and spends no tokens (measured 2026-08-20: 1.9s
-  cold, 0 tokens), but it is a process, and an install that never opens a chat
-  still starts one the first time the browser asks.
-- The figure can be up to a minute old: the sidecar caches for 55 seconds and
-  the browser polls every 60. A five-hour window does not move fast enough for
-  that to mislead anyone, and the alternative is one query per chat per render.
+- The reading always costs a session of its own: the sidecar starts one with
+  nothing to say, asks it, and shuts it down after four idle minutes. It sends
+  no message and spends no tokens (measured 2026-08-20: 1.9s cold, 0 tokens),
+  but it is a process, and an install that never opens a chat still starts one
+  the first time a page connects.
+- The figure can be up to thirty seconds old, or thirty-five when an answer was
+  refused as the kit's stale snapshot. A five-hour window does not move fast
+  enough for that to mislead anyone.
+- A refusal that never ends would freeze the figure, so only the account's own
+  two windows can cause one. A per-model row that stops appearing is believed:
+  a model legitimately drops out of a window it is no longer used in.
 - Who is working in a chat is Claude's answer only. Codex writes no markers we
   read, so a Codex conversation somebody else is driving is drawn asleep and
   offered like any other (§6.3.4).

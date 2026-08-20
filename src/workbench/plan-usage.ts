@@ -10,8 +10,10 @@
  *
  * The figure is the ACCOUNT'S, not this chat's: every chat on the machine
  * spends the same allowance, and so every chat shows the same number. It is
- * therefore read once by the sidecar and served whole, never carried on a
- * session's event stream.
+ * therefore read by the sidecar alone, on a beat of its own, and said down the
+ * one stream every page already holds — as a `usage` frame that belongs to no
+ * session, so a chat nobody is typing in shows what the account has spent
+ * elsewhere (bw-dmoe).
  *
  * Shared: the sidecar normalises the kit's answer with this and the browser
  * draws it with this. It therefore imports nothing — the sidecar runs it
