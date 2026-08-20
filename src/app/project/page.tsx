@@ -5,7 +5,7 @@ import { type MouseEvent, Suspense, useCallback, useEffect, useRef, useState } f
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { ArrowLeft, EllipsisVertical } from 'lucide-react';
+import { ArrowLeft, EllipsisVertical, Home } from 'lucide-react';
 
 import { CardPanel } from '@/components/card-panel';
 import { ProjectSettingsDialog } from '@/components/project-settings-dialog';
@@ -129,6 +129,23 @@ function ProjectTabs() {
             <Link href="/" data-testid="back-arrow" onClick={stepBack}>
               <ArrowLeft className="h-4 w-4 opacity-100" />
               <span className="sr-only">Back</span>
+            </Link>
+          </Button>
+          {/* The way out that is always the same one. The arrow beside it is
+              where the reader came from, which is a different question and by
+              now a different answer, so the project list has a control of its
+              own rather than being whatever the history happens to hold
+              (bw-430t). Nothing is intercepted here: it is the plain link it
+              looks like, at any depth. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0 text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
+            asChild
+          >
+            <Link href="/" data-testid="home-button">
+              <Home className="h-4 w-4 opacity-100" />
+              <span className="sr-only">All projects</span>
             </Link>
           </Button>
           <h1

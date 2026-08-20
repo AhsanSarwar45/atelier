@@ -13,6 +13,11 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
  * The list is still where it goes when there is nothing of ours behind it: a
  * pasted address, a fresh tab. Stepping back there would leave the app.
  *
+ * Which left the project list reachable only by accident, so a house sits
+ * beside the arrow and is the plain link the arrow used to be (bw-430t). Two
+ * controls, two questions: where the reader came from, and where the app
+ * starts.
+ *
  * Needs an instance with at least one project.
  *
  * Run: BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3008 \
@@ -50,6 +55,27 @@ test.describe('the project bar arrow', () => {
 
     await page.getByTestId('back-arrow').click();
     await expect(page).toHaveURL(/tab=board/);
+  });
+
+  test('is not the way to the project list — the house beside it is', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto('/');
+    await page.goto(`/project?id=${id}&tab=board`);
+    await page.goto(`/project?id=${id}&tab=reports`);
+    await expect(page.getByTestId('home-button')).toBeVisible({ timeout: 30_000 });
+
+    // Three addresses deep, and the house still goes straight out.
+    await page.getByTestId('home-button').click();
+    await expect(page, 'the house stepped back instead of going to the list').toHaveURL(/\/$/);
+  });
+
+  test('and the house have names a reader can tell apart', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=board`);
+    await expect(page.getByTestId('back-arrow')).toBeVisible({ timeout: 30_000 });
+
+    await expect(page.getByRole('link', { name: 'Back', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'All projects', exact: true })).toBeVisible();
   });
 
   test('falls back to the list when nothing of ours is behind it', async ({ page, request }) => {
