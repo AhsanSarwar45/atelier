@@ -4760,13 +4760,22 @@ def main():
                 mode = json.load(fh).get("dolt_mode")
             status = bd("dolt", "status").stdout
             count = bd("count").stdout.strip().splitlines()
+            loose = subprocess.run(["git", "status", "--porcelain",
+                                    "--untracked-files=all"], cwd=root, env=env,
+                                   text=True, capture_output=True, timeout=120)
+            # Beads points this project's git at the board's own hooks directory,
+            # which is inside the working tree — so the guard join leaves there
+            # is a file `git status` can see, and the case is not vacuous.
+            guarded = os.path.exists(os.path.join(root, ".beads", "hooks",
+                                                  "reference-transaction"))
             return (said.stdout + said.stderr, mode, status,
-                    int(count[-1]) if count and count[-1].isdigit() else None)
+                    int(count[-1]) if count and count[-1].isdigit() else None,
+                    loose.stdout, guarded)
         finally:
             bd("dolt", "stop")
             shutil.rmtree(tmp, ignore_errors=True)
 
-    join_said, runs_as, server_says, cards_after = board_after_join()
+    join_said, runs_as, server_says, cards_after, _, _ = board_after_join()
     assert runs_as == "server", \
         "joining a project with no board at all left it running one only a " \
         "command line can open (%r); join said %r" % (runs_as, join_said)
@@ -4774,7 +4783,8 @@ def main():
         "the board a joining project was given says it is on a server and no " \
         "server answers for it: %r (join said %r)" % (server_says, join_said)
 
-    join_said, runs_as, server_says, cards_after = board_after_join(cards_first=3)
+    join_said, runs_as, server_says, cards_after, loose, guarded = \
+        board_after_join(cards_first=3)
     assert runs_as == "server" and "Dolt server: running" in server_says, \
         "a board beads was running itself was not moved onto a server: mode %r, " \
         "status %r (join said %r)" % (runs_as, server_says, join_said)
@@ -4782,6 +4792,20 @@ def main():
         "moving a board of 3 cards onto a server left %r of them, and the move " \
         "was supposed to undo itself rather than land short: join said %r" \
         % (cards_after, join_said)
+
+    assert guarded, \
+        "join left no landing guard inside the working tree, so what follows " \
+        "proves nothing about keeping one out of git: it said %r" % join_said
+    left = [line for line in loose.splitlines()
+            if any(name in line for name in ("before-the-server.jsonl",
+                                             "dolt-server-config.yaml",
+                                             "reference-transaction"))]
+    assert not left, \
+        "joining left its own working files loose in the project's git: %s. A " \
+        "copy of the board taken before the move, the server settings written " \
+        "for this morning's port, and a shim holding a path on this machine sit " \
+        "in `git status` forever — and the next landing sweeps them into a " \
+        "stash. join said %r" % (left, join_said)
 
     print("ok: joining gives a project with no board one on a database server, "
           "and moves a board beads was running itself onto a server with every "

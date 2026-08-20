@@ -161,6 +161,7 @@ SERVER = "server"
 # backup of the database — the move never rewrites one — but the one thing that
 # would let a person put the cards back by hand if the undo below ever failed.
 BEFORE = "before-the-server.jsonl"
+CONFIG = "dolt-server-config.yaml"
 
 
 def board(args, root):
@@ -270,6 +271,88 @@ def serve(root, decl, say):
         else ("would not start (%s)" % said)
     say("board  %s was NOT moved: on a server it %s, against %d before — the move "
         "was undone and the board is exactly as it was" % (root, went, before))
+
+
+def unwatched(root, rel, why):
+    """Keep a file this command wrote out of `git status` in this checkout.
+
+    Everything joining leaves inside the working tree is either a safety net for
+    the machine it was made on or a pointer at a path on it, and no clone wants
+    either. Left untracked and unignored it sits in `git status` forever — where
+    the landing gate sweeps it into a stash on the first landing afterwards.
+
+    Written to this clone's own exclude list rather than to a `.gitignore`: those
+    are tracked files, shared with everyone, and a line about one machine's copy
+    does not belong in a diff anybody else reads.
+    """
+    if not git(["ls-files", "--error-unmatch", rel], root)[0] \
+            or not git(["check-ignore", "-q", rel], root)[0]:
+        return          # git already has an answer about this one
+    code, common = git(["rev-parse", "--path-format=absolute",
+                        "--git-common-dir"], root)
+    if code or not common:
+        return
+    watched = os.path.join(common, "info", "exclude")
+    try:
+        text = open(watched).read() if os.path.exists(watched) else ""
+        if rel in text:
+            return
+        os.makedirs(os.path.dirname(watched), exist_ok=True)
+        with open(watched, "a") as fh:
+            fh.write(("" if text.endswith("\n") or not text else "\n")
+                     + "\n# " + why + "\n/" + rel + "\n")
+    except OSError:
+        # A checkout that will not take the line still joined, and the line is
+        # tidiness. Nothing here is worth undoing good work over.
+        pass
+
+
+def local(root):
+    """Everything joining leaves inside the working tree that belongs to THIS
+    machine alone, as {path relative to the root: why it is nobody else's}.
+
+    Two files and a shim. The copy of the board taken before it moved; the server
+    settings beads writes when it starts one, which name a port chosen that
+    morning and a directory on this disk; and the guard, wherever this project's
+    git looks for hooks — which is the board's own directory in one project and
+    `scripts/git-hooks` in the next, so it is asked rather than assumed.
+    """
+    out = {os.path.join(".beads", BEFORE):
+           "The board as it read before it moved onto a server, kept by"
+           "\n# `machinery/join` so the move can be undone by hand.",
+           os.path.join(".beads", CONFIG):
+           "The board server's settings, written afresh by beads every time it"
+           "\n# starts one: the port is this morning's and the path is this disk's."}
+    for where in hook_dirs(root):
+        rel = os.path.relpath(os.path.join(where, GUARD), root)
+        if not rel.startswith(os.pardir):
+            out[rel] = ("A pointer at where this machine keeps the landing guard,"
+                        "\n# written by `machinery/join`. The path inside it is"
+                        " this machine's own.")
+    return out
+
+
+def tidy(root, say):
+    """Keep what joining left behind out of this checkout's `git status`."""
+    for rel, why in local(root).items():
+        if os.path.exists(os.path.join(root, rel)):
+            unwatched(root, rel, why)
+
+
+def untidy(root):
+    """The files joining left that git is still watching, so they will be swept.
+
+    Untracked and unignored, a file sits in `git status` forever — and the
+    landing gate stashes everything it finds there before a merge, so the next
+    landing carries this machine's own settings off into a stash nobody reads.
+    """
+    loose = [rel for rel in local(root)
+             if os.path.exists(os.path.join(root, rel))
+             and git(["ls-files", "--error-unmatch", rel], root)[0]
+             and git(["check-ignore", "-q", rel], root)[0]]
+    return ["%s is neither tracked nor ignored at %s — it belongs to this machine "
+            "alone, and the landing gate sweeps whatever it finds loose into a "
+            "stash before every merge" % (", ".join(loose), root)] if loose else []
 
 
 def unserved(root):
@@ -730,6 +813,7 @@ def standing(root):
                     "`git -C %s config beads.role maintainer`" % (role or "unset", root))
     said += unwired(root)
     said += unguarded(root)
+    said += untidy(root)
     return said, decl
 
 
@@ -984,6 +1068,7 @@ def main():
     # asks the board something, and asking one that is mid-move answers for the
     # copy that is about to stop existing.
     wire(root, said.append)
+    tidy(root, said.append)
     listing(root, decl, said.append)
     states(root, said.append)
     # After the states and never before them: these are the cards the board
