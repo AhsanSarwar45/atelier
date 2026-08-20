@@ -55,6 +55,11 @@ async function aBusyChat(request: APIRequestContext, page: Page): Promise<{ proj
   const candidates = rows.filter((r) => r.externalId).slice(0, 8);
 
   const tried: string[] = [];
+  // A conversation that sent work off to a subagent draws that subagent's own
+  // commands indented under the row that started it, and those rows are the
+  // ones a check counting only the top of the conversation misses. So they are
+  // what we go looking for, and any busy chat is only the fallback (bw-qdim.12).
+  let fallback: { project: Project; id: string } | null = null;
   for (const past of candidates) {
     // Opened, which reads it and starts nothing (docs/designs/app-shell.md §1.9).
     const opened = (await (
@@ -80,13 +85,47 @@ async function aBusyChat(request: APIRequestContext, page: Page): Promise<{ proj
       .then(() => true)
       .catch(() => false);
     const spoke = (await page.getByTestId('assistant-message').count()) > 0;
-    tried.push(`${past.externalId}: ${drew ? 'commands' : 'none'}${spoke ? ' and replies' : ''}`);
-    if (drew && spoke) return { project, id: opened.id };
+    const sentWorkOff = drew && (await page.getByTestId('subagent-tool-row').count()) > 0;
+    tried.push(
+      `${past.externalId}: ${drew ? 'commands' : 'none'}${spoke ? ' and replies' : ''}${sentWorkOff ? ' and subagents' : ''}`,
+    );
+    if (!drew || !spoke) continue;
+    if (sentWorkOff) return { project, id: opened.id };
+    fallback ??= { project, id: opened.id };
+  }
+
+  if (fallback) {
+    await page.goto(`/project?id=${fallback.project.id}&tab=chat&chat=${fallback.id}`);
+    await page.getByTestId('chat-tab').waitFor({ timeout: OPEN_MS });
+    await commandRows(page).first().waitFor({ timeout: 20_000 });
+    return fallback;
   }
 
   test.skip(true, `no past chat on this instance drew both commands and replies: ${tried.join('; ')}`);
   throw new Error('unreachable');
 }
+
+/**
+ * Every command row the conversation drew.
+ *
+ * A command a subagent ran is drawn indented under the one that sent it off and
+ * carries its own name in the record, so the tree counts it like any other —
+ * and a check that counts only the top-level ones is comparing its number
+ * against a different set of rows than the tree's, which comes apart on any
+ * conversation that dispatched a subagent (bw-qdim.12).
+ */
+const commandRows = (page: Page) =>
+  page.locator('[data-testid="tool-row"], [data-testid="subagent-tool-row"]');
+
+/**
+ * Only the rows at the top of the conversation.
+ *
+ * Arithmetic about what one switch hid belongs here: switching a tool off takes
+ * the work its rows spawned with them, so the number of INDENTED rows left
+ * standing is not `before - mine` — while a top-level row is hidden by its own
+ * switch and nothing else.
+ */
+const topRows = (page: Page) => page.getByTestId('tool-row');
 
 const line = (page: Page, kind: string) => page.locator(`[data-testid="kind-line"][data-kind="${kind}"]`);
 const switchOn = (page: Page, kind: string) => line(page, kind).getByTestId('kind-switch');
@@ -109,7 +148,7 @@ async function settled(page: Page): Promise<number> {
   await expect
     .poll(
       async () => {
-        const now = await page.getByTestId('tool-row').count();
+        const now = await commandRows(page).count();
         const still = now === last && now > 0;
         last = now;
         return still;
@@ -159,7 +198,7 @@ test.describe('choosing which kinds of message show', () => {
     await openTheFilter(page);
     await switchOn(page, 'commands').click();
 
-    await expect(page.getByTestId('tool-row')).toHaveCount(0);
+    await expect(commandRows(page)).toHaveCount(0);
     await expect(page.getByTestId('assistant-message')).toHaveCount(replies);
     await expect(page.getByTestId('open-kind-filter')).toHaveAttribute('data-filtered', 'true');
   });
@@ -167,16 +206,19 @@ test.describe('choosing which kinds of message show', () => {
   test('turning one tool off hides only that tool’s rows', async ({ page, request }) => {
     await aBusyChat(request, page);
     const tool = await firstToolName(page);
-    const before = await settled(page);
-    const mine = await page.locator(`[data-testid="tool-row"][data-tool-name="${tool}"]`).count();
+    await settled(page);
+    const before = await topRows(page).count();
+    const mine = await topRows(page).and(page.locator(`[data-tool-name="${tool}"]`)).count();
     test.skip(mine === before, `this chat only ever ran ${tool}, so there is nothing to leave standing`);
 
     await openTheFilter(page);
     await foldOn(page, 'commands').click();
     await switchOn(page, `tool:${tool}`).click();
 
-    await expect(page.locator(`[data-testid="tool-row"][data-tool-name="${tool}"]`)).toHaveCount(0);
-    await expect(page.getByTestId('tool-row')).toHaveCount(before - mine);
+    // Gone wherever it ran — a subagent's own call to it as well as the
+    // conversation's — and every other row at the top still standing.
+    await expect(commandRows(page).and(page.locator(`[data-tool-name="${tool}"]`))).toHaveCount(0);
+    await expect(topRows(page)).toHaveCount(before - mine);
   });
 
   test('a group whose children disagree draws half-on', async ({ page, request }) => {
@@ -202,13 +244,26 @@ test.describe('choosing which kinds of message show', () => {
     await expect(line(page, 'commands')).toHaveAttribute('data-count', String(drawn));
     await expect(line(page, 'replies')).toHaveAttribute('data-count', String(replies));
 
-    // The commands group is the sum of the tools under it, which is what makes
-    // the number worth reading.
+    // Each tool's own number against the rows of that tool the conversation
+    // drew — name by name rather than as one total, because two numbers that
+    // add up to the same sum can still both be wrong.
     await foldOn(page, 'commands').click();
-    const counts = await line(page, 'commands')
+    const onScreen = new Map<string, number>();
+    for (const name of await commandRows(page).evaluateAll((els) =>
+      els.map((el) => el.getAttribute('data-tool-name') ?? ''),
+    )) {
+      onScreen.set(name, (onScreen.get(name) ?? 0) + 1);
+    }
+    const said = await line(page, 'commands')
       .locator('xpath=following-sibling::*[starts-with(@data-kind,"tool:")]')
-      .evaluateAll((els) => els.map((el) => Number(el.getAttribute('data-count'))));
-    expect(counts.reduce((a, b) => a + b, 0)).toBe(drawn);
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          tool: (el.getAttribute('data-kind') ?? '').slice('tool:'.length),
+          count: Number(el.getAttribute('data-count')),
+        })),
+      );
+    expect(Object.fromEntries(said.map((s) => [s.tool, s.count]))).toEqual(Object.fromEntries(onScreen));
+    expect(said.reduce((sum, s) => sum + s.count, 0)).toBe(drawn);
   });
 
   test('switching everything off says so, and hands the conversation back', async ({ page, request }) => {
@@ -218,12 +273,12 @@ test.describe('choosing which kinds of message show', () => {
     await switchOn(page, 'agent').click();
 
     await expect(page.getByTestId('nothing-showing')).toBeVisible();
-    await expect(page.getByTestId('tool-row')).toHaveCount(0);
+    await expect(commandRows(page)).toHaveCount(0);
     await expect(page.getByTestId('assistant-message')).toHaveCount(0);
 
     await page.getByTestId('show-every-kind-back').click();
     await expect(page.getByTestId('nothing-showing')).toHaveCount(0);
-    await expect(page.getByTestId('tool-row').first()).toBeVisible();
+    await expect(topRows(page).first()).toBeVisible();
     await expect(page.getByTestId('open-kind-filter')).toHaveAttribute('data-filtered', 'false');
   });
 
@@ -231,7 +286,7 @@ test.describe('choosing which kinds of message show', () => {
     const { project, id } = await aBusyChat(request, page);
     await openTheFilter(page);
     await switchOn(page, 'commands').click();
-    await expect(page.getByTestId('tool-row')).toHaveCount(0);
+    await expect(commandRows(page)).toHaveCount(0);
 
     // A way of reading, not a property of one conversation: it is remembered
     // for the browser, the way the open-everything switch beside it is.
@@ -239,7 +294,7 @@ test.describe('choosing which kinds of message show', () => {
     await page.getByTestId('chat-tab').waitFor({ timeout: OPEN_MS });
     await expect(page.getByTestId('open-kind-filter')).toHaveAttribute('data-filtered', 'true', { timeout: 30_000 });
     await expect(page.getByTestId('assistant-message').first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId('tool-row')).toHaveCount(0);
+    await expect(commandRows(page)).toHaveCount(0);
 
     await openTheFilter(page);
     await expect(line(page, 'commands')).toHaveAttribute('data-state', 'off');

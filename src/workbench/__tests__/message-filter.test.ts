@@ -201,6 +201,19 @@ describe('a command run inside another command', () => {
     const off = flipped(EVERYTHING, items, toolKind('Read'));
     expect(showing(items, off)).toHaveLength(1);
   });
+
+  // The count beside Commands is the reader's price for turning it off, so it
+  // has to count the same rows the conversation draws. An indented row is
+  // drawn like any other and the tree counts it like any other; a check that
+  // reads only the rows at the top compares two different sets (bw-qdim.12).
+  it('is counted like any other command, because it is drawn like one', () => {
+    const parent = ran('Task');
+    const items = [parent, ran('Read', parent.id), ran('Read')];
+    const tree = treeOf(items);
+    expect(find(tree, COMMANDS).count).toBe(3);
+    expect(find(tree, toolKind('Read')).count).toBe(2);
+    expect(showing(items, EVERYTHING)).toHaveLength(3);
+  });
 });
 
 describe('how a switch reads', () => {
