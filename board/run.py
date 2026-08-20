@@ -319,6 +319,25 @@ SPENT_NOTE = (
     % reading.ROUNDS)
 
 
+def past_reading(order, rows):
+    """Whether the run has actually gone on past the reading.
+
+    Not whether a position after the reading has a card — the reading itself hands
+    the job the one that comes next, so a card there is as much a sign the reading
+    just finished as a sign the run left it behind. It is whether one of them has
+    CLOSED. A job whose reader came back a second time with something to fix, after
+    the finishing position had already been handed out, is standing at its reading
+    again and not past it, and reading a card as "past" left exactly that job shut
+    for good with nothing on the board able to move it (mch-6f5).
+    """
+    if "review" not in order:
+        return False
+    after = set(order[order.index("review") + 1:])
+    return any(r.get("status") == "closed" for r in rows
+               for l in r.get("labels") or []
+               if l.startswith("step:") and spine.now(l[5:]) in after)
+
+
 def reading_over(goal_id, goal, order, rows, root):
     """Let a job past a reading it will get no more of, and say so.
 
@@ -335,7 +354,7 @@ def reading_over(goal_id, goal, order, rows, root):
     """
     if not at_reading(order, rows) or not reading.spent(goal):
         return False
-    if steps_of(rows) & set(order[order.index("review") + 1:]):
+    if past_reading(order, rows):
         return False
     gates = reading_gates(goal_id, root)
     if not gates:

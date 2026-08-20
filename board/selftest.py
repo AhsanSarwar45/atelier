@@ -2215,6 +2215,28 @@ def main():
     assert not any("append-notes" in a and "readings a job gets" in a for a in again), \
         "the run wrote the same line onto the goal every time a card closed: %s" % again
 
+    # The reading hands the job the position after it, so a card standing there is
+    # as much a sign the reading has just finished as a sign the run left it
+    # behind. A second reading that comes back with something to fix arrives with
+    # that card already standing, and reading it as "past the reading" left the
+    # job shut for good with nothing on the board able to move it (mch-6f5).
+    handed = run("open", notes=TWICE, shas=("a1c0ffee", "b2deadbe", "c3landedsince"),
+                 gates=READING_GATE,
+                 rows=ROWS + [{"id": "g.9", "status": "open",
+                               "labels": ["step:land", "of:g"]}])
+    assert any(a.startswith("gate resolve g-gate") for a in handed), \
+        "a job already handed the position after its reading stayed shut behind a " \
+        "gate no reader is coming to open: %s" % handed
+
+    # Once one of those positions has closed the run really is past its reading,
+    # and nothing there is opened or resolved a second time.
+    gone = run("open", notes=TWICE, shas=("a1c0ffee", "b2deadbe", "c3landedsince"),
+               gates=READING_GATE,
+               rows=ROWS + [{"id": "g.9", "status": "closed",
+                             "labels": ["step:land", "of:g"]}])
+    assert not any(a.startswith("gate resolve") for a in gone), \
+        "the run went back over a reading it had already gone past: %s" % gone
+
     print("ok: a job is read once when its work is done and once when its findings "
           "are answered, never a third time however much landed since, no reader "
           "sends a third from inside itself, the last reader is told it is the "
