@@ -2,11 +2,18 @@
  * What there is to come back to: sessions this app ran, plus every Claude
  * session on this machine that belongs to the project.
  *
- * The list comes from the SDK's own session index, never from a transcript we
- * parse ourselves. It carries what the owner needs to tell one chat from
- * another — the name Claude holds for it, the directory it ran in, the branch
- * it was on — and its shape is the SDK's contract rather than a format we
- * guessed at.
+ * The list comes from the SDK's own session index. It carries what the owner
+ * needs to tell one chat from another — the name Claude holds for it, the
+ * directory it ran in, the branch it was on — and its shape is the SDK's
+ * contract rather than a format we guessed at.
+ *
+ * One question the index cannot answer, and only one: when the PERSON last
+ * spoke. An entry there says `lastModified` and nothing about who wrote it, and
+ * for a chat begun in a terminal there is no row of ours that saw him type. So
+ * that one field is read off the chat's own record, in the smallest way it can
+ * be — the end of the file, backwards, once per record and then only over what
+ * has been appended since (spoken.ts, bw-zhs9). Everything else on a row still
+ * comes from the index or from our store.
  *
  * Design: docs/agent-workbench.md §6.3.
  */
@@ -15,6 +22,7 @@ import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 import { byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
 import { runningNow } from './running.ts';
+import { lastSpokeAt } from './spoken.ts';
 import type { Store } from './store.ts';
 
 interface KnownSession {
@@ -58,6 +66,22 @@ export async function knownSessions(projectPath: string | null, everything = fal
 }
 
 /**
+ * The second clock for one row: when the person himself last spoke.
+ *
+ * Two places can answer and both can be silent. Our own column is stamped when
+ * he sends from this app; the chat's record answers for the times he typed
+ * somewhere else, and for a chat begun in a terminal it is the only answer
+ * there is. The later of the two wins, for the same reason `lastActiveAt` takes
+ * the later of ours and the index's — a chat worked on in both places is
+ * exactly the one that matters. With neither, the row keeps the clock it
+ * already has, so it orders the way the whole list orders today (bw-zhs9).
+ */
+function spokeAt(ours: string | null | undefined, recorded: string | null, fallback: string): string {
+  const said = ours ? laterOf(ours, recorded) : recorded;
+  return said ?? fallback;
+}
+
+/**
  * The restore list: ours first, then any session we did not start.
  *
  * Nothing here starts a process. A row is an offer, never a wake-up
@@ -80,11 +104,22 @@ export async function restoreList(
   // writing (bw-dmxj). The tool's own markers are asked instead, and the
   // answer is cached, so listing forty rows costs one look at the machine.
   const running = runningNow();
+  // When the person last spoke, asked for every chat at once. Bounded and
+  // remembered per record (spoken.ts), so a list of forty rows costs forty
+  // looks at a file's length plus whatever each record has gained since the
+  // last one — never a scan of a conversation (bw-zhs9, bw-uiyz).
+  const spoken = new Map<string, string | null>();
+  await Promise.all(
+    [...new Set([...mine.map((s) => s.externalId), ...known.keys()])]
+      .filter((id): id is string => id !== null)
+      .map(async (id) => void spoken.set(id, await lastSpokeAt(id))),
+  );
 
   const rows: RestoreRow[] = mine.map((s) => {
     // The name Claude holds wins over the opening line we cut down ourselves:
     // it is the one the owner sees everywhere else this conversation appears.
     const seen = s.externalId ? known.get(s.externalId) : undefined;
+    const active = laterOf(s.lastActiveAt, seen?.lastActiveAt);
     return {
       sessionId: s.id,
       externalId: s.externalId,
@@ -94,7 +129,8 @@ export async function restoreList(
       // that happens; our own log only moves when this app drives it. A chat
       // worked on elsewhere is exactly the one that matters most here, so the
       // later of the two wins (bw-dmxj.4).
-      lastActiveAt: laterOf(s.lastActiveAt, seen?.lastActiveAt),
+      lastActiveAt: active,
+      lastSpokeAt: spokeAt(s.lastSpokeAt, (s.externalId ? spoken.get(s.externalId) : null) ?? null, active),
       state: s.state,
       origin: s.origin,
       projectId: s.projectId,
@@ -118,6 +154,9 @@ export async function restoreList(
       brand: 'claude',
       title: s.name,
       lastActiveAt: s.lastActiveAt,
+      // Nothing of ours ever saw this chat being typed into, so the record is
+      // the only place the answer is written down.
+      lastSpokeAt: spokeAt(null, spoken.get(s.externalId) ?? null, s.lastActiveAt),
       state: 'dormant',
       origin: 'terminal',
       projectId: project?.id ?? null,

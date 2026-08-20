@@ -110,6 +110,13 @@ const MIGRATIONS: string[] = [
   // only "read" left them that way forever — which is the copy the manager
   // photographed (bw-1u1, docs/agent-workbench.md §6.3.2).
   `ALTER TABLE session ADD COLUMN imported_recipe INTEGER;`,
+
+  // When the PERSON last said something, beside the clock that moves for
+  // everything. `last_active_at` is stamped by every event this app writes, so
+  // a chat climbs the list all night while an agent works in it and the ones
+  // the manager is talking in slide about under his cursor. Only `send` stamps
+  // this one, and nothing else may (bw-zhs9).
+  `ALTER TABLE session ADD COLUMN last_spoke_at TEXT;`,
 ];
 
 export class Store {
@@ -171,6 +178,18 @@ export class Store {
     }
     if (!sets.length) return;
     this.db.prepare(`UPDATE session SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
+  }
+
+  /**
+   * The person said something. The one thing that moves the second clock.
+   *
+   * Kept out of `updateSession` on purpose: that one's `touch` is stamped by
+   * every event this app writes, which is precisely the behaviour this exists
+   * to sit beside. An agent's reply, its thinking, its question about a tool
+   * and the cards it linked must all leave this untouched (bw-zhs9).
+   */
+  markSpoke(id: string, at: string = new Date().toISOString()): void {
+    this.db.prepare('UPDATE session SET last_spoke_at = ? WHERE id = ?').run(at, id);
   }
 
   /**
@@ -413,5 +432,6 @@ function rowToSummary(r: Record<string, unknown>): SessionSummary {
     state: r.state as SessionSummary['state'],
     createdAt: r.created_at as string,
     lastActiveAt: r.last_active_at as string,
+    lastSpokeAt: (r.last_spoke_at as string) ?? null,
   };
 }

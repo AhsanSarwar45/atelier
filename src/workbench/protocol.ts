@@ -251,6 +251,22 @@ export interface RestoreRow {
   /** What the conversation is called, in the brand's own words. */
   title: string | null;
   lastActiveAt: string;
+  /**
+   * When the PERSON last said something here, which is a different question
+   * from when anything last happened.
+   *
+   * `lastActiveAt` moves for everything an agent does — a reply, a line of
+   * thinking, a question about a tool — so rows shuffle under the manager's
+   * cursor while three agents write, and the chat he is actually talking in
+   * slides away from him (bw-zhs9). This one moves only when he speaks.
+   *
+   * When nothing can say — a chat he has never typed into, or one whose record
+   * holds nothing of his within reach of its end — the sidecar puts
+   * `lastActiveAt` here, so a row is always orderable and the ones nothing is
+   * known about behave exactly as the list behaves today. Absent altogether on
+   * a row the browser built for itself out of the live stream.
+   */
+  lastSpokeAt?: string | null;
   state: SessionState;
   origin: 'app' | 'terminal';
   projectId: string | null;
@@ -367,6 +383,12 @@ export interface SessionSummary {
   state: SessionState;
   createdAt: string;
   lastActiveAt: string;
+  /**
+   * When the person last sent a message into this chat, as the sidecar's own
+   * store recorded it. Absent for a chat he has never sent into from here —
+   * one begun in a terminal, or one only ever read (bw-zhs9).
+   */
+  lastSpokeAt?: string | null;
 }
 
 /**

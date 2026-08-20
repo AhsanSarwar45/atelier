@@ -683,6 +683,11 @@ export class Sessions {
 
     const s = this.store.getSession(sessionId);
     if (s && !s.title) this.store.updateSession(sessionId, { title: text.slice(0, 80) });
+    // He spoke. This is the ONLY place the second clock moves for a chat this
+    // app drives — the whole point of it is that nothing the agent then does
+    // moves it again (bw-zhs9). A chat started from a card comes through here
+    // too: its brief is its first turn, sent like any other.
+    this.store.markSpoke(sessionId);
 
     await driver.send({ text, images });
   }
