@@ -108,8 +108,14 @@ export function modelNamed(model: string | null): string | null {
   return short || model;
 }
 
-/** How long this row has been going, live between the kit's own reports. */
-function running(row: SentAway, now: number): number {
+/**
+ * How long this row has been going, live between the kit's own reports.
+ *
+ * Exported because the row and the conversation opened from it must say the
+ * same number: two accounts of one agent, differing by whatever has happened
+ * since the kit last reported, is worse than one.
+ */
+export function liveSeconds(row: SentAway, now: number): number {
   if (isOver(row.state)) return row.seconds;
   const mine = row.startedAt ? (now - row.startedAt) / 1000 : 0;
   // The kit's count knows about pauses and this one does not, so it wins
@@ -117,7 +123,48 @@ function running(row: SentAway, now: number): number {
   return Math.max(row.seconds, mine);
 }
 
-function Row({ row, now }: { row: SentAway; now: number }) {
+/**
+ * One clock for the whole screen, ticking only while something is still going.
+ *
+ * One, because two of them drift: a row and the pane opened from it each ran
+ * their own second and rounded to different numbers, so the row read `2s` while
+ * the conversation opened from it read `1s` (measured 2026-08-20). There is one
+ * interval and one instant, and a reader joining late joins on the instant
+ * everybody else is already on.
+ *
+ * Only while something runs, because a panel of finished rows that re-renders
+ * every second is a panel that costs a frame a second to say nothing.
+ */
+let sharedNow = 0;
+const readers = new Set<(now: number) => void>();
+let beat: ReturnType<typeof setInterval> | null = null;
+
+function joinTheClock(read: (now: number) => void): () => void {
+  if (!beat) {
+    sharedNow = Date.now();
+    beat = setInterval(() => {
+      sharedNow = Date.now();
+      readers.forEach((r) => r(sharedNow));
+    }, TICK_MS);
+  }
+  readers.add(read);
+  read(sharedNow);
+  return () => {
+    readers.delete(read);
+    if (readers.size === 0 && beat) {
+      clearInterval(beat);
+      beat = null;
+    }
+  };
+}
+
+export function useNow(live: boolean): number {
+  const [now, setNow] = useState(() => (beat ? sharedNow : Date.now()));
+  useEffect(() => (live ? joinTheClock(setNow) : undefined), [live]);
+  return now;
+}
+
+function Row({ row, now, onOpen }: { row: SentAway; now: number; onOpen?: (id: string) => void }) {
   const { label: kind, Icon } = KINDS[row.kind];
   const state = STATES[row.state];
   const model = modelNamed(row.model);
@@ -132,11 +179,22 @@ function Row({ row, now }: { row: SentAway; now: number }) {
       data-kind={row.kind}
       data-state={row.state}
       className={cn(
-        'flex flex-col gap-1 px-2 py-1.5 text-xs',
+        'text-xs',
         // Over is quiet: the eye belongs on whatever is still moving.
         over && 'opacity-60',
       )}
     >
+      {/* The whole row is the way in, not a mark on it: the row IS the thing,
+          and a target the size of one word beside it is a target the reader
+          misses. The padding lives here rather than on the box for the same
+          reason — a click anywhere in the row is a click on the row. */}
+      <button
+        type="button"
+        data-testid="sent-away-open"
+        title={row.what ? `Open ${row.what}` : `Open this ${kind}`}
+        onClick={onOpen ? () => onOpen(row.id) : undefined}
+        className="flex w-full flex-col gap-1 px-2 py-1.5 text-left hover:bg-muted/40"
+      >
       <div className="flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span data-testid="sent-away-kind" className="sr-only">
@@ -161,7 +219,7 @@ function Row({ row, now }: { row: SentAway; now: number }) {
         )}
         <span data-testid="sent-away-for" className="flex shrink-0 items-center gap-1">
           <Clock className="h-3 w-3" aria-hidden="true" />
-          {forHowLong(running(row, now))}
+          {forHowLong(liveSeconds(row, now))}
         </span>
         <span
           data-testid="sent-away-spend"
@@ -190,26 +248,19 @@ function Row({ row, now }: { row: SentAway; now: number }) {
           {row.result}
         </p>
       )}
+      </button>
     </Panel>
   );
 }
 
 export interface SentAwayPanelProps {
   agents: SentAway[];
+  /** Opening one: its own conversation, which is the row's whole point. */
+  onOpen?: (id: string) => void;
 }
 
-export function SentAwayPanel({ agents }: SentAwayPanelProps) {
-  const live = agents.some((a) => !isOver(a.state));
-  const [now, setNow] = useState(() => Date.now());
-
-  // Only while something is running: a panel of finished rows that re-renders
-  // every second is a panel that costs a frame a second to say nothing.
-  useEffect(() => {
-    if (!live) return;
-    setNow(Date.now());
-    const tick = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(tick);
-  }, [live]);
+export function SentAwayPanel({ agents, onOpen }: SentAwayPanelProps) {
+  const now = useNow(agents.some((a) => !isOver(a.state)));
 
   if (agents.length === 0) return null;
 
@@ -222,7 +273,7 @@ export function SentAwayPanel({ agents }: SentAwayPanelProps) {
       className="flex flex-col gap-1.5"
     >
       {agents.map((row) => (
-        <Row key={row.id} row={row} now={now} />
+        <Row key={row.id} row={row} now={now} onOpen={onOpen} />
       ))}
     </div>
   );

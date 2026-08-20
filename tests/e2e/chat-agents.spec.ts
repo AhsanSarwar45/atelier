@@ -3,6 +3,8 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+import { restartInstance } from './restart';
+
 /**
  * The agents a chat sends off, seen from the chat.
  *
@@ -316,5 +318,114 @@ test.describe('the agents a chat sends off', () => {
     // Stopped when the case is over, so a run leaves no agent behind — and no
     // command of its own left running in the background.
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
+  });
+
+  /**
+   * One agent's own conversation, opened from its row — while it works, and
+   * again after the program has been stopped and started.
+   *
+   * The restart is the whole second half. A pane built from what this browser
+   * happened to watch go past would pass the first half and be empty on the
+   * second, and that is exactly the fault this job is fixing everywhere else:
+   * a chat read back disagreeing with the same chat watched live. So the same
+   * agent is opened twice and the second reading is checked against the first.
+   */
+  test('opens one agent’s own conversation from its row, and again after a restart', async ({ page, request }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const chat = await freshChat(request, page);
+    const project = await fixtureProject(request);
+    await say(
+      request,
+      chat,
+      'Use the Task tool exactly once to launch one general-purpose subagent, and do no work yourself. ' +
+        'Tell that subagent, in its prompt, to do these four things in order: ' +
+        'first write one sentence saying what it is about to do; ' +
+        `then run the shell command "python3 -c 'import time; time.sleep(${HELPER_WAITS})'" ` +
+        'in the foreground, waiting for it, and do not put it in the background; ' +
+        'then write one sentence saying whether the wait worked; then reply with the single word DONE. ' +
+        'When it comes back, reply with the single word FINISHED and nothing else.',
+    );
+
+    // ---- opened while it is still working -------------------------------
+    const row = page.locator('[data-testid="sent-away-row"][data-kind="helper"]').first();
+    await row.waitFor({ timeout: DELEGATED_MS });
+    const agent = await row.getAttribute('data-agent');
+    expect(agent, 'the helper’s row has no id').toBeTruthy();
+
+    await row.click();
+    const pane = page.getByTestId('agent-view');
+    await expect(pane).toHaveAttribute('data-agent', agent!);
+
+    // Its own words, in the pane, while it is still going. Polled rather than
+    // asserted once: the pane opens the moment the row exists, which can be
+    // before the helper has said anything.
+    // Polled on its WORDS rather than on its row count: the first thing a
+    // helper produces is usually a thought or a tool call, so a pane with rows
+    // in it is not yet a pane with anything said in it.
+    await expect
+      .poll(async () => pane.getByTestId('assistant-message').count(), {
+        message: 'the pane never showed anything the helper said',
+        timeout: DELEGATED_MS,
+      })
+      .toBeGreaterThan(0);
+    expect(Number(await pane.getAttribute('data-said'))).toBeGreaterThan(0);
+    // What it SAID, not how its rows looked while it was saying it: a command's
+    // row reads RUNNING under the command and OK once it is done, so the whole
+    // pane's text captured mid-run can never match itself afterwards. The words
+    // are the thing that has to survive the restart.
+    const live = (await pane.getByTestId('assistant-message').allInnerTexts())
+      .map((t) => t.trim())
+      .filter(Boolean);
+    expect(live, 'the pane is open on an empty conversation').not.toHaveLength(0);
+
+    await page.screenshot({ path: `${SHOTS}/chat-agent-opened.png`, fullPage: false });
+    await page.getByTestId('agent-view-close').click();
+    await expect(pane).toHaveCount(0);
+
+    // Finished before the program is stopped, so what is read back afterwards
+    // is a whole conversation and not one cut off mid-sentence.
+    await expect
+      .poll(async () => (await row.getAttribute('data-state')) ?? '', {
+        message: 'the helper never finished',
+        timeout: DELEGATED_MS,
+      })
+      .toMatch(new RegExp(OVER.join('|')));
+    await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
+
+    // ---- and again, off the record, after the program is restarted -------
+    await restartInstance({
+      binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'beads-server'),
+      serverPort: Number(process.env.BEADS_WEB_PORT ?? 3018),
+      sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT ?? 3019),
+      env: process.env,
+      healthUrl: `${process.env.BEADS_E2E_URL}/api/workbench/health`,
+      logFile: join(process.env.WORKBENCH_E2E_RUN ?? join(__dirname, '..', '.e2e-run'), 'server.log'),
+    });
+
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${chat}`);
+    await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+
+    // The same agent, by the same id — not merely "a row".
+    const again = page.locator(`[data-testid="sent-away-row"][data-agent="${agent}"]`);
+    await again.waitFor({ timeout: HELLO_MS });
+    await expect(again).toHaveAttribute('data-kind', 'helper');
+    await again.click();
+
+    const reopened = page.getByTestId('agent-view');
+    await expect(reopened).toHaveAttribute('data-agent', agent!);
+    // Everything it said is still there: the same words, and its answer with
+    // them. Not "at least something" — the conversation read live, verbatim.
+    const kept = (await page.getByTestId('agent-view-said').innerText()).trim();
+    for (const words of live) {
+      expect(kept, `what the helper said was lost over the restart.\nlive:\n${words}\n\nafter:\n${kept}`).toContain(
+        words,
+      );
+    }
+    // And what it DID, not only what it said: the command it ran is on the
+    // record too, or the pane read back is half a conversation.
+    expect(kept, 'the command the helper ran is missing after the restart').toContain('time.sleep(');
+    await expect(page.getByTestId('agent-view-result')).not.toHaveText('');
+
+    await page.screenshot({ path: `${SHOTS}/chat-agent-opened-again.png`, fullPage: false });
   });
 });

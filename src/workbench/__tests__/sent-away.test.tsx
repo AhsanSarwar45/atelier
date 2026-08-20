@@ -286,6 +286,26 @@ describe('the panel', () => {
     expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('parked');
     expect(rows['task-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('running');
   });
+
+  /**
+   * The whole row is the way into that agent's own conversation, not a mark on
+   * it: a target the size of one word beside the words is a target the reader
+   * misses, and there is nothing else on the row to click (bw-7ks.22.4).
+   */
+  it('hands back which one was clicked, wherever on the row the click landed', () => {
+    const opened: string[] = [];
+    const view = foldAll(sentAway());
+    render(<SentAwayPanel agents={view.agents} onOpen={(id) => opened.push(id)} />);
+
+    const row = screen.getByTestId('sent-away-panel').querySelector('[data-agent="task-1"]')!;
+    (row.querySelector('[data-testid="sent-away-open"]') as HTMLElement).click();
+    // On the words themselves, which is where a reader aims.
+    (row.querySelector('[data-testid="sent-away-what"]') as HTMLElement).click();
+    // And on its clock, at the other end of the row.
+    (row.querySelector('[data-testid="sent-away-for"]') as HTMLElement).click();
+
+    expect(opened).toEqual(['task-1', 'task-1', 'task-1']);
+  });
 });
 
 /**

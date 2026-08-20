@@ -83,11 +83,13 @@ export interface ChatRightRailProps {
   reports: { project: string; slug: string; title: string }[];
   /** Everything it handed to something else, oldest first (§8.2.7). */
   agents: SentAway[];
+  /** Opening one of them onto its own conversation. */
+  onOpenAgent: (id: string) => void;
   open: boolean;
   onToggle: () => void;
 }
 
-export function ChatRightRail({ projectId, cards, reports, agents, open, onToggle }: ChatRightRailProps) {
+export function ChatRightRail({ projectId, cards, reports, agents, onOpenAgent, open, onToggle }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
   const empty = cards.length === 0 && reports.length === 0 && agents.length === 0;
   return (
@@ -147,7 +149,7 @@ export function ChatRightRail({ projectId, cards, reports, agents, open, onToggl
               this rail to look at (§8.2.7). */}
           {agents.length > 0 && (
             <Section title="Sent away">
-              <SentAwayPanel agents={agents} />
+              <SentAwayPanel agents={agents} onOpen={onOpenAgent} />
             </Section>
           )}
 

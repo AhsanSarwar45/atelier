@@ -64,6 +64,7 @@ import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
+import { AgentView } from '@/workbench/agent-view';
 import { MachineLine, TranscriptRow, WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { PlanChip, usePlanUsage, UsageView } from '@/workbench/usage-view';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
@@ -395,6 +396,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** The picture being looked at, from the tray or from a message. */
   const [looking, setLooking] = useState<ImagePayload | null>(null);
+  /** Which sent-off agent's own conversation is open, by the call that sent it. */
+  const [openAgent, setOpenAgent] = useState<string | null>(null);
+  /**
+   * That agent as it stands now, or nothing.
+   *
+   * Looked up rather than held: a chat whose transcript is read again loses
+   * every row it had, and a pane still holding one of them would be showing a
+   * conversation this chat no longer has.
+   */
+  const agentOpen = useMemo(
+    () => (openAgent ? (view.agents.find((a) => a.id === openAgent) ?? null) : null),
+    [openAgent, view.agents],
+  );
   /** Which entry the `/` menu has under the cursor. */
   const [pick, setPick] = useState(0);
   /** The `/` menu, put away by hand until the next keystroke. */
@@ -650,6 +664,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           cards={cards}
           reports={ours}
           agents={view.agents}
+          onOpenAgent={setOpenAgent}
           open={rightOpen}
           onToggle={flipRight}
         />
@@ -1035,6 +1050,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </div>
 
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
+      {/* Read from the row as it stands right now, never from what was clicked:
+          an agent opened while it works goes on working, and its clock, its
+          spend and its answer keep arriving behind the pane. */}
+      {agentOpen && (
+        <AgentView
+          row={agentOpen}
+          items={view.items}
+          sessionId={sessionId}
+          mentions={mentions}
+          onClose={() => setOpenAgent(null)}
+        />
+      )}
     </div>,
   );
 }
