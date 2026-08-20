@@ -343,3 +343,17 @@ BEADS_E2E_URL=http://127.0.0.1:3032 node scripts/chat-open-cost.mjs <sessionId>
 
 Against the four longest chats on this machine: 3.77MB arriving in 361ms became
 0.09MB in 67ms, and 3.65MB and 1.83MB became 0.11MB and 0.14MB.
+
+## `board-open-cost.mjs`
+
+Every request the app makes between clicking a project and the board's first
+card, in order, with what each one cost. Anything in that list nobody asked
+for is a wait the reader pays for on every board open.
+
+```
+node scripts/board-open-cost.mjs http://127.0.0.1:3032
+```
+
+Run it against a built instance. It is how the memory panel was caught reading
+what the project remembers before anyone had opened it — a `bd` run of its own,
+a seventh of a second, for an empty list (bw-uiyz.14).

@@ -68,7 +68,7 @@ export function MemoryPanel({ open, onOpenChange, projectPath }: MemoryPanelProp
     createEntry,
     editEntry,
     deleteEntry,
-  } = useMemory(projectPath);
+  } = useMemory(projectPath, open);
 
   // Create dialog state
   const [isCreateOpen, setIsCreateOpen] = useState(false);

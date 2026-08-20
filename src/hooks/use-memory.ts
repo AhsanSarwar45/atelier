@@ -37,11 +37,17 @@ export interface UseMemoryResult {
 /**
  * Hook to load and manage memory entries from a project's bd knowledge base.
  *
+ * What a project remembers is read when someone asks to see it, not when the
+ * board behind it is drawn. The answer is a `bd` run of its own — a seventh of
+ * a second, most often for an empty list — and every board open used to wait
+ * for it whether or not anyone had opened the panel (bw-uiyz.14).
+ *
  * @param projectPath - The absolute path to the project root
+ * @param asked - Whether anyone is looking; nothing is read until they are
  */
-export function useMemory(projectPath: string): UseMemoryResult {
+export function useMemory(projectPath: string, asked: boolean = true): UseMemoryResult {
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(asked);
   const [error, setError] = useState<Error | null>(null);
   const [search, setSearch] = useState("");
 
@@ -77,9 +83,10 @@ export function useMemory(projectPath: string): UseMemoryResult {
   }, [loadMemory]);
 
   useEffect(() => {
+    if (!asked) return;
     hasLoadedRef.current = false;
     loadMemory();
-  }, [loadMemory]);
+  }, [asked, loadMemory]);
 
   const filteredEntries = useMemo(() => {
     if (!search.trim()) return entries;
