@@ -32,12 +32,15 @@ export function BeadChip({
   projectId,
   size = 'sm',
   testId = 'bead-chip',
+  title,
   className,
 }: {
   id: string;
   projectId: string | null;
   size?: 'sm' | 'xs';
   testId?: string;
+  /** What the pointer says, when the chip stands for more than the one card it names. */
+  title?: string;
   className?: string;
 }) {
   const router = useRouter();
@@ -55,7 +58,7 @@ export function BeadChip({
         type="button"
         data-testid={testId}
         data-bead-id={id}
-        title={`Open ${id}`}
+        title={title ?? `Open ${id}`}
         onClick={(e) => {
           e.stopPropagation();
           // Pushed, and the rest of the address kept: the card opens over what he

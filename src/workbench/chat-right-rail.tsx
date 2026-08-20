@@ -13,16 +13,22 @@
  * rather than in a toolbar the reader has to go looking through. The choice is
  * remembered for the browser rather than for one chat: it is a way of looking,
  * the same reason the "show everything" switch is (§8.2.4).
+ *
+ * It folds rather than jumps: the width moves and the eye follows the edge, so
+ * the transcript is not two different widths on two consecutive frames. Anyone
+ * who asked their machine for less motion gets the two ends and nothing between
+ * them (bw-7ks.22.12).
  */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { PanelRight, PanelRightClose } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import { reads, TIGHT } from '@/workbench/context-window';
 import type { Cost } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
@@ -84,14 +90,21 @@ export interface ChatRightRailProps {
 }
 
 export function ChatRightRail({ projectId, cards, reports, cost, context, open, onToggle }: ChatRightRailProps) {
+  const jobs = useMemo(() => byJob(cards), [cards]);
   const empty = cards.length === 0 && reports.length === 0 && !cost && !context;
   return (
     <div
       data-testid="chat-right-rail"
       data-open={open}
-      data-cards={cards.length}
+      data-cards={jobs.length}
+      data-pieces={cards.length}
       className={cn(
-        'z-30 flex h-full shrink-0 flex-col border-l border-border/60 bg-background',
+        'z-30 flex h-full shrink-0 flex-col overflow-hidden border-l border-border/60 bg-background',
+        // The fold is the width moving, so the eye follows the edge instead of
+        // finding the column somewhere else on the next frame. The content keeps
+        // its own width and is clipped by this, or the chips would reflow into a
+        // narrower and narrower column all the way down (bw-7ks.22.12).
+        'transition-[width] duration-200 ease-out motion-reduce:transition-none',
         // Open on a narrow screen, the transcript is what must stay readable, so
         // the rail lies over it and a click outside puts it away — the same
         // bargain the list of chats makes on the other side.
@@ -118,15 +131,33 @@ export function ChatRightRail({ projectId, cards, reports, cost, context, open, 
         )}
       </button>
 
-      {open && (
-        <div className="flex min-h-0 flex-1 flex-col divide-y divide-border/60 overflow-y-auto">
-          {cards.length > 0 && (
+      {/* Mounted whether or not it is open: a panel that unmounts on the way out
+          has nothing left to animate, and the fold would be a jump with a delay
+          in front of it. */}
+      <div
+        aria-hidden={!open}
+        data-testid="chat-right-rail-body"
+        className={cn(
+          'flex min-h-0 w-72 flex-1 flex-col divide-y divide-border/60 overflow-y-auto',
+          'transition-opacity duration-150 ease-out motion-reduce:transition-none',
+          open ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+      >
+          {jobs.length > 0 && (
             <Section title="Cards it has touched">
-              {/* One per line and every one of them: this is the column the
-                  chips were moved here to get (§8.2.1). */}
+              {/* One chip per JOB, and all of them: the column exists so nothing
+                  has to be hidden behind a count (§8.2.1), and a job's pieces
+                  are folded into it because a dozen chips reading bw-uiyz.N say
+                  one thing a dozen times (bw-7ks.22.11). */}
               <div className="flex flex-wrap gap-1" data-testid="rail-cards">
-                {cards.map((id) => (
-                  <BeadChip key={id} id={id} projectId={projectId} size="sm" />
+                {jobs.map((job) => (
+                  <BeadChip
+                    key={job.id}
+                    id={job.id}
+                    projectId={projectId}
+                    size="sm"
+                    title={jobTitle(job)}
+                  />
                 ))}
               </div>
             </Section>
@@ -173,8 +204,7 @@ export function ChatRightRail({ projectId, cards, reports, cost, context, open, 
               Nothing from this chat yet.
             </p>
           )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
