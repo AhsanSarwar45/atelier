@@ -27,6 +27,8 @@ import { quadrantPng } from './fixture-png';
 
 /** Kept out of Playwright's outputDir, which is wiped at the start of a run. */
 const FIXTURE = join(__dirname, '..', '.workbench-run-picture');
+/** A project of its own, so the two cases never share a chat list. */
+const MANY = join(__dirname, '..', '.workbench-run-pictures');
 const SHOTS = join(__dirname, '..', 'results');
 
 /** Where the sidecar under test reads its records, as it works it out itself. */
@@ -67,21 +69,29 @@ function row(chat: { id: string; cwd: string }, parent: string | null, type: 'us
 const ASKED = 'look at this and tell me what is wrong';
 const ANSWERED = 'Four quadrants: red, blue, green and yellow.';
 
+/** One picture block, the way the tool writes a pasted picture down. */
+function picture(size = 120) {
+  return {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/png', data: quadrantPng(size).toString('base64') },
+  };
+}
+
 /**
- * A chat somebody pasted a picture into, written down the way the tool writes
- * one: the words carrying the marker, and the picture in a block of its own.
+ * A chat somebody pasted pictures into, written down the way the tool writes
+ * one: the words carrying the markers, and each picture in a block of its own.
  */
-function aChatWithAPictureIn(projectPath: string) {
+function aChatWithPicturesIn(projectPath: string, count = 1) {
   const chat = { id: randomUUID(), cwd: projectPath };
   const dir = recordDir(projectPath);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${chat.id}.jsonl`);
+  const markers = Array.from({ length: count }, (_, i) => `[Image #${i + 1}]`).join(' ');
   const asked = row(chat, null, 'user', [
-    { type: 'text', text: `${ASKED} [Image #1]` },
-    {
-      type: 'image',
-      source: { type: 'base64', media_type: 'image/png', data: quadrantPng(120).toString('base64') },
-    },
+    { type: 'text', text: `${ASKED} ${markers}` },
+    // Sizes differ so the grid is proved to line them up rather than merely
+    // inheriting one shape from the pictures themselves.
+    ...Array.from({ length: count }, (_, i) => picture(120 + i * 40)),
   ]);
   const answered = row(chat, asked.uuid, 'assistant', [{ type: 'text', text: ANSWERED }]);
   writeFileSync(file, `${asked.text}\n${answered.text}\n`);
@@ -130,7 +140,7 @@ test.describe('a picture in a chat that already happened', () => {
     mkdirSync(SHOTS, { recursive: true });
 
     const project = await projectAt(request, FIXTURE);
-    const chat = aChatWithAPictureIn(FIXTURE);
+    const chat = aChatWithPicturesIn(FIXTURE);
     let sessionId = '';
 
     try {
@@ -182,6 +192,81 @@ test.describe('a picture in a chat that already happened', () => {
       chat.forget();
       await request.delete(`/api/projects/${project.id}`);
       rmSync(FIXTURE, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Five pictures are three across and then two, and the block stays a block.
+   *
+   * Stacked at full bubble width — which is what they were — two screenshots
+   * pushed the words off the screen and five were a page of their own
+   * (bw-uu9x.10). A browser with no layout can only be told the rule; where the
+   * thumbnails actually land is a question for the glass, so it is asked here:
+   * the drawn positions are read off the running page and counted into rows.
+   */
+  test('lays five pictures out three then two, inside a bounded block', async ({ page, request }) => {
+    test.setTimeout(180_000);
+
+    rmSync(MANY, { recursive: true, force: true });
+    mkdirSync(MANY, { recursive: true });
+    mkdirSync(SHOTS, { recursive: true });
+
+    const project = await projectAt(request, MANY);
+    const chat = aChatWithPicturesIn(MANY, 5);
+    let sessionId = '';
+
+    try {
+      const opened = await request.post('/api/workbench/command', {
+        data: {
+          type: 'session.open',
+          externalId: chat.id,
+          brand: 'claude',
+          projectId: project.id,
+          projectPath: MANY,
+        },
+      });
+      expect(opened.status(), await opened.text()).toBe(200);
+      sessionId = ((await opened.json()) as { id: string }).id;
+
+      await page.goto(`/project?id=${project.id}&chat=${sessionId}`);
+      await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('transcript').getByText(ANSWERED)).toBeVisible({ timeout: 60_000 });
+
+      const grid = page.getByTestId('user-message').getByTestId('picture-grid').first();
+      await expect(grid).toBeVisible({ timeout: 60_000 });
+      const thumbs = page.getByTestId('user-message').getByTestId('message-image');
+      await expect(thumbs).toHaveCount(5);
+
+      // 1. Where they landed: three on one line, two on the next.
+      const boxes = await thumbs.evaluateAll((els) =>
+        els.map((el) => {
+          const box = el.getBoundingClientRect();
+          return { top: Math.round(box.top), height: box.height, width: box.width };
+        }),
+      );
+      const rows = new Map<number, number>();
+      for (const box of boxes) rows.set(box.top, (rows.get(box.top) ?? 0) + 1);
+      expect([...rows.values()], 'five pictures did not land three then two').toEqual([3, 2]);
+
+      // 2. The block is a block: bounded, and not a screenshot the size of the page.
+      const width = await grid.evaluate((el) => el.getBoundingClientRect().width);
+      expect(width, 'the block of pictures is wider than its cap').toBeLessThanOrEqual(400);
+      for (const box of boxes) expect(box.height).toBeLessThanOrEqual(200);
+
+      // 3. Every one of them still opens whole — including the last.
+      await thumbs.last().click();
+      await expect(page.getByTestId('picture-viewer')).toBeVisible();
+      await expect(page.getByTestId('picture-viewer-image')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('picture-viewer')).toHaveCount(0);
+      await page.screenshot({ path: join(SHOTS, 'chat-picture-grid.png'), fullPage: false });
+    } finally {
+      if (sessionId) {
+        await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId } });
+      }
+      chat.forget();
+      await request.delete(`/api/projects/${project.id}`);
+      rmSync(MANY, { recursive: true, force: true });
     }
   });
 });
