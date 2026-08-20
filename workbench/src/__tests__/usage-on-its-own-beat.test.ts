@@ -121,6 +121,50 @@ describe('the account figure', () => {
     stopProbing();
   });
 
+  it('says the figure in hand once to a page that opens late, not twice', async () => {
+    answers = [limits(51, '2026-08-20T22:20:00Z')];
+    const { watchUsage, stopProbing } = await freshModule();
+
+    const first = watchUsage(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    // A second page connects with a reading already held. It is owed the figure
+    // straight away — once. The server said it a second time itself, so every
+    // stream opened after the first read carried the same frame twice
+    // (bw-dmoe.6).
+    const heard: (number | null | undefined)[] = [];
+    const second = watchUsage((u) => heard.push(u.session?.percent));
+    expect(heard).toEqual([51]);
+
+    first();
+    second();
+    stopProbing();
+  });
+
+  it('refuses an answer that has dropped the window altogether', async () => {
+    answers = [
+      limits(44, '2026-08-20T22:20:00Z'),
+      // Same loss, dressed differently: rather than a smaller number, the
+      // five-hour figure is simply not in the answer.
+      { subscription_type: 'max', rate_limits_available: true, rate_limits: { seven_day: { utilization: 70, resets_at: '2026-08-23T08:00:00Z' } } },
+      limits(47, '2026-08-20T22:20:00Z'),
+    ];
+    const { watchUsage, usageNow, stopProbing } = await freshModule();
+
+    const heard: (number | null | undefined)[] = [];
+    const stop = watchUsage((u) => heard.push(u.session?.percent));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(heard, 'a known figure was blanked by an answer that omitted it').toEqual([44]);
+    expect(usageNow()?.session?.percent).toBe(44);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(heard).toEqual([44, 47]);
+
+    stop();
+    stopProbing();
+  });
+
   it('believes a fall when the window it belongs to has rolled', async () => {
     answers = [limits(96, '2026-08-20T22:20:00Z'), limits(3, '2026-08-21T03:20:00Z')];
     const { watchUsage, stopProbing } = await freshModule();

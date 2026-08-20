@@ -199,7 +199,7 @@ export async function planUsage(): Promise<PlanUsage> {
   return await refresh();
 }
 
-/** What is held right now, for a stream opening. Null before the first answer. */
+/** What is held right now, without asking for it. Null before the first answer. */
 export function usageNow(): PlanUsage | null {
   return cached;
 }

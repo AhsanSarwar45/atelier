@@ -15,7 +15,7 @@ import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { watchOutside } from './outside.ts';
-import { planUsage, usageNow, watchUsage } from './plan-usage.ts';
+import { planUsage, watchUsage } from './plan-usage.ts';
 import { knownSessions, restoreList } from './registry.ts';
 import { runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
@@ -174,10 +174,11 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   // The account's own allowance, whether or not this browser has a chat open
   // and however long that chat has been silent: this server reads it on a beat
   // of its own and every page hears the same figure at the same moment
-  // (plan-usage.ts, bw-dmoe). A stream that opens before the first read is told
-  // nothing now and hears it the moment there is one.
-  const held = usageNow();
-  if (held) write({ kind: 'usage', usage: held });
+  // (plan-usage.ts, bw-dmoe). Watching says the figure in hand straight away,
+  // so a page that opens after the first read draws it without waiting for the
+  // next beat — and one that opens before there is any hears it the moment
+  // there is one. Saying it here as well sent every stream the same frame twice
+  // (bw-dmoe.6).
   const unwatchUsage = watchUsage((usage) => write({ kind: 'usage', usage }));
   const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
   const unopen = sessions.watchOpen((s) => write({ kind: 'opened', session: { ...s, activity: '', beads: [] } }));

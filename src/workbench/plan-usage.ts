@@ -409,10 +409,20 @@ function windowsOf(u: PlanUsage): PlanWindow[] {
  * a new reset time and a small number, and an account with no plan behind it
  * answers by saying so. The second is refused only when something good is
  * already held, because a reading in hand beats a blank.
+ *
+ * A window can also fall to nothing at all: the answer simply arrives without
+ * the five-hour or the weekly figure in it. That is the same loss dressed
+ * differently — the chip would blank a number it had — so it is refused too.
+ * The per-model rows are not held to that: a model drops out of a window it was
+ * never used in again, and refusing forever over one would freeze the figure
+ * (bw-dmoe.5).
  */
 export function believable(next: PlanUsage, held: PlanUsage | null): boolean {
   if (!held || !held.available) return true;
   if (!next.available) return false;
+  // The account's own two windows, which a good answer never comes without.
+  if (held.session?.percent != null && next.session?.percent == null) return false;
+  if (held.week?.percent != null && next.week?.percent == null) return false;
   const before = windowsOf(held);
   return windowsOf(next).every((now) => {
     const was = before.find((w) => w.key === now.key);
