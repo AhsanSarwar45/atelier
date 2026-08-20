@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
 import { diffLines } from '@/workbench/line-diff';
 import { lookOf, markOf, opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
+import { PictureGrid } from '@/workbench/picture-grid';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
 import { ReportCard } from '@/workbench/report-view';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
@@ -634,18 +635,7 @@ const MessageRow = memo(function MessageRow({
         sentOff(sentBy) && SENT_OFF,
       )}
     >
-      {item.images.map((img, i) => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={i}
-          data-testid="message-image"
-          src={img.dataUrl}
-          alt={img.alt}
-          title="Click to see it full size"
-          onClick={() => onLook(img)}
-          className="mb-2 max-h-64 max-w-full cursor-zoom-in rounded border border-border/60"
-        />
-      ))}
+      <PictureGrid images={item.images} onLook={onLook} />
       <MarkdownBody className="text-sm" mentions={mentions}>
         {item.text}
       </MarkdownBody>
