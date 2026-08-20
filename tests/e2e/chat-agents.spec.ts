@@ -359,24 +359,25 @@ test.describe('the agents a chat sends off', () => {
     // Its own words, in the pane, while it is still going. Polled rather than
     // asserted once: the pane opens the moment the row exists, which can be
     // before the helper has said anything.
-    // Polled on its WORDS rather than on its row count: the first thing a
-    // helper produces is usually a thought or a tool call, so a pane with rows
-    // in it is not yet a pane with anything said in it.
+    // Polled on the COMMAND it was told to run, not on a sentence: whether a
+    // helper writes one before it starts work is the model's business, and a
+    // check that waits for one fails for reasons that are not the app's.
     await expect
-      .poll(async () => pane.getByTestId('assistant-message').count(), {
-        message: 'the pane never showed anything the helper said',
+      .poll(async () => pane.getByTestId('subagent-tool-row').count(), {
+        message: 'the pane never showed anything the helper did',
         timeout: DELEGATED_MS,
       })
       .toBeGreaterThan(0);
+    // `subagent-tool-row`, because every row in this pane belongs to the agent
+    // the pane is about: what a helper did is drawn as a helper's everywhere.
+    await expect(pane.getByTestId('subagent-tool-row').first()).toContainText('time.sleep(');
     expect(Number(await pane.getAttribute('data-said'))).toBeGreaterThan(0);
-    // What it SAID, not how its rows looked while it was saying it: a command's
-    // row reads RUNNING under the command and OK once it is done, so the whole
-    // pane's text captured mid-run can never match itself afterwards. The words
-    // are the thing that has to survive the restart.
+    // What it SAID, kept for after the restart — and only that, never the whole
+    // pane: a command's row reads RUNNING under the command and OK once it is
+    // done, so a mid-run capture of the pane can never match itself afterwards.
     const live = (await pane.getByTestId('assistant-message').allInnerTexts())
       .map((t) => t.trim())
       .filter(Boolean);
-    expect(live, 'the pane is open on an empty conversation').not.toHaveLength(0);
 
     await page.screenshot({ path: `${SHOTS}/chat-agent-opened.png`, fullPage: false });
     await page.getByTestId('agent-view-close').click();
@@ -425,6 +426,12 @@ test.describe('the agents a chat sends off', () => {
     // record too, or the pane read back is half a conversation.
     expect(kept, 'the command the helper ran is missing after the restart').toContain('time.sleep(');
     await expect(page.getByTestId('agent-view-result')).not.toHaveText('');
+
+    // One row on the panel, not two. The helper ran a command of its own, and
+    // the kit reports that on the same channel as the chat's own work — drawn
+    // there it was a second row owned by nobody. It belongs inside this pane,
+    // which is where it is (bw-7ks.22.18).
+    await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', '1');
 
     await page.screenshot({ path: `${SHOTS}/chat-agent-opened-again.png`, fullPage: false });
   });

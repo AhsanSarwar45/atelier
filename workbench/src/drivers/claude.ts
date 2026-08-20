@@ -89,6 +89,27 @@ function oneLine(value: unknown, limit = 200): string {
 }
 
 /**
+ * Whether a task the kit reported was sent away by a HELPER rather than by this
+ * chat.
+ *
+ * The kit reports both on one channel, so a command a helper ran drew a row of
+ * its own beside the helper running it — owned by nobody, counting zero seconds
+ * for a command that took forty-five, and saying its own description twice
+ * (measured 2026-08-20). It is already drawn where it belongs: inside that
+ * helper's own conversation.
+ *
+ * Two signals, because one of them is undeclared. The kit stamps such a task
+ * `owned_by_subagent`, which is on the wire and not in its published types; and
+ * the call that started it is a call this driver already watched a helper make.
+ * Either is enough.
+ */
+export function sentAwayByAHelper(m: Record<string, any>, callsOfHelpers: ReadonlySet<string>): boolean {
+  if (m.owned_by_subagent === true) return true;
+  const call = typeof m.tool_use_id === 'string' ? m.tool_use_id : '';
+  return call !== '' && callsOfHelpers.has(call);
+}
+
+/**
  * What a helper actually answered.
  *
  * The text a finished helper hands back is written for the model, not for a
@@ -386,6 +407,10 @@ export class ClaudeDriver implements Driver {
   >();
   /** Which task a call sent off, so a helper's own words can find its row. */
   private taskOfCall = new Map<string, string>();
+  /** Every call a HELPER made, so work it sends away is not read as this chat's. */
+  private callsOfHelpers = new Set<string>();
+  /** The tasks that turned out to be a helper's own, so nothing later opens a row for them. */
+  private tasksOfHelpers = new Set<string>();
   /** When the last thinking-progress line was sent, so a long think is not a flood. */
   private lastThinkingAt = 0;
   /**
@@ -449,6 +474,9 @@ export class ClaudeDriver implements Driver {
    * `sentAway` rather than blanked.
    */
   private sawTask(m: Record<string, any>): void {
+    // Nothing more is heard about a helper's own work: not its progress, not
+    // its ending. A finish for a row that was never opened opens one.
+    if (this.tasksOfHelpers.has(String(m.task_id ?? ''))) return;
     const numbers = (id: string) =>
       this.sentAway.get(id) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' as AgentState };
 
@@ -456,6 +484,10 @@ export class ClaudeDriver implements Driver {
       case 'task_started': {
         const id = String(m.task_id ?? '');
         if (!id) return;
+        if (sentAwayByAHelper(m, this.callsOfHelpers)) {
+          this.tasksOfHelpers.add(id);
+          return;
+        }
         const call = typeof m.tool_use_id === 'string' && m.tool_use_id ? m.tool_use_id : null;
         if (call) this.taskOfCall.set(call, id);
         if (!this.sentAway.has(id)) this.sentAway.set(id, numbers(id));
@@ -549,7 +581,11 @@ export class ClaudeDriver implements Driver {
         // edge that says how it ended.
         for (const task of (m.tasks ?? []) as { task_id: string; task_type: string; description: string }[]) {
           const id = String(task.task_id ?? '');
-          if (!id || this.sentAway.has(id)) continue;
+          if (!id || this.sentAway.has(id) || this.tasksOfHelpers.has(id)) continue;
+          if (sentAwayByAHelper(task as Record<string, any>, this.callsOfHelpers)) {
+            this.tasksOfHelpers.add(id);
+            continue;
+          }
           this.sentAway.set(id, numbers(id));
           this.emit({
             type: 'agent.started',
@@ -1223,6 +1259,9 @@ export class ClaudeDriver implements Driver {
         for (const b of m.message?.content ?? []) {
           if (b.type === 'tool_use') {
             const input = b.input ?? {};
+            // Whose call this is, kept for the panel: work started by a call a
+            // helper made is the helper's, not this chat's.
+            if (sentBy) this.callsOfHelpers.add(String(b.id));
             this.liveTools.set(b.id, b.name);
             this.emit({
               type: 'tool.started',
