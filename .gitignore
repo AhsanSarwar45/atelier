@@ -7,3 +7,6 @@ __pycache__/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Working copies cut by the board's own tools, one per job.
+/worktrees/
