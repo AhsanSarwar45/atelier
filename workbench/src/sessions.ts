@@ -35,6 +35,12 @@ import type { Store } from './store.ts';
 type Subscriber = (e: WbpEvent) => void;
 
 /**
+ * How long the read-ahead waits before looking again at whether the reader is
+ * done with the thread, and between two chats when he is.
+ */
+const READ_AHEAD_PAUSE_MS = 250;
+
+/**
  * How often a chat another program is driving is looked at again.
  *
  * The look is one stat of one file — `getSessionInfo` reads that session's
@@ -313,6 +319,46 @@ export class Sessions {
   }
 
   /**
+   * Every chat whose record this app has never read, read once behind the
+   * reader's back.
+   *
+   * Reading a chat's record is what the FIRST click on it waits for — up to
+   * 2.4s on the manager's longest, against a quarter of a second for every
+   * click after — and 146 of the 171 chats on this machine had never been
+   * read. Nobody is waiting here, so they are read newest first, which is the
+   * order the list is in and the order he clicks in.
+   *
+   * One at a time with a breath between: this is the one thread the sidecar
+   * answers every other request from, so the loop must never hold it for two
+   * records running. A chat somebody is driving is left alone — its driver is
+   * writing the log this would be reading (bw-uiyz.12).
+   */
+  /** The reading of a record now under way, so the next one waits for it. */
+  private importing: Promise<void> = Promise.resolve();
+
+  async readAhead(busy: () => boolean = () => false): Promise<number> {
+    let read = 0;
+    for (const summary of this.store.listSessions()) {
+      if (this.drivers.has(summary.id)) continue;
+      const readBy = this.store.importedBy(summary.id);
+      if (readBy !== null && readBy >= IMPORT_RECIPE) continue;
+      // Nothing here is worth a reader waiting behind. Reading all of them
+      // takes the better part of a minute of this thread, and a click that
+      // arrived in the middle of that waited 7.8s for it (bw-uiyz.12).
+      while (busy()) await new Promise((wake) => setTimeout(wake, READ_AHEAD_PAUSE_MS));
+      try {
+        await this.importPast(summary);
+        read += 1;
+      } catch {
+        // A record that has been moved, pruned, or never existed. The click
+        // itself handles that the same way; it is not worth stopping for.
+      }
+      await new Promise((wake) => setTimeout(wake, READ_AHEAD_PAUSE_MS));
+    }
+    return read;
+  }
+
+  /**
    * Reads what was already said in a chat out of the agent kit's own record and
    * writes it into the event log as the events that would have carried it.
    *
@@ -332,6 +378,22 @@ export class Sessions {
    * is then the only copy the app has (bw-1u1.26).
    */
   private async importPast(summary: SessionSummary, live = false): Promise<ReadSoFar> {
+    // ONE reading of a record at a time in the whole process, whoever asked
+    // for it. Nothing ever read two at once until the read-ahead could be in
+    // the middle of one chat while the reader clicked another, and a store
+    // written by two readings at once came back malformed (bw-uiyz.12). A
+    // click that lands mid-chat waits out that one chat and no more; a click
+    // on the chat being read finds it already read and returns at once.
+    const queued = this.importing.then(() => this.importOnce(summary, live));
+    this.importing = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queued;
+  }
+
+  /** One reading of a chat's record, with nothing else reading the same one. */
+  private async importOnce(summary: SessionSummary, live = false): Promise<ReadSoFar> {
     if (!summary.externalId) return NOTHING_READ;
     // Said plainly on the row, not inferred from the cards it happens to have
     // touched: a chat that touched none failed that test forever, so every click

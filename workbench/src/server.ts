@@ -55,6 +55,17 @@ async function readBody(req: IncomingMessage): Promise<string> {
  * A browser that reconnects passes the last seq it saw, and is sent only what
  * arrived since: no snapshot, because it is already drawing one.
  */
+/**
+ * When the reader last asked us for anything.
+ *
+ * The sidecar answers everything on one thread, so work nobody is waiting for
+ * has to stand aside while he is using it (bw-uiyz.12).
+ */
+let lastAsk = 0;
+
+/** How long after the reader's last request the thread counts as his own. */
+const READER_QUIET_MS = 1_500;
+
 function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: string, since: number): void {
   res.writeHead(200, {
     'content-type': 'text/event-stream',
@@ -225,6 +236,7 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
+  lastAsk = Date.now();
   const path = url.pathname.replace(/^\/api\/workbench/, '') || '/';
 
   void (async () => {
@@ -325,4 +337,9 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[workbench] sidecar listening on http://127.0.0.1:${PORT}`);
+  // The first click on a chat used to wait for its whole record to be read.
+  // It is read here instead, with nobody waiting (bw-uiyz.12).
+  void sessions.readAhead(() => Date.now() - lastAsk < READER_QUIET_MS).then((read) => {
+    if (read > 0) console.log(`[workbench] ${read} chat(s) read ahead`);
+  });
 });
