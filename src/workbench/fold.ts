@@ -23,6 +23,7 @@ import type {
   CommandInfo,
   Cost,
   ImagePayload,
+  MachineFamily,
   ModelChoice,
   NoteRank,
   SessionState,
@@ -92,6 +93,8 @@ export interface TranscriptNotice {
   kind: 'notice';
   id: string;
   text: string;
+  /** Which family it is drawn as; absent on a chat recorded before there were families. */
+  family?: MachineFamily;
 }
 
 export interface TranscriptReport {
@@ -319,7 +322,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'notice':
-      next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text }];
+      next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family }];
       return next;
 
     // What follows replaces what came before: a chat re-read under a newer
@@ -536,7 +539,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
 
       case 'notice':
-        items.push({ kind: 'notice', id: `notice-${e.seq}`, text: e.text });
+        items.push({ kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family });
         break;
 
       case 'transcript.reset':

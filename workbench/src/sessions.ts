@@ -416,6 +416,9 @@ export class Sessions {
     if (past.length > shown.length) {
       this.publish(summary.id, {
         type: 'notice',
+        // The chat's own memory, drawn as one: it is the same thing to a reader
+        // as the conversation folding itself up (bw-jkh2.5).
+        family: 'memory',
         text: `${past.length - shown.length} earlier messages and commands are in this chat and are not drawn here.`,
       });
     }
@@ -664,7 +667,8 @@ export class Sessions {
       // Before the notice below, not after it: that notice is the chat waking
       // up, and a chat that is somebody else's does not wake (bw-dmxj.12).
       this.refuseIfHeld(row.externalId);
-      this.publish(sessionId, { type: 'notice', text: 'Continuing this chat.' });
+      // An agent being started, which is what background says (bw-jkh2.5).
+      this.publish(sessionId, { type: 'notice', family: 'background', text: 'Continuing this chat.' });
       await this.resume({
         sessionId,
         externalId: row.externalId ?? undefined,

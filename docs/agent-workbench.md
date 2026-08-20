@@ -861,9 +861,11 @@ to sleep and coming back.
 #### 8.2.4 Everything the agent does, on one page (bw-1u1)
 
 Constraint: nothing the kit sends is dropped. What the agent *says* reads as
-speech; everything the machine says about itself is grey and out of the way; and
-the body of anything — a call's arguments and its output, a hook's stdout, a
-whole message the app had no name for — sits behind a click.
+speech; everything the machine says about itself is punctuation rather than a
+speaker — small, centred, out of the way, and coloured by what kind of thing it
+is (the six families below); and the body of anything — a call's arguments and
+its output, a hook's stdout, a whole message the app had no name for — sits
+behind a click.
 
 **The driver has no whitelist.** `pump()` translates the kinds it knows and ends
 with an arm that catches every other message and turns it into a `note`. This is
@@ -880,7 +882,7 @@ next one just as quietly.
 | rank | what is in it | how it is drawn |
 |---|---|---|
 | `say` | the agent's answer, his own turn | a bubble, as now |
-| `note` | what the machine says about itself: compaction, retries, refusals, denials, mode changes, a hook that failed, a subagent starting | one grey line, its body behind a click |
+| `note` | what the machine says about itself: compaction, retries, refusals, denials, mode changes, a hook that failed, a subagent starting | a chip on a hairline rule, coloured by its family, its body behind a click |
 | `detail` | the machine's own breathing: `status: "requesting"`, hook starts, rate-limit pings, and any kind this app has no name for | nothing, until "show everything" is on |
 
 The kit's `system/informational` carries its own `level`, and its documentation
@@ -888,6 +890,66 @@ already names the treatment the manager asked for — "'info' shows only in
 transcript mode; 'notice' renders in inactive gray". So `info` → `detail`, and
 `notice`/`suggestion`/`warning` → `note`. Where the kit ranks a message, that
 ranking is used rather than one of ours.
+
+**Six families, and every kind lands in exactly one (bw-jkh2).** The rank above
+decides how *loudly* a machine message is drawn; the family decides *what it
+looks like*. The driver has always told a compaction from a retry from a hook
+that refused the turn, and the screen threw that away: all twenty-odd kinds
+reached the page as the same grey line of code type, so a chat that stalled
+because the manager stopped it and one that stalled because it ran out of room
+were indistinguishable. Each kind is now sorted into one of six families, and
+the family carries the colour and the mark:
+
+| family | what lands there | colour, mark |
+|---|---|---|
+| `stopped` | he stopped it (`user/synthetic`), the agent shut down, the chat was started over | `--warning`, a stop mark |
+| `failed` | an error result, a permission denied, a model refusal, a mirror error, a hook that failed, a sign-in that went wrong, a plugin that would not install | `--danger`, a warning triangle |
+| `waiting` | a busy service being ridden out (`system/api_retry`) | `--status-review`, a turning arrow, with how many times |
+| `memory` | the chat compacting itself, the answer to `/compact`, what it recalled, earlier messages not drawn | `--epic`, a folding mark |
+| `background` | an agent sent off, an agent reporting back, a mode or model change, anything the machine wanted him to know rather than to act on | `--info`, a small robot |
+| `breathing` | hooks starting and finishing cleanly, status pings, tool-use summaries, anything with nothing to say | `--text-faint`, a dot |
+
+Three rules hold this together, and each of them is a fault it already had:
+
+- **The colours are tokens the app already owns**, never colours of their own,
+  so red means the same thing in a chat as it does on the board and every one of
+  the eleven skins gets a family palette for nothing.
+- **The classes are spelled out one family at a time and never built from the
+  family's name.** Tailwind ships a class only when it read the literal string in
+  the source; interpolating the name is exactly how the board's own state
+  colours went grey (bw-ufso.2, `src/lib/state-styles.ts`).
+  `src/workbench/__tests__/machine-lines.test.tsx` runs the real Tailwind over
+  the real tree, and has a case that goes red when the file spelling them is out
+  of reach.
+- **A kind whose meaning depends on how it went is sorted by its rank, not by
+  its wording** — a hook that failed is `note` and lands in `failed`, one that
+  worked is `detail` and lands in `breathing`. That survives a rewording; a
+  string match would not.
+
+There is no default family. The same test reads every kind out of
+`workbench/src/drivers/claude.ts` — the `noteBody` switch and every `this.note`
+written by hand — and fails on any that has none, so a kind added to the driver
+cannot quietly arrive in grey. A kind the *kit* invents that the driver has
+never seen keeps the loudness the driver's fallback gave it: `background` when
+it carries a sentence, `breathing` when it is only structure.
+
+**A run of one kind is one chip carrying a count.** A bad ten minutes on a busy
+service is eight retries, which is one thing that happened eight times rather
+than eight things; read as eight it buries the sentence either side of it. The
+fold is on kind and rank and never on the words, because a retry counts up as it
+goes — "1 of 5", then "2 of 5" — so folding on the sentence would fold nothing.
+The chip says the newest of the run, because that is where it had got to, and
+opening it hands back every folded line in order. Quiet lines are dropped
+*before* the fold rather than after it: a status ping landing mid-run would
+otherwise cut the run in two and draw the same thing twice with nothing between.
+
+**The app's own asides take the same shape.** `notice` — "N earlier messages are
+not drawn here", "Continuing this chat." — was a second, plainer centred line,
+unlike everything around it. It is drawn as a machine line like any other. A
+note has the driver's kind to sort on and an aside has only its sentence, so the
+sidecar sends the family with it (`family?` on the `notice` event); one recorded
+before there were families falls back to `background`, which is the app
+speaking, so every chat already on disk replays right.
 
 **A call's body is on the call's own row.** `tool.completed` has always carried
 the output across the wire and the browser threw it away, keeping only a status

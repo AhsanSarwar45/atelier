@@ -49,6 +49,7 @@ import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
+import { drawnRows } from '@/workbench/machine-lines';
 import { mentionsIn } from '@/workbench/mentions';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, drawable, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
@@ -57,7 +58,7 @@ import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
-import { TranscriptRow, WorkingLine } from '@/workbench/transcript-rows';
+import { MachineLine, TranscriptRow, WorkingLine } from '@/workbench/transcript-rows';
 import { PlanChip, usePlanUsage, UsageView } from '@/workbench/usage-view';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts } from '@/workbench/use-session';
 
@@ -403,6 +404,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const rows = useMemo(() => stillShowing(canDraw, offKinds), [canDraw, offKinds]);
 
   /**
+   * The same rows as they are drawn: every machine line carrying the family that
+   * decides its colour and its mark, and a run of one kind folded into a single
+   * chip (bw-jkh2).
+   */
+  const drawn = useMemo(() => drawnRows(rows, openAll), [rows, openAll]);
+
+  /**
    * Written where it is CHANGED, never mirrored from an effect: an effect that
    * writes the state back runs once with the value the screen started at, which
    * overwrites what was remembered before the effect that reads it has taken —
@@ -734,16 +742,23 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         {rows.length === 0 && canDraw.length > 0 && (
           <NothingShowing hidden={canDraw.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
-        {rows.map((item) => (
-          <TranscriptRow
-            key={item.id}
-            item={item}
-            openAll={openAll}
-            sessionId={sessionId}
-            mentions={mentions}
-            onLook={setLooking}
-          />
-        ))}
+        {drawn.map((drawnRow) =>
+          // A machine line and one of the app's own asides are the same shape:
+          // both are the chat talking about itself rather than someone in it,
+          // and a run of one kind arrives here already folded into one row.
+          drawnRow.row === 'machine' ? (
+            <MachineLine key={drawnRow.id} row={drawnRow} openAll={openAll} />
+          ) : (
+            <TranscriptRow
+              key={drawnRow.item.id}
+              item={drawnRow.item}
+              openAll={openAll}
+              sessionId={sessionId}
+              mentions={mentions}
+              onLook={setLooking}
+            />
+          ),
+        )}
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes
             an answer (docs/agent-workbench.md §8.2.2). */}

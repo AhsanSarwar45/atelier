@@ -156,8 +156,16 @@ export type WbpEvent = EventBase &
     | { type: 'link.bead'; beadId: string; via: 'tool' | 'brief' | 'manual' }
     | { type: 'report.available'; project: string; slug: string }
     | { type: 'error'; message: string; fatal: boolean }
-    /** A line the app says about the chat itself, not the agent's own words. */
-    | { type: 'notice'; text: string }
+    /**
+     * A line the app says about the chat itself, not the agent's own words.
+     *
+     * It carries the family it is drawn as, because the app's own asides are
+     * the one kind of machine line whose meaning is not written anywhere else:
+     * a note has the driver's name for it to sort on, and an aside has only its
+     * sentence. One written before there were families is drawn as the app
+     * speaking, which is what it is (bw-jkh2.5).
+     */
+    | { type: 'notice'; text: string; family?: MachineFamily }
     /**
      * Anything the machine says about ITSELF — compaction, a retry, a refusal,
      * a hook that failed, a mode that changed — and everything the driver had no
@@ -184,6 +192,13 @@ export type WbpEvent = EventBase &
 
 /** How loudly a `note` is drawn. See the rank table in §8.2.4. */
 export type NoteRank = 'note' | 'detail';
+
+/**
+ * Which of the six families a machine line is drawn as — its colour and its
+ * mark. What lands in each is `src/workbench/machine-lines.tsx`; the name is
+ * here because the wire carries it (docs/agent-workbench.md §8.2.4).
+ */
+export type MachineFamily = 'stopped' | 'failed' | 'waiting' | 'memory' | 'background' | 'breathing';
 
 export type WbpEventType = WbpEvent['type'];
 

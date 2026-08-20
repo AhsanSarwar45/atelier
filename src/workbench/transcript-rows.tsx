@@ -18,11 +18,13 @@ import { memo, useEffect, useReducer, useState } from 'react';
 import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
 import { diffLines } from '@/workbench/line-diff';
+import { lookOf, markOf, opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
 import { ReportCard } from '@/workbench/report-view';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
@@ -362,38 +364,98 @@ export const ToolRow = memo(function ToolRow({
   );
 });
 /**
- * A line about the chat's own machinery: compaction, a retry, a refusal, a mode
- * change, or a kind of message this app has no name for.
+ * A line about the chat's own machinery: you stopped it, a busy service being
+ * ridden out, the conversation folding itself up, a rule of yours refusing the
+ * turn, an agent sent off, or a kind of message this app has no name for.
  *
- * Grey and one line high, so it never competes with what the agent said, and it
- * opens onto the whole message. `detail` rows are the machine breathing and
- * appear only once the reader asks for everything (§8.2.4).
+ * It is punctuation, not a speaker: a small chip sitting centred on a hairline
+ * rule, the way a date divider sits in a messaging app, so it separates what was
+ * said instead of competing with it. Its colour and its mark come from the
+ * family the kind belongs to (src/workbench/machine-lines.tsx), which is what
+ * makes an interrupt and a routine status ping tell themselves apart at a
+ * glance — they used to be the same grey line (bw-jkh2, §8.2.4).
+ *
+ * A run of one kind arrives folded, so the chip carries how many times it
+ * happened and opening it gives every one of them in order.
+ *
+ * A folded row is built fresh on every pass, so remembering it against its own
+ * identity would remember nothing; it is remembered against what it says
+ * instead, which is what keeps a word arriving in a message from redrawing
+ * every chip above it (bw-uiyz.5).
  */
-export const NoteRow = memo(function NoteRow({ item, openAll }: { item: Extract<TranscriptItem, { kind: 'note' }>; openAll: boolean }) {
-  const [open, setOpen] = useOpen(openAll);
-  if (item.rank === 'detail' && !openAll) return null;
+export const MachineLine = memo(
+  function MachineLine({ row, openAll }: { row: MachineRow; openAll: boolean }) {
+    const [open, setOpen] = useOpen(openAll);
+    const look = lookOf(row.family);
+    const Mark = markOf(row.family);
+    const opens = opensOn(row);
 
-  return (
-    <div data-testid="note-row" data-note-rank={item.rank} data-note-kind={item.noteKind} className="font-mono text-xs">
-      <button
-        type="button"
-        data-testid="note-toggle"
-        disabled={!item.body}
-        onClick={() => setOpen(!open)}
-        className={cn(
-          'flex w-full items-center gap-2 text-left text-muted-foreground/80 enabled:hover:text-foreground',
-          item.rank === 'detail' && 'text-muted-foreground/50',
-        )}
+    return (
+      <div
+        data-testid="note-row"
+        data-note-rank={row.rank}
+        data-note-kind={row.kind}
+        data-family={row.family}
+        data-times={row.lines.length}
+        className="flex flex-col items-center gap-1"
       >
-        {item.body && <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />}
-        <span className={cn('truncate', !item.body && 'pl-5')}>{item.text}</span>
-        {/* The brand's own name for it, so an unfamiliar line can be looked up. */}
-        {openAll && <span className="ml-auto shrink-0 opacity-50">{item.noteKind}</span>}
-      </button>
-      {open && item.body && <Body label={item.noteKind} text={item.body} testId="note-body" />}
-    </div>
+        <div className="flex w-full items-center gap-2">
+          <span className={cn('h-px min-w-4 flex-1', look.rule)} />
+          {/* The app's own chip, dressed in the family's colours rather than
+              redrawn: one set of parts (src/lib/__tests__/one-set-of-parts.test.ts). */}
+          <Badge asChild size="md" shape="circle" className={cn('min-w-0 max-w-[80%] px-2.5', look.chip)}>
+            <button
+              type="button"
+              data-testid="note-toggle"
+              disabled={!opens}
+              onClick={() => setOpen(!open)}
+              // The brand's own name for it, so an unfamiliar line can be looked
+              // up without spending room on the chip itself.
+              title={row.kind}
+              className="enabled:hover:brightness-125"
+            >
+              <Mark />
+              <span className="truncate">{saidBy(row)}</span>
+              {/* Eight retries is one thing that happened eight times. */}
+              {row.lines.length > 1 && (
+                <Badge size="xs" shape="circle" data-testid="note-times" className={cn('tabular-nums', look.count)}>
+                  {row.lines.length}
+                </Badge>
+              )}
+              {opens && <ChevronRight className={cn('transition-transform', open && 'rotate-90')} />}
+            </button>
+          </Badge>
+          <span className={cn('h-px min-w-4 flex-1', look.rule)} />
+        </div>
+        {open && (
+          <div className="w-full">
+            {row.lines.map((line, i) => (
+              <Body
+                key={i}
+                label={row.lines.length > 1 ? `${row.kind} · ${i + 1} of ${row.lines.length}` : row.kind}
+                text={line.body ?? line.text}
+                testId="note-body"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (before, now) => before.openAll === now.openAll && sameRow(before.row, now.row),
+);
+
+/** Whether two folded rows would draw the same chip over the same words. */
+function sameRow(a: MachineRow, b: MachineRow): boolean {
+  return (
+    a.id === b.id &&
+    a.family === b.family &&
+    a.kind === b.kind &&
+    a.rank === b.rank &&
+    a.lines.length === b.lines.length &&
+    a.lines.every((line, i) => line.text === b.lines[i]?.text && line.body === b.lines[i]?.body)
   );
-});
+}
 /**
  * What the agent worked out on the way to its answer.
  *
@@ -544,15 +606,6 @@ const MessageRow = memo(function MessageRow({
   );
 });
 
-/** A line the app itself put in the conversation, centred and out of the way. */
-const NoticeRow = memo(function NoticeRow({ item }: { item: Extract<TranscriptItem, { kind: 'notice' }> }) {
-  return (
-    <p data-testid="transcript-notice" className="text-center text-xs text-muted-foreground">
-      {item.text}
-    </p>
-  );
-});
-
 /**
  * One row of the conversation, whatever kind it is.
  *
@@ -576,12 +629,8 @@ export const TranscriptRow = memo(function TranscriptRow({
   switch (item.kind) {
     case 'tool':
       return <ToolRow item={item} nested={item.parentId !== null} openAll={openAll} />;
-    case 'note':
-      return <NoteRow item={item} openAll={openAll} />;
     case 'thinking':
       return <ThinkingBlock item={item} />;
-    case 'notice':
-      return <NoticeRow item={item} />;
     case 'report':
       return <ReportCard project={item.project} slug={item.slug} />;
     case 'ask':
@@ -595,6 +644,11 @@ export const TranscriptRow = memo(function TranscriptRow({
           chosen={item.chosen}
         />
       );
+    // Notes and asides never reach here: the chat folds them into machine lines
+    // before it draws, which is the only shape they have.
+    case 'note':
+    case 'notice':
+      return null;
     default:
       return <MessageRow item={item} mentions={mentions} onLook={onLook} />;
   }
