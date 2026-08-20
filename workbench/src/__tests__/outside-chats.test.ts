@@ -30,9 +30,12 @@ import { watchOutside } from '../outside.ts';
 let config = '';
 let project = '';
 let elsewhere = '';
+let late = '';
 
 /** The working directory the second project's chats are held in. */
 const ELSEWHERE = '/home/me/elsewhere';
+/** And the third's, which only says so once its second chat is written. */
+const LATE = '/home/me/late';
 const wasConfig = process.env.CLAUDE_CONFIG_DIR;
 
 /** The settle is a second; everything here waits past one to read the count. */
@@ -61,6 +64,10 @@ beforeAll(() => {
   elsewhere = join(config, 'projects', '-home-me-elsewhere');
   mkdirSync(elsewhere, { recursive: true });
   writeFileSync(join(elsewhere, 'an-old-chat.jsonl'), lineFrom(ELSEWHERE, 'yesterday'));
+  // A third, whose only chat so far says nothing about where it is held — the
+  // state every project is in for as long as its records predate the field.
+  late = join(config, 'projects', '-home-me-late');
+  mkdirSync(late, { recursive: true });
   process.env.CLAUDE_CONFIG_DIR = config;
 });
 
@@ -123,6 +130,33 @@ describe('the folder the tools write conversations into', () => {
     writeFileSync(join(project, 'another-new-chat.jsonl'), line('started in Zed'));
     await naps(PAST_THE_SECOND_MS);
     expect(said).toEqual([[]]);
+  }, 10_000);
+
+  it('asks again about a project it could not place, so one early silence is not forever', async () => {
+    // What it could not tell was a fact about what had been written by then, not
+    // about the project: its chats predated the field, or its first line had not
+    // reached the disk yet. Kept, that answer would leave every screen on the
+    // machine rebuilding its whole list for every stranger's typing, for as long
+    // as the app runs (bw-uivp.6).
+    const said: string[][] = [];
+    stopWatching = watchOutside((folders) => {
+      said.push(folders);
+    });
+
+    // Its records predate the field.
+    writeFileSync(join(late, 'no-idea.jsonl'), line('a chat that says nothing'));
+    await naps(PAST_THE_SECOND_MS);
+    expect(said, 'a project nothing could place was placed anyway').toEqual([[]]);
+
+    // And this one will say, once the line it was opened for reaches the disk.
+    writeFileSync(join(late, 'says-where.jsonl'), '');
+    await naps(PAST_THE_SECOND_MS);
+    expect(said[1], 'a half-written record was read as an answer').toEqual([]);
+
+    // It lands, and the project can be placed from here on.
+    writeFileSync(join(late, 'says-where.jsonl'), lineFrom(LATE, 'started in Zed'));
+    await naps(PAST_THE_SECOND_MS);
+    expect(said[2], 'the early silence was kept and the project stayed unplaceable').toEqual([LATE]);
   }, 10_000);
 
   it('stops watching when the last reader has gone', async () => {

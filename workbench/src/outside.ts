@@ -45,7 +45,7 @@
  * refuses the watch, which is a state this degrades through rather than dies
  * of.
  */
-import { readdirSync, readFileSync, watch, type FSWatcher } from 'node:fs';
+import { closeSync, openSync, readdirSync, readSync, watch, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 
 import { claudeConfigDir } from './running.ts';
@@ -78,10 +78,32 @@ let stirredFolders = new Set<string>();
  * Every line of a record carries the directory it was written in, so one line
  * of one file answers it.
  *
- * Remembered per folder, because a folder's directory does not change and the
- * question is asked every time an agent anywhere writes a line.
+ * An answer is remembered per folder, because a folder's directory does not
+ * change and the question is asked every time an agent anywhere writes a line.
+ * Only an answer, though: "nowhere I could see" is what a folder says while its
+ * first record is still half-written, and remembering that would be permanent
+ * (bw-uivp.6).
  */
-const homeOf = new Map<string, string | null>();
+const homeOf = new Map<string, string>();
+
+/**
+ * The head of a record, without the rest of it.
+ *
+ * A record grows to megabytes over a long conversation and the answer is on its
+ * first line, so this reads the front of the file and stops. It matters because
+ * a folder that cannot be placed is asked again on the next write rather than
+ * written off, and asking again has to be cheap enough to do every second.
+ */
+function firstLineOf(path: string): string {
+  const file = openSync(path, 'r');
+  try {
+    const front = Buffer.alloc(64_000);
+    const got = readSync(file, front, 0, front.length, 0);
+    return front.toString('utf8', 0, got).split('\n')[0] ?? '';
+  } finally {
+    closeSync(file);
+  }
+}
 
 function whereItRuns(name: string): string | null {
   const known = homeOf.get(name);
@@ -91,10 +113,7 @@ function whereItRuns(name: string): string | null {
     const here = join(claudeConfigDir(), 'projects', name);
     for (const file of readdirSync(here)) {
       if (!file.endsWith('.jsonl')) continue;
-      // The first line is enough and the rest of a record can be enormous, so
-      // only the head of the file is read.
-      const head = readFileSync(join(here, file), 'utf8').slice(0, 64_000).split('\n')[0] ?? '';
-      const said = JSON.parse(head) as { cwd?: unknown };
+      const said = JSON.parse(firstLineOf(join(here, file))) as { cwd?: unknown };
       if (typeof said.cwd === 'string' && said.cwd) {
         found = said.cwd;
         break;
@@ -106,7 +125,10 @@ function whereItRuns(name: string): string | null {
     // for its list rather than missing a chat.
     found = null;
   }
-  homeOf.set(name, found);
+  // Only a real answer is kept. A folder that could not be placed is asked
+  // again the next time it is written to, which is exactly when it may have
+  // gained the record that says where it is being held.
+  if (found) homeOf.set(name, found);
   return found;
 }
 
