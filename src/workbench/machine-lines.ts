@@ -108,6 +108,13 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // `note` for exactly that reason; one that came home fine is news of the
   // quietest sort (bw-6jq5).
   'system/task_notification': { note: 'failed', detail: 'background' },
+  // The panel's own running commentary: a state changing, what one is doing
+  // now, the level list of what is running loose. All of it is drawn on the
+  // rows themselves, so in the conversation it is the machine breathing
+  // (bw-6jq5.3).
+  'system/task_updated': 'breathing',
+  'system/task_progress': 'breathing',
+  'system/background_tasks_changed': 'breathing',
   'system/informational': { note: 'background', detail: 'breathing' },
   'system/notification': { note: 'background', detail: 'breathing' },
   mode: 'background',
@@ -195,6 +202,9 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   // came home having FAILED still speaks, which is the rank split.
   'system/task_started': 'machine',
   'system/task_notification': { note: 'you', detail: 'machine' },
+  'system/task_updated': 'machine',
+  'system/task_progress': 'machine',
+  'system/background_tasks_changed': 'machine',
 
   // The machine's own housekeeping, whatever colour it happens to wear.
   'system/mirror_error': 'machine',

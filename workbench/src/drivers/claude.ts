@@ -73,7 +73,44 @@ const INFORMATIONAL_RANK: Record<string, NoteRank> = {
 };
 
 /** The fields a message the app has never seen might keep a human sentence in. */
-const SPOKEN_FIELDS = ['content', 'text', 'message', 'error', 'summary', 'reason', 'result'];
+const SPOKEN_FIELDS = ['content', 'text', 'message', 'error', 'summary', 'reason', 'result', 'description'];
+
+/**
+ * A human sentence somewhere in a message this build has never seen.
+ *
+ * One level down as well as at the top. The kit keeps a task's new state under
+ * `patch` and a background list's descriptions under `tasks`, and a search that
+ * only looked at the top of the message found neither — so both printed their
+ * own wire name where their sentence should be, on the manager's own screen
+ * (bw-6jq5.3, bw-wasy).
+ */
+function spokenIn(m: Record<string, any>): string | null {
+  const here = SPOKEN_FIELDS.map((f) => m[f]).find((v) => typeof v === 'string' && v.trim());
+  if (here) return here as string;
+  for (const value of Object.values(m)) {
+    // The first of a list stands for the list: a message that carries ten of
+    // something says what it is about with one of them, and a line that read
+    // all ten would be a paragraph.
+    const nested = Array.isArray(value) ? value[0] : value;
+    if (!nested || typeof nested !== 'object') continue;
+    const found = SPOKEN_FIELDS.map((f) => (nested as Record<string, any>)[f]).find(
+      (v) => typeof v === 'string' && v.trim(),
+    );
+    if (found) return found as string;
+  }
+  return null;
+}
+
+/** What the kit's own word for a task's state reads as in a sentence. */
+const TASK_SAID: Record<string, string> = {
+  pending: 'is waiting to start',
+  running: 'is running',
+  paused: 'is parked',
+  completed: 'has finished',
+  failed: 'failed',
+  killed: 'was stopped',
+  stopped: 'was stopped',
+};
 
 
 /** The kit's name for one message, as the branches below spell it. */
@@ -162,6 +199,15 @@ function kindOfTask(taskType: unknown, agentType: unknown): AgentKind {
   return 'helper';
 }
 
+/**
+ * A row for sent-off work nothing has been heard about yet.
+ *
+ * One copy, because there were two and they drifted: a field added to the map's
+ * shape reached one of them and the other went on building a row without it
+ * (bw-6jq5.3).
+ */
+const NOTHING_YET = { seconds: 0, tokens: 0, calls: 0, model: null as string | null, state: 'running' as AgentState, what: '' };
+
 /** What the kit's own word for a task's state means on a row. */
 const TASK_STATE: Record<string, AgentState> = {
   pending: 'running',
@@ -173,8 +219,8 @@ const TASK_STATE: Record<string, AgentState> = {
   stopped: 'stopped',
 };
 
-function noteFor(m: Record<string, any>): Note | null {
-  const note = noteBody(m);
+function noteFor(m: Record<string, any>, nameOf: (id: string) => string): Note | null {
+  const note = noteBody(m, nameOf);
   // A line cut at two hundred characters with nothing behind it is a line whose
   // rest is reachable nowhere: the row's own toggle is disabled when there is no
   // body, and §8.2.4 promises that the body of anything sits behind a click.
@@ -191,9 +237,16 @@ function clockOf(seconds: number): string {
   return new Date(seconds * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
-function noteBody(m: Record<string, any>): Note | null {
+/**
+ * @param nameOf what a sent-off agent is called, by the id the kit uses for it.
+ *   The lines about sent-off work are the panel's record and are read behind
+ *   the switch that gives the machine's own side back (bw-6jq5) — so they name
+ *   the agent, which is the one thing a wire id cannot tell a reader.
+ */
+function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note | null {
   const kind = kindOf(m);
   const whole = () => oneLine(JSON.stringify(m), KEPT);
+  const agent = () => nameOf(String(m.task_id ?? '')) || 'A sent-off agent';
 
   switch (kind) {
     // The answer to /compact, and the only place the reason lives.
@@ -344,14 +397,51 @@ function noteBody(m: Record<string, any>): Note | null {
       };
     }
 
+    // The three below are the record of sent-off work, and the panel is where
+    // that work is READ (bw-6jq5) — so they sit on the machine's own side and
+    // nothing here is loud. Behind that switch is still a conversation though,
+    // and all three used to print their own wire name into it, because the only
+    // words they carry are a level down (bw-6jq5.3).
+    case 'system/task_updated': {
+      const patch = (m.patch ?? {}) as { status?: string; is_backgrounded?: boolean };
+      const said = patch.is_backgrounded
+        ? 'was left running in the background'
+        : (patch.status && TASK_SAID[patch.status]) || `is now ${oneLine(patch.status ?? 'in some other state')}`;
+      return { rank: 'detail', kind, text: `${agent()} ${said}`, body: whole() };
+    }
+
+    case 'system/task_progress': {
+      // Only ever seen here when the work belongs to no call of this chat's:
+      // one that does is drawn on its own row instead, and never reaches a line.
+      const doing = oneLine(m.summary ?? m.last_tool_name ?? m.description ?? '');
+      return { rank: 'detail', kind, text: doing ? `${agent()}: ${doing}` : `${agent()} is still going`, body: whole() };
+    }
+
+    case 'system/background_tasks_changed': {
+      const named = ((m.tasks ?? []) as { description?: string }[])
+        .map((task) => oneLine(task.description ?? ''))
+        .filter(Boolean);
+      return {
+        rank: 'detail',
+        kind,
+        text:
+          named.length === 0
+            ? 'Nothing is running in the background now'
+            : `Running in the background: ${named.join(', ')}`,
+        body: whole(),
+      };
+    }
+
     default: {
-      // A kind this build has never seen. If it carries a sentence it is drawn
-      // like anything else that speaks; if it is only structure it waits behind
-      // "show everything". Either way it is never nothing.
-      const spoken = SPOKEN_FIELDS.map((f) => m[f]).find((v) => typeof v === 'string' && v.trim());
+      // A kind this build has never seen. If it carries a sentence — at the top
+      // of the message or a level down — it is drawn like anything else that
+      // speaks; if it is only structure it says so in words, and waits behind
+      // "show everything". Either way it is never its own wire name, which
+      // tells a reader nothing he did not already have (bw-6jq5.3).
+      const spoken = spokenIn(m);
       return spoken
         ? { rank: 'note', kind, text: oneLine(spoken), body: String(spoken) }
-        : { rank: 'detail', kind, text: kind, body: whole() };
+        : { rank: 'detail', kind, text: `The machine said something this build has no words for (${kind})`, body: whole() };
     }
   }
 }
@@ -418,7 +508,7 @@ export class ClaudeDriver implements Driver {
    */
   private sentAway = new Map<
     string,
-    { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState }
+    { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState; what: string }
   >();
   /** Which task a call sent off, so a helper's own words can find its row. */
   private taskOfCall = new Map<string, string>();
@@ -526,7 +616,7 @@ export class ClaudeDriver implements Driver {
     // its ending. A finish for a row that was never opened opens one.
     if (this.tasksOfHelpers.has(String(m.task_id ?? ''))) return true;
     const numbers = (id: string) =>
-      this.sentAway.get(id) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' as AgentState };
+      this.sentAway.get(id) ?? { ...NOTHING_YET };
 
     switch (m.subtype) {
       case 'task_started': {
@@ -541,13 +631,17 @@ export class ClaudeDriver implements Driver {
           this.taskOfCall.set(call, id);
           this.callOfTask.set(id, call);
         }
-        if (!this.sentAway.has(id)) this.sentAway.set(id, numbers(id));
+        // What it is called, kept as well as sent: every later message about it
+        // carries the id and nothing else, and a line saying an id was stopped
+        // is a line about nothing a reader can name (bw-6jq5.3).
+        const what = oneLine(m.description ?? m.workflow_name ?? m.prompt ?? '');
+        this.sentAway.set(id, { ...numbers(id), what: what || numbers(id).what });
         this.emit({
           type: 'agent.started',
           agentId: id,
           toolCallId: call,
           kind: kindOfTask(m.task_type, m.subagent_type),
-          what: oneLine(m.description ?? m.workflow_name ?? m.prompt ?? ''),
+          what,
           agentType: typeof m.subagent_type === 'string' ? m.subagent_type : null,
           // The kit names no model here. It arrives with the helper's first
           // words, or with its result — both fill this row in later.
@@ -637,13 +731,14 @@ export class ClaudeDriver implements Driver {
             this.tasksOfHelpers.add(id);
             continue;
           }
-          this.sentAway.set(id, numbers(id));
+          const what = oneLine(task.description ?? '');
+          this.sentAway.set(id, { ...numbers(id), what });
           this.emit({
             type: 'agent.started',
             agentId: id,
             toolCallId: null,
             kind: kindOfTask(task.task_type, null),
-            what: oneLine(task.description ?? ''),
+            what,
             agentType: null,
             model: null,
           });
@@ -729,7 +824,7 @@ export class ClaudeDriver implements Driver {
   private helperFinished(callId: string, ok: boolean, result: unknown, output: string): void {
     const id = this.taskOfCall.get(callId);
     if (!id) return;
-    const was = this.sentAway.get(id) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' as AgentState };
+    const was = this.sentAway.get(id) ?? { ...NOTHING_YET };
     const totals = (result ?? {}) as {
       resolvedModel?: string;
       totalTokens?: number;
@@ -1316,7 +1411,7 @@ export class ClaudeDriver implements Driver {
           this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
         } else if (!helpers) {
           // Every other thing the session says about itself.
-          const note = noteFor(m);
+          const note = noteFor(m, (id) => this.sentAway.get(id)?.what ?? '');
           if (note) this.note(note);
         }
         break;
@@ -1501,7 +1596,7 @@ export class ClaudeDriver implements Driver {
       // kit sends is drawn, because a whitelist is exactly what dropped the
       // manager's /compact answer (§8.2.4).
       default: {
-        const note = noteFor(m);
+        const note = noteFor(m, (id) => this.sentAway.get(id)?.what ?? '');
         if (note) this.note(note);
       }
     }
