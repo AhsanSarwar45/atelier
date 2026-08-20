@@ -329,7 +329,7 @@ It never greys it out with an excuse and never fakes parity.
 | plan-then-approve | yes (`--permission-mode plan`) | **no** → hidden; `review/start` is offered as its own command instead |
 | images in | base64 blocks | `image`/`localImage` items |
 | todo checklist | yes, via the task tools — this build ships no `TodoWrite` | *confirm* |
-| subagents | yes (`parent_tool_use_id`) | **no** → panel hidden |
+| subagents | yes (`parent_tool_use_id`) | yes, since 2026-03-16 — defined in `~/.codex/agents/*.toml`, own model and effort, parent surfaces their threads |
 | cost | dollars | tokens |
 | typed commands | the install's real slash commands | four fixed entries (§7) |
 | model picker | `--model` | `model/list` + per-turn override |
@@ -787,20 +787,30 @@ No third tab: reports live inside the chat and inside the card (decision 10).
   live panel; asks rendered as cards with real buttons.
 - **Composer** — multiline, paste/drop an image, `@` opens file completion,
   `/` opens the typed-command menu, Stop replaces Send while a turn runs.
-- **Right rail** — cards this chat has touched (clicking one opens it on the
-  Board tab), reports it produced, cost, pinned permission mode.
+- **Right rail** — the chat's own second column, collapsible and remembered:
+  the cards this chat has touched (clicking one opens it on the Board tab), the
+  reports it produced, every agent it sent off, and what the work cost
+  (§8.2.6).
 
 #### 8.2.1 The open chat's own line
 
 Constraint: what an open chat says about itself is one line high whatever it
 carries, and the words that name the agent are never squeezed to make room for
-what it has touched. A long-running chat's cards are shown as the first few and
-a count; the count carries the rest.
+what it has touched.
 
 Why: measured 2026-08-16 (bw-p61.3), one chat's 26 card chips made a row 2277 px
 wide in a pane about 700 px wide, and the model and permission text was squeezed
 to 37 px — three words stacked in a column, which is the picture the manager
 sent back.
+
+**Superseded, 2026-08-20 (bw-7ks.22.10).** The first answer was to draw the
+first few cards and a count. It kept the line one line high and still put the
+thing that grows with the work on the axis there is least of. The header line
+now carries **no** cards at all: they move into the right rail (§8.2.6), which
+is a column, so twenty-six of them cost height nobody is competing for instead
+of width everything is. What stays on the line is what names the chat — brand,
+model, mode, state — none of which grows, so the constraint holds by
+construction rather than by a count.
 
 #### 8.2.2 What a working chat shows (bw-f1q)
 
@@ -983,6 +993,119 @@ reason to keep taking it: none of these is where the log's weight actually is.
 The menu of what a chat can do is republished whole every turn — 58,969 B of
 these 79,300, three quarters of the log, and not a quiet line at all. That is
 bw-7bj.
+
+#### 8.2.6 The right rail (bw-7ks.22.9)
+
+Constraint: the chat has a second column, on the right, and it is the reader's
+to shut. Open, it is a narrow fixed-width column beside the transcript; shut, it
+is a thin edge with a handle and the transcript takes the width back. The choice
+is remembered for the browser and survives a reload — a rail that comes back
+open every time is a rail that gets shut every time.
+
+It is the left rail turned around, and deliberately the same component
+(`chat-rail`, §8.2): in flow on a wide window with the transcript between the
+two, absolutely placed and sliding over the transcript on a narrow one, where a
+click outside shuts it. Two rails and a readable conversation do not fit in a
+phone's width, and the conversation is what the reader came for.
+
+What it holds, in this order:
+
+- **The cards this chat has touched** — all of them, one per line, id and title,
+  clicking through to the Board tab. This is where they live now (§8.2.1). A
+  card touched only by an agent the chat sent off is still this chat's card,
+  which is the fault §8.2.7 fixes on the way past.
+- **The reports it produced** — `report.available` already crosses the wire and
+  is drawn nowhere.
+- **The agents it sent off** — §8.2.7. The tallest thing in the rail, and the
+  reason the rail exists.
+- **What the work cost** — the running spend, counting the delegated work
+  (§8.2.7).
+
+A rail and not a tab: its whole job is to answer *what is happening away from
+here* without leaving the words that sent it.
+
+#### 8.2.7 Every agent the chat sent off (bw-7ks.22)
+
+Constraint: work a chat hands to another agent is a **row you can see, open and
+steer**, from the moment it is sent to the moment it answers. Today it is a grey
+line ranked `detail` — hidden unless "show everything" is on — and then silence
+until a result appears in the parent's speech as if the parent had done it.
+
+**One row per piece of sent-off work**, and the panel is a work panel rather
+than a subagent panel: the kit's own list of background work names four kinds —
+a helper agent, a command left running, a watch, a scripted run — and all four
+are work the chat is waiting on, so all four get a row and the kind is a mark on
+the row.
+
+| column | what it says | where it comes from |
+|---|---|---|
+| what | the brief in its own words, one line | `task_started.description` |
+| kind | helper, command, watch, run | the background-work list |
+| model | which model this one runs | the kit's list of agents, and the model on the helper's own messages |
+| for | how long it has been going, live | `task_progress.usage.duration_ms`, counted from the start where absent |
+| spent | tokens, and how many calls it has made | `task_progress.usage` |
+| doing | its own last line, refreshed about every 30s | progress summaries |
+| state | running, waiting on you, done, failed, stopped | `task_notification.status` |
+
+**Every one of those numbers already arrives and is thrown away.** Nothing here
+needs a new source; it needs the driver to stop discarding what it is handed.
+The one genuinely new cost is the progress sentence, which re-uses the helper's
+own cache rather than paying for a fresh read.
+
+**Its own conversation opens from its row** (bw-7ks.22.4). A helper's turns are
+a conversation like any other and are drawn by the same renderer as the parent's
+— the transcript and the live stream are one code path (§4), and a helper is
+just a stream with a parent. Clicking the row opens it in place of the parent's
+transcript, with the way back where the reader expects it.
+
+**Steering is three tiers, and the honest reason there are three**
+(bw-7ks.22.5). Neither brand gives anyone a private input channel into a running
+helper, so we do not pretend to have one:
+
+1. **Direct** — stop it, or park it and let it run on. Both are the kit's own
+   controls (`stopTask`, `backgroundTask`) and both are exact.
+2. **Its own asks** — a permission ask a helper raised is answered on the
+   helper's row, attributed to the helper that raised it, not to the parent it
+   arrived through.
+3. **Relayed** — a typed message goes to the parent, naming which helper it is
+   for, because that is the only road either brand offers. Codex's own
+   documentation says to ask the parent to steer a running helper; Claude has
+   no other door either. The row says the message was relayed, so nobody reads
+   a delivered word as a private one.
+
+**Five faults this closes on the way past**, each of which is why the picture is
+missing today rather than merely thin:
+
+- a helper's words are never forwarded, because the driver does not ask for them
+  (bw-7ks.22.2);
+- "sent off" is filed as `detail`, so the one line that exists is hidden by
+  default (bw-7ks.22.6);
+- reading a chat back from the record **flattens** a helper's turns into the
+  parent's speech, because the read-back path never looks at what a message's
+  parent was (bw-7ks.22.7);
+- following a chat live **drops** them outright — one line in the tail reader
+  discards every message marked as a helper's — so the two paths disagree with
+  each other about what the same conversation contains (bw-7ks.22.7);
+- what a turn cost counts the main loop only and excludes every helper, so the
+  cost shown under a delegated turn is wrong by however much was delegated
+  (bw-7ks.22.8).
+
+**One seam, both brands** (§2.1). The vocabulary grows by three lines and a
+command family, and a brand is still one driver file:
+
+- `agent.started` / `agent.progress` / `agent.finished` — the row and its
+  numbers;
+- `message.started` gains `parentToolCallId`, exactly as `tool.started` already
+  carries it, so a helper's speech is filed under its own row by the same
+  attribution that already files its calls there;
+- `agent.stop`, `agent.park`, `agent.say` — the three tiers, going the other
+  way.
+
+Codex helpers shipped 2026-03-16 and are the same shape: their own definition
+file, their own model and effort, threads the parent surfaces, steering asked of
+the parent. So the capability matrix row that said Codex has none is stale, and
+is corrected in §3.3. Where a brand cannot do one of the three tiers, that
+control is hidden and nothing is faked (decision 13).
 
 ### 8.3 The board tab
 
