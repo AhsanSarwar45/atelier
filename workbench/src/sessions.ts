@@ -26,6 +26,7 @@ import {
 } from '../../src/workbench/imported-history.ts';
 import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
 import { type Split, taskSpend } from '../../src/workbench/token-picture.ts';
+import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -1222,6 +1223,49 @@ export class Sessions {
         `It could not be handed to it directly, so it comes to you:\n\n${text}`,
     );
     this.publish(sessionId, { type: 'agent.relayed', agentId, text });
+  }
+
+  /**
+   * Both halves of one chat's token picture: its window now, its spend ever.
+   *
+   * The window can only come from whoever is driving the chat, so it is asked
+   * of our own driver and of nothing else. A chat being READ — from its record,
+   * or followed while another program drives it — gets the plain sentence
+   * instead of a figure: the app knows what that chat's turns cost and cannot
+   * know what its next prompt is made of, and inventing a breakdown from the
+   * record would be a guess drawn as a measurement (decision 13, bw-3ug7).
+   *
+   * The spend is the other way round: read from the chat's own file, so it
+   * works for any chat at all, live or long finished, and spans every time the
+   * conversation forgot itself — which is the whole reason the reader is
+   * asking, the gauge having dropped back to nothing at each of them.
+   */
+  async tokenPicture(sessionId: string): Promise<TokenPicture> {
+    const driver = this.drivers.get(sessionId);
+    let window = null;
+    let windowNote: string | null = NOT_OURS_TO_ASK;
+    if (driver?.windowNow) {
+      try {
+        window = readWindow((await driver.windowNow()) as Parameters<typeof readWindow>[0]);
+        windowNote = window ? null : 'The program driving this chat did not say what is in its window.';
+      } catch {
+        // A chat dying mid-question loses this answer and nothing else.
+        windowNote = 'This chat could not be asked what is in its window just now.';
+      }
+    } else if (driver) {
+      windowNote = "This chat's brand cannot say what is in its window.";
+    }
+
+    const summary = this.store.getSession(sessionId);
+    const record = summary?.externalId ? findRecord(summary.externalId) : null;
+    if (record === null) {
+      return { window, windowNote, spent: null, spentNote: 'This chat has no record on disk yet.' };
+    }
+    const lines = allLines(record);
+    if (lines.length === 0) {
+      return { window, windowNote, spent: null, spentNote: "This chat's record could not be read." };
+    }
+    return { window, windowNote, spent: taskSpend(lines, helpersOf(record)), spentNote: null };
   }
 
   private require(sessionId: string): Driver {

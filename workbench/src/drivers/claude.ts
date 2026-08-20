@@ -1308,6 +1308,22 @@ export class ClaudeDriver implements Driver {
   }
 
 
+  /**
+   * What is filling this chat's window, as the kit's own `/context` has it.
+   *
+   * Down the channel that is already open, so it costs no turn and no tokens
+   * (measured 2026-08-20: 1.4s, 0 tokens) — which is what lets the panel ask
+   * every time it is opened rather than caching a picture that has moved. The
+   * shape is the kit's; `readWindow` in `src/workbench/window-now.ts` turns it
+   * into the browser's, and this is the one line that knows the method's name
+   * (bw-3ug7).
+   */
+  async windowNow(): Promise<unknown | null> {
+    const q = this.q as { getContextUsage?: () => Promise<unknown> } | null;
+    if (!q?.getContextUsage) return null;
+    return await q.getContextUsage();
+  }
+
   async close(): Promise<void> {
     this.closed = true;
     this.wake?.();

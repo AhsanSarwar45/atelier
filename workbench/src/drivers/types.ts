@@ -68,4 +68,14 @@ export interface Driver {
   parkAgent?(agentId: string): Promise<boolean>;
   /** Tear the session down. */
   close(): Promise<void>;
+  /**
+   * What is filling THIS session's window right now, piece by piece.
+   *
+   * Optional, and the only place the answer exists: the record on disk holds
+   * what turns cost, never what the next prompt is made of. A brand that
+   * cannot say leaves the panel saying so, rather than the app working a
+   * breakdown out for itself (window-now.ts, bw-3ug7). The answer is the
+   * brand's own shape; `readWindow` reads it.
+   */
+  windowNow?(): Promise<unknown | null>;
 }

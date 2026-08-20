@@ -278,6 +278,13 @@ const server = createServer((req, res) => {
         // pushed it down /watch and never ask; this answers a first paint and
         // the tools that ask from a terminal (bw-malh, bw-dmoe).
         json(res, 200, await planUsage());
+      } else if (path === '/tokens' && req.method === 'GET') {
+        // This chat's own two numbers, unlike /usage above, which is the
+        // account's: what fills the window now, and what the task has spent
+        // since its first word (bw-3ug7).
+        const sessionId = url.searchParams.get('session');
+        if (!sessionId) return json(res, 400, { error: 'session is required' });
+        json(res, 200, await sessions.tokenPicture(sessionId));
       } else if (path === '/watch' && req.method === 'GET') {
         streamAll(req, res);
       } else if (path.startsWith('/links/bead/') && req.method === 'GET') {
