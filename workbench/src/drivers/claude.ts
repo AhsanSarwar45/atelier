@@ -208,6 +208,9 @@ function kindOfTask(taskType: unknown, agentType: unknown): AgentKind {
  */
 const NOTHING_YET = { seconds: 0, tokens: 0, calls: 0, model: null as string | null, state: 'running' as AgentState, what: '' };
 
+/** The states a row never leaves: the work is over, however it went. */
+const OVER = new Set<AgentState>(['done', 'failed', 'stopped']);
+
 /** What the kit's own word for a task's state means on a row. */
 const TASK_STATE: Record<string, AgentState> = {
   pending: 'running',
@@ -704,10 +707,16 @@ export class ClaudeDriver implements Driver {
         if (!id) return false;
         const was = numbers(id);
         const state = TASK_STATE[String(m.status ?? '')] ?? 'done';
+        // How it ended, once. A row he stopped stays stopped whatever else
+        // arrives about it afterwards, and the ending is written down here and
+        // not only sent out — the receipt of the dispatching call comes through
+        // a different door and has to be able to see it (bw-7ks.22.27).
+        const ended: AgentState = was.state === 'stopped' ? 'stopped' : state;
+        this.sentAway.set(id, { ...was, state: ended });
         this.emit({
           type: 'agent.finished',
           agentId: id,
-          state: state === 'failed' ? 'failed' : state === 'stopped' ? 'stopped' : 'done',
+          state: ended,
           seconds: Math.round(Number(m.usage?.duration_ms ?? 0) / 1000) || was.seconds,
           tokens: Number(m.usage?.total_tokens ?? 0) || was.tokens,
           calls: Number(m.usage?.tool_uses ?? 0) || was.calls,
@@ -826,6 +835,11 @@ export class ClaudeDriver implements Driver {
     const id = this.taskOfCall.get(callId);
     if (!id) return;
     const was = this.sentAway.get(id) ?? { ...NOTHING_YET };
+    // He stopped it. The call it was dispatched by comes back interrupted a
+    // moment later, and reading that receipt as an ending would rewrite what he
+    // did into a clean finish — no error, and nothing on the screen to say the
+    // stop ever happened (bw-7ks.22.27).
+    if (was.state === 'stopped') return;
     const totals = (result ?? {}) as {
       resolvedModel?: string;
       totalTokens?: number;
@@ -1269,9 +1283,18 @@ export class ClaudeDriver implements Driver {
    * Ends one piece of sent-off work and nothing else. The chat keeps its turn,
    * and everything else it sent away keeps running; the kit answers with a
    * notification of its own, which is what closes the row.
+   *
+   * The row is told the moment the kit takes the stop, and not left waiting for
+   * that notification: the call this work was dispatched by also comes back,
+   * carrying a clean result whatever became of the work, and whichever of the
+   * two arrives first is the one the row would have believed. Written down
+   * here, the order stops mattering and what he did survives it
+   * (bw-7ks.22.27). A row already over is left alone — stopping something that
+   * has just finished does not un-finish it.
    */
   async stopAgent(agentId: string): Promise<void> {
     await this.q?.stopTask(agentId);
+    if (!OVER.has(this.rowNumbers(agentId).state)) this.agentState(agentId, 'stopped');
   }
 
   /**

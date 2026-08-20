@@ -457,7 +457,15 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         a.id === e.agentId
           ? {
               ...a,
-              state: e.state,
+              // He stopped it, and that stays said. The kit ends a row twice
+              // over — its own notification about the work, and the receipt of
+              // the call that dispatched it — and an interrupted call's receipt
+              // can land after the notification saying it was stopped. Taking
+              // the later one would quietly rewrite what he did into a clean
+              // finish, with nothing on the screen to say otherwise
+              // (bw-7ks.22.27).
+              state: a.state === 'stopped' ? 'stopped' : e.state,
+              result: a.state === 'stopped' ? a.result : e.result,
               // The kit's own numbers where it sent them, and what the row
               // already had where it did not: a finished row that blanks its
               // spend is worse than one carrying the last figure it was given.
@@ -465,7 +473,6 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               tokens: e.tokens || a.tokens,
               calls: e.calls || a.calls,
               model: e.model ?? a.model,
-              result: e.result,
             }
           : a,
       );
@@ -770,12 +777,16 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         const at = agentAt.get(e.agentId);
         if (at !== undefined) {
           const row = agents[at]!;
-          row.state = e.state;
+          // A stop he asked for is final here too, for the reason the live arm
+          // gives above: the second ending is the dispatching call's receipt,
+          // and it comes back clean whatever became of the work (bw-7ks.22.27).
+          const stopped = row.state === 'stopped';
+          row.state = stopped ? 'stopped' : e.state;
           row.seconds = e.seconds || row.seconds;
           row.tokens = e.tokens || row.tokens;
           row.calls = e.calls || row.calls;
           row.model = e.model ?? row.model;
-          row.result = e.result;
+          if (!stopped) row.result = e.result;
         }
         break;
       }

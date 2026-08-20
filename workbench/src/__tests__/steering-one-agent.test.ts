@@ -194,3 +194,92 @@ describe('ending one, and letting one run on', () => {
     expect(new ClaudeDriver().agentControls()).toEqual(['stop', 'park', 'say']);
   });
 });
+
+/** The kit's own word that the work is over, whichever way it went. */
+const ended = (status: string, summary: string) => ({
+  type: 'system',
+  subtype: 'task_notification',
+  task_id: 'afa98b872c4df37bc',
+  status,
+  summary,
+  usage: { total_tokens: 12_000, tool_uses: 3, duration_ms: 45_000 },
+});
+
+/**
+ * The receipt of the call that dispatched it, which comes back a moment later
+ * carrying what the run cost. A stopped helper's call is still answered.
+ */
+const RECEIPT = {
+  type: 'user',
+  message: {
+    content: [{ type: 'tool_result', tool_use_id: 'toolu_01SentItOff', is_error: false, content: 'Counted 412 rows' }],
+  },
+  tool_use_result: { totalTokens: 12_000, totalToolUseCount: 3, totalDurationMs: 45_000 },
+};
+
+const endings = (events: WbpEvent[]): { state: string; result: string | null }[] =>
+  events
+    .filter((e) => e.type === 'agent.finished')
+    .map((e) => ({ state: (e as { state: string }).state, result: (e as { result: string | null }).result }));
+
+const rowOf = (events: WbpEvent[]) => foldAll(events).agents.find((a) => a.id === 'afa98b872c4df37bc');
+
+describe('a stop is the last word about that row', () => {
+  it('and the receipt of the call it was sent by does not undo it', () => {
+    // Two writers end the same row: the kit's notification about the work, and
+    // the tool_result of the call that dispatched it. The second one comes back
+    // clean whatever happened to the work, so reading it as an ending rewrites
+    // what he did into a finish, with nothing on the screen to say otherwise
+    // (bw-7ks.22.27).
+    const { events } = reading([SENT_OFF, ended('killed', 'Stopped by you'), RECEIPT]);
+
+    expect(endings(events)).toEqual([{ state: 'stopped', result: 'Stopped by you' }]);
+    expect(rowOf(events)).toMatchObject({ state: 'stopped', result: 'Stopped by you' });
+  });
+
+  it('and neither does a later ending arriving from anywhere else', () => {
+    const { events } = reading([SENT_OFF, ended('killed', 'Stopped by you')]);
+    events.push({
+      type: 'agent.finished',
+      agentId: 'afa98b872c4df37bc',
+      state: 'done',
+      result: 'All 412 rows counted',
+      seconds: 45,
+      tokens: 12_000,
+      calls: 3,
+      model: null,
+      seq: events.length,
+      sessionId: 's1',
+      at: '2026-08-20T12:00:00.000Z',
+    } as WbpEvent);
+
+    expect(rowOf(events)).toMatchObject({ state: 'stopped', result: 'Stopped by you' });
+  });
+
+  it('but an ordinary finish still lands, and carries what the run cost', () => {
+    const { events } = reading([SENT_OFF, ended('completed', 'Counted them'), RECEIPT]);
+
+    expect(rowOf(events)).toMatchObject({ state: 'done', seconds: 45, tokens: 12_000, calls: 3 });
+  });
+});
+
+describe('and the row is told at once, not when the kit gets round to it', () => {
+  it('reads stopped the moment the kit takes the stop', async () => {
+    const { driver, events } = reading([SENT_OFF]);
+    (driver as unknown as { q: unknown }).q = kitThatAnswers(true);
+
+    await driver.stopAgent('afa98b872c4df37bc');
+
+    expect(states(events)).toEqual(['stopped']);
+  });
+
+  it('and a stop asked for after it finished does not un-finish it', async () => {
+    const { driver, events } = reading([SENT_OFF, ended('completed', 'Counted them')]);
+    (driver as unknown as { q: unknown }).q = kitThatAnswers(true);
+
+    await driver.stopAgent('afa98b872c4df37bc');
+
+    expect(states(events)).toEqual([]);
+    expect(rowOf(events)).toMatchObject({ state: 'done' });
+  });
+});

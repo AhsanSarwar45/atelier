@@ -1235,7 +1235,7 @@ helper, so we do not pretend to have one:
    no other door either. The row says the message was relayed, so nobody reads
    a delivered word as a private one.
 
-Four things about the built shape that the tiers above do not tell you, each of
+Five things about the built shape that the tiers above do not tell you, each of
 which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
 
 - **The two direct controls take two different ids.** `stopTask` takes the task
@@ -1247,6 +1247,15 @@ which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
   one thing only: no work of that name was in the FOREGROUND. So a no is not a
   failed click, it is an answer about the work — it is already in the background
   — and the row takes it as one (bw-7ks.22.24).
+- **A row is ended by two writers, and a stop outranks both.** The kit sends its
+  own `task_notification` about the work, and the CALL that dispatched the work
+  comes back separately with a `tool_result` carrying what the run cost — and an
+  interrupted call's receipt is not marked in error, so it reads as a clean
+  finish whatever became of the work. Either can land last. So a stop is written
+  down the moment the kit takes it, and once a row reads `stopped` nothing later
+  moves it: not the receipt, not a second notification, not the fold replaying
+  the whole record from the start. Without that, what he did is quietly rewritten
+  into `done`, with no error and nothing on the screen to say so (bw-7ks.22.27).
 - **The kit's permission hook names the call, not the agent.** `canUseTool`
   carries an `agentID`, but the task messages carry no `agent_id` at all, so
   that id cannot be matched to the `task_id` a row is keyed by — it is a
