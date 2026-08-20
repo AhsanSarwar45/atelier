@@ -56,7 +56,6 @@ const said = (text: string): TranscriptItem => ({
   id: `msg-${text}`,
   role: 'assistant',
   text,
-  parentId: null,
   images: [],
   done: true,
   parentId: null,
