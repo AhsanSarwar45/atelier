@@ -109,3 +109,24 @@ export function addressWith(params: URLSearchParams, patch: Partial<Where>): str
   }
   return `/project?${q.toString()}`;
 }
+
+/**
+ * Whether the app has a page of its own behind this one.
+ *
+ * The bar's arrow is a step back through the history, not a jump to the list:
+ * a report opened from a chat has to give that chat back, not the front door.
+ * It falls back to the list only when nothing of ours is behind — a pasted
+ * address, a fresh tab — because stepping back there would leave the app.
+ *
+ * The Navigation API is the exact answer: its entries are only the ones on this
+ * origin, so an index above the first means the entry behind us is ours.
+ * Browsers without it get the rough count, which is right about the fresh tab
+ * and wrong only about arriving from somewhere else, where stepping back is
+ * what the browser's own arrow would do anyway.
+ */
+export function somewhereBehind(): boolean {
+  if (typeof window === 'undefined') return false;
+  const nav = (window as { navigation?: { currentEntry?: { index: number } } }).navigation;
+  if (nav?.currentEntry) return nav.currentEntry.index > 0;
+  return window.history.length > 1;
+}
