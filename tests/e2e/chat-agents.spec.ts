@@ -270,25 +270,39 @@ test.describe('the agents a chat sends off', () => {
 
     // Three rows at once, one of them over and one of them still going, which
     // is the picture — and it only exists while the helper sent last is still
-    // working. Waited for as one condition rather than three, because each of
+    // working. Waited for as one condition rather than four, because each of
     // them alone is true at moments when the picture is not there.
+    //
+    // The helper's model is part of what is waited for, not something read off
+    // afterwards: a row appears the instant the call that sent it does, and its
+    // model arrives later, with the helper's first words. Sampling the rows the
+    // moment three of them coexist catches the helper before it has spoken and
+    // fails saying it names no model (bw-7ks.22.20).
     const rows = page.locator('[data-testid="sent-away-row"]');
     await expect
       .poll(
         async () => {
-          const states = await rows.evaluateAll((els) => els.map((el) => el.getAttribute('data-state') ?? ''));
+          const seen = await rows.evaluateAll((els) =>
+            els.map((el) => ({
+              state: el.getAttribute('data-state') ?? '',
+              kind: el.getAttribute('data-kind') ?? '',
+              model: (el.querySelector('[data-testid="sent-away-model"]') as HTMLElement | null)?.innerText.trim() ?? '',
+            })),
+          );
+          const helpers = seen.filter((r) => r.kind === 'helper');
           return {
-            rows: states.length,
-            over: states.some((s) => OVER.includes(s)),
-            going: states.some((s) => !OVER.includes(s)),
+            rows: seen.length,
+            over: seen.some((r) => OVER.includes(r.state)),
+            going: seen.some((r) => !OVER.includes(r.state)),
+            helpersNameTheirModel: helpers.length > 0 && helpers.every((r) => r.model !== ''),
           };
         },
         {
-          message: 'the panel never carried three pieces of sent-off work with one over and one still going',
+          message: 'the panel never carried three pieces of sent-off work with one over, one still going and the helper naming its model',
           timeout: DELEGATED_MS,
         },
       )
-      .toMatchObject({ rows: 3, over: true, going: true });
+      .toMatchObject({ rows: 3, over: true, going: true, helpersNameTheirModel: true });
 
     const drawn = await rows.evaluateAll((els) =>
       els.map((el) => ({
