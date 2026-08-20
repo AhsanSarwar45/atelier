@@ -440,8 +440,39 @@ export function laterOf(mine: string, theirs: string | null | undefined): string
 }
 
 /**
+ * The clock the list runs on: when the person himself last spoke in a chat, or
+ * failing that when anything last happened in it.
+ *
+ * Every row has one. A chat he has never typed into, one whose record holds
+ * nothing of his within reach, and a row an older sidecar built before the
+ * second clock existed all fall back to `lastActiveAt` and behave exactly as
+ * the whole list behaved before (bw-zhs9).
+ *
+ * Read it in all three places the list uses a time — the order, the day over a
+ * row, and the time on the row itself — because they must be one clock. Order
+ * by one and head by another and a row lands in a day it is not dated for.
+ */
+export function whenHeSpoke(row: RestoreRow): string {
+  return row.lastSpokeAt ?? row.lastActiveAt;
+}
+
+/**
+ * The later of two answers to "when did he last speak", either of which may be
+ * silence.
+ *
+ * Silence is not a time and must not become one. A row whose clock is unknown
+ * falls back to when anything last happened in it, and that fallback moves; if
+ * silence were written down here as the moment we happened to ask, the row
+ * would freeze at that moment while the chat carried on (bw-zhs9).
+ */
+export function laterSpoke(ours: string | null | undefined, theirs: string | null | undefined): string | null {
+  if (!ours) return theirs ?? null;
+  return laterOf(ours, theirs);
+}
+
+/**
  * The order of the restore list: chats somebody is working in right now, then
- * everything else, each half newest first.
+ * everything else, each half by the last time he spoke in it.
  *
  * Date alone is the wrong order for this list. It answers "what happened most
  * recently", and the reader's question is "where is the work" — a chat that has
@@ -449,10 +480,18 @@ export function laterOf(mine: string, theirs: string | null | undefined): string
  * ago, and the list draws only a screenful, so the running one was not merely
  * lower down, it was not drawn at all.
  *
+ * "What happened last" is the wrong clock for the half below, too. Every reply,
+ * every line of thinking, every question about a tool moved a row, so three
+ * agents at work shuffled the list under the manager's cursor and the chat he
+ * was talking in slid away from him mid-sentence. The rows go by when HE last
+ * spoke instead: a chat whose agent has been writing for ten minutes sits
+ * exactly where it sat before the agent started, and only a message he sends
+ * carries a chat to the top (bw-zhs9).
+ *
  * Both sides sort: the sidecar when it builds the list, the screen again after
  * the live stream has added to it.
  */
 export function byWhatIsWorking(a: RestoreRow, b: RestoreRow): number {
   if (!!a.runningElsewhere !== !!b.runningElsewhere) return a.runningElsewhere ? -1 : 1;
-  return b.lastActiveAt.localeCompare(a.lastActiveAt);
+  return whenHeSpoke(b).localeCompare(whenHeSpoke(a));
 }

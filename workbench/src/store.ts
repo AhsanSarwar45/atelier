@@ -263,11 +263,21 @@ export class Store {
   /**
    * Carries `origin` as well: where a conversation began does not change
    * because the app later took it over, and the restore list says so.
+   *
+   * Ordered by the clock the list is ordered by: when the person last spoke,
+   * and when he never has, when anything last happened (bw-zhs9). The rows are
+   * sorted again once they are built — over facts this query cannot see, like
+   * who is working right now — and this is that same order arriving in it, so
+   * the wire and the screen never disagree about which chats are the newest.
    */
   listSessions(projectId?: string): (SessionSummary & { origin: 'app' | 'terminal' })[] {
     const rows = projectId
-      ? this.db.prepare('SELECT * FROM session WHERE project_id = ? ORDER BY last_active_at DESC').all(projectId)
-      : this.db.prepare('SELECT * FROM session ORDER BY last_active_at DESC').all();
+      ? this.db
+          .prepare(
+            'SELECT * FROM session WHERE project_id = ? ORDER BY COALESCE(last_spoke_at, last_active_at) DESC',
+          )
+          .all(projectId)
+      : this.db.prepare('SELECT * FROM session ORDER BY COALESCE(last_spoke_at, last_active_at) DESC').all();
     return (rows as Record<string, string>[]).map((r) => ({
       ...rowToSummary(r),
       origin: r.origin === 'terminal' ? 'terminal' : 'app',

@@ -43,6 +43,7 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
     activity: 'Starting',
     waitingFor: null,
     lastActiveAt: '2026-08-16T11:00:00.000Z',
+    lastSpokeAt: null,
     startedAt: '2026-08-16T11:00:00.000Z',
     beads: [],
     ...over,
@@ -147,5 +148,55 @@ describe('the working mark keeps up', () => {
   it('a chat this app started itself is left alone: the stream names conversations', () => {
     const merged = withLive([row({ externalId: null, runningElsewhere: true })], [], PROJECT, new Set<string>());
     expect(merged[0]!.runningElsewhere).toBe(true);
+  });
+});
+
+/**
+ * The list is ordered by when the person himself last spoke, and the live
+ * stream must not drag a row up it. The complaint: rows jumped around under
+ * the manager's cursor while agents worked, and the chat he was talking in
+ * slid away from him mid-sentence (bw-zhs9).
+ */
+describe('what the stream may move a row for', () => {
+  const spoke = '2026-08-16T09:00:00.000Z';
+
+  it('an agent working in a chat leaves the row where it was', () => {
+    const rows = [
+      row({ sessionId: 'talking', lastActiveAt: spoke, lastSpokeAt: spoke }),
+      row({ sessionId: 'busy', lastActiveAt: '2026-08-16T08:00:00.000Z', lastSpokeAt: '2026-08-16T08:00:00.000Z' }),
+    ];
+    // The agent in the lower chat has been writing for ten minutes: its own
+    // clock is now the newest thing on the list, and its spoken clock is not.
+    const working = session({
+      id: 'busy',
+      lastActiveAt: '2026-08-16T12:00:00.000Z',
+      lastSpokeAt: '2026-08-16T08:00:00.000Z',
+      state: 'streaming',
+    });
+    expect(withLive(rows, [working], PROJECT).map((r) => r.sessionId)).toEqual(['talking', 'busy']);
+  });
+
+  it('a message he sends carries its chat to the top', () => {
+    const rows = [
+      row({ sessionId: 'talking', lastActiveAt: spoke, lastSpokeAt: spoke }),
+      row({ sessionId: 'busy', lastActiveAt: '2026-08-16T08:00:00.000Z', lastSpokeAt: '2026-08-16T08:00:00.000Z' }),
+    ];
+    const answered = session({ id: 'busy', lastActiveAt: '2026-08-16T12:00:00.000Z', lastSpokeAt: '2026-08-16T12:00:00.000Z' });
+    expect(withLive(rows, [answered], PROJECT).map((r) => r.sessionId)).toEqual(['busy', 'talking']);
+  });
+
+  it('never backwards: the row keeps a later time read from the chat’s own record', () => {
+    // He typed in a terminal, which our driver never saw; the record did.
+    const known = row({ sessionId: 's1', lastSpokeAt: '2026-08-16T12:00:00.000Z' });
+    const stale = session({ id: 's1', lastSpokeAt: '2026-08-16T09:00:00.000Z' });
+    expect(withLive([known], [stale], PROJECT)[0]!.lastSpokeAt).toBe('2026-08-16T12:00:00.000Z');
+  });
+
+  it('a chat nobody has spoken in keeps no clock of its own, so it orders by what happened', () => {
+    const known = row({ sessionId: 's1', lastSpokeAt: null });
+    const quiet = session({ id: 's1', lastSpokeAt: null, lastActiveAt: '2026-08-16T12:00:00.000Z' });
+    const [merged] = withLive([known], [quiet], PROJECT);
+    expect(merged!.lastSpokeAt, 'silence was written down as a time').toBeNull();
+    expect(merged!.lastActiveAt).toBe('2026-08-16T12:00:00.000Z');
   });
 });

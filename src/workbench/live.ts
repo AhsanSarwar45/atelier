@@ -34,6 +34,15 @@ export interface LiveSession {
   /** What it is waiting for, when it is waiting on the owner. */
   waitingFor: string | null;
   lastActiveAt: string;
+  /**
+   * When the person himself last spoke in this chat, or `null` if nothing here
+   * has ever heard him.
+   *
+   * The clock the chat list is ordered by, so it moves on his own message and
+   * on nothing the agent then does — that is the whole of what keeps a row
+   * still while an agent writes in it (protocol.ts, whenHeSpoke; bw-zhs9).
+   */
+  lastSpokeAt: string | null;
   startedAt: string;
   /** Cards this chat has touched, as the machine recorded them. */
   beads: string[];
@@ -93,6 +102,7 @@ function fromSummary(s: SessionSummary & { activity: string; beads: string[] }):
     activity: s.activity,
     waitingFor: null,
     lastActiveAt: s.lastActiveAt,
+    lastSpokeAt: s.lastSpokeAt ?? null,
     startedAt: s.createdAt,
     beads: s.beads,
   };
@@ -166,14 +176,29 @@ function absorb(frame: WatchFrame): void {
         state: 'starting',
         activity: '',
         waitingFor: null,
-        lastActiveAt: e.at,
+        // A chat that has just come into being has not been spoken in yet; the
+        // message he sends it arrives on its own event, below.
+        lastSpokeAt: null,
         startedAt: e.at,
+        lastActiveAt: e.at,
         beads: [],
       },
     ];
   }
 
   switch (e.type) {
+    // The one event that moves the list's own clock. Everything else in this
+    // switch is the agent working — a reply, a question about a tool, a card it
+    // linked — and the point of the second clock is that none of it disturbs
+    // the order the manager is reading (bw-zhs9).
+    case 'message.started':
+      if (e.role !== 'user') return;
+      // A chat being read replays his old messages onto this stream, each one
+      // stamped with the moment it was read. A sleeping chat did nothing,
+      // whatever is coming down its log (movesTheClock, bw-4wcd.9).
+      if (!moves(e.sessionId)) return;
+      patch(e.sessionId, { lastSpokeAt: e.at, lastActiveAt: e.at });
+      break;
     case 'session.state':
       patch(e.sessionId, {
         state: e.state,

@@ -19,7 +19,7 @@ import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { useLiveSessions, useRunningElsewhere, type LiveSession } from '@/workbench/live';
-import { byWhatIsWorking, folderOf, laterOf, type RestoreRow } from '@/workbench/protocol';
+import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
 /**
@@ -67,7 +67,7 @@ export const WORKING_NOW = 'Working now';
 export function groupRows(rows: RestoreRow[], now = new Date()): { heading: string; rows: RestoreRow[] }[] {
   const groups: { heading: string; rows: RestoreRow[] }[] = [];
   for (const row of rows) {
-    const heading = row.runningElsewhere ? WORKING_NOW : dayHeading(row.lastActiveAt, now);
+    const heading = row.runningElsewhere ? WORKING_NOW : dayHeading(whenHeSpoke(row), now);
     const already = groups.find((g) => g.heading === heading);
     if (already) already.rows.push(row);
     else groups.push({ heading, rows: [row] });
@@ -119,6 +119,10 @@ export function withLive(
         // the row may already hold a later time from the tool's index — a chat
         // being worked on in a terminal moves that index and not our driver.
         lastActiveAt: laterOf(known.lastActiveAt, session.lastActiveAt),
+        // Never backwards here either, and for a second reason: the row may
+        // carry a time read out of the chat's own record, which is the only
+        // place a message he typed in a terminal is written down.
+        lastSpokeAt: laterSpoke(known.lastSpokeAt, session.lastSpokeAt),
         beads: session.beads.length ? session.beads : known.beads,
       };
       continue;
@@ -129,6 +133,7 @@ export function withLive(
       brand: session.brand,
       title: session.title,
       lastActiveAt: session.lastActiveAt,
+      lastSpokeAt: session.lastSpokeAt,
       state: session.state,
       origin: 'app',
       projectId: session.projectId,
@@ -308,7 +313,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       {row.title ?? 'Untitled chat'}
                     </button>
                     <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {clockTime(row.lastActiveAt)}
+                      {clockTime(whenHeSpoke(row))}
                     </span>
                   </div>
                   <div className="mt-1 flex items-center gap-1 overflow-hidden">

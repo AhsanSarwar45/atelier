@@ -12,8 +12,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { groupRows, WORKING_NOW } from '@/workbench/chat-sidebar';
-import { byWhatIsWorking, laterOf, type RestoreRow } from '@/workbench/protocol';
+import { clockTime, groupRows, WORKING_NOW } from '@/workbench/chat-sidebar';
+import { byWhatIsWorking, laterOf, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 
 function row(over: Partial<RestoreRow> = {}): RestoreRow {
   return {
@@ -127,5 +127,53 @@ describe('the blocks the list is drawn in', () => {
     const groups = groupRows(rows, now);
     expect(groups.map((g) => g.heading)).toEqual(['Today', 'Yesterday']);
     expect(groups[0].rows.map((r) => r.sessionId)).toEqual(['a', 'b']);
+  });
+});
+
+/**
+ * The clock the list runs on.
+ *
+ * The complaint: "the ordering of the chats must be the last time the USER
+ * sent a message, so they don't keep jumping around as agents message". Every
+ * reply, every line of thinking, every question about a tool moved a row, so
+ * three agents at work shuffled the list under the manager's cursor (bw-zhs9).
+ *
+ * One clock for all three uses of a time — the order, the day over a row, and
+ * the time on the row — because ordering by one and heading by another files a
+ * row under a day it is not dated for.
+ */
+describe('the clock the list runs on', () => {
+  const now = new Date(2026, 7, 19, 12, 0, 0);
+  const at = (day: number, hour: number) => new Date(2026, 7, day, hour, 0, 0).toISOString();
+
+  it('a chat whose agent is working sits where he left it, not at the top', () => {
+    const talking = row({ sessionId: 'talking', lastActiveAt: at(19, 9), lastSpokeAt: at(19, 9) });
+    // Ten minutes of an agent writing: the newest thing on the list, and not
+    // his own.
+    const busy = row({ sessionId: 'busy', lastActiveAt: at(19, 11), lastSpokeAt: at(19, 8) });
+    expect([busy, talking].sort(byWhatIsWorking).map((r) => r.sessionId)).toEqual(['talking', 'busy']);
+  });
+
+  it('and the message he sends carries it back to the top', () => {
+    const talking = row({ sessionId: 'talking', lastActiveAt: at(19, 9), lastSpokeAt: at(19, 9) });
+    const answered = row({ sessionId: 'busy', lastActiveAt: at(19, 11), lastSpokeAt: at(19, 11) });
+    expect([talking, answered].sort(byWhatIsWorking).map((r) => r.sessionId)).toEqual(['busy', 'talking']);
+  });
+
+  it('a chat nobody has spoken in orders by what happened in it, as the whole list used to', () => {
+    const older = row({ sessionId: 'older', lastActiveAt: at(19, 9), lastSpokeAt: null });
+    const newer = row({ sessionId: 'newer', lastActiveAt: at(19, 11) });
+    expect([older, newer].sort(byWhatIsWorking).map((r) => r.sessionId)).toEqual(['newer', 'older']);
+  });
+
+  it('the day over a row and the time on it are the same clock as the order', () => {
+    // He spoke yesterday; the agent answered this morning. The row belongs
+    // under yesterday, where its own order puts it.
+    const row_ = row({ sessionId: 'yesterday', lastActiveAt: at(19, 11), lastSpokeAt: at(18, 16) });
+    const today = row({ sessionId: 'today', lastActiveAt: at(19, 10), lastSpokeAt: at(19, 10) });
+    const groups = groupRows([today, row_].sort(byWhatIsWorking), now);
+    expect(groups.map((g) => g.heading)).toEqual(['Today', 'Yesterday']);
+    expect(groups[1]!.rows.map((r) => r.sessionId)).toEqual(['yesterday']);
+    expect(clockTime(whenHeSpoke(row_))).toBe(clockTime(at(18, 16)));
   });
 });
