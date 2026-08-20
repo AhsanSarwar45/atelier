@@ -47,19 +47,51 @@ const PROMPT =
   'In exactly two sentences, say what you are about to do. ' +
   'Then append a line saying HELLO to notes.txt using the Edit tool.';
 
-/** Reuses the project row a previous run left behind; its path is unique. */
+/**
+ * A fixture project, made or reused, and marked `isTest` so it stays off the
+ * owner's real dashboard and gets swept up by teardown rather than living on
+ * his machine like the seven that got left behind before this ran through a
+ * script that isolates its own settings DB.
+ */
 async function projectAt(request: APIRequestContext, path: string, name?: string): Promise<{ id: string }> {
-  const existing = (await (await request.get('/api/projects')).json()) as { id: string; path: string }[];
+  const existing = (await (await request.get('/api/projects?include_test=true')).json()) as {
+    id: string;
+    path: string;
+  }[];
   const found = existing.find((p) => p.path === path);
   if (found) return found;
   const created = await request.post('/api/projects', {
-    data: { name: name ?? `workbench-${path.split('-').pop()}`, path },
+    data: { name: name ?? `workbench-${path.split('-').pop()}`, path, isTest: true },
   });
   expect(created.status(), await created.text()).toBe(201);
   return (await created.json()) as { id: string };
 }
 
 test.describe('workbench', () => {
+  /**
+   * `useProject` and the dashboard both resolve a project by filtering the
+   * plain project list client-side (`src/hooks/use-project.ts`,
+   * `src/hooks/use-projects.ts`) — there is no per-ID lookup on the server. A
+   * fixture project is marked `isTest` so a plain `GET /api/projects` leaves it
+   * off the owner's real dashboard (bw-6m6w.9), but with nothing else said that
+   * same filtering makes it invisible to its OWN browser tab too: the project
+   * page never resolves a name and the board never mounts. So every request
+   * this page makes for the plain list is asked for test projects as well — a
+   * rewrite scoped to this page alone, so a real visitor typing the same URL
+   * still sees none of them.
+   */
+  test.beforeEach(async ({ page }) => {
+    await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      const url = new URL(route.request().url());
+      url.searchParams.set('include_test', 'true');
+      await route.continue({ url: url.toString() });
+    });
+  });
+
   test('live-turn streams an answer and asks permission', async ({ page, request }) => {
     // A real turn: model latency plus a tool round trip.
     test.setTimeout(300_000);
@@ -72,79 +104,83 @@ test.describe('workbench', () => {
 
     const project = await projectAt(request, FIXTURE);
 
-    await page.goto(`/project?id=${project.id}`);
-    await page.getByTestId('tab-chat').click();
+    try {
+      await page.goto(`/project?id=${project.id}`);
+      await page.getByTestId('tab-chat').click();
 
-    await page.getByTestId('new-chat').click();
-    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
+      await page.getByTestId('new-chat').click();
+      await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
 
-    await page.getByTestId('composer').fill(PROMPT);
-    await page.getByTestId('send-button').click();
+      await page.getByTestId('composer').fill(PROMPT);
+      await page.getByTestId('send-button').click();
 
-    // ---- the streamed answer, caught mid-flight -------------------------
-    const assistant = page.getByTestId('assistant-message').first();
-    await expect(assistant).toBeVisible({ timeout: 90_000 });
-    // Wait for real prose rather than the empty bubble the first delta creates.
-    await expect.poll(async () => (await assistant.textContent())?.length ?? 0, { timeout: 90_000 }).toBeGreaterThan(20);
+      // ---- the streamed answer, caught mid-flight -------------------------
+      const assistant = page.getByTestId('assistant-message').first();
+      await expect(assistant).toBeVisible({ timeout: 90_000 });
+      // Wait for real prose rather than the empty bubble the first delta creates.
+      await expect.poll(async () => (await assistant.textContent())?.length ?? 0, { timeout: 90_000 }).toBeGreaterThan(20);
 
-    const stop = page.getByTestId('stop-button');
-    await expect(stop).toBeVisible();
+      const stop = page.getByTestId('stop-button');
+      await expect(stop).toBeVisible();
 
-    const textA = (await assistant.textContent()) ?? '';
-    await page.screenshot({ path: join(SHOTS, 'live-turn-a.png'), fullPage: false });
+      const textA = (await assistant.textContent()) ?? '';
+      await page.screenshot({ path: join(SHOTS, 'live-turn-a.png'), fullPage: false });
 
-    await expect
-      .poll(async () => ((await assistant.textContent()) ?? '').length, { timeout: 60_000 })
-      .toBeGreaterThan(textA.length);
+      await expect
+        .poll(async () => ((await assistant.textContent()) ?? '').length, { timeout: 60_000 })
+        .toBeGreaterThan(textA.length);
 
-    const textB = (await assistant.textContent()) ?? '';
-    await page.screenshot({ path: join(SHOTS, 'live-turn-b.png'), fullPage: false });
+      const textB = (await assistant.textContent()) ?? '';
+      await page.screenshot({ path: join(SHOTS, 'live-turn-b.png'), fullPage: false });
 
-    expect(textB.length).toBeGreaterThan(textA.length);
-    expect(textB.startsWith(textA.slice(0, 20))).toBe(true);
-    await expect(stop).toBeVisible();
+      expect(textB.length).toBeGreaterThan(textA.length);
+      expect(textB.startsWith(textA.slice(0, 20))).toBe(true);
+      await expect(stop).toBeVisible();
 
-    // ---- the permission card --------------------------------------------
-    // Read-only tools are asked about too, so answer each card until the Edit
-    // one arrives; that is the card the screenshots must show. Cards are
-    // addressed by their own ask id, never by position — a second card
-    // appearing must not shift what the assertions point at.
-    let editAskId: string | null = null;
-    for (let i = 0; i < 8 && editAskId === null; i++) {
-      const open = page.locator('[data-testid="permission-card"][data-ask-state="open"]').first();
-      await expect(open).toBeVisible({ timeout: 120_000 });
-      const askId = await open.getAttribute('data-ask-id');
-      const toolName = await open.getAttribute('data-tool-name');
-      if (toolName && /^(Edit|Write|MultiEdit)$/.test(toolName)) {
-        editAskId = askId;
-        break;
+      // ---- the permission card --------------------------------------------
+      // Read-only tools are asked about too, so answer each card until the Edit
+      // one arrives; that is the card the screenshots must show. Cards are
+      // addressed by their own ask id, never by position — a second card
+      // appearing must not shift what the assertions point at.
+      let editAskId: string | null = null;
+      for (let i = 0; i < 8 && editAskId === null; i++) {
+        const open = page.locator('[data-testid="permission-card"][data-ask-state="open"]').first();
+        await expect(open).toBeVisible({ timeout: 120_000 });
+        const askId = await open.getAttribute('data-ask-id');
+        const toolName = await open.getAttribute('data-tool-name');
+        if (toolName && /^(Edit|Write|MultiEdit)$/.test(toolName)) {
+          editAskId = askId;
+          break;
+        }
+        await open.getByTestId('permission-allow_once').click();
+        await expect(page.locator(`[data-ask-id="${askId}"]`)).toHaveAttribute('data-ask-state', 'resolved', {
+          timeout: 60_000,
+        });
       }
-      await open.getByTestId('permission-allow_once').click();
-      await expect(page.locator(`[data-ask-id="${askId}"]`)).toHaveAttribute('data-ask-state', 'resolved', {
-        timeout: 60_000,
-      });
+      expect(editAskId, 'an Edit permission card should appear').not.toBeNull();
+
+      const editCard = page.locator(`[data-ask-id="${editAskId}"]`);
+      await expect(editCard.getByTestId('permission-allow_once')).toHaveText('Allow once');
+      await expect(editCard.getByTestId('permission-allow_always')).toHaveText('Allow always');
+      await expect(editCard.getByTestId('permission-deny')).toHaveText('Deny');
+      await editCard.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: join(SHOTS, 'permission-ask.png'), fullPage: false });
+
+      await editCard.getByTestId('permission-allow_once').click();
+
+      await expect(editCard).toHaveAttribute('data-ask-state', 'resolved', { timeout: 60_000 });
+      await expect(editCard.getByTestId('permission-resolved')).toHaveText('Allowed');
+
+      // The tool the card guarded must then actually run and finish.
+      const editRow = page.locator('[data-testid="tool-row"][data-tool-name="Edit"]').last();
+      await expect(editRow).toHaveAttribute('data-tool-status', 'ok', { timeout: 120_000 });
+
+      await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 180_000 });
+      await editRow.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: join(SHOTS, 'permission-allowed.png'), fullPage: false });
+    } finally {
+      await request.delete(`/api/projects/${project.id}`);
     }
-    expect(editAskId, 'an Edit permission card should appear').not.toBeNull();
-
-    const editCard = page.locator(`[data-ask-id="${editAskId}"]`);
-    await expect(editCard.getByTestId('permission-allow_once')).toHaveText('Allow once');
-    await expect(editCard.getByTestId('permission-allow_always')).toHaveText('Allow always');
-    await expect(editCard.getByTestId('permission-deny')).toHaveText('Deny');
-    await editCard.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(SHOTS, 'permission-ask.png'), fullPage: false });
-
-    await editCard.getByTestId('permission-allow_once').click();
-
-    await expect(editCard).toHaveAttribute('data-ask-state', 'resolved', { timeout: 60_000 });
-    await expect(editCard.getByTestId('permission-resolved')).toHaveText('Allowed');
-
-    // The tool the card guarded must then actually run and finish.
-    const editRow = page.locator('[data-testid="tool-row"][data-tool-name="Edit"]').last();
-    await expect(editRow).toHaveAttribute('data-tool-status', 'ok', { timeout: 120_000 });
-
-    await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 180_000 });
-    await editRow.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: join(SHOTS, 'permission-allowed.png'), fullPage: false });
   });
 
   /**
@@ -169,64 +205,68 @@ test.describe('workbench', () => {
 
     const project = await projectAt(request, FIXTURE);
 
-    const started = await request.post('/api/workbench/command', {
-      data: {
-        type: 'session.start',
-        projectId: project.id,
-        projectPath: FIXTURE,
-        brand: 'claude',
-        permissionMode: 'bypassPermissions',
-      },
-    });
-    expect(started.status(), await started.text()).toBe(200);
-    const session = (await started.json()) as { id: string };
+    try {
+      const started = await request.post('/api/workbench/command', {
+        data: {
+          type: 'session.start',
+          projectId: project.id,
+          projectPath: FIXTURE,
+          brand: 'claude',
+          permissionMode: 'bypassPermissions',
+        },
+      });
+      expect(started.status(), await started.text()).toBe(200);
+      const session = (await started.json()) as { id: string };
 
-    await page.goto(`/project?id=${project.id}&chat=${session.id}`);
-    await page.getByTestId('tab-chat').click();
-    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
+      await page.goto(`/project?id=${project.id}&chat=${session.id}`);
+      await page.getByTestId('tab-chat').click();
+      await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
 
-    await page.getByTestId('image-input').setInputFiles(picture);
-    await expect(page.getByTestId('attachment-tray')).toBeVisible();
+      await page.getByTestId('image-input').setInputFiles(picture);
+      await expect(page.getByTestId('attachment-tray')).toBeVisible();
 
-    await page.getByTestId('composer').fill(
-      [
-        'Do all of this in one go, using the tools named:',
-        '1. With TaskCreate, add three checklist items: "Read the notes", "Ask a helper about the docs", "Append HELLO".',
-        '2. TaskUpdate the first to in_progress, Read notes.txt, then TaskUpdate it to completed.',
-        '3. TaskUpdate the second to in_progress, then use the Task tool to launch a general-purpose subagent',
-        '   that reads wheels.md and brakes.md and reports what they say. Then TaskUpdate the second to completed.',
-        '4. TaskUpdate the third to in_progress, then use Edit on notes.txt to change the line "beta" to "BETA" and',
-        '   add a line "HELLO" after "gamma". Leave the third item in_progress — do NOT complete it.',
-        '5. Finish by saying, in one sentence, what colours the attached picture has.',
-      ].join('\n'),
-    );
-    await page.getByTestId('send-button').click();
+      await page.getByTestId('composer').fill(
+        [
+          'Do all of this in one go, using the tools named:',
+          '1. With TaskCreate, add three checklist items: "Read the notes", "Ask a helper about the docs", "Append HELLO".',
+          '2. TaskUpdate the first to in_progress, Read notes.txt, then TaskUpdate it to completed.',
+          '3. TaskUpdate the second to in_progress, then use the Task tool to launch a general-purpose subagent',
+          '   that reads wheels.md and brakes.md and reports what they say. Then TaskUpdate the second to completed.',
+          '4. TaskUpdate the third to in_progress, then use Edit on notes.txt to change the line "beta" to "BETA" and',
+          '   add a line "HELLO" after "gamma". Leave the third item in_progress — do NOT complete it.',
+          '5. Finish by saying, in one sentence, what colours the attached picture has.',
+        ].join('\n'),
+      );
+      await page.getByTestId('send-button').click();
 
-    // The turn is over when the agent reports its cost.
-    await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 480_000 });
+      // The turn is over when the agent reports its cost.
+      await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 480_000 });
 
-    // 1. tool rows
-    await expect(page.getByTestId('tool-row').first()).toBeVisible();
-    // 2. a side-by-side diff with a line marked as changed
-    const diff = page.getByTestId('diff-view').first();
-    await expect(diff).toBeVisible();
-    await expect(diff.locator('[data-diff-kind="changed"], [data-diff-kind="added"]').first()).toBeVisible();
-    // 3. the picture, in the user's own bubble
-    await expect(page.getByTestId('user-message').getByTestId('message-image').first()).toBeVisible();
-    // 4. the checklist, with one ticked and one running
-    await expect(page.getByTestId('todo-panel')).toBeVisible();
-    await expect(page.locator('[data-testid="todo-item"][data-todo-status="completed"]').first()).toBeVisible();
-    await expect(page.locator('[data-testid="todo-item"][data-todo-status="in_progress"]').first()).toBeVisible();
-    // 5. a subagent's own call, indented under the call that spawned it
-    await expect(page.getByTestId('subagent-tool-row').first()).toBeVisible();
-    // 6. cost, already asserted above
+      // 1. tool rows
+      await expect(page.getByTestId('tool-row').first()).toBeVisible();
+      // 2. a side-by-side diff with a line marked as changed
+      const diff = page.getByTestId('diff-view').first();
+      await expect(diff).toBeVisible();
+      await expect(diff.locator('[data-diff-kind="changed"], [data-diff-kind="added"]').first()).toBeVisible();
+      // 3. the picture, in the user's own bubble
+      await expect(page.getByTestId('user-message').getByTestId('message-image').first()).toBeVisible();
+      // 4. the checklist, with one ticked and one running
+      await expect(page.getByTestId('todo-panel')).toBeVisible();
+      await expect(page.locator('[data-testid="todo-item"][data-todo-status="completed"]').first()).toBeVisible();
+      await expect(page.locator('[data-testid="todo-item"][data-todo-status="in_progress"]').first()).toBeVisible();
+      // 5. a subagent's own call, indented under the call that spawned it
+      await expect(page.getByTestId('subagent-tool-row').first()).toBeVisible();
+      // 6. cost, already asserted above
 
-    // A tall window so one screenshot carries all six rather than a scrolled slice.
-    await page.setViewportSize({ width: 1440, height: 2400 });
-    await page.getByTestId('transcript').evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    await page.screenshot({ path: join(SHOTS, 'transcript.png'), fullPage: false });
+      // A tall window so one screenshot carries all six rather than a scrolled slice.
+      await page.setViewportSize({ width: 1440, height: 2400 });
+      await page.getByTestId('transcript').evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await page.screenshot({ path: join(SHOTS, 'transcript.png'), fullPage: false });
+    } finally {
+      await request.delete(`/api/projects/${project.id}`);
+    }
   });
 
   /**
@@ -250,100 +290,103 @@ test.describe('workbench', () => {
 
     const project = await projectAt(request, FIXTURE, 'workbench-links');
 
-    const started = await request.post('/api/workbench/command', {
-      data: {
-        type: 'session.start',
-        projectId: project.id,
-        projectPath: FIXTURE,
-        brand: 'claude',
-        permissionMode: 'bypassPermissions',
-      },
-    });
-    expect(started.status(), await started.text()).toBe(200);
-    const session = (await started.json()) as { id: string };
+    try {
+      const started = await request.post('/api/workbench/command', {
+        data: {
+          type: 'session.start',
+          projectId: project.id,
+          projectPath: FIXTURE,
+          brand: 'claude',
+          permissionMode: 'bypassPermissions',
+        },
+      });
+      expect(started.status(), await started.text()).toBe(200);
+      const session = (await started.json()) as { id: string };
 
-    await page.goto(`/project?id=${project.id}&chat=${session.id}`);
-    await page.getByTestId('tab-chat').click();
-    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
+      await page.goto(`/project?id=${project.id}&chat=${session.id}`);
+      await page.getByTestId('tab-chat').click();
+      await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 30_000 });
 
-    // Nothing here names the card to the app: the agent is told to run a bd
-    // command, and the app has to notice that by itself.
-    await page.getByTestId('composer').fill(
-      [
-        `Run this exact shell command and show me its output: bd note ${PARENT_CARD} "looked at by the workbench"`,
-        '',
-        `Then use the Edit tool on ${SPEC} to change its`,
-        '"eyebrow" line to say: Written from the chat that made it.',
-        '',
-        'Do nothing else.',
-      ].join('\n'),
-    );
-    await page.getByTestId('send-button').click();
+      // Nothing here names the card to the app: the agent is told to run a bd
+      // command, and the app has to notice that by itself.
+      await page.getByTestId('composer').fill(
+        [
+          `Run this exact shell command and show me its output: bd note ${PARENT_CARD} "looked at by the workbench"`,
+          '',
+          `Then use the Edit tool on ${SPEC} to change its`,
+          '"eyebrow" line to say: Written from the chat that made it.',
+          '',
+          'Do nothing else.',
+        ].join('\n'),
+      );
+      await page.getByTestId('send-button').click();
 
-    // ---- (a) the chip nobody typed --------------------------------------
-    const chip = page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`);
-    await expect(chip).toBeVisible({ timeout: 300_000 });
-    await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 300_000 });
-    await page.screenshot({ path: join(SHOTS, 'link-a.png'), fullPage: false });
+      // ---- (a) the chip nobody typed --------------------------------------
+      const chip = page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`);
+      await expect(chip).toBeVisible({ timeout: 300_000 });
+      await expect(page.getByTestId('cost-chip')).toBeVisible({ timeout: 300_000 });
+      await page.screenshot({ path: join(SHOTS, 'link-a.png'), fullPage: false });
 
-    // The board is the record, so the edge must be readable straight from bd.
-    const onBoard = await request.get(
-      `/api/workbench/links/bead/${PARENT_CARD}?path=${encodeURIComponent(FIXTURE)}`,
-    );
-    expect(onBoard.status()).toBe(200);
-    const chats = (await onBoard.json()) as { sessionId: string }[];
-    expect(chats.map((c) => c.sessionId)).toContain(session.id);
+      // The board is the record, so the edge must be readable straight from bd.
+      const onBoard = await request.get(
+        `/api/workbench/links/bead/${PARENT_CARD}?path=${encodeURIComponent(FIXTURE)}`,
+      );
+      expect(onBoard.status()).toBe(200);
+      const chats = (await onBoard.json()) as { sessionId: string }[];
+      expect(chats.map((c) => c.sessionId)).toContain(session.id);
 
-    // ---- (c) the report, in the stream then in its own place ------------
-    const inline = page.getByTestId('report-inline');
-    await expect(inline).toBeVisible({ timeout: 60_000 });
-    await inline.scrollIntoViewIfNeeded();
-    await page.setViewportSize({ width: 1440, height: 1400 });
-    await page.screenshot({ path: join(SHOTS, 'link-c-inline.png'), fullPage: false });
+      // ---- (c) the report, in the stream then in its own place ------------
+      const inline = page.getByTestId('report-inline');
+      await expect(inline).toBeVisible({ timeout: 60_000 });
+      await inline.scrollIntoViewIfNeeded();
+      await page.setViewportSize({ width: 1440, height: 1400 });
+      await page.screenshot({ path: join(SHOTS, 'link-c-inline.png'), fullPage: false });
 
-    // Clicking it goes to the report's own place under this project — not a
-    // modal, and not a page held in a frame (bw-7ks.21.15).
-    await inline.click();
-    await expect(page).toHaveURL(/tab=reports.*report=/);
-    await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
-    // And what is drawn really is the report, not the builder's refusal.
-    await expect(page.locator('text=Linked From The Chat').first()).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator('iframe')).toHaveCount(0);
-    await page.screenshot({ path: join(SHOTS, 'link-c.png'), fullPage: false });
+      // Clicking it goes to the report's own place under this project — not a
+      // modal, and not a page held in a frame (bw-7ks.21.15).
+      await inline.click();
+      await expect(page).toHaveURL(/tab=reports.*report=/);
+      await expect(page.getByTestId('report-part').first()).toBeVisible({ timeout: 90_000 });
+      // And what is drawn really is the report, not the builder's refusal.
+      await expect(page.locator('text=Linked From The Chat').first()).toBeVisible({ timeout: 60_000 });
+      await expect(page.locator('iframe')).toHaveCount(0);
+      await page.screenshot({ path: join(SHOTS, 'link-c.png'), fullPage: false });
 
-    // Back is the conversation he was reading, at the message that named it.
-    await page.goBack();
-    await expect(page.getByTestId('report-inline')).toBeVisible({ timeout: 30_000 });
+      // Back is the conversation he was reading, at the message that named it.
+      await page.goBack();
+      await expect(page.getByTestId('report-inline')).toBeVisible({ timeout: 30_000 });
 
-    // ---- (b) the card's own side of the join ----------------------------
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto(`/project?id=${project.id}`);
-    await page.getByTestId('tab-board').click();
-    await page.getByText('The card this chat works on').first().click();
+      // ---- (b) the card's own side of the join ----------------------------
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.goto(`/project?id=${project.id}`);
+      await page.getByTestId('tab-board').click();
+      await page.getByText('The card this chat works on').first().click();
 
-    const chatList = page.getByTestId('card-chats');
-    await expect(chatList).toBeVisible({ timeout: 60_000 });
-    const entry = chatList.locator(`[data-session-id="${session.id}"]`);
-    await expect(entry).toBeVisible();
-    await page.screenshot({ path: join(SHOTS, 'link-b.png'), fullPage: false });
+      const chatList = page.getByTestId('card-chats');
+      await expect(chatList).toBeVisible({ timeout: 60_000 });
+      const entry = chatList.locator(`[data-session-id="${session.id}"]`);
+      await expect(entry).toBeVisible();
+      await page.screenshot({ path: join(SHOTS, 'link-b.png'), fullPage: false });
 
-    // Clicking it lands back on that very chat.
-    await entry.click();
-    await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', session.id, {
-      timeout: 60_000,
-    });
-    await expect(
-      page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`),
-    ).toBeVisible({ timeout: 60_000 });
+      // Clicking it lands back on that very chat.
+      await entry.click();
+      await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', session.id, {
+        timeout: 60_000,
+      });
+      await expect(
+        page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`),
+      ).toBeVisible({ timeout: 60_000 });
 
-    // ---- and the chat list says the same thing, one line per chat -------
-    // The row knows which cards the chat worked on — it carries them rather than
-    // drawing them, so the rail stays two lines of words.
-    const row = page.locator(`[data-testid="restore-row"][data-row-key="${session.id}"]`);
-    await expect(row).toHaveAttribute('data-beads', new RegExp(`\\b${PARENT_CARD}\\b`), { timeout: 60_000 });
-
-    // The run's report is filed among the real ones, so it is taken away again.
-    rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });
+      // ---- and the chat list says the same thing, one line per chat -------
+      // The row knows which cards the chat worked on — it carries them rather than
+      // drawing them, so the rail stays two lines of words.
+      const row = page.locator(`[data-testid="restore-row"][data-row-key="${session.id}"]`);
+      await expect(row).toHaveAttribute('data-beads', new RegExp(`\\b${PARENT_CARD}\\b`), { timeout: 60_000 });
+    } finally {
+      // The run's report is filed among the real ones, so it is taken away again.
+      rmSync(reportsHome(REPORT_PROJECT), { recursive: true, force: true });
+      await request.delete(`/api/projects/${project.id}`);
+    }
   });
 
   /**
@@ -388,86 +431,90 @@ test.describe('workbench', () => {
 
     const project = await projectAt(request, FIXTURE);
 
-    // A chat of the app's own, so the list has both kinds in it.
-    const started = await request.post('/api/workbench/command', {
-      data: {
-        type: 'session.start',
-        projectId: project.id,
-        projectPath: FIXTURE,
-        brand: 'claude',
-        permissionMode: 'bypassPermissions',
-      },
-    });
-    const mine = (await started.json()) as { id: string };
-    await request.post('/api/workbench/command', {
-      data: { type: 'prompt.send', sessionId: mine.id, text: 'Reply with exactly: FIRST' },
-    });
-    // Not merely titled: waited on until the agent has said who it is. A chat
-    // killed before that has no conversation to come back to, and "yesterday's
-    // sessions" means ones that really happened.
-    await expect
-      .poll(
-        async () => {
-          const rows = (await (await request.get(`/api/workbench/restore?project=${project.id}&path=${encodeURIComponent(FIXTURE)}`)).json()) as {
-            sessionId: string | null;
-            externalId: string | null;
-            title: string | null;
-          }[];
-          const row = rows.find((r) => r.sessionId === mine.id);
-          return Boolean(row?.title && row.externalId);
+    try {
+      // A chat of the app's own, so the list has both kinds in it.
+      const started = await request.post('/api/workbench/command', {
+        data: {
+          type: 'session.start',
+          projectId: project.id,
+          projectPath: FIXTURE,
+          brand: 'claude',
+          permissionMode: 'bypassPermissions',
         },
-        { timeout: 300_000 },
-      )
-      .toBe(true);
+      });
+      const mine = (await started.json()) as { id: string };
+      await request.post('/api/workbench/command', {
+        data: { type: 'prompt.send', sessionId: mine.id, text: 'Reply with exactly: FIRST' },
+      });
+      // Not merely titled: waited on until the agent has said who it is. A chat
+      // killed before that has no conversation to come back to, and "yesterday's
+      // sessions" means ones that really happened.
+      await expect
+        .poll(
+          async () => {
+            const rows = (await (await request.get(`/api/workbench/restore?project=${project.id}&path=${encodeURIComponent(FIXTURE)}`)).json()) as {
+              sessionId: string | null;
+              externalId: string | null;
+              title: string | null;
+            }[];
+            const row = rows.find((r) => r.sessionId === mine.id);
+            return Boolean(row?.title && row.externalId);
+          },
+          { timeout: 300_000 },
+        )
+        .toBe(true);
 
-    // ---- the restart the whole item is about ----------------------------
-    await restartInstance({
-      binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'beads-server'),
-      serverPort: Number(process.env.BEADS_WEB_PORT ?? 3018),
-      sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT ?? 3019),
-      env: process.env,
-      healthUrl: `${process.env.BEADS_E2E_URL}/api/workbench/health`,
-      logFile: join(process.env.WORKBENCH_E2E_RUN ?? join(__dirname, '..', '.e2e-run'), 'server.log'),
-    });
+      // ---- the restart the whole item is about ----------------------------
+      await restartInstance({
+        binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'beads-server'),
+        serverPort: Number(process.env.BEADS_WEB_PORT ?? 3018),
+        sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT ?? 3019),
+        env: process.env,
+        healthUrl: `${process.env.BEADS_E2E_URL}/api/workbench/health`,
+        logFile: join(process.env.WORKBENCH_E2E_RUN ?? join(__dirname, '..', '.e2e-run'), 'server.log'),
+      });
 
-    await page.goto(`/project?id=${project.id}&tab=chat`);
-    await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: 60_000 });
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: 60_000 });
 
-    // Both kinds are listed, and the day headings are real.
-    // By the conversation's own id, not by the row key: taking a terminal
-    // session over gives it one of our session ids, and it is still the row
-    // the owner clicked.
-    const terminalRow = page.locator(`[data-testid="restore-row"][data-external-id="${terminalId}"]`);
-    await expect(terminalRow).toBeVisible({ timeout: 60_000 });
-    await expect(terminalRow).toHaveAttribute('data-origin', 'terminal');
-    await expect(page.getByTestId('day-heading').filter({ hasText: 'Yesterday' })).toBeVisible();
-    await expect(page.locator('[data-testid="restore-row"][data-origin="app"]').first()).toBeVisible();
-    // Nothing woke itself up over the restart.
-    await expect(terminalRow).toHaveAttribute('data-state', 'dormant');
+      // Both kinds are listed, and the day headings are real.
+      // By the conversation's own id, not by the row key: taking a terminal
+      // session over gives it one of our session ids, and it is still the row
+      // the owner clicked.
+      const terminalRow = page.locator(`[data-testid="restore-row"][data-external-id="${terminalId}"]`);
+      await expect(terminalRow).toBeVisible({ timeout: 60_000 });
+      await expect(terminalRow).toHaveAttribute('data-origin', 'terminal');
+      await expect(page.getByTestId('day-heading').filter({ hasText: 'Yesterday' })).toBeVisible();
+      await expect(page.locator('[data-testid="restore-row"][data-origin="app"]').first()).toBeVisible();
+      // Nothing woke itself up over the restart.
+      await expect(terminalRow).toHaveAttribute('data-state', 'dormant');
 
-    // The row says what the conversation is: the name Claude holds for it,
-    // which for a session with no title of its own is what was asked of it —
-    // measured, and the same string this test typed into `claude -p`.
-    await expect(terminalRow.getByTestId('row-name')).toHaveText('Reply with exactly: READY');
-    // And where it ran, by the folder's own name.
-    await expect(terminalRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
-    await page.screenshot({ path: join(SHOTS, 'restore.png'), fullPage: false });
+      // The row says what the conversation is: the name Claude holds for it,
+      // which for a session with no title of its own is what was asked of it —
+      // measured, and the same string this test typed into `claude -p`.
+      await expect(terminalRow.getByTestId('row-name')).toHaveText('Reply with exactly: READY');
+      // And where it ran, by the folder's own name.
+      await expect(terminalRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
+      await page.screenshot({ path: join(SHOTS, 'restore.png'), fullPage: false });
 
-    // ---- one click brings the terminal session back ---------------------
-    await terminalRow.getByTestId('resume-row').click();
-    await expect(page.getByTestId('restore-error')).toHaveCount(0);
-    await expect(terminalRow.getByTestId('row-pill')).toHaveText('ready', { timeout: 180_000 });
-    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
+      // ---- one click brings the terminal session back ---------------------
+      await terminalRow.getByTestId('resume-row').click();
+      await expect(page.getByTestId('restore-error')).toHaveCount(0);
+      await expect(terminalRow.getByTestId('row-pill')).toHaveText('ready', { timeout: 180_000 });
+      await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
 
-    await page.getByTestId('composer').fill('Reply with exactly: RESUMED');
-    await page.getByTestId('send-button').click();
-    const answer = page.getByTestId('assistant-message').last();
-    await expect(answer).toContainText('RESUMED', { timeout: 300_000 });
-    await page.screenshot({ path: join(SHOTS, 'restore-resumed.png'), fullPage: false });
+      await page.getByTestId('composer').fill('Reply with exactly: RESUMED');
+      await page.getByTestId('send-button').click();
+      const answer = page.getByTestId('assistant-message').last();
+      await expect(answer).toContainText('RESUMED', { timeout: 300_000 });
+      await page.screenshot({ path: join(SHOTS, 'restore-resumed.png'), fullPage: false });
 
-    // ---- and the app's own chat is placed the same way ------------------
-    const appRow = page.locator('[data-testid="restore-row"][data-origin="app"]').first();
-    await expect(appRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
+      // ---- and the app's own chat is placed the same way ------------------
+      const appRow = page.locator('[data-testid="restore-row"][data-origin="app"]').first();
+      await expect(appRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
+    } finally {
+      await request.delete(`/api/projects/${project.id}`);
+    }
   });
 
   /**
@@ -483,59 +530,69 @@ test.describe('workbench', () => {
     mkdirSync(SHOTS, { recursive: true });
 
     const started: { id: string; projectId: string }[] = [];
-    for (const name of ['tray-a', 'tray-b']) {
-      const dir = fixtureFor(name);
-      rmSync(dir, { recursive: true, force: true });
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'notes.txt'), 'first line\n');
-      const project = await projectAt(request, dir);
-      // Permission mode 'default' on purpose: the edit in PROMPT then has to
-      // ask, which is what the tray is a list of.
-      const res = await request.post('/api/workbench/command', {
-        data: { type: 'session.start', projectId: project.id, projectPath: dir, brand: 'claude' },
+    // Tracked apart from `started`, which is keyed on the chat session and
+    // read all through the test — this is only for the cleanup at the end.
+    const projectIds: string[] = [];
+    try {
+      for (const name of ['tray-a', 'tray-b']) {
+        const dir = fixtureFor(name);
+        rmSync(dir, { recursive: true, force: true });
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'notes.txt'), 'first line\n');
+        const project = await projectAt(request, dir);
+        projectIds.push(project.id);
+        // Permission mode 'default' on purpose: the edit in PROMPT then has to
+        // ask, which is what the tray is a list of.
+        const res = await request.post('/api/workbench/command', {
+          data: { type: 'session.start', projectId: project.id, projectPath: dir, brand: 'claude' },
+        });
+        const session = (await res.json()) as { id: string };
+        started.push({ id: session.id, projectId: project.id });
+        await request.post('/api/workbench/command', {
+          data: { type: 'prompt.send', sessionId: session.id, text: PROMPT },
+        });
+      }
+
+      // The project list — neither project's own screen.
+      await page.goto('/');
+
+      // While the two turns run, the strip names them both.
+      const strip = page.getByTestId('glance-strip');
+      await expect(strip).toBeVisible({ timeout: 120_000 });
+      await expect
+        .poll(async () => page.getByTestId('glance-row').count(), { timeout: 120_000 })
+        .toBeGreaterThanOrEqual(2);
+      await expect(page.getByTestId('glance-activity').first()).not.toBeEmpty();
+      await page.screenshot({ path: join(SHOTS, 'glance.png'), fullPage: false });
+
+      // Both turns reach their edit and stop for permission: the badge reads two.
+      const badge = page.getByTestId('tray-badge');
+      await expect(badge).toHaveAttribute('data-count', '2', { timeout: 300_000 });
+
+      await badge.click();
+      const rows = page.getByTestId('tray-row');
+      await expect(rows).toHaveCount(2);
+      for (const s of started) {
+        const row = page.locator(`[data-testid="tray-row"][data-session-id="${s.id}"]`);
+        await expect(row.getByTestId('tray-project')).not.toBeEmpty();
+        await expect(row.getByTestId('tray-waiting-for')).toContainText(/\S/);
+      }
+      await page.screenshot({ path: join(SHOTS, 'tray.png'), fullPage: false });
+
+      // A row lands on its own chat, with the ask on screen.
+      await page.locator(`[data-testid="tray-row"][data-session-id="${started[0]!.id}"]`).click();
+      await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', started[0]!.id, {
+        timeout: 60_000,
       });
-      const session = (await res.json()) as { id: string };
-      started.push({ id: session.id, projectId: project.id });
-      await request.post('/api/workbench/command', {
-        data: { type: 'prompt.send', sessionId: session.id, text: PROMPT },
+      await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]').first()).toBeVisible({
+        timeout: 60_000,
       });
+      await page.screenshot({ path: join(SHOTS, 'tray-landed.png'), fullPage: false });
+    } finally {
+      for (const id of projectIds) {
+        await request.delete(`/api/projects/${id}`);
+      }
     }
-
-    // The project list — neither project's own screen.
-    await page.goto('/');
-
-    // While the two turns run, the strip names them both.
-    const strip = page.getByTestId('glance-strip');
-    await expect(strip).toBeVisible({ timeout: 120_000 });
-    await expect
-      .poll(async () => page.getByTestId('glance-row').count(), { timeout: 120_000 })
-      .toBeGreaterThanOrEqual(2);
-    await expect(page.getByTestId('glance-activity').first()).not.toBeEmpty();
-    await page.screenshot({ path: join(SHOTS, 'glance.png'), fullPage: false });
-
-    // Both turns reach their edit and stop for permission: the badge reads two.
-    const badge = page.getByTestId('tray-badge');
-    await expect(badge).toHaveAttribute('data-count', '2', { timeout: 300_000 });
-
-    await badge.click();
-    const rows = page.getByTestId('tray-row');
-    await expect(rows).toHaveCount(2);
-    for (const s of started) {
-      const row = page.locator(`[data-testid="tray-row"][data-session-id="${s.id}"]`);
-      await expect(row.getByTestId('tray-project')).not.toBeEmpty();
-      await expect(row.getByTestId('tray-waiting-for')).toContainText(/\S/);
-    }
-    await page.screenshot({ path: join(SHOTS, 'tray.png'), fullPage: false });
-
-    // A row lands on its own chat, with the ask on screen.
-    await page.locator(`[data-testid="tray-row"][data-session-id="${started[0]!.id}"]`).click();
-    await expect(page.getByTestId('chat-tab')).toHaveAttribute('data-session-id', started[0]!.id, {
-      timeout: 60_000,
-    });
-    await expect(page.locator('[data-testid="permission-card"][data-ask-state="open"]').first()).toBeVisible({
-      timeout: 60_000,
-    });
-    await page.screenshot({ path: join(SHOTS, 'tray-landed.png'), fullPage: false });
   });
 
   /**
@@ -555,55 +612,59 @@ test.describe('workbench', () => {
     mkdirSync(SHOTS, { recursive: true });
 
     const project = await projectAt(request, FIXTURE);
-    await page.goto(`/project?id=${project.id}`);
+    try {
+      await page.goto(`/project?id=${project.id}`);
 
-    // Open the card, and start a chat from it.
-    await page.locator(`[data-bead-id="${PARENT_CARD}"]`).first().click();
-    const start = page.getByTestId('start-chat-from-card');
-    await expect(start).toBeVisible({ timeout: 60_000 });
-    await start.click();
+      // Open the card, and start a chat from it.
+      await page.locator(`[data-bead-id="${PARENT_CARD}"]`).first().click();
+      const start = page.getByTestId('start-chat-from-card');
+      await expect(start).toBeVisible({ timeout: 60_000 });
+      await start.click();
 
-    // It lands on a chat that already quotes the card, with its chip in the header.
-    const tab = page.getByTestId('chat-tab');
-    await expect(tab).toBeVisible({ timeout: 120_000 });
-    const opened = await tab.getAttribute('data-session-id');
-    expect(opened, 'the button opened a chat').toBeTruthy();
-    await expect(page.getByTestId('user-message').first()).toContainText('The card this chat works on', {
-      timeout: 60_000,
-    });
-    await expect(page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`)).toBeVisible({
-      timeout: 60_000,
-    });
-    await page.screenshot({ path: join(SHOTS, 'from-card.png'), fullPage: false });
+      // It lands on a chat that already quotes the card, with its chip in the header.
+      const tab = page.getByTestId('chat-tab');
+      await expect(tab).toBeVisible({ timeout: 120_000 });
+      const opened = await tab.getAttribute('data-session-id');
+      expect(opened, 'the button opened a chat').toBeTruthy();
+      await expect(page.getByTestId('user-message').first()).toContainText('The card this chat works on', {
+        timeout: 60_000,
+      });
+      await expect(page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`)).toBeVisible({
+        timeout: 60_000,
+      });
+      await page.screenshot({ path: join(SHOTS, 'from-card.png'), fullPage: false });
 
-    // Back on the board, that card is the one showing a live line.
-    await page.getByTestId('tab-board').click();
-    const liveLine = page.locator(`[data-testid="card-live-chat"][data-bead-id="${PARENT_CARD}"]`);
-    await expect(liveLine).toBeVisible({ timeout: 120_000 });
-    await expect(liveLine).toHaveAttribute('data-session-id', opened!);
-    await expect(page.getByTestId('card-live-chat')).toHaveCount(1);
-    await page.screenshot({ path: join(SHOTS, 'board-dot.png'), fullPage: false });
+      // Back on the board, that card is the one showing a live line.
+      await page.getByTestId('tab-board').click();
+      const liveLine = page.locator(`[data-testid="card-live-chat"][data-bead-id="${PARENT_CARD}"]`);
+      await expect(liveLine).toBeVisible({ timeout: 120_000 });
+      await expect(liveLine).toHaveAttribute('data-session-id', opened!);
+      await expect(page.getByTestId('card-live-chat')).toHaveCount(1);
+      await page.screenshot({ path: join(SHOTS, 'board-dot.png'), fullPage: false });
 
-    // And the same chat on a phone: the list is a drawer, the composer is in reach.
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`/project?id=${project.id}&tab=chat&chat=${opened}`);
-    await expect(page.getByTestId('composer')).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId('chat-rail')).toHaveAttribute('data-open', 'false');
+      // And the same chat on a phone: the list is a drawer, the composer is in reach.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`/project?id=${project.id}&tab=chat&chat=${opened}`);
+      await expect(page.getByTestId('composer')).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('chat-rail')).toHaveAttribute('data-open', 'false');
 
-    const composer = await page.getByTestId('composer').boundingBox();
-    expect(composer, 'the composer is on screen').toBeTruthy();
-    expect(composer!.y + composer!.height, 'the composer is within the screen').toBeLessThanOrEqual(844);
+      const composer = await page.getByTestId('composer').boundingBox();
+      expect(composer, 'the composer is on screen').toBeTruthy();
+      expect(composer!.y + composer!.height, 'the composer is within the screen').toBeLessThanOrEqual(844);
 
-    const overflows = await page.evaluate(
-      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    );
-    expect(overflows, 'nothing pushes the page sideways').toBe(false);
-    await page.screenshot({ path: join(SHOTS, 'phone.png'), fullPage: false });
+      const overflows = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      expect(overflows, 'nothing pushes the page sideways').toBe(false);
+      await page.screenshot({ path: join(SHOTS, 'phone.png'), fullPage: false });
 
-    // The drawer opens over the conversation rather than beside it.
-    await page.getByTestId('chat-rail-toggle').click();
-    await expect(page.getByTestId('chat-rail')).toHaveAttribute('data-open', 'true');
-    await page.screenshot({ path: join(SHOTS, 'phone-drawer.png'), fullPage: false });
+      // The drawer opens over the conversation rather than beside it.
+      await page.getByTestId('chat-rail-toggle').click();
+      await expect(page.getByTestId('chat-rail')).toHaveAttribute('data-open', 'true');
+      await page.screenshot({ path: join(SHOTS, 'phone-drawer.png'), fullPage: false });
+    } finally {
+      await request.delete(`/api/projects/${project.id}`);
+    }
   });
 
   /**
@@ -619,70 +680,80 @@ test.describe('workbench', () => {
 
     const WORD = 'PERIWINKLE';
     const started: { id: string; projectId: string; name: string }[] = [];
-    for (const name of ['spend-a', 'spend-b']) {
-      const dir = fixtureFor(name);
-      rmSync(dir, { recursive: true, force: true });
-      mkdirSync(dir, { recursive: true });
-      const project = await projectAt(request, dir);
-      const res = await request.post('/api/workbench/command', {
-        data: {
-          type: 'session.start',
-          projectId: project.id,
-          projectPath: dir,
-          brand: 'claude',
-          permissionMode: 'bypassPermissions',
-        },
-      });
-      const session = (await res.json()) as { id: string };
-      started.push({ id: session.id, projectId: project.id, name });
-      await request.post('/api/workbench/command', {
-        data: {
-          type: 'prompt.send',
-          sessionId: session.id,
-          text: `Reply with exactly this sentence and nothing else: The word is ${WORD} in ${name}.`,
-        },
-      });
+    // Tracked apart from `started`, which is keyed on the chat session and
+    // read all through the test — this is only for the cleanup at the end.
+    const projectIds: string[] = [];
+    try {
+      for (const name of ['spend-a', 'spend-b']) {
+        const dir = fixtureFor(name);
+        rmSync(dir, { recursive: true, force: true });
+        mkdirSync(dir, { recursive: true });
+        const project = await projectAt(request, dir);
+        projectIds.push(project.id);
+        const res = await request.post('/api/workbench/command', {
+          data: {
+            type: 'session.start',
+            projectId: project.id,
+            projectPath: dir,
+            brand: 'claude',
+            permissionMode: 'bypassPermissions',
+          },
+        });
+        const session = (await res.json()) as { id: string };
+        started.push({ id: session.id, projectId: project.id, name });
+        await request.post('/api/workbench/command', {
+          data: {
+            type: 'prompt.send',
+            sessionId: session.id,
+            text: `Reply with exactly this sentence and nothing else: The word is ${WORD} in ${name}.`,
+          },
+        });
+      }
+
+      // Both turns have to finish: the cost only arrives when the turn is done.
+      await expect
+        .poll(
+          async () => {
+            const rows = (await (await request.get('/api/workbench/spend')).json()) as { usd: number }[];
+            return rows.filter((r) => r.usd > 0).length;
+          },
+          { timeout: 300_000 },
+        )
+        .toBeGreaterThanOrEqual(2);
+
+      // The two ways in live in the chat tab's own toolbar (docs/designs/app-shell.md §1.1).
+      await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
+      await page.getByTestId('open-search').click();
+      await page.getByTestId('search-input').fill(WORD);
+
+      // Matches from two different chats, each with the word marked.
+      await expect.poll(async () => page.getByTestId('search-hit').count(), { timeout: 60_000 })
+        .toBeGreaterThanOrEqual(2);
+      const ids = await page.getByTestId('search-hit').evaluateAll(
+        (nodes) => nodes.map((n) => n.getAttribute('data-session-id')),
+      );
+      expect(new Set(ids).size, 'the matches come from more than one chat').toBeGreaterThanOrEqual(2);
+      await expect(page.getByTestId('search-mark').first()).toHaveText(WORD);
+      await expect(page.getByTestId('search-project').first()).not.toBeEmpty();
+      await page.screenshot({ path: join(SHOTS, 'search.png'), fullPage: false });
+
+      // A hit lands on the chat that said it.
+      await page.getByTestId('search-hit').first().click();
+      await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
+
+      // And the spend view: two charts, the money one with a bar in it.
+      await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
+      await page.getByTestId('open-spend').click();
+      await expect(page.getByTestId('spend-money')).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('spend-tokens')).toBeVisible();
+      await expect
+        .poll(async () => Number(await page.getByTestId('spend-money').getAttribute('data-days')), { timeout: 60_000 })
+        .toBeGreaterThanOrEqual(1);
+      await page.screenshot({ path: join(SHOTS, 'spend.png'), fullPage: false });
+    } finally {
+      for (const id of projectIds) {
+        await request.delete(`/api/projects/${id}`);
+      }
     }
-
-    // Both turns have to finish: the cost only arrives when the turn is done.
-    await expect
-      .poll(
-        async () => {
-          const rows = (await (await request.get('/api/workbench/spend')).json()) as { usd: number }[];
-          return rows.filter((r) => r.usd > 0).length;
-        },
-        { timeout: 300_000 },
-      )
-      .toBeGreaterThanOrEqual(2);
-
-    // The two ways in live in the chat tab's own toolbar (docs/designs/app-shell.md §1.1).
-    await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
-    await page.getByTestId('open-search').click();
-    await page.getByTestId('search-input').fill(WORD);
-
-    // Matches from two different chats, each with the word marked.
-    await expect.poll(async () => page.getByTestId('search-hit').count(), { timeout: 60_000 })
-      .toBeGreaterThanOrEqual(2);
-    const ids = await page.getByTestId('search-hit').evaluateAll(
-      (nodes) => nodes.map((n) => n.getAttribute('data-session-id')),
-    );
-    expect(new Set(ids).size, 'the matches come from more than one chat').toBeGreaterThanOrEqual(2);
-    await expect(page.getByTestId('search-mark').first()).toHaveText(WORD);
-    await expect(page.getByTestId('search-project').first()).not.toBeEmpty();
-    await page.screenshot({ path: join(SHOTS, 'search.png'), fullPage: false });
-
-    // A hit lands on the chat that said it.
-    await page.getByTestId('search-hit').first().click();
-    await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
-
-    // And the spend view: two charts, the money one with a bar in it.
-    await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
-    await page.getByTestId('open-spend').click();
-    await expect(page.getByTestId('spend-money')).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId('spend-tokens')).toBeVisible();
-    await expect
-      .poll(async () => Number(await page.getByTestId('spend-money').getAttribute('data-days')), { timeout: 60_000 })
-      .toBeGreaterThanOrEqual(1);
-    await page.screenshot({ path: join(SHOTS, 'spend.png'), fullPage: false });
   });
 });

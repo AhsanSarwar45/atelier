@@ -37,11 +37,20 @@ function reportsHome(): string {
   return join(data, 'kanban-ui', 'reports', PROJECT_NAME);
 }
 
+/**
+ * A fixture project, made or reused, and marked `isTest` so it stays off the
+ * owner's real dashboard and gets swept up by teardown rather than living on
+ * his machine like the seven that got left behind before this ran through a
+ * script that isolates its own settings DB.
+ */
 async function projectAt(request: APIRequestContext, path: string): Promise<{ id: string }> {
-  const existing = (await (await request.get('/api/projects')).json()) as { id: string; path: string }[];
+  const existing = (await (await request.get('/api/projects?include_test=true')).json()) as {
+    id: string;
+    path: string;
+  }[];
   const found = existing.find((p) => p.path === path);
   if (found) return found;
-  const created = await request.post('/api/projects', { data: { name: PROJECT_NAME, path } });
+  const created = await request.post('/api/projects', { data: { name: PROJECT_NAME, path, isTest: true } });
   expect(created.status(), await created.text()).toBe(201);
   return (await created.json()) as { id: string };
 }
@@ -57,6 +66,29 @@ function ourCard(page: Page) {
 }
 
 test.describe('a report waiting on an answer', () => {
+  /**
+   * `useProjects` and `useProject` both resolve off the plain project list
+   * fetched client-side (`src/hooks/use-projects.ts`, `src/hooks/use-project.ts`)
+   * — there is no per-ID lookup on the server. A fixture project is marked
+   * `isTest` so a plain `GET /api/projects` leaves it off the owner's real
+   * dashboard (bw-6m6w.9), but that same filtering would make it invisible to
+   * its OWN browser tab too — `ourCard(page)` would never find a row to assert
+   * against. So every request this page makes for the plain list is asked for
+   * test projects as well — a rewrite scoped to this page alone, so a real
+   * visitor typing the same URL still sees none of them.
+   */
+  test.beforeEach(async ({ page }) => {
+    await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      const url = new URL(route.request().url());
+      url.searchParams.set('include_test', 'true');
+      await route.continue({ url: url.toString() });
+    });
+  });
+
   test('is counted for the project until the card its question holds up closes', async ({ page, request }) => {
     test.setTimeout(240_000);
 

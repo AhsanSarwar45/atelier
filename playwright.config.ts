@@ -10,6 +10,9 @@ export default defineConfig({
   snapshotDir: './tests/snapshots',
   fullyParallel: true,
   retries: 0,
+  // Every fixture project deletes itself in its own test's `finally`; this is
+  // the sweep for whatever a killed run left behind (bw-6m6w.10).
+  globalTeardown: './tests/e2e/global-teardown.ts',
   use: {
     // Overridable so a worktree can drive its own instance without touching
     // the one serving the owner's board on 3008.
