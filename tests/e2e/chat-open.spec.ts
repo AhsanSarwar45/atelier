@@ -32,6 +32,58 @@ async function openChatTab(page: Page, id: string): Promise<void> {
   await page.waitForTimeout(2000);
 }
 
+/**
+ * The chats the list is offering, named by the id each will open as.
+ *
+ * A row is picked by name and not by where it sits: the list is ordered by who
+ * spoke last, and a row that has never been opened does not carry its id yet,
+ * so those are left out rather than clicked blind.
+ */
+function chatKeys(page: Page, among = '[data-testid="restore-row"]'): Promise<string[]> {
+  return page
+    .locator(among)
+    .evaluateAll((els) =>
+      els
+        .map((e) => e.getAttribute('data-row-key'))
+        .filter((k): k is string => !!k && !k.startsWith('ext:')),
+    );
+}
+
+/**
+ * Opens one chat and waits for THAT chat to be the one drawn.
+ *
+ * Waiting for the pane itself proves nothing after the first chat: it is
+ * already there, still holding the last conversation, while this one is being
+ * read off disk. Every walk in this file used to read the chat it had just
+ * left, several times over (bw-khe.5).
+ */
+async function openChat(page: Page, key: string): Promise<void> {
+  await page.locator(`[data-testid="restore-row"][data-row-key="${key}"]`).getByTestId('row-name').click();
+  await page.locator(`[data-testid="chat-tab"][data-session-id="${key}"]`).waitFor({ timeout: WAY_IN_MS });
+}
+
+/**
+ * Waits until the pane has stopped filling.
+ *
+ * A conversation arrives in one frame and is then drawn a piece at a time, so
+ * the first message appearing means the drawing has STARTED. A check that reads
+ * there sees two rows of a chat that has eighty, and its answer depends on how
+ * busy the machine was — which is what made 'a written-out address is a link'
+ * and the report check fail on some runs and pass on others (bw-khe.5).
+ */
+async function paneSettles(page: Page, still = 600, most = 30_000): Promise<void> {
+  const count = () =>
+    page.evaluate(() => document.querySelectorAll('[data-testid="transcript"] > *').length);
+  const until = Date.now() + most;
+  let was = await count();
+  while (Date.now() < until) {
+    await page.waitForTimeout(still);
+    const now = await count();
+    if (now === was) return;
+    was = now;
+  }
+}
+
 /** Which chat is drawn, and the first thing said in it. */
 async function whatIsDrawn(page: Page) {
   return page.evaluate(() => {
@@ -45,15 +97,49 @@ async function whatIsDrawn(page: Page) {
 }
 
 test.describe('the open chat', () => {
+  // Reading a chat's past off disk and waking it is seconds, and every wait in
+  // this file is written for that. The runner's own thirty seconds would cut
+  // them all off long before they were allowed to give up, and a whole file of
+  // 'Test timeout of 30000ms exceeded' says nothing about the app (bw-khe.5).
+  test.describe.configure({ timeout: WAY_IN_MS });
+
   test('each chat shows its own messages, not the last one’s', async ({ page, request }) => {
     const id = await projectId(request);
     await openChatTab(page, id);
 
-    const rows = page.locator('[data-testid="restore-row"]');
+    // Three named chats, not the first three places. The list is ordered by who
+    // spoke last, so on a machine with agents running, clicking position 0, 1, 2
+    // can open one chat twice while they trade places (bw-khe.5).
+    const wanted = (await chatKeys(page)).slice(0, 3);
+    expect(wanted.length, 'this instance has fewer than three chats to open').toBe(3);
+
+    // Every paint of the pane is written down as it happens, because the thing
+    // being proved is a moment rather than a state: the pane must be EMPTY the
+    // first time it carries the new chat's name. Sampling from out here would
+    // step over that moment whenever the record came back quickly.
+    await page.evaluate(() => {
+      const paints: { id: string | null; messages: number }[] = [];
+      (window as unknown as { paints: typeof paints }).paints = paints;
+      const note = () => {
+        const id =
+          document.querySelector('[data-testid="chat-tab"]')?.getAttribute('data-session-id') ?? null;
+        const messages = document.querySelectorAll(
+          '[data-testid="assistant-message"],[data-testid="user-message"]',
+        ).length;
+        const last = paints[paints.length - 1];
+        if (!last || last.id !== id || last.messages !== messages) paints.push({ id, messages });
+      };
+      note();
+      new MutationObserver(note).observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+      });
+    });
+
     const drawn: { sessionId: string | null; opening: string; messages: number }[] = [];
-    for (const i of [0, 1, 2]) {
-      await rows.nth(i).getByTestId('row-name').click();
-      await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+    for (const key of wanted) {
+      await openChat(page, key);
       // The past is read in behind the open, so wait for words rather than paint.
       await expect
         .poll(async () => (await whatIsDrawn(page)).messages, { timeout: 60_000 })
@@ -63,29 +149,91 @@ test.describe('the open chat', () => {
 
     const chats = new Set(drawn.map((d) => d.sessionId));
     expect(chats.size, 'the same chat was opened three times').toBe(3);
-    const openings = new Set(drawn.map((d) => d.opening));
-    expect(
-      openings.size,
-      `three chats opened but ${openings.size} different first messages were drawn`,
-    ).toBe(3);
+    expect(Math.min(...drawn.map((d) => d.messages)), 'a chat opened with nothing in it').toBeGreaterThan(0);
+
+    // The whole complaint: a chat carrying the last one's messages. Each chat's
+    // first paint under its own name must be an empty pane — what the reader
+    // sees after that is its own, because it is all that was put there.
+    //
+    // The first messages themselves cannot settle this: a chat that has been
+    // going a while opens on the same words as every other one, the line about
+    // the session being continued, so three different chats show one opening.
+    const paints = await page.evaluate(
+      () => (window as unknown as { paints: { id: string | null; messages: number }[] }).paints,
+    );
+    for (const key of wanted) {
+      const first = paints.find((p) => p.id === key);
+      expect(first, `${key} was never drawn`).toBeDefined();
+      expect(
+        first!.messages,
+        `the pane already held ${first!.messages} messages the moment it became ${key}`,
+      ).toBe(0);
+    }
+  });
+
+  test('the list holds still while he is clicking it', async ({ page, request }) => {
+    const id = await projectId(request);
+    await openChatTab(page, id);
+
+    const topSix = () =>
+      page
+        .locator('[data-testid="restore-row"]')
+        .evaluateAll((els) => els.slice(0, 6).map((e) => e.getAttribute('data-row-key')));
+
+    const before = await topSix();
+    expect(before.length, 'this instance has fewer than six chats').toBe(6);
+    await page.locator('[data-testid="restore-row"]').nth(2).getByTestId('row-name').click();
+    await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+    // Long enough for the working chats to have spoken again several times over.
+    await page.waitForTimeout(6000);
+
+    expect(await topSix(), 'the rows moved under the reader’s hand').toEqual(before);
   });
 
   test('a written-out address is a link', async ({ page, request }) => {
     const id = await projectId(request);
     await openChatTab(page, id);
-    await page.getByTestId('restore-row').first().getByTestId('row-name').click();
-    await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
 
-    // A chat of any length carries addresses; the first that does settles it.
+    // Whichever of them wrote an address out. A chat that never mentions one is
+    // not a failure, so this walks until it finds one or runs out of chats —
+    // and it takes several: these are working chats, mostly commands and their
+    // answers, with two or three things actually said in a whole conversation.
+    const keys = (await chatKeys(page)).slice(0, 8);
+    let written = 0;
+    for (const key of keys) {
+      if (written > 0) break;
+      await openChat(page, key);
+      await page.getByTestId('assistant-message').first().waitFor({ timeout: 60_000 });
+      await paneSettles(page);
+      written = await page.evaluate(() => {
+        const said = [
+          ...document.querySelectorAll(
+            '[data-testid="assistant-message"],[data-testid="user-message"]',
+          ),
+        ];
+        let saying = 0;
+        for (const message of said) {
+          const walk = document.createTreeWalker(message, NodeFilter.SHOW_TEXT);
+          for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+            // An address inside a command or a code block is code and stays
+            // code: `curl http://…` is something to copy, not to follow.
+            if (node.parentElement?.closest('code,pre')) continue;
+            if (!/https?:\/\//.test(node.textContent ?? '')) continue;
+            saying++;
+            break;
+          }
+        }
+        return saying;
+      });
+    }
+    expect(written, 'none of the chats opened wrote an address out').toBeGreaterThan(0);
+
     await expect
       .poll(
         async () =>
-          page.evaluate(() => {
-            const said = [...document.querySelectorAll('[data-testid="assistant-message"],[data-testid="user-message"]')];
-            const written = said.filter((e) => /https?:\/\//.test(e.textContent ?? '')).length;
-            const linked = document.querySelectorAll('[data-testid="transcript"] a[href^="http"]').length;
-            return written === 0 ? -1 : linked;
-          }),
+          page.evaluate(
+            () => document.querySelectorAll('[data-testid="transcript"] a[href^="http"]').length,
+          ),
         { timeout: 60_000 },
       )
       .toBeGreaterThan(0);
@@ -176,13 +324,15 @@ test.describe('the open chat', () => {
 
     // Whichever of them worked a card that has a report; a chat with none is not
     // a failure, so the case walks until it finds one or runs out.
-    const many = Math.min(await worked.count(), 4);
+    const keys = (
+      await chatKeys(page, '[data-testid="restore-row"][data-beads]:not([data-beads=""])')
+    ).slice(0, 4);
     let found = 0;
-    for (let i = 0; i < many && found === 0; i++) {
-      await worked.nth(i).getByTestId('row-name').click();
-      await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+    for (const key of keys) {
+      if (found > 0) break;
+      await openChat(page, key);
       await page.getByTestId('bead-chip').first().waitFor({ timeout: 60_000 });
-      await page.waitForTimeout(1500);
+      await paneSettles(page);
       found = await page.getByTestId('chat-report-chip').count();
     }
     expect(found, 'no chat that worked a reported card showed its report').toBeGreaterThan(0);

@@ -80,6 +80,52 @@ function rowKey(row: RestoreRow): string {
 }
 
 /**
+ * The order the reader is looking at, held still while he is looking at it.
+ *
+ * The top of this list is the chats somebody is working in right now, and
+ * inside that block the order is who spoke last — which on this machine moves
+ * every few seconds, because that is what a working agent does. So he goes to
+ * click the third row and opens the second: the two traded places while his
+ * hand was moving. Measured on 2026-08-20 with six agents running: the top six
+ * rows re-ordered within six seconds, and nothing had been clicked (bw-khe.5).
+ *
+ * A row already in the list therefore stays where it is. Only what is IN it —
+ * what it is doing, when it last spoke, whether somebody is in it — changes
+ * under him. A chat the list has never shown joins at the place the fresh order
+ * gives it, just below whichever row it now follows, so a chat begun elsewhere
+ * still arrives on its own. The order settles again the next time the list is
+ * opened, which is the one moment he is not pointing at it.
+ */
+export function holdStill(fresh: RestoreRow[], settled: readonly string[]): RestoreRow[] {
+  if (settled.length === 0) return fresh;
+  const rank = new Map(settled.map((key, i) => [key, i]));
+
+  // Each newcomer remembers which known row it arrived behind, so its place is
+  // the fresh order's answer expressed in rows rather than in positions.
+  const held: RestoreRow[] = [];
+  const joining = new Map<string | null, RestoreRow[]>();
+  let behind: string | null = null;
+  for (const row of fresh) {
+    const key = rowKey(row);
+    if (rank.has(key)) {
+      held.push(row);
+      behind = key;
+      continue;
+    }
+    const block = joining.get(behind) ?? [];
+    block.push(row);
+    joining.set(behind, block);
+  }
+
+  held.sort((a, b) => rank.get(rowKey(a))! - rank.get(rowKey(b))!);
+  for (const [after, block] of Array.from(joining)) {
+    const at = after === null ? 0 : held.findIndex((r) => rowKey(r) === after) + 1;
+    held.splice(at, 0, ...block);
+  }
+  return held;
+}
+
+/**
  * The list as it stands, plus whatever has happened since it was asked for.
  *
  * The list is fetched once when the tab opens; a chat started after that —
@@ -166,10 +212,16 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
   const running = useRunningElsewhere();
+  // The order as it was last drawn. Read while rendering and written after, so
+  // what he is pointing at is what decides where the rows go (holdStill).
+  const settled = useRef<string[]>([]);
   const rows = useMemo(
-    () => withLive(fetched, live, projectId, running),
+    () => holdStill(withLive(fetched, live, projectId, running), settled.current),
     [fetched, live, projectId, running],
   );
+  useEffect(() => {
+    settled.current = rows.map(rowKey);
+  }, [rows]);
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
