@@ -84,7 +84,16 @@ mkdirSync(dirname(chipOut), { recursive: true });
 mkdirSync(dirname(panelOut), { recursive: true });
 await page.locator('[data-testid="chat-tab"] > div').first().screenshot({ path: chipOut });
 
-await chip.click();
+// Opened from the keyboard, not the mouse: this chip is the only way into the
+// usage picture in the app, so a reader who does not use a mouse has no other
+// way in (bw-malh.7). Focus has to land ON it, and Enter has to open it.
+await chip.focus();
+const focused = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? '');
+if (focused !== 'plan-chip') {
+  console.log(`the chip does not take focus: focus sat on ${focused || 'nothing'}`);
+  process.exit(1);
+}
+await page.keyboard.press('Enter');
 const panel = page.getByTestId('usage-view');
 await panel.waitFor({ timeout: 30_000 });
 await page.waitForTimeout(400);

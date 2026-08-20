@@ -238,6 +238,14 @@ export function UsageView({ onClose }: { onClose: () => void }) {
  * string because each carries its OWN colour — a calm session beside a week at
  * 96% is exactly the case a single colour hides.
  *
+ * Each is a real <button> inside the badge, which is the pattern the report
+ * chip already uses: a Badge renders a <span>, and a click handler on a span is
+ * reachable by mouse and by nothing else — no tab stop, no Enter, and nothing
+ * for a screen reader to announce or press. This chip is the only way into the
+ * usage picture in the whole app, so mouse-only would be the only way in
+ * (bw-malh.7). The label it announces is the whole sentence, because "wk 22%"
+ * read aloud is not a sentence.
+ *
  * Draws nothing at all when there is no plan behind the account: a chip
  * reading "—%" beside the cost would be a limit the reader does not have.
  */
@@ -256,33 +264,33 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
   return (
     <span className="flex items-center gap-1" data-testid="plan-chips">
       {five && (
-        <Badge
-          variant={severityVariant(five.severity)}
-          appearance="light"
-          size="sm"
-          data-testid="plan-chip"
-          data-percent={five.percent ?? ''}
-          data-severity={five.severity}
-          title={title}
-          className="cursor-pointer font-mono"
-          onClick={onOpen}
-        >
-          {sessionChipReads(five)}
+        <Badge variant={severityVariant(five.severity)} appearance="light" size="sm" className="font-mono">
+          <button
+            type="button"
+            data-testid="plan-chip"
+            data-percent={five.percent ?? ''}
+            data-severity={five.severity}
+            title={title}
+            aria-label={`Plan usage — this session: ${windowReads(five, now)}. Opens the whole usage picture.`}
+            onClick={onOpen}
+          >
+            {sessionChipReads(five)}
+          </button>
         </Badge>
       )}
       {week && (
-        <Badge
-          variant={severityVariant(week.severity)}
-          appearance="light"
-          size="sm"
-          data-testid="plan-chip-week"
-          data-percent={week.percent ?? ''}
-          data-severity={week.severity}
-          title={title}
-          className="cursor-pointer font-mono"
-          onClick={onOpen}
-        >
-          {weekChipReads(week)}
+        <Badge variant={severityVariant(week.severity)} appearance="light" size="sm" className="font-mono">
+          <button
+            type="button"
+            data-testid="plan-chip-week"
+            data-percent={week.percent ?? ''}
+            data-severity={week.severity}
+            title={title}
+            aria-label={`Plan usage — this week: ${windowReads(week, now)}. Opens the whole usage picture.`}
+            onClick={onOpen}
+          >
+            {weekChipReads(week)}
+          </button>
         </Badge>
       )}
     </span>
