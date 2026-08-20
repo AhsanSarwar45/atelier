@@ -25,13 +25,15 @@
 
 import { useEffect, useState } from 'react';
 
-import { Bot, Clock, Coins, Eye, Terminal, Workflow } from 'lucide-react';
+import { Bot, Clock, Coins, Eye, Pause, Square, Terminal, Workflow } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import type { SentAway } from '@/workbench/fold';
-import type { AgentKind, AgentState } from '@/workbench/protocol';
+import type { AgentControl, AgentKind, AgentState } from '@/workbench/protocol';
+import { sendCommand } from '@/workbench/use-session';
 
 /** How often a running row re-reads the clock. */
 const TICK_MS = 1000;
@@ -164,7 +166,87 @@ export function useNow(live: boolean): number {
   return now;
 }
 
-function Row({ row, now, onOpen }: { row: SentAway; now: number; onOpen?: (id: string) => void }) {
+/**
+ * The two exact controls on one running row (docs/agent-workbench.md §8.2.7):
+ * stop it, or park it and let it run on. Both are the brand's own.
+ *
+ * Only what the brand actually has. A control the driver did not name is not
+ * drawn — a button that cannot do the thing written on it is worse than no
+ * button (decision 13) — and a chat nobody is driving names none of them, which
+ * is the truth: there is nothing there to steer with.
+ *
+ * Nothing is drawn once the work is over, and park goes once it is parked:
+ * there is no parking a thing that is already in the background.
+ */
+export function AgentSteering({
+  row,
+  sessionId,
+  controls,
+}: {
+  row: SentAway;
+  sessionId: string;
+  controls: AgentControl[];
+}) {
+  const [busy, setBusy] = useState<AgentControl | null>(null);
+  const canStop = controls.includes('stop');
+  const canPark = controls.includes('park') && row.state !== 'parked';
+  if (isOver(row.state) || (!canStop && !canPark)) return null;
+
+  const act = (what: 'stop' | 'park'): void => {
+    setBusy(what);
+    // Released as soon as the ask is answered, not held until the row changes
+    // under it: what happened is the kit's word, carried on the row's own
+    // state, and a button waiting for it would never come back from a refusal.
+    void sendCommand({ type: what === 'stop' ? 'agent.stop' : 'agent.park', sessionId, agentId: row.id })
+      .catch(() => {})
+      .finally(() => setBusy(null));
+  };
+
+  return (
+    <div data-testid="sent-away-steer" className="flex items-center gap-1 border-t border-border/60 px-2 py-1">
+      {canPark && (
+        <Button
+          size="xs"
+          variant="ghost"
+          data-testid="sent-away-park"
+          disabled={busy !== null}
+          title="Let it run on in the background and take the turn back"
+          onClick={() => act('park')}
+        >
+          <Pause className="h-3 w-3" aria-hidden="true" />
+          Park
+        </Button>
+      )}
+      {canStop && (
+        <Button
+          size="xs"
+          variant="ghost"
+          data-testid="sent-away-stop"
+          disabled={busy !== null}
+          title="End this one. The chat and everything else it sent away carry on"
+          onClick={() => act('stop')}
+        >
+          <Square className="h-3 w-3" aria-hidden="true" />
+          Stop
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function Row({
+  row,
+  now,
+  sessionId,
+  controls,
+  onOpen,
+}: {
+  row: SentAway;
+  now: number;
+  sessionId: string;
+  controls: AgentControl[];
+  onOpen?: (id: string) => void;
+}) {
   const { label: kind, Icon } = KINDS[row.kind];
   const state = STATES[row.state];
   const model = modelNamed(row.model);
@@ -249,17 +331,22 @@ function Row({ row, now, onOpen }: { row: SentAway; now: number; onOpen?: (id: s
         </p>
       )}
       </button>
+      <AgentSteering row={row} sessionId={sessionId} controls={controls} />
     </Panel>
   );
 }
 
 export interface SentAwayPanelProps {
   agents: SentAway[];
+  /** Whose chat these belong to; the steering acts on it. */
+  sessionId: string;
+  /** Which steering controls this chat's brand has. None is a real answer. */
+  controls: AgentControl[];
   /** Opening one: its own conversation, which is the row's whole point. */
   onOpen?: (id: string) => void;
 }
 
-export function SentAwayPanel({ agents, onOpen }: SentAwayPanelProps) {
+export function SentAwayPanel({ agents, sessionId, controls, onOpen }: SentAwayPanelProps) {
   const now = useNow(agents.some((a) => !isOver(a.state)));
 
   if (agents.length === 0) return null;
@@ -273,7 +360,7 @@ export function SentAwayPanel({ agents, onOpen }: SentAwayPanelProps) {
       className="flex flex-col gap-1.5"
     >
       {agents.map((row) => (
-        <Row key={row.id} row={row} now={now} onOpen={onOpen} />
+        <Row key={row.id} row={row} now={now} sessionId={sessionId} controls={controls} onOpen={onOpen} />
       ))}
     </div>
   );

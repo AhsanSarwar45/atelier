@@ -5,7 +5,7 @@
  * HTTP, never sees SQLite, and never knows about beads — which is why adding
  * a brand is one file (docs/agent-workbench.md §2.4).
  */
-import type { ImagePayload, WbpEvent } from '../../../src/workbench/protocol.ts';
+import type { AgentControl, ImagePayload, WbpEvent } from '../../../src/workbench/protocol.ts';
 
 /** One user turn: what was typed, and any pictures attached to it. */
 export interface PromptInput {
@@ -47,6 +47,25 @@ export interface Driver {
   setModel(model: string): Promise<void>;
   /** Stop the turn in flight, leaving the session usable. */
   interrupt(): Promise<void>;
+  /**
+   * Which of the three steering controls this brand actually has for the work
+   * a chat sends away (docs/agent-workbench.md §8.2.7).
+   *
+   * Optional, and answering with fewer than three is a real answer: a control
+   * a brand cannot perform is hidden rather than drawn and faked (decision 13).
+   * A driver that says nothing offers no steering at all.
+   */
+  agentControls?(): AgentControl[];
+  /**
+   * End ONE piece of sent-off work. The chat goes on, and so does everything
+   * else it sent away. `agentId` is the row's own id.
+   */
+  stopAgent?(agentId: string): Promise<void>;
+  /**
+   * Let one piece of sent-off work run on in the background and hand the turn
+   * back to the chat. False when the brand knew of no such work in flight.
+   */
+  parkAgent?(agentId: string): Promise<boolean>;
   /** Tear the session down. */
   close(): Promise<void>;
   /**

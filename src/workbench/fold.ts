@@ -19,6 +19,7 @@
  * Design: docs/agent-workbench.md §4.
  */
 import type {
+  AgentControl,
   AgentKind,
   AgentState,
   AskOption,
@@ -99,6 +100,19 @@ export interface TranscriptAsk {
   title: string;
   options: AskOption[];
   chosen: string | null;
+  /**
+   * The call that sent the agent which raised this question, or null when the
+   * chat's own agent raised it. Named `parentId` because that is what every
+   * other row calls it — it is what the agent's own pane reads to find the
+   * questions that belong to it (docs/agent-workbench.md §8.2.7).
+   */
+  parentId: string | null;
+  /**
+   * What that agent was sent off to do, as its row says it — joined here once,
+   * when the question arrives, so a card in the middle of the conversation
+   * names the agent that raised it instead of reading as the chat's own.
+   */
+  askedBy: string | null;
 }
 
 export interface TranscriptNotice {
@@ -157,6 +171,24 @@ export interface SentAway {
   doing: string | null;
   /** Its last word, kept once it is finished. */
   result: string | null;
+  /**
+   * Words the owner typed FOR this agent, in the order they were typed.
+   *
+   * They were not delivered to it — nothing can — they were said to the chat
+   * that sent it, naming it. Kept so the row can say so (§8.2.7).
+   */
+  relayed: string[];
+}
+
+/**
+ * The brief of the agent a question came from, as its row knows it.
+ *
+ * By the call that SENT it, falling back to the row's own id, which is the one
+ * key every part of this app looks a sent-off agent up by.
+ */
+function briefOf(agents: SentAway[], sentBy: string | null): string | null {
+  if (sentBy === null) return null;
+  return agents.find((a) => (a.toolCallId ?? a.id) === sentBy)?.what || null;
 }
 
 export interface SessionView {
@@ -190,9 +222,11 @@ export interface SessionMenu {
   skills: string[];
   models: ModelChoice[];
   permissionModes: string[];
+  /** Which steering controls this session's brand has for the work it sent away. */
+  agentControls: AgentControl[];
 }
 
-const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], permissionModes: [] };
+const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], permissionModes: [], agentControls: [] };
 
 /** A chat with nothing drawn yet. Exported so the fold can be checked on its own. */
 export const EMPTY: SessionView = {
@@ -387,6 +421,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               calls: 0,
               doing: null,
               result: null,
+              relayed: [],
             },
           ];
       return next;
@@ -408,6 +443,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
             }
           : a,
       );
+      return next;
+
+    case 'agent.relayed':
+      next.agents = view.agents.map((a) => (a.id === e.agentId ? { ...a, relayed: [...a.relayed, e.text] } : a));
       return next;
 
     case 'agent.finished':
@@ -456,7 +495,16 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'ask.permission':
       next.items = [
         ...items,
-        { kind: 'ask', id: e.askId, toolName: e.toolName, title: e.title, options: e.options, chosen: null },
+        {
+          kind: 'ask',
+          id: e.askId,
+          toolName: e.toolName,
+          title: e.title,
+          options: e.options,
+          chosen: null,
+          parentId: e.parentToolCallId ?? null,
+          askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
+        },
       ];
       return next;
 
@@ -474,6 +522,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         skills: e.skills,
         models: e.models,
         permissionModes: e.permissionModes,
+        agentControls: e.agentControls,
       };
       return next;
 
@@ -683,6 +732,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
             calls: 0,
             doing: null,
             result: null,
+            relayed: [],
           });
         } else {
           const row = agents[at]!;
@@ -704,6 +754,12 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           if (e.model) row.model = e.model;
           if (e.state) row.state = e.state;
         }
+        break;
+      }
+
+      case 'agent.relayed': {
+        const at = agentAt.get(e.agentId);
+        if (at !== undefined) agents[at]!.relayed.push(e.text);
         break;
       }
 
@@ -755,7 +811,16 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
       case 'ask.permission':
         askAt.set(e.askId, items.length);
-        items.push({ kind: 'ask', id: e.askId, toolName: e.toolName, title: e.title, options: e.options, chosen: null });
+        items.push({
+          kind: 'ask',
+          id: e.askId,
+          toolName: e.toolName,
+          title: e.title,
+          options: e.options,
+          chosen: null,
+          parentId: e.parentToolCallId ?? null,
+          askedBy: briefOf(agents, e.parentToolCallId ?? null),
+        });
         break;
 
       case 'ask.resolved': {
@@ -774,6 +839,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           skills: e.skills,
           models: e.models,
           permissionModes: e.permissionModes,
+          agentControls: e.agentControls,
         };
         break;
 

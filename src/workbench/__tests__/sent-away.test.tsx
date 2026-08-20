@@ -213,14 +213,14 @@ describe('the panel', () => {
 
   function drawn() {
     const agents = foldAll(sentAway()).agents;
-    render(<SentAwayPanel agents={agents} />);
+    render(<SentAwayPanel agents={agents} sessionId="chat-1" controls={[]} />);
     return Object.fromEntries(
       screen.getAllByTestId('sent-away-row').map((el) => [el.getAttribute('data-agent')!, el]),
     );
   }
 
   it('draws nothing at all when the chat has sent nothing away', () => {
-    const { container } = render(<SentAwayPanel agents={[]} />);
+    const { container } = render(<SentAwayPanel agents={[]} sessionId="chat-1" controls={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -295,7 +295,7 @@ describe('the panel', () => {
   it('hands back which one was clicked, wherever on the row the click landed', () => {
     const opened: string[] = [];
     const view = foldAll(sentAway());
-    render(<SentAwayPanel agents={view.agents} onOpen={(id) => opened.push(id)} />);
+    render(<SentAwayPanel agents={view.agents} sessionId="chat-1" controls={[]} onOpen={(id) => opened.push(id)} />);
 
     const row = screen.getByTestId('sent-away-panel').querySelector('[data-agent="task-1"]')!;
     (row.querySelector('[data-testid="sent-away-open"]') as HTMLElement).click();

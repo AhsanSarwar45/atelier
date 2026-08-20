@@ -21,17 +21,20 @@
  */
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import { Clock, Coins, X } from 'lucide-react';
+import { Clock, Coins, Send, X } from 'lucide-react';
 
 import type { Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { Textarea } from '@/components/ui/textarea';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
-import { forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, useNow } from '@/workbench/sent-away';
+import type { AgentControl } from '@/workbench/protocol';
+import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spend, STATES, useNow } from '@/workbench/sent-away';
 import { TranscriptRow } from '@/workbench/transcript-rows';
+import { sendCommand } from '@/workbench/use-session';
 
 /**
  * Everything one sent-off agent said, in the order it said it.
@@ -41,13 +44,74 @@ import { TranscriptRow } from '@/workbench/transcript-rows';
  * and the two are different strings. Read by the agent's id, the pane opened on
  * an empty conversation every time — measured 2026-08-20, against a real chat.
  *
- * A permission question is the one row that carries no parent yet — the kit
- * does not say which agent raised it — so none of them reach here. That is a
- * known gap on the job rather than an oversight.
+ * A permission question a helper raised reaches here on the same terms as its
+ * words: the kit names the call being asked about, that call is on record as
+ * the helper's own, and the question is stamped with the call that sent the
+ * helper (bw-7ks.22.5). So it is answered on the helper's own conversation,
+ * where the reader can see what it was for.
  */
 export function saidBy(items: TranscriptItem[], row: Pick<SentAway, 'id' | 'toolCallId'>): TranscriptItem[] {
   const sentBy = row.toolCallId ?? row.id;
   return items.filter((item) => 'parentId' in item && item.parentId === sentBy);
+}
+
+/**
+ * The third tier of steering, and the honest one (docs/agent-workbench.md
+ * §8.2.7).
+ *
+ * Neither brand gives anyone a private input channel into a helper that is
+ * already running, so this does not pretend to be one: what is typed goes to
+ * the CHAT that sent the agent, naming which agent it is for, and the pane says
+ * so both before it is sent and after. A word drawn as delivered would be a lie
+ * about the road it took.
+ */
+function RelayBox({ row, sessionId }: { row: SentAway; sessionId: string }) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const send = (): void => {
+    const said = text.trim();
+    if (!said || sending) return;
+    setSending(true);
+    void sendCommand({ type: 'agent.say', sessionId, agentId: row.id, text: said })
+      .then(() => setText(''))
+      .catch(() => {})
+      .finally(() => setSending(false));
+  };
+
+  return (
+    <div className="border-t border-border/60 px-4 py-3" data-testid="agent-view-relay">
+      <p className="text-[11px] text-muted-foreground">
+        Nothing can hand words to an agent that is already running. What you type goes to the chat that sent this
+        one, naming it.
+      </p>
+      <div className="mt-2 flex items-end gap-2">
+        <Textarea
+          rows={2}
+          value={text}
+          data-testid="agent-view-relay-text"
+          placeholder="A word for this agent, by way of the chat that sent it"
+          className="min-h-0 flex-1 resize-none text-xs"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <Button
+          size="sm"
+          data-testid="agent-view-relay-send"
+          disabled={sending || text.trim() === ''}
+          onClick={send}
+        >
+          <Send className="h-3.5 w-3.5" aria-hidden="true" />
+          Relay
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export interface AgentViewProps {
@@ -55,11 +119,13 @@ export interface AgentViewProps {
   /** The whole conversation; what belongs to this agent is picked out here. */
   items: TranscriptItem[];
   sessionId: string;
+  /** Which steering controls this chat's brand has. None is a real answer. */
+  controls: AgentControl[];
   mentions: Mentions;
   onClose: () => void;
 }
 
-export function AgentView({ row, items, sessionId, mentions, onClose }: AgentViewProps) {
+export function AgentView({ row, items, sessionId, controls, mentions, onClose }: AgentViewProps) {
   const said = useMemo(() => saidBy(items, row), [items, row]);
   const { label: kind, Icon } = KINDS[row.kind];
   const state = STATES[row.state];
@@ -122,6 +188,7 @@ export function AgentView({ row, items, sessionId, mentions, onClose }: AgentVie
               </span>
             </div>
           </div>
+          <AgentSteering row={row} sessionId={sessionId} controls={controls} />
           <Badge variant={state.variant} appearance="light" size="xs" data-testid="agent-view-state">
             {state.label}
           </Badge>
@@ -142,6 +209,23 @@ export function AgentView({ row, items, sessionId, mentions, onClose }: AgentVie
             </p>
           )}
         </div>
+
+        {/* Words the reader typed FOR it, and where they actually went. Drawn
+            as relayed, never as said to it: it never heard them. */}
+        {row.relayed.length > 0 && (
+          <div className="border-t border-border/60 px-4 py-3" data-testid="agent-view-relayed" data-count={row.relayed.length}>
+            <h3 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Relayed to the chat that sent it
+            </h3>
+            {row.relayed.map((said, i) => (
+              <p key={i} className="mt-1 whitespace-pre-wrap text-xs text-foreground">
+                {said}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {!isOver(row.state) && controls.includes('say') && <RelayBox row={row} sessionId={sessionId} />}
 
         {/* Its answer, kept where a reader who opened this to find it looks:
             at the end of what it said, not scrolled back into the chat. */}

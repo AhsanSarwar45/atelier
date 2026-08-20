@@ -1170,6 +1170,41 @@ export class Sessions {
   }
 
   /**
+   * Ends ONE piece of sent-off work. The chat keeps its turn and everything
+   * else it sent away keeps running (docs/agent-workbench.md §8.2.7).
+   */
+  async stopAgent(sessionId: string, agentId: string): Promise<void> {
+    const driver = this.require(sessionId);
+    if (!driver.stopAgent) throw new Error(`this chat's brand cannot stop one agent`);
+    await driver.stopAgent(agentId);
+  }
+
+  /** Hands the turn back and lets the work run on. False when there was none in flight. */
+  async parkAgent(sessionId: string, agentId: string): Promise<boolean> {
+    const driver = this.require(sessionId);
+    if (!driver.parkAgent) throw new Error(`this chat's brand cannot park one agent`);
+    return driver.parkAgent(agentId);
+  }
+
+  /**
+   * A word typed for an agent that is already running.
+   *
+   * It goes to the CHAT that sent the agent, naming which agent it is for,
+   * because that is the only road either brand offers — neither gives anyone a
+   * private input channel into a helper in flight, and this does not pretend to
+   * have one (docs/agent-workbench.md §8.2.7). The turn is sent first and the
+   * row marked after, so a row never claims a relay that never left.
+   */
+  async relay(sessionId: string, agentId: string, text: string): Promise<void> {
+    await this.send(
+      sessionId,
+      `A message for the agent you sent off (id ${agentId}), from the person watching this chat. ` +
+        `It could not be handed to it directly, so it comes to you:\n\n${text}`,
+    );
+    this.publish(sessionId, { type: 'agent.relayed', agentId, text });
+  }
+
+  /**
    * The account's plan allowance, from whichever live session will answer.
    *
    * The figure is the account's, so any running chat's channel is as good as

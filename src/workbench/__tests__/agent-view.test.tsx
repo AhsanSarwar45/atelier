@@ -143,7 +143,7 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
 
   it('draws that agent’s conversation, its numbers and its answer', () => {
     const row = view.agents.find((a) => a.id === 'task-1')!;
-    render(<AgentView row={row} items={view.items} sessionId="chat-1" mentions={PLAINLY} onClose={() => {}} />);
+    render(<AgentView row={row} items={view.items} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={() => {}} />);
 
     expect(screen.getByTestId('agent-view-what')).toHaveTextContent('find the callers');
     expect(screen.getByTestId('agent-view-model')).toHaveTextContent('opus-4-5');
@@ -172,6 +172,7 @@ describe('the pane itself', () => {
         row={{ ...row, id: 'nobody', toolCallId: 'nobody' }}
         items={view.items}
         sessionId="chat-1"
+        controls={[]}
         mentions={PLAINLY}
         onClose={() => {}}
       />,
@@ -189,11 +190,11 @@ describe('the pane itself', () => {
       seconds: 2,
       startedAt: Date.now() - 30_000,
     };
-    const { unmount } = render(<SentAwayPanel agents={[row]} />);
+    const { unmount } = render(<SentAwayPanel agents={[row]} sessionId="chat-1" controls={[]} />);
     const onTheRow = screen.getByTestId('sent-away-for').textContent;
     unmount();
 
-    render(<AgentView row={row} items={view.items} sessionId="chat-1" mentions={PLAINLY} onClose={() => {}} />);
+    render(<AgentView row={row} items={view.items} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={() => {}} />);
     expect(screen.getByTestId('agent-view-for').textContent).toBe(onTheRow);
     expect(onTheRow).toBe('30s');
   });
@@ -210,11 +211,11 @@ describe('the pane itself', () => {
         seconds: 2,
         startedAt: Date.now() - 30_000,
       };
-      render(<SentAwayPanel agents={[row]} />);
+      render(<SentAwayPanel agents={[row]} sessionId="chat-1" controls={[]} />);
       act(() => {
         vi.advanceTimersByTime(500);
       });
-      render(<AgentView row={row} items={view.items} sessionId="chat-1" mentions={PLAINLY} onClose={() => {}} />);
+      render(<AgentView row={row} items={view.items} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={() => {}} />);
 
       expect(screen.getByTestId('agent-view-for').textContent).toBe(screen.getByTestId('sent-away-for').textContent);
     } finally {
@@ -226,7 +227,7 @@ describe('the pane itself', () => {
     const shut = vi.fn();
     const row = view.agents.find((a) => a.id === 'task-1')!;
     const { unmount } = render(
-      <AgentView row={row} items={view.items} sessionId="chat-1" mentions={PLAINLY} onClose={shut} />,
+      <AgentView row={row} items={view.items} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={shut} />,
     );
 
     screen.getByTestId('agent-view-close').click();

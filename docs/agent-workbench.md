@@ -1146,7 +1146,7 @@ transcript, with the way back where the reader expects it.
 helper, so we do not pretend to have one:
 
 1. **Direct** — stop it, or park it and let it run on. Both are the kit's own
-   controls (`stopTask`, `backgroundTask`) and both are exact.
+   controls (`stopTask`, `backgroundTasks`) and both are exact.
 2. **Its own asks** — a permission ask a helper raised is answered on the
    helper's row, attributed to the helper that raised it, not to the parent it
    arrived through.
@@ -1155,6 +1155,35 @@ helper, so we do not pretend to have one:
    documentation says to ask the parent to steer a running helper; Claude has
    no other door either. The row says the message was relayed, so nobody reads
    a delivered word as a private one.
+
+Four things about the built shape that the tiers above do not tell you, each of
+which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
+
+- **The two direct controls take two different ids.** `stopTask` takes the task
+  id, which is what the row is keyed by; `backgroundTasks` takes the `tool_use`
+  id of the call that started the work. The driver keeps the reverse of the map
+  it already had so a row can answer both. Hand over the wrong one and the whole
+  turn goes to the background instead of one agent — which is why parking is
+  proved by a live run and not by a fixture. A row the kit wrote no call for was
+  already running in the background, so parking it is refused without asking.
+- **The kit's permission hook names the call, not the agent.** `canUseTool`
+  carries an `agentID`, but the task messages carry no `agent_id` at all, so
+  that id cannot be matched to the `task_id` a row is keyed by — it is a
+  different id-space. Attribution is worked out instead from the parentage every
+  one of a helper's words already carries: the driver notes, as it reads them,
+  which calls a helper made, and `toolUseID` then leads back to the call that
+  sent the helper and from there to its row. Nothing new is asked of the kit.
+- **A row waiting to be answered says so itself.** It reads `waiting on you`
+  from the moment the ask goes out until it is answered, said by the driver
+  rather than waited for from the kit's next report about that task — which is
+  the whole reason a row's state is not a boolean. Parked arrives the other way
+  round, from the kit: `task_updated.is_backgrounded`.
+- **Which controls exist is a per-session answer**, carried on `session.menu` as
+  `agentControls` and defaulting to none. A brand declares only the tiers it
+  has, a chat nobody is driving declares none — which is the truth, there is
+  nothing there to steer with — and a tier not declared is not drawn. The relay
+  sends the turn to the parent first and marks the row second, so a row never
+  claims a relay that never left.
 
 **Four faults this closes on the way past**, each of which is why the picture is
 missing today rather than merely thin:

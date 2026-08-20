@@ -12,7 +12,7 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
-import type { AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
 import { fullness, WINDOW, windowNamed } from '../../../src/workbench/context-window.ts';
@@ -407,6 +407,25 @@ export class ClaudeDriver implements Driver {
   >();
   /** Which task a call sent off, so a helper's own words can find its row. */
   private taskOfCall = new Map<string, string>();
+  /**
+   * And back the other way, so a row can be steered.
+   *
+   * Parking is asked for by the CALL that started the work, not by the task —
+   * that is what the kit's own control takes — and the row carries the task id
+   * (docs/agent-workbench.md §8.2.7).
+   */
+  private callOfTask = new Map<string, string>();
+  /**
+   * Which sent-off agent made a call, for the calls a helper makes of its own.
+   *
+   * A permission question names the call it is about and nothing else, so this
+   * is what says whose question it is: the helper's call is looked up here, and
+   * the answer is the call that sent the helper — the same parentage every one
+   * of its words already carries (bw-7ks.22.5).
+   */
+  private parentOfCall = new Map<string, string>();
+  /** Which row is held up by an outstanding question, so it can be let go again. */
+  private agentAsking = new Map<string, string>();
   /** Every call a HELPER made, so work it sends away is not read as this chat's. */
   private callsOfHelpers = new Set<string>();
   /** The tasks that turned out to be a helper's own, so nothing later opens a row for them. */
@@ -497,7 +516,10 @@ export class ClaudeDriver implements Driver {
           return true;
         }
         const call = typeof m.tool_use_id === 'string' && m.tool_use_id ? m.tool_use_id : null;
-        if (call) this.taskOfCall.set(call, id);
+        if (call) {
+          this.taskOfCall.set(call, id);
+          this.callOfTask.set(id, call);
+        }
         if (!this.sentAway.has(id)) this.sentAway.set(id, numbers(id));
         this.emit({
           type: 'agent.started',
@@ -611,6 +633,45 @@ export class ClaudeDriver implements Driver {
       default:
         return false;
     }
+  }
+
+  /** What a row last said about itself, for a message that carries only part of it. */
+  private rowNumbers(agentId: string): { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState } {
+    return this.sentAway.get(agentId) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' };
+  }
+
+  /**
+   * A row's state changed and nothing else about it did.
+   *
+   * The numbers are sent again rather than blanked: a question being raised
+   * says nothing about how long the helper has been going, and a row that
+   * dropped its clock every time one arrived would flicker.
+   */
+  private agentState(agentId: string, state: AgentState): void {
+    if (!this.sentAway.has(agentId)) return;
+    const was = this.rowNumbers(agentId);
+    if (was.state === state) return;
+    this.sentAway.set(agentId, { ...was, state });
+    this.emit({ type: 'agent.progress', agentId, seconds: was.seconds, tokens: was.tokens, calls: was.calls, state });
+  }
+
+  /**
+   * Which sent-off agent raised a permission question, when one did
+   * (bw-7ks.22.5).
+   *
+   * The kit names only the call being asked about. That call is the helper's
+   * OWN, and the step from it to the call that sent the helper is the same
+   * parentage every one of the helper's words is already stamped with — so
+   * nothing new has to be asked of the kit to know whose question this is.
+   *
+   * `agentId` can be null where the call's parent is known and its row is not:
+   * the question still belongs to that agent's conversation, which is where a
+   * reader goes looking for it.
+   */
+  private whoAsked(toolUseId: string | undefined): { sentBy: string; agentId: string | null } | null {
+    const sentBy = toolUseId ? this.parentOfCall.get(toolUseId) : undefined;
+    if (!sentBy) return null;
+    return { sentBy, agentId: this.taskOfCall.get(sentBy) ?? null };
   }
 
   /**
@@ -876,8 +937,14 @@ export class ClaudeDriver implements Driver {
         // apply, and with the settings above his skills are loaded and listed
         // (77 of them on this machine).
         settingSources: ['user', 'project', 'local'],
-        canUseTool: (toolName: string, input: Record<string, unknown>, o: { suggestions?: PermissionUpdate[] }) =>
-          this.onPermissionRequest(toolName, input, o),
+        // `toolUseID` is what says whose question this is: it names the call
+        // being asked about, and a call a helper made is on record as the
+        // helper's (bw-7ks.22.5).
+        canUseTool: (
+          toolName: string,
+          input: Record<string, unknown>,
+          o: { suggestions?: PermissionUpdate[]; toolUseID?: string; agentID?: string },
+        ) => this.onPermissionRequest(toolName, input, o),
       },
     });
 
@@ -898,11 +965,21 @@ export class ClaudeDriver implements Driver {
   onPermissionRequest(
     toolName: string,
     input: Record<string, unknown>,
-    o: { suggestions?: PermissionUpdate[] },
+    o: { suggestions?: PermissionUpdate[]; toolUseID?: string; agentID?: string },
   ): Promise<PermissionResult> {
     const askId = randomUUID();
+    // Whose question this is, worked out before the card goes out: a helper's
+    // question is answered on the helper's row and inside the helper's own
+    // conversation, not in the middle of its owner's (§8.2.7).
+    const asker = this.whoAsked(o.toolUseID);
     return new Promise<PermissionResult>((resolve) => {
       this.asks.set(askId, { resolve, suggestions: o.suggestions, input });
+      // The row stops reading as working while nobody is answering it. That is
+      // the whole reason a row's state is not a boolean.
+      if (asker?.agentId) {
+        this.agentAsking.set(askId, asker.agentId);
+        this.agentState(asker.agentId, 'waiting');
+      }
       this.emit({
         type: 'ask.permission',
         askId,
@@ -919,6 +996,7 @@ export class ClaudeDriver implements Driver {
           { id: 'allow_always', label: 'Allow always', kind: 'allow_always' },
           { id: 'deny', label: 'Deny', kind: 'deny' },
         ],
+        ...(asker ? { parentToolCallId: asker.sentBy } : {}),
       });
       this.emit({ type: 'session.state', state: 'waiting_permission', label: `Asking about ${toolName}` });
     });
@@ -985,6 +1063,7 @@ export class ClaudeDriver implements Driver {
       skills: this.skills,
       models: this.models,
       permissionModes: [...CLAUDE_PERMISSION_MODES],
+      agentControls: this.agentControls(),
     });
   }
 
@@ -1025,6 +1104,12 @@ export class ClaudeDriver implements Driver {
     const ask = this.asks.get(askId);
     if (!ask) return;
     this.asks.delete(askId);
+    // Whatever was held up by it is working again.
+    const held = this.agentAsking.get(askId);
+    if (held !== undefined) {
+      this.agentAsking.delete(askId);
+      this.agentState(held, 'running');
+    }
 
     if (choice === 'deny') {
       ask.resolve({ behavior: 'deny', message: 'The owner denied this from the workbench.' });
@@ -1046,6 +1131,38 @@ export class ClaudeDriver implements Driver {
     this.wake = null;
     this.awaitingAnswer = true;
     this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
+  }
+
+  /**
+   * All three, because the kit has all three: it stops one task by its id, it
+   * backgrounds one by the call that started it, and a relay asks the brand for
+   * nothing at all (docs/agent-workbench.md §8.2.7).
+   */
+  agentControls(): AgentControl[] {
+    return ['stop', 'park', 'say'];
+  }
+
+  /**
+   * Ends one piece of sent-off work and nothing else. The chat keeps its turn,
+   * and everything else it sent away keeps running; the kit answers with a
+   * notification of its own, which is what closes the row.
+   */
+  async stopAgent(agentId: string): Promise<void> {
+    await this.q?.stopTask(agentId);
+  }
+
+  /**
+   * Hands the turn back and lets the work run on.
+   *
+   * Asked for by the CALL that started it, which is what the kit's control
+   * takes. A row that was never a call of this chat's own — a command left
+   * running — was already in the background, and false says exactly that:
+   * there was no foreground work of that name to park.
+   */
+  async parkAgent(agentId: string): Promise<boolean> {
+    const call = this.callOfTask.get(agentId);
+    if (!call) return false;
+    return (await this.q?.backgroundTasks(call)) ?? false;
   }
 
   async interrupt(): Promise<void> {
@@ -1277,7 +1394,10 @@ export class ClaudeDriver implements Driver {
             const input = b.input ?? {};
             // Whose call this is, kept for the panel: work started by a call a
             // helper made is the helper's, not this chat's.
-            if (sentBy) this.callsOfHelpers.add(String(b.id));
+            if (sentBy) {
+              this.callsOfHelpers.add(String(b.id));
+              this.parentOfCall.set(String(b.id), sentBy);
+            }
             this.liveTools.set(b.id, b.name);
             this.emit({
               type: 'tool.started',

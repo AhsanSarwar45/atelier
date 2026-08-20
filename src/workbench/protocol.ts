@@ -97,10 +97,11 @@ export type WbpEvent = EventBase &
     | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string }
     | { type: 'session.state'; state: SessionState; label: string }
     /**
-     * Everything the writing box can offer for THIS session: the commands and
-     * skills the install has, the models it could switch to, and the permission
-     * modes it accepts. Sent when the session announces itself, and again
-     * whenever the brand pushes a new list (docs/agent-workbench.md §7).
+     * Everything this session can offer: the commands and skills the install
+     * has, the models it could switch to, the permission modes it accepts, and
+     * which of the steering controls its brand has for the work it sends away.
+     * Sent when the session announces itself, and again whenever the brand
+     * pushes a new list (docs/agent-workbench.md §7).
      */
     | {
         type: 'session.menu';
@@ -108,6 +109,17 @@ export type WbpEvent = EventBase &
         skills: string[];
         models: ModelChoice[];
         permissionModes: string[];
+        /**
+         * Which of the three steering controls this session's brand actually
+         * has (docs/agent-workbench.md §8.2.7). A control that is not named
+         * here is not drawn: a button that cannot do the thing written on it
+         * is worse than no button (decision 13).
+         *
+         * Per session rather than per install, because it is a brand's answer
+         * and a chat is of one brand. A chat nobody is driving names none of
+         * them, which is the truth — there is nothing there to steer with.
+         */
+        agentControls: AgentControl[];
       }
     /**
      * What the session is set to now — after the owner changed one of them from
@@ -225,10 +237,41 @@ export type WbpEvent = EventBase &
         model: string | null;
         result: string | null;
       }
+    /**
+     * A word the owner typed for a running agent, and where it actually went.
+     *
+     * Neither brand offers a private channel into a helper that is already
+     * running, so this event says what happened rather than what one would
+     * wish had: the message went to the chat that sent the helper, naming which
+     * helper it was for (docs/agent-workbench.md §8.2.7). Kept on the row,
+     * because a reader who typed it needs to see both that it was said and how
+     * it was said — a word drawn as delivered would be a lie about the road it
+     * took.
+     */
+    | { type: 'agent.relayed'; agentId: string; text: string }
     | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }
-    | { type: 'ask.permission'; askId: string; toolName: string; input: Record<string, unknown>; title: string; options: AskOption[] }
+    /**
+     * A tool is asking to run. `parentToolCallId` is set when a SENT-OFF agent
+     * raised the question, and names the call that sent that agent — the same
+     * attribution every other line carries, so the question draws on the
+     * helper's own row and inside its own conversation instead of in the middle
+     * of its owner's (docs/agent-workbench.md §8.2.7).
+     *
+     * Optional on the same terms as `message.started`: almost every question in
+     * a chat is the main agent's own, and a field on every one of them is paid
+     * a million times over.
+     */
+    | {
+        type: 'ask.permission';
+        askId: string;
+        toolName: string;
+        input: Record<string, unknown>;
+        title: string;
+        options: AskOption[];
+        parentToolCallId?: string;
+      }
     | { type: 'ask.resolved'; askId: string; chosen: string }
     | { type: 'cost'; cost: Cost }
     /**
@@ -295,6 +338,18 @@ export type AgentKind = 'helper' | 'command' | 'watch' | 'run';
  */
 export type AgentState = 'running' | 'waiting' | 'parked' | 'done' | 'failed' | 'stopped';
 
+/**
+ * A way of steering one running piece of sent-off work
+ * (docs/agent-workbench.md §8.2.7).
+ *
+ * `stop` and `park` are the brand's own controls and are exact: one ends that
+ * agent alone, the other hands the turn back and lets it run on. `say` is a
+ * relay and nothing more — the typed words go to the chat that sent the agent,
+ * naming which agent they are for, because that is the only road either brand
+ * offers into one that is already running.
+ */
+export type AgentControl = 'stop' | 'park' | 'say';
+
 /** How loudly a `note` is drawn. See the rank table in §8.2.4. */
 export type NoteRank = 'note' | 'detail';
 
@@ -333,6 +388,16 @@ export type WbpCommand =
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
   | { type: 'session.stop'; sessionId: string }
+  /**
+   * Steering ONE piece of sent-off work, never the chat it belongs to
+   * (docs/agent-workbench.md §8.2.7). `agentId` is the row's own id.
+   *
+   * `agent.say` is a relay: the sidecar sends the chat a turn naming which
+   * agent the words are for, and records on the row that this is what it did.
+   */
+  | { type: 'agent.stop'; sessionId: string; agentId: string }
+  | { type: 'agent.park'; sessionId: string; agentId: string }
+  | { type: 'agent.say'; sessionId: string; agentId: string; text: string }
   /** Both act on the session that is open, not on the next one (§8.2.3). */
   | { type: 'session.mode'; sessionId: string; mode: string }
   | { type: 'session.model'; sessionId: string; model: string }

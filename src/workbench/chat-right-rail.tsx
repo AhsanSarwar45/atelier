@@ -30,6 +30,7 @@ import { BeadChip } from '@/components/bead-chip-row';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway } from '@/workbench/fold';
+import type { AgentControl } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { SentAwayPanel } from '@/workbench/sent-away';
 
@@ -83,13 +84,27 @@ export interface ChatRightRailProps {
   reports: { project: string; slug: string; title: string }[];
   /** Everything it handed to something else, oldest first (§8.2.7). */
   agents: SentAway[];
+  /** Whose chat these belong to; the steering on a row acts on it. */
+  sessionId: string;
+  /** Which steering controls this chat's brand has for them. None is a real answer. */
+  agentControls: AgentControl[];
   /** Opening one of them onto its own conversation. */
   onOpenAgent: (id: string) => void;
   open: boolean;
   onToggle: () => void;
 }
 
-export function ChatRightRail({ projectId, cards, reports, agents, onOpenAgent, open, onToggle }: ChatRightRailProps) {
+export function ChatRightRail({
+  projectId,
+  cards,
+  reports,
+  agents,
+  sessionId,
+  agentControls,
+  onOpenAgent,
+  open,
+  onToggle,
+}: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
   const empty = cards.length === 0 && reports.length === 0 && agents.length === 0;
   return (
@@ -149,7 +164,7 @@ export function ChatRightRail({ projectId, cards, reports, agents, onOpenAgent, 
               this rail to look at (§8.2.7). */}
           {agents.length > 0 && (
             <Section title="Sent away">
-              <SentAwayPanel agents={agents} onOpen={onOpenAgent} />
+              <SentAwayPanel agents={agents} sessionId={sessionId} controls={agentControls} onOpen={onOpenAgent} />
             </Section>
           )}
 

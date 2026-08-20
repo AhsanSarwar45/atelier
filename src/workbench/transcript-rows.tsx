@@ -31,7 +31,14 @@ import { ReportCard } from '@/workbench/report-view';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
 
-/** One permission card. Collapses to its answer once the human has clicked. */
+/**
+ * One permission card. Collapses to its answer once the human has clicked.
+ *
+ * `sentBy` and `askedBy` are set when a SENT-OFF agent raised the question. The
+ * card then says whose question it is, because a card that reads as the chat's
+ * own when a helper raised it is asking the reader to allow something nobody in
+ * front of them chose to do (docs/agent-workbench.md §8.2.7).
+ */
 export const PermissionCard = memo(function PermissionCard({
   sessionId,
   askId,
@@ -39,6 +46,8 @@ export const PermissionCard = memo(function PermissionCard({
   toolName,
   options,
   chosen,
+  sentBy,
+  askedBy,
 }: {
   sessionId: string;
   askId: string;
@@ -46,8 +55,14 @@ export const PermissionCard = memo(function PermissionCard({
   toolName: string;
   options: AskOption[];
   chosen: string | null;
+  sentBy?: string | null;
+  askedBy?: string | null;
 }) {
   const [pending, setPending] = useState<string | null>(null);
+  // What it says about who is asking. A brief where the row had one, and the
+  // plain fact where it did not: either way the reader is told this is not the
+  // agent they are talking to.
+  const raisedBy = sentBy ? askedBy || 'an agent this chat sent off' : null;
 
   if (chosen) {
     const answered = chosen === 'deny' ? 'Denied' : 'Allowed';
@@ -57,6 +72,7 @@ export const PermissionCard = memo(function PermissionCard({
         data-ask-state="resolved"
         data-ask-id={askId}
         data-tool-name={toolName}
+        data-sent-by={sentBy ?? undefined}
         className="text-sm text-muted-foreground"
       >
         <span data-testid="permission-resolved" className="font-medium text-foreground">
@@ -76,7 +92,13 @@ export const PermissionCard = memo(function PermissionCard({
       data-ask-state="open"
       data-ask-id={askId}
       data-tool-name={toolName}
+      data-sent-by={sentBy ?? undefined}
     >
+      {raisedBy && (
+        <div data-testid="permission-asked-by" className="mb-1 truncate text-xs text-muted-foreground" title={raisedBy}>
+          Asked by {raisedBy}
+        </div>
+      )}
       <div className="text-sm font-medium text-foreground">Allow {toolName}?</div>
       <div className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{title}</div>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -677,6 +699,8 @@ export const TranscriptRow = memo(function TranscriptRow({
           toolName={item.toolName}
           options={item.options}
           chosen={item.chosen}
+          sentBy={item.parentId}
+          askedBy={item.askedBy}
         />
       );
     // Notes, asides, and the lines the kit writes in the reader's name never

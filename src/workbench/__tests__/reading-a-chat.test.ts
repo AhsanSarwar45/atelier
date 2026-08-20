@@ -78,7 +78,7 @@ function turn(n: number): WbpEvent[] {
 function aWholeChat(turns: number): WbpEvent[] {
   const log: WbpEvent[] = [
     said({ type: 'session.started', brand: 'claude', externalId: null, model: 'opus', permissionMode: 'default', cwd: '/w' }),
-    said({ type: 'session.menu', commands: [], skills: ['x'], models: [], permissionModes: ['default'] }),
+    said({ type: 'session.menu', commands: [], skills: ['x'], models: [], permissionModes: ['default'], agentControls: ['stop', 'park', 'say'] }),
     ...turn(0),
     said({ type: 'note', noteId: 'n1', rank: 'note', kind: 'compact', text: 'compacted', body: null }),
     said({ type: 'link.bead', beadId: 'bw-uiyz', via: 'tool' }),

@@ -221,6 +221,17 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       await sessions.stop(cmd.sessionId);
       json(res, 200, { ok: true });
       return;
+    case 'agent.stop':
+      await sessions.stopAgent(cmd.sessionId, cmd.agentId);
+      json(res, 200, { ok: true });
+      return;
+    case 'agent.park':
+      json(res, 200, { ok: true, parked: await sessions.parkAgent(cmd.sessionId, cmd.agentId) });
+      return;
+    case 'agent.say':
+      await sessions.relay(cmd.sessionId, cmd.agentId, cmd.text);
+      json(res, 200, { ok: true });
+      return;
     case 'session.mode':
       await sessions.pin(cmd.sessionId, { mode: cmd.mode });
       json(res, 200, { ok: true });

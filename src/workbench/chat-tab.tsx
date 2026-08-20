@@ -664,6 +664,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           cards={cards}
           reports={ours}
           agents={view.agents}
+          sessionId={sessionId}
+          agentControls={view.menu.agentControls}
           onOpenAgent={setOpenAgent}
           open={rightOpen}
           onToggle={flipRight}
@@ -1060,6 +1062,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           row={agentOpen}
           items={view.items}
           sessionId={sessionId}
+          controls={view.menu.agentControls}
           mentions={mentions}
           onClose={() => setOpenAgent(null)}
         />

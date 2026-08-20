@@ -136,8 +136,18 @@ async function fixtureProject(request: APIRequestContext): Promise<{ id: string;
   return projectAt(request, 'workbench-agents', FIXTURE);
 }
 
-/** A chat of its own for this case, allowed to run tools without asking. */
-async function freshChat(request: APIRequestContext, page: Page): Promise<string> {
+/**
+ * A chat of its own for this case, allowed to run tools without asking.
+ *
+ * Except where the card IS the thing under test: one case asks for the asking
+ * mode by name, because a question an agent raised for itself only exists in a
+ * chat that asks.
+ */
+async function freshChat(
+  request: APIRequestContext,
+  page: Page,
+  permissionMode: 'bypassPermissions' | 'default' = 'bypassPermissions',
+): Promise<string> {
   const project = await fixtureProject(request);
 
   const started = (await (
@@ -149,7 +159,7 @@ async function freshChat(request: APIRequestContext, page: Page): Promise<string
         projectId: project.id,
         projectPath: project.path,
         brand: 'claude',
-        permissionMode: 'bypassPermissions',
+        permissionMode,
       },
     })
   ).json()) as { id: string };
@@ -829,5 +839,175 @@ test.describe('the agents a chat sends off', () => {
       written.remove();
       await request.delete(`/api/projects/${project.id}`);
     }
+  });
+
+  /**
+   * Steering one agent the chat sent away, all three tiers of it (§8.2.7).
+   *
+   * Two of them are direct — the kit is asked about that one piece of work, by
+   * its own name — and the third is not: nothing can hand words to an agent
+   * that is already running, so what the reader types goes to the chat that
+   * sent it, naming which one it is for, and the pane says so. A box that
+   * looked like a chat with the agent would be a lie the reader only finds out
+   * about when the answer never comes.
+   *
+   * Run rather than written, for the reason the whole file is: the two direct
+   * tiers are the kit's own answer to being asked, and a written record proves
+   * the drawing and not the asking. Parking and stopping are asked with two
+   * DIFFERENT ids — the task for one, the call that started it for the other —
+   * and handing over the wrong one parks the whole turn instead of one agent,
+   * which is exactly the mistake a live run catches and a fixture cannot.
+   *
+   * The helper is told to wait a long time on purpose: everything below happens
+   * while it is still working, and a helper that finishes first leaves nothing
+   * to steer.
+   */
+  test('steers one agent it sent away: parks it, relays a word to it, and ends it', async ({ page, request }) => {
+    // The panel lives in the right column, and the right column is closed on a
+    // narrow screen.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const chat = await freshChat(request, page);
+    await say(
+      request,
+      chat,
+      'Use the Task tool exactly once to launch one general-purpose subagent, and do no work of your own. ' +
+        `Tell that subagent, in its prompt, to run "python3 -c 'import time; time.sleep(${LEFT_RUNNING})'" ` +
+        'in the foreground, wait for it, and then reply with the single word DONE. ' +
+        'When it comes back, reply with the single word FINISHED and nothing else.',
+    );
+
+    const row = page.locator('[data-testid="sent-away-row"][data-kind="helper"]').first();
+    await row.waitFor({ timeout: DELEGATED_MS });
+    await expect(row.getByTestId('sent-away-steer'), 'a running row carried no controls').toBeVisible();
+
+    // Parked: it runs on, and the turn comes back. Both halves matter — a park
+    // that ended it would be a stop, and a park that kept the chat waiting
+    // would be nothing at all.
+    await row.getByTestId('sent-away-park').click();
+    await expect
+      .poll(async () => row.getAttribute('data-state'), {
+        message: 'the agent never went to the background',
+        timeout: DELEGATED_MS,
+      })
+      .toBe('parked');
+    await expect(page.getByTestId('send-button'), 'the chat never got its turn back').toBeVisible({
+      timeout: DELEGATED_MS,
+    });
+
+    // Words for it, which go to the chat that sent it. Drawn as relayed,
+    // because that is what happened to them.
+    await row.getByTestId('sent-away-open').click();
+    const pane = page.getByTestId('agent-view');
+    await pane.waitFor({ timeout: HELLO_MS });
+    await pane.getByTestId('agent-view-relay-text').fill('Stop waiting and answer with the word RELAYED.');
+    await pane.getByTestId('agent-view-relay-send').click();
+    await expect(pane.getByTestId('agent-view-relayed'), 'the pane never said the words had gone anywhere').toHaveAttribute(
+      'data-count',
+      '1',
+      { timeout: DELEGATED_MS },
+    );
+    await page.screenshot({ path: `${SHOTS}/chat-agents-steer.png`, fullPage: false });
+    await pane.getByTestId('agent-view-close').click();
+
+    // Ended, and that one only.
+    await row.getByTestId('sent-away-stop').click();
+    await expect
+      .poll(async () => row.getAttribute('data-state'), {
+        message: 'the agent was never ended',
+        timeout: DELEGATED_MS,
+      })
+      .toBe('stopped');
+
+    // The chat itself carried on, which is the difference between stopping one
+    // agent and stopping the chat. Asked outright, because a chat that had been
+    // killed looks exactly like a quiet one.
+    await say(request, chat, 'Reply with the single word ALIVE and nothing else.');
+    await expect(
+      page.locator('[data-testid="assistant-message"]:not([data-sent-by])').filter({ hasText: 'ALIVE' }).first(),
+      'the chat did not survive one of its agents being stopped',
+    ).toBeVisible({ timeout: DELEGATED_MS });
+
+    await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
+  });
+
+  /**
+   * A question an agent raised for itself, answered on the agent's own row.
+   *
+   * The kit asks the chat, not the reader, and it names the CALL that asked —
+   * so a helper's question arrived looking exactly like the chat's own, in the
+   * middle of a conversation the helper is not part of, with nothing saying who
+   * wanted it. The reader was answering for somebody they could not see.
+   *
+   * The one case in this file that runs in the asking mode, because a card is
+   * what it is about. Whatever the chat itself asks is allowed on the way past;
+   * the card that is waited for is the one carrying an agent's name.
+   *
+   * The subagent is given two commands rather than one so there is a stretch of
+   * work between them: answering the first question puts the row back to
+   * working, and a helper with nothing left to do would be finished before the
+   * screen could say so.
+   */
+  test('steers by answering a question one agent raised for itself', async ({ page, request }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const chat = await freshChat(request, page, 'default');
+    await say(
+      request,
+      chat,
+      'Use the Task tool exactly once to launch one general-purpose subagent, and do no work of your own. ' +
+        'Tell that subagent, in its prompt, to do these two things in order: ' +
+        `first run the shell command "python3 -c 'print(41 + 1)'" and note what it printed; ` +
+        `then run "python3 -c 'import time; time.sleep(${LEFT_RUNNING})'" in the foreground and wait for it. ` +
+        'When it comes back, reply with the single word FINISHED and nothing else.',
+    );
+
+    const open = page.locator('[data-testid="permission-card"][data-ask-state="open"]');
+    const fromAnAgent = page.locator('[data-testid="permission-card"][data-ask-state="open"][data-sent-by]');
+
+    // Everything the chat asks for itself is waved through; the run is waiting
+    // for the first question that is somebody else's.
+    await expect
+      .poll(
+        async () => {
+          if ((await fromAnAgent.count()) > 0) return true;
+          try {
+            if ((await open.count()) > 0) await open.first().getByTestId('permission-allow_once').click({ timeout: 2000 });
+          } catch {
+            // It was answered, or resolved itself, between the look and the click.
+          }
+          return false;
+        },
+        { message: 'no agent ever raised a question of its own', timeout: DELEGATED_MS },
+      )
+      .toBe(true);
+
+    const card = fromAnAgent.first();
+    const row = page.locator('[data-testid="sent-away-row"][data-kind="helper"]').first();
+    await row.waitFor({ timeout: DELEGATED_MS });
+
+    // The card names the agent by its brief — the same words its row carries —
+    // so the reader knows who they are answering for.
+    const brief = ((await row.getByTestId('sent-away-what').textContent()) ?? '').trim();
+    expect(brief, 'the row for the agent that asked has no brief').not.toBe('');
+    await expect(card.getByTestId('permission-asked-by')).toContainText(brief);
+
+    // And the row says it is not working: it is waiting on the reader.
+    await expect
+      .poll(async () => row.getAttribute('data-state'), {
+        message: 'the row went on reading as working while it waited to be answered',
+        timeout: DELEGATED_MS,
+      })
+      .toBe('waiting');
+    await page.screenshot({ path: `${SHOTS}/chat-agents-steer-asked.png`, fullPage: false });
+
+    // Answered, and it is working again.
+    await card.getByTestId('permission-allow_once').click();
+    await expect
+      .poll(async () => row.getAttribute('data-state'), {
+        message: 'the row never went back to working after it was answered',
+        timeout: DELEGATED_MS,
+      })
+      .toBe('running');
+
+    await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
   });
 });
