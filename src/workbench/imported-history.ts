@@ -9,6 +9,14 @@
  * (docs/agent-workbench.md §6.3.2).
  */
 
+/**
+ * A picture read out of a record is an `ImagePayload` and nothing else: the very
+ * shape a picture just pasted into the writing box has, so both reach the
+ * transcript as the same thing and are drawn by the same rule, with no second
+ * shape to keep in step (bw-uu9x.1, bw-uu9x.8).
+ */
+import type { ImagePayload } from './protocol';
+
 /** How much of a chat's past is drawn when it is opened. */
 export const IMPORTED_MESSAGES = 200;
 
@@ -142,21 +150,7 @@ export function textOf(message: unknown): string {
 }
 
 /**
- * A picture out of a chat's own record, in the shape a picture just sent has.
- *
- * The record keeps it as base64 beside the words of the same message, and the
- * transcript already knows how to draw one and open it full size — so a picture
- * read back is handed over as the very same thing rather than as a second kind
- * of picture with a second way of being drawn (bw-uu9x.1).
- */
-export interface PastImage {
-  mime: string;
-  dataUrl: string;
-  alt: string;
-}
-
-/**
- * How much encoded picture one of them may carry back out of the record.
+ * How much encoded picture a message may carry back out of the record.
  *
  * A picture is carried whole, because that is what makes it clickable, and the
  * whole of it then lives in the chat's stored history as well. One screenshot
@@ -175,8 +169,45 @@ function measured(data: unknown): string {
   return bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`;
 }
 
-/** The marker the harness writes into the words where a picture was pasted. */
-const PICTURE_MARKER = /\[Image #(\d+)\]/g;
+/**
+ * The marker the harness writes where a picture was pasted, with whatever
+ * spacing sits either side of it — the space belongs to the marker, and goes
+ * with it.
+ */
+const PICTURE_MARKER = /[^\S\n]*\[Image #\d+\][^\S\n]*/g;
+
+/**
+ * The words with the harness's picture markers lifted out of them.
+ *
+ * The number in `[Image #2]` counts the pictures of the whole conversation, not
+ * the blocks of the one message: a real record of this project's own holds a
+ * message whose two pictures are a png then a jpeg while its words read
+ * `…[Image #2]…[Image #1]` — the png being the one called #2. So no marker is
+ * matched to a picture, because that match would be wrong; every marker goes,
+ * since every picture it could name is already drawn above the words, and the
+ * ones that could not be drawn are named after them instead (bw-uu9x.6).
+ *
+ * Only the lines a marker stood on are touched: the space either side of a
+ * lifted marker closes up, a line that was a marker and nothing else goes with
+ * it, and every other line keeps the spacing it was written with — an aligned
+ * table or a pasted snippet in the same message is not squashed for having a
+ * screenshot beside it (bw-uu9x.7).
+ */
+function withoutMarkers(said: string): string {
+  if (!said.includes('[Image #')) return said;
+  const kept: string[] = [];
+  for (const line of said.split('\n')) {
+    if (!line.includes('[Image #')) {
+      kept.push(line);
+      continue;
+    }
+    const stripped = line.replace(PICTURE_MARKER, (marker, at: number) =>
+      at === 0 || at + marker.length === line.length ? '' : ' ',
+    );
+    if (stripped.trim() !== '') kept.push(stripped);
+  }
+  return kept.join('\n').trim();
+}
 
 /**
  * What one message holds: its words, and the pictures pasted into it.
@@ -184,19 +215,19 @@ const PICTURE_MARKER = /\[Image #(\d+)\]/g;
  * The harness does not put a picture in the words — it puts `[Image #1]` there
  * and the bytes in a block of their own. Reading the words alone left that
  * marker standing over nothing, which is exactly what the manager was looking
- * at (bw-uu9x). So the two are read together: each picture is carried, and its
- * marker comes out of the words because the picture itself now stands there.
- * A picture too big to carry keeps its place in the words instead, named and
- * measured, so the reader is never quietly short of one.
+ * at (bw-uu9x). So the two are read together: each picture is carried and drawn
+ * where the message begins, and the markers come out of the words because the
+ * pictures themselves now stand there. A picture too big to carry is named and
+ * measured under the words instead, so the reader is never quietly short of one.
  */
-export function saidWithPictures(message: unknown): { text: string; images: PastImage[] } {
+export function saidWithPictures(message: unknown): { text: string; images: ImagePayload[] } {
   const said = textOf(message);
   const content = (message as { content?: unknown } | null)?.content;
   if (!Array.isArray(content)) return { text: said, images: [] };
 
-  const images: PastImage[] = [];
-  /** What each picture's marker becomes: nothing, when the picture is drawn. */
-  const insteadOf = new Map<number, string>();
+  const images: ImagePayload[] = [];
+  /** A line for each picture that could not be carried, in the order held. */
+  const undrawn: string[] = [];
   let nth = 0;
 
   for (const block of content) {
@@ -214,36 +245,14 @@ export function saidWithPictures(message: unknown): { text: string; images: Past
       b.source?.type === 'base64' && typeof data === 'string' && data.length <= PICTURE_KEPT;
     if (whole) {
       images.push({ mime, dataUrl: `data:${mime};base64,${data as string}`, alt: `Picture ${nth}` });
-      insteadOf.set(nth, '');
     } else {
-      insteadOf.set(nth, `[${mime}, ${measured(data)}]`);
+      undrawn.push(`[${mime}, ${measured(data)}]`);
     }
   }
 
   if (nth === 0) return { text: said, images: [] };
 
-  const stood = new Set<number>();
-  let text = said.replace(PICTURE_MARKER, (marker, digits: string) => {
-    const n = Number(digits);
-    if (!insteadOf.has(n)) return marker;
-    stood.add(n);
-    return insteadOf.get(n)!;
-  });
-  // A picture the words never marked — a message that is a picture and nothing
-  // else — still has to be accounted for when it was too big to draw.
-  const unmarked = Array.from(insteadOf.entries())
-    .filter(([n, instead]) => instead !== '' && !stood.has(n))
-    .map(([, instead]) => instead);
-  if (unmarked.length) text = [text, ...unmarked].filter(Boolean).join('\n');
-  // Lifting a marker out of the middle of a sentence leaves the space either
-  // side of it standing.
-  return {
-    text: text
-      .replace(/[^\S\n]{2,}/g, ' ')
-      .replace(/[^\S\n]+$/gm, '')
-      .trim(),
-    images,
-  };
+  return { text: [withoutMarkers(said), ...undrawn].filter(Boolean).join('\n'), images };
 }
 
 /** Whether a recorded message is something a person or an agent actually said. */
@@ -310,7 +319,7 @@ interface RecordedMessage {
 
 /** One row of a chat that already happened, in the order it happened. */
 export type PastEntry =
-  | { kind: 'said'; role: 'user' | 'assistant'; text: string; images: PastImage[] }
+  | { kind: 'said'; role: 'user' | 'assistant'; text: string; images: ImagePayload[] }
   | { kind: 'call'; id: string; name: string; input: Record<string, unknown>; output: string; ok: boolean };
 
 /**

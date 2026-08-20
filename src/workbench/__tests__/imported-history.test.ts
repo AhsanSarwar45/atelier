@@ -149,7 +149,7 @@ describe('a picture in a message comes back with it', () => {
     expect(rows[0]!.kind === 'said' && rows[0]!.images).toHaveLength(1);
   });
 
-  it('keeps each picture with its own marker when a message holds several', () => {
+  it('carries every picture a message holds, in the order it holds them', () => {
     const said = saidWithPictures({
       content: [
         { type: 'text', text: 'before [Image #1] after [Image #2] end' },
@@ -159,6 +159,55 @@ describe('a picture in a message comes back with it', () => {
     });
     expect(said.images.map((i) => i.mime)).toEqual(['image/png', 'image/jpeg']);
     expect(said.text).toBe('before after end');
+  });
+
+  /**
+   * The number in a marker counts the pictures of the whole conversation, not
+   * the blocks of the one message. A record of this project's own holds a
+   * message whose blocks run png then jpeg while its words read
+   * '…[Image #2]…[Image #1]', with the png being the one the prose calls #2. So
+   * nothing may be decided from that number (bw-uu9x.6).
+   */
+  it('does not read the marker’s number as the picture’s place in the message', () => {
+    const said = saidWithPictures({
+      content: [
+        { type: 'text', text: 'the error [Image #2] and the settings [Image #1]' },
+        pasted(),
+        pasted(PIXEL, 'image/jpeg'),
+      ],
+    });
+    expect(said.images.map((i) => i.mime)).toEqual(['image/png', 'image/jpeg']);
+    expect(said.text).toBe('the error and the settings');
+  });
+
+  it('accounts for an uncarried picture even where the numbers run backwards', () => {
+    const huge = 'A'.repeat(PICTURE_KEPT + 4);
+    const said = saidWithPictures({
+      content: [
+        { type: 'text', text: 'the error [Image #2] and the settings [Image #1]' },
+        pasted(huge),
+        pasted(PIXEL, 'image/jpeg'),
+      ],
+    });
+    // The one that fits is drawn; the one that does not is named — and neither
+    // is guessed at from a marker number that means something else.
+    expect(said.images.map((i) => i.mime)).toEqual(['image/jpeg']);
+    expect(said.text).toBe('the error and the settings\n[image/png, 732 KB]');
+  });
+
+  /**
+   * A message that pastes a screenshot beside an aligned table or a snippet is
+   * still that table and that snippet: only the lines a marker stood on may be
+   * touched by lifting one out (bw-uu9x.7).
+   */
+  it('leaves the spacing of every line the marker was not on alone', () => {
+    const said = saidWithPictures({
+      content: [
+        { type: 'text', text: 'see [Image #1]\nname     count\nbuild        4\n' },
+        pasted(),
+      ],
+    });
+    expect(said.text).toBe('see\nname     count\nbuild        4');
   });
 
   it('draws a message that is a picture and nothing else', () => {
@@ -174,7 +223,7 @@ describe('a picture in a message comes back with it', () => {
       content: [{ type: 'text', text: 'this one [Image #1] please' }, pasted(huge)],
     });
     expect(said.images).toHaveLength(0);
-    expect(said.text).toBe('this one [image/png, 732 KB] please');
+    expect(said.text).toBe('this one please\n[image/png, 732 KB]');
   });
 
   it('names a picture the record holds somewhere else rather than as bytes', () => {
@@ -185,7 +234,7 @@ describe('a picture in a message comes back with it', () => {
       ],
     });
     expect(said.images).toHaveLength(0);
-    expect(said.text).toBe('here [image/png, 0 bytes]');
+    expect(said.text).toBe('here\n[image/png, 0 bytes]');
   });
 
   it('leaves a message with no picture in it exactly as it was', () => {
