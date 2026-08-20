@@ -23,6 +23,7 @@ import type {
   AgentKind,
   AgentState,
   AskOption,
+  Audience,
   CommandInfo,
   Cost,
   ImagePayload,
@@ -121,6 +122,8 @@ export interface TranscriptNotice {
   text: string;
   /** Which family it is drawn as; absent on a chat recorded before there were families. */
   family?: MachineFamily;
+  /** Who it is for; absent on a chat recorded before there were audiences (bw-6jq5). */
+  audience?: Audience;
 }
 
 export interface TranscriptReport {
@@ -547,7 +550,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'notice':
-      next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family }];
+      next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family, audience: e.audience }];
       return next;
 
     // What follows replaces what came before: a chat re-read under a newer
@@ -861,7 +864,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
 
       case 'notice':
-        items.push({ kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family });
+        items.push({ kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family, audience: e.audience });
         break;
 
       case 'transcript.reset':

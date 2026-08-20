@@ -21,6 +21,8 @@ import {
   drawnRows,
   familyOf,
   FAMILIES,
+  forWhom,
+  KINDS_WITH_AN_AUDIENCE,
   KNOWN_KINDS,
   lookOf,
   markOf,
@@ -106,6 +108,35 @@ describe('every kind has a family', () => {
   it('keeps an unfamiliar kind at the loudness the driver gave it', () => {
     expect(familyOf('system/something_new', 'note')).toBe('background');
     expect(familyOf('system/something_new', 'detail')).toBe('breathing');
+  });
+
+  it('says who every kind the driver can emit is for', () => {
+    // Unnamed here means nobody has ruled on it, and it falls to the machine's
+    // side — where a chat does not draw it. That is the right default and the
+    // wrong place to arrive by accident, so this goes red instead (bw-6jq5).
+    const found = kindsTheDriverEmits();
+    expect(found.filter((kind) => !KINDS_WITH_AN_AUDIENCE.includes(kind))).toEqual([]);
+  });
+
+  it('separates who a line is for from how bad it is', () => {
+    // The two axes disagree on purpose, in both directions. A hook that refused
+    // the turn is loud and is still the machine's own business; an agent coming
+    // home fine is quiet news and so is the machine's; an agent that FAILED is
+    // his (the manager's ruling of 2026-08-20).
+    expect(familyOf('system/hook_response', 'note')).toBe('failed');
+    expect(forWhom('system/hook_response', 'note')).toBe('machine');
+    expect(forWhom('system/task_started', 'detail')).toBe('machine');
+    expect(forWhom('system/task_notification', 'detail')).toBe('machine');
+    expect(forWhom('system/task_notification', 'note')).toBe('you');
+    // His allowance: nothing to do while the window is open, everything to do
+    // once it has closed.
+    expect(forWhom('rate_limit_event', 'detail')).toBe('machine');
+    expect(forWhom('rate_limit_event', 'note')).toBe('you');
+  });
+
+  it('keeps a kind nobody has ruled on off his screen, not out of the record', () => {
+    expect(forWhom('system/something_new', 'note')).toBe('machine');
+    expect(forWhom('system/something_new', 'detail')).toBe('machine');
   });
 
   it('puts a stop, a retry and a compaction in three different families', () => {

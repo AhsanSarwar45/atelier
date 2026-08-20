@@ -269,11 +269,21 @@ function noteBody(m: Record<string, any>): Note | null {
       };
     }
 
+    // An agent leaving and an agent coming home. The panel is the list of
+    // agents — what each one is, what it is doing, what it has spent — so the
+    // chat says nothing about either unless one FAILED, which is the manager's
+    // own ruling of 2026-08-20 and the reason the pair is split by outcome
+    // rather than drawn alike (bw-6jq5).
     case 'system/task_started':
       return { rank: 'detail', kind, text: `Sent off: ${oneLine(m.description)}`, body: String(m.description ?? '') };
 
     case 'system/task_notification':
-      return { rank: 'note', kind, text: `${oneLine(m.summary)} (${m.status})`, body: whole() };
+      return {
+        rank: m.status === 'failed' ? 'note' : 'detail',
+        kind,
+        text: `${oneLine(m.summary)} (${m.status})`,
+        body: whole(),
+      };
 
     case 'system/memory_recall':
       return {
@@ -312,15 +322,20 @@ function noteBody(m: Record<string, any>): Note | null {
 
     // What his allowance is doing. It arrived with no wording of its own, so
     // the row read `rate_limit_event` — the kind's name where the sentence
-    // should be (bw-jkh2.19). It is news either way and not the machine's own
-    // breathing: it is about HIM, and he asked to be told.
+    // should be (bw-jkh2.19).
+    //
+    // A window that is OPEN is the machine reporting that nothing is wrong, and
+    // it says so again every few minutes: 35 of the 104 lines a chat drew by
+    // default were this one sentence. A window that has closed or is closing is
+    // about HIM — it is why his work is about to stop — so only that one is
+    // loud, and the pair is what the chat sorts on (bw-6jq5).
     case 'rate_limit_event': {
       const info = m.rate_limit_info ?? {};
       const window = String(info.rateLimitType ?? 'allowance').replace(/_/g, '-');
       const allowed = info.status === 'allowed';
       const resets = typeof info.resetsAt === 'number' ? ` until ${clockOf(info.resetsAt)}` : '';
       return {
-        rank: 'note',
+        rank: allowed ? 'detail' : 'note',
         kind,
         text: allowed
           ? `Allowance: the ${window} window is open${resets}`

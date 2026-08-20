@@ -600,6 +600,9 @@ export class Sessions {
         // The chat's own memory, drawn as one: it is the same thing to a reader
         // as the conversation folding itself up (bw-jkh2.5).
         family: 'memory',
+        // For him: rows he can see are missing is the one thing he cannot find
+        // out any other way (bw-6jq5).
+        audience: 'you',
         text: `${past.length - shown.length} earlier messages and commands are in this chat and are not drawn here.`,
       });
     }
@@ -1109,8 +1112,15 @@ export class Sessions {
       // Before the notice below, not after it: that notice is the chat waking
       // up, and a chat that is somebody else's does not wake (bw-dmxj.12).
       this.refuseIfHeld(row.externalId);
-      // An agent being started, which is what background says (bw-jkh2.5).
-      this.publish(sessionId, { type: 'notice', family: 'background', text: 'Continuing this chat.' });
+      // An agent being started, which is what background says (bw-jkh2.5) — and
+      // the machine's own, because he just typed into this chat and starting it
+      // back up is how that gets answered, not news (bw-6jq5).
+      this.publish(sessionId, {
+        type: 'notice',
+        family: 'background',
+        audience: 'machine',
+        text: 'Continuing this chat.',
+      });
       await this.resume({
         sessionId,
         externalId: row.externalId ?? undefined,

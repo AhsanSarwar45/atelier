@@ -1,5 +1,13 @@
 /**
- * What the machine says about itself, sorted into six families and drawn as one.
+ * What the machine says about itself, sorted two ways and drawn as one row.
+ *
+ * The two ways answer different questions and both are needed. The FAMILY says
+ * how bad a line is and decides its colour. The AUDIENCE says who it is for and
+ * decides whether the chat draws it before the reader has touched anything.
+ * With only the first, everything loud enough to have a colour was shown, and
+ * 78 of the 104 lines a chat drew by default were the machine keeping its own
+ * books — an allowance window opening, the mode a chat started in, an agent
+ * being dispatched (bw-6jq5). `FOR` below is the second answer.
  *
  * The driver already tells these apart — a compaction, a retry, a hook that
  * refused the turn, a subagent reporting back all arrive under their own name
@@ -30,10 +38,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import type { MachineFamily, NoteRank } from '@/workbench/protocol';
+import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
-export type { MachineFamily };
+export type { Audience, MachineFamily };
+
+/** Both audiences, his first — the order the filter stacks them in. */
+export const AUDIENCES: Audience[] = ['you', 'machine'];
 
 /** Every family, in the order they are written about — for tests and for the doc. */
 export const FAMILIES: MachineFamily[] = [
@@ -149,7 +160,10 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // is a chat that delegated its whole turn reading as a chat that fell silent
   // (bw-7ks.22.6).
   'system/task_started': { note: 'background', detail: 'background' },
-  'system/task_notification': 'background',
+  // A helper that came home having failed is a failure, and the driver ranks it
+  // `note` for exactly that reason; one that came home fine is news of the
+  // quietest sort (bw-6jq5).
+  'system/task_notification': { note: 'failed', detail: 'background' },
   'system/informational': { note: 'background', detail: 'breathing' },
   'system/notification': { note: 'background', detail: 'breathing' },
   mode: 'background',
@@ -182,6 +196,115 @@ export function familyOf(kind: string, rank: NoteRank): MachineFamily {
 }
 
 /**
+ * Who each kind is for. The other half of the answer, and the one that decides
+ * what a chat draws before the reader has touched anything (bw-6jq5).
+ *
+ * The rule for reading this table is one question: is there anything he would
+ * DO about the line? He stopped a turn, a command was refused, the chat folded
+ * itself up, the model would not answer, his allowance ran out — all of those
+ * change what he does next. An allowance window merely being open, a memory
+ * being recalled, a rule of his running, a plugin installing, an agent being
+ * dispatched and coming home again do not: they are the chat keeping its books,
+ * and it keeps them whether he is watching or not.
+ *
+ * Where the answer turns on WHAT happened rather than on which kind it is, it
+ * is written as a pair and the driver carries the split in the rank — a helper
+ * that failed, an allowance that ran out, a compaction that was asked for
+ * rather than a status ping. That is the same idiom the families use above, and
+ * it is why the driver ranks by outcome rather than by kind.
+ */
+const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
+  // He stopped it, or it stopped.
+  'user/synthetic': 'you',
+  'system/worker_shutting_down': 'you',
+  conversation_reset: 'you',
+
+  // The turn did not do what he asked.
+  result: 'you',
+  'system/permission_denied': 'you',
+  'system/model_refusal_no_fallback': 'you',
+  'system/model_refusal_fallback': 'you',
+  // Signing in is his to fix; checking a sign-in that is fine is not.
+  auth_status: { note: 'you', detail: 'machine' },
+
+  // Why the chat is sitting there.
+  'system/api_retry': 'you',
+
+  // The allowance: nothing to do while the window is open, and the reason the
+  // work stopped once it is not. The driver ranks the closed one `note`.
+  rate_limit_event: { note: 'you', detail: 'machine' },
+
+  // The chat's own memory. Folding up changes what the agent knows and is his;
+  // the recall behind it, and the ping on every request, are not.
+  'system/compact_boundary': 'you',
+  'system/status': { note: 'you', detail: 'machine' },
+  'system/memory_recall': 'machine',
+
+  // What he set. A chat that has quietly stopped asking before it runs things
+  // is a trap, so a real change speaks; the state a chat opened in is not a
+  // change and the driver no longer reports one (bw-6jq5.2).
+  mode: 'you',
+  model: 'you',
+
+  // Sent-off work is a panel of its own, and a line per dispatch on top of it
+  // says the same thing twice — the manager's ruling of 2026-08-20. One that
+  // came home having FAILED still speaks, which is the rank split.
+  'system/task_started': 'machine',
+  'system/task_notification': { note: 'you', detail: 'machine' },
+
+  // The machine's own housekeeping, whatever colour it happens to wear.
+  'system/mirror_error': 'machine',
+  'system/hook_started': 'machine',
+  'system/hook_progress': 'machine',
+  'system/hook_response': 'machine',
+  'system/plugin_install': 'machine',
+  'system/informational': 'machine',
+  'system/notification': 'machine',
+  tool_use_summary: 'machine',
+};
+
+/**
+ * Every kind somebody has decided an audience for, for the test that walks the
+ * driver. A kind the driver can emit and this list does not name is a kind
+ * nobody has ruled on, and it falls to the machine's side unread — so the test
+ * fails rather than the reader quietly losing it.
+ */
+export const KINDS_WITH_AN_AUDIENCE: string[] = Object.keys(FOR);
+
+/**
+ * Who one kind of machine line is for.
+ *
+ * A kind this build has never met is the machine's, whatever it says. That is
+ * the opposite of the families' guess, and on purpose: a kind nobody has taught
+ * the app is by definition one nobody has decided he needs, and the alternative
+ * — every new thing the kit invents landing in the middle of his conversation —
+ * is the complaint this job began with. It is not lost, because the machine's
+ * own group in the filter carries a count of what is in it (bw-6jq5).
+ */
+export function forWhom(kind: string, rank: NoteRank): Audience {
+  const found = FOR[kind];
+  if (found === undefined) return 'machine';
+  return typeof found === 'string' ? found : found[rank];
+}
+
+/**
+ * Who one of the app's OWN asides is for, when it did not say.
+ *
+ * An aside carries its audience from the sidecar, and one recorded before there
+ * were audiences carries only a family. A family that means something stopped,
+ * failed, is being waited on or has changed what the chat remembers is his; the
+ * app talking about itself is not.
+ */
+const ASIDE_FOR: Record<MachineFamily, Audience> = {
+  stopped: 'you',
+  failed: 'you',
+  waiting: 'you',
+  memory: 'you',
+  background: 'machine',
+  breathing: 'machine',
+};
+
+/**
  * One machine line on the page, and every line folded into it, oldest first.
  *
  * A bad ten minutes on a busy service is eight retries, which is one thing that
@@ -194,6 +317,7 @@ export interface MachineRow {
   row: 'machine';
   id: string;
   family: MachineFamily;
+  audience: Audience;
   kind: string;
   rank: NoteRank;
   lines: { text: string; body: string | null }[];
@@ -206,9 +330,11 @@ export type DrawnRow = MachineRow | { row: 'other'; item: TranscriptItem };
  * is not the machine talking. The filter asks this so that its switches stand
  * for what is on the page rather than for the shape the event arrived in.
  */
-export const machineIn = (item: TranscriptItem): { family: MachineFamily; kind: string } | null => {
+export const machineIn = (
+  item: TranscriptItem,
+): { family: MachineFamily; audience: Audience; kind: string } | null => {
   const line = machineLine(item);
-  return line === null ? null : { family: line.family, kind: line.kind };
+  return line === null ? null : { family: line.family, audience: line.audience, kind: line.kind };
 };
 
 /** What the chip says: where the run had got to. */
@@ -226,10 +352,10 @@ export const opensOn = (row: MachineRow): boolean =>
  * goes — "1 of 5", then "2 of 5" — so folding on the sentence would fold
  * nothing at all and leave the run exactly as long as it was.
  *
- * The family has to agree as well, because the app's own asides all arrive
- * under the one kind and carry their family beside it: two of them in a row
- * meant for different families would otherwise fold, and the chip would wear
- * the first one's colour over the last one's words.
+ * The family and the audience have to agree as well, because the app's own
+ * asides all arrive under the one kind and carry both beside it: two of them in
+ * a row meant differently would otherwise fold, and the chip would wear the
+ * first one's colour — or the first one's reader — over the last one's words.
  *
  * Nothing is dropped here on grounds of loudness. A quiet line used to be held
  * back unless a second control was on, so the filter counted status lines the
@@ -249,7 +375,8 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
       last?.row === 'machine' &&
       last.kind === line.kind &&
       last.rank === line.rank &&
-      last.family === line.family
+      last.family === line.family &&
+      last.audience === line.audience
     ) {
       last.lines.push({ text: line.text, body: line.body });
       continue;
@@ -258,6 +385,7 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
       row: 'machine',
       id: line.id,
       family: line.family,
+      audience: line.audience,
       kind: line.kind,
       rank: line.rank,
       lines: [{ text: line.text, body: line.body }],
@@ -294,13 +422,20 @@ export const writtenInHisName = (text: string): boolean => /^\[[^\n\]]+\]$/.test
  * sidecar gave it; one recorded before there were families is the app speaking,
  * which is what an aside is.
  */
-function machineLine(
-  item: TranscriptItem,
-): { id: string; family: MachineFamily; kind: string; rank: NoteRank; text: string; body: string | null } | null {
+function machineLine(item: TranscriptItem): {
+  id: string;
+  family: MachineFamily;
+  audience: Audience;
+  kind: string;
+  rank: NoteRank;
+  text: string;
+  body: string | null;
+} | null {
   if (item.kind === 'message' && item.role === 'user' && writtenInHisName(item.text)) {
     return {
       id: item.id,
       family: familyOf('user/synthetic', 'note'),
+      audience: forWhom('user/synthetic', 'note'),
       kind: 'user/synthetic',
       rank: 'note',
       text: item.text.trim(),
@@ -311,6 +446,7 @@ function machineLine(
     return {
       id: item.id,
       family: familyOf(item.noteKind, item.rank),
+      audience: forWhom(item.noteKind, item.rank),
       kind: item.noteKind,
       rank: item.rank,
       text: item.text,
@@ -318,9 +454,11 @@ function machineLine(
     };
   }
   if (item.kind === 'notice') {
+    const family = item.family ?? familyOf('app/notice', 'note');
     return {
       id: item.id,
-      family: item.family ?? familyOf('app/notice', 'note'),
+      family,
+      audience: item.audience ?? ASIDE_FOR[family],
       kind: 'app/notice',
       rank: 'note',
       text: item.text,

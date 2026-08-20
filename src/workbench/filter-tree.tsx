@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import {
+  audienceKind,
   COMMANDS,
   flip,
   switchOf,
@@ -41,10 +42,14 @@ interface TreeProps {
 /**
  * The tree itself. Commands arrives folded: it is the longest group and the one
  * a reader opens on purpose, and unfolded it pushes everything below it off the
- * panel.
+ * panel. The machine's own side arrives folded for the same reason and one
+ * more — it is switched off to begin with, so it is a drawer of things he has
+ * already said he does not want to read (bw-6jq5).
  */
 export function KindTree({ items, off, onChange }: TreeProps) {
-  const [folded, setFolded] = useState<ReadonlySet<KindId>>(() => new Set([COMMANDS]));
+  const [folded, setFolded] = useState<ReadonlySet<KindId>>(
+    () => new Set([COMMANDS, audienceKind('machine')]),
+  );
   const fold = (id: KindId) =>
     setFolded((was) => {
       const next = new Set(was);
@@ -88,6 +93,10 @@ function Line({
   const state = switchOf(node, off);
   const shut = folded.has(node.id);
   const branch = node.children.length > 0;
+  // Five levels deep at the bottom of the status tree — you, the agent, status,
+  // who it is for, how bad it is, the kind itself — so the step is small enough
+  // that the last of them still has room for its name (bw-6jq5).
+  const indent = `${depth * 0.85 + 0.25}rem`;
 
   return (
     <>
@@ -100,7 +109,7 @@ function Line({
         data-state={state}
         data-count={node.count}
         className="flex items-center gap-1.5 rounded px-1 py-1 text-sm hover:bg-surface-overlay"
-        style={{ paddingLeft: `${depth * 1.1 + 0.25}rem` }}
+        style={{ paddingLeft: indent }}
       >
         {branch ? (
           <button
@@ -180,7 +189,7 @@ export function KindFilter({ items, off, onChange }: TreeProps) {
           data-filtered={filtered}
         />
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-2" data-testid="kind-filter-panel">
+      <PopoverContent align="start" className="w-72 p-2" data-testid="kind-filter-panel">
         <KindTree items={items} off={off} onChange={onChange} />
         <button
           type="button"

@@ -9,12 +9,20 @@
  * the panel says three helpers are running, and only the conversation says the
  * second one went off between the two commands the reader is looking at.
  *
- * Which is worth nothing if the lines are not on the page, and both ways of
- * losing them are held here. "Sent off" was filed as the machine's own
- * breathing and started switched off, so a chat that delegated its whole turn
- * read as a chat that fell silent; and the line saying one came back was
- * dropped as a repeat of the helper's own answer, which it quotes on purpose,
- * so the panel said finished and the conversation never said it came home.
+ * Which is worth nothing if the lines are not IN the record, and both ways of
+ * losing them are held here: "Sent off" was dropped from the conversation
+ * outright, so a chat that delegated its whole turn read as a chat that fell
+ * silent; and the line saying one came back was dropped as a repeat of the
+ * helper's own answer, which it quotes on purpose, so the panel said finished
+ * and the conversation never said it came home.
+ *
+ * Being in the record and being on his screen are two different questions, and
+ * this file asks both. An agent going and coming home is drawn on the panel —
+ * what it is, what it is doing, what it spent — so repeating it in the chat
+ * says the same thing twice: those lines are the machine's own and start
+ * switched off, and only one that FAILED speaks unasked. That is the manager's
+ * ruling of 2026-08-20 (bw-6jq5). Every one of them is still one switch away,
+ * which is what `everythingSaid` holds.
  *
  * It holds them across the seam rather than either side of it: the real driver reads the kit's real messages, the real reducer folds
  * them into a conversation, and the browser's real filter — with nothing
@@ -29,7 +37,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { foldAll } from '../../../src/workbench/fold.ts';
-import { QUIET, showing } from '../../../src/workbench/message-filter.ts';
+import { EVERYTHING, QUIET, showing } from '../../../src/workbench/message-filter.ts';
 import type { WbpEvent } from '../../../src/workbench/protocol.ts';
 import { ClaudeDriver } from '../drivers/claude.ts';
 
@@ -96,30 +104,36 @@ const ANSWERED = {
  * shipping path — the sidecar stamps the three fields it adds here, the browser
  * folds, the browser filters.
  */
-function readerSees(messages: Record<string, unknown>[]): string[] {
+function linesOf(messages: Record<string, unknown>[], off: ReadonlySet<string>): string[] {
   const events: WbpEvent[] = [];
   const driver = new ClaudeDriver();
   (driver as unknown as { emit: (e: Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>) => void }).emit = (e) =>
     events.push({ ...e, seq: events.length, sessionId: 's1', at: '2026-08-20T12:00:00.000Z' } as WbpEvent);
   for (const m of messages) driver.draw(m);
-  return showing(foldAll(events).items, QUIET)
+  return showing(foldAll(events).items, off)
     .map((item) => (item.kind === 'note' ? item.text : ''))
     .filter(Boolean);
 }
 
-describe('what a chat says about the work it sent away', () => {
-  it('says all five, with nothing switched on to hear them', () => {
-    const said = readerSees([
-      SENT_OFF,
-      RETRYING,
-      ended('afa98b872c4df37bc', 'completed', 'Slept and reported'),
-      ended('t-2', 'failed', 'Could not read the file'),
-      ended('t-3', 'stopped', 'Given up on'),
-    ]);
+/** What is on his screen before he touches a switch. */
+const readerSees = (messages: Record<string, unknown>[]): string[] => linesOf(messages, QUIET);
 
+/** What the record holds, which is what the one switch gives him back. */
+const everythingSaid = (messages: Record<string, unknown>[]): string[] => linesOf(messages, EVERYTHING);
+
+describe('what a chat says about the work it sent away', () => {
+  const FIVE = [
+    SENT_OFF,
+    RETRYING,
+    ended('afa98b872c4df37bc', 'completed', 'Slept and reported'),
+    ended('t-2', 'failed', 'Could not read the file'),
+    ended('t-3', 'stopped', 'Given up on'),
+  ];
+
+  it('holds all five in the record, in the order they happened', () => {
     // Sent off, retrying, finished, failed, given up — in that order, because
     // the record is the conversation and the conversation is in time.
-    expect(said).toEqual([
+    expect(everythingSaid(FIVE)).toEqual([
       'Sent off: Sleep 45 seconds then report',
       'Retrying (2 of 5) after HTTP 529',
       'Slept and reported (completed)',
@@ -128,10 +142,20 @@ describe('what a chat says about the work it sent away', () => {
     ]);
   });
 
+  it('draws only the two he can act on before he touches a switch', () => {
+    // The service being ridden out is why his chat is sitting there, and the
+    // helper that failed is work he asked for that did not happen. An agent
+    // leaving, arriving home fine, or being given up on is the panel's news.
+    expect(readerSees(FIVE)).toEqual([
+      'Retrying (2 of 5) after HTTP 529',
+      'Could not read the file (failed)',
+    ]);
+  });
+
   it('says nothing at all about work a helper sent away', () => {
     // Not the going and not the coming home: the helper's own command is on the
     // helper's own conversation, where it is somebody's.
-    expect(readerSees([A_HELPER_S, ended('br1aixx0b', 'completed', 'Slept')])).toEqual([]);
+    expect(everythingSaid([A_HELPER_S, ended('br1aixx0b', 'completed', 'Slept')])).toEqual([]);
   });
 
   it('says one came back even when its whole answer was one word', () => {
@@ -140,12 +164,12 @@ describe('what a chat says about the work it sent away', () => {
     // not a second shape: kept in the same breath, "DONE" from the helper ate
     // "DONE (completed)" from the chat, and the panel said finished while the
     // conversation never said it came home.
-    const said = readerSees([SENT_OFF, ANSWERED, ended('afa98b872c4df37bc', 'completed', 'DONE')]);
+    const said = everythingSaid([SENT_OFF, ANSWERED, ended('afa98b872c4df37bc', 'completed', 'DONE')]);
     expect(said).toEqual(['Sent off: Sleep 45 seconds then report', 'DONE (completed)']);
   });
 
   it('and still says the chat’s own, with a helper’s work in among it', () => {
-    const said = readerSees([
+    const said = everythingSaid([
       SENT_OFF,
       A_HELPER_S,
       ended('br1aixx0b', 'completed', 'Slept'),

@@ -24,6 +24,7 @@ import {
   showing,
   switchOf,
   QUIET,
+  audienceKind,
   statusKind,
   statusOf,
   toolKind,
@@ -140,17 +141,23 @@ describe('which switch a row answers to', () => {
   });
 
   it('reads a notice and a note as status lines, each under its own kind', () => {
-    expect(kindOf(noted())).toBe(statusOf('background', 'hook'));
-    expect(kindOf({ kind: 'notice', id: 'n', text: 'reconnected' })).toBe(statusOf('background', 'app/notice'));
-    // Its kind sits under its family, and the family under status lines.
-    expect(above(kindOf(noted()))).toBe(statusKind('background'));
-    expect(above(statusKind('background'))).toBe(STATUS);
+    expect(kindOf(noted())).toBe(statusOf('machine', 'background', 'hook'));
+    expect(kindOf({ kind: 'notice', id: 'n', text: 'reconnected' })).toBe(
+      statusOf('machine', 'background', 'app/notice'),
+    );
+    // Its kind sits under its family, the family under who it is for, and that
+    // under status lines.
+    expect(above(kindOf(noted()))).toBe(statusKind('machine', 'background'));
+    expect(above(statusKind('machine', 'background'))).toBe(audienceKind('machine'));
+    expect(above(audienceKind('machine'))).toBe(STATUS);
   });
 
   it('reads a line the kit wrote in his name as the machine talking, not as him', () => {
     // The complaint this job began with: stopping a turn put
     // "[Request interrupted by user]" on the page wearing his own colour.
-    expect(kindOf(said('user', '[Request interrupted by user]'))).toBe(statusOf('stopped', 'user/synthetic'));
+    expect(kindOf(said('user', '[Request interrupted by user]'))).toBe(
+      statusOf('you', 'stopped', 'user/synthetic'),
+    );
     expect(kindOf(said('user', 'do the thing'))).toBe('you');
   });
 });
@@ -283,10 +290,10 @@ describe('what is remembered', () => {
     expect(Array.from(remembered())).toEqual(Array.from(off));
   });
 
-  it('starts with the machine’s own breathing off and nothing else', () => {
+  it('starts with the machine’s own side off and nothing else', () => {
     expect(remembered()).toEqual(new Set(QUIET));
-    expect(remembered().has(statusKind('breathing'))).toBe(true);
-    expect(remembered().has(statusKind('stopped'))).toBe(false);
+    expect(remembered().has(audienceKind('machine'))).toBe(true);
+    expect(remembered().has(audienceKind('you'))).toBe(false);
   });
 
   it('starts the same way when what was stored cannot be read', () => {
@@ -294,7 +301,7 @@ describe('what is remembered', () => {
     expect(remembered()).toEqual(new Set(QUIET));
   });
 
-  it('keeps an empty answer once he has switched the breathing back on', () => {
+  it('keeps an empty answer once he has switched the machine’s side back on', () => {
     // Stored and empty is not the same as never stored: he asked for all of it.
     localStorage.setItem(CHAT_FILTER, '[]');
     expect(remembered().size).toBe(0);
@@ -342,20 +349,35 @@ describe('what a count is counting', () => {
     expect(find(tree, AGENT).count).toBe(find(tree, AGENT).children.reduce((n, c) => n + c.count, 0));
   });
 
-  it('carries one switch per kind, under the family it belongs to', () => {
-    const items = [...conversation(), filed(), filed()];
+  it('splits status lines by who they are for, then by family, then by kind', () => {
+    const items = [...conversation(), filed(), filed(), stopped()];
     const under = find(treeOf(items), STATUS).children;
-    expect(under.map((c) => c.id)).toEqual([statusKind('background'), statusKind('breathing')]);
-    expect(under.flatMap((c) => c.children.map((k) => k.id))).toEqual([
-      statusOf('background', 'hook'),
-      statusOf('breathing', 'hook'),
+    expect(under.map((c) => c.id)).toEqual([audienceKind('you'), audienceKind('machine')]);
+    expect(under.flatMap((c) => c.children.map((f) => f.id))).toEqual([
+      statusKind('you', 'stopped'),
+      statusKind('machine', 'background'),
+      statusKind('machine', 'breathing'),
     ]);
-    expect(under.map((c) => c.count)).toEqual([1, 1]);
+    expect(under.flatMap((c) => c.children.flatMap((f) => f.children.map((k) => k.id)))).toEqual([
+      statusOf('you', 'stopped', 'user/synthetic'),
+      statusOf('machine', 'background', 'hook'),
+      statusOf('machine', 'breathing', 'hook'),
+    ]);
+    // His one line against the machine's three, folded to two rows.
+    expect(under.map((c) => c.count)).toEqual([1, 2]);
+  });
+
+  it('draws an audience with nothing in it rather than leaving a hole', () => {
+    // A chat whose machine said nothing must not look like a chat whose machine
+    // side has gone missing: the group is where he goes to check (bw-6jq5).
+    const under = find(treeOf(conversation().filter((i) => i.kind !== 'note')), STATUS).children;
+    expect(under.map((c) => c.id)).toEqual([audienceKind('you'), audienceKind('machine')]);
+    expect(under.map((c) => c.count)).toEqual([0, 0]);
   });
 
   it('switches one family off and leaves the other standing', () => {
     const items = [...conversation(), filed(), filed()];
-    const off = flipped(EVERYTHING, items, statusKind('breathing'));
+    const off = flipped(EVERYTHING, items, statusKind('machine', 'breathing'));
     const drawn = showing(items, off);
     expect(drawn.some((i) => i.kind === 'note' && i.rank === 'detail')).toBe(false);
     expect(drawn.some((i) => i.kind === 'note' && i.rank === 'note')).toBe(true);
@@ -363,17 +385,26 @@ describe('what a count is counting', () => {
 
   it('switches one kind off and leaves the rest of its family standing', () => {
     const items = [...conversation(), filed(), stopped()];
-    const off = flipped(EVERYTHING, items, statusOf('stopped', 'user/synthetic'));
+    const off = flipped(EVERYTHING, items, statusOf('you', 'stopped', 'user/synthetic'));
     const drawn = showing(items, off);
     expect(drawn.some((i) => i.kind === 'note' && i.noteKind === 'user/synthetic')).toBe(false);
     expect(drawn.some((i) => i.kind === 'note' && i.noteKind === 'hook')).toBe(true);
   });
 
-  it('draws nothing of the machine’s breathing before he has touched anything, and the rest of it', () => {
+  it('draws nothing of the machine’s own before he has touched anything, and everything of his', () => {
+    // The whole job in one line: the loud hook note is the machine's business
+    // and goes, the interrupt is his and stays. Loudness decided this before
+    // (bw-6jq5).
     const items = [...conversation(), filed(), stopped()];
     const drawn = showing(items, remembered());
-    expect(drawn.some((i) => i.kind === 'note' && i.rank === 'detail')).toBe(false);
+    expect(drawn.some((i) => i.kind === 'note' && i.noteKind === 'hook')).toBe(false);
     expect(drawn.some((i) => i.kind === 'note' && i.noteKind === 'user/synthetic')).toBe(true);
+  });
+
+  it('gives the machine’s whole side back in one switch', () => {
+    const items = [...conversation(), filed(), stopped()];
+    const off = flipped(remembered(), items, audienceKind('machine'));
+    expect(showing(items, off)).toHaveLength(items.length);
   });
 
   it('keeps every other kind exactly as it was', () => {

@@ -16,16 +16,32 @@
  *    on, so a tool used here for the first time — and a kind we add to the chat
  *    next month — arrives visible instead of silently missing from a
  *    conversation he thought he was reading whole. The one exception is the
- *    machine's own breathing, which starts off: see `QUIET` (bw-jkh2.19).
+ *    machine's own side, which starts off: see `QUIET` (bw-6jq5).
  *  - Turning a group off hides everything under it and forgets what was off
  *    inside it, so turning the group back on gives him all of it back rather
  *    than whatever remained of it the last time he was in there.
  */
-import { drawnRows, FAMILIES, machineIn, type MachineFamily } from '@/workbench/machine-lines';
+import {
+  AUDIENCES,
+  drawnRows,
+  FAMILIES,
+  machineIn,
+  type Audience,
+  type MachineFamily,
+} from '@/workbench/machine-lines';
 import type { TranscriptItem } from '@/workbench/use-session';
 
-/** Where the reader's choice is remembered between visits. */
-export const CHAT_FILTER = 'workbench.chat-filter';
+/**
+ * Where the reader's choice is remembered between visits.
+ *
+ * The number moved when audience became the top of the status tree: every
+ * switch under it is spelled differently now, so a choice written by the old
+ * build names nothing and would silently read as "he turned nothing off" —
+ * which is exactly the chat full of bookkeeping this job removed. A new name
+ * hands him the new default once and keeps the old choice out of the way
+ * (bw-6jq5).
+ */
+export const CHAT_FILTER = 'workbench.chat-filter.2';
 
 /**
  * A kind's name in the tree. The fixed ones are spelled out; a tool is
@@ -51,29 +67,39 @@ export const toolName = (id: KindId): string => id.slice('tool:'.length);
 export const isTool = (id: KindId): boolean => id.startsWith('tool:');
 
 /**
- * A machine line's switch: its family under status, and its own kind under the
- * family.
+ * A machine line's switch: who it is for under status, its family under that,
+ * and its own kind under the family.
  *
- * Hook chatter and a chat that ran out of room are both status lines and are
+ * Audience is the top of the three because it is the one the reader reaches
+ * for: everything meant for him, or all of it. Family is kept beneath because
+ * hook chatter and a chat that ran out of room are both status lines and are
  * not remotely the same news, so one switch over the pair of them is no switch
- * at all: turning the noise off took the announcements with it (bw-jkh2.14).
- * And inside a family the reader wants one kind gone rather than all of them —
- * the hook that fires on every prompt, but not the hook that refused a turn
- * (bw-jkh2.19).
+ * at all (bw-jkh2.14). And inside a family the reader wants one kind gone
+ * rather than all of them — the hook that fires on every prompt, but not the
+ * hook that refused a turn (bw-jkh2.19).
  *
- * The family cannot contain a slash and a kind may, so the first one separates
- * the two and everything after it is the kind.
+ * Neither an audience nor a family can contain a slash and a kind may, so the
+ * first two separate the three and everything after the second is the kind.
  */
-export const statusKind = (family: MachineFamily): KindId => `status:${family}`;
-export const statusOf = (family: MachineFamily, kind: string): KindId => `status:${family}/${kind}`;
+export const audienceKind = (who: Audience): KindId => `status:${who}`;
+export const statusKind = (who: Audience, family: MachineFamily): KindId => `status:${who}/${family}`;
+export const statusOf = (who: Audience, family: MachineFamily, kind: string): KindId =>
+  `status:${who}/${family}/${kind}`;
 export const isStatus = (id: KindId): boolean => id.startsWith('status:');
-const cut = (id: KindId): [MachineFamily, string | null] => {
+const cut = (id: KindId): [Audience, MachineFamily | null, string | null] => {
   const rest = id.slice('status:'.length);
   const at = rest.indexOf('/');
-  return at === -1 ? [rest as MachineFamily, null] : [rest.slice(0, at) as MachineFamily, rest.slice(at + 1)];
+  if (at === -1) return [rest as Audience, null, null];
+  const who = rest.slice(0, at) as Audience;
+  const under = rest.slice(at + 1);
+  const then = under.indexOf('/');
+  return then === -1
+    ? [who, under as MachineFamily, null]
+    : [who, under.slice(0, then) as MachineFamily, under.slice(then + 1)];
 };
-export const familyOfKind = (id: KindId): MachineFamily => cut(id)[0];
-export const kindUnder = (id: KindId): string | null => cut(id)[1];
+export const audienceOfKind = (id: KindId): Audience => cut(id)[0];
+export const familyOfKind = (id: KindId): MachineFamily | null => cut(id)[1];
+export const kindUnder = (id: KindId): string | null => cut(id)[2];
 
 /** What each fixed kind is called on screen, in the reader's words. */
 const LABELS: Record<string, string> = {
@@ -85,6 +111,12 @@ const LABELS: Record<string, string> = {
   [STATUS]: 'Status lines',
   [QUESTIONS]: 'Questions',
   [REPORTS]: 'Reports',
+};
+
+/** What each audience is called on screen. The switch the reader reaches for. */
+const AUDIENCE_LABELS: Record<Audience, string> = {
+  you: 'For you',
+  machine: 'The machine’s own',
 };
 
 /** What each family is called on screen — severity and cause, in his words. */
@@ -145,13 +177,20 @@ export const labelOf = (id: KindId): string => {
   if (isTool(id)) return toolName(id);
   if (!isStatus(id)) return LABELS[id] ?? id;
   const kind = kindUnder(id);
-  return kind === null ? FAMILY_LABELS[familyOfKind(id)] : (KIND_LABELS[kind] ?? saidPlainly(kind));
+  if (kind !== null) return KIND_LABELS[kind] ?? saidPlainly(kind);
+  const family = familyOfKind(id);
+  return family === null ? AUDIENCE_LABELS[audienceOfKind(id)] : FAMILY_LABELS[family];
 };
 
 /** The kind directly above this one, or null for the two at the top. */
 export function above(id: KindId): KindId | null {
   if (isTool(id)) return COMMANDS;
-  if (isStatus(id)) return kindUnder(id) === null ? STATUS : statusKind(familyOfKind(id));
+  if (isStatus(id)) {
+    const family = familyOfKind(id);
+    if (family === null) return STATUS;
+    if (kindUnder(id) === null) return audienceKind(audienceOfKind(id));
+    return statusKind(audienceOfKind(id), family);
+  }
   if (id === YOU || id === AGENT) return null;
   return AGENT;
 }
@@ -169,7 +208,7 @@ export function kindOf(item: TranscriptItem): KindId {
   // typed and is drawn as a machine line, and the switch has to follow the
   // page rather than the wire (bw-jkh2.12).
   const machine = machineIn(item);
-  if (machine !== null) return statusOf(machine.family, machine.kind);
+  if (machine !== null) return statusOf(machine.audience, machine.family, machine.kind);
   switch (item.kind) {
     case 'message':
       return item.role === 'user' ? YOU : REPLIES;
@@ -213,7 +252,7 @@ export function treeOf(items: TranscriptItem[]): KindNode[] {
   // removes one row would be a lie about what turning it off costs.
   const tally = new Map<KindId, number>();
   for (const row of drawnRows(items)) {
-    const id = row.row === 'machine' ? statusOf(row.family, row.kind) : kindOf(row.item);
+    const id = row.row === 'machine' ? statusOf(row.audience, row.family, row.kind) : kindOf(row.item);
     tally.set(id, (tally.get(id) ?? 0) + 1);
   }
 
@@ -222,19 +261,33 @@ export function treeOf(items: TranscriptItem[]): KindNode[] {
     .sort((a, b) => toolName(a).localeCompare(toolName(b)))
     .map((id) => leaf(id, tally));
 
-  // In the families' own order, which runs from what stopped the work down to
-  // what the machine says while it breathes — not alphabetically, which would
-  // put the noise first. Inside a family, by the name the reader reads.
-  const families = FAMILIES.map((family) => {
-    const kinds = Array.from(tally.keys())
-      .filter((id) => isStatus(id) && kindUnder(id) !== null && familyOfKind(id) === family)
-      .sort((a, b) => labelOf(a).localeCompare(labelOf(b)))
-      .map((id) => leaf(id, tally));
-    return kinds.length === 0 ? null : group(statusKind(family), kinds);
-  }).filter((node): node is KindNode => node !== null);
+  // His side first, then the machine's. Inside each, the families' own order,
+  // which runs from what stopped the work down to what the machine says while
+  // it breathes — not alphabetically, which would put the noise first. Inside a
+  // family, by the name the reader reads.
+  //
+  // An audience with nothing in it is still drawn: a chat where the machine
+  // said nothing at all must not look like a chat whose machine side has gone
+  // missing, and the group is where the reader goes to check (bw-6jq5).
+  const audiences = AUDIENCES.map((who) => {
+    const families = FAMILIES.map((family) => {
+      const kinds = Array.from(tally.keys())
+        .filter(
+          (id) =>
+            isStatus(id) &&
+            kindUnder(id) !== null &&
+            audienceOfKind(id) === who &&
+            familyOfKind(id) === family,
+        )
+        .sort((a, b) => labelOf(a).localeCompare(labelOf(b)))
+        .map((id) => leaf(id, tally));
+      return kinds.length === 0 ? null : group(statusKind(who, family), kinds);
+    }).filter((node): node is KindNode => node !== null);
+    return group(audienceKind(who), families);
+  });
 
   const branches = UNDER_AGENT.map((id) =>
-    id === COMMANDS ? group(COMMANDS, tools) : id === STATUS ? group(STATUS, families) : leaf(id, tally),
+    id === COMMANDS ? group(COMMANDS, tools) : id === STATUS ? group(STATUS, audiences) : leaf(id, tally),
   );
 
   return [leaf(YOU, tally), group(AGENT, branches)];
@@ -333,18 +386,25 @@ const descend = (node: KindNode): KindId[] =>
 export const EVERYTHING: ReadonlySet<KindId> = new Set<KindId>();
 
 /**
- * What is off before he touches anything.
+ * What is off before he touches anything: the machine's own side, whole.
  *
  * The rest of the tree arrives on, so a kind the chat grows next month is never
  * silently missing from a conversation he thought he was reading whole. The
- * machine's own breathing is the one exception, and it is not a close call: a
- * busy chat files hundreds of hook starts and status pings against a handful of
- * lines that are actually for him, and a page of them buries the interrupt he
- * was looking for. Everything meant for HIM — an interrupt, a service being
- * ridden out, running out of room, a rule refusing a turn — is in another
- * family and arrives on (bw-jkh2.19).
+ * machine's own side is the one exception, and it is not a close call. Over
+ * three days of this manager's real chats, 859 machine lines were written and
+ * 104 of them were drawn by default — of which 78 were the machine talking to
+ * itself: which mode it is in, which model it pinned, an allowance window that
+ * is open, an agent sent off and an agent home again. He cannot act on any of
+ * it, and it buried the four lines he could (bw-6jq5).
+ *
+ * Off by audience rather than by family, because loudness was never the
+ * question. A hook that refused HIS turn and a hook that fired on every prompt
+ * are both routine by cause and are not remotely the same news; an agent that
+ * FAILED is on this side of the line while the same agent finishing quietly is
+ * not. One switch — the group at the top — hands him the whole machine side
+ * back when he wants to know what it is doing.
  */
-export const QUIET: ReadonlySet<KindId> = new Set<KindId>([statusKind('breathing')]);
+export const QUIET: ReadonlySet<KindId> = new Set<KindId>([audienceKind('machine')]);
 
 /**
  * The rows this conversation draws. Everything a sent-off agent produced goes
@@ -370,7 +430,7 @@ export function showing(items: TranscriptItem[], off: ReadonlySet<KindId>): Tran
 export function remembered(): Set<KindId> {
   if (typeof localStorage === 'undefined') return new Set(QUIET);
   const held = localStorage.getItem(CHAT_FILTER);
-  // Never been here: the machine's own breathing starts off, everything else on.
+  // Never been here: the machine's own side starts off, everything else on.
   if (held === null) return new Set(QUIET);
   try {
     const parsed = JSON.parse(held);
