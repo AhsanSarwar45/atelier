@@ -632,10 +632,15 @@ def register(root, decl, say):
     rather than appended to — a torn append would be read as a project that no
     longer exists.
     """
-    text = open(project.REGISTRY).read() if os.path.exists(project.REGISTRY) else \
-        "[projects]\n"
+    text = open(project.REGISTRY).read() if os.path.exists(project.REGISTRY) else ""
     if re.search(r"^%s\s*=" % re.escape(decl.name), text, re.M):
         return
+    if not re.search(r"^\[projects\]\s*$", text, re.M):
+        # A register holding something else — the line saying where the report
+        # tools live, and nothing more, on a machine that has joined nothing yet.
+        # Without this the line below matches nothing, the file is rewritten
+        # exactly as it was, and every project joins while saying it was listed.
+        text = "[projects]\n" + ("\n" + text if text.strip() else "")
     text = re.sub(r"^\[projects\]\s*$",
                   '[projects]\n%s = "%s"' % (decl.name, root), text, count=1, flags=re.M)
     with open(project.REGISTRY, "w") as fh:
@@ -777,6 +782,25 @@ def unlisted(root):
     return []
 
 
+def unowned(decl):
+    """The one question about this project that only its owner can answer.
+
+    Nothing here can answer it: whether an agent may put work onto the lines this
+    project ships from is a permission, and a checkout that has said nothing is
+    protected. Said in its own function because joining asks it twice — once of a
+    project already running, and once, up front, of a project that has just been
+    written its first declaration and is about to be filled in by hand.
+    """
+    if decl.lands_on not in decl.protected:
+        return []
+    return ["machinery.toml does not say who lands work here, so %s is protected "
+            "— and a card here closes only once a commit naming it reaches %s. "
+            "Nothing can finish until this project answers: `agent_merges = true` "
+            "if agents land their own work, or a line they may land on in "
+            "`lands_on` with only what they may not in `protected`"
+            % (decl.lands_on, decl.lands_on)]
+
+
 def standing(root):
     """Every reason this project is not yet running the machinery."""
     said = []
@@ -796,13 +820,7 @@ def standing(root):
         said += unserved(root)
         said += unstated(root)
         said += unsigned(root)
-        if decl.lands_on in decl.protected:
-            said.append("machinery.toml does not say who lands work here, so %s is "
-                        "protected — and a card here closes only once a commit naming "
-                        "it reaches %s. Nothing can finish until this project answers: "
-                        "`agent_merges = true` if agents land their own work, or a "
-                        "line they may land on in `lands_on` with only what they may "
-                        "not in `protected`" % (decl.lands_on, decl.lands_on))
+        said += unowned(decl)
     if decl.name not in project.registry():
         said.append("not in the register (%s)" % project.REGISTRY)
     said += unlisted(root)
@@ -1045,11 +1063,19 @@ def main():
         decl = project.of(root)
     if not decl.prefix:
         print("\n".join(said))
-        sys.exit("%s/%s says nothing on the `prefix` line, and nothing here can "
+        # Every line a person has to fill, in one refusal. Answered one at a
+        # time this is two edits and two runs, and the second refusal arrives
+        # after the board, the gates and the screen's list are already made —
+        # which reads as a join that half worked rather than as a question.
+        asked = ["%s/%s says nothing on the `prefix` line, and nothing here can "
                  "answer it for you: it is written into every card id this board "
                  "will ever issue, so a guess is undone by rewriting all of them. "
-                 "Fill it in — two or three letters, no dash — and run this again."
-                 % (root, project.DECLARATION))
+                 "Fill it in — two or three letters, no dash."
+                 % (root, project.DECLARATION)]
+        asked += ["While that file is open, the other line only you can answer: "
+                  + line for line in unowned(decl)]
+        asked.append("Answer them and run this again; joining does the rest.")
+        sys.exit("\n\n".join(asked))
     register(root, decl, said.append)
     project._DECLS.clear()
     project._ROOTS.clear()

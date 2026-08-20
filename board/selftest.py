@@ -5056,8 +5056,10 @@ def main():
         """A brand-new directory put through the real `join`: what it exits, what
         it wrote, and whether it went on to build a board.
 
-        `fill` is the prefix written into the declaration before a second join,
-        for the case that answers the line and comes back.
+        `fill` is the prefix written into the declaration before a second join.
+        It answers the OTHER line at the same time — who lands work here — the
+        way a person filling the file in front of them would, which is the whole
+        point of asking both in one refusal.
         """
         tmp = tempfile.mkdtemp(prefix="board-join-declared-")
         root = os.path.join(tmp, "brand-new-thing")
@@ -5072,6 +5074,17 @@ def main():
             os.makedirs(root)
             subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=root,
                            env=env, timeout=120)
+            # The two things joining reads off the MACHINE rather than off the
+            # project: a board screen that has been run here once, and a home for
+            # the shared report tools. Without them a project joins as far as it
+            # can and says which machine-wide thing is missing — which is honest,
+            # and would make "one command and it is green" unaskable here.
+            listed = os.path.join(tmp, ".local", "share", "kanban-ui")
+            os.makedirs(listed)
+            with sqlite3.connect(os.path.join(listed, "settings.db")) as db:
+                db.execute(SCREEN_LIST)
+            with open(os.path.join(mine, "projects.toml"), "w") as fh:
+                fh.write('[home]\nreports = "%s"\n' % os.path.join(tmp, "reports"))
             first = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
                                    text=True, capture_output=True, timeout=600, env=env)
             made = os.path.join(root, project.DECLARATION)
@@ -5080,19 +5093,21 @@ def main():
             again = None
             if fill and wrote:
                 with open(made, "w") as fh:
-                    fh.write(wrote.replace('prefix = ""', 'prefix = "%s"' % fill))
+                    fh.write(wrote.replace('prefix = ""', 'prefix = "%s"' % fill)
+                             .replace("agent_merges = false", "agent_merges = true"))
                 again = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
                                        text=True, capture_output=True, timeout=600,
                                        env=env)
                 boarded = os.path.isdir(os.path.join(root, ".beads"))
             return (first.returncode, first.stdout + first.stderr, wrote, boarded,
-                    (again.stdout + again.stderr) if again else "")
+                    (again.stdout + again.stderr) if again else "",
+                    again.returncode if again else None)
         finally:
             subprocess.run(["bd", "dolt", "stop"], cwd=root, env=env,
                            capture_output=True, text=True, timeout=120)
             shutil.rmtree(tmp, ignore_errors=True)
 
-    code, first_said, wrote, boarded, _ = declared_by_join()
+    code, first_said, wrote, boarded, _, _ = declared_by_join()
     assert wrote, \
         "joining a directory that declares nothing left it declaring nothing, so " \
         "the person joining it still has to find the example and copy it: %r" \
@@ -5107,14 +5122,24 @@ def main():
         "joining built a board before its prefix was answered, so every card it " \
         "ever issues carries an id nobody chose: %r" % first_said
 
-    code, first_said, wrote, boarded, again_said = declared_by_join(fill="bn")
+    assert "agent_merges" in first_said, \
+        "the refusal names the prefix and stops, so the person joining fills one " \
+        "line, runs again, watches the board and the gates and the screen's list " \
+        "all get made, and is refused a second time over a line they could have " \
+        "answered in the same edit: %r" % first_said
+
+    code, first_said, wrote, boarded, again_said, again_code = \
+        declared_by_join(fill="bn")
     assert boarded and "on a server" in again_said, \
         "a project whose declaration was answered did not then join: %r" % again_said
+    assert again_code == 0 and "still missing" not in again_said, \
+        "a project whose declaration was answered in full is still not joined " \
+        "after the one run that follows (exit %r): %r" % (again_code, again_said)
 
     print("ok: joining a directory that declares nothing writes it a declaration "
-          "from the shape kept beside the tools, with its own name in it, and "
-          "stops on the prefix rather than guessing one — and joins it in full "
-          "once that line is answered")
+          "from the shape kept beside the tools, with its own name in it, asks "
+          "for every line only its owner can answer at once rather than guessing "
+          "any of them, and joins it in full and green on the run after")
 
     # And the other half of the rule: `--check` says so about a board only a
     # command line can open, wherever it finds one.
