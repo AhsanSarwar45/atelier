@@ -456,8 +456,14 @@ export class ClaudeDriver implements Driver {
    * this job exists to close, on the one road the first fix did not cover. Every
    * `system/status` carries the mode in force, so this is what it is compared
    * against (bw-1u1.43).
+   *
+   * Null is "no status has arrived yet", and it is not the same as the empty
+   * string: a chat that has only just opened has not CHANGED its mode, and
+   * saying so put a line about the machine's own settings at the top of every
+   * conversation the manager opened — 37 of them over three days, every one the
+   * first line of its chat (bw-6jq5.2, bw-k3vs).
    */
-  private mode = '';
+  private mode: string | null = null;
   /** TaskCreate calls awaiting the result that carries the task's id. */
   private pendingTodo = new Map<string, { text: string }>();
   /**
@@ -1098,15 +1104,21 @@ export class ClaudeDriver implements Driver {
    * it opts out of the rule that skips a sentence just said (bw-1u1.32).
    *
    * Nothing is said when nothing changed: a status arrives on every single API
-   * request and carries the mode each time (bw-1u1.43).
+   * request and carries the mode each time (bw-1u1.43). Nor when there is
+   * nothing to have changed FROM — the first status of a chat is the mode it
+   * opened in, which the header already shows and nobody chose here. Asking for
+   * a mode still speaks even as the first thing a chat does, because then
+   * somebody did choose it (bw-6jq5.2).
    */
-  private modeIsNow(mode: string): void {
+  private modeIsNow(mode: string, heard: 'observed' | 'asked' = 'asked'): void {
     if (mode === this.mode) return;
+    const openedIn = this.mode === null && heard === 'observed';
     this.mode = mode;
     // `model: null` is "this message says nothing about the model" — see
     // protocol.ts. The sidecar stores the mode off this event, so a chat that
     // goes to sleep does not wake up back in the old one (§3.1).
     this.emit({ type: 'session.pinned', permissionMode: mode, model: null });
+    if (openedIn) return;
     this.note({ rank: 'note', kind: 'mode', text: `Permission mode is now ${mode}.`, always: true });
   }
 
@@ -1243,7 +1255,7 @@ export class ClaudeDriver implements Driver {
         // itself (bw-1u1.43). Read before anything else in this arm, because
         // the same message is then drawn as an ordinary quiet line below.
         if (m.subtype === 'status' && typeof m.permissionMode === 'string' && m.permissionMode) {
-          this.modeIsNow(m.permissionMode);
+          this.modeIsNow(m.permissionMode, 'observed');
         }
         // What the chat has sent away, read from the same messages the lines
         // below are drawn from rather than instead of them (§8.2.7). It answers
