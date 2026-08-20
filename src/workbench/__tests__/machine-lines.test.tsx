@@ -50,6 +50,7 @@ const aside = (text: string, family?: MachineFamily): TranscriptItem => ({
   family,
 });
 
+/** Something the chat itself said — nobody sent it off, so it hangs off nothing. */
 const said = (text: string): TranscriptItem => ({
   kind: 'message',
   id: `msg-${text}`,
@@ -57,6 +58,7 @@ const said = (text: string): TranscriptItem => ({
   text,
   images: [],
   done: true,
+  parentId: null,
 });
 
 /**
