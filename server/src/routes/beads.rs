@@ -381,21 +381,12 @@ fn counts_of(beads: &[Bead], data_source: &str) -> CachedCounts {
 ///
 /// Calls `bd list --json` for issues and `bd sql` for comments,
 /// then merges them together.
-async fn read_beads_from_cli(project_path: &Path, updated_after: Option<&str>) -> Result<Vec<Bead>, String> {
-    // Get beads, optionally filtered by updated_after
-    let list_output = if let Some(since) = updated_after {
-        let updated_flag = format!("--updated-after={}", since);
-        let args = vec!["list", "--json", "--all", &updated_flag];
-        match run_bd(&args, project_path).await {
-            Ok(output) => output,
-            Err(e) => {
-                tracing::warn!("bd list --updated-after failed ({}), falling back to full list", e);
-                run_bd(&["list", "--json", "--all"], project_path).await?
-            }
-        }
-    } else {
-        run_bd(&["list", "--json", "--all"], project_path).await?
-    };
+///
+/// The board always comes back whole: what changed is picked out of it
+/// afterwards by `changed_since`, so one run answers every kind of ask and can
+/// be kept for the next one (bw-uiyz.13).
+async fn read_beads_from_cli(project_path: &Path) -> Result<Vec<Bead>, String> {
+    let list_output = run_bd(&["list", "--json", "--all"], project_path).await?;
     let json_str = extract_json_array(&list_output)?;
     let mut beads: Vec<Bead> = serde_json::from_str(json_str)
         .map_err(|e| format!("Failed to parse bd list output: {}", e))?;
@@ -539,6 +530,43 @@ fn board_answer(beads: Vec<Bead>, source: &str, counted: bool) -> Json<serde_jso
     Json(serde_json::json!({ "beads": beads, "source": source }))
 }
 
+/// The cards of a board that changed after a moment, or all of them if no
+/// moment was asked about.
+///
+/// This is what a screen watching a board wants when the watcher tells it a
+/// file moved: not the board again, only what moved in it. Answering it from
+/// the board we already hold is the whole point — the ask used to be its own
+/// `bd` run (bw-uiyz.13).
+///
+/// A card whose stamp cannot be read counts as changed. Handing back one card
+/// too many costs the screen a redraw of that card; leaving one out leaves the
+/// board wrong until something else happens to it.
+fn changed_since(beads: Vec<Bead>, since: Option<&str>) -> Vec<Bead> {
+    let Some(since) = since else { return beads };
+    beads
+        .into_iter()
+        .filter(|bead| {
+            let stamp = bead.updated_at.as_deref().or(bead.created_at.as_deref());
+            stamp.is_none_or(|stamp| after(stamp, since))
+        })
+        .collect()
+}
+
+/// Whether one stamp is later than another.
+///
+/// Both are written by `bd`, so they are the same shape and comparing the text
+/// would do — but a stamp in one zone and a moment in another compare as text
+/// to nonsense, so they are read as times when they can be read at all.
+fn after(stamp: &str, since: &str) -> bool {
+    match (
+        chrono::DateTime::parse_from_rfc3339(stamp),
+        chrono::DateTime::parse_from_rfc3339(since),
+    ) {
+        (Ok(stamp), Ok(since)) => stamp > since,
+        _ => stamp > since,
+    }
+}
+
 /// A board as it was last read, by the path it was read from.
 type Boards = Mutex<HashMap<String, (Instant, String, Vec<Bead>)>>;
 
@@ -641,27 +669,38 @@ pub async fn read_beads(
     }
 
     // Reading a whole board costs a `bd` run and about a second, and one screen
-    // asks for the same board from several places at once (bw-uiyz.9). So whole
-    // reads share: the board just read is handed straight back, and two asking
-    // at the same moment cost one read between them rather than one each.
-    // A read of only what changed since a moment is never shared — it is not the
-    // board, and it is cheap already.
-    let whole_read = params.updated_after.is_none();
-    if whole_read {
-        if let Some((beads, source)) = kept_board(&path) {
-            return (StatusCode::OK, board_answer(beads, &source, counted));
-        }
-    }
-    let gate = if whole_read { Some(gate_for(&path)) } else { None };
-    let _hold = match gate.as_ref() {
-        Some(gate) => Some(gate.lock().await),
-        None => None,
+    // asks for the same board from several places at once (bw-uiyz.9). So reads
+    // share: the board just read is handed straight back, and two asking at the
+    // same moment cost one read between them rather than one each.
+    //
+    // A read of only what changed is answered out of that same board rather
+    // than by a `bd` run of its own (bw-uiyz.13). It used to run one — unshared
+    // and never kept — so every change to a busy board cost half a second for
+    // every screen watching it, while the whole board beside it was handed back
+    // in four milliseconds. The board is read whole and kept whole; what changed
+    // is a question about what we already hold.
+    //
+    // A count is always of the whole board: how many cards changed in the last
+    // minute is not a count of anything the screen shows.
+    let since = if counted {
+        None
+    } else {
+        params.updated_after.as_deref()
     };
+    if let Some((beads, source)) = kept_board(&path) {
+        return (
+            StatusCode::OK,
+            board_answer(changed_since(beads, since), &source, counted),
+        );
+    }
+    let gate = gate_for(&path);
+    let _hold = gate.lock().await;
     // Whoever we waited behind has read it by now.
-    if whole_read {
-        if let Some((beads, source)) = kept_board(&path) {
-            return (StatusCode::OK, board_answer(beads, &source, counted));
-        }
+    if let Some((beads, source)) = kept_board(&path) {
+        return (
+            StatusCode::OK,
+            board_answer(changed_since(beads, since), &source, counted),
+        );
     }
 
     // Tier 0: Try per-project Dolt server via port file or log
@@ -689,10 +728,11 @@ pub async fn read_beads(
                         tracing::info!("Read {} beads from per-project Dolt (port {})", beads.len(), port);
                         let beads = post_process_beads(beads);
                         upsert_counts_cache(&db, &path, "dolt-project", &beads);
-                        if whole_read {
-                            keep_board(&path, "dolt-project", &beads);
-                        }
-                        return (StatusCode::OK, board_answer(beads, "dolt-project", counted));
+                        keep_board(&path, "dolt-project", &beads);
+                        return (
+                            StatusCode::OK,
+                            board_answer(changed_since(beads, since), "dolt-project", counted),
+                        );
                     }
                     Err(e) => {
                         tracing::warn!("Per-project Dolt server on port {} failed: {}, falling back", port, e);
@@ -724,10 +764,9 @@ pub async fn read_beads(
         }
 
         // Tier 2: Try bd CLI
-        match read_beads_from_cli(&project_path, params.updated_after.as_deref()).await {
+        match read_beads_from_cli(&project_path).await {
             Ok(b) => {
-                let mode = if params.updated_after.is_some() { "incremental" } else { "full" };
-                tracing::info!("Read {} beads from bd CLI for {} ({})", b.len(), path, mode);
+                tracing::info!("Read {} beads from bd CLI for {}", b.len(), path);
                 break 'fallback (b, "cli");
             }
             Err(cli_err) => {
@@ -756,10 +795,11 @@ pub async fn read_beads(
 
     let beads = post_process_beads(beads);
     upsert_counts_cache(&db, &path, source, &beads);
-    if whole_read {
-        keep_board(&path, source, &beads);
-    }
-    (StatusCode::OK, board_answer(beads, source, counted))
+    keep_board(&path, source, &beads);
+    (
+        StatusCode::OK,
+        board_answer(changed_since(beads, since), source, counted),
+    )
 }
 
 /// Request body for creating a new bead.
@@ -1396,6 +1436,72 @@ mod tests {
     #[test]
     fn test_is_non_issue_record_garbage() {
         assert!(!is_non_issue_record("not json"));
+    }
+
+    /// One card, stamped.
+    fn stamped(id: &str, updated_at: Option<&str>) -> Bead {
+        let mut bead: Bead = serde_json::from_str(
+            r#"{"id":"x","title":"T","status":"open","priority":2}"#,
+        )
+        .unwrap();
+        bead.id = id.to_string();
+        bead.updated_at = updated_at.map(str::to_string);
+        bead
+    }
+
+    fn ids(beads: Vec<Bead>) -> Vec<String> {
+        beads.into_iter().map(|b| b.id).collect()
+    }
+
+    #[test]
+    fn a_read_of_what_changed_is_answered_from_the_board_already_read() {
+        let path = "/tmp/a-board-that-was-read";
+        keep_board(
+            path,
+            "cli",
+            &[
+                stamped("old-1", Some("2026-08-19T10:00:00Z")),
+                stamped("moved-1", Some("2026-08-20T09:00:00Z")),
+            ],
+        );
+
+        let (beads, source) = kept_board(path).expect("the board just read is kept");
+        assert_eq!(source, "cli");
+        assert_eq!(
+            ids(changed_since(beads, Some("2026-08-20T00:00:00Z"))),
+            vec!["moved-1"],
+            "only what moved since the moment asked about"
+        );
+    }
+
+    #[test]
+    fn no_moment_asked_about_means_the_whole_board() {
+        let board = vec![
+            stamped("a", Some("2026-08-19T10:00:00Z")),
+            stamped("b", Some("2026-08-20T09:00:00Z")),
+        ];
+        assert_eq!(ids(changed_since(board, None)), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_card_with_no_stamp_counts_as_changed() {
+        // Leaving it out would leave the board wrong until something else
+        // happened to that card; one extra card costs one redraw.
+        let board = vec![stamped("nameless", None)];
+        assert_eq!(ids(changed_since(board, Some("2026-08-20T00:00:00Z"))), vec!["nameless"]);
+    }
+
+    #[test]
+    fn a_stamp_and_a_moment_in_different_zones_are_still_compared_as_times() {
+        // 09:00 in Karachi is 04:00 UTC — earlier than the moment asked about,
+        // though the text of it sorts later.
+        let board = vec![stamped("karachi-morning", Some("2026-08-20T09:00:00+05:00"))];
+        assert!(changed_since(board, Some("2026-08-20T06:00:00Z")).is_empty());
+        let board = vec![stamped("karachi-evening", Some("2026-08-20T18:00:00+05:00"))];
+        assert_eq!(
+            ids(changed_since(board, Some("2026-08-20T06:00:00Z"))),
+            vec!["karachi-evening"]
+        );
     }
 
     #[test]
