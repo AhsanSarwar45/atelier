@@ -167,7 +167,7 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   // and no row here to carry one; the only sign of it is the tool writing its
   // record. Hearing that folder move is the whole of what tells this browser
   // to ask for the list again (outside.ts, bw-uivp.1).
-  const unwatchOutside = watchOutside(() => write({ kind: 'outside' }));
+  const unwatchOutside = watchOutside((folders) => write({ kind: 'outside', folders }));
 
   const beat = setInterval(() => res.write(': keep-alive\n\n'), 30_000);
   const done = () => {

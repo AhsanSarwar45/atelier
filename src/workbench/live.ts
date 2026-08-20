@@ -9,7 +9,7 @@
  */
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
 import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
@@ -85,15 +85,52 @@ let snapshot: LiveSession[] = sessions;
  */
 let running: Set<string> | null = null;
 /**
- * How many times the stream has said the tools' own session folders moved.
+ * How many times the stream has said the tools' own session folders moved, for
+ * each project anybody is watching.
  *
  * Never rows, and never a list: the frame is a bare word (protocol.ts,
  * WatchFrame) because `restoreList` on the sidecar is the one place that builds
  * rows. A number that only climbs is the smallest thing a view can watch — what
  * it stands at means nothing, a change in it means "ask for the list again"
  * (bw-uivp.2).
+ *
+ * One count per project rather than one for the machine, because the word now
+ * says which working directories moved: a screen showing one project ignores
+ * the writing agents do in every other, which on this machine was four full
+ * list rebuilds in twelve idle seconds for work that had nothing to do with
+ * what was on screen (bw-uivp.4).
  */
-let heardOutside = 0;
+const heardOutside = new Map<string, number>();
+
+/** A project starts being counted for the moment something asks about it. */
+function countFor(project: string): number {
+  return heardOutside.get(project) ?? 0;
+}
+
+/**
+ * Whether writing in `where` is writing this project cares about.
+ *
+ * A project's own chats are not only the ones run in its folder: a job is built
+ * in a copy of the tree beside it, and those chats belong to the same project
+ * on screen, so anything under the folder counts.
+ */
+function inside(project: string, where: string): boolean {
+  return where === project || where.startsWith(project.endsWith('/') ? project : `${project}/`);
+}
+
+/**
+ * The word arrived. Every project it could be about hears it; a word the
+ * sidecar could not place is about all of them (protocol.ts, WatchFrame).
+ */
+function heard(folders: string[] | undefined): void {
+  const bare = !folders || folders.length === 0;
+  for (const project of Array.from(heardOutside.keys())) {
+    if (bare || folders.some((where) => inside(project, where))) {
+      heardOutside.set(project, countFor(project) + 1);
+    }
+  }
+  listeners.forEach((fn) => fn());
+}
 
 function announce(): void {
   snapshot = sessions;
@@ -152,6 +189,15 @@ function absorb(frame: WatchFrame): void {
   if (frame.kind === 'snapshot') {
     sessions = frame.sessions.map(fromSummary);
     announce();
+    // The sidecar stops watching the tools' folders the moment the last browser
+    // leaves, so nothing was heard while this one was away and a chat begun in
+    // that gap would have stayed invisible until some unrelated write happened
+    // to shake the list. A stream that has just come back is itself the word
+    // (bw-uivp.5).
+    if (missedSomething) {
+      missedSomething = false;
+      heard(undefined);
+    }
     return;
   }
   if (frame.kind === 'outside') {
@@ -160,8 +206,7 @@ function absorb(frame: WatchFrame): void {
     // frame carries none — so the sessions are left exactly as they are and the
     // only thing published is that the word was said. The chat list is what
     // answers it, by asking for the list again (chat-sidebar.tsx, bw-uivp.2).
-    heardOutside += 1;
-    listeners.forEach((fn) => fn());
+    heard(frame.folders);
     return;
   }
   if (frame.kind === 'opened') {
@@ -260,6 +305,11 @@ const RETRY_MS = 2_000;
 const RETRY_CEILING_MS = 30_000;
 let retryIn = RETRY_MS;
 let retrying: ReturnType<typeof setTimeout> | null = null;
+/**
+ * The stream has been away, so what happened outside this app while it was gone
+ * was said to nobody. Cleared by the snapshot that comes back.
+ */
+let missedSomething = false;
 
 /**
  * The stream has stopped speaking, so what it said about who is working is no
@@ -276,6 +326,7 @@ let retrying: ReturnType<typeof setTimeout> | null = null;
 function dropped(): void {
   source?.close();
   source = null;
+  missedSomething = true;
   if (running !== null) {
     running = null;
     announce();
@@ -356,11 +407,23 @@ export function useRunningElsewhere(): Set<string> | null {
  * is out of date, ask for it again". A view watches it exactly as the working
  * mark above is watched, and for the same reason: nobody is going to reload a
  * tab to find out that a chat was started somewhere else (bw-uivp).
+ *
+ * Counted for the project asked about and no other, so agents working in the
+ * rest of the machine cost this screen nothing (bw-uivp.4). A stream that has
+ * been away and come back counts once for every project, because nothing was
+ * heard while it was gone (bw-uivp.5).
  */
-export function useHeardFromOutside(): number {
+export function useHeardFromOutside(project: string): number {
+  const watch = useMemo(
+    () => (fn: () => void) => {
+      if (!heardOutside.has(project)) heardOutside.set(project, 0);
+      return subscribe(fn);
+    },
+    [project],
+  );
   return useSyncExternalStore(
-    subscribe,
-    () => heardOutside,
+    watch,
+    () => countFor(project),
     () => 0,
   );
 }

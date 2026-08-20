@@ -204,8 +204,13 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
    * list a second time on open for a word nobody said. This fetches when the
    * count has actually moved and at no other time: switching project re-makes
    * `load`, which runs this again and finds the count where it left it.
+   *
+   * It is this project's own count. The machine runs agents in many projects at
+   * once, and the word used to be about all of them: four rebuilds of this list
+   * in twelve idle seconds, for work nothing on this screen was showing
+   * (bw-uivp.4).
    */
-  const heardOutside = useHeardFromOutside();
+  const heardOutside = useHeardFromOutside(projectPath);
   const heardAt = useRef(heardOutside);
 
   useEffect(() => {

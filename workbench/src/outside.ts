@@ -12,10 +12,12 @@
  *
  * So the folder is watched, and everybody on the app-wide stream is told the
  * one word: the tools' own session folders changed, ask for the list again.
- * Nothing about WHICH chat rides along. `restoreList` in registry.ts is the one
- * place that builds rows and it stays that way — a watcher that started
- * assembling rows of its own would be a second answer to the same question,
- * free to disagree with the first (bw-uivp.1).
+ * Nothing about WHICH chat rides along — only which working directories moved,
+ * so a screen showing one project does not rebuild its list every time an agent
+ * types in another (bw-uivp.4). `restoreList` in registry.ts is the one place
+ * that builds rows and it stays that way — a watcher that started assembling
+ * rows of its own would be a second answer to the same question, free to
+ * disagree with the first (bw-uivp.1).
  *
  * **The folder is the one the SDK itself reads.** Conversations live at
  * `<config>/projects/<the working directory with its slashes turned to
@@ -43,7 +45,7 @@
  * refuses the watch, which is a state this degrades through rather than dies
  * of.
  */
-import { watch, type FSWatcher } from 'node:fs';
+import { readdirSync, readFileSync, watch, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
 
 import { claudeConfigDir } from './running.ts';
@@ -60,22 +62,82 @@ import { claudeConfigDir } from './running.ts';
  */
 const SETTLE_MS = 1_000;
 
-const watchers = new Set<() => void>();
+const watchers = new Set<(folders: string[]) => void>();
 let folder: FSWatcher | null = null;
 let settling: ReturnType<typeof setTimeout> | null = null;
+/** Which folders were written to during the second being waited out. */
+let stirredFolders = new Set<string>();
+
+/**
+ * Which working directory a folder under `projects` holds the chats of.
+ *
+ * Read out of a record rather than worked out from the folder's name. The name
+ * is the working directory with its punctuation flattened, which does not come
+ * back — two different directories can flatten to one name — and this code has
+ * never guessed it: `record-tail.ts` finds a chat by listing the folders too.
+ * Every line of a record carries the directory it was written in, so one line
+ * of one file answers it.
+ *
+ * Remembered per folder, because a folder's directory does not change and the
+ * question is asked every time an agent anywhere writes a line.
+ */
+const homeOf = new Map<string, string | null>();
+
+function whereItRuns(name: string): string | null {
+  const known = homeOf.get(name);
+  if (known !== undefined) return known;
+  let found: string | null = null;
+  try {
+    const here = join(claudeConfigDir(), 'projects', name);
+    for (const file of readdirSync(here)) {
+      if (!file.endsWith('.jsonl')) continue;
+      // The first line is enough and the rest of a record can be enormous, so
+      // only the head of the file is read.
+      const head = readFileSync(join(here, file), 'utf8').slice(0, 64_000).split('\n')[0] ?? '';
+      const said = JSON.parse(head) as { cwd?: unknown };
+      if (typeof said.cwd === 'string' && said.cwd) {
+        found = said.cwd;
+        break;
+      }
+    }
+  } catch {
+    // An unreadable folder, an empty one, a first line that is not JSON: the
+    // word is said without it, and a browser that cannot place a folder asks
+    // for its list rather than missing a chat.
+    found = null;
+  }
+  homeOf.set(name, found);
+  return found;
+}
 
 /** The word itself, to everybody watching, and the burst starts counting again. */
 function tellEverybody(): void {
   settling = null;
-  watchers.forEach((tell) => tell());
+  const moved = [...stirredFolders];
+  stirredFolders = new Set();
+  const where = moved.map(whereItRuns).filter((cwd): cwd is string => !!cwd);
+  // Nothing placeable — the platform told us no filename, or no record would
+  // say — leaves the word bare, which every listener treats as "this could be
+  // yours". Fail towards the extra fetch and never towards the missing chat.
+  const folders = where.length === moved.length ? where : [];
+  watchers.forEach((tell) => tell(folders));
 }
 
 /**
  * Something was written under the folder. The first write in a quiet moment
  * starts the second; every write that lands inside it is already accounted
  * for, so it changes nothing and costs nothing.
+ *
+ * Which folder it was is worth keeping, though: this machine runs agents in
+ * many projects at once, and four words arrived in twelve idle seconds from
+ * other people's work. A browser that can see the word is not about its own
+ * project does not rebuild its list for it (bw-uivp.4).
  */
-function stirred(): void {
+function stirred(_event: string, name: string | Buffer | null): void {
+  // A path relative to `projects`: the folder, then the record inside it. Some
+  // platforms give no name at all, and then nothing can be scoped.
+  const said = typeof name === 'string' ? name : name ? name.toString() : '';
+  stirredFolders.add(said.split(/[\\/]/)[0] ?? '');
   if (settling) return;
   settling = setTimeout(tellEverybody, SETTLE_MS);
 }
@@ -118,7 +180,7 @@ function beginWatching(): FSWatcher | null {
  * again the next time somebody connects, so a machine where the tool ran for
  * the first time after the sidecar started is not deaf until it restarts.
  */
-export function watchOutside(tell: () => void): () => void {
+export function watchOutside(tell: (folders: string[]) => void): () => void {
   watchers.add(tell);
   if (!folder) folder = beginWatching();
   return () => {
@@ -128,6 +190,7 @@ export function watchOutside(tell: () => void): () => void {
       clearTimeout(settling);
       settling = null;
     }
+    stirredFolders = new Set();
     folder?.close();
     folder = null;
   };

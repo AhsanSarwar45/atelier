@@ -35,9 +35,22 @@ class FakeStream {
 
   close(): void {}
 
-  /** The sidecar has heard the tools' own session folders move. */
-  saysOutside(): void {
-    this.onmessage?.({ data: JSON.stringify({ kind: 'outside' }) });
+  /**
+   * The sidecar has heard the tools' own session folders move, in the working
+   * directories named — or, with none named, somewhere it could not place.
+   */
+  saysOutside(folders?: string[]): void {
+    this.onmessage?.({ data: JSON.stringify({ kind: 'outside', folders }) });
+  }
+
+  /** The connection dies, the way a rebuild or a restart kills it. */
+  dies(): void {
+    this.onerror?.();
+  }
+
+  /** And the sidecar answers again, starting as it always does. */
+  saysSnapshot(): void {
+    this.onmessage?.({ data: JSON.stringify({ kind: 'snapshot', sessions: [] }) });
   }
 }
 
@@ -182,5 +195,87 @@ describe('a chat begun in another tool', () => {
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(rowFor('s2'), 'the chat being read stopped looking open').toHaveClass('bg-accent');
     expect(rowFor('s1')).not.toHaveClass('bg-accent');
+  });
+});
+
+/**
+ * The word is scoped, because this machine runs agents in many projects at
+ * once: measured against the running sidecar, four words arrived in one idle
+ * twelve-second window from other people's work, and each one rebuilt the whole
+ * list on every open tab (bw-uivp.4).
+ */
+describe('whose work the word is about', () => {
+  it('another project’s agent typing costs this list nothing', async () => {
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    act(() => opened[0].saysOutside(['/home/me/somewhere-else']));
+    act(() => opened[0].saysOutside(['/home/me/another-thing/worktrees/job']));
+    // Proved by what happens next rather than by a wait: a word about this
+    // project fetches once, so if the two before it had fetched there would be
+    // three here.
+    act(() => opened[0].saysOutside([PATH]));
+    await waitFor(() => expect(restores()).toHaveLength(2));
+    expect(restores(), 'somebody else’s work rebuilt this list').toHaveLength(2);
+  });
+
+  it('a chat begun in this project does', async () => {
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    act(() => opened[0].saysOutside([PATH]));
+    await waitFor(() => expect(restores()).toHaveLength(2));
+  });
+
+  it('and so does one begun in a copy of it, where the jobs are built', async () => {
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    act(() => opened[0].saysOutside([`${PATH}/worktrees/some-job`]));
+    await waitFor(() => expect(restores()).toHaveLength(2));
+  });
+
+  it('a word the sidecar could not place is for everyone', async () => {
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    // Fail towards the extra fetch, never towards the missing chat.
+    act(() => opened[0].saysOutside([]));
+    await waitFor(() => expect(restores()).toHaveLength(2));
+  });
+});
+
+/**
+ * The sidecar stops watching the folders the moment the last browser leaves, so
+ * a chat begun while the stream was down was heard by nobody. Coming back is
+ * itself the word (bw-uivp.5).
+ */
+describe('when the stream has been away', () => {
+  it('the list is asked for again as soon as it comes back', async () => {
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    // The sidecar was rebuilt; a chat was begun in Zed while it was gone.
+    act(() => opened[0].dies());
+    list = [row(), row({ sessionId: 'zed', title: 'Begun while it was down' })];
+    act(() => opened[0].saysSnapshot());
+
+    await waitFor(() => expect(screen.getByText('Begun while it was down')).toBeInTheDocument());
+    expect(restores()).toHaveLength(2);
+  });
+
+  it('but an ordinary first snapshot is not a word', async () => {
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    act(() => opened[0].saysSnapshot());
+    await Promise.resolve();
+    expect(restores(), 'opening the tab fetched the list twice').toHaveLength(1);
   });
 });

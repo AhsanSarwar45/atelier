@@ -29,6 +29,10 @@ import { watchOutside } from '../outside.ts';
 /** A config directory of our own, laid out the way the tools lay theirs out. */
 let config = '';
 let project = '';
+let elsewhere = '';
+
+/** The working directory the second project's chats are held in. */
+const ELSEWHERE = '/home/me/elsewhere';
 const wasConfig = process.env.CLAUDE_CONFIG_DIR;
 
 /** The settle is a second; everything here waits past one to read the count. */
@@ -37,6 +41,11 @@ const PAST_THE_SECOND_MS = 1_400;
 /** One line of a conversation, in the shape the tools write it. */
 function line(text: string): string {
   return JSON.stringify({ type: 'user', message: { role: 'user', content: text } }) + '\n';
+}
+
+/** The same, from a chat that says which directory it is being held in. */
+function lineFrom(cwd: string, text: string): string {
+  return JSON.stringify({ type: 'user', cwd, message: { role: 'user', content: text } }) + '\n';
 }
 
 const naps = (ms: number) => new Promise((wake) => setTimeout(wake, ms));
@@ -48,6 +57,10 @@ beforeAll(() => {
   project = join(config, 'projects', '-home-me-project');
   mkdirSync(project, { recursive: true });
   writeFileSync(join(project, 'an-old-chat.jsonl'), line('yesterday'));
+  // Another project entirely, whose records say where they are being written.
+  elsewhere = join(config, 'projects', '-home-me-elsewhere');
+  mkdirSync(elsewhere, { recursive: true });
+  writeFileSync(join(elsewhere, 'an-old-chat.jsonl'), lineFrom(ELSEWHERE, 'yesterday'));
   process.env.CLAUDE_CONFIG_DIR = config;
 });
 
@@ -81,6 +94,35 @@ describe('the folder the tools write conversations into', () => {
     for (let i = 0; i < 40; i += 1) appendFileSync(join(project, 'a-new-chat.jsonl'), line(`turn ${i}`));
     await naps(PAST_THE_SECOND_MS);
     expect(said, 'a busy agent flooded the stream').toBe(2);
+  }, 10_000);
+
+  it('says whose work it was, so other projects’ screens can ignore it', async () => {
+    // Measured against the running sidecar: four words in one idle twelve-second
+    // window, all of them other people's agents typing, and each rebuilt the
+    // whole list on every open tab (bw-uivp.4). The word carries the working
+    // directory so a screen can tell whether it is being spoken to.
+    const said: string[][] = [];
+    stopWatching = watchOutside((folders) => {
+      said.push(folders);
+    });
+
+    writeFileSync(join(elsewhere, 'a-new-chat.jsonl'), lineFrom(ELSEWHERE, 'started in Zed'));
+    await naps(PAST_THE_SECOND_MS);
+    expect(said).toEqual([[ELSEWHERE]]);
+  }, 10_000);
+
+  it('and says nothing of the kind when it cannot tell, so no chat is missed', async () => {
+    // This project's records predate the field, or were written by a tool that
+    // does not set it. An unplaceable word is bare, which every screen takes as
+    // possibly its own: fail towards the extra fetch, never the missing chat.
+    const said: string[][] = [];
+    stopWatching = watchOutside((folders) => {
+      said.push(folders);
+    });
+
+    writeFileSync(join(project, 'another-new-chat.jsonl'), line('started in Zed'));
+    await naps(PAST_THE_SECOND_MS);
+    expect(said).toEqual([[]]);
   }, 10_000);
 
   it('stops watching when the last reader has gone', async () => {

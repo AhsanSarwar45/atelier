@@ -391,8 +391,16 @@ export type WatchFrame =
    * than once a second however hard an agent is typing: it means ask for the
    * list again, and it carries no rows, because `restoreList` is the one place
    * that builds them (workbench/src/outside.ts, bw-uivp.1).
+   *
+   * `folders` names the working directories the writing happened in, so a
+   * screen showing one project can tell a word about its own work from one
+   * about somebody else's — this machine runs agents in many projects at once
+   * and the unscoped word cost every open list a full rebuild four times in
+   * twelve idle seconds. Empty, or absent, means the sidecar could not place
+   * the writing: then the word is for everyone, because an extra fetch is the
+   * cheaper mistake (bw-uivp.4).
    */
-  | { kind: 'outside' }
+  | { kind: 'outside'; folders?: string[] }
   | { kind: 'event'; event: WbpEvent };
 
 /** A chat that touched a card, as the card's own side of the join lists it. */
