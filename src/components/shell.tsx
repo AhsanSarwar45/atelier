@@ -11,7 +11,7 @@
  */
 'use client';
 
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, forwardRef, useContext, useState, type ReactNode } from 'react';
 
 import { Loader2 } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -109,29 +109,27 @@ export function Toolbar({ label = 'Tools', className, children }: { label?: stri
  * words are still there for whoever needs them (the manager's rule on
  * descriptions, docs/designs/app-shell.md §1.4).
  */
-export function ToolButton({
-  icon,
-  label,
-  onClick,
-  disabled,
-  busy,
-  emphasis = 'quiet',
-  className,
-  ...rest
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick?: () => void;
-  disabled?: boolean;
-  /** Shown in place of the picture while the button's work is being done. */
-  busy?: boolean;
-  emphasis?: 'quiet' | 'loud';
-  className?: string;
-} & Omit<React.ComponentProps<typeof Button>, 'children' | 'onClick' | 'disabled' | 'className'>) {
+export const ToolButton = forwardRef<
+  HTMLButtonElement,
+  {
+    icon: ReactNode;
+    label: string;
+    onClick?: () => void;
+    disabled?: boolean;
+    /** Shown in place of the picture while the button's work is being done. */
+    busy?: boolean;
+    emphasis?: 'quiet' | 'loud';
+    className?: string;
+  } & Omit<React.ComponentProps<typeof Button>, 'children' | 'onClick' | 'disabled' | 'className'>
+  // Forwards its ref because a control on this bar may be what opens a panel:
+  // a panel places itself against the button it came out of, and cannot find it
+  // through a component that keeps its own element to itself.
+>(function ToolButton({ icon, label, onClick, disabled, busy, emphasis = 'quiet', className, ...rest }, ref) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          ref={ref}
           size="sm"
           mode="icon"
           variant={emphasis === 'loud' ? 'primary' : 'ghost'}
@@ -155,4 +153,4 @@ export function ToolButton({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
-}
+});
