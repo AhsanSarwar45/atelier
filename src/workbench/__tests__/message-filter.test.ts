@@ -23,7 +23,9 @@ import {
   remembered,
   showing,
   switchOf,
+  QUIET,
   statusKind,
+  statusOf,
   toolKind,
   treeOf,
 } from '@/workbench/message-filter';
@@ -77,6 +79,16 @@ const filed = (): TranscriptItem => ({
   body: null,
 });
 
+/** An interrupt, which is the machine talking and is meant for him. */
+const stopped = (): TranscriptItem => ({
+  kind: 'note',
+  id: id(),
+  rank: 'note',
+  noteKind: 'user/synthetic',
+  text: '[Request interrupted by user]',
+  body: null,
+});
+
 /** A conversation with something of every kind in it. */
 const conversation = (): TranscriptItem[] => [
   said('user', 'do the thing'),
@@ -127,16 +139,18 @@ describe('which switch a row answers to', () => {
     expect(kindOf(ran('Edit'))).toBe(toolKind('Edit'));
   });
 
-  it('reads a notice and a note as status lines, each under its own family', () => {
-    expect(kindOf(noted())).toBe(statusKind('background'));
-    expect(kindOf({ kind: 'notice', id: 'n', text: 'reconnected' })).toBe(statusKind('background'));
-    expect(above(kindOf(noted()))).toBe(STATUS);
+  it('reads a notice and a note as status lines, each under its own kind', () => {
+    expect(kindOf(noted())).toBe(statusOf('background', 'hook'));
+    expect(kindOf({ kind: 'notice', id: 'n', text: 'reconnected' })).toBe(statusOf('background', 'app/notice'));
+    // Its kind sits under its family, and the family under status lines.
+    expect(above(kindOf(noted()))).toBe(statusKind('background'));
+    expect(above(statusKind('background'))).toBe(STATUS);
   });
 
   it('reads a line the kit wrote in his name as the machine talking, not as him', () => {
     // The complaint this job began with: stopping a turn put
     // "[Request interrupted by user]" on the page wearing his own colour.
-    expect(kindOf(said('user', '[Request interrupted by user]'))).toBe(statusKind('stopped'));
+    expect(kindOf(said('user', '[Request interrupted by user]'))).toBe(statusOf('stopped', 'user/synthetic'));
     expect(kindOf(said('user', 'do the thing'))).toBe('you');
   });
 });
@@ -269,12 +283,20 @@ describe('what is remembered', () => {
     expect(Array.from(remembered())).toEqual(Array.from(off));
   });
 
-  it('starts with nothing off when he has never touched it', () => {
-    expect(remembered().size).toBe(0);
+  it('starts with the machine’s own breathing off and nothing else', () => {
+    expect(remembered()).toEqual(new Set(QUIET));
+    expect(remembered().has(statusKind('breathing'))).toBe(true);
+    expect(remembered().has(statusKind('stopped'))).toBe(false);
   });
 
-  it('starts with nothing off when what was stored cannot be read', () => {
+  it('starts the same way when what was stored cannot be read', () => {
     localStorage.setItem(CHAT_FILTER, 'not json');
+    expect(remembered()).toEqual(new Set(QUIET));
+  });
+
+  it('keeps an empty answer once he has switched the breathing back on', () => {
+    // Stored and empty is not the same as never stored: he asked for all of it.
+    localStorage.setItem(CHAT_FILTER, '[]');
     expect(remembered().size).toBe(0);
   });
 });
@@ -320,10 +342,14 @@ describe('what a count is counting', () => {
     expect(find(tree, AGENT).count).toBe(find(tree, AGENT).children.reduce((n, c) => n + c.count, 0));
   });
 
-  it('carries one switch per family the conversation has, in the families’ own order', () => {
+  it('carries one switch per kind, under the family it belongs to', () => {
     const items = [...conversation(), filed(), filed()];
     const under = find(treeOf(items), STATUS).children;
     expect(under.map((c) => c.id)).toEqual([statusKind('background'), statusKind('breathing')]);
+    expect(under.flatMap((c) => c.children.map((k) => k.id))).toEqual([
+      statusOf('background', 'hook'),
+      statusOf('breathing', 'hook'),
+    ]);
     expect(under.map((c) => c.count)).toEqual([1, 1]);
   });
 
@@ -333,6 +359,21 @@ describe('what a count is counting', () => {
     const drawn = showing(items, off);
     expect(drawn.some((i) => i.kind === 'note' && i.rank === 'detail')).toBe(false);
     expect(drawn.some((i) => i.kind === 'note' && i.rank === 'note')).toBe(true);
+  });
+
+  it('switches one kind off and leaves the rest of its family standing', () => {
+    const items = [...conversation(), filed(), stopped()];
+    const off = flipped(EVERYTHING, items, statusOf('stopped', 'user/synthetic'));
+    const drawn = showing(items, off);
+    expect(drawn.some((i) => i.kind === 'note' && i.noteKind === 'user/synthetic')).toBe(false);
+    expect(drawn.some((i) => i.kind === 'note' && i.noteKind === 'hook')).toBe(true);
+  });
+
+  it('draws nothing of the machine’s breathing before he has touched anything, and the rest of it', () => {
+    const items = [...conversation(), filed(), stopped()];
+    const drawn = showing(items, remembered());
+    expect(drawn.some((i) => i.kind === 'note' && i.rank === 'detail')).toBe(false);
+    expect(drawn.some((i) => i.kind === 'note' && i.noteKind === 'user/synthetic')).toBe(true);
   });
 
   it('keeps every other kind exactly as it was', () => {

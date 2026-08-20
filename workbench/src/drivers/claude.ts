@@ -115,6 +115,11 @@ function noteFor(m: Record<string, any>): Note | null {
   return note;
 }
 
+/** A moment as a clock reading, for a line a reader has to act on. */
+function clockOf(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
 function noteBody(m: Record<string, any>): Note | null {
   const kind = kindOf(m);
   const whole = () => oneLine(JSON.stringify(m), KEPT);
@@ -233,6 +238,25 @@ function noteBody(m: Record<string, any>): Note | null {
 
     case 'conversation_reset':
       return { rank: 'note', kind, text: 'This chat was started over.' };
+
+    // What his allowance is doing. It arrived with no wording of its own, so
+    // the row read `rate_limit_event` — the kind's name where the sentence
+    // should be (bw-jkh2.19). It is news either way and not the machine's own
+    // breathing: it is about HIM, and he asked to be told.
+    case 'rate_limit_event': {
+      const info = m.rate_limit_info ?? {};
+      const window = String(info.rateLimitType ?? 'allowance').replace(/_/g, '-');
+      const allowed = info.status === 'allowed';
+      const resets = typeof info.resetsAt === 'number' ? ` until ${clockOf(info.resetsAt)}` : '';
+      return {
+        rank: 'note',
+        kind,
+        text: allowed
+          ? `Allowance: the ${window} window is open${resets}`
+          : `Allowance: the ${window} window is ${oneLine(info.status ?? 'closed')}${resets}`,
+        body: whole(),
+      };
+    }
 
     default: {
       // A kind this build has never seen. If it carries a sentence it is drawn

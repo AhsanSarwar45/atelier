@@ -46,10 +46,8 @@ export const FAMILIES: MachineFamily[] = [
 ];
 
 export interface FamilyLook {
-  /** The hairline either side of the chip. */
-  rule: string;
-  /** The chip itself: its tint, its edge and the colour of its mark. */
-  chip: string;
+  /** The row itself: its tint, its edge and the colour of its words. */
+  row: string;
   /** How many times in a row this kind happened. */
   count: string;
 }
@@ -63,33 +61,27 @@ export interface FamilyLook {
  */
 const LOOKS: Record<MachineFamily, FamilyLook> = {
   stopped: {
-    rule: 'bg-warning/30',
-    chip: 'border-warning/35 bg-warning/10 text-warning',
+    row: 'border-warning/35 bg-warning/10 text-warning',
     count: 'bg-warning/20 text-warning',
   },
   failed: {
-    rule: 'bg-danger/30',
-    chip: 'border-danger/35 bg-danger/10 text-danger',
+    row: 'border-danger/35 bg-danger/10 text-danger',
     count: 'bg-danger/20 text-danger',
   },
   waiting: {
-    rule: 'bg-status-review/30',
-    chip: 'border-status-review/35 bg-status-review/10 text-status-review',
+    row: 'border-status-review/35 bg-status-review/10 text-status-review',
     count: 'bg-status-review/20 text-status-review',
   },
   memory: {
-    rule: 'bg-epic/30',
-    chip: 'border-epic/35 bg-epic/10 text-epic',
+    row: 'border-epic/35 bg-epic/10 text-epic',
     count: 'bg-epic/20 text-epic',
   },
   background: {
-    rule: 'bg-info/30',
-    chip: 'border-info/35 bg-info/10 text-info',
+    row: 'border-info/35 bg-info/10 text-info',
     count: 'bg-info/20 text-info',
   },
   breathing: {
-    rule: 'bg-t-faint/25',
-    chip: 'border-t-faint/30 bg-transparent text-t-faint',
+    row: 'border-t-faint/30 bg-transparent text-t-faint',
     count: 'bg-t-faint/20 text-t-faint',
   },
 };
@@ -135,6 +127,10 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
 
   // Riding out a service that is busy.
   'system/api_retry': 'waiting',
+
+  // What the reader's allowance is doing. Not the machine's own breathing: it
+  // is about HIM, and it starts on (bw-jkh2.19).
+  rate_limit_event: 'background',
 
   // The chat's own memory: folding itself up, and what it carries.
   'system/compact_boundary': 'memory',
@@ -199,11 +195,14 @@ export interface MachineRow {
 export type DrawnRow = MachineRow | { row: 'other'; item: TranscriptItem };
 
 /**
- * The family one row of a conversation draws as, or nothing if it is not the
- * machine talking. The filter asks this so that its switches stand for what is
- * on the page rather than for the shape the event happened to arrive in.
+ * The family and the kind one row of a conversation draws as, or nothing if it
+ * is not the machine talking. The filter asks this so that its switches stand
+ * for what is on the page rather than for the shape the event arrived in.
  */
-export const familyIn = (item: TranscriptItem): MachineFamily | null => machineLine(item)?.family ?? null;
+export const machineIn = (item: TranscriptItem): { family: MachineFamily; kind: string } | null => {
+  const line = machineLine(item);
+  return line === null ? null : { family: line.family, kind: line.kind };
+};
 
 /** What the chip says: where the run had got to. */
 export const saidBy = (row: MachineRow): string => row.lines[row.lines.length - 1]?.text ?? '';

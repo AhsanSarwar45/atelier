@@ -399,20 +399,21 @@ export const ToolRow = memo(function ToolRow({
  * ridden out, the conversation folding itself up, a rule of yours refusing the
  * turn, an agent sent off, or a kind of message this app has no name for.
  *
- * It is punctuation, not a speaker: a small chip sitting centred on a hairline
- * rule, the way a date divider sits in a messaging app, so it separates what was
- * said instead of competing with it. Its colour and its mark come from the
- * family the kind belongs to (src/workbench/machine-lines.tsx), which is what
- * makes an interrupt and a routine status ping tell themselves apart at a
- * glance — they used to be the same grey line (bw-jkh2, §8.2.4).
+ * It is a row of the same width and the same build as the commands around it,
+ * in its family's colour (src/workbench/machine-lines.tsx) — which is what makes
+ * an interrupt and a routine status ping tell themselves apart at a glance;
+ * they used to be the same grey line (bw-jkh2, §8.2.4). It was tried as a small
+ * chip centred on a hairline rule, which read as punctuation between the rows
+ * rather than as one of them and lost the transcript its one column
+ * (bw-jkh2.17).
  *
- * A run of one kind arrives folded, so the chip carries how many times it
+ * A run of one kind arrives folded, so the row carries how many times it
  * happened and opening it gives every one of them in order.
  *
  * A folded row is built fresh on every pass, so remembering it against its own
  * identity would remember nothing; it is remembered against what it says
  * instead, which is what keeps a word arriving in a message from redrawing
- * every chip above it (bw-uiyz.5).
+ * every row above it (bw-uiyz.5).
  */
 export const MachineLine = memo(
   function MachineLine({ row }: { row: MachineRow }) {
@@ -420,7 +421,6 @@ export const MachineLine = memo(
     const look = lookOf(row.family);
     const Mark = markOf(row.family);
     const opens = opensOn(row);
-
     return (
       <div
         data-testid="note-row"
@@ -428,39 +428,38 @@ export const MachineLine = memo(
         data-note-kind={row.kind}
         data-family={row.family}
         data-times={row.lines.length}
-        className="flex flex-col items-center gap-1"
+        data-open={open}
       >
-        <div className="flex w-full items-center gap-2">
-          <span className={cn('h-px min-w-4 flex-1', look.rule)} />
-          {/* The app's own chip, dressed in the family's colours rather than
-              redrawn: one set of parts (src/lib/__tests__/one-set-of-parts.test.ts). */}
-          <Badge asChild size="md" shape="circle" className={cn('min-w-0 max-w-[80%] px-2.5', look.chip)}>
-            <button
-              type="button"
-              data-testid="note-toggle"
-              disabled={!opens}
-              onClick={() => setOpen(!open)}
-              // The brand's own name for it, so an unfamiliar line can be looked
-              // up without spending room on the chip itself.
-              title={row.kind}
-              className="enabled:hover:brightness-125"
-            >
-              <Mark />
-              <span className="truncate">{saidBy(row)}</span>
-              {/* Eight retries is one thing that happened eight times. */}
-              {row.lines.length > 1 && (
-                <Badge size="xs" shape="circle" data-testid="note-times" className={cn('tabular-nums', look.count)}>
-                  {row.lines.length}
-                </Badge>
-              )}
-              {opens && <ChevronRight className={cn('transition-transform', open && 'rotate-90')} />}
-            </button>
-          </Badge>
-          <span className={cn('h-px min-w-4 flex-1', look.rule)} />
-        </div>
-        {open && (
-          <div className="w-full">
-            {row.lines.map((line, i) => (
+        <Panel inset="none" className={cn('px-2.5 py-1.5 font-mono text-xs', look.row)}>
+          <button
+            type="button"
+            data-testid="note-toggle"
+            disabled={!opens}
+            onClick={() => setOpen(!open)}
+            title={row.kind}
+            className="flex w-full items-center gap-2 text-left enabled:hover:brightness-125"
+          >
+            <Mark className="h-3 w-3 shrink-0" />
+            {opens && (
+              <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
+            )}
+            <span className="truncate">{saidBy(row)}</span>
+            {row.lines.length > 1 && (
+              <Badge
+                size="xs"
+                shape="circle"
+                data-testid="note-times"
+                className={cn('shrink-0 tabular-nums', look.count)}
+              >
+                {row.lines.length}
+              </Badge>
+            )}
+            {/* Where a command says OK or FAILED, this says which of the six it
+                is — so the colour is never the only thing carrying it. */}
+            <span className="ml-auto shrink-0 uppercase tracking-wide">{row.family}</span>
+          </button>
+          {open &&
+            row.lines.map((line, i) => (
               <Body
                 key={i}
                 label={row.lines.length > 1 ? `${row.kind} · ${i + 1} of ${row.lines.length}` : row.kind}
@@ -468,8 +467,7 @@ export const MachineLine = memo(
                 testId="note-body"
               />
             ))}
-          </div>
-        )}
+        </Panel>
       </div>
     );
   },
@@ -621,17 +619,18 @@ const MessageRow = memo(function MessageRow({
       // The answer takes the column; what he typed stays narrower and to
       // the right, which is what tells the two apart without a label.
       //
-      // Each also wears an edge in its own colour, on the side it is anchored
-      // to. A conversation is mostly commands, and a tint alone did not carry
-      // far enough down a page of them to find a sentence by — the edge is what
-      // makes a message findable at a scroll's speed (bw-jkh2.16). The violet
-      // rail is not used here: it means a HELPER wrote the row, and it wins
-      // over the speaker's own edge when both are true.
+      // Each also wears an edge in its own colour, and the two sit on opposite
+      // sides — his on the left, the agent's on the right. A conversation is
+      // mostly commands, and a tint alone did not carry far enough down a page
+      // of them to find a sentence by; the edge is what makes a message findable
+      // at a scroll's speed (bw-jkh2.16, bw-jkh2.18). The violet rail is not
+      // used here: it means a HELPER wrote the row, and it wins over the
+      // speaker's own edge when both are true.
       className={cn(
         'rounded-lg px-3 py-2 text-sm leading-relaxed',
         item.role === 'user'
-          ? 'ml-auto max-w-[75ch] border-r-2 border-primary/70 bg-primary/15 text-foreground'
-          : 'w-full border-l-2 border-muted-foreground/40 bg-muted/40 text-foreground',
+          ? 'ml-auto max-w-[75ch] border-l-2 border-primary/70 bg-primary/15 text-foreground'
+          : 'w-full border-r-2 border-muted-foreground/40 bg-muted/40 text-foreground',
         sentOff(sentBy) && SENT_OFF,
       )}
     >

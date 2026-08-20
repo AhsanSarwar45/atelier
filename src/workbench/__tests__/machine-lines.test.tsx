@@ -89,7 +89,7 @@ describe('every kind has a family', () => {
 
   it('gives every family a colour and a mark of its own', () => {
     const marks = new Set(FAMILIES.map((f) => markOf(f)));
-    const chips = new Set(FAMILIES.map((f) => lookOf(f).chip));
+    const chips = new Set(FAMILIES.map((f) => lookOf(f).row));
     expect(marks.size).toBe(FAMILIES.length);
     expect(chips.size).toBe(FAMILIES.length);
   });
@@ -251,7 +251,7 @@ const selector = (cls: string): string => '.' + cls.replace(/[/:]/g, (c) => '\\'
 const classesAsked = (): string[] =>
   FAMILIES.flatMap((f) => {
     const look = lookOf(f);
-    return [look.rule, look.chip, look.count].join(' ').split(/\s+/);
+    return [look.row, look.count].join(' ').split(/\s+/);
   }).filter(Boolean);
 
 async function build(content: string[]): Promise<string> {
@@ -314,13 +314,16 @@ const machineRow = (items: TranscriptItem[]) => {
   return row;
 };
 
-describe('the chat draws them as chips', () => {
+describe('the chat draws them as rows', () => {
   it('carries its family, its mark and what it said', () => {
     render(<MachineLine row={machineRow([note('user/synthetic', '[Request interrupted by user]')])} />);
     const row = screen.getByTestId('note-row');
     expect(row).toHaveAttribute('data-family', 'stopped');
     expect(row).toHaveAttribute('data-note-kind', 'user/synthetic');
-    expect(screen.getByTestId('note-toggle').className).toContain('text-warning');
+    // The colour is on the row, the way a command's is, not on the button.
+    expect(screen.getByTestId('note-row').querySelector('[class*="text-warning"]')).toBeTruthy();
+    // And it is the same full-width row a command draws in, never centred.
+    expect(screen.getByTestId('note-row').className).not.toContain('items-center');
     expect(row.querySelector('svg')).toBeTruthy();
     expect(row.textContent).toContain('[Request interrupted by user]');
   });

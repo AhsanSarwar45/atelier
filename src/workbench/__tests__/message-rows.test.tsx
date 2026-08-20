@@ -44,8 +44,9 @@ describe('a message says who said it', () => {
     draw(said('assistant', 'done'));
     const mine = screen.getByTestId('user-message').className;
     const its = screen.getByTestId('assistant-message').className;
-    expect(mine).toContain('border-r-2');
-    expect(its).toContain('border-l-2');
+    // His on the left, the agent's on the right (bw-jkh2.18).
+    expect(mine).toContain('border-l-2');
+    expect(its).toContain('border-r-2');
     // Each edge in its own colour, and neither of them the helper's violet.
     expect(mine).toContain('border-primary/70');
     expect(its).toContain('border-muted-foreground/40');
