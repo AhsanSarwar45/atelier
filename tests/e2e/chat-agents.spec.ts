@@ -425,14 +425,20 @@ test.describe('the agents a chat sends off', () => {
   });
 
   /**
-   * The lines the conversation itself writes about work the chat sent away,
-   * read exactly as a reader has them: nothing switched on, nothing clicked.
+   * The lines the conversation itself writes about work the chat sent away —
+   * where the manager put them, which is not on the page by default.
    *
-   * The panel says three helpers are running; only the conversation says the
-   * second one went off between the two commands he is looking at. So the lines
-   * are the record and the panel is a reading of it, and a record filed under
-   * the machine's own breathing — which starts switched off — is a chat that
-   * delegated its whole turn reading as a chat that fell silent (bw-7ks.22.6).
+   * They used to be, and this case used to say so. Then the panel next to them
+   * was built, and a line saying an agent went off, beside a row saying an
+   * agent went off, is the same news twice: the manager ruled on 2026-08-20
+   * that the row is the one he wants and the lines belong on the machine's own
+   * side, which starts switched off (bw-6jq5, bw-7ks.22.26). So what is checked
+   * here is both halves of that ruling — the reader sees the panel and no
+   * bookkeeping, and the record still holds the lines for the reader who asks
+   * for them.
+   *
+   * Exactly one of each, still, because the helper opened a piece of work of
+   * its own and that is the helper's news, not this chat's (bw-7ks.22.18).
    *
    * The helper is told to wait, because a foreground command that takes a
    * moment is what the kit opens a task of its own for: the count below is only
@@ -441,7 +447,10 @@ test.describe('the agents a chat sends off', () => {
    * failed, given up on — is held next door in the sidecar's own suite, where
    * a failure and a busy service can be produced on demand and here they cannot.
    */
-  test('the lines about work it sent away are on the page with nothing switched on', async ({ page, request }) => {
+  test('keeps the lines about work it sent away where the reader asks for them, not on the page', async ({
+    page,
+    request,
+  }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const chat = await freshChat(request, page);
     await say(
@@ -454,44 +463,55 @@ test.describe('the agents a chat sends off', () => {
         'When it comes back, reply with the single word FINISHED and nothing else.',
     );
 
-    // Waited out to the end of the turn: the finishing line is the second half
-    // of what this case is about, and it does not exist until the helper is home.
-    await expect
-      .poll(
-        async () =>
-          await page.locator('[data-testid="note-row"][data-note-kind="system/task_notification"]').count(),
-        { message: 'the chat never said its helper had finished', timeout: DELEGATED_MS },
-      )
-      .toBeGreaterThan(0);
+    // Waited out to the end of the turn. The row is what says so now, which is
+    // the ruling itself: the panel carries the news and the conversation does
+    // not repeat it.
+    const helper = page.locator('[data-testid="sent-away-row"][data-kind="helper"]');
+    await expect(helper.getByTestId('sent-away-result')).toBeVisible({ timeout: DELEGATED_MS });
 
-    const lines = await page
-      .locator('[data-testid="note-row"]')
-      .evaluateAll((els) =>
-        els.map((el) => ({
-          kind: el.getAttribute('data-note-kind') ?? '',
-          family: el.getAttribute('data-family') ?? '',
-          text: (el.querySelector('[data-testid="note-toggle"]') as HTMLElement | null)?.innerText.trim() ?? '',
-        })),
-      );
+    const linesNow = async () =>
+      await page
+        .locator('[data-testid="note-row"]')
+        .evaluateAll((els) =>
+          els.map((el) => ({
+            kind: el.getAttribute('data-note-kind') ?? '',
+            family: el.getAttribute('data-family') ?? '',
+            text: (el.querySelector('[data-testid="note-toggle"]') as HTMLElement | null)?.innerText.trim() ?? '',
+          })),
+        );
+    const OF_AGENTS = ['system/task_started', 'system/task_notification'];
+
+    // Nothing switched on: no bookkeeping about the agent, and the row saying
+    // what it answered instead.
+    const quiet = await linesNow();
+    expect(
+      quiet.filter((l) => OF_AGENTS.includes(l.kind)),
+      `the chat writes its own bookkeeping about work the panel already shows: ${JSON.stringify(quiet, null, 2)}`,
+    ).toEqual([]);
+    await page.screenshot({ path: `${SHOTS}/chat-sent-away-lines.png`, fullPage: false });
+
+    // And asked for, they are all there. One click, because the reader who
+    // wants the machine's side wants all of it.
+    await page.getByTestId('open-kind-filter').click();
+    await page.getByTestId('show-every-kind').click();
+    await page.keyboard.press('Escape');
+
+    const lines = await linesNow();
     const said = JSON.stringify(lines, null, 2);
-
-    // One line saying it went and one saying it came home — and exactly one of
-    // each, because the helper opened a piece of work of its own and that is
-    // the helper's news, not this chat's (bw-7ks.22.18).
     const went = lines.filter((l) => l.kind === 'system/task_started');
     const home = lines.filter((l) => l.kind === 'system/task_notification');
     expect(went.length, `not one line saying work was sent off: ${said}`).toBe(1);
     expect(home.length, `not one line saying it finished: ${said}`).toBe(1);
     expect(went[0].text, `the line does not say what was sent off: ${said}`).toMatch(/Sent off: \S/);
 
-    // And they are drawn, which is the claim: the filter was never touched, so
-    // what is on the page is what a reader who has never opened it has.
+    // Filed as news, not as the machine breathing: a line the ranking map
+    // forgot to name falls to breathing by default, and these two are named on
+    // purpose — the difference between a chat that delegated its whole turn and
+    // one that fell silent (bw-7ks.22.6).
     expect(
       [...went, ...home].every((l) => l.family !== 'breathing'),
       `a line about sent-off work is filed as the machine's own breathing: ${said}`,
     ).toBe(true);
-
-    await page.screenshot({ path: `${SHOTS}/chat-sent-away-lines.png`, fullPage: false });
 
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
   });
