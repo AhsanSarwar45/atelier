@@ -9,11 +9,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cut,
+  IMPORT_RECIPE,
   KEPT,
   type PastEntry,
   pastTranscript,
+  PICTURE_KEPT,
   resultText,
   saidByAnyone,
+  saidWithPictures,
   settledUpTo,
   textOf,
   trimInput,
@@ -109,6 +112,94 @@ describe('a chat’s past comes back with its commands', () => {
 });
 
 /**
+ * A picture pasted into a chat, read back out of that chat's own record.
+ *
+ * What the manager saw on 2026-08-20 was the bare words `[Image #1]` sitting in
+ * his own message with nothing to click: the record kept the picture in a block
+ * of its own, and reading the words alone threw it away (bw-uu9x).
+ */
+describe('a picture in a message comes back with it', () => {
+  /** A one-pixel PNG, small enough to write out here in full. */
+  const PIXEL =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const pasted = (data = PIXEL, mime = 'image/png') => ({
+    type: 'image',
+    source: { type: 'base64', media_type: mime, data },
+  });
+
+  it('carries the picture and lifts the harness’s marker out of the words', () => {
+    const said = saidWithPictures({
+      content: [{ type: 'text', text: 'look at this [Image #1] and tell me why' }, pasted()],
+    });
+    expect(said.images).toHaveLength(1);
+    expect(said.images[0]).toMatchObject({ mime: 'image/png', dataUrl: `data:image/png;base64,${PIXEL}` });
+    expect(said.text).toBe('look at this and tell me why');
+    expect(said.text).not.toContain('[Image #');
+  });
+
+  it('gives a whole message back as one row, its picture beside its words', () => {
+    const rows = pastTranscript([
+      {
+        type: 'user',
+        message: { content: [{ type: 'text', text: 'why is this broken [Image #1]' }, pasted()] },
+      },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'said', role: 'user', text: 'why is this broken' });
+    expect(rows[0]!.kind === 'said' && rows[0]!.images).toHaveLength(1);
+  });
+
+  it('keeps each picture with its own marker when a message holds several', () => {
+    const said = saidWithPictures({
+      content: [
+        { type: 'text', text: 'before [Image #1] after [Image #2] end' },
+        pasted(),
+        pasted(PIXEL, 'image/jpeg'),
+      ],
+    });
+    expect(said.images.map((i) => i.mime)).toEqual(['image/png', 'image/jpeg']);
+    expect(said.text).toBe('before after end');
+  });
+
+  it('draws a message that is a picture and nothing else', () => {
+    const rows = pastTranscript([{ type: 'user', message: { content: [pasted()] } }]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'said', text: '' });
+    expect(rows[0]!.kind === 'said' && rows[0]!.images).toHaveLength(1);
+  });
+
+  it('names and measures a picture too big to carry instead of carrying it', () => {
+    const huge = 'A'.repeat(PICTURE_KEPT + 4);
+    const said = saidWithPictures({
+      content: [{ type: 'text', text: 'this one [Image #1] please' }, pasted(huge)],
+    });
+    expect(said.images).toHaveLength(0);
+    expect(said.text).toBe('this one [image/png, 732 KB] please');
+  });
+
+  it('names a picture the record holds somewhere else rather than as bytes', () => {
+    const said = saidWithPictures({
+      content: [
+        { type: 'text', text: 'here [Image #1]' },
+        { type: 'image', source: { type: 'url', media_type: 'image/png', url: 'https://x/y.png' } },
+      ],
+    });
+    expect(said.images).toHaveLength(0);
+    expect(said.text).toBe('here [image/png, 0 bytes]');
+  });
+
+  it('leaves a message with no picture in it exactly as it was', () => {
+    const said = saidWithPictures({ content: [{ type: 'text', text: 'nothing pasted here' }] });
+    expect(said).toEqual({ text: 'nothing pasted here', images: [] });
+    expect(saidWithPictures({ content: 'plain words' })).toEqual({ text: 'plain words', images: [] });
+  });
+
+  it('reads every chat again, because one read before this drew no pictures', () => {
+    expect(IMPORT_RECIPE).toBe(6);
+  });
+});
+
+/**
  * What an opened command row prints. The browser used to throw command output
  * away, so a result carrying a picture was never read by anyone; the moment the
  * row started opening onto it, a screenshot became a wall of base64 where the
@@ -182,7 +273,7 @@ describe('what a command was asked to do', () => {
 });
 
 describe('how much of a record still being written may be drawn', () => {
-  const said = (text: string): PastEntry => ({ kind: 'said', role: 'assistant', text });
+  const said = (text: string): PastEntry => ({ kind: 'said', role: 'assistant', text, images: [] });
   const call = (id: string, output: string): PastEntry => ({
     kind: 'call',
     id,

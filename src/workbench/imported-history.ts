@@ -22,14 +22,16 @@ export const IMPORTED_MESSAGES = 200;
  * the conversation stands, which a chat begun in a terminal has no driver here
  * to say (bw-4wcd.4). 5 takes the window off what the kit states in the record
  * rather than off a marker in the model's name that the kit never writes
- * (bw-4wcd.15). Raise it whenever the reading would produce a different
- * transcript from the same record: every chat read in by a lower one is read
- * again on its next open.
+ * (bw-4wcd.15). 6 carries the pictures a message held, which every reading
+ * before it dropped on the floor — leaving the bare marker the harness writes
+ * in their place and nothing to click (bw-uu9x.1). Raise it whenever the
+ * reading would produce a different transcript from the same record: every chat
+ * read in by a lower one is read again on its next open.
  *
  * It lives beside the reading it numbers, so raising the reading and raising
  * the number are one edit in one file (bw-khe.11).
  */
-export const IMPORT_RECIPE = 5;
+export const IMPORT_RECIPE = 6;
 
 /** What opening a chat does about a past it may or may not have read already. */
 export type ReadingChoice =
@@ -139,6 +141,111 @@ export function textOf(message: unknown): string {
     .trim();
 }
 
+/**
+ * A picture out of a chat's own record, in the shape a picture just sent has.
+ *
+ * The record keeps it as base64 beside the words of the same message, and the
+ * transcript already knows how to draw one and open it full size — so a picture
+ * read back is handed over as the very same thing rather than as a second kind
+ * of picture with a second way of being drawn (bw-uu9x.1).
+ */
+export interface PastImage {
+  mime: string;
+  dataUrl: string;
+  alt: string;
+}
+
+/**
+ * How much encoded picture one of them may carry back out of the record.
+ *
+ * A picture is carried whole, because that is what makes it clickable, and the
+ * whole of it then lives in the chat's stored history as well. One screenshot
+ * is a couple of hundred kilobytes and costs nothing; a chat somebody pasted a
+ * hundred of into would be read into memory and written to disk entire. Past
+ * this, the picture is named and measured in the words instead — the reader
+ * still learns it was there, and the record on disk still holds it (bw-uu9x.3).
+ */
+export const PICTURE_KEPT = 1_000_000;
+
+/** How big a base64 payload is, in the terms a reader judges big or small by. */
+function measured(data: unknown): string {
+  // base64 spends four characters per three bytes, which is close enough for a
+  // size a reader is only deciding "big or small" from.
+  const bytes = typeof data === 'string' ? Math.round((data.length * 3) / 4) : 0;
+  return bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`;
+}
+
+/** The marker the harness writes into the words where a picture was pasted. */
+const PICTURE_MARKER = /\[Image #(\d+)\]/g;
+
+/**
+ * What one message holds: its words, and the pictures pasted into it.
+ *
+ * The harness does not put a picture in the words — it puts `[Image #1]` there
+ * and the bytes in a block of their own. Reading the words alone left that
+ * marker standing over nothing, which is exactly what the manager was looking
+ * at (bw-uu9x). So the two are read together: each picture is carried, and its
+ * marker comes out of the words because the picture itself now stands there.
+ * A picture too big to carry keeps its place in the words instead, named and
+ * measured, so the reader is never quietly short of one.
+ */
+export function saidWithPictures(message: unknown): { text: string; images: PastImage[] } {
+  const said = textOf(message);
+  const content = (message as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return { text: said, images: [] };
+
+  const images: PastImage[] = [];
+  /** What each picture's marker becomes: nothing, when the picture is drawn. */
+  const insteadOf = new Map<number, string>();
+  let nth = 0;
+
+  for (const block of content) {
+    const b = (typeof block === 'object' && block !== null ? block : {}) as {
+      type?: string;
+      source?: { type?: string; media_type?: string; data?: unknown };
+    };
+    if (b.type !== 'image') continue;
+    nth += 1;
+    const mime = b.source?.media_type ?? 'image/png';
+    const data = b.source?.data;
+    // Only base64 is carried: a block naming a file or an address holds no
+    // bytes here to turn into something the browser can draw.
+    const whole =
+      b.source?.type === 'base64' && typeof data === 'string' && data.length <= PICTURE_KEPT;
+    if (whole) {
+      images.push({ mime, dataUrl: `data:${mime};base64,${data as string}`, alt: `Picture ${nth}` });
+      insteadOf.set(nth, '');
+    } else {
+      insteadOf.set(nth, `[${mime}, ${measured(data)}]`);
+    }
+  }
+
+  if (nth === 0) return { text: said, images: [] };
+
+  const stood = new Set<number>();
+  let text = said.replace(PICTURE_MARKER, (marker, digits: string) => {
+    const n = Number(digits);
+    if (!insteadOf.has(n)) return marker;
+    stood.add(n);
+    return insteadOf.get(n)!;
+  });
+  // A picture the words never marked — a message that is a picture and nothing
+  // else — still has to be accounted for when it was too big to draw.
+  const unmarked = Array.from(insteadOf.entries())
+    .filter(([n, instead]) => instead !== '' && !stood.has(n))
+    .map(([, instead]) => instead);
+  if (unmarked.length) text = [text, ...unmarked].filter(Boolean).join('\n');
+  // Lifting a marker out of the middle of a sentence leaves the space either
+  // side of it standing.
+  return {
+    text: text
+      .replace(/[^\S\n]{2,}/g, ' ')
+      .replace(/[^\S\n]+$/gm, '')
+      .trim(),
+    images,
+  };
+}
+
 /** Whether a recorded message is something a person or an agent actually said. */
 export function saidByAnyone(text: string): boolean {
   return text.length > 0 && !MACHINE_CHATTER.test(text.trimStart());
@@ -203,7 +310,7 @@ interface RecordedMessage {
 
 /** One row of a chat that already happened, in the order it happened. */
 export type PastEntry =
-  | { kind: 'said'; role: 'user' | 'assistant'; text: string }
+  | { kind: 'said'; role: 'user' | 'assistant'; text: string; images: PastImage[] }
   | { kind: 'call'; id: string; name: string; input: Record<string, unknown>; output: string; ok: boolean };
 
 /**
@@ -265,11 +372,7 @@ export function resultText(content: unknown): string {
       };
       if (b.type === 'text') return String(b.text ?? '');
       if (b.type === 'image') {
-        const kind = b.source?.media_type ?? 'image';
-        // base64 spends four characters per three bytes, which is close enough
-        // for a size a reader is only deciding "big or small" from.
-        const bytes = typeof b.source?.data === 'string' ? Math.round((b.source.data.length * 3) / 4) : 0;
-        return `[${kind}, ${bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`}]`;
+        return `[${b.source?.media_type ?? 'image'}, ${measured(b.source?.data)}]`;
       }
       return `[${b.type ?? 'unknown'}]`;
     })
@@ -306,8 +409,11 @@ export function pastTranscript(messages: RecordedMessage[]): PastEntry[] {
 
   for (const m of messages) {
     if (m.type !== 'user' && m.type !== 'assistant') continue;
-    const said = textOf(m.message);
-    if (saidByAnyone(said)) entries.push({ kind: 'said', role: m.type, text: said });
+    const { text, images } = saidWithPictures(m.message);
+    // A message that is a picture and nothing else has no words to judge, and
+    // it is still something he said — so a picture is reason enough to draw the
+    // row (bw-uu9x.1).
+    if (saidByAnyone(text) || images.length > 0) entries.push({ kind: 'said', role: m.type, text, images });
 
     // A message's own words come before the calls it made, which is the order
     // they happened in and the order the live wire sends them.

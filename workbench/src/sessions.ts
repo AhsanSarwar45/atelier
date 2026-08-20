@@ -28,6 +28,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
+import { spokenAsEvents } from './reading-back.ts';
 import { findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
 import { runningNow } from './running.ts';
@@ -596,10 +597,7 @@ export class Sessions {
    */
   private draw(sessionId: string, entry: PastEntry): void {
     if (entry.kind === 'said') {
-      const messageId = randomUUID();
-      this.publish(sessionId, { type: 'message.started', messageId, role: entry.role });
-      this.publish(sessionId, { type: 'text.delta', messageId, text: entry.text });
-      this.publish(sessionId, { type: 'message.completed', messageId });
+      for (const e of spokenAsEvents(entry, randomUUID())) this.publish(sessionId, e);
       return;
     }
     this.publish(sessionId, {
