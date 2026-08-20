@@ -8,14 +8,19 @@
  * read has been signed by nobody yet, and a finish offered there is how
  * unsigned work reached Done.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { EpicCard } from '../epic-card';
+import { closeBead } from '@/lib/cli';
 import type { CardLayout } from '@/lib/themes';
 import type { Bead, BeadStatus, Epic } from '@/types';
 
 vi.mock('@/lib/cli', () => ({ closeBead: vi.fn().mockResolvedValue(undefined) }));
+
+/** What the screen was told to say, without a toaster in the tree to say it. */
+const said = vi.hoisted(() => vi.fn());
+vi.mock('@/hooks/use-toast', () => ({ toast: said }));
 vi.mock('@/lib/api', () => ({ git: {} }));
 
 /** The layout the card is drawn in, so every theme's shape can be read. */
@@ -294,5 +299,98 @@ describe('what the card asks anyone else about', () => {
     await waitFor(() => expect(screen.getByText(/Child Tasks/)).toBeInTheDocument());
     expect(asked).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
+  });
+});
+
+/**
+ * What a press says while the board is being written.
+ *
+ * Finishing a job runs the board program: a second or so while the machine is
+ * quiet, and 35 seconds measured through a browser while other agents were
+ * writing. All the press did until now was grey a small button and swap its
+ * word, so the manager pressed, saw a screen that had not changed, and pressed
+ * again (bw-x1fv.8).
+ */
+describe('the answer to a press', () => {
+  /** A close that hangs until the case lets it finish, standing in for a busy board. */
+  const closeThatHangs = () => {
+    let finish!: () => void;
+    let refuse!: (why: Error) => void;
+    vi.mocked(closeBead).mockImplementation(
+      () => new Promise<void>((ok, no) => {
+        finish = () => ok();
+        refuse = (why) => no(why);
+      }),
+    );
+    return { finish: () => finish(), refuse: (why: Error) => refuse(why) };
+  };
+
+  const press = () => fireEvent.click(screen.getByRole('button', { name: FINISH }));
+
+  it('says the press was heard before the board has answered', () => {
+    closeThatHangs();
+    draw('manager_review');
+    press();
+
+    // Said on the press, not on the answer: the answer is what takes the time.
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(said.mock.calls[0][0].title).toMatch(/marking test-1 done/i);
+  });
+
+  it('marks the card itself, so a column of finished jobs shows which one', async () => {
+    const board = closeThatHangs();
+    draw('manager_review');
+    press();
+
+    expect(document.querySelector('[data-bead-id="test-1"]')).toHaveAttribute('data-marking', 'true');
+    await act(async () => { board.finish(); });
+    expect(document.querySelector('[data-bead-id="test-1"]')).not.toHaveAttribute('data-marking');
+  });
+
+  it('says the job is done, and has the board read again', async () => {
+    const board = closeThatHangs();
+    const afterwards = vi.fn();
+    render(
+      <EpicCard
+        epic={epicIn('manager_review')}
+        allBeads={[child]}
+        statusById={lookup([child])}
+        onSelect={vi.fn()}
+        onChildClick={vi.fn()}
+        projectPath="/test/project"
+        onUpdate={afterwards}
+      />
+    );
+    press();
+    await act(async () => { board.finish(); });
+
+    expect(said.mock.calls.at(-1)?.[0].title).toMatch(/test-1 is done/i);
+    expect(afterwards, 'the board was never read again, so the card sat in the column').toHaveBeenCalled();
+  });
+
+  it('says a sign-off that failed failed, instead of stopping silently', async () => {
+    const board = closeThatHangs();
+    const afterwards = vi.fn();
+    render(
+      <EpicCard
+        epic={epicIn('manager_review')}
+        allBeads={[child]}
+        statusById={lookup([child])}
+        onSelect={vi.fn()}
+        onChildClick={vi.fn()}
+        projectPath="/test/project"
+        onUpdate={afterwards}
+      />
+    );
+    press();
+    await act(async () => { board.refuse(new Error('Command timed out after 30 seconds')); });
+
+    const last = said.mock.calls.at(-1)?.[0];
+    expect(last.variant).toBe('destructive');
+    expect(last.description).toMatch(/timed out/i);
+    // Read again even so: the commonest failure here is a request giving up on
+    // a close that went on to succeed, and the board is what settles it.
+    expect(afterwards).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: FINISH })).toBeEnabled();
   });
 });

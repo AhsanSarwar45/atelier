@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "@/hooks/use-theme";
+import { toast } from "@/hooks/use-toast";
 import { formatBeadId, getStatusDotColor, isBlockedBy, truncate } from "@/lib/bead-utils";
 import { closeBead } from "@/lib/cli";
 import { computeEpicProgress, progressPercent } from "@/lib/epic-parser";
@@ -119,18 +120,44 @@ export const EpicCard = memo(function EpicCard({
   const canCloseEpic = allDone && epic.status === 'manager_review';
 
   /**
-   * Handle closing the epic
+   * The manager signs the job off.
+   *
+   * Answered the moment it is pressed rather than when the work behind it
+   * finishes. Finishing a job runs the board program, which on this machine
+   * takes seconds while it is quiet and was measured at 35 while other agents
+   * were writing to the board; until then the only sign the press had landed
+   * was a twelve-pixel spinner inside the button, which reads as a screen that
+   * did nothing (bw-x1fv.8).
+   *
+   * The card stays where it is until the board says it moved — a card that
+   * jumped to Done on the press would be telling the manager something the
+   * board had not agreed to yet, and a job whose close fails would have to
+   * jump back.
    */
   const handleCloseEpic = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isClosing) return;
 
     setIsClosing(true);
+    toast({
+      title: `Marking ${formatBeadId(epic.id)} done…`,
+      description: 'Writing it to the board. This can take a moment while agents are working.',
+    });
     try {
       await closeBead(epic.id, projectPath);
+      toast({ title: `${formatBeadId(epic.id)} is done`, description: truncate(epic.title, 80) });
       onUpdate?.();
     } catch (error) {
-      console.error('Failed to close epic:', error);
+      // Silent before this: the spinner stopped, the card stayed where it was,
+      // and nothing said whether it had worked. The board is read again either
+      // way, because the commonest failure here is the request giving up at
+      // thirty seconds on a close that went on to succeed.
+      toast({
+        variant: 'destructive',
+        title: `Could not mark ${formatBeadId(epic.id)} done`,
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+      onUpdate?.();
     } finally {
       setIsClosing(false);
     }
@@ -141,6 +168,10 @@ export const EpicCard = memo(function EpicCard({
   // Shared interaction props
   const interactionProps = {
     "data-bead-id": epic.id,
+    // Which card the press was about, for a reader with several jobs standing
+    // in his column and for the checks that time the answer.
+    "data-marking": isClosing ? "true" : undefined,
+    "aria-busy": isClosing,
     role: "button" as const,
     tabIndex: 0,
     "aria-label": `Select epic: ${epic.title}`,
