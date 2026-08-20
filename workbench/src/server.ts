@@ -13,6 +13,7 @@ import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
+import { watchOutside } from './outside.ts';
 import { knownSessions, restoreList } from './registry.ts';
 import { runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
@@ -143,6 +144,11 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
   const unopen = sessions.watchOpen((s) => write({ kind: 'opened', session: { ...s, activity: '', beads: [] } }));
   const unwatchRunning = watchRunning((conversations) => write({ kind: 'running', conversations }));
+  // A chat begun in an editor or a terminal has no event of ours to arrive on
+  // and no row here to carry one; the only sign of it is the tool writing its
+  // record. Hearing that folder move is the whole of what tells this browser
+  // to ask for the list again (outside.ts, bw-uivp.1).
+  const unwatchOutside = watchOutside(() => write({ kind: 'outside' }));
 
   const beat = setInterval(() => res.write(': keep-alive\n\n'), 30_000);
   const done = () => {
@@ -150,6 +156,7 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
     unsubscribe();
     unopen();
     unwatchRunning();
+    unwatchOutside();
   };
   req.on('close', done);
   req.on('error', done);

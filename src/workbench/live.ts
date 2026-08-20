@@ -134,6 +134,13 @@ function absorb(frame: WatchFrame): void {
     announce();
     return;
   }
+  if (frame.kind === 'outside') {
+    // The tools' own session folders moved: a chat was begun or worked in
+    // somewhere that is not this app. Nothing here changes — this store holds
+    // the sessions the sidecar drives, and the list is what has to ask again.
+    // It learns to, on hearing this, in bw-uivp.2.
+    return;
+  }
   if (frame.kind === 'opened') {
     if (!sessions.some((s) => s.id === frame.session.id)) {
       sessions = [...sessions, fromSummary(frame.session)];

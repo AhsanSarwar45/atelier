@@ -334,6 +334,14 @@ export type WatchFrame =
    * started/stopped pair after a missed frame is not.
    */
   | { kind: 'running'; conversations: string[] }
+  /**
+   * The tools' own session folders have changed — a conversation written that
+   * this app did not write, or one of them added to. A bare word, said no more
+   * than once a second however hard an agent is typing: it means ask for the
+   * list again, and it carries no rows, because `restoreList` is the one place
+   * that builds them (workbench/src/outside.ts, bw-uivp.1).
+   */
+  | { kind: 'outside' }
   | { kind: 'event'; event: WbpEvent };
 
 /** A chat that touched a card, as the card's own side of the join lists it. */
