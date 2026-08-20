@@ -9,6 +9,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
+import { foldAll } from '../../src/workbench/fold.ts';
 import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
@@ -41,8 +42,18 @@ async function readBody(req: IncomingMessage): Promise<string> {
 }
 
 /**
- * One session's stream: replay from `since`, then tail live. A browser that
- * reconnects passes the last seq it saw and misses nothing.
+ * One session's stream: the conversation as it stands, then the live tail.
+ *
+ * A browser opening a chat is handed the folded conversation in one `snapshot`
+ * frame rather than every event ever recorded. The log is not the conversation:
+ * a chat whose record is re-read republishes the whole of it behind a
+ * `transcript.reset`, so the longest chat on this machine carried three and
+ * three quarter megabytes of which four hundredths were still on the screen.
+ * Folding it here — once, in one pass — is what the browser would have done
+ * with all of it anyway (bw-uiyz.4).
+ *
+ * A browser that reconnects passes the last seq it saw, and is sent only what
+ * arrived since: no snapshot, because it is already drawing one.
  */
 function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: string, since: number): void {
   res.writeHead(200, {
@@ -58,7 +69,14 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: stri
     res.write(`id: ${(e as { seq: number }).seq}\ndata: ${JSON.stringify(e)}\n\n`);
   };
 
-  for (const e of sessions.replay(sessionId, since)) write(e);
+  if (since === 0) {
+    const view = foldAll(sessions.replay(sessionId, 0));
+    // Named, so the browser tells the conversation apart from an event; the id
+    // is what a reconnection resumes from, whether ours or the browser's own.
+    res.write(`id: ${view.lastSeq}\nevent: snapshot\ndata: ${JSON.stringify(view)}\n\n`);
+  } else {
+    for (const e of sessions.replay(sessionId, since)) write(e);
+  }
   const unsubscribe = sessions.subscribe(sessionId, write);
 
   // Keeps intermediaries from reaping an idle stream, same 30s cadence as watch.rs.

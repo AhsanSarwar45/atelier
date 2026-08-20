@@ -322,3 +322,24 @@ node scripts/chat-typing-cost.mjs http://127.0.0.1:3008 200
 It exits red above 40ms a keystroke. Injected against the fault it was written
 for: 268ms a keystroke with the rows drawn inline in the chat, 4ms with each row
 remembered against its own item.
+
+## `chat-open-cost.mjs`
+
+Where the wait goes when a chat is opened. Prints how long the conversation
+took to arrive, how many rows it holds, how many pieces of screen they cost, and
+how long the main thread stayed busy after the bytes landed — so a slow open can
+be blamed on the wire, on the fold or on the drawing rather than guessed at.
+
+A chat whose record has been read again republishes its whole transcript behind
+a `transcript.reset`, and the reset throws away everything before it. Opening
+the longest chat on this machine therefore sent three and three quarter
+megabytes across the wire for the forty-two events still on the screen. The
+sidecar folds the log itself now and sends the conversation it built
+(bw-uiyz.4).
+
+```
+BEADS_E2E_URL=http://127.0.0.1:3032 node scripts/chat-open-cost.mjs <sessionId>
+```
+
+Against the four longest chats on this machine: 3.77MB arriving in 361ms became
+0.09MB in 67ms, and 3.65MB and 1.83MB became 0.11MB and 0.14MB.
