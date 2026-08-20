@@ -121,8 +121,18 @@ describe('the agents a chat sent off, read back from the record', () => {
     expect(helper!.tokens).toBe(4000);
     // Split the way the kit reports one call, so a chat can add its helpers'
     // spend to its own and still say what went in and what came out
-    // (bw-7ks.22.8).
-    expect(helper!.spend).toEqual({ input: 3200, output: 800, total: 4000 });
+    // (bw-7ks.22.8). Every part of it apart, words kept ready and words read
+    // back included: folding those into what was sent is what made the chat's
+    // own chip read a third high, and a helper's share is added to that same
+    // total (bw-3ug7.2, bw-7ks.22.25).
+    expect(helper!.spend).toEqual({
+      input: 200,
+      cacheWrite: 2000,
+      cacheRead: 1000,
+      output: 800,
+      thinking: 0,
+      total: 4000,
+    });
     expect(helper!.calls).toBe(1);
     expect(helper!.result).toBe('412 rows.');
     // Its conversation, in the order it happened: the brief it was given, the
