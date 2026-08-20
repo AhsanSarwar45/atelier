@@ -222,7 +222,7 @@ export function AgentsPanel({
   onOpenChange,
   projectPath,
 }: AgentsPanelProps) {
-  const { agents, isLoading, error, updateAgent } = useAgents(projectPath);
+  const { agents, isLoading, error, updateAgent } = useAgents(projectPath, open);
 
   // Track which card is expanded
   const [expandedFilename, setExpandedFilename] = useState<string | null>(null);

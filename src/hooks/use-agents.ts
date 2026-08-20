@@ -32,12 +32,17 @@ export interface UseAgentsResult {
 /**
  * Hook to load and manage agent definitions from a project.
  *
+ * The panel this fills is mounted beside the board, so the board used to pay
+ * for it: the list is read when someone opens the panel, not when the board
+ * behind it is drawn (bw-uiyz.16).
+ *
  * @param projectPath - The absolute path to the project root
+ * @param asked - Whether anyone is looking; nothing is read until they are
  * @returns Object containing agents, loading state, error, mutations, and refresh
  */
-export function useAgents(projectPath: string): UseAgentsResult {
+export function useAgents(projectPath: string, asked: boolean = true): UseAgentsResult {
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(asked);
   const [error, setError] = useState<Error | null>(null);
 
   // Track if initial load has completed
@@ -80,11 +85,12 @@ export function useAgents(projectPath: string): UseAgentsResult {
     await loadAgents();
   }, [loadAgents]);
 
-  // Initial load when project path changes
+  // Initial load when project path changes, once anyone is looking
   useEffect(() => {
+    if (!asked) return;
     hasLoadedRef.current = false;
     loadAgents();
-  }, [loadAgents]);
+  }, [asked, loadAgents]);
 
   /**
    * Update an agent's model and/or all-tools setting
