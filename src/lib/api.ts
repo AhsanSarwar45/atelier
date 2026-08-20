@@ -339,10 +339,15 @@ export const fs = {
 
   roots: () => fetchApi<{ home: string; roots: string[] }>('/api/fs/roots'),
 
-  openExternal: (path: string, target: 'vscode' | 'cursor' | 'finder') =>
+  /**
+   * Open a path in an outside program. `finder` is whatever the machine opens
+   * that kind of file with; the two editors take a line to sit on, which the
+   * default program has no way to be told (bw-khe.13).
+   */
+  openExternal: (path: string, target: 'vscode' | 'cursor' | 'finder', line?: number | null) =>
     fetchApi<{ success: boolean }>('/api/fs/open-external', {
       method: 'POST',
-      body: JSON.stringify({ path, target }),
+      body: JSON.stringify(line == null ? { path, target } : { path, target, line }),
     }),
 };
 

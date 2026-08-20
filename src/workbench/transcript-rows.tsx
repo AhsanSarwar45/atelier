@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { memo, useEffect, useReducer, useState } from 'react';
+import { memo, useContext, useEffect, useReducer, useState } from 'react';
 
 import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
 
@@ -27,6 +27,7 @@ import { diffLines } from '@/workbench/line-diff';
 import { lookOf, markOf, opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
 import { ReportCard } from '@/workbench/report-view';
+import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
 
 /** One permission card. Collapses to its answer once the human has clicked. */
@@ -110,8 +111,10 @@ export const PermissionCard = memo(function PermissionCard({
  * a line that never had a file around it.
  */
 function Line({ text, language, html }: { text: string; language: string | null; html?: string | null }) {
-  const painted = html === undefined ? paint(text, language) : html;
-  if (painted === null || painted === undefined) return <>{text}</>;
+  const split = useContext(SplitPaths);
+  const found = html === undefined ? paint(text, language) : html;
+  const painted = found === undefined ? null : withChips(found, split);
+  if (painted === null) return <Chipped text={text} />;
   return <span dangerouslySetInnerHTML={{ __html: painted }} />;
 }
 
@@ -227,12 +230,13 @@ function Body({
  * (bw-4wcd.2).
  */
 function Numbered({ text, language }: { text: string; language: string | null }) {
+  const split = useContext(SplitPaths);
   const lines = text.split('\n');
   const numbered = lines.filter((l) => /^\s*\d+\t/.test(l)).length;
-  if (!language) return <>{text}</>;
+  if (!language) return <Chipped text={text} />;
   if (numbered < lines.length / 2) {
-    const html = paint(text, language);
-    return html === null ? <>{text}</> : <span dangerouslySetInnerHTML={{ __html: html }} />;
+    const html = withChips(paint(text, language), split);
+    return html === null ? <Chipped text={text} /> : <span dangerouslySetInnerHTML={{ __html: html }} />;
   }
   // The numbers off, the file put back together, coloured as one thing and
   // then cut again — otherwise every line is read as if it were the first
@@ -264,7 +268,7 @@ function Numbered({ text, language }: { text: string; language: string | null })
  * read was the one they could not (bw-1u1.33). Each argument gets its own
  * heading and its value beneath it, whole lines intact.
  */
-function whatItWasAsked(input: Record<string, unknown>): string {
+export function whatItWasAsked(input: Record<string, unknown>): string {
   const entries = Object.entries(input ?? {});
   if (entries.length === 0) return '';
   return entries
@@ -353,7 +357,14 @@ export const ToolRow = memo(function ToolRow({
           {hasBody && (
             <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
           )}
-          <span className="truncate">{item.title}</span>
+          {/* The row's own line is where the reader sees an address most often
+              — every command an agent runs opens with the folder it ran in — so
+              the chips are here too, not only in the command behind the click.
+              A span inside a button is fine; the conversation's own listener
+              stops a chip's click reaching the toggle (bw-khe.13). */}
+          <span className="truncate">
+            <Chipped text={item.title} />
+          </span>
           {/* How long it has been running, while it is running: a call that takes a
               minute must not look the same as one that took none. */}
           {item.status === 'running' && item.seconds > 0 && (

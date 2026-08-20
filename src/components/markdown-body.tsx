@@ -26,6 +26,8 @@ export interface Mentions {
   split: (text: string) => Piece[];
   card: (id: string) => ReactNode;
   report: (slug: string) => ReactNode;
+  /** A file named in the words, drawn as the reader wrote it (bw-khe.13). */
+  path?: (absolute: string, raw: string, line: number | null) => ReactNode;
 }
 
 const PROSE_CLASSES =
@@ -40,6 +42,16 @@ const PROSE_CLASSES =
   "prose-code:px-1 prose-code:py-0.5 prose-code:rounded " +
   // A pasted path or a long address must not push the column wider than its box.
   "prose-pre:overflow-x-auto break-words";
+
+/**
+ * The words inside a marked span — what the reader actually wrote, which is
+ * what a chip draws and what a copied command must still contain.
+ */
+function textOf(children: ReactNode): string {
+  if (typeof children === 'string') return children;
+  if (Array.isArray(children)) return children.map(textOf).join('');
+  return '';
+}
 
 export function MarkdownBody({
   children,
@@ -71,6 +83,12 @@ export function MarkdownBody({
             if (card && mentions) return <>{mentions.card(card)}</>;
             const report = marks['data-report-mention'];
             if (report && mentions) return <>{mentions.report(report)}</>;
+            const path = marks['data-path-mention'];
+            if (path && mentions?.path) {
+              const line = marks['data-path-line'];
+              const written = textOf(props.children);
+              return <>{mentions.path(path, written || path, line ? Number(line) : null)}</>;
+            }
             return <span {...props} />;
           },
         }}

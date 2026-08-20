@@ -53,7 +53,11 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
-import { mentionsIn } from '@/workbench/mentions';
+import { openableIn } from '@/workbench/mentions';
+import { PathChip, openPathClicked } from '@/workbench/path-chip';
+import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
+import { usePathsOnDisk } from '@/workbench/paths-on-disk';
+import { SplitPaths } from '@/workbench/split-paths';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, drawable, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
@@ -61,14 +65,32 @@ import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
-import { MachineLine, TranscriptRow, WorkingLine } from '@/workbench/transcript-rows';
+import { MachineLine, TranscriptRow, WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { PlanChip, usePlanUsage, UsageView } from '@/workbench/usage-view';
-import { isBusy, readImage, sendCommand, useSession, useSessionFacts } from '@/workbench/use-session';
+import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
 /** Whether the transcript is showing every command's body and every quiet line. */
 const CHAT_OPEN_ALL = 'workbench.open-all';
+
+/**
+ * Everything one row of a conversation actually says, for going through once
+ * to find the addresses in it. Nothing is drawn from this — it is only the list
+ * of questions to put to disk before the reader looks (bw-khe.13).
+ */
+function textOfItem(item: TranscriptItem): string[] {
+  if (item.kind === 'tool') {
+    const asked =
+      item.name === 'Bash' && typeof item.input.command === 'string'
+        ? String(item.input.command)
+        : whatItWasAsked(item.input);
+    return [item.title, asked, item.output ?? '', item.diff?.path ?? ''];
+  }
+  if (item.kind === 'note') return [item.text, item.body ?? ''];
+  if (item.kind === 'message' || item.kind === 'thinking' || item.kind === 'notice') return [item.text];
+  return [];
+}
 
 interface ChatTabProps {
   projectId: string | null;
@@ -325,10 +347,38 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // are what decide (bw-4wcd.3, src/workbench/mentions.ts).
   const knownCards = useKnownCards(projectPath);
   const byName = useMemo(() => new Map(reports.map((r) => [r.slug, r])), [reports]);
+
+  // A file the agent named opens from where it is written, the same way. Only
+  // ones that are really there: `and/or` and `24/7` are shaped like addresses
+  // too, so disk is what decides (bw-khe.13, src/workbench/paths.ts). What a
+  // relative name means is decided by the folder THIS chat ran in.
+  const disk = usePathsOnDisk();
+  const where = useMemo<Rooted>(
+    () => ({ cwd: facts?.cwd ?? projectPath ?? '', home: disk.home }),
+    [facts?.cwd, projectPath, disk.home],
+  );
+  const splitPaths = useCallback((text: string) => pathsIn(text, where, disk), [where, disk]);
+
+  // Everything the conversation says, gone through once for the addresses in
+  // it, so the answers are already back by the time the reader looks.
+  useEffect(() => {
+    const asking = new Set<string>();
+    for (const item of view.items) {
+      for (const text of textOfItem(item)) for (const p of askableIn(text, where)) asking.add(p);
+    }
+    if (asking.size > 0) disk.ask(Array.from(asking));
+  }, [view.items, where, disk]);
+
   const mentions = useMemo<Mentions>(
     () => ({
       split: (text) =>
-        mentionsIn(text, { card: (id) => knownCards.has(id), report: (slug) => byName.has(slug) }),
+        openableIn(
+          text,
+          { card: (id) => knownCards.has(id), report: (slug) => byName.has(slug) },
+          where,
+          disk,
+        ),
+      path: (absolute, raw, line) => <PathChip absolute={absolute} raw={raw} line={line} />,
       card: (id) => (
         <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5 align-baseline" />
       ),
@@ -342,7 +392,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         );
       },
     }),
-    [knownCards, byName, projectId, projectPath],
+    [knownCards, byName, projectId, projectPath, where, disk],
   );
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
@@ -767,9 +817,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </div>
       )}
 
+      <SplitPaths.Provider value={splitPaths}>
       <div
         className="mx-auto flex w-full max-w-[110ch] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
         data-testid="transcript"
+        // One listener for every file chip in the conversation, wherever it was
+        // drawn: in a message, in a command, or on a tool row's own line. A
+        // chip that answers here never lets the click reach what it sits inside
+        // (bw-khe.13).
+        //
+        // On the way DOWN, not up: a tool row's toggle sits below this, and by
+        // the time a click had bubbled back to here that button had already run
+        // and opened the row. Caught on the way down, stopping the click stops
+        // everything under it — the row a chip sits on stays as the reader left
+        // it, which the browser check proves.
+        onClickCapture={(e) => openPathClicked(e)}
       >
         {rows.length === 0 && canDraw.length > 0 && (
           <NothingShowing hidden={canDraw.length} onShowAll={() => changeKinds(EVERYTHING)} />
@@ -805,6 +867,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
         <div ref={endRef} />
       </div>
+      </SplitPaths.Provider>
 
       <div className="border-t border-border/60 px-4 py-3">
         {/* One frame holds the typing, the pictures waiting to go and the button

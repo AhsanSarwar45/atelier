@@ -34,6 +34,21 @@ pub struct OpenExternalRequest {
     pub path: String,
     /// Target application: "vscode", "cursor", or "finder"
     pub target: String,
+    /// The line to sit on, when the address named one. The editors take it;
+    /// the system's own opener has no way to be told (bw-khe.13).
+    #[serde(default)]
+    pub line: Option<u32>,
+}
+
+/// What an editor is handed: the file, or the file and the line inside it.
+///
+/// VS Code and Cursor both read `-g path:line`; without `-g` the same argument
+/// is a filename with a colon in it, so the flag is not optional.
+pub fn editor_args(path: &std::path::Path, line: Option<u32>) -> Vec<String> {
+    match line {
+        Some(n) => vec!["-g".to_string(), format!("{}:{}", path.display(), n)],
+        None => vec![path.display().to_string()],
+    }
 }
 
 /// A single directory entry.
@@ -175,17 +190,18 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
     }
 
     // Execute the appropriate command based on target
+    let args = editor_args(&path, request.line);
     let result = match request.target.as_str() {
         "vscode" => {
             // Try "code" command first, fall back to macOS open command
-            let code_result = std::process::Command::new("code").arg(&path).spawn();
+            let code_result = std::process::Command::new("code").args(&args).spawn();
             if code_result.is_err() {
                 // Fallback for macOS: use open -a "Visual Studio Code"
                 #[cfg(target_os = "macos")]
                 {
                     std::process::Command::new("open")
-                        .args(["-a", "Visual Studio Code"])
-                        .arg(&path)
+                        .args(["-a", "Visual Studio Code", "--args"])
+                        .args(&args)
                         .spawn()
                 }
                 #[cfg(not(target_os = "macos"))]
@@ -198,14 +214,14 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
         }
         "cursor" => {
             // Try "cursor" command first, fall back to macOS open command
-            let cursor_result = std::process::Command::new("cursor").arg(&path).spawn();
+            let cursor_result = std::process::Command::new("cursor").args(&args).spawn();
             if cursor_result.is_err() {
                 // Fallback for macOS: use open -a "Cursor"
                 #[cfg(target_os = "macos")]
                 {
                     std::process::Command::new("open")
-                        .args(["-a", "Cursor"])
-                        .arg(&path)
+                        .args(["-a", "Cursor", "--args"])
+                        .args(&args)
                         .spawn()
                 }
                 #[cfg(not(target_os = "macos"))]
@@ -305,5 +321,39 @@ mod tests {
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"isDirectory\":true"));
+    }
+
+    /// A chip that named a line must land the reader on that line, and an
+    /// editor only reads a line when it is told to with `-g` (bw-khe.13).
+    #[test]
+    fn open_external_hands_the_editor_the_line() {
+        let path = PathBuf::from("/home/someone/project/src/main.rs");
+        assert_eq!(
+            editor_args(&path, Some(42)),
+            vec!["-g".to_string(), "/home/someone/project/src/main.rs:42".to_string()]
+        );
+    }
+
+    /// Without a line it is the bare path, so a file with a colon in its name
+    /// is not read as a line number.
+    #[test]
+    fn open_external_without_a_line_is_the_bare_path() {
+        let path = PathBuf::from("/home/someone/project/notes.md");
+        assert_eq!(
+            editor_args(&path, None),
+            vec!["/home/someone/project/notes.md".to_string()]
+        );
+    }
+
+    /// A request that names no line is still a request: the field is optional
+    /// on the wire, because every caller before this one omitted it.
+    #[test]
+    fn open_external_accepts_a_request_with_no_line() {
+        let asked: OpenExternalRequest =
+            serde_json::from_str(r#"{"path":"/home/someone/x","target":"finder"}"#).unwrap();
+        assert_eq!(asked.line, None);
+        let with_line: OpenExternalRequest =
+            serde_json::from_str(r#"{"path":"/home/someone/x","target":"vscode","line":7}"#).unwrap();
+        assert_eq!(with_line.line, Some(7));
     }
 }

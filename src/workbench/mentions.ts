@@ -19,13 +19,24 @@
  * asks which cards a chat WORKED ON, and deliberately ignores mentions; this
  * one asks what a reader should be able to click, and mentions are the whole of
  * it. A chip here never puts a card on the chat's line.
+ *
+ * ## Files are the exception to the fenced block
+ *
+ * A card id inside a command must stay dead text — chipping it would break the
+ * command as something to copy. A file named inside a command is the opposite:
+ * `cd /home/ahsan/dev/… && grep …` is exactly where addresses live, and it is
+ * the one the reader most wants to open (bw-khe.13). So code and fenced blocks
+ * suppress cards and reports, and let files through; what the chip draws is
+ * still the reader's own words, so the command still copies as it was written.
  */
+import { pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
 
 /** One stretch of a message: plain words, or something that opens. */
 export type Piece =
   | { kind: 'text'; text: string }
   | { kind: 'card'; id: string }
-  | { kind: 'report'; slug: string };
+  | { kind: 'report'; slug: string }
+  | PathPiece;
 
 /**
  * A word made of parts joined by dashes or dots — the shape both a card id and
@@ -65,6 +76,29 @@ export function mentionsIn(text: string, existing: Existing): Piece[] {
   return pieces;
 }
 
+/**
+ * Everything in a run of text a reader can open: the cards and reports it
+ * names, and the files it names.
+ *
+ * Cards go first and files fill the gaps, so a token that is both an id on the
+ * board and a name on disk opens the card — the board is the thing this app is
+ * for, and a card is the rarer coincidence.
+ */
+export function openableIn(text: string, existing: Existing, where: Rooted, disk: OnDisk): Piece[] {
+  const out: Piece[] = [];
+  for (const piece of mentionsIn(text, existing)) {
+    if (piece.kind !== 'text') {
+      out.push(piece);
+      continue;
+    }
+    for (const part of pathsIn(piece.text, where, disk)) {
+      if (part.kind === 'text' && part.text === '') continue;
+      out.push(part);
+    }
+  }
+  return out.length > 0 ? out : [{ kind: 'text', text }];
+}
+
 /* ------------------------------------------------------------------ *
  * The same rule, as the step that rewrites a rendered message.
  * ------------------------------------------------------------------ */
@@ -78,11 +112,17 @@ interface HastNode {
 }
 
 /**
- * Where a name is not a mention: inside a fenced block, inside inline code, or
- * inside a link that already goes somewhere. Chipping a card id inside a
- * command would break the command as something to copy.
+ * Where nothing at all is a mention: inside a link that already goes somewhere.
  */
-const NOT_PROSE = new Set(['code', 'pre', 'a']);
+const NOT_PROSE = new Set(['a']);
+
+/**
+ * Where a card id is not a mention but a file still is: inside a fenced block
+ * and inside inline code. Chipping a card id inside a command would break the
+ * command as something to copy; the files named in that same command are the
+ * reason the reader is looking at it.
+ */
+const ONLY_FILES = new Set(['code', 'pre']);
 
 /**
  * The rendering step: every run of words in a message is looked at, and the
@@ -93,10 +133,10 @@ const NOT_PROSE = new Set(['code', 'pre', 'a']);
  * writer gave them: a paragraph, a bullet, a table cell, a heading.
  */
 export function rehypeMentions(split: (text: string) => Piece[]) {
-  return (tree: HastNode): void => rewrite(tree, split);
+  return (tree: HastNode): void => rewrite(tree, split, false);
 }
 
-function rewrite(node: HastNode, split: (text: string) => Piece[]): void {
+function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: boolean): void {
   const kids = node.children;
   if (!Array.isArray(kids)) return;
   const out: HastNode[] = [];
@@ -104,7 +144,8 @@ function rewrite(node: HastNode, split: (text: string) => Piece[]): void {
 
   for (const kid of kids) {
     if (kid.type === 'element') {
-      if (!NOT_PROSE.has(kid.tagName ?? '')) rewrite(kid, split);
+      const tag = kid.tagName ?? '';
+      if (!NOT_PROSE.has(tag)) rewrite(kid, split, filesOnly || ONLY_FILES.has(tag));
       out.push(kid);
       continue;
     }
@@ -112,7 +153,7 @@ function rewrite(node: HastNode, split: (text: string) => Piece[]): void {
       out.push(kid);
       continue;
     }
-    const pieces = split(kid.value);
+    const pieces = filesOnly ? filesFrom(split(kid.value)) : split(kid.value);
     if (pieces.length === 1 && pieces[0]!.kind === 'text') {
       out.push(kid);
       continue;
@@ -123,15 +164,50 @@ function rewrite(node: HastNode, split: (text: string) => Piece[]): void {
         if (piece.text) out.push({ type: 'text', value: piece.text });
         continue;
       }
-      const name = piece.kind === 'card' ? piece.id : piece.slug;
-      out.push({
-        type: 'element',
-        tagName: 'span',
-        properties: piece.kind === 'card' ? { 'data-card-mention': name } : { 'data-report-mention': name },
-        children: [{ type: 'text', value: name }],
-      });
+      out.push(marker(piece));
     }
   }
 
   if (changed) node.children = out;
+}
+
+/** One piece, as the span the page then draws as a chip. */
+function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
+  if (piece.kind === 'path') {
+    return {
+      type: 'element',
+      tagName: 'span',
+      properties: {
+        'data-path-mention': piece.absolute,
+        ...(piece.line === null ? {} : { 'data-path-line': String(piece.line) }),
+      },
+      children: [{ type: 'text', value: piece.raw }],
+    };
+  }
+  const name = piece.kind === 'card' ? piece.id : piece.slug;
+  return {
+    type: 'element',
+    tagName: 'span',
+    properties: piece.kind === 'card' ? { 'data-card-mention': name } : { 'data-report-mention': name },
+    children: [{ type: 'text', value: name }],
+  };
+}
+
+/**
+ * The same split with the cards and reports put back into the words they came
+ * from, for the inside of a command, where only a file opens.
+ */
+function filesFrom(pieces: Piece[]): Piece[] {
+  const out: Piece[] = [];
+  for (const piece of pieces) {
+    if (piece.kind === 'path') {
+      out.push(piece);
+      continue;
+    }
+    const text = piece.kind === 'text' ? piece.text : piece.kind === 'card' ? piece.id : piece.slug;
+    const last = out[out.length - 1];
+    if (last && last.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + text };
+    else out.push({ kind: 'text', text });
+  }
+  return out;
 }
