@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
-import { EMPTY, reduce, type SessionView } from '@/workbench/fold';
+import { asView, EMPTY, reduce, type SessionView } from '@/workbench/fold';
 import type { ImagePayload, SessionFacts, SessionState, WbpCommand, WbpEvent } from '@/workbench/protocol';
 
 export {
@@ -143,8 +143,10 @@ export function useSession(sessionId: string | null): SessionView {
       // The conversation as the sidecar built it — everything said before this
       // browser asked, in one frame. Only the tail is folded here.
       source.addEventListener('snapshot', (msg) => {
-        const view = JSON.parse((msg as MessageEvent).data) as SessionView;
-        draw(view);
+        // Filled against a blank chat rather than trusted: the sidecar is a
+        // process that outlives this page, so it can be older than the screen
+        // and simply not send a list the screen draws (bw-7ks.22.16).
+        draw(asView(JSON.parse((msg as MessageEvent).data) as Partial<SessionView>));
       });
 
       source.onmessage = (msg) => {

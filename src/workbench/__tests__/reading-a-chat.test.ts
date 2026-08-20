@@ -10,7 +10,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
+import { asView, EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
 import { movesTheClock } from '@/workbench/live';
 import type { SessionState, WbpEvent } from '@/workbench/protocol';
 import { useSession } from '@/workbench/use-session';
@@ -158,8 +158,14 @@ class FakeStream {
     this.closed = true;
   }
 
-  /** The sidecar hands over the conversation as it stands. */
-  hands(view: SessionView): void {
+  /**
+   * The sidecar hands over the conversation as it stands.
+   *
+   * Loosely typed on purpose: an older sidecar hands over a shape that no
+   * longer matches, and refusing to say so in a test would only prove the
+   * screen copes with the shape it wrote itself.
+   */
+  hands(view: SessionView | Record<string, unknown>): void {
     this.named.get('snapshot')?.({ data: JSON.stringify(view) });
   }
 
@@ -223,5 +229,92 @@ describe('a chat opened, and opened again after the stream drops', () => {
     expect(opened[0].closed).toBe(true);
     act(() => void vi.advanceTimersByTime(5_000));
     expect(opened).toHaveLength(1);
+  });
+});
+
+/**
+ * A sidecar older than the screen.
+ *
+ * The sidecar is a process and the screen is a page. The page reloads into new
+ * code in a second; the process goes on running the code it was started with
+ * until somebody restarts it — which is every upgrade, and was every one of
+ * this job's own runs. A screen that reads a list off that conversation read
+ * nothing at all and took the whole chat down with it: "can't access property
+ * length, agents is undefined", measured 2026-08-20 against a sidecar started
+ * before the panel existed.
+ */
+describe('a conversation handed over by an older sidecar', () => {
+  beforeEach(() => {
+    opened = [];
+    stamped = 0;
+    vi.useFakeTimers();
+    vi.stubGlobal('EventSource', FakeStream);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  /** The conversation as a sidecar that has never heard of sent-off work sends it. */
+  function anOlderChat(): Record<string, unknown> {
+    const { agents, todos, menu, ...rest } = foldAll(aWholeChat(2));
+    return { ...rest, menu: { commands: [], skills: [] } };
+  }
+
+  it('draws it, with nothing where the lists it never sent would be', () => {
+    const { result } = renderHook(() => useSession('chat-1'));
+    const older = anOlderChat();
+    act(() => opened[0].hands(older));
+
+    // The conversation itself is all there — this is not a screen that gave up.
+    expect(result.current.items).toHaveLength((older.items as unknown[]).length);
+    expect(result.current.lastSeq).toBe(older.lastSeq);
+
+    // And every list the screen draws is a list, so drawing it is a no-op
+    // rather than a crash.
+    expect(result.current.agents).toEqual([]);
+    expect(result.current.todos).toEqual([]);
+    expect(result.current.menu.models).toEqual([]);
+    expect(result.current.menu.permissionModes).toEqual([]);
+  });
+
+  it('still folds what arrives live on top of it', () => {
+    const { result } = renderHook(() => useSession('chat-1'));
+    const older = anOlderChat();
+    act(() => opened[0].hands(older));
+    const drawn = result.current.items.length;
+
+    stamped = older.lastSeq as number;
+    act(() =>
+      opened[0].says({
+        type: 'agent.started',
+        agentId: 'a1',
+        kind: 'helper',
+        what: 'check the login code',
+        model: null,
+      } as WbpEvent),
+    );
+
+    expect(result.current.items).toHaveLength(drawn);
+    expect(result.current.agents).toHaveLength(1);
+  });
+
+  it('fills a chat handed over as nothing at all', () => {
+    // Whatever the far end sends, the screen holds a whole chat: a null, an
+    // empty object, a list where an object belongs.
+    for (const sent of [null, undefined, {}, { agents: null }, { menu: null }]) {
+      const view = asView(sent as never);
+      expect(Array.isArray(view.agents)).toBe(true);
+      expect(Array.isArray(view.items)).toBe(true);
+      expect(Array.isArray(view.menu.commands)).toBe(true);
+      expect(view.state).toBe(EMPTY.state);
+    }
+  });
+
+  it('keeps what the sidecar did send', () => {
+    const view = asView({ agents: [], state: 'thinking', stateLabel: 'Thinking', lastSeq: 9 });
+    expect(view.state).toBe('thinking');
+    expect(view.lastSeq).toBe(9);
   });
 });

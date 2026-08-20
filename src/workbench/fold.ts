@@ -212,6 +212,45 @@ export const EMPTY: SessionView = {
   lastSeq: 0,
 };
 
+/** A list off the wire, or the blank one when the sender never sent it. */
+function list<T>(sent: T[] | undefined, blank: T[]): T[] {
+  return Array.isArray(sent) ? sent : blank;
+}
+
+/**
+ * A conversation off the wire, filled against a blank one.
+ *
+ * The sidecar is a process and the screen is a page: it goes on running the
+ * code it was started with while the browser reloads into newer code, so a
+ * screen reading a list the sidecar has never heard of reads nothing at all and
+ * the whole chat goes white. That is not a hypothetical — it is what an agent
+ * panel does against a sidecar started before the panel existed, and it is what
+ * every reader with the program already running will meet on the next upgrade.
+ *
+ * Anything the sender left out is what a chat with nothing in it has, which is
+ * exactly what the screen drew before that field existed.
+ */
+export function asView(sent: Partial<SessionView> | null | undefined): SessionView {
+  const raw = sent ?? {};
+  const menu = (raw.menu ?? {}) as Partial<SessionMenu>;
+  return {
+    ...EMPTY,
+    ...raw,
+    items: list(raw.items, EMPTY.items),
+    todos: list(raw.todos, EMPTY.todos),
+    agents: list(raw.agents, EMPTY.agents),
+    beads: list(raw.beads, EMPTY.beads),
+    menu: {
+      ...NO_MENU,
+      ...menu,
+      commands: list(menu.commands, NO_MENU.commands),
+      skills: list(menu.skills, NO_MENU.skills),
+      models: list(menu.models, NO_MENU.models),
+      permissionModes: list(menu.permissionModes, NO_MENU.permissionModes),
+    },
+  };
+}
+
 /** Applies one event to the view. Pure, so replay and live tail agree by construction. */
 export function reduce(view: SessionView, e: WbpEvent): SessionView {
   const items = view.items;
