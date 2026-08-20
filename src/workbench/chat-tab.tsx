@@ -27,8 +27,7 @@ import {
   X,
 } from 'lucide-react';
 
-import { BeadChip, BeadChipRow } from '@/components/bead-chip-row';
-import { reads, TIGHT } from '@/workbench/context-window';
+import { BeadChip } from '@/components/bead-chip-row';
 import { type Mentions } from '@/components/markdown-body';
 import { useReports } from '@/components/reports';
 import { TabTools, ToolButton } from '@/components/shell';
@@ -46,13 +45,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
+import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { mentionsIn } from '@/workbench/mentions';
 import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, drawable, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
+import type { CommandInfo, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -70,12 +70,6 @@ interface ChatTabProps {
   projectPath: string | null;
   /** Attach to this existing session instead of offering a new one. */
   openSessionId?: string | null;
-}
-
-function costLabel(cost: Cost): string {
-  return cost.kind === 'usd'
-    ? `$${cost.usd.toFixed(4)}`
-    : `${cost.total.toLocaleString()} tokens`;
 }
 
 /**
@@ -347,6 +341,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [shut, setShut] = useState(false);
   /** Only ever seen on a narrow screen; the rail is always there on a wide one. */
   const [railOpen, setRailOpen] = useState(false);
+  /** The chat's own column on the right, remembered between visits. */
+  const [rightOpen, flipRight] = useRightRail();
   /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
   const [showing, setShowing] = useState<'search' | 'spend' | null>(null);
   /**
@@ -615,6 +611,28 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         />
       )}
       <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
+      {/* The chat's own column. Only when there IS a chat: an empty rail beside
+          an empty screen says nothing and takes width to say it. */}
+      {sessionId && (
+        <ChatRightRail
+          projectId={projectId}
+          cards={cards}
+          reports={ours}
+          cost={view.cost}
+          context={view.context}
+          open={rightOpen}
+          onToggle={flipRight}
+        />
+      )}
+      {sessionId && rightOpen && (
+        <button
+          type="button"
+          aria-label="Close what this chat has touched"
+          data-testid="chat-right-rail-scrim"
+          className="absolute inset-0 z-20 bg-black/40 md:hidden"
+          onClick={flipRight}
+        />
+      )}
     </div>
   );
 
@@ -633,8 +651,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   return shell(
     <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
-      {/* One line, whatever it carries: the words naming the agent never give
-          way to the cards it has touched (docs/agent-workbench.md §8.2.1). */}
+      {/* One line, and nothing on it grows with the work: the cards, the
+          reports and what the chat has spent are all in the column beside it
+          (docs/agent-workbench.md §8.2.6). */}
       <div className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/60 px-4 text-sm">
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
@@ -657,15 +676,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {view.model ? ` · ${view.model}` : ''}
           {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
         </span>
-        <BeadChipRow
-          ids={cards}
-          projectId={projectId}
-          place="line"
-          className="flex min-w-0 items-center gap-1 overflow-hidden"
-        />
-        {ours.map((r) => (
-          <ReportChip key={`${r.project}/${r.slug}`} project={r.project} slug={r.slug} title={r.title} />
-        ))}
         {facts?.folder && (
           <Badge
             hue={hueFor(facts.folder)}
@@ -682,32 +692,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           >
             {facts.folder}
           </Badge>
-        )}
-        {/* What this turn is costing him, in the two currencies that matter:
-            money, and the room the conversation has left before the kit
-            compacts it out from under the agent (bw-4wcd.4). */}
-        {(view.context || view.cost) && (
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            {view.context && (
-              <Badge
-                variant={view.context.used / view.context.window >= TIGHT ? 'warning' : 'secondary'}
-                appearance="light"
-                size="sm"
-                data-testid="context-chip"
-                data-used={view.context.used}
-                data-window={view.context.window}
-                title={`${view.context.used.toLocaleString()} of ${view.context.window.toLocaleString()} tokens of this conversation are in use`}
-                className="font-mono"
-              >
-                {reads(view.context.used, view.context.window)}
-              </Badge>
-            )}
-            {view.cost && (
-              <Badge variant="secondary" appearance="light" size="sm" data-testid="cost-chip" className="font-mono">
-                {costLabel(view.cost)}
-              </Badge>
-            )}
-          </div>
         )}
       </div>
 
