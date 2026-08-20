@@ -106,6 +106,25 @@ exec python3 "$GUARD" "$@"
 GUARD_REL = os.path.join("hooks", "landing-gate.py")
 
 
+# --- the board ---------------------------------------------------------------
+#
+# A board beads runs in its own process is a board only a command line can open.
+# The app reads a project's cards straight out of a database server when one
+# holds them, and otherwise falls back to spawning `bd` once per read; `bd
+# doctor` refuses its deep checks on one outright. So a joined project's board
+# is on a server, and the two arrangements differ by one directory name and one
+# word in the board's own record — which is what makes moving between them a
+# thing this can do rather than an export and a re-import.
+KEPT = "embeddeddolt"    # where beads keeps the database when it runs it itself
+SERVED = "dolt"          # where it looks for one a server holds
+MODE = "dolt_mode"       # the word in the board's record saying which of the two
+SERVER = "server"
+# What the cards looked like just before the move, kept beside the board. Not a
+# backup of the database — the move never rewrites one — but the one thing that
+# would let a person put the cards back by hand if the undo below ever failed.
+BEFORE = "before-the-server.jsonl"
+
+
 def board(args, root):
     """Ask this project's own board something. Whether it answered, and what it said."""
     try:
@@ -114,6 +133,116 @@ def board(args, root):
         return run.returncode == 0, (run.stdout or run.stderr).strip()
     except Exception as why:
         return False, str(why)
+
+
+def record(root):
+    """What this board says about itself, and the file it says it in."""
+    where = os.path.join(root, ".beads", "metadata.json")
+    try:
+        with open(where) as fh:
+            return json.load(fh), where
+    except (OSError, ValueError):
+        return {}, where
+
+
+def cards(root):
+    """How many cards this board holds, or None if it would not say.
+
+    The number is the whole safety of the move below: a board that will not
+    answer is a board whose move nobody could check afterwards, so it is not
+    moved at all.
+    """
+    ok, said = board(["count"], root)
+    if not ok:
+        return None
+    try:
+        return int(said.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def rewrite(where, held, mode):
+    held[MODE] = mode
+    with open(where, "w") as fh:
+        json.dump(held, fh, indent=2)
+
+
+def serve(root, decl, say):
+    """Bring this project's board up on a database server.
+
+    Three cases. No board at all: make one, already on a server. A board already
+    on one: nothing to do. A board beads runs itself: move it, counting the cards
+    on both sides of the move and undoing the whole of it if the number changes.
+
+    The undo matters more than the move. Nothing here rewrites the database — the
+    move is a rename and one word in a JSON file — so putting both back is the
+    same two operations in reverse, and a board that came up wrong is a board
+    that is handed back exactly as it was.
+    """
+    beads = os.path.join(root, ".beads")
+    if not os.path.isdir(beads):
+        if not decl.prefix:
+            return          # standing() already says this, and says it better
+        ok, said = board(["init", "--server", "--prefix", decl.prefix,
+                          "--non-interactive"], root)
+        say("board  %s has one now, on a server" % root if ok else
+            "board  %s would not take a new board: %s" % (root, said))
+        return
+    held, where = record(root)
+    if held.get(MODE) == SERVER:
+        return
+    was = held.get(MODE)
+    kept, served = os.path.join(beads, KEPT), os.path.join(beads, SERVED)
+    if not os.path.isdir(kept):
+        say("board  %s is not on a server and keeps no database at %s either, so "
+            "there is nothing to move — look at it by hand" % (root, kept))
+        return
+    if os.path.exists(served):
+        say("board  %s already holds %s beside the database it runs itself, and "
+            "the move would write over it; left exactly as it is" % (root, served))
+        return
+    before = cards(root)
+    if before is None:
+        say("board  %s would not say how many cards it holds, so it was left "
+            "alone: a move nobody can check afterwards is one nobody should make"
+            % root)
+        return
+    ok, said = board(["export", "--all", "-o", os.path.join(beads, BEFORE)], root)
+    if not ok:
+        say("board  %s would not write out its cards before the move (%s), so it "
+            "was left alone" % (root, said))
+        return
+    os.rename(kept, served)
+    rewrite(where, held, SERVER)
+    ok, said = board(["dolt", "start"], root)
+    after = cards(root) if ok else None
+    if after == before:
+        say("board  %s is on a server now, holding the same %d cards; what they "
+            "said first is in %s" % (root, before, os.path.join(beads, BEFORE)))
+        return
+    board(["dolt", "stop"], root)
+    for leftover in ("dolt-server.pid", "dolt-server.port", "dolt-server.lock"):
+        try:
+            os.remove(os.path.join(beads, leftover))
+        except OSError:
+            pass
+    os.rename(served, kept)
+    rewrite(where, held, was)
+    went = ("held %d cards" % after) if after is not None \
+        else ("would not start (%s)" % said)
+    say("board  %s was NOT moved: on a server it %s, against %d before — the move "
+        "was undone and the board is exactly as it was" % (root, went, before))
+
+
+def unserved(root):
+    """Whether this project's board is one only a command line can open."""
+    held, _ = record(root)
+    if not held or held.get(MODE) == SERVER:
+        return []
+    return ["this board is not on a database server (it says %r), so the board "
+            "screen cannot read it over SQL and falls back to spawning `bd` once "
+            "per read, and `bd doctor` refuses its deep checks here; "
+            "`machinery/join %s` moves it" % (held.get(MODE) or "nothing", root)]
 
 
 def states(root, say):
@@ -409,6 +538,7 @@ def standing(root):
     if not os.path.isdir(os.path.join(root, ".beads")):
         said.append("no board at %s/.beads — `bd init --prefix %s`" % (root, decl.prefix))
     else:
+        said += unserved(root)
         said += unstated(root)
         said += unsigned(root)
         if decl.lands_on in decl.protected:
@@ -554,6 +684,10 @@ def main():
         said.append("role   %s is a maintainer of its own board" % root)
     # After the role, never before it: a checkout still inferring a contributor
     # routes bd at a planning store, and the states would be told to that.
+    serve(root, decl, said.append)
+    # After the board is where it is going to be, never before: everything below
+    # asks the board something, and asking one that is mid-move answers for the
+    # copy that is about to stop existing.
     states(root, said.append)
     # After the states and never before them: these are the cards the board
     # refused for want of the word it has just been told.

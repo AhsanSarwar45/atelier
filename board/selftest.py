@@ -4680,6 +4680,10 @@ def main():
             return (said.stdout + said.stderr, wrote, hand.stdout + hand.stderr,
                     moved, check.stdout + check.stderr)
         finally:
+            # Joining gives a project a board on a database server, so this one
+            # leaves a server running behind it unless it is put down here.
+            subprocess.run(["bd", "dolt", "stop"], cwd=root, env=env,
+                           capture_output=True, text=True, timeout=120)
             shutil.rmtree(tmp, ignore_errors=True)
 
     said, wrote, hand, moved, check = joined()
@@ -4706,6 +4710,81 @@ def main():
           "looks for a hook, a joined checkout turns away a hand-moved pointer "
           "without anything wiring it by hand, and a checkout that lost the "
           "guard to its own board tooling is told so")
+
+    # The board a joined project ends up with. A board beads runs in its own
+    # process can only be opened by a command line: the board screen reads a
+    # project's cards straight out of a database server when one holds them and
+    # otherwise falls back to spawning `bd` once per read, and `bd doctor`
+    # refuses its deep checks on one outright. So joining puts the board on a
+    # server — making one there if the project has none, and MOVING one it finds,
+    # which is the half that could lose cards and so is counted on both sides.
+    def board_after_join(cards_first=0):
+        """A throwaway project put through the real `join`, and the board it has
+        afterwards: how it says it runs, whether a server answers for it, and how
+        many cards it holds.
+
+        `cards_first` writes that many cards onto a board beads runs itself
+        BEFORE joining, which is the case that has something to lose.
+        """
+        tmp = tempfile.mkdtemp(prefix="board-join-served-")
+        root = os.path.join(tmp, "project")
+        env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
+
+        def bd(*args, at=None):
+            return subprocess.run(["bd"] + list(args), cwd=at or root, text=True,
+                                  capture_output=True, timeout=300, env=env)
+
+        try:
+            mine = os.path.join(tmp, "machinery")
+            os.makedirs(os.path.join(mine, "hooks"))
+            for near in ("join", "project.py",
+                         os.path.join("hooks", "landing-gate.py")):
+                shutil.copy(os.path.join(HOME, near), os.path.join(mine, near))
+            os.makedirs(root)
+            subprocess.run(["git", "init", "-q", "-b", "ours", "."], cwd=root,
+                           env=env, timeout=120)
+            with open(os.path.join(root, project.DECLARATION), "w") as fh:
+                fh.write('name = "served"\nprefix = "sv"\nlands_on = "ours"\n'
+                         'areas = ["tooling"]\nagent_merges = true\n')
+            if cards_first:
+                made = bd("init", "--prefix", "sv")
+                assert os.path.isdir(os.path.join(root, ".beads", "embeddeddolt")), \
+                    "the case meant to start from a board beads runs itself did " \
+                    "not get one, so it proves nothing: %r" % (made.stdout + made.stderr)
+                for n in range(cards_first):
+                    bd("create", "a card the move must not lose (%d)" % n)
+            said = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
+                                  text=True, capture_output=True, timeout=600, env=env)
+            with open(os.path.join(root, ".beads", "metadata.json")) as fh:
+                mode = json.load(fh).get("dolt_mode")
+            status = bd("dolt", "status").stdout
+            count = bd("count").stdout.strip().splitlines()
+            return (said.stdout + said.stderr, mode, status,
+                    int(count[-1]) if count and count[-1].isdigit() else None)
+        finally:
+            bd("dolt", "stop")
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    join_said, runs_as, server_says, cards_after = board_after_join()
+    assert runs_as == "server", \
+        "joining a project with no board at all left it running one only a " \
+        "command line can open (%r); join said %r" % (runs_as, join_said)
+    assert "Dolt server: running" in server_says, \
+        "the board a joining project was given says it is on a server and no " \
+        "server answers for it: %r (join said %r)" % (server_says, join_said)
+
+    join_said, runs_as, server_says, cards_after = board_after_join(cards_first=3)
+    assert runs_as == "server" and "Dolt server: running" in server_says, \
+        "a board beads was running itself was not moved onto a server: mode %r, " \
+        "status %r (join said %r)" % (runs_as, server_says, join_said)
+    assert cards_after == 3, \
+        "moving a board of 3 cards onto a server left %r of them, and the move " \
+        "was supposed to undo itself rather than land short: join said %r" \
+        % (cards_after, join_said)
+
+    print("ok: joining gives a project with no board one on a database server, "
+          "and moves a board beads was running itself onto a server with every "
+          "card still on it")
 
     # Litter in the checkout a landing lands in. Left to git, any tracked change
     # there refuses the landing with "Working directory has staged changes" and
