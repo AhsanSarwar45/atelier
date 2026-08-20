@@ -14,6 +14,8 @@
  */
 
 /** Brands we can drive. One string per driver. */
+import type { PlanUsage } from './plan-usage';
+
 export type Brand = 'claude' | 'codex';
 
 /**
@@ -568,6 +570,16 @@ export type WatchFrame =
    * cheaper mistake (bw-uivp.4).
    */
   | { kind: 'outside'; folders?: string[] }
+  /**
+   * What the ACCOUNT has spent of its plan — the five-hour window, the week,
+   * and what is behind them.
+   *
+   * On this stream rather than in a poll of the screen's own, because the
+   * figure belongs to nobody's chat: the sidecar reads it on a beat of its own
+   * and says it to every page at the same moment, so a chat sitting silent
+   * shows the same number as the one being worked in (plan-usage.ts, bw-dmoe).
+   */
+  | { kind: 'usage'; usage: PlanUsage }
   | { kind: 'event'; event: WbpEvent };
 
 /** A chat that touched a card, as the card's own side of the join lists it. */

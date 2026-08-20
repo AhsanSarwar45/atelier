@@ -1,20 +1,24 @@
 /**
- * Reading the account's plan allowance, once, for every chat.
+ * Reading the account's plan allowance, once, for every browser.
  *
  * The five-hour and weekly windows belong to the ACCOUNT, not to a chat: two
  * chats open side by side spend the same allowance and must show the same
- * number. So it is read here — once, cached — and served whole from `/usage`,
- * rather than carried on any session's event stream (bw-malh).
+ * number. So it is read HERE, on a beat of this server's own, and pushed out to
+ * every open page over the stream they already hold — no page asks for it, and
+ * no chat's own traffic decides how fresh it is (bw-malh, bw-dmoe).
  *
- * Where the answer comes from, in order:
+ * It is asked of one helper and one only: a prober — a session of our own with
+ * nothing to say, kept alive so the kit has a channel to answer down. Measured
+ * 2026-08-20: 1.9s to start and answer cold, 0 tokens. Asking whichever chat
+ * happened to be running instead put a different process behind the number
+ * every time and the figure disagreed with itself minute to minute; it is shut
+ * down again once nobody is watching for a few minutes, because an idle kit
+ * process is a hundred megabytes held for a number that moves in percents.
  *
- *  1. Any live chat. The kit answers this down a channel that is already open,
- *     without taking a turn and without spending a token.
- *  2. A prober — a session of our own with nothing to say, kept only so the
- *     kit has a channel to answer down when no chat is running. Measured
- *     2026-08-20: 1.9s to start and answer cold, 0 tokens. It is shut down
- *     again once nobody has asked for a few minutes, because an idle kit
- *     process is a hundred megabytes held for a number that moves in percents.
+ * An answer is not believed just because it arrived: the kit falls back to a
+ * snapshot it keeps on disk without saying so, so a reading whose window has
+ * gone backwards under an unmoved reset time is dropped and the last good one
+ * stands (`believable`, bw-dmoe).
  *
  * The shape it hands back is the browser's, not the kit's: `readUsage` in
  * `src/workbench/plan-usage.ts` does the translating, and both sides hold the
@@ -22,23 +26,32 @@
  */
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-import { NOTHING_KNOWN, type PlanUsage, type RawPlanUsage, readUsage } from '../../src/workbench/plan-usage.ts';
+import { believable, NOTHING_KNOWN, type PlanUsage, type RawPlanUsage, readUsage } from '../../src/workbench/plan-usage.ts';
 
 /**
- * How long an answer stands before it is asked for again.
+ * How often the figure is read while anybody is watching.
  *
- * Just under the minute the browser polls on, so a poll that arrives a hair
- * early still finds the cache warm and a poll on the beat always reads fresh.
+ * Thirty seconds is what the manager asked for: half a minute is short enough
+ * that a window filling up while he watches another chat spend is visible
+ * before he decides anything, and long enough that a browser left open all day
+ * is two reads a minute of a number nobody is paying for.
  */
-const FRESH_MS = 55_000;
+const BEAT_MS = 30_000;
+
+/** How long an answer stands before a page asking outright makes us read again. */
+const FRESH_MS = BEAT_MS;
+
+/**
+ * How soon a refused answer is asked for again.
+ *
+ * A reading dropped for going backwards means the kit served its snapshot; the
+ * next live read is usually the true one, and waiting a whole beat for it
+ * leaves the chip a half-minute behind for no reason.
+ */
+const RETRY_MS = 5_000;
 
 /** How long the prober is kept alive after the last question. */
 const PROBE_IDLE_MS = 4 * 60_000;
-
-/** What a live session can be asked. Only the drivers that have a plan implement it. */
-export interface UsageSource {
-  planUsage(): Promise<unknown | null>;
-}
 
 /** The Query surface this file uses, named here so the SDK's shout stays in one place. */
 interface Prober {
@@ -47,10 +60,16 @@ interface Prober {
   [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
 }
 
+/** The last answer that could be believed, and when it was read. */
 let cached: PlanUsage | null = null;
 let cachedAt = 0;
 /** The read in flight, so ten browsers asking at once ask the kit once. */
 let inFlight: Promise<PlanUsage> | null = null;
+
+/** Everybody being pushed the figure — one per open page, none when none. */
+const watchers = new Set<(u: PlanUsage) => void>();
+let beat: ReturnType<typeof setInterval> | null = null;
+let retry: ReturnType<typeof setTimeout> | null = null;
 
 let prober: Prober | null = null;
 let proberStop: (() => void) | null = null;
@@ -125,31 +144,41 @@ async function askTheKit(): Promise<unknown | null> {
   }
 }
 
-async function read(sessions: UsageSource | null): Promise<PlanUsage> {
+/**
+ * One read, believed or dropped.
+ *
+ * Returns what the app should hold afterwards, which on a dropped answer is
+ * what it already held: a figure that has gone backwards is the kit's snapshot
+ * talking, not the account (`believable`).
+ */
+async function read(): Promise<PlanUsage> {
   const at = new Date().toISOString();
-  let raw: unknown | null = null;
-  try {
-    raw = (await sessions?.planUsage()) ?? null;
-  } catch {
-    raw = null;
-  }
-  if (!raw) raw = await askTheKit();
+  const raw = await askTheKit();
   const usage = readUsage(raw as RawPlanUsage | null, at);
+  if (!believable(usage, cached)) {
+    askAgainSoon();
+    return cached as PlanUsage;
+  }
   cached = usage;
   cachedAt = now();
+  watchers.forEach((tell) => tell(usage));
   return usage;
 }
 
-/**
- * The account's plan allowance, fresh enough.
- *
- * Never throws: a reader that cannot be told the number is told there is no
- * number, and the chat draws no chip rather than a stale one.
- */
-export async function planUsage(sessions: UsageSource | null): Promise<PlanUsage> {
-  if (cached && now() - cachedAt < FRESH_MS) return cached;
+/** A refused answer is asked for again shortly, once — the beat carries the rest. */
+function askAgainSoon(): void {
+  if (retry !== null || watchers.size === 0) return;
+  retry = setTimeout(() => {
+    retry = null;
+    void refresh();
+  }, RETRY_MS);
+  retry.unref?.();
+}
+
+/** A read that never throws: nothing known beats a crashed stream. */
+async function refresh(): Promise<PlanUsage> {
   if (inFlight) return await inFlight;
-  inFlight = read(sessions).catch(() => ({ ...NOTHING_KNOWN, at: new Date().toISOString() }));
+  inFlight = read().catch(() => cached ?? { ...NOTHING_KNOWN, at: new Date().toISOString() });
   try {
     return await inFlight;
   } finally {
@@ -157,9 +186,60 @@ export async function planUsage(sessions: UsageSource | null): Promise<PlanUsage
   }
 }
 
+/**
+ * The account's plan allowance, fresh enough, for a page asking outright.
+ *
+ * The pages are pushed the figure and do not poll, so this answers the first
+ * paint and the tools that ask from a terminal. Never throws: a reader that
+ * cannot be told the number is told there is no number, and the chat draws no
+ * chip rather than a stale one.
+ */
+export async function planUsage(): Promise<PlanUsage> {
+  if (cached && now() - cachedAt < FRESH_MS) return cached;
+  return await refresh();
+}
+
+/** What is held right now, for a stream opening. Null before the first answer. */
+export function usageNow(): PlanUsage | null {
+  return cached;
+}
+
+/**
+ * Be told the figure, now and whenever it moves.
+ *
+ * The beat runs for as long as somebody is listening and stops with the last of
+ * them, so a server nobody is watching holds no timer and no kit process. A
+ * watcher that arrives while an answer is already held is told it at once
+ * rather than waiting up to half a minute to be shown anything.
+ */
+export function watchUsage(tell: (u: PlanUsage) => void): () => void {
+  watchers.add(tell);
+  if (cached) tell(cached);
+  if (!cached || now() - cachedAt >= FRESH_MS) void refresh();
+  if (!beat) {
+    beat = setInterval(() => void refresh(), BEAT_MS);
+    // A timer holding the sidecar open past its work is a process that will not
+    // exit; this one only keeps a number fresh.
+    beat.unref?.();
+  }
+  return () => {
+    watchers.delete(tell);
+    if (watchers.size > 0) return;
+    if (beat) clearInterval(beat);
+    beat = null;
+    if (retry !== null) clearTimeout(retry);
+    retry = null;
+  };
+}
+
 /** Shuts the prober down. For the sidecar's own exit, and for the tests. */
 export function stopProbing(): void {
   if (proberTimer) clearTimeout(proberTimer);
+  if (beat) clearInterval(beat);
+  beat = null;
+  if (retry !== null) clearTimeout(retry);
+  retry = null;
+  watchers.clear();
   proberStop?.();
   prober = null;
   proberStop = null;

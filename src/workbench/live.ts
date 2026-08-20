@@ -12,6 +12,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
+import { NOTHING_KNOWN, type PlanUsage } from '@/workbench/plan-usage';
 import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
 
 /** What one chat is doing, as every global view needs it. */
@@ -102,6 +103,17 @@ let running: Set<string> | null = null;
  */
 const heardOutside = new Map<string, number>();
 
+/**
+ * What the account has spent of its plan, as the sidecar last said it.
+ *
+ * Pushed down the same stream as everything else here and never asked for: the
+ * figure is the ACCOUNT'S, so it cannot be a property of the chat on screen,
+ * and a page that polled for it showed a chat sitting silent a different number
+ * from the one being worked in (bw-dmoe). Nothing known until the stream
+ * speaks, which the chip draws as no chip at all rather than as a zero.
+ */
+let usage: PlanUsage = NOTHING_KNOWN;
+
 /** A project starts being counted for the moment something asks about it. */
 function countFor(project: string): number {
   return heardOutside.get(project) ?? 0;
@@ -181,6 +193,11 @@ function moves(id: string, next?: SessionState): boolean {
 }
 
 function absorb(frame: WatchFrame): void {
+  if (frame.kind === 'usage') {
+    usage = frame.usage;
+    listeners.forEach((fn) => fn());
+    return;
+  }
   if (frame.kind === 'running') {
     running = new Set(frame.conversations);
     announce();
@@ -379,6 +396,22 @@ export function useLiveSessions(): LiveSession[] {
     subscribe,
     () => snapshot,
     () => EMPTY,
+  );
+}
+
+/**
+ * What the account has spent of its plan, kept fresh by the sidecar.
+ *
+ * Every page holding this stream is told the same figure at the same moment, so
+ * two chats side by side — one being worked in, one silent for an hour — read
+ * the same number, and the silent one moves while the other spends. No screen
+ * asks for it and no chat's traffic decides how fresh it is (bw-dmoe).
+ */
+export function usePlanUsage(): PlanUsage {
+  return useSyncExternalStore(
+    subscribe,
+    () => usage,
+    () => NOTHING_KNOWN,
   );
 }
 

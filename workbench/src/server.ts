@@ -15,7 +15,7 @@ import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { watchOutside } from './outside.ts';
-import { planUsage } from './plan-usage.ts';
+import { planUsage, usageNow, watchUsage } from './plan-usage.ts';
 import { knownSessions, restoreList } from './registry.ts';
 import { runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
@@ -171,6 +171,14 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   // Straight after the snapshot, because a chat somebody is working in has no
   // row in our store to appear in one, and the rail marks its rows off this.
   write({ kind: 'running', conversations: whatIsRunning() });
+  // The account's own allowance, whether or not this browser has a chat open
+  // and however long that chat has been silent: this server reads it on a beat
+  // of its own and every page hears the same figure at the same moment
+  // (plan-usage.ts, bw-dmoe). A stream that opens before the first read is told
+  // nothing now and hears it the moment there is one.
+  const held = usageNow();
+  if (held) write({ kind: 'usage', usage: held });
+  const unwatchUsage = watchUsage((usage) => write({ kind: 'usage', usage }));
   const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
   const unopen = sessions.watchOpen((s) => write({ kind: 'opened', session: { ...s, activity: '', beads: [] } }));
   const unwatchRunning = watchRunning((conversations) => write({ kind: 'running', conversations }));
@@ -187,6 +195,7 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
     unopen();
     unwatchRunning();
     unwatchOutside();
+    unwatchUsage();
   };
   req.on('close', done);
   req.on('error', done);
@@ -265,9 +274,10 @@ const server = createServer((req, res) => {
       } else if (path === '/spend' && req.method === 'GET') {
         json(res, 200, store.spend());
       } else if (path === '/usage' && req.method === 'GET') {
-        // The account's allowance, not this chat's: one cached answer serves
-        // every chat open in the browser (bw-malh).
-        json(res, 200, await planUsage(sessions));
+        // The account's allowance, not this chat's. The pages themselves are
+        // pushed it down /watch and never ask; this answers a first paint and
+        // the tools that ask from a terminal (bw-malh, bw-dmoe).
+        json(res, 200, await planUsage());
       } else if (path === '/watch' && req.method === 'GET') {
         streamAll(req, res);
       } else if (path.startsWith('/links/bead/') && req.method === 'GET') {

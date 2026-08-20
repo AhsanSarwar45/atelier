@@ -8,20 +8,18 @@
  * here, one click away, rather than crowding a line that also has to carry the
  * agent, the folder and the cards (bw-malh).
  *
- * The figure is the ACCOUNT'S, so it is fetched once for the whole browser and
- * shared: ten chats open show one number and ask for it once a minute between
- * them, not ten times.
+ * The figure is the ACCOUNT'S, so no screen here reads it: the sidecar keeps it
+ * fresh on a beat of its own and pushes it to every open page, which is what
+ * makes a chat sitting silent show the same number as the one being worked in
+ * (live.ts `usePlanUsage`, bw-dmoe).
  */
 'use client';
 
-import { useEffect, useState } from 'react';
-
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { apiUrl } from '@/lib/api-base';
+import { usePlanUsage } from '@/workbench/live';
 import {
   clockReads,
-  NOTHING_KNOWN,
   percentReads,
   sessionChipReads,
   type Driving,
@@ -32,55 +30,6 @@ import {
   weekChipReads,
   windowReads,
 } from '@/workbench/plan-usage';
-
-/** How often the browser asks again. The sidecar's own answer is cached just under this. */
-const EVERY_MS = 60_000;
-
-/* ------------------------------------------------------------------ *
- * One reading, shared by every chat on screen.
- * ------------------------------------------------------------------ */
-
-let held: PlanUsage = NOTHING_KNOWN;
-const listeners = new Set<(u: PlanUsage) => void>();
-let timer: ReturnType<typeof setInterval> | null = null;
-
-async function refresh(): Promise<void> {
-  try {
-    const res = await fetch(apiUrl('/api/workbench/usage'));
-    if (!res.ok) return;
-    held = (await res.json()) as PlanUsage;
-    listeners.forEach((tell) => tell(held));
-  } catch {
-    // No answer means the last one stands. A plan window does not move fast
-    // enough for a missed minute to mislead anyone, and blanking the chip on a
-    // dropped request would make it flicker all day.
-  }
-}
-
-/**
- * What the account has spent, kept fresh.
- *
- * Every caller shares one reading and one timer; the timer stops when the last
- * chat showing it goes away.
- */
-export function usePlanUsage(): PlanUsage {
-  const [usage, setUsage] = useState<PlanUsage>(held);
-  useEffect(() => {
-    listeners.add(setUsage);
-    if (!timer) {
-      void refresh();
-      timer = setInterval(() => void refresh(), EVERY_MS);
-    }
-    return () => {
-      listeners.delete(setUsage);
-      if (listeners.size === 0 && timer) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-  }, []);
-  return usage;
-}
 
 /* ------------------------------------------------------------------ *
  * Drawing it.

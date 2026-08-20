@@ -57,7 +57,7 @@ import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
-import { useLiveSessions, useRunningElsewhere } from '@/workbench/live';
+import { useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
@@ -66,7 +66,7 @@ import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
 import { AgentView } from '@/workbench/agent-view';
 import { MachineLine, TranscriptRow, WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
-import { PlanChip, usePlanUsage, UsageView } from '@/workbench/usage-view';
+import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 
 /** Where the "show me everything" switch is remembered between visits. */
