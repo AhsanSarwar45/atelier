@@ -14,7 +14,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fs } from '@/lib/api';
 
@@ -128,7 +128,10 @@ export function usePathsOnDisk(): Disk {
 
   const real = useCallback((absolute: string) => answers.get(absolute) === true, []);
 
-  return { real, home: homeNow, ask };
+  // One value, kept, not built again on every pass. A fresh object here is a
+  // fresh `mentions` in the chat, which is every message in the conversation
+  // drawn again for one keystroke (bw-2lzj.1).
+  return useMemo(() => ({ real, home: homeNow, ask }), [real, homeNow, ask]);
 }
 
 /** Forget everything asked. For tests, which must not inherit an old disk. */
