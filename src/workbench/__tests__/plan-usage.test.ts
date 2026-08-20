@@ -18,9 +18,11 @@ import {
   percentReads,
   type RawPlanUsage,
   readUsage,
+  sessionChipReads,
   severityOf,
   untilReads,
   WARN_AT,
+  weekChipReads,
   windowReads,
 } from '@/workbench/plan-usage';
 
@@ -161,6 +163,19 @@ describe('what the chip says', () => {
     expect(chipReads({ key: 'session', label: 'This session', percent: 74, resetsAt: '2026-08-20T14:50:00Z', severity: 'normal' }, 'UTC')).toBe(
       '74% · resets 14:50',
     );
+  });
+
+  it('names both figures, because two bare percentages say which is which to nobody', () => {
+    // Both are on the top line side by side (bw-malh.5), so each has to say
+    // which window it is measuring without being hovered.
+    expect(
+      sessionChipReads({ key: 'session', label: 'This session', percent: 74, resetsAt: '2026-08-20T14:50:00Z', severity: 'normal' }, 'UTC'),
+    ).toBe('5h 74% · resets 14:50');
+    expect(weekChipReads({ key: 'week', label: 'This week', percent: 18, resetsAt: '2026-08-23T07:00:00Z', severity: 'normal' })).toBe('wk 18%');
+  });
+
+  it('leaves the week without a countdown, which is days away and belongs in the panel', () => {
+    expect(weekChipReads({ key: 'week', label: 'This week', percent: null, resetsAt: null, severity: 'normal' })).toBe('wk —');
   });
 
   it('says only the percentage when nothing resets on a clock', () => {

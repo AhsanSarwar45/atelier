@@ -356,6 +356,26 @@ export function chipReads(w: PlanWindow, timeZone?: string): string {
   return clock ? `${percentReads(w.percent)} · resets ${clock}` : percentReads(w.percent);
 }
 
+/**
+ * The five-hour figure as the top line says it: `5h 67% · resets 14:50`.
+ *
+ * Named, because the line carries the week's figure beside it and a bare `67%`
+ * next to a bare `18%` says which is which to nobody (bw-malh.5).
+ */
+export function sessionChipReads(w: PlanWindow, timeZone?: string): string {
+  return `5h ${chipReads(w, timeZone)}`;
+}
+
+/**
+ * The week's figure as the top line says it: `wk 18%`.
+ *
+ * No reset time: a weekly window comes back in days, which is not a countdown
+ * anybody reads off a status line — it is in the panel, next to the bar.
+ */
+export function weekChipReads(w: PlanWindow): string {
+  return `wk ${percentReads(w.percent)}`;
+}
+
 /** The whole sentence, for the chip's tooltip and the panel's own lines. */
 export function windowReads(w: PlanWindow, now: Date, timeZone?: string): string {
   const clock = clockReads(w.resetsAt, timeZone);

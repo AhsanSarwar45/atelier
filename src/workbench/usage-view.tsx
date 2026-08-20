@@ -20,15 +20,16 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import {
-  chipReads,
   clockReads,
   NOTHING_KNOWN,
   percentReads,
+  sessionChipReads,
   type Driving,
   type PlanUsage,
   type PlanWindow,
   type Severity,
   untilReads,
+  weekChipReads,
   windowReads,
 } from '@/workbench/plan-usage';
 
@@ -229,30 +230,61 @@ export function UsageView({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * The chip itself, so the top line holds one component and not six.
+ * The two figures themselves, so the top line holds one component and not six.
+ *
+ * Both of them, not just the five-hour one: the week is what a run of long days
+ * actually hits first, and a figure only a mouse-hover reveals is a figure the
+ * reader does not have (bw-malh.5). They are separate chips rather than one
+ * string because each carries its OWN colour — a calm session beside a week at
+ * 96% is exactly the case a single colour hides.
  *
  * Draws nothing at all when there is no plan behind the account: a chip
  * reading "—%" beside the cost would be a limit the reader does not have.
  */
 export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => void }) {
-  const w = usage.session;
-  if (!usage.available || !w) return null;
+  const five = usage.session;
+  const week = usage.week;
+  if (!usage.available || (!five && !week)) return null;
   const now = new Date();
+  const title = [
+    five ? `This session: ${windowReads(five, now)}` : null,
+    week ? `This week: ${windowReads(week, now)}` : null,
+    'Click for the whole picture',
+  ]
+    .filter(Boolean)
+    .join('\n');
   return (
-    <Badge
-      variant={severityVariant(w.severity)}
-      appearance="light"
-      size="sm"
-      data-testid="plan-chip"
-      data-percent={w.percent ?? ''}
-      data-severity={w.severity}
-      title={[windowReads(w, now), usage.week ? `This week: ${windowReads(usage.week, now)}` : null, 'Click for the whole picture']
-        .filter(Boolean)
-        .join('\n')}
-      className="cursor-pointer font-mono"
-      onClick={onOpen}
-    >
-      {chipReads(w)}
-    </Badge>
+    <span className="flex items-center gap-1" data-testid="plan-chips">
+      {five && (
+        <Badge
+          variant={severityVariant(five.severity)}
+          appearance="light"
+          size="sm"
+          data-testid="plan-chip"
+          data-percent={five.percent ?? ''}
+          data-severity={five.severity}
+          title={title}
+          className="cursor-pointer font-mono"
+          onClick={onOpen}
+        >
+          {sessionChipReads(five)}
+        </Badge>
+      )}
+      {week && (
+        <Badge
+          variant={severityVariant(week.severity)}
+          appearance="light"
+          size="sm"
+          data-testid="plan-chip-week"
+          data-percent={week.percent ?? ''}
+          data-severity={week.severity}
+          title={title}
+          className="cursor-pointer font-mono"
+          onClick={onOpen}
+        >
+          {weekChipReads(week)}
+        </Badge>
+      )}
+    </span>
   );
 }

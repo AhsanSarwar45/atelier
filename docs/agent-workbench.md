@@ -1110,9 +1110,14 @@ control is hidden and nothing is faked (decision 13).
 #### 8.2.8 What the plan has left (bw-malh)
 
 Constraint: the chat's own line says how much of the account's five-hour window
-is gone and when it comes back, and clicking it opens the whole usage picture —
-the week, the week scoped to a model, credits, and what the spending has gone
-on.
+is gone and when it comes back, and how much of the week is gone beside it, and
+clicking either opens the whole usage picture — the week scoped to a model,
+credits, and what the spending has gone on.
+
+Both figures are drawn, and each carries its own colour: the week is what a run
+of long days hits first, and one colour over both would hide a week at 96%
+behind a session at 12%. The week shows no countdown — it comes back in days,
+which is a panel line, not a status line.
 
 Why: the line already carried this turn's dollars and the conversation's room,
 and neither is the thing that actually stops the work. What stops it is the plan
@@ -1138,7 +1143,7 @@ asks it, and shuts it down again after four idle minutes — measured 2026-08-20
 percentage; a guessed allowance is worse than none.
 
 **A window nobody has draws nothing.** On an API key, on Bedrock, on Vertex,
-`rate_limits_available` is false and the chip is absent — because a chip reading
+`rate_limits_available` is false and both chips are absent — because a chip reading
 0% there says "nothing spent", which is the opposite of "this account has no
 plan window at all". The reading is in `src/workbench/plan-usage.ts`, shared by
 the sidecar that normalises the kit's answer and the browser that draws it, and

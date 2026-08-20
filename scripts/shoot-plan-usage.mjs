@@ -1,7 +1,7 @@
 /**
- * The two pictures this job is judged on: the chip on the chat's top line
- * saying how much of the five-hour plan window is gone and when it comes back,
- * and the panel it opens.
+ * The two pictures this job is judged on: the chat's top line saying how much of
+ * the five-hour plan window is gone, when it comes back, and how much of the
+ * week has gone beside it — and the panel either chip opens.
  *
  * Costs nothing to run: the figure comes from the kit's own usage channel, not
  * from a turn, so no message is ever sent in the chat this opens.
@@ -66,10 +66,15 @@ await page.goto(`${screen}/project?id=${project.id}&tab=chat&chat=${started.id}`
 
 const chip = page.getByTestId('plan-chip');
 await chip.waitFor({ timeout: 60_000 });
+const week = page.getByTestId('plan-chip-week');
+await week.waitFor({ timeout: 60_000 });
 const said = (await chip.textContent())?.trim() ?? '';
-console.log(`the chip says: ${said}`);
-if (!/\d+%/.test(said)) {
-  console.log('the chip carries no percentage');
+const saidWeek = (await week.textContent())?.trim() ?? '';
+console.log(`the line says: ${said} | ${saidWeek}`);
+// Both figures, drawn: the week was once in a hover tooltip only, which is a
+// figure the reader does not have and a screenshot cannot show (bw-malh.5).
+if (!/\d+%/.test(said) || !/\d+%/.test(saidWeek)) {
+  console.log('the line is missing one of the two percentages');
   process.exit(1);
 }
 
