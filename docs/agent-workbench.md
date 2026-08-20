@@ -963,6 +963,17 @@ the same three days of work started today would draw 44. A model line is not
 among them: it is only ever written when somebody asked for the model, so every
 one of the 6 in the record was a real change.
 
+**What this leaves owed (bw-6jq5).**
+
+- **A line's wording is frozen when it is written**, so the 37 rows in the
+  record above that still read as a wire name keep reading that way; only chats
+  made after this build get the sentence. Rewording what is already stored is
+  `bw-x6hb`, and is deliberately not this job.
+- **The check needs a real record and is run by hand.** It opens the workbench
+  store read-only and dies if there is none, so it is not in `npm test`, which
+  has to pass on a machine that has never held a chat. `STORE=` points it at
+  another record.
+
 **Six families, and every kind lands in exactly one (bw-jkh2).** The rank above
 decides how *loudly* a machine message is drawn; the family decides *what it
 looks like*. The driver has always told a compaction from a retry from a hook
