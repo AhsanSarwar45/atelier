@@ -12,7 +12,7 @@
  */
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -66,10 +66,23 @@ export function useReports() {
   return { reports, isLoading, reload };
 }
 
-/** The report belonging to this card, or null when it has none. */
-export function useCardReport(card: string): ReportEntry | null {
+/**
+ * The report belonging to each card that has one.
+ *
+ * Built once for a whole board. Each card used to ask for its own, which meant
+ * every card on the screen holding its own copy of every report this machine
+ * has and searching that list on every pass — and all of them redrawing the
+ * moment the answer came back.
+ */
+export function useReportsByCard(): ReadonlyMap<string, ReportEntry> {
   const { reports } = useReports();
-  return reports.find(r => r.card === card) ?? null;
+  return useMemo(() => {
+    const byCard = new Map<string, ReportEntry>();
+    for (const entry of reports) {
+      if (entry.card) byCard.set(entry.card, entry);
+    }
+    return byCard;
+  }, [reports]);
 }
 
 interface CardReportLinkProps {

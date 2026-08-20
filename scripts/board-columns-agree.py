@@ -130,18 +130,21 @@ class Browser:
         self.proc.terminate()
 
 
-# A card drawn inside another card is that card's own piece, not a card of the
-# column, which is what the heading counts. Both are read in the order the screen
-# drew them, because the manager's column is the oldest first.
+# What each column holds, in the order it holds it — the manager's column is the
+# oldest first, so the order is part of the answer.
+#
+# Read off the column's own `data-cards` rather than by counting the cards on the
+# screen: a column draws only the handful the reader can see and names every card
+# it holds there, so the screen is still answerable from outside without drawing
+# a hundred and fifty cards to be asked.
 READ_COLUMNS = """
 (() => {
   const out = {};
   for (const col of document.querySelectorAll('[data-column]')) {
     const badge = col.querySelector('.column-count-badge');
+    const held = (col.dataset.cards || '').split(' ').filter(Boolean);
     out[col.dataset.column] = {
-      cards: [...col.querySelectorAll('[data-bead-id]')]
-        .filter(e => !e.parentElement.closest('[data-bead-id]'))
-        .map(e => e.dataset.beadId),
+      cards: held,
       heading: badge ? Number(badge.textContent.trim()) : null,
     };
   }

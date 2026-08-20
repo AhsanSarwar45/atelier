@@ -10,6 +10,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { KanbanColumn } from "@/components/kanban-column";
 import { MemoryPanel } from "@/components/memory-panel";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
+import { useReportsByCard } from "@/components/reports";
 import { TabTools } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
@@ -176,6 +177,12 @@ export default function KanbanBoard() {
     () => new Map(beads.map(b => [b.id, b.status] as const)),
     [beads],
   );
+
+  /**
+   * The report each card carries, looked up once for the whole board rather
+   * than once per card.
+   */
+  const reportFor = useReportsByCard();
 
   /**
    * Detect beads with truly unknown statuses for the warning indicator.
@@ -350,6 +357,7 @@ export default function KanbanBoard() {
                 beads={filteredBeadsByStatus[status] || []}
                 allBeads={beads}
                 statusById={statusById}
+                reportFor={reportFor}
                 selectedBeadId={selectedId}
                 ticketNumbers={ticketNumbers}
                 onSelectBead={openBead}

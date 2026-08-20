@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, type ReactNode } from "react";
+import { memo, useState, useMemo, type ReactNode } from "react";
 
 import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
 
@@ -62,9 +62,12 @@ function getProgressIndicatorClass(percentage: number): string {
 
 /**
  * Larger epic card with distinctive styling
+ *
+ * Remembered against its own props, like the plain card: a job card resolves
+ * its children out of the whole board, and doing that again on every pass of a
+ * board that had not changed was the most expensive thing on the screen.
  */
-
-export function EpicCard({
+export const EpicCard = memo(function EpicCard({
   epic,
   allBeads,
   statusById,
@@ -410,4 +413,4 @@ export function EpicCard({
       </div>
     </div>
   );
-}
+});

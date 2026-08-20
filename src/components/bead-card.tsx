@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 import { FolderOpen, Link2, MessageSquare } from "lucide-react";
 
@@ -91,7 +91,12 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
   }
 }
 
-export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSelected = false, onSelect, report }: BeadCardProps) {
+/**
+ * Remembered against its own props: a board redraws whenever anything on it
+ * moves, and without this every card on the screen was built again to say
+ * exactly what it already said.
+ */
+export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSelected = false, onSelect, report }: BeadCardProps) {
   const { layout } = useTheme();
   const blocked = isBlockedBy(bead, statusById);
   const commentCount = (bead.comments ?? []).length;
@@ -388,4 +393,4 @@ export function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSel
       </div>
     </div>
   );
-}
+});
