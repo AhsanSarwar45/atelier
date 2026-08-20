@@ -1155,6 +1155,19 @@ Colour is a floor, never a ceiling: the server ranks each window itself and its
 ranking is believed, but 80% and 95% raise the ranking anyway, so a build that
 sends no severity cannot draw a calm chip at 99%.
 
+**The chips are buttons, because they are the only door.** A `Badge` renders a
+`<span>`, and a click handler on a span is reachable by mouse and by nothing
+else — no tab stop, no Enter, nothing for a screen reader to press. These chips
+are the only way into the usage picture anywhere in the app, so each is a real
+`<button>` inside the badge (the pattern `ReportChip` already uses) and
+announces the whole sentence rather than its own shorthand: `wk 56%` read aloud
+is not a sentence. `scripts/shoot-plan-usage.mjs` proves it the way a reader
+would — it focuses the chip, checks the focus actually landed on it, and presses
+Enter — and that check earned its keep immediately by catching a stale served
+bundle. What it does **not** yet do is keep the keyboard inside the panel once
+it is open; that gap is every overlay in this app, not this one, and is filed as
+bw-4dw5.
+
 ### 8.3 The board tab
 
 Unchanged, plus one thing: decision 11 — a card being worked on shows its live
@@ -1291,6 +1304,20 @@ document.
   the model's decision and a standing browser check resting on it goes red for
   no reason. It was watched happening once by hand instead, 2026-08-19
   (`scripts/README.md`).
+- The plan figures come from the kit's own usage channel through a method the
+  SDK shouts is unstable (`usage_EXPERIMENTAL_…_DO_NOT_RELY_ON_THIS_API_YET`).
+  A version that renames or drops it degrades to `available: false`, which draws
+  no chips at all — the state this feature replaced — and never to a wrong
+  number. The alternative was adding up tokens to guess at a percentage, and a
+  guessed allowance is worse than none.
+- When no chat is running, the reading costs a session of its own: the sidecar
+  starts one with nothing to say, asks it, and shuts it down after four idle
+  minutes. It sends no message and spends no tokens (measured 2026-08-20: 1.9s
+  cold, 0 tokens), but it is a process, and an install that never opens a chat
+  still starts one the first time the browser asks.
+- The figure can be up to a minute old: the sidecar caches for 55 seconds and
+  the browser polls every 60. A five-hour window does not move fast enough for
+  that to mislead anyone, and the alternative is one query per chat per render.
 - Who is working in a chat is Claude's answer only. Codex writes no markers we
   read, so a Codex conversation somebody else is driving is drawn asleep and
   offered like any other (§6.3.4).
