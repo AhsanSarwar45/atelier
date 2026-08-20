@@ -31,7 +31,7 @@ import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
 import { type HelperPast, helperNamed, helpersNow, helpersOf } from './helper-records.ts';
 import { spokenAsEvents } from './reading-back.ts';
-import { findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
+import { allLines, findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
@@ -592,7 +592,7 @@ export class Sessions {
         if (entry.kind === 'call') links.observe(entry.name, entry.input);
       }
     }
-    this.saySpend(summary.id, messages, helpers);
+    this.saySpend(summary.id, record === null ? messages : allLines(record), helpers);
 
     const shown = past.slice(-IMPORTED_MESSAGES);
     if (past.length > shown.length) {

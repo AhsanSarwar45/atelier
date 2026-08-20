@@ -17,7 +17,7 @@
  * it follows the record's parent links and hands back the conversation as it
  * now stands, which appended lines alone cannot say.
  */
-import { readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -88,6 +88,36 @@ export function recordSize(sessionId: string, config?: string): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Every line of a record, from its first to its last.
+ *
+ * The kit's own reader is the one that hands back a chat as it NOW STANDS, and
+ * that is not the same thing: a conversation that has compacted twelve times
+ * comes back from it as the turns since the twelfth, and asking it what a long
+ * day cost answered 37 turns and 5 million tokens against a file holding 2,313
+ * turns and 531 million (measured 2026-08-20, bw-3ug7.5). The file is where the
+ * whole task is, because the kit appends to it across every forgetting rather
+ * than starting a new one.
+ *
+ * The kit's bookkeeping is dropped and the conversation kept, by the same rule
+ * the follower uses. Whole-file: 124ms on that same 30MB record, which is a
+ * click and not a wait. Empty when there is no such file to read.
+ */
+export function allLines(path: string): RecordLine[] {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return [];
+  }
+  const lines: RecordLine[] = [];
+  for (const line of text.split('\n')) {
+    const row = readLine(line);
+    if (row !== null) lines.push(row);
+  }
+  return lines;
 }
 
 /**
