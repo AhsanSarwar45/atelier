@@ -125,11 +125,15 @@ function Line({
           onClick={() => onFlip(node)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
+          {/* An empty box is drawn in the edge the app gives a box you type
+              into. The faint one is a shade off the panel behind it, which on
+              a dark skin is no box at all — and a switch nobody can see is a
+              switch nobody knows they can turn back on (bw-qdim.11). */}
           <span
             aria-hidden="true"
             className={cn(
               'flex size-4 shrink-0 items-center justify-center rounded-[4px] border',
-              state === 'off' ? 'border-b-default' : 'border-transparent bg-primary text-primary-foreground',
+              state === 'off' ? 'border-b-strong' : 'border-transparent bg-primary text-primary-foreground',
             )}
           >
             {state === 'on' && <Check className="size-3" />}
