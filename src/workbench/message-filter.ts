@@ -168,14 +168,56 @@ export function switchOf(node: KindNode, off: ReadonlySet<KindId>): SwitchState 
  * forgotten, so switching it back on hands the reader the whole of it — and so
  * a tool that first appears while commands is off stays off with the rest of
  * them rather than arriving alone in an empty group.
+ *
+ * The whole tree is needed, not just the switch that was clicked: turning one
+ * tool back on while commands is off has to say what happens to the OTHER
+ * tools, and the answer — they stay off — cannot be written down without
+ * knowing which tools this conversation has (bw-qdim.9).
  */
-export function flip(off: ReadonlySet<KindId>, node: KindNode): Set<KindId> {
+export function flip(off: ReadonlySet<KindId>, node: KindNode, tree: KindNode[]): Set<KindId> {
   const next = new Set(off);
   const going = switchOf(node, off) !== 'off';
+  if (!going) letThrough(next, node.id, tree);
   for (const child of descend(node)) next.delete(child);
   next.delete(node.id);
   if (going) next.add(node.id);
   return next;
+}
+
+/**
+ * Open a path down to one switch through the groups above it.
+ *
+ * A group is switched off as a single entry, which is what makes turning it
+ * back on give the reader all of it. The cost is that a switch inside it is
+ * then off by inheritance and has nothing of its own to remove — clicking it
+ * did nothing at all, which reads as a broken control. So each group on the way
+ * down is opened and its own children switched off individually, leaving
+ * exactly the one the reader asked for standing and the group reading half-on.
+ */
+function letThrough(off: Set<KindId>, id: KindId, tree: KindNode[]): void {
+  const path = upward(id).reverse();
+  let inherited = false;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const parent = path[i]!;
+    const onward = path[i + 1]!;
+    const wasOff = inherited || off.has(parent);
+    off.delete(parent);
+    if (!wasOff) continue;
+    for (const child of find(tree, parent)?.children ?? []) {
+      if (child.id !== onward) off.add(child.id);
+    }
+    inherited = true;
+  }
+}
+
+/** One switch in the tree, by name. */
+function find(tree: KindNode[], id: KindId): KindNode | null {
+  for (const node of tree) {
+    if (node.id === id) return node;
+    const under = find(node.children, id);
+    if (under) return under;
+  }
+  return null;
 }
 
 const descend = (node: KindNode): KindId[] =>
@@ -183,6 +225,19 @@ const descend = (node: KindNode): KindId[] =>
 
 /** Nothing switched off — what the reader gets before he touches anything. */
 export const EVERYTHING: ReadonlySet<KindId> = new Set<KindId>();
+
+/**
+ * The rows a conversation could draw at all, before any of these switches.
+ *
+ * A note the chat files as detail is only on screen with Show everything on. A
+ * count that includes those the rest of the time prices Status lines by rows
+ * the reader cannot see, and the count exists precisely to tell him what
+ * turning a switch off would cost him (bw-qdim.10).
+ */
+export function drawable(items: TranscriptItem[], openAll: boolean): TranscriptItem[] {
+  if (openAll) return items;
+  return items.filter((item) => item.kind !== 'note' || item.rank !== 'detail');
+}
 
 /**
  * The rows this conversation draws. A command run inside another command goes

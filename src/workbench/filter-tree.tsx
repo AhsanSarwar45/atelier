@@ -51,10 +51,11 @@ export function KindTree({ items, off, onChange }: TreeProps) {
       if (!next.delete(id)) next.add(id);
       return next;
     });
+  const tree = treeOf(items);
 
   return (
     <div role="tree" aria-label="Kinds of message" data-testid="kind-tree" className="flex flex-col">
-      {treeOf(items).map((node) => (
+      {tree.map((node) => (
         <Line
           key={node.id}
           node={node}
@@ -62,7 +63,7 @@ export function KindTree({ items, off, onChange }: TreeProps) {
           off={off}
           folded={folded}
           onFold={fold}
-          onFlip={(target) => onChange(flip(off, target))}
+          onFlip={(target) => onChange(flip(off, target, tree))}
         />
       ))}
     </div>
