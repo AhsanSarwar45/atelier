@@ -101,21 +101,35 @@ const GROWS_PROJECT = join(GROWS_RUN, 'project');
 /**
  * A project of this run's own, marked as a test project so it stays off the
  * owner's dashboard and is swept up rather than living on his machine.
+ *
+ * Asked for, not made: the cases in this file run at the same time and four of
+ * them share one project, so two of them look, both find nothing, and both make
+ * it. Whoever lost that race died on the database refusing a second project at
+ * the same path — before it had drawn anything, and about a piece of scaffolding
+ * rather than about the screen it was written for (bw-7ks.22.21).
  */
 async function projectAt(
   request: APIRequestContext,
   name: string,
   path: string,
 ): Promise<{ id: string; path: string }> {
-  const listed = (await (await request.get('/api/projects?include_test=true')).json()) as {
-    id: string;
-    path: string;
-  }[];
-  const found = listed.find((p) => p.path === path);
+  const there = async (): Promise<{ id: string; path: string } | undefined> => {
+    const listed = (await (await request.get('/api/projects?include_test=true')).json()) as {
+      id: string;
+      path: string;
+    }[];
+    return listed.find((p) => p.path === path);
+  };
+  const found = await there();
   if (found) return found;
   const made = await request.post('/api/projects', { data: { name, path, isTest: true } });
-  expect(made.status(), await made.text()).toBe(201);
-  return (await made.json()) as { id: string; path: string };
+  if (made.status() === 201) return (await made.json()) as { id: string; path: string };
+  // Somebody else made it between the look and the making. Theirs is as good as
+  // ours: it is the same path, registered the same way.
+  const said = await made.text();
+  const raced = await there();
+  expect(raced, `no project at ${path}, and it could not be made: ${said}`).toBeTruthy();
+  return raced!;
 }
 
 async function fixtureProject(request: APIRequestContext): Promise<{ id: string; path: string }> {
@@ -158,7 +172,14 @@ test.describe('the agents a chat sends off', () => {
     rmSync(FIXTURE, { recursive: true, force: true });
     mkdirSync(FIXTURE, { recursive: true });
   });
-  test.describe.configure({ timeout: 600_000 });
+  // One at a time. Four of these start a real agent, and one of those starts a
+  // small run of agents and a helper of its own; run all at once against one
+  // account they queue behind each other and time out on a wait that passes in
+  // under a minute when two run side by side (measured 2026-08-20: seven at
+  // once, two cases dead at five minutes; the same two together, 1.0m and 1.3m,
+  // both green). The rest of the suite stays parallel — this file is the one
+  // that costs money and minutes (bw-7ks.22.21).
+  test.describe.configure({ mode: 'default', timeout: 600_000 });
 
   /**
    * A test project is left off the plain list, which is the list the project
