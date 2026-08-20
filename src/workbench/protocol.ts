@@ -366,8 +366,9 @@ export type MachineFamily = 'stopped' | 'failed' | 'waiting' | 'memory' | 'backg
  * The families answer how bad a line is, and that is a different question from
  * whether the reader has anything to do about it: an allowance window opening
  * is news of a sort, and it is the machine's own news. Sorting by loudness
- * alone put 78 of the 104 lines a chat drew by default on the reader's screen
- * for no reason he could act on (bw-6jq5).
+ * alone put most of what a chat drew by default on the reader's screen for no
+ * reason he could act on — the count and the run behind it are in
+ * docs/agent-workbench.md §8.2.4, written down once (bw-6jq5).
  *
  * `you` is a line he would act on, chase, or has just caused. `machine` is the
  * chat keeping its own books. Which one a kind is, is

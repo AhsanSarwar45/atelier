@@ -5,9 +5,11 @@
  * how bad a line is and decides its colour. The AUDIENCE says who it is for and
  * decides whether the chat draws it before the reader has touched anything.
  * With only the first, everything loud enough to have a colour was shown, and
- * 78 of the 104 lines a chat drew by default were the machine keeping its own
- * books — an allowance window opening, the mode a chat started in, an agent
- * being dispatched (bw-6jq5). `FOR` below is the second answer.
+ * most of what a chat drew by default was the machine keeping its own books —
+ * an allowance window opening, the mode a chat started in, an agent being
+ * dispatched (bw-6jq5). `FOR` below is the second answer. The one measurement
+ * behind all of this is in docs/agent-workbench.md §8.2.4 and is not copied
+ * here: two copies of a count drift apart, and did.
  *
  * The driver already tells these apart — a compaction, a retry, a hook that
  * refused the turn, a subagent reporting back all arrive under their own name

@@ -900,12 +900,15 @@ ranking is used rather than one of ours.
 **Two ways of sorting, and only one of them decides what is drawn
 (bw-6jq5).** Loudness says how hard a line pushes; it never said who the line
 was *for*, and the screen used it for both. So the reader opened a chat already
-holding every loud line the machine wrote about its own housekeeping. Measured
-2026-08-20 over the manager's own record — 118 chats, 895 machine lines — 140
-were drawn before he touched a switch, and 78 of them were bookkeeping: 43
-announcing the mode or model a chat started in, not one of which was a change,
-and 35 saying an allowance window was open. His words on that one: "this rate
-limit event seems to be for the agent. why am I being shown it."
+holding every loud line the machine wrote about its own housekeeping. **This is the one place the measurement is written down**, because a count
+copied into a second file drifts from the first and did (bw-6jq5.7); the source
+comments point here. Measured 2026-08-20 by
+`scripts/chat-shows-what-is-yours.mjs` over the manager's own record: 118 chats,
+895 machine lines, folded to 510 rows on screen. **123 of those rows were drawn
+before he touched a switch**, and most were bookkeeping — 37 announcing the mode
+a chat opened in, not one of which was a change, and 35 saying an allowance
+window was open. His words on that one: "this rate limit event seems to be for
+the agent. why am I being shown it."
 
 Every kind therefore carries an audience beside its family, in `FOR`
 (`src/workbench/machine-lines.ts`), and the two axes are read separately:
@@ -935,8 +938,8 @@ Every kind therefore carries an audience beside its family, in `FOR`
   visible rather than hidden in a group nobody opens.
 
 **A chat is silent about the state it opened in.** Every chat wrote a line
-naming its permission mode as though someone had changed it; 37 of the 43 above
-were that line, one per session, never a second. The driver now holds "no mode
+naming its permission mode as though someone had changed it: 37 of the 118 chats
+in the record above, one line each, never a second. The driver now holds "no mode
 known yet" apart from a mode it has been told, and the first one it merely
 *observes* pins the picker without writing a line. A mode picked on purpose still
 says so, first thing in the chat or not.
@@ -954,8 +957,11 @@ rebuilds every chat through the real driver, folds it with the real screen's
 fold and asks three things: that nothing meant for the machine reaches him
 unasked, that no line's sentence is its own wire name, and that a chat which just
 opened announces no mode. Any one of them red is a failure. Same record, sorted
-the new way: 96 drawn instead of 140, and 59 for a chat made from today, the
-difference being mode lines already frozen into chats made before it.
+the new way: **81 rows drawn instead of 123**. Of those 81, 37 are the opening
+mode line, frozen into chats made before this build and never written again — so
+the same three days of work started today would draw 44. A model line is not
+among them: it is only ever written when somebody asked for the model, so every
+one of the 6 in the record was a real change.
 
 **Six families, and every kind lands in exactly one (bw-jkh2).** The rank above
 decides how *loudly* a machine message is drawn; the family decides *what it

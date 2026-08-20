@@ -378,8 +378,9 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     // should be (bw-jkh2.19).
     //
     // A window that is OPEN is the machine reporting that nothing is wrong, and
-    // it says so again every few minutes: 35 of the 104 lines a chat drew by
-    // default were this one sentence. A window that has closed or is closing is
+    // it says so again every few minutes — one of the two biggest things the
+    // reader was shown for nothing (docs/agent-workbench.md §8.2.4, where the
+    // count lives). A window that has closed or is closing is
     // about HIM — it is why his work is about to stop — so only that one is
     // loud, and the pair is what the chat sorts on (bw-6jq5).
     case 'rate_limit_event': {

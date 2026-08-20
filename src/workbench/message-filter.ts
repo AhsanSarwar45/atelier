@@ -392,11 +392,11 @@ export const EVERYTHING: ReadonlySet<KindId> = new Set<KindId>();
  * The rest of the tree arrives on, so a kind the chat grows next month is never
  * silently missing from a conversation he thought he was reading whole. The
  * machine's own side is the one exception, and it is not a close call. Over
- * three days of this manager's real chats, 859 machine lines were written and
- * 104 of them were drawn by default — of which 78 were the machine talking to
- * itself: which mode it is in, which model it pinned, an allowance window that
- * is open, an agent sent off and an agent home again. He cannot act on any of
- * it, and it buried the four lines he could (bw-6jq5).
+ * three days of this manager's real chats, most of what was drawn by default
+ * was the machine talking to itself: which mode it is in, an allowance window
+ * that is open, an agent sent off and an agent home again. He cannot act on any
+ * of it, and it buried the few lines he could (bw-6jq5). The count itself lives
+ * once, in docs/agent-workbench.md §8.2.4, beside the check that produces it.
  *
  * Off by audience rather than by family, because loudness was never the
  * question. A hook that refused HIS turn and a hook that fired on every prompt
