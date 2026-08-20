@@ -255,7 +255,10 @@ describe('a picture in a message comes back with it', () => {
   });
 
   it('reads every chat again, because one read before this drew no pictures', () => {
-    expect(IMPORT_RECIPE).toBe(6);
+    // A floor rather than a number: the pictures went in at 6, and a later
+    // reading that raises it again re-reads these chats too. Pinning the
+    // number would fail the next honest bump and say nothing about pictures.
+    expect(IMPORT_RECIPE).toBeGreaterThanOrEqual(6);
   });
 });
 

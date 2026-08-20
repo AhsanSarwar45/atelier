@@ -28,6 +28,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
+import { type HelperPast, helpersOf } from './helper-records.ts';
 import { spokenAsEvents } from './reading-back.ts';
 import { findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
@@ -575,6 +576,20 @@ export class Sessions {
     const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
     linkPast(messages, (name, input) => links.observe(name, input));
 
+    /**
+     * Every agent this chat sent off, from its own record beside the chat's
+     * (helper-records.ts). Its calls are read for cards and reports exactly as
+     * the chat's own are: work a helper alone did is work the chat did, and a
+     * card only a helper touched was on no chat at all (bw-7ks.22.7).
+     */
+    const record = findRecord(summary.externalId);
+    const helpers = record === null ? [] : helpersOf(record);
+    for (const helper of helpers) {
+      for (const entry of helper.entries) {
+        if (entry.kind === 'call') links.observe(entry.name, entry.input);
+      }
+    }
+
     const shown = past.slice(-IMPORTED_MESSAGES);
     if (past.length > shown.length) {
       this.publish(summary.id, {
@@ -585,9 +600,66 @@ export class Sessions {
         text: `${past.length - shown.length} earlier messages and commands are in this chat and are not drawn here.`,
       });
     }
-    for (const entry of shown) this.draw(summary.id, entry);
+    // A helper is drawn where its own call is, so its turns nest under it the
+    // way the live wire nests them. One whose call fell off the end of what is
+    // drawn is drawn first instead: the panel is every agent the chat sent off,
+    // and a row missing from it is the same silence this card is about.
+    const onPage = new Set(shown.flatMap((entry) => (entry.kind === 'call' ? [entry.id] : [])));
+    const byCall = new Map<string, HelperPast>();
+    for (const helper of helpers) {
+      if (helper.toolCallId !== null && onPage.has(helper.toolCallId)) byCall.set(helper.toolCallId, helper);
+      else this.drawHelper(summary.id, helper);
+    }
+    for (const entry of shown) {
+      this.draw(summary.id, entry);
+      const helper = entry.kind === 'call' ? byCall.get(entry.id) : undefined;
+      if (helper) this.drawHelper(summary.id, helper);
+    }
     leaveMark();
     return read;
+  }
+
+  /**
+   * One agent the chat sent off, said in the events the live wire would have
+   * carried: the row, then its whole conversation stamped with the call that
+   * sent it, then what it came back with.
+   *
+   * Its turns carry that call and so nest under it, which is the same
+   * attribution the driver puts on a helper's words as they arrive
+   * (bw-7ks.22.2) and the same one the pane reads to open a row's own
+   * conversation (bw-7ks.22.4). Nothing here is a second way of drawing a
+   * helper; it is the one way, fed from disk instead of from the wire.
+   *
+   * A helper the kit wrote no meta for has no call to hang off. Its row is
+   * still drawn — it ran, and it spent what it spent — and its conversation
+   * hangs off its own name, which is what the pane falls back to.
+   */
+  private drawHelper(sessionId: string, helper: HelperPast): void {
+    const under = helper.toolCallId ?? helper.agentId;
+    this.publish(sessionId, {
+      type: 'agent.started',
+      agentId: helper.agentId,
+      toolCallId: helper.toolCallId,
+      // Every helper with a record of its own is an agent: the kit gives a
+      // command left running no conversation to write down.
+      kind: 'helper',
+      what: helper.what,
+      agentType: helper.agentType,
+      model: helper.model,
+    });
+    for (const entry of helper.entries) this.draw(sessionId, entry, under);
+    this.publish(sessionId, {
+      type: 'agent.finished',
+      agentId: helper.agentId,
+      // The record says what it did, never whether the chat was happy with it:
+      // a helper that failed said so in words, and those words are its answer.
+      state: 'done',
+      seconds: helper.seconds,
+      tokens: helper.tokens,
+      calls: helper.calls,
+      model: helper.model,
+      result: helper.result,
+    });
   }
 
   /**
@@ -595,9 +667,9 @@ export class Sessions {
    * so a command read off the disk and one watched as it ran open the same way
    * (docs/agent-workbench.md §8.2.4).
    */
-  private draw(sessionId: string, entry: PastEntry): void {
+  private draw(sessionId: string, entry: PastEntry, parent: string | null = null): void {
     if (entry.kind === 'said') {
-      for (const e of spokenAsEvents(entry, randomUUID())) this.publish(sessionId, e);
+      for (const e of spokenAsEvents(entry, randomUUID(), parent)) this.publish(sessionId, e);
       return;
     }
     this.publish(sessionId, {
@@ -606,7 +678,7 @@ export class Sessions {
       name: entry.name,
       input: trimInput(entry.input),
       title: toolTitle(entry.name, entry.input),
-      parentToolCallId: null,
+      parentToolCallId: parent,
     });
     // A change is read off the same arguments the live watcher reads it off, so
     // an edit in an imported chat is drawn as a change rather than as the new

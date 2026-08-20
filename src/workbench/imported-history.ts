@@ -32,14 +32,17 @@ export const IMPORTED_MESSAGES = 200;
  * rather than off a marker in the model's name that the kit never writes
  * (bw-4wcd.15). 6 carries the pictures a message held, which every reading
  * before it dropped on the floor — leaving the bare marker the harness writes
- * in their place and nothing to click (bw-uu9x.1). Raise it whenever the
- * reading would produce a different transcript from the same record: every chat
- * read in by a lower one is read again on its next open.
+ * in their place and nothing to click (bw-uu9x.1). 7 reads the agents the chat
+ * sent off, whose turns the kit files beside the record rather than in it, so a
+ * chat read back has the rows and the conversations a chat watched live has
+ * (bw-7ks.22.7). Raise it whenever the reading would produce a different
+ * transcript from the same record: every chat read in by a lower one is read
+ * again on its next open.
  *
  * It lives beside the reading it numbers, so raising the reading and raising
  * the number are one edit in one file (bw-khe.11).
  */
-export const IMPORT_RECIPE = 6;
+export const IMPORT_RECIPE = 7;
 
 /** What opening a chat does about a past it may or may not have read already. */
 export type ReadingChoice =

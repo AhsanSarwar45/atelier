@@ -20,12 +20,20 @@ import type { DriverEvent } from './drivers/types.ts';
  * same rule, with no second path to keep working. Reading the words alone is
  * what left the manager looking at the bare marker `[Image #1]` in his own
  * message with nothing to click (bw-uu9x.2).
+ *
+ * `sentBy` names the call that sent off the agent whose words these are, when
+ * they are not the chat's own. It is the same attribution the live wire puts on
+ * a helper's speech, and it is what files those words under the helper's row
+ * instead of the conversation's (bw-7ks.22.7).
  */
 export function spokenAsEvents(
   entry: Extract<PastEntry, { kind: 'said' }>,
   messageId: string,
+  sentBy: string | null = null,
 ): DriverEvent[] {
-  const events: DriverEvent[] = [{ type: 'message.started', messageId, role: entry.role }];
+  const events: DriverEvent[] = [
+    { type: 'message.started', messageId, role: entry.role, ...(sentBy === null ? {} : { parentToolCallId: sentBy }) },
+  ];
   for (const image of entry.images) events.push({ type: 'image', messageId, image });
   // A message that is a picture and nothing else says nothing, and an empty
   // word is still a word in the log.

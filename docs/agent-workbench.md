@@ -1153,7 +1153,7 @@ helper, so we do not pretend to have one:
    no other door either. The row says the message was relayed, so nobody reads
    a delivered word as a private one.
 
-**Five faults this closes on the way past**, each of which is why the picture is
+**Four faults this closes on the way past**, each of which is why the picture is
 missing today rather than merely thin:
 
 - a helper's words are never forwarded, because the driver does not ask for them
@@ -1165,12 +1165,18 @@ missing today rather than merely thin:
   same breath, so a helper answering "DONE" ate "DONE (completed)", which quotes
   it by design. The panel then said finished while the conversation never said
   it came home (bw-7ks.22.6);
-- reading a chat back from the record **flattens** a helper's turns into the
-  parent's speech, because the read-back path never looks at what a message's
-  parent was (bw-7ks.22.7);
-- following a chat live **drops** them outright — one line in the tail reader
-  discards every message marked as a helper's — so the two paths disagree with
-  each other about what the same conversation contains (bw-7ks.22.7);
+- a chat read back from the record has **no agents at all**: not a flattened
+  helper, not a dropped one — none. The kit files a helper's whole conversation
+  in a file of its own beside the record, `<chat>/subagents/agent-<id>.jsonl`,
+  with an `agent-<id>.meta.json` naming the call that sent it off, and the
+  chat's own record keeps one call and one answer. Nothing here ever opened
+  that directory, so a chat found on disk had an empty panel, nothing to open,
+  and a card only a helper ever touched on no chat anywhere. The fix reads
+  those files at import and says them as the events the live wire would have
+  carried, so one drawing serves both paths (bw-7ks.22.7, kit 2.1.237,
+  measured 2026-08-20; the tail reader's line discarding sidechain messages is
+  vestigial — no such line reaches a parent's record on this version, and it
+  still guards against pointing the tail at a helper's own file);
 - what a turn cost counts the main loop only and excludes every helper, so the
   cost shown under a delegated turn is wrong by however much was delegated
   (bw-7ks.22.8).

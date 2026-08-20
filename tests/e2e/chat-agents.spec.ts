@@ -1,8 +1,19 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+import { makeFixtureProject, PARENT_CARD } from './fixture-board';
+import {
+  CHAT_SAID,
+  HELPER_AGENT,
+  HELPER_ANSWERED,
+  HELPER_BRIEF,
+  HELPER_SAID,
+  SENT_OFF_CALL,
+  writeChatWithHelper,
+} from './fixture-record';
 import { restartInstance } from './restart';
 
 /**
@@ -75,22 +86,32 @@ const OVER = ['done', 'failed', 'stopped'];
 /** A folder of its own, so this case never runs an agent in someone's work. */
 const FIXTURE = join(__dirname, '..', '.workbench-run-agents');
 
+/** Where the read-back case builds a project with a board of its own. */
+const RECORD_RUN = join(__dirname, '..', '.workbench-run-record');
+const RECORD_PROJECT = join(RECORD_RUN, 'project');
+
 /**
  * A project of this run's own, marked as a test project so it stays off the
  * owner's dashboard and is swept up rather than living on his machine.
  */
-async function fixtureProject(request: APIRequestContext): Promise<{ id: string; path: string }> {
+async function projectAt(
+  request: APIRequestContext,
+  name: string,
+  path: string,
+): Promise<{ id: string; path: string }> {
   const listed = (await (await request.get('/api/projects?include_test=true')).json()) as {
     id: string;
     path: string;
   }[];
-  const found = listed.find((p) => p.path === FIXTURE);
+  const found = listed.find((p) => p.path === path);
   if (found) return found;
-  const made = await request.post('/api/projects', {
-    data: { name: 'workbench-agents', path: FIXTURE, isTest: true },
-  });
+  const made = await request.post('/api/projects', { data: { name, path, isTest: true } });
   expect(made.status(), await made.text()).toBe(201);
   return (await made.json()) as { id: string; path: string };
+}
+
+async function fixtureProject(request: APIRequestContext): Promise<{ id: string; path: string }> {
+  return projectAt(request, 'workbench-agents', FIXTURE);
 }
 
 /** A chat of its own for this case, allowed to run tools without asking. */
@@ -506,5 +527,110 @@ test.describe('the agents a chat sends off', () => {
     await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', '1');
 
     await page.screenshot({ path: `${SHOTS}/chat-agent-opened-again.png`, fullPage: false });
+  });
+
+  /**
+   * A chat this app never ran, opened off the record afterwards.
+   *
+   * The case above restarts the program and reads a chat back — but a chat the
+   * app DROVE is replayed from its own event log, so it proves the log and
+   * never the record. This one is the other reading: a conversation that
+   * happened somewhere else, found on disk, whose helper's turns the kit filed
+   * in a file of its own beside the record and never in it. Read as the chat's
+   * own file alone, that chat sent nothing off — an empty panel, nothing to
+   * open, and a card only the helper ever touched on no chat anywhere
+   * (bw-7ks.22.7).
+   *
+   * The record is written rather than earned, because a live agent cannot
+   * produce this: every chat a live run makes is a chat this app drove. The
+   * shapes are the kit's own, and the reading of them is proved line by line
+   * next door in the sidecar's suite; what this case proves is that the app
+   * reaches for that file at all, and draws what it finds where a reader
+   * expects it.
+   *
+   * The board is real. The helper runs `bd show` on a card of the fixture's
+   * own, and the chat's own turns never name it, so a chip for it on the chat
+   * can have come from nowhere but the helper.
+   */
+  test('a chat read back from the record keeps its agents apart', async ({ page, request }) => {
+    // The panel lives in the right column, which is shut on a narrow screen.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    rmSync(RECORD_RUN, { recursive: true, force: true });
+    mkdirSync(RECORD_RUN, { recursive: true });
+    makeFixtureProject(RECORD_PROJECT, join(RECORD_RUN, 'reporting'));
+    const project = await projectAt(request, 'workbench-record', RECORD_PROJECT);
+    const written = writeChatWithHelper({
+      cwd: RECORD_PROJECT,
+      sessionId: randomUUID(),
+      card: PARENT_CARD,
+    });
+
+    try {
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: HELLO_MS });
+
+      // Offered like any chat begun elsewhere, and opened for reading by its
+      // name — not resumed, because nothing here starts an agent.
+      const listed = page.locator(`[data-testid="restore-row"][data-external-id="${written.sessionId}"]`);
+      await listed.waitFor({ timeout: HELLO_MS });
+      await listed.getByTestId('row-name').click();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+
+      // ---- the conversation ------------------------------------------------
+      // The chat's own answer is the chat's own.
+      const itsOwn = page.locator('[data-testid="assistant-message"]:not([data-sent-by])');
+      await expect(itsOwn.filter({ hasText: CHAT_SAID })).toHaveCount(1, { timeout: HELLO_MS });
+      // And the helper's words are the helper's, named by the call that sent
+      // it — the whole of this item in one line.
+      const helperSaid = page.locator(`[data-testid="assistant-message"][data-sent-by="${SENT_OFF_CALL}"]`);
+      await expect(helperSaid.filter({ hasText: HELPER_SAID })).toHaveCount(1);
+      expect(
+        await itsOwn.filter({ hasText: HELPER_SAID }).count(),
+        'the helper’s sentence was drawn as the chat’s own',
+      ).toBe(0);
+      // Under the call that sent it, not merely near it.
+      const order = await page.evaluate((id) => {
+        const row = document.querySelector(`[data-tool-id="${id}"]`);
+        const said = document.querySelector(`[data-testid="assistant-message"][data-sent-by="${id}"]`);
+        if (!row || !said) return 'missing';
+        return row.compareDocumentPosition(said) & Node.DOCUMENT_POSITION_FOLLOWING ? 'after' : 'before';
+      }, SENT_OFF_CALL);
+      expect(order, 'the helper spoke above the call that sent it').toBe('after');
+
+      // ---- the panel -------------------------------------------------------
+      await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', '1');
+      const row = page.locator(`[data-testid="sent-away-row"][data-agent="${HELPER_AGENT}"]`);
+      await expect(row).toHaveAttribute('data-kind', 'helper');
+      await expect(row).toHaveAttribute('data-state', 'done');
+      await expect(row.getByTestId('sent-away-what')).toHaveText(HELPER_BRIEF);
+      // What the record states nowhere and the row says anyway: which model it
+      // ran, how long it took, and what it spent, all worked out from its own
+      // turns (helper-records.ts).
+      await expect(row.getByTestId('sent-away-model')).not.toHaveText('');
+      await expect(row.getByTestId('sent-away-for')).toHaveText(/\d+[smh]/);
+      await expect(row.getByTestId('sent-away-spend')).toHaveText(/\d/);
+      await expect(row.getByTestId('sent-away-result')).toContainText(HELPER_ANSWERED);
+
+      // ---- the card only the helper touched --------------------------------
+      // Polled: the board is asked about each candidate behind the drawing.
+      await expect(page.locator(`[data-testid="bead-chip"][data-bead-id="${PARENT_CARD}"]`).first()).toBeVisible({
+        timeout: HELLO_MS,
+      });
+
+      await page.screenshot({ path: `${SHOTS}/chat-agents-read-back.png`, fullPage: false });
+
+      // ---- and its own conversation, one click away ------------------------
+      await row.click();
+      const pane = page.getByTestId('agent-view');
+      await expect(pane).toHaveAttribute('data-agent', HELPER_AGENT);
+      const said = (await page.getByTestId('agent-view-said').innerText()).trim();
+      expect(said, 'the helper’s own sentence is not in its pane').toContain(HELPER_SAID);
+      expect(said, 'what the helper DID is not in its pane').toContain(`bd show ${PARENT_CARD}`);
+      await expect(page.getByTestId('agent-view-result')).toContainText(HELPER_ANSWERED);
+      await page.screenshot({ path: `${SHOTS}/chat-agents-read-back-opened.png`, fullPage: false });
+    } finally {
+      written.remove();
+      await request.delete(`/api/projects/${project.id}`);
+    }
   });
 });

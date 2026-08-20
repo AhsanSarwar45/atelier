@@ -86,7 +86,8 @@ describe('opening a chat whose record holds a picture', () => {
 
   it('reads every chat again, because every reading before this drew no pictures', () => {
     // A chat already read in keeps the transcript the old rules made until the
-    // reading it was read by is out of date (bw-khe.11).
-    expect(IMPORT_RECIPE).toBe(6);
+    // reading it was read by is out of date (bw-khe.11). A floor rather than a
+    // number: a later reading that raises it again re-reads these chats too.
+    expect(IMPORT_RECIPE).toBeGreaterThanOrEqual(6);
   });
 });
