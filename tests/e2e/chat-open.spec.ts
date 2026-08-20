@@ -198,6 +198,7 @@ test.describe('the open chat', () => {
     // not a failure, so this walks until it finds one or runs out of chats —
     // and it takes several: these are working chats, mostly commands and their
     // answers, with two or three things actually said in a whole conversation.
+    test.slow();
     const keys = (await chatKeys(page)).slice(0, 8);
     let written = 0;
     for (const key of keys) {
@@ -334,6 +335,10 @@ test.describe('the open chat', () => {
     const worked = page.locator('[data-testid="restore-row"][data-beads]:not([data-beads=""])');
     await worked.first().waitFor({ timeout: 30_000 });
 
+    // Four chats, each read off disk on its first open: the whole way in, four
+    // times over, is more than one chat's worth of patience.
+    test.slow();
+
     // Whichever of them worked a card that has a report; a chat with none is not
     // a failure, so the case walks until it finds one or runs out.
     const keys = (
@@ -344,8 +349,15 @@ test.describe('the open chat', () => {
       if (found > 0) break;
       await openChat(page, key);
       await page.getByTestId('bead-chip').first().waitFor({ timeout: 60_000 });
-      await paneSettles(page);
-      found = await page.getByTestId('chat-report-chip').count();
+      // The chips arrive with the cards this chat worked, a moment behind them,
+      // so this waits for the answer itself rather than for the whole
+      // conversation to finish drawing — four chats of that is minutes.
+      found = await page
+        .getByTestId('chat-report-chip')
+        .first()
+        .waitFor({ timeout: 8_000 })
+        .then(() => 1)
+        .catch(() => 0);
     }
     expect(found, 'no chat that worked a reported card showed its report').toBeGreaterThan(0);
 
