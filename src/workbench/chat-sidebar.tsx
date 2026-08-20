@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { useLiveSessions, useRunningElsewhere, type LiveSession } from '@/workbench/live';
+import { useHeardFromOutside, useLiveSessions, useRunningElsewhere, type LiveSession } from '@/workbench/live';
 import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -187,6 +187,32 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * A chat begun somewhere that is not this app — in Zed, in a terminal — joins
+   * the list on its own, within seconds, with nothing clicked.
+   *
+   * The sidecar watches the tools' own session folders and says one bare word
+   * when they move (live.ts, `useHeardFromOutside`). The word carries no rows on
+   * purpose, so the only answer to it is the fetch above: ask for the list
+   * again, exactly as the tab does when it opens. Before this the chat was
+   * invisible until the owner clicked a row, which asked again as a side effect
+   * and made every chat appear at once (bw-uivp).
+   *
+   * The count is remembered rather than merely watched because React runs every
+   * effect once when it is first set up, and doing that here would fetch the
+   * list a second time on open for a word nobody said. This fetches when the
+   * count has actually moved and at no other time: switching project re-makes
+   * `load`, which runs this again and finds the count where it left it.
+   */
+  const heardOutside = useHeardFromOutside();
+  const heardAt = useRef(heardOutside);
+
+  useEffect(() => {
+    if (heardAt.current === heardOutside) return;
+    heardAt.current = heardOutside;
+    void load();
+  }, [heardOutside, load]);
 
   /**
    * One click is the whole way in, and it is a READ: the conversation is drawn,

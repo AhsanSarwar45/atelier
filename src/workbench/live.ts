@@ -84,6 +84,16 @@ let snapshot: LiveSession[] = sessions;
  * empty set would rub those marks out before the stream had spoken.
  */
 let running: Set<string> | null = null;
+/**
+ * How many times the stream has said the tools' own session folders moved.
+ *
+ * Never rows, and never a list: the frame is a bare word (protocol.ts,
+ * WatchFrame) because `restoreList` on the sidecar is the one place that builds
+ * rows. A number that only climbs is the smallest thing a view can watch — what
+ * it stands at means nothing, a change in it means "ask for the list again"
+ * (bw-uivp.2).
+ */
+let heardOutside = 0;
 
 function announce(): void {
   snapshot = sessions;
@@ -146,9 +156,12 @@ function absorb(frame: WatchFrame): void {
   }
   if (frame.kind === 'outside') {
     // The tools' own session folders moved: a chat was begun or worked in
-    // somewhere that is not this app. Nothing here changes — this store holds
-    // the sessions the sidecar drives, and the list is what has to ask again.
-    // It learns to, on hearing this, in bw-uivp.2.
+    // somewhere that is not this app. No session in this store changed — the
+    // frame carries none — so the sessions are left exactly as they are and the
+    // only thing published is that the word was said. The chat list is what
+    // answers it, by asking for the list again (chat-sidebar.tsx, bw-uivp.2).
+    heardOutside += 1;
+    listeners.forEach((fn) => fn());
     return;
   }
   if (frame.kind === 'opened') {
@@ -331,5 +344,23 @@ export function useRunningElsewhere(): Set<string> | null {
     subscribe,
     () => running,
     () => null,
+  );
+}
+
+/**
+ * How many times the stream has said a chat was begun or worked in outside this
+ * app — in Zed, in a terminal, by anything that writes the tools' own session
+ * folders.
+ *
+ * The number itself says nothing; a change in it says "the list you are holding
+ * is out of date, ask for it again". A view watches it exactly as the working
+ * mark above is watched, and for the same reason: nobody is going to reload a
+ * tab to find out that a chat was started somewhere else (bw-uivp).
+ */
+export function useHeardFromOutside(): number {
+  return useSyncExternalStore(
+    subscribe,
+    () => heardOutside,
+    () => 0,
   );
 }
