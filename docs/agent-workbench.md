@@ -1243,8 +1243,10 @@ which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
   id of the call that started the work. The driver keeps the reverse of the map
   it already had so a row can answer both. Hand over the wrong one and the whole
   turn goes to the background instead of one agent — which is why parking is
-  proved by a live run and not by a fixture. A row the kit wrote no call for was
-  already running in the background, so parking it is refused without asking.
+  proved by a live run and not by a fixture. And `backgroundTasks` says no to
+  one thing only: no work of that name was in the FOREGROUND. So a no is not a
+  failed click, it is an answer about the work — it is already in the background
+  — and the row takes it as one (bw-7ks.22.24).
 - **The kit's permission hook names the call, not the agent.** `canUseTool`
   carries an `agentID`, but the task messages carry no `agent_id` at all, so
   that id cannot be matched to the `task_id` a row is keyed by — it is a
@@ -1256,7 +1258,10 @@ which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
   from the moment the ask goes out until it is answered, said by the driver
   rather than waited for from the kit's next report about that task — which is
   the whole reason a row's state is not a boolean. Parked arrives the other way
-  round, from the kit: `task_updated.is_backgrounded`.
+  round, from the kit: `task_updated.is_backgrounded`, which is the ONLY message
+  that carries it — a launch does not, so work started in the background arrives
+  looking exactly like work started in front of you, and the click is what finds
+  out which it was.
 - **Which controls exist is a per-session answer**, carried on `session.menu` as
   `agentControls` and defaulting to none. A brand declares only the tiers it
   has, a chat nobody is driving declares none — which is the truth, there is

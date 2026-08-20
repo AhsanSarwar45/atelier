@@ -385,6 +385,36 @@ test.describe('the agents a chat sends off', () => {
     // ended, never because the kit acknowledged the launch (bw-7ks.22.3).
     expect(over.every((r) => r.forHowLong !== '0s'), `a row finished having taken no time at all: ${said}`).toBe(true);
 
+    // And every control drawn on a row does something to that row. Which is
+    // not a claim about which buttons appear: work already running in the
+    // background is indistinguishable, on the way in, from work in front of
+    // you — same launch, same call — so the command left running draws Park
+    // like the rest. Clicking it is what settles where the work is, and the row
+    // has to take that answer: parked, and done offering (bw-7ks.22.24).
+    const controls = await rows.evaluateAll((els) =>
+      els.map((el) => ({
+        kind: el.getAttribute('data-kind'),
+        over: !!el.querySelector('[data-testid="sent-away-result"]'),
+        park: !!el.querySelector('[data-testid="sent-away-park"]'),
+        stop: !!el.querySelector('[data-testid="sent-away-stop"]'),
+      })),
+    );
+    const controlsSaid = JSON.stringify(controls, null, 2);
+    expect(
+      controls.filter((r) => r.kind === 'helper' && !r.over).every((r) => r.park && r.stop),
+      `the helper this chat called offers neither park nor stop: ${controlsSaid}`,
+    ).toBe(true);
+
+    const leftRunning = page.locator('[data-testid="sent-away-row"][data-kind="command"]').first();
+    expect(
+      await leftRunning.getByTestId('sent-away-park').count(),
+      `nothing to click: the command left running draws no Park at all: ${controlsSaid}`,
+    ).toBe(1);
+    await leftRunning.getByTestId('sent-away-park').click();
+    await expect(leftRunning).toHaveAttribute('data-state', 'parked');
+    await expect(leftRunning.getByTestId('sent-away-park')).toHaveCount(0);
+    await expect(leftRunning.getByTestId('sent-away-stop')).toBeVisible();
+
     const rail = page.getByTestId('chat-right-rail');
     await expect(rail).toHaveAttribute('data-open', 'true');
     await page.screenshot({ path: `${SHOTS}/chat-sent-away.png`, clip: (await rail.boundingBox())! });

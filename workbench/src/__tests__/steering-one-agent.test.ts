@@ -168,6 +168,28 @@ describe('ending one, and letting one run on', () => {
     expect(kit.backgroundTasks).not.toHaveBeenCalled();
   });
 
+  it('and a no is an answer about the work, so the row says it is already there', async () => {
+    // The kit says no to one thing only: nothing of that name was in the
+    // FOREGROUND. Which is not a failed click — it is the work telling us where
+    // it already is, and a row that went on offering to park it would be
+    // offering something that has happened (bw-7ks.22.24).
+    const { driver, events } = reading([SENT_OFF]);
+    (driver as unknown as { q: unknown }).q = kitThatAnswers(false);
+
+    expect(await driver.parkAgent('afa98b872c4df37bc')).toBe(false);
+    expect(states(events)).toEqual(['parked']);
+  });
+
+  it('and does not say it twice when the kit parks it', async () => {
+    // The kit reports that one itself, and a row moved from both ends is a row
+    // that reads parked before the kit agrees it is.
+    const { driver, events } = reading([SENT_OFF]);
+    (driver as unknown as { q: unknown }).q = kitThatAnswers(true);
+
+    expect(await driver.parkAgent('afa98b872c4df37bc')).toBe(true);
+    expect(states(events)).toEqual([]);
+  });
+
   it('offers all three tiers, which is what the screen draws buttons from', () => {
     expect(new ClaudeDriver().agentControls()).toEqual(['stop', 'park', 'say']);
   });

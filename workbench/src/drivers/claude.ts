@@ -1278,14 +1278,20 @@ export class ClaudeDriver implements Driver {
    * Hands the turn back and lets the work run on.
    *
    * Asked for by the CALL that started it, which is what the kit's control
-   * takes. A row that was never a call of this chat's own — a command left
-   * running — was already in the background, and false says exactly that:
-   * there was no foreground work of that name to park.
+   * takes. No means one thing only — the kit answers false when no work of that
+   * name was in the foreground — so a no is not a failure but an answer about
+   * the work: it is already running in the background, and the row is told to
+   * read that way. Nothing on the wire says so any earlier. A command left
+   * running arrives like any other piece of work, call and all, and the kit
+   * only mentions being backgrounded when something changes it (bw-7ks.22.24).
    */
   async parkAgent(agentId: string): Promise<boolean> {
     const call = this.callOfTask.get(agentId);
-    if (!call) return false;
-    return (await this.q?.backgroundTasks(call)) ?? false;
+    const parked = call ? ((await this.q?.backgroundTasks(call)) ?? false) : false;
+    // Parking it moves it itself, in the kit's own report; only the no has to
+    // be written down here, and the row stops offering what is already true.
+    if (!parked) this.agentState(agentId, 'parked');
+    return parked;
   }
 
   async interrupt(): Promise<void> {
