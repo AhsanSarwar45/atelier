@@ -22,22 +22,12 @@
  * comes from a token the app already owns, so nothing new was invented for this
  * and a red here is the red on the board.
  *
- * The classes are written out one family at a time and never built from the
- * family's name: Tailwind ships a class only when it read the literal string in
- * the source, which is exactly how the board's own state colours went grey
- * (src/lib/state-styles.ts, bw-ufso.2). `__tests__/machine-lines.test.tsx` runs
- * the real Tailwind over the real tree and fails if one stops coming out.
+ * What each family LOOKS like is next door in `machine-look.ts`, and the split
+ * is load-bearing rather than tidy: this file names icons and Tailwind classes
+ * nowhere, so it imports nothing at run time and a plain node script can read
+ * the real sorting instead of keeping a copy of it that goes stale
+ * (scripts/chat-shows-what-is-yours.mjs, bw-6jq5.4).
  */
-import {
-  Bot,
-  Circle,
-  CircleStop,
-  FoldVertical,
-  RefreshCw,
-  TriangleAlert,
-  type LucideIcon,
-} from 'lucide-react';
-
 import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -45,6 +35,15 @@ export type { Audience, MachineFamily };
 
 /** Both audiences, his first — the order the filter stacks them in. */
 export const AUDIENCES: Audience[] = ['you', 'machine'];
+
+/**
+ * Whose lines a chat does not draw until the reader asks for them.
+ *
+ * The filter turns this into the switch it remembers and the check reads it to
+ * say what a chat draws by default, so the two can never drift into disagreeing
+ * about what he sees (`message-filter.ts`, bw-6jq5).
+ */
+export const OFF_BY_DEFAULT: Audience[] = ['machine'];
 
 /** Every family, in the order they are written about — for tests and for the doc. */
 export const FAMILIES: MachineFamily[] = [
@@ -55,61 +54,6 @@ export const FAMILIES: MachineFamily[] = [
   'background',
   'breathing',
 ];
-
-export interface FamilyLook {
-  /** The row itself: its tint, its edge and the colour of its words. */
-  row: string;
-  /** How many times in a row this kind happened. */
-  count: string;
-}
-
-/**
- * The look of each family. Spelled out, never interpolated — see the note above.
- *
- * `breathing` is the machine's own breathing and is the one family with no
- * tint: it is grey on purpose, because it is what the reader scrolls past
- * rather than what stopped the work.
- */
-const LOOKS: Record<MachineFamily, FamilyLook> = {
-  stopped: {
-    row: 'border-warning/35 bg-warning/10 text-warning',
-    count: 'bg-warning/20 text-warning',
-  },
-  failed: {
-    row: 'border-danger/35 bg-danger/10 text-danger',
-    count: 'bg-danger/20 text-danger',
-  },
-  waiting: {
-    row: 'border-status-review/35 bg-status-review/10 text-status-review',
-    count: 'bg-status-review/20 text-status-review',
-  },
-  memory: {
-    row: 'border-epic/35 bg-epic/10 text-epic',
-    count: 'bg-epic/20 text-epic',
-  },
-  background: {
-    row: 'border-info/35 bg-info/10 text-info',
-    count: 'bg-info/20 text-info',
-  },
-  breathing: {
-    row: 'border-t-faint/30 bg-transparent text-t-faint',
-    count: 'bg-t-faint/20 text-t-faint',
-  },
-};
-
-export const lookOf = (family: MachineFamily): FamilyLook => LOOKS[family];
-
-/** The mark on the chip. One per family, so the colour is never the only signal. */
-const MARKS: Record<MachineFamily, LucideIcon> = {
-  stopped: CircleStop,
-  failed: TriangleAlert,
-  waiting: RefreshCw,
-  memory: FoldVertical,
-  background: Bot,
-  breathing: Circle,
-};
-
-export const markOf = (family: MachineFamily): LucideIcon => MARKS[family];
 
 /**
  * Where each of the driver's kinds lands.

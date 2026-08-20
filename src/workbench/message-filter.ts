@@ -26,6 +26,7 @@ import {
   drawnRows,
   FAMILIES,
   machineIn,
+  OFF_BY_DEFAULT,
   type Audience,
   type MachineFamily,
 } from '@/workbench/machine-lines';
@@ -404,7 +405,7 @@ export const EVERYTHING: ReadonlySet<KindId> = new Set<KindId>();
  * not. One switch — the group at the top — hands him the whole machine side
  * back when he wants to know what it is doing.
  */
-export const QUIET: ReadonlySet<KindId> = new Set<KindId>([audienceKind('machine')]);
+export const QUIET: ReadonlySet<KindId> = new Set<KindId>(OFF_BY_DEFAULT.map(audienceKind));
 
 /**
  * The rows this conversation draws. Everything a sent-off agent produced goes

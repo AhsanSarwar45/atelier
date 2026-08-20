@@ -355,7 +355,7 @@ export type NoteRank = 'note' | 'detail';
 
 /**
  * Which of the six families a machine line is drawn as — its colour and its
- * mark. What lands in each is `src/workbench/machine-lines.tsx`; the name is
+ * mark. What lands in each is `src/workbench/machine-lines.ts`; the name is
  * here because the wire carries it (docs/agent-workbench.md §8.2.4).
  */
 export type MachineFamily = 'stopped' | 'failed' | 'waiting' | 'memory' | 'background' | 'breathing';
@@ -371,7 +371,7 @@ export type MachineFamily = 'stopped' | 'failed' | 'waiting' | 'memory' | 'backg
  *
  * `you` is a line he would act on, chase, or has just caused. `machine` is the
  * chat keeping its own books. Which one a kind is, is
- * `src/workbench/machine-lines.tsx`; the name is here because the wire carries
+ * `src/workbench/machine-lines.ts`; the name is here because the wire carries
  * it on the app's own asides.
  */
 export type Audience = 'you' | 'machine';

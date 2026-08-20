@@ -24,11 +24,10 @@ import {
   forWhom,
   KINDS_WITH_AN_AUDIENCE,
   KNOWN_KINDS,
-  lookOf,
-  markOf,
   saidBy,
   type MachineFamily,
 } from '@/workbench/machine-lines';
+import { lookOf, markOf } from '@/workbench/machine-look';
 import type { NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 

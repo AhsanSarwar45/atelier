@@ -24,7 +24,8 @@ import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
 import { diffLines } from '@/workbench/line-diff';
-import { lookOf, markOf, opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
+import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
+import { lookOf, markOf } from '@/workbench/machine-look';
 import { PictureGrid } from '@/workbench/picture-grid';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
 import { ReportCard } from '@/workbench/report-view';
@@ -423,7 +424,7 @@ export const ToolRow = memo(function ToolRow({
  * turn, an agent sent off, or a kind of message this app has no name for.
  *
  * It is a row of the same width and the same build as the commands around it,
- * in its family's colour (src/workbench/machine-lines.tsx) — which is what makes
+ * in its family's colour (src/workbench/machine-lines.ts) — which is what makes
  * an interrupt and a routine status ping tell themselves apart at a glance;
  * they used to be the same grey line (bw-jkh2, §8.2.4). It was tried as a small
  * chip centred on a hairline rule, which read as punctuation between the rows
