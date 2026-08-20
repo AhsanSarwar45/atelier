@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -4901,6 +4902,126 @@ def main():
           "project's own Claude settings, keeps the gates, settings, ceiling and "
           "voice that project already chose, and moves a gate wired where it "
           "would never be heard rather than doubling it")
+
+    # The board screen's own list of projects (bw-aisw.4). A project can have a
+    # perfect board and still not be on the screen, because the screen shows the
+    # projects a row names and nothing else — so joining keeps that row, matched
+    # on where the project lives rather than on what it is called.
+    SCREEN_LIST = """
+        CREATE TABLE projects (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+            last_opened TEXT NOT NULL, created_at TEXT NOT NULL, local_path TEXT,
+            archived_at TEXT, is_test INTEGER NOT NULL DEFAULT 0)
+    """
+
+    def listed_after_join(screen=True, already=None, twice=True):
+        """A throwaway project put through the real `join`, and the rows the
+        board screen's list holds for it afterwards.
+
+        `screen` builds a list of the shape the product builds — this stands in
+        for the app having been run once on this machine; `already` is a row put
+        there before joining. Joining runs twice by default, which is the whole
+        question: a row is kept, not added again.
+        """
+        tmp = tempfile.mkdtemp(prefix="board-join-listed-")
+        root = os.path.join(tmp, "project")
+        env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
+        # Read before HOME on this system, and set on plenty of desktops — left
+        # alone, every case here writes into the real list on this machine.
+        env.pop("XDG_DATA_HOME", None)
+        listing = os.path.join(tmp, ".local", "share", "kanban-ui", "settings.db")
+        try:
+            mine = os.path.join(tmp, "machinery")
+            os.makedirs(os.path.join(mine, "hooks"))
+            for near in ("join", "project.py",
+                         os.path.join("hooks", "landing-gate.py")):
+                shutil.copy(os.path.join(HOME, near), os.path.join(mine, near))
+            os.makedirs(root)
+            subprocess.run(["git", "init", "-q", "-b", "ours", "."], cwd=root,
+                           env=env, timeout=120)
+            with open(os.path.join(root, project.DECLARATION), "w") as fh:
+                fh.write('name = "on-screen"\nprefix = "os"\nlands_on = "ours"\n'
+                         'areas = ["tooling"]\nagent_merges = true\n')
+            if screen:
+                os.makedirs(os.path.dirname(listing))
+                db = sqlite3.connect(listing)
+                db.execute(SCREEN_LIST)
+                if already:
+                    # The case names the project's own path as "ROOT": it is a
+                    # throwaway directory, so only in here is it known.
+                    already = tuple(root if v == "ROOT" else v for v in already)
+                    db.execute("INSERT INTO projects (id, name, path, last_opened, "
+                               "created_at, archived_at, is_test) VALUES (?,?,?,?,?,?,?)",
+                               already)
+                db.commit()
+                db.close()
+            said = ""
+            for _ in range(2 if twice else 1):
+                run = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
+                                     text=True, capture_output=True, timeout=600, env=env)
+                said += run.stdout + run.stderr
+            check = subprocess.run(
+                [sys.executable, os.path.join(mine, "join"), "--check"],
+                text=True, capture_output=True, timeout=600, env=env)
+            rows = []
+            if os.path.exists(listing):
+                db = sqlite3.connect(listing)
+                rows = db.execute("SELECT name, path, archived_at, is_test "
+                                  "FROM projects ORDER BY name").fetchall()
+                db.close()
+            return (said, rows, check.stdout + check.stderr,
+                    os.path.exists(listing), root)
+        finally:
+            subprocess.run(["bd", "dolt", "stop"], cwd=root, env=env,
+                           capture_output=True, text=True, timeout=120)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    join_said, rows, list_check, there, root = listed_after_join()
+    assert len(rows) == 1, \
+        "joining a project twice left %d row(s) on the board screen's list — one " \
+        "join must put it there and the second must recognise it: join said %r" \
+        % (len(rows), join_said)
+    assert rows[0][1] == root and rows[0][2] is None and rows[0][3] == 0, \
+        "the row joining wrote does not show the project on the screen: %r " \
+        "(join said %r)" % (rows[0], join_said)
+    assert rows[0][0] == "On Screen", \
+        "a project nobody had named on the screen was listed as %r rather than " \
+        "the name a person writes: join said %r" % (rows[0][0], join_said)
+    assert "on no row of the board screen" not in list_check, \
+        "join wrote the row and then reported it missing: %r" % list_check
+
+    # A project somebody had already put on the screen, named their way, and
+    # since archived. Joining says it is a live project; it does not rename it.
+    join_said, rows, list_check, there, root = listed_after_join(
+        already=("kept-id", "The Racing One", "ROOT", "then", "then", "2026-01-01", 1))
+    assert len(rows) == 1 and rows[0][0] == "The Racing One", \
+        "joining renamed a project somebody had already put on the screen, or " \
+        "added a second row for it: %r (join said %r)" % (rows, join_said)
+    assert rows[0][2] is None and rows[0][3] == 0, \
+        "a project that joined is still archived or still marked a test on the " \
+        "board screen's list, so the screen does not show it: %r (join said %r)" \
+        % (rows[0], join_said)
+
+    # And the machine where the app has never run. Joining does everything else
+    # and says this one thing rather than building a list of its own: the shape
+    # of that list belongs to the product, which migrates it on the way up.
+    join_said, rows, list_check, there, root = listed_after_join(screen=False,
+                                                                twice=False)
+    assert not there, \
+        "joining built a project list of its own on a machine the board screen " \
+        "has never run on — the next release migrates that file and finds a " \
+        "shape nobody wrote: join said %r" % join_said
+    assert "has never been run here" in join_said, \
+        "joining a project on a machine with no board screen said nothing about " \
+        "the one part of joining that did not happen: %r" % join_said
+    assert "no list for" in list_check, \
+        "`join --check` is silent about a machine with no project list at all: " \
+        "%r" % list_check
+
+    print("ok: joining puts a project on the board screen's list and joining it "
+          "again keeps the one row, brings back a project that was archived or "
+          "marked a test without renaming it, and says so rather than building a "
+          "list of its own where the screen has never run")
 
     # Litter in the checkout a landing lands in. Left to git, any tracked change
     # there refuses the landing with "Working directory has staged changes" and

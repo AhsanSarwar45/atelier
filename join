@@ -32,13 +32,16 @@ sessions are not disturbed. They are one line of pointing and no logic.
     machinery/join --check                say where every registered project stands
 """
 import argparse
+import datetime
 import filecmp
 import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import uuid
 
 HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
@@ -50,6 +53,19 @@ FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
 # Claude Code reads these out of a project's own `.claude/`, so a project shares
 # them by pointing at this home rather than by holding a copy.
 SHARED = ("agents", "skills", "output-styles", "commands")
+# The board screen's own list of projects. A project whose board runs perfectly
+# is still not on the screen until a row here names where it lives, and typing
+# that path into the screen by hand is the last piece of joining anybody was
+# still doing themselves.
+#
+# The app names itself once, in the product's `identity.rs`, and asks the
+# operating system where a program of that name keeps its data. These two lines
+# are that answer written out for the systems this machinery runs on.
+APP = "kanban-ui"
+LIST = "settings.db"
+# How long to wait for the screen's own writer to let go of the list. The screen
+# may be running while a project joins, and sqlite lets one writer in at a time.
+LIST_WAIT = 10
 
 FORWARDER = '''#!/usr/bin/env python3
 """A forwarder, not the tool (cor-up1g).
@@ -522,6 +538,114 @@ def register(root, decl, say):
     say("listed %s as %s" % (root, decl.name))
 
 
+def project_list():
+    """Where the board screen keeps this machine's list of projects."""
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Application Support/com.beads.%s/%s"
+                                  % (APP, LIST))
+    room = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(room, APP, LIST)
+
+
+def called(decl):
+    """The name the screen shows a project it has never seen before.
+
+    Only ever used for a row that does not exist yet: a project already on the
+    screen is called whatever the person who put it there called it, and joining
+    is not the moment to rename somebody's project under them.
+    """
+    return " ".join(word.capitalize()
+                    for word in re.split(r"[-_\s]+", decl.name) if word) or decl.name
+
+
+def opened():
+    """The screen's project list, or None when there is none to open.
+
+    Never created here. The list's shape belongs to the product, which builds it
+    and migrates it on the way up; a second maker of the same tables is a second
+    thing to keep in step, and it would be wrong the first time the product adds
+    a column.
+    """
+    where = project_list()
+    if not os.path.exists(where):
+        return None
+    try:
+        return sqlite3.connect(where, timeout=LIST_WAIT)
+    except sqlite3.Error:
+        return None
+
+
+def listing(root, decl, say):
+    """Keep this project's row in the board screen's list, matched on where the
+    project lives.
+
+    The path is what the row is about, so it is what the row is found by: a
+    project renamed in its own declaration is the same project, and a second row
+    for the same directory is a duplicate the screen would show twice.
+    """
+    where = project_list()
+    db = opened()
+    if db is None:
+        say("unseen %s is not on the board screen: this machine has no %s, so the "
+            "screen has never been run here. Everything else about this project "
+            "is joined; run the app once and re-join to put it on the list."
+            % (root, where))
+        return
+    try:
+        row = db.execute("SELECT name, archived_at, is_test FROM projects "
+                         "WHERE path = ?", (root,)).fetchone()
+        if row is None:
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            db.execute("INSERT INTO projects (id, name, path, local_path, "
+                       "last_opened, created_at, is_test) VALUES (?,?,?,?,?,?,0)",
+                       (str(uuid.uuid4()), called(decl), root, None, now, now))
+            db.commit()
+            say("shown  %s is on the board screen's list as %s" % (root, called(decl)))
+            return
+        held, archived, test = row
+        if not archived and not test:
+            return
+        db.execute("UPDATE projects SET archived_at = NULL, is_test = 0 "
+                   "WHERE path = ?", (root,))
+        db.commit()
+        say("shown  %s was %s on the board screen's list and is back on it as %s"
+            % (root, "archived" if archived else "marked a test project", held))
+    except sqlite3.Error as why:
+        # A list that will not answer is worth one line and no more: every other
+        # part of joining has already happened, and the screen is not the board.
+        say("unseen %s could not be written into %s (%s), so this project is not "
+            "on the board screen" % (root, where, why))
+    finally:
+        db.close()
+
+
+def unlisted(root):
+    """Said when the board screen would not show this project."""
+    where = project_list()
+    db = opened()
+    if db is None:
+        return ["the board screen has never run on this machine (no %s), so there "
+                "is no list for %s to be on" % (where, root)]
+    try:
+        row = db.execute("SELECT archived_at, is_test FROM projects WHERE path = ?",
+                         (root,)).fetchone()
+    except sqlite3.Error as why:
+        return ["the board screen's list at %s could not be read (%s)" % (where, why)]
+    finally:
+        db.close()
+    if row is None:
+        return ["%s is on no row of the board screen's list, so its cards are not "
+                "on the screen however well its board runs; `machinery/join %s` "
+                "puts it there" % (root, root)]
+    if row[0]:
+        return ["%s is archived on the board screen's list, so the screen does not "
+                "show it; `machinery/join %s` brings it back" % (root, root)]
+    if row[1]:
+        return ["%s is marked a test project on the board screen's list, so the "
+                "screen hides it; `machinery/join %s` unmarks it" % (root, root)]
+    return []
+
+
 def standing(root):
     """Every reason this project is not yet running the machinery."""
     said = []
@@ -550,6 +674,7 @@ def standing(root):
                         "not in `protected`" % (decl.lands_on, decl.lands_on))
     if decl.name not in project.registry():
         said.append("not in the register (%s)" % project.REGISTRY)
+    said += unlisted(root)
     code, role = git(["config", "--get", "beads.role"], root)
     if role != "maintainer":
         said.append("git config beads.role is %r — a fork infers a contributor and "
@@ -802,6 +927,7 @@ def main():
     # asks the board something, and asking one that is mid-move answers for the
     # copy that is about to stop existing.
     wire(root, said.append)
+    listing(root, decl, said.append)
     states(root, said.append)
     # After the states and never before them: these are the cards the board
     # refused for want of the word it has just been told.
