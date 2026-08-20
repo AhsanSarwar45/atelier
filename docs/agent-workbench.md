@@ -1462,6 +1462,58 @@ The workbench follows it — a single module-level store owns the one global
 `EventSource` and the per-session state that the tray, the strip and the board
 cards all read. One connection for the whole app, not one per component.
 
+### 8.7 The two token numbers
+
+The gauge on a chat's status line is a way in, not a label. Clicking it opens
+`src/workbench/token-view.tsx`, which holds the only two token figures a chat
+has and says in words which of them resets.
+
+**Now — what fills the window.** Only the kit can answer this. The record on
+disk holds what each turn COST, never what the next prompt will be MADE OF: the
+system prompt, the tool schemas, the skills and the memory files are never
+written into it. So `ClaudeDriver.windowNow()` asks the SDK's
+`Query.getContextUsage()` down the channel that is already open — measured
+2026-08-20 at ~1.4s and **0 tokens**, no turn taken — and
+`src/workbench/window-now.ts` normalises the answer for the browser. Three
+kinds of band come back and they are kept apart: the filled ones (which sum
+exactly to `totalTokens`), the room ("Free space", "Autocompact buffer"), and
+the deferred tools, which are NOT in the total because they cost nothing until
+something calls them. `messageBreakdown` is the kit's own walk of the messages
+and does **not** reconcile with the conversation band it sits under — 6,587
+against a 4,504 band on a fresh chat — so `Inside.total` is the parts added and
+the panel says so on the page rather than quietly implying agreement.
+
+A chat this app is not driving cannot be asked at all, and is told so:
+`NOT_OURS_TO_ASK` is printed verbatim rather than a figure worked out here from
+a guess (decision 13).
+
+**Ever — what the task has spent.** `src/workbench/token-picture.ts`, over the
+chat's own record file, whole. Two traps, both measured on record `bde56edd`:
+
+1. One answer is written as SEVERAL lines — thinking, words, each tool call —
+   and every one of them repeats that answer's usage under the same
+   `message.id`. Summing lines billed 722,555,101 against a true 531,313,155,
+   36% high and worse the harder the agent works. So usage is deduplicated by
+   id (`turnsIn`) — while tool calls are counted on EVERY line, because the
+   blocks are divided between them rather than repeated, and deduplicating both
+   lost two calls in five.
+2. `getSessionMessages()` hands back only the turns since the last compaction —
+   37 turns of a record holding 2,313. `allLines()` in
+   `workbench/src/record-tail.ts` reads the file whole instead (124ms on 30MB),
+   which is the only source that spans every forgetting.
+
+Helpers are added in from their own files (`helpersOf`), so work sent away is
+counted rather than lost with the agent that did it.
+
+**One route, both halves.** `GET /api/workbench/tokens?session=<id>` returns
+`TokenPicture`: `window` with `windowNote`, `spent` with `spentNote`. Either
+half may be null, and when it is, the note is a sentence a manager can read —
+the panel prints it rather than inventing a reason. Read once on open: neither
+number moves fast enough to follow, and the click pays for both.
+
+No price, ever: tokens are never converted into money anywhere in this app
+(decision 12, §8.4f).
+
 ---
 
 ## 9. Files
@@ -1490,7 +1542,7 @@ change and it gets said out loud, not absorbed.
 
 `workbench/` (the sidecar), `server/src/routes/workbench.rs` (proxy +
 supervisor), `src/workbench/**` (protocol types, store, chat UI, tray, strip,
-search, spend, plan usage, report viewer), `tests/e2e/workbench.spec.ts`, this
+search, spend, plan usage, the token picture, report viewer), `tests/e2e/workbench.spec.ts`, this
 document.
 
 ### 9.3 Declared shortcuts
