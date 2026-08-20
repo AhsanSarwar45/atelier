@@ -213,6 +213,11 @@ export const opensOn = (row: MachineRow): boolean =>
  * goes — "1 of 5", then "2 of 5" — so folding on the sentence would fold
  * nothing at all and leave the run exactly as long as it was.
  *
+ * The family has to agree as well, because the app's own asides all arrive
+ * under the one kind and carry their family beside it: two of them in a row
+ * meant for different families would otherwise fold, and the chip would wear
+ * the first one's colour over the last one's words.
+ *
  * The quiet lines go before the folding rather than after it, because a status
  * ping landing in the middle of a run of retries would otherwise cut the run in
  * two and draw the same thing twice with nothing between them.
@@ -227,7 +232,12 @@ export function drawnRows(items: TranscriptItem[], everything: boolean): DrawnRo
     }
     if (line.rank === 'detail' && !everything) continue;
     const last = rows[rows.length - 1];
-    if (last?.row === 'machine' && last.kind === line.kind && last.rank === line.rank) {
+    if (
+      last?.row === 'machine' &&
+      last.kind === line.kind &&
+      last.rank === line.rank &&
+      last.family === line.family
+    ) {
       last.lines.push({ text: line.text, body: line.body });
       continue;
     }

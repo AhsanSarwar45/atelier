@@ -178,6 +178,28 @@ describe('an app aside is a chip too', () => {
     expect(rows[0]).toMatchObject({ row: 'machine', family: 'background' });
   });
 
+  it('does not fold two asides meant for different families', () => {
+    // Every aside arrives under the one kind and carries its family beside it,
+    // so kind and loudness alone would merge these and draw the second one's
+    // words in the first one's colour.
+    const rows = drawnRows([aside('one', 'memory'), aside('two', 'background')], false);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => (r.row === 'machine' ? r.family : 'other'))).toEqual(['memory', 'background']);
+  });
+
+  it('keeps every chip wearing the colour of the words it shows', () => {
+    const rows = drawnRows(
+      [aside('one', 'memory'), aside('two', 'background'), aside('three', 'background')],
+      false,
+    );
+    for (const row of rows) {
+      if (row.row !== 'machine') continue;
+      const shown = row.lines[row.lines.length - 1]!.text;
+      const meant = { one: 'memory', two: 'background', three: 'background' }[shown];
+      expect(row.family).toBe(meant);
+    }
+  });
+
   it('folds with the aside beside it, and not with a note', () => {
     const rows = drawnRows(
       [aside('one', 'memory'), aside('two', 'memory'), note('system/api_retry', 'Retrying (1 of 5)')],
@@ -204,6 +226,17 @@ async function build(content: string[]): Promise<string> {
   return out.css;
 }
 
+/** Every colour a family names, and so every colour a skin owes. */
+const TOKENS = ['--warning', '--danger', '--status-review', '--epic', '--info', '--text-faint'];
+
+/** Each palette in a stylesheet: its selector, and what it sets, brace to brace. */
+function blocksOf(css: string, opener: RegExp): { name: string; body: string }[] {
+  return Array.from(css.matchAll(opener)).map((m) => {
+    const from = m.index! + m[0].length;
+    return { name: m[0].slice(0, -1).trim(), body: css.slice(from, css.indexOf('}', from)) };
+  });
+}
+
 describe('the colours survive the build', () => {
   it('builds every class every family asks for', async () => {
     // Reasoning about the source is exactly what missed the board's own state
@@ -220,14 +253,24 @@ describe('the colours survive the build', () => {
   }, 60_000);
 
   it('takes its colours from tokens every skin defines', () => {
-    // Red must be red in all eleven skins, which it is only if the family asks
-    // for a token the skins set rather than a colour of its own.
-    const css = readFileSync(resolve(__dirname, '../../app/globals.css'), 'utf8');
-    const skins = css.split(/\[data-theme=|\.dark\b|:root/).length - 1;
-    expect(skins).toBeGreaterThan(1);
-    for (const token of ['--warning', '--danger', '--status-review', '--epic', '--info', '--text-faint']) {
-      expect(css).toContain(token);
-    }
+    // Red must be red in every skin, which it is only if the family asks for a
+    // token the skin itself sets rather than a colour of its own.
+    //
+    // Read out of the file the named skins live in, and block by block: the
+    // earlier version of this read only globals.css, whose own two blocks
+    // satisfied it whatever the named skins did — it would have stayed green
+    // with themes.css deleted (bw-jkh2.9).
+    const base = readFileSync(resolve(__dirname, '../../app/globals.css'), 'utf8');
+    const skins = blocksOf(readFileSync(resolve(__dirname, '../../app/themes.css'), 'utf8'),
+                           /html\[data-theme="[a-z-]+"\]\s*\{/g);
+    // A guard on the reading: a rename over there that matched nothing would
+    // otherwise leave this passing on an empty list.
+    expect(skins.length).toBeGreaterThan(5);
+    // The colours a skin does not touch fall through to the ones underneath, so
+    // the base owes all six and no skin may set only some of them.
+    expect(TOKENS.filter((t) => !base.includes(`${t}:`))).toEqual([]);
+    const short = skins.filter((b) => TOKENS.some((t) => !b.body.includes(`${t}:`))).map((b) => b.name);
+    expect(short).toEqual([]);
   });
 });
 
