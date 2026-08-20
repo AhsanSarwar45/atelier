@@ -70,6 +70,24 @@ export function toolCallsOf(message: unknown): PastToolCall[] {
     }));
 }
 
+/**
+ * Every tool call in a whole record, handed to whatever makes the links.
+ *
+ * The live watcher is given each call as it happens; a chat this app never
+ * watched has none of those, only the record. This is how the two are made the
+ * same call for the same rules, and it is one function rather than a loop
+ * written twice so that a chat read in cannot quietly stop bringing its cards
+ * and its reports while the live path keeps working (bw-khe.10).
+ */
+export function linkPast(
+  messages: { message?: unknown }[],
+  observe: (name: string, input: Record<string, unknown>) => void,
+): void {
+  for (const m of messages) {
+    for (const call of toolCallsOf(m.message)) observe(call.name, call.input);
+  }
+}
+
 /** One recorded message, as much of it as reading a past chat needs. */
 interface RecordedMessage {
   type?: string;

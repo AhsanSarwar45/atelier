@@ -14,10 +14,10 @@ import {
   cut,
   diffOf,
   IMPORTED_MESSAGES,
+  linkPast,
   type PastEntry,
   pastTranscript,
   settledUpTo,
-  toolCallsOf,
   trimInput,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
@@ -408,9 +408,7 @@ export class Sessions {
     // What it did, read before what it said, so the chat's cards and reports are
     // already on the line by the time the first message is drawn.
     const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
-    for (const m of messages) {
-      for (const call of toolCallsOf(m.message)) links.observe(call.name, call.input);
-    }
+    linkPast(messages, (name, input) => links.observe(name, input));
 
     const shown = past.slice(-IMPORTED_MESSAGES);
     if (past.length > shown.length) {
