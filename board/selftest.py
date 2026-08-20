@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 
 # A git hook exports these as absolute paths to the repository being committed
 # to, and every git command run below inherits them — so the throwaway checkouts
@@ -4663,10 +4664,16 @@ def main():
             said = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
                                   text=True, capture_output=True, timeout=120, env=env)
             gitdir = g("rev-parse", "--absolute-git-dir").stdout.strip()
-            wrote = [w for w in
-                     (os.path.join(root, ".beads", "hooks", "reference-transaction"),
-                      os.path.join(gitdir, ".beads", "hooks", "reference-transaction"))
-                     if os.path.exists(w)]
+            # Where this project's git looks NOW, which the join itself may have
+            # changed: making the board points the hooks path at the board's own
+            # directory, and it writes that path in full — so the two places a
+            # relative path sends git become one place both ways of arriving
+            # resolve to.
+            at = g("config", "--get", "core.hooksPath").stdout.strip()
+            looks = [at] if os.path.isabs(at) else [os.path.join(root, at),
+                                                    os.path.join(gitdir, at)]
+            wrote = [w for w in (os.path.join(where, "reference-transaction")
+                                 for where in looks) if os.path.exists(w)]
             if wipe:
                 # The board's own tooling rebuilding its hooks directory, which
                 # is how a joined checkout loses the guard without anybody
@@ -4679,7 +4686,7 @@ def main():
                 [sys.executable, os.path.join(mine, "join"), "--check"],
                 text=True, capture_output=True, timeout=120, env=env)
             return (said.stdout + said.stderr, wrote, hand.stdout + hand.stderr,
-                    moved, check.stdout + check.stderr)
+                    moved, check.stdout + check.stderr, len(looks))
         finally:
             # Joining gives a project a board on a database server, so this one
             # leaves a server running behind it unless it is put down here.
@@ -4687,19 +4694,20 @@ def main():
                            capture_output=True, text=True, timeout=120)
             shutil.rmtree(tmp, ignore_errors=True)
 
-    said, wrote, hand, moved, check = joined()
-    assert len(wrote) == 2, \
-        "joining a project left the guard at %s — git looks in the top of the " \
-        "working tree for an ordinary command and in the git directory for " \
-        "anything arriving over a push, and a guard in only one of them is a " \
-        "guard a push walks past. join said %r" % (wrote or "neither place", said)
+    said, wrote, hand, moved, check, looks = joined()
+    assert len(wrote) == looks, \
+        "joining a project left the guard at %s, and its git looks in %d place(s) " \
+        "— the top of the working tree for an ordinary command and the git " \
+        "directory for anything arriving over a push, unless the path it holds " \
+        "is a whole one. A guard in only some of them is a guard a push walks " \
+        "past. join said %r" % (wrote or "neither place", looks, said)
     assert not moved and "landing gate" in hand, \
         "a project that has just been joined let its landing line be moved by " \
         "hand: %r (join said %r)" % (hand, said)
     assert "nothing guards the landing line" not in check, \
         "join wrote the guard and then reported it missing: %r" % check
 
-    said, wrote, hand, moved, check = joined(wipe=True)
+    said, wrote, hand, moved, check, _ = joined(wipe=True)
     assert moved, \
         "the landing line held still with no guard in the working tree's hooks " \
         "directory, so the case above proves nothing about the guard: %r" % hand
@@ -4707,7 +4715,43 @@ def main():
         "a checkout whose board tooling rebuilt its hooks directory runs " \
         "unguarded and `join --check` says nothing about it: %r" % check
 
-    print("ok: joining a project leaves the landing guard in both places git "
+    # And the two-place half on its own, which a whole run cannot stage any more:
+    # making the board writes the hooks path out in full, so only a checkout
+    # whose path is still the relative spelling `bd hooks install` used to write
+    # sends git to the working tree for an ordinary command and to the git
+    # directory for anything arriving over a push (bw-7e8.5).
+    def guard_over_a_relative_path():
+        """Where the guard lands in a checkout whose hooks path is relative."""
+        tmp = tempfile.mkdtemp(prefix="board-guard-relative-")
+        root = os.path.join(tmp, "project")
+        try:
+            os.makedirs(root)
+            env = dict(os.environ, HOME=tmp)
+
+            def g(*args):
+                return subprocess.run(["git"] + list(args), cwd=root, text=True,
+                                      capture_output=True, timeout=120, env=env)
+
+            g("init", "-q", "-b", "ours", ".")
+            g("config", "core.hooksPath", ".beads/hooks")
+            tool("join").guard(root, lambda line: None)
+            gitdir = g("rev-parse", "--absolute-git-dir").stdout.strip()
+            return [w for w in
+                    (os.path.join(root, ".beads", "hooks", "reference-transaction"),
+                     os.path.join(gitdir, ".beads", "hooks", "reference-transaction"))
+                    if os.path.exists(w)]
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    both = guard_over_a_relative_path()
+    assert len(both) == 2, \
+        "a checkout whose git holds a relative hooks path was guarded at %s: git " \
+        "resolves that path against the top of the working tree for an ordinary " \
+        "command and against the git directory for anything arriving over a " \
+        "push, and a guard in only one of them is a guard a push walks past" \
+        % (both or "neither place")
+
+    print("ok: joining a project leaves the landing guard everywhere its own git "
           "looks for a hook, a joined checkout turns away a hand-moved pointer "
           "without anything wiring it by hand, and a checkout that lost the "
           "guard to its own board tooling is told so")
@@ -4794,14 +4838,20 @@ def main():
             # is a file `git status` can see, and the case is not vacuous.
             guarded = os.path.exists(os.path.join(root, ".beads", "hooks",
                                                   "reference-transaction"))
+            # And whether a second copy was left where git looks BEFORE there is
+            # a board — orphaned the moment beads points the hooks path at the
+            # board's own directory, and only harmless while beads happens to
+            # carry the old directory across (bw-aisw.11).
+            stray = os.path.exists(os.path.join(root, ".git", "hooks",
+                                                "reference-transaction"))
             return (said.stdout + said.stderr, mode, status,
                     int(count[-1]) if count and count[-1].isdigit() else None,
-                    loose.stdout, guarded)
+                    loose.stdout, guarded, stray)
         finally:
             bd("dolt", "stop")
             shutil.rmtree(tmp, ignore_errors=True)
 
-    join_said, runs_as, server_says, cards_after, _, _ = board_after_join()
+    join_said, runs_as, server_says, cards_after, _, guarded, stray = board_after_join()
     assert runs_as == "server", \
         "joining a project with no board at all left it running one only a " \
         "command line can open (%r); join said %r" % (runs_as, join_said)
@@ -4809,7 +4859,16 @@ def main():
         "the board a joining project was given says it is on a server and no " \
         "server answers for it: %r (join said %r)" % (server_says, join_said)
 
-    join_said, runs_as, server_says, cards_after, loose, guarded = \
+    # A project with no board yet keeps its hooks where git leaves them, and it
+    # is making the board that moves them: written first, the landing guard goes
+    # to the one directory git is about to stop reading, and stays green only
+    # for as long as beads keeps carrying the old directory across (bw-aisw.11).
+    assert guarded and not stray, \
+        "joining a project that had no board left the landing guard in the wrong " \
+        "place: the board's own hooks directory holds it %r, git's default still " \
+        "holds a copy %r. join said %r" % (guarded, stray, join_said)
+
+    join_said, runs_as, server_says, cards_after, loose, guarded, _ = \
         board_after_join(cards_first=3)
     assert runs_as == "server" and "Dolt server: running" in server_says, \
         "a board beads was running itself was not moved onto a server: mode %r, " \
@@ -4837,7 +4896,7 @@ def main():
     # file, which is every project joined before this command learned any of this:
     # beads commits it at `bd init`, so an exclude line has no say over it and the
     # port rewritten on every server start shows up as a change forever (bw-aisw.9).
-    join_said, runs_as, _, _, loose, _ = board_after_join(cards_first=1, tracked=True)
+    join_said, runs_as, _, _, loose, _, _ = board_after_join(cards_first=1, tracked=True)
     left = [line for line in loose.splitlines()
             if "dolt-server-config.yaml" in line]
     assert runs_as == "server" and not left, \
@@ -5160,7 +5219,7 @@ def main():
     # it and edit it. It writes the copy now — with what a directory can answer
     # for itself answered — and stops on the one line it cannot answer, because a
     # prefix goes into every card id the board will ever issue.
-    def declared_by_join(fill=None):
+    def declared_by_join(fill=None, called="brand-new-thing"):
         """A brand-new directory put through the real `join`: what it exits, what
         it wrote, and whether it went on to build a board.
 
@@ -5168,9 +5227,12 @@ def main():
         It answers the OTHER line at the same time — who lands work here — the
         way a person filling the file in front of them would, which is the whole
         point of asking both in one refusal.
+
+        `called` names the directory itself, because what a person calls their
+        own folder is not ours to choose and it is written into the declaration.
         """
         tmp = tempfile.mkdtemp(prefix="board-join-declared-")
-        root = os.path.join(tmp, "brand-new-thing")
+        root = os.path.join(tmp, called)
         env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
         env.pop("XDG_DATA_HOME", None)
         try:
@@ -5243,6 +5305,51 @@ def main():
     assert again_code == 0 and "still missing" not in again_said, \
         "a project whose declaration was answered in full is still not joined " \
         "after the one run that follows (exit %r): %r" % (again_code, again_said)
+
+    # The other line joining writes out of a name nobody chose: the register every
+    # tool reads on every command, which holds the project's path.
+    def registered(path):
+        """What the register reads back as after a project at `path` joins it."""
+        tmp = tempfile.mkdtemp(prefix="board-register-odd-")
+        try:
+            joining = tool("join")
+            was, joining.project.REGISTRY = joining.project.REGISTRY, \
+                os.path.join(tmp, "projects.toml")
+            with open(joining.project.REGISTRY, "w") as fh:
+                fh.write('[home]\nreports = "%s"\n' % tmp)
+            try:
+                joining.register(path, project.Declaration(path, {"name": "odd"}),
+                                 lambda line: None)
+                text = open(joining.project.REGISTRY).read()
+            finally:
+                joining.project.REGISTRY = was
+            try:
+                return tomllib.loads(text).get("projects", {}), ""
+            except tomllib.TOMLDecodeError as why:
+                return {}, str(why)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    odd = '/tmp/a folder called "this"/project'
+    rows, broke = registered(odd)
+    assert rows.get("odd") == odd, \
+        "registering a project whose path holds a quote left the register reading " \
+        "back as %r (%s) — every board command reads this file, so one line of it " \
+        "written as if nothing could be in a path takes every project down at once" \
+        % (rows, broke or "it parsed")
+
+    # A directory's own name is not ours to choose, and one holding a quote wrote
+    # a declaration that stops at that quote — read back by the very next line of
+    # the same run, and by every tool afterwards (bw-aisw.12).
+    _, odd_said, wrote, _, _, _ = declared_by_join(called='odd "name" here')
+    try:
+        read, broke = tomllib.loads(wrote), ""
+    except tomllib.TOMLDecodeError as why:
+        read, broke = None, str(why)
+    assert read and read.get("name") == 'odd "name" here', \
+        "joining a directory whose own name holds a quote wrote it a declaration " \
+        "that does not read back as that name (%r, %s), and the next line of the " \
+        "same run reads this file: %r" % (read, broke or "it parsed", odd_said)
 
     print("ok: joining a directory that declares nothing writes it a declaration "
           "from the shape kept beside the tools, with its own name in it, asks "

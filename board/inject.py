@@ -576,6 +576,21 @@ FAULTS = [
     ("a board move that undoes itself leaves the server's settings file behind",
      JOIN,
      lambda s: s.replace("    putback(os.path.join(beads, CONFIG), settled)\n", "")),
+    # And the two the second reader found (bw-aisw.11, .12): the landing guard
+    # written before the board that decides where it goes, and a project's own
+    # name written into its declaration as if nothing could be in it.
+    ("the landing guard is written before the board that moves where it goes",
+     JOIN,
+     lambda s: s.replace("    install(said.append)\n    if a.forward:",
+                         "    install(said.append)\n    guard(root, said.append)"
+                         "\n    if a.forward:")
+                .replace("    guard(root, said.append)\n    # After the board is "
+                         "where it is going to be", "    # After the board is "
+                         "where it is going to be")),
+    ("a project's own path is written into the register unquoted", JOIN,
+     lambda s: s.replace("quoted(root))", "'\"%s\"' % root)")),
+    ("a project's own name is written into its declaration unquoted", JOIN,
+     lambda s: s.replace("'name = ' + quoted(base)", "'name = \"%s\"' % base")),
     ("joining a project never tells its board about the review states", JOIN,
      lambda s: s.replace("    states(root, said.append)\n", "")),
     ("joining takes away the states a board already had of its own", JOIN,
