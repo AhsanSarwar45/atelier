@@ -58,6 +58,7 @@ import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { SpendView } from '@/workbench/spend-view';
 import { TranscriptRow, WorkingLine } from '@/workbench/transcript-rows';
+import { PlanChip, usePlanUsage, UsageView } from '@/workbench/usage-view';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts } from '@/workbench/use-session';
 
 /** Where the "show me everything" switch is remembered between visits. */
@@ -344,7 +345,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The chat's own column on the right, remembered between visits. */
   const [rightOpen, flipRight] = useRightRail();
   /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
-  const [showing, setShowing] = useState<'search' | 'spend' | null>(null);
+  const [showing, setShowing] = useState<'search' | 'spend' | 'usage' | null>(null);
+  /** The ACCOUNT'S allowance — the same figure in every chat, not this one's (bw-malh). */
+  const plan = usePlanUsage();
   /**
    * Whether the list also holds the chats an agent started for another chat.
    * Off unless he says otherwise, and remembered, because it is a way of
@@ -583,6 +586,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
       {showing === 'spend' && <SpendView onClose={() => setShowing(null)} />}
+      {showing === 'usage' && <UsageView onClose={() => setShowing(null)} />}
 
       <div
         data-testid="chat-rail"
@@ -693,6 +697,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {facts.folder}
           </Badge>
         )}
+        {/* The one figure on this line that is not about THIS chat: how much
+            of the account's own five-hour allowance is gone, and when it comes
+            back. It stays on the line the cost and context chips left for the
+            rail (bw-7ks.22.9), because it is what actually stops the work and
+            a reader must see it without opening anything (bw-malh). */}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <PlanChip usage={plan} onOpen={() => setShowing('usage')} />
+        </div>
       </div>
 
       {view.todos.length > 0 && (

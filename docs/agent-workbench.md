@@ -1107,6 +1107,49 @@ the parent. So the capability matrix row that said Codex has none is stale, and
 is corrected in §3.3. Where a brand cannot do one of the three tiers, that
 control is hidden and nothing is faked (decision 13).
 
+#### 8.2.8 What the plan has left (bw-malh)
+
+Constraint: the chat's own line says how much of the account's five-hour window
+is gone and when it comes back, and clicking it opens the whole usage picture —
+the week, the week scoped to a model, credits, and what the spending has gone
+on.
+
+Why: the line already carried this turn's dollars and the conversation's room,
+and neither is the thing that actually stops the work. What stops it is the plan
+window, and until now it could only be read by leaving the app and typing
+`/usage` in a terminal — so the first the reader knew of it was an agent
+refusing to run.
+
+Three decisions worth keeping:
+
+**Account-wide, so it is read once and served whole.** Every chat on the machine
+spends the same allowance. The figure is therefore a sidecar endpoint —
+`GET /api/workbench/usage`, cached just under a minute — and not an event on any
+session's stream: a per-session event would write account state into every
+chat's transcript and let two chats disagree about one number. The browser polls
+it once a minute for the whole window, however many chats are open.
+
+**The kit is asked, and nothing is derived.** The five-hour and weekly figures
+are the server's, reached through the Claude SDK's own `/usage` channel. A live
+chat answers it down a channel already open, for no tokens and no turn. When no
+chat is running, the sidecar starts a session of its own with nothing to say,
+asks it, and shuts it down again after four idle minutes — measured 2026-08-20:
+1.9s cold, 0 tokens. Nothing here counts tokens or adds up dollars to guess at a
+percentage; a guessed allowance is worse than none.
+
+**A window nobody has draws nothing.** On an API key, on Bedrock, on Vertex,
+`rate_limits_available` is false and the chip is absent — because a chip reading
+0% there says "nothing spent", which is the opposite of "this account has no
+plan window at all". The reading is in `src/workbench/plan-usage.ts`, shared by
+the sidecar that normalises the kit's answer and the browser that draws it, and
+tested against a real captured answer rather than a hand-written one: the answer
+carries more than its published type admits, including windows under codenames
+no plan of ours has.
+
+Colour is a floor, never a ceiling: the server ranks each window itself and its
+ranking is believed, but 80% and 95% raise the ranking anyway, so a build that
+sends no severity cannot draw a calm chip at 99%.
+
 ### 8.3 The board tab
 
 Unchanged, plus one thing: decision 11 — a card being worked on shows its live
@@ -1209,7 +1252,8 @@ change and it gets said out loud, not absorbed.
 
 `workbench/` (the sidecar), `server/src/routes/workbench.rs` (proxy +
 supervisor), `src/workbench/**` (protocol types, store, chat UI, tray, strip,
-search, spend, report viewer), `tests/e2e/workbench.spec.ts`, this document.
+search, spend, plan usage, report viewer), `tests/e2e/workbench.spec.ts`, this
+document.
 
 ### 9.3 Declared shortcuts
 
