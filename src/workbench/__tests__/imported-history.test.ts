@@ -200,6 +200,17 @@ describe('a picture in a message comes back with it', () => {
    * still that table and that snippet: only the lines a marker stood on may be
    * touched by lifting one out (bw-uu9x.7).
    */
+  it('closes a sentence up once where two markers were pasted back to back', () => {
+    const said = saidWithPictures({
+      content: [
+        { type: 'text', text: 'compare [Image #1][Image #2] these' },
+        pasted(),
+        pasted(PIXEL, 'image/jpeg'),
+      ],
+    });
+    expect(said.text).toBe('compare these');
+  });
+
   it('leaves the spacing of every line the marker was not on alone', () => {
     const said = saidWithPictures({
       content: [

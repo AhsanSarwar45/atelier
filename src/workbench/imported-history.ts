@@ -170,11 +170,16 @@ function measured(data: unknown): string {
 }
 
 /**
- * The marker the harness writes where a picture was pasted, with whatever
- * spacing sits either side of it — the space belongs to the marker, and goes
- * with it.
+ * A run of markers the harness wrote where pictures were pasted, with whatever
+ * spacing sits around them — the space belongs to the markers, and goes with
+ * them.
+ *
+ * A run rather than one at a time, because pasting two pictures in a row writes
+ * `[Image #1][Image #2]` with nothing between: lifted separately they leave a
+ * space each, side by side, and the sentence closes up on a double space
+ * (bw-uu9x.9).
  */
-const PICTURE_MARKER = /[^\S\n]*\[Image #\d+\][^\S\n]*/g;
+const PICTURE_MARKER = /[^\S\n]*(?:\[Image #\d+\][^\S\n]*)+/g;
 
 /**
  * The words with the harness's picture markers lifted out of them.
