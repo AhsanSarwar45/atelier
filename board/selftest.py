@@ -4786,6 +4786,122 @@ def main():
           "and moves a board beads was running itself onto a server with every "
           "card still on it")
 
+    # The session gates, which every project runs and corsetta was found running
+    # none of (bw-aisw.3). A project's `.claude/settings.json` is its own — five
+    # of corsetta's gates are its own work, and it has settings there that have
+    # nothing to do with this machinery — so joining MERGES into it: it adds what
+    # this machinery's table names, moves a gate wired where it would never be
+    # heard, and touches nothing else.
+    joining = tool("join")
+
+    def wired_after_join(already=None):
+        """A throwaway project put through the real `join`, and the Claude
+        settings it has afterwards, read back as text and as an object.
+
+        `already` is the settings file the project carries before it joins, or
+        None for a project that has none at all.
+        """
+        tmp = tempfile.mkdtemp(prefix="board-join-wired-")
+        root = os.path.join(tmp, "project")
+        env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
+        try:
+            mine = os.path.join(tmp, "machinery")
+            os.makedirs(os.path.join(mine, "hooks"))
+            for near in ("join", "project.py",
+                         os.path.join("hooks", "landing-gate.py")):
+                shutil.copy(os.path.join(HOME, near), os.path.join(mine, near))
+            # The one gate that is not this machinery's lives with the shared
+            # report tools, and a machine that has not said where those are
+            # cannot wire it — so this one says.
+            with open(os.path.join(mine, "projects.toml"), "w") as fh:
+                fh.write('[projects]\n\n[home]\nreports = "%s"\n'
+                         % os.path.join(tmp, "reporting"))
+            os.makedirs(root)
+            subprocess.run(["git", "init", "-q", "-b", "ours", "."], cwd=root,
+                           env=env, timeout=120)
+            with open(os.path.join(root, project.DECLARATION), "w") as fh:
+                fh.write('name = "wiring"\nprefix = "wr"\nlands_on = "ours"\n'
+                         'areas = ["tooling"]\nagent_merges = true\n')
+            if already is not None:
+                os.makedirs(os.path.join(root, ".claude"))
+                with open(os.path.join(root, ".claude", "settings.json"), "w") as fh:
+                    json.dump(already, fh, indent=2)
+            said = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
+                                  text=True, capture_output=True, timeout=600, env=env)
+            where = os.path.join(root, ".claude", "settings.json")
+            text = open(where).read() if os.path.exists(where) else ""
+            check = subprocess.run(
+                [sys.executable, os.path.join(mine, "join"), "--check"],
+                text=True, capture_output=True, timeout=600, env=env)
+            return (said.stdout + said.stderr, text,
+                    json.loads(text) if text else None,
+                    check.stdout + check.stderr)
+        finally:
+            subprocess.run(["bd", "dolt", "stop"], cwd=root, env=env,
+                           capture_output=True, text=True, timeout=120)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    join_said, wired_text, wired, wired_check = wired_after_join()
+    absent = [name for _, _, names in joining.WIRING for name in names
+              if name not in wired_text]
+    assert not absent, \
+        "a project that joined runs none of %s, so nothing refuses the thing " \
+        "each of them is there to refuse: join said %r" % (", ".join(absent), join_said)
+    assert wired.get("autoCompactWindow") == joining.CEILING_MAX, \
+        "a joined project sets its history ceiling to %r, so a session there " \
+        "carries the whole day into every request: join said %r" \
+        % (wired.get("autoCompactWindow"), join_said)
+    assert wired.get("outputStyle") == joining.SPOKEN, \
+        "a joined project that had said nothing about how it speaks was left " \
+        "speaking %r: join said %r" % (wired.get("outputStyle"), join_said)
+    assert "is wired into no event" not in wired_check, \
+        "join wrote the gates and then reported them missing: %r" % wired_check
+
+    # A project that already has settings: its own gate, its own ceiling, its own
+    # voice, and one of this machinery's wired where it would never be heard.
+    ours = "$CLAUDE_PROJECT_DIR/scripts/hooks/no-main-tree-cargo.sh"
+    join_said, wired_text, wired, wired_check = wired_after_join(already={
+        "outputStyle": "explanatory",
+        "autoCompactWindow": 120000,
+        "permissions": {"deny": ["Read(./.env)"]},
+        "hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": ours}]},
+            # Heard on the Agent tool alone, which leaves a lead started by
+            # naming its skill refused nothing (mch-1p2.3).
+            {"matcher": "Agent", "hooks": [
+                {"type": "command", "command": "/gone/hooks/agent-fence.py"}]},
+        ]}})
+    assert ours in wired_text, \
+        "joining a project threw away a gate of its own (%s): join said %r" \
+        % (ours, join_said)
+    assert wired.get("permissions") == {"deny": ["Read(./.env)"]}, \
+        "joining a project rewrote a setting that has nothing to do with this " \
+        "machinery: permissions are now %r (join said %r)" \
+        % (wired.get("permissions"), join_said)
+    assert wired.get("autoCompactWindow") == 120000, \
+        "joining raised a project's own history ceiling to %r — a ceiling below " \
+        "this machinery's is the project being stricter than asked, not wrong " \
+        "(join said %r)" % (wired.get("autoCompactWindow"), join_said)
+    assert wired.get("outputStyle") == "explanatory", \
+        "joining overwrote the voice a project had chosen with %r: join said %r" \
+        % (wired.get("outputStyle"), join_said)
+    assert wired_text.count(joining.FENCE) == 1, \
+        "the fence is wired %d times after joining a project that already had " \
+        "it under a matcher of its own — one of them runs and the other is " \
+        "noise nobody reads: join said %r" \
+        % (wired_text.count(joining.FENCE), join_said)
+    assert not joining.half_heard(wired_text), \
+        "joining left the fence hearing only half the ways a lead is started: " \
+        "%r (join said %r)" % (joining.half_heard(wired_text), join_said)
+    assert "$CLAUDE_PROJECT_DIR" in wired_text and ours in wired_text, \
+        "the project's own spelling of where its hooks live did not survive " \
+        "joining: %r" % wired_text
+
+    print("ok: joining wires every session gate this machinery has into a "
+          "project's own Claude settings, keeps the gates, settings, ceiling and "
+          "voice that project already chose, and moves a gate wired where it "
+          "would never be heard rather than doubling it")
+
     # Litter in the checkout a landing lands in. Left to git, any tracked change
     # there refuses the landing with "Working directory has staged changes" and
     # names nobody (bw-vb2.3), so the gate looks first: leftovers nobody live is

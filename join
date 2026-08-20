@@ -560,21 +560,39 @@ def standing(root):
     return said, decl
 
 
-# The events a project has to wire, and the hook that answers each. Read here so
-# a project that joined before a hook existed is told about it rather than
-# quietly running without it.
-WIRING = {
-    "PreToolUse": ("agent-fence.py", "board-actor.py", "board-merge-gate.py",
-                   "board-status-gate.py", "report-gate.py"),
-    "PostToolUse": ("board-touch.py",),
-    "UserPromptSubmit": ("habit-reading.py",),
-    "SessionStart": ("board-prime.py",),
-    "SessionEnd": ("board-push.py",),
-    "Stop": ("completion-gate.py", "board-gate.py"),
-}
-# The ceiling on a session's own history. A worker session lives for hours, and
-# without this it carries every turn of the day into every request — so the
-# setting is read here too, and a project that has not set one is told.
+# Every event a joined project wires, the tools each one listens to, and the
+# gates that answer. One table: writing a project's settings and reading them
+# back both work off it, so a gate added here reaches every project by joining
+# and is named out loud everywhere it has not.
+#
+# An empty matcher means every use of the event.
+#
+# The long list against PostToolUse is every tool whose use is work: the board
+# refreshes a claim off it, and a session that only edits would otherwise have
+# its cards handed back under it.
+TOUCHING = ("Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|"
+            "Agent|Task|Monitor|TaskCreate|SendMessage")
+WIRING = (
+    ("PreToolUse", "Agent|Skill", ("agent-fence.py",)),
+    ("PreToolUse", "Artifact", ("publish-gate.py",)),
+    ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
+                            "board-status-gate.py")),
+    ("PreToolUse", "AskUserQuestion", ("report-gate.py",)),
+    ("PreToolUse", "Edit|Write|MultiEdit", ("plan-doc-lint.py",)),
+    ("PostToolUse", TOUCHING, ("board-touch.py",)),
+    ("SubagentStop", "", ("board-touch.py", "helper-proof.py")),
+    ("UserPromptSubmit", "", ("habit-reading.py",)),
+    ("SessionStart", "", ("board-prime.py",)),
+    ("SessionEnd", "", ("board-push.py",)),
+    ("Stop", "", ("completion-gate.py", "board-gate.py")),
+)
+# The one gate that is not the machinery's own: it reads a report before it is
+# published, and the report tools are shared out of a home of their own.
+PUBLISH = "publish-gate.py"
+# The house voice. Set where a project says nothing, never over a project that
+# has chosen its own.
+VOICE = "outputStyle"
+SPOKEN = "manager"
 CEILING = "autoCompactWindow"
 # The highest number that is still a ceiling. The 2026-08-18 audit found worker
 # sessions at 599k tokens a request on a million-token window, and the card's bar
@@ -611,6 +629,101 @@ def half_heard(text):
     return []
 
 
+def gate(root, name):
+    """Where this project types the gate of this name, or "" if nowhere.
+
+    A project that kept forwarders at its old paths is written its own spelling,
+    so joining does not move a path a running session is already using; every
+    other project is written the tool's own. The one gate that is not the
+    machinery's belongs to the shared report tools, and a machine that has not
+    said where those live cannot wire it at all.
+    """
+    if name == PUBLISH:
+        room = project.reports_dir()
+        return os.path.join(room, "tools", name) if room else ""
+    near = os.path.join("scripts", "hooks", name)
+    return os.path.join("$CLAUDE_PROJECT_DIR", near) \
+        if os.path.exists(os.path.join(root, near)) \
+        else os.path.join(HOME, "hooks", name)
+
+
+def wire(root, say):
+    """Write the machinery's gates into this project's own Claude settings.
+
+    Merged and never overwritten. A project's settings are its own — corsetta
+    carries five gates of its own there — so nothing is removed that this table
+    does not name, no setting outside the gates is touched, and a gate already
+    wired is left where it is unless its path has gone stale or it sits under a
+    matcher that would never hear it.
+
+    A file that will not parse is left completely alone and said out loud: it is
+    somebody's own work, and rewriting it whole would lose it.
+    """
+    where = os.path.join(root, ".claude", "settings.json")
+    held = {}
+    if os.path.exists(where):
+        try:
+            with open(where) as fh:
+                held = json.load(fh)
+        except ValueError as why:
+            say("kept   %s — it does not parse (%s), so nothing was written into "
+                "it; the gates below are not running here" % (where, why))
+            return
+        if not isinstance(held, dict):
+            say("kept   %s — it is not a settings object, so nothing was written "
+                "into it" % where)
+            return
+    was = json.dumps(held, sort_keys=True)
+    hooks = held.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        say("kept   %s — its hooks are not a set of events, so nothing was "
+            "written into it" % where)
+        return
+    wired, missing = [], []
+    for event, matcher, names in WIRING:
+        blocks = hooks.setdefault(event, [])
+        if not isinstance(blocks, list):
+            continue
+        # Every place this gate could already be under this event, so one wired
+        # under a matcher that never hears it is moved rather than duplicated.
+        for name in names:
+            want = gate(root, name)
+            if not want:
+                missing.append(name)
+                continue
+            for block in blocks:
+                kept = [h for h in (block.get("hooks") or [])
+                        if os.path.basename((h.get("command") or "")) != name]
+                if len(kept) != len(block.get("hooks") or []):
+                    block["hooks"] = kept
+            home = next((b for b in blocks
+                         if (b.get("matcher") or "") == matcher), None)
+            if home is None:
+                home = {"matcher": matcher, "hooks": []} if matcher else {"hooks": []}
+                blocks.append(home)
+            home.setdefault("hooks", []).append({"type": "command", "command": want})
+            wired.append(name)
+        # A block left holding nothing held only gates this table names, and is
+        # now not a block at all.
+        hooks[event] = [b for b in blocks if b.get("hooks")]
+    found = held.get(CEILING)
+    if isinstance(found, bool) or not isinstance(found, (int, float)) \
+            or found > CEILING_MAX:
+        held[CEILING] = CEILING_MAX
+    held.setdefault(VOICE, SPOKEN)
+    if json.dumps(held, sort_keys=True) == was:
+        return
+    os.makedirs(os.path.dirname(where), exist_ok=True)
+    with open(where, "w") as fh:
+        json.dump(held, fh, indent=2)
+        fh.write("\n")
+    say("wired  %s runs %d gate(s) of this machinery's" % (where, len(wired)))
+    if missing:
+        say("unwired %s: this machine says nowhere the shared report tools live, "
+            "so `%s` is wired nowhere — one line under [home] in %s"
+            % (root, ", ".join(missing), project.REGISTRY))
+
+
 def unwired(root):
     """Hooks this project's settings do not run, and the ceiling they do not set.
     A gate nobody wired is a gate that is not there, and it fails silently —
@@ -623,7 +736,7 @@ def unwired(root):
         text = open(where).read()
     except OSError:
         return ["no .claude/settings.json at %s — nothing is wired" % root]
-    missing = [name for names in WIRING.values() for name in names if name not in text]
+    missing = [name for _, _, names in WIRING for name in names if name not in text]
     said = ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
         if missing else []
     said += half_heard(text)
@@ -688,6 +801,7 @@ def main():
     # After the board is where it is going to be, never before: everything below
     # asks the board something, and asking one that is mid-move answers for the
     # copy that is about to stop existing.
+    wire(root, said.append)
     states(root, said.append)
     # After the states and never before them: these are the cards the board
     # refused for want of the word it has just been told.
