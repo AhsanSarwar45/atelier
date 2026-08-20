@@ -897,6 +897,66 @@ transcript mode; 'notice' renders in inactive gray". So `info` → `detail`, and
 `notice`/`suggestion`/`warning` → `note`. Where the kit ranks a message, that
 ranking is used rather than one of ours.
 
+**Two ways of sorting, and only one of them decides what is drawn
+(bw-6jq5).** Loudness says how hard a line pushes; it never said who the line
+was *for*, and the screen used it for both. So the reader opened a chat already
+holding every loud line the machine wrote about its own housekeeping. Measured
+2026-08-20 over the manager's own record — 118 chats, 895 machine lines — 140
+were drawn before he touched a switch, and 78 of them were bookkeeping: 43
+announcing the mode or model a chat started in, not one of which was a change,
+and 35 saying an allowance window was open. His words on that one: "this rate
+limit event seems to be for the agent. why am I being shown it."
+
+Every kind therefore carries an audience beside its family, in `FOR`
+(`src/workbench/machine-lines.ts`), and the two axes are read separately:
+
+| axis | decides | drawn from |
+|---|---|---|
+| audience — `you` / `machine` | whether the line is on screen before he touches a switch | `FOR`, read through `forWhom(kind, rank)` |
+| family — the six below | what the line looks like: its colour and its mark | `BY_KIND`, unchanged |
+
+- **What is his** is what he can act on or has to know: something stopped,
+  something failed, a busy service being ridden out, the chat compacting itself,
+  a mode or model that actually changed, an agent that came home having failed.
+- **The machine's own** is its housekeeping: an allowance window merely opening,
+  status pings, his own rules starting and finishing, memory being recalled, an
+  agent sent off or home unharmed. The panel is the list of agents (§8.2.7), so
+  the chat drawing a line per dispatch says the same thing twice — the manager's
+  ruling of 2026-08-20.
+- **A kind that means different things by how it went is split on its rank**, the
+  same trick the families use: an allowance window that has *closed* on him is
+  `note` and his, one merely open is `detail` and the machine's. So is
+  `system/status`: the ping is the machine's, the compaction answer riding on it
+  is his.
+- **The switch is the audience**, not the family: `OFF_BY_DEFAULT = ['machine']`
+  is the one fact the browser's filter and the check script both read, the
+  status tree stacks families under "For you" and "The machine's own", and what
+  is remembered is what he switched *off* — so a kind added later arrives
+  visible rather than hidden in a group nobody opens.
+
+**A chat is silent about the state it opened in.** Every chat wrote a line
+naming its permission mode as though someone had changed it; 37 of the 43 above
+were that line, one per session, never a second. The driver now holds "no mode
+known yet" apart from a mode it has been told, and the first one it merely
+*observes* pins the picker without writing a line. A mode picked on purpose still
+says so, first thing in the chat or not.
+
+**A line says what happened, never its own name.** Three kinds — an agent
+updated, an agent reporting progress, the background list changing — printed
+their own wire name where the sentence belongs. They now name the agent and say
+what became of it. Anything the app has never met says whatever words the
+message carried, from one level down or the first of a list, and falls back to a
+sentence that admits the app has no words for it rather than to the name itself.
+
+**It is checked against his own record, not a copy of it.**
+`scripts/chat-shows-what-is-yours.mjs` reads the workbench store read-only,
+rebuilds every chat through the real driver, folds it with the real screen's
+fold and asks three things: that nothing meant for the machine reaches him
+unasked, that no line's sentence is its own wire name, and that a chat which just
+opened announces no mode. Any one of them red is a failure. Same record, sorted
+the new way: 96 drawn instead of 140, and 59 for a chat made from today, the
+difference being mode lines already frozen into chats made before it.
+
 **Six families, and every kind lands in exactly one (bw-jkh2).** The rank above
 decides how *loudly* a machine message is drawn; the family decides *what it
 looks like*. The driver has always told a compaction from a retry from a hook
@@ -1012,7 +1072,9 @@ useless, because the browser's card keeps no arguments at all and not one byte
 of it was ever drawn (bw-1u1.40, bw-1u1.42). What the kit is *answered* with is
 never cut — only what is stored and shown.
 
-**A mode change says so, whoever made it.** Switching permission mode mid-chat writes a `note`.
+**A mode change says so, whoever made it — a mode nobody changed does not.**
+Switching permission mode mid-chat writes a `note`; the mode a chat merely opens
+in is not a change and is drawn nowhere (bw-6jq5, above).
 A chat that quietly stopped asking about tools is a trap, and bypass is now
 reachable from the picker (§3.1). It says so *every* time, including the same
 mode picked twice: a quiet line is otherwise skipped when the same sentence has
