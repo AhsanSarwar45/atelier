@@ -733,7 +733,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {/* One line, and nothing on it grows with the work: the cards, the
           reports and what the chat has spent are all in the column beside it
           (docs/agent-workbench.md §8.2.6). */}
-      <div className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/60 px-4 text-sm">
+      <div
+        data-testid="chat-status-line"
+        className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/60 px-4 text-sm"
+      >
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
             at: the messages arrive as that program works. It says the same word
@@ -750,7 +753,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         >
           {held ? 'working' : view.stateLabel}
         </Badge>
-        <span data-testid="session-meta" className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+        {/* The one thing on this line allowed to give way when the line runs
+            short, and the only one that can: the model and the permission mode
+            are both named again on the writing box below, while every chip
+            beside it is a number or a name that means nothing half-drawn. Left
+            to itself it kept its full width and the chips shrank under their
+            own words, so what the chat was running printed straight across the
+            folder chip (bw-7ks.22.15). */}
+        <span
+          data-testid="session-meta"
+          className="min-w-0 shrink truncate whitespace-nowrap text-xs text-muted-foreground"
+        >
           claude
           {view.model ? ` · ${view.model}` : ''}
           {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
@@ -767,7 +780,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             // The whole path and the branch in the tooltip: the chip has room
             // for the one word that tells two copies of a project apart.
             title={[facts.cwd, facts.branch].filter(Boolean).join(' · ')}
-            className="font-mono"
+            // Never squeezed by the line, and never wider than a name: a chip
+            // that shrinks under its own text spills it over its neighbour
+            // (bw-7ks.22.15).
+            className="max-w-40 shrink-0 truncate font-mono"
           >
             {facts.folder}
           </Badge>
