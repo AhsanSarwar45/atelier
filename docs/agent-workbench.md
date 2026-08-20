@@ -913,7 +913,10 @@ Three rules hold this together, and each of them is a fault it already had:
 
 - **The colours are tokens the app already owns**, never colours of their own,
   so red means the same thing in a chat as it does on the board and every one of
-  the eleven skins gets a family palette for nothing.
+  the eleven skins gets a family palette for nothing. The same test reads
+  `src/app/themes.css` block by block and names any skin short of one of the six;
+  reading only `globals.css`, whose own blocks satisfy the check on their own,
+  proved a test that could not fail (bw-jkh2.9).
 - **The classes are spelled out one family at a time and never built from the
   family's name.** Tailwind ships a class only when it read the literal string in
   the source; interpolating the name is exactly how the board's own state
@@ -936,8 +939,12 @@ it carries a sentence, `breathing` when it is only structure.
 **A run of one kind is one chip carrying a count.** A bad ten minutes on a busy
 service is eight retries, which is one thing that happened eight times rather
 than eight things; read as eight it buries the sentence either side of it. The
-fold is on kind and rank and never on the words, because a retry counts up as it
-goes — "1 of 5", then "2 of 5" — so folding on the sentence would fold nothing.
+fold is on kind, rank and family and never on the words, because a retry counts
+up as it goes — "1 of 5", then "2 of 5" — so folding on the sentence would fold
+nothing. Family has to be one of the three even though a kind usually decides it:
+the app's own asides all arrive under the one kind and carry their family beside
+them, so two in a row for different families would otherwise fold and the chip
+would wear the first one's colour over the last one's words (bw-jkh2.8).
 The chip says the newest of the run, because that is where it had got to, and
 opening it hands back every folded line in order. Quiet lines are dropped
 *before* the fold rather than after it: a status ping landing mid-run would
