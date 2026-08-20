@@ -289,8 +289,9 @@ test.describe('the open chat', () => {
     // A chat that has worked on cards — its row already says so.
     const worked = page.locator('[data-testid="restore-row"][data-beads]:not([data-beads=""])');
     await worked.first().waitFor({ timeout: 30_000 });
-    await worked.first().getByTestId('row-name').click();
-    await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+    const [key] = await chatKeys(page, '[data-testid="restore-row"][data-beads]:not([data-beads=""])');
+    expect(key, 'no chat in this instance has worked on a card').toBeDefined();
+    await openChat(page, key!);
     await page.getByTestId('bead-chip').first().waitFor({ timeout: 60_000 });
 
     const more = page.getByTestId('bead-chip-more');
@@ -305,11 +306,22 @@ test.describe('the open chat', () => {
     const chip = page.getByTestId('bead-chip').first();
     const wanted = await chip.getAttribute('data-bead-id');
     await chip.click();
-    // The board takes the card out of the address once it has opened it, so the
-    // proof is the panel, not the URL.
+
+    // The card opens OVER what he was reading rather than taking him to the
+    // board: he asked to see a ticket, not to leave the conversation, and the
+    // address keeps the chat so Back closes the card and leaves him where he
+    // was (app-shell.md §1.7). So the proof is the panel and the chat behind it.
     await page.getByTestId('bead-detail').first().waitFor({ timeout: 30_000 });
-    expect(page.url(), 'the click did not land on the board').toContain('tab=board');
-    expect(await page.getByTestId('bead-detail').first().innerText()).toContain(wanted!);
+    // Lowercased on both sides: the panel draws the id in capitals, and what is
+    // being proved here is which card opened, not how it is written (bw-1efn).
+    expect((await page.getByTestId('bead-detail').first().innerText()).toLowerCase()).toContain(
+      wanted!.toLowerCase(),
+    );
+    expect(page.url(), 'the card did not go into the address').toContain(`card=${wanted}`);
+
+    await page.goBack();
+    await page.getByTestId('chat-tab').waitFor({ timeout: WAY_IN_MS });
+    await expect(page.getByTestId('bead-detail')).toHaveCount(0);
   });
 
   test('a report of this chat’s work reaches the chat', async ({ page, request }) => {
