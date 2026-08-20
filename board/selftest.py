@@ -5768,6 +5768,31 @@ def main():
           "prints for a board with nothing, and the run no longer swallows the "
           "refusal")
 
+    # Naming the fence in a project's settings is not the same as wiring it to
+    # everything it guards: a lead is started by naming the agent OR by naming its
+    # skill, and a project deaf to the second reads as wired while leaving that
+    # route open (mch-1p2.3).
+    def wired(matcher):
+        return joiner.half_heard(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": matcher, "hooks": [{"type": "command", "command":
+             "/home/ahsan/dev/machinery/hooks/agent-fence.py"}]},
+            {"matcher": "Bash", "hooks": [{"type": "command", "command":
+             "/home/ahsan/dev/machinery/hooks/board-actor.py"}]}]}}))
+
+    deaf = wired("Agent")
+    assert deaf and "Skill" in deaf[0] and "agent-fence.py" in deaf[0], \
+        "a project hearing the fence on the Agent tool alone is not told the skill " \
+        "route is open: %s" % deaf
+    assert wired("Agent|Skill") == [], \
+        "a project wired to both tools is told something is missing anyway"
+    assert wired("Skill") and "Agent" in wired("Skill")[0], \
+        "a project hearing only the skill route is not told the agent one is open"
+    assert joiner.half_heard("not json at all") == [], \
+        "a settings file nobody can read was answered as though it had been"
+
+    print("ok: joining tells a project when its fence is wired to hear only half "
+          "of what it guards")
+
 
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a

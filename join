@@ -452,6 +452,35 @@ CEILING = "autoCompactWindow"
 CEILING_MAX = 200000
 
 
+# A gate is only wired to the tools it was told to listen for, and the fence
+# guards two of them: a lead can be started by naming the agent or by naming its
+# skill, and a project that wired the fence to the Agent tool alone leaves the
+# second route open while reading as wired (mch-1p2.3). The hook's name in the
+# file says nothing about that, so the tools beside it are read too.
+FENCE = "agent-fence.py"
+FENCE_TOOLS = ("Agent", "Skill")
+
+
+def half_heard(text):
+    """The tools the fence is wired to hear, when they are not all of them."""
+    try:
+        events = (json.loads(text).get("hooks") or {}).get("PreToolUse") or []
+    except (ValueError, AttributeError):
+        return []
+    for block in events:
+        if not any(FENCE in (h.get("command") or "")
+                   for h in (block.get("hooks") or [])):
+            continue
+        heard = str(block.get("matcher") or "")
+        deaf = [tool for tool in FENCE_TOOLS
+                if not re.search(r"\b%s\b" % tool, heard)]
+        if deaf:
+            return ["%s is wired to %r in .claude/settings.json, which never hears "
+                    "%s — a lead started that way is refused nothing" %
+                    (FENCE, heard, " or ".join(deaf))]
+    return []
+
+
 def unwired(root):
     """Hooks this project's settings do not run, and the ceiling they do not set.
     A gate nobody wired is a gate that is not there, and it fails silently —
@@ -467,6 +496,7 @@ def unwired(root):
     missing = [name for names in WIRING.values() for name in names if name not in text]
     said = ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
         if missing else []
+    said += half_heard(text)
     try:
         found = json.loads(text).get(CEILING)
     except (ValueError, AttributeError):
