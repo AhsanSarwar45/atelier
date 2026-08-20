@@ -605,15 +605,22 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           onOpen={(id) => { setRailOpen(false); open(id); }}
         />
       </div>
-      {railOpen && (
-        <button
-          type="button"
-          aria-label="Close the chat list"
-          data-testid="chat-rail-scrim"
-          className="absolute inset-0 z-20 bg-black/40 md:hidden"
-          onClick={() => setRailOpen(false)}
-        />
-      )}
+      {/* Mounted either way and faded, so the darkening arrives with the panel
+          instead of snapping on in front of it (bw-7ks.22.12). */}
+      <button
+        type="button"
+        aria-hidden={!railOpen}
+        tabIndex={railOpen ? 0 : -1}
+        aria-label="Close the chat list"
+        data-testid="chat-rail-scrim"
+        data-open={railOpen}
+        className={cn(
+          'absolute inset-0 z-20 bg-black/40 md:hidden',
+          'transition-opacity duration-200 ease-out motion-reduce:transition-none',
+          railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        onClick={() => setRailOpen(false)}
+      />
       <div className="flex min-w-0 flex-1 flex-col">{inner}</div>
       {/* The chat's own column. Only when there IS a chat: an empty rail beside
           an empty screen says nothing and takes width to say it. */}
@@ -628,12 +635,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           onToggle={flipRight}
         />
       )}
-      {sessionId && rightOpen && (
+      {sessionId && (
         <button
           type="button"
+          aria-hidden={!rightOpen}
+          tabIndex={rightOpen ? 0 : -1}
           aria-label="Close what this chat has touched"
           data-testid="chat-right-rail-scrim"
-          className="absolute inset-0 z-20 bg-black/40 md:hidden"
+          data-open={rightOpen}
+          className={cn(
+            'absolute inset-0 z-20 bg-black/40 md:hidden',
+            'transition-opacity duration-200 ease-out motion-reduce:transition-none',
+            rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
+          )}
           onClick={flipRight}
         />
       )}

@@ -214,5 +214,30 @@ test.describe('the right rail', () => {
       `it animated anyway: ${opening.seen.map(Math.round).join(', ')}`,
     ).toBe(0);
     expect(Math.max(...opening.seen), 'the rail never came back').toBeGreaterThan(200);
+
+    // On a narrow screen the column lies over the conversation and darkens it.
+    // The darkening belongs to the same fold, so it arrives with the panel.
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.setViewportSize({ width: 700, height: 900 });
+    const shade = await page.evaluate(async (ms) => {
+      const scrim = document.querySelector('[data-testid="chat-right-rail-scrim"]') as HTMLElement;
+      const handle = document.querySelector('[data-testid="chat-right-rail-toggle"]') as HTMLElement;
+      const seen: number[] = [];
+      handle.click();
+      const from = performance.now();
+      await new Promise<void>((done) => {
+        const tick = () => {
+          seen.push(Number(getComputedStyle(scrim).opacity));
+          if (performance.now() - from < ms) requestAnimationFrame(tick);
+          else done();
+        };
+        requestAnimationFrame(tick);
+      });
+      return seen;
+    }, FOLD_MS);
+    expect(
+      shade.filter((o) => o > 0.05 && o < 0.95).length,
+      `the darkening snapped on: ${shade.map((o) => o.toFixed(2)).join(', ')}`,
+    ).toBeGreaterThan(0);
   });
 });
