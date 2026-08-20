@@ -206,6 +206,30 @@ def rewrite(where, held, mode):
         json.dump(held, fh, indent=2)
 
 
+def keepsake(path):
+    """What a file holds right now, or None where there is no such file."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def putback(path, was):
+    """Put a file back to what `keepsake` found, taking it away if it found none."""
+    try:
+        if was is None:
+            if os.path.exists(path):
+                os.remove(path)
+        elif keepsake(path) != was:
+            with open(path, "wb") as fh:
+                fh.write(was)
+    except OSError:
+        # An undo that cannot write is still an undo of the board itself, which
+        # is the part that holds the cards.
+        pass
+
+
 def serve(root, decl, say):
     """Bring this project's board up on a database server.
 
@@ -216,7 +240,9 @@ def serve(root, decl, say):
     The undo matters more than the move. Nothing here rewrites the database — the
     move is a rename and one word in a JSON file — so putting both back is the
     same two operations in reverse, and a board that came up wrong is a board
-    that is handed back exactly as it was.
+    that is handed back exactly as it was. Exactly, including the settings file
+    the server writes for itself on its way up: a board handed back with that
+    sitting beside it was not handed back as it was (bw-aisw.10).
     """
     beads = os.path.join(root, ".beads")
     if not os.path.isdir(beads):
@@ -253,6 +279,10 @@ def serve(root, decl, say):
         return
     os.rename(kept, served)
     rewrite(where, held, SERVER)
+    # What the server settings said before the server was asked to start, so the
+    # undo can put that back too: starting one writes the file afresh, and on a
+    # board that never had one it writes the first copy there has ever been.
+    settled = keepsake(os.path.join(beads, CONFIG))
     ok, said = board(["dolt", "start"], root)
     after = cards(root) if ok else None
     if after == before:
@@ -265,12 +295,32 @@ def serve(root, decl, say):
             os.remove(os.path.join(beads, leftover))
         except OSError:
             pass
+    putback(os.path.join(beads, CONFIG), settled)
     os.rename(served, kept)
     rewrite(where, held, was)
     went = ("held %d cards" % after) if after is not None \
         else ("would not start (%s)" % said)
     say("board  %s was NOT moved: on a server it %s, against %d before — the move "
         "was undone and the board is exactly as it was" % (root, went, before))
+
+
+def unwatch_tracked(root, rel):
+    """Stop git watching a file this project already commits, in this clone only.
+
+    beads commits the board server's settings itself, so a project joined before
+    this command learned any of it carries that file in its history — and then
+    every server start rewrites the port inside it and `git status` reports the
+    file as changed, forever. An exclude line says nothing about a tracked file;
+    the index is where git keeps the one flag that does.
+
+    Set here and nowhere else, so the project's own history is left alone: the
+    file stays committed exactly as it is, and only this machine's copy of it
+    goes quiet. `git update-index --no-skip-worktree <file>` undoes it.
+    """
+    code, said = git(["ls-files", "-v", "--", rel], root)
+    if code or said[:1] in ("S", "s"):
+        return          # already told, or git will not say — nothing to add
+    git(["update-index", "--skip-worktree", "--", rel], root)
 
 
 def unwatched(root, rel, why):
@@ -284,10 +334,15 @@ def unwatched(root, rel, why):
     Written to this clone's own exclude list rather than to a `.gitignore`: those
     are tracked files, shared with everyone, and a line about one machine's copy
     does not belong in a diff anybody else reads.
+
+    A file the project already commits is a different job, and `unwatch_tracked`
+    does it: an exclude line has no say over a tracked file, so that one is told
+    to git a second way (bw-aisw.9).
     """
-    if not git(["ls-files", "--error-unmatch", rel], root)[0] \
-            or not git(["check-ignore", "-q", rel], root)[0]:
-        return          # git already has an answer about this one
+    if not git(["ls-files", "--error-unmatch", rel], root)[0]:
+        return unwatch_tracked(root, rel)
+    if not git(["check-ignore", "-q", rel], root)[0]:
+        return          # somebody's ignore file already covers this one
     code, common = git(["rev-parse", "--path-format=absolute",
                         "--git-common-dir"], root)
     if code or not common:
@@ -339,20 +394,28 @@ def tidy(root, say):
             unwatched(root, rel, why)
 
 
-def untidy(root):
-    """The files joining left that git is still watching, so they will be swept.
+def watched(root, rel):
+    """Whether git will report this file in `git status` here.
 
-    Untracked and unignored, a file sits in `git status` forever — and the
-    landing gate stashes everything it finds there before a merge, so the next
-    landing carries this machine's own settings off into a stash nobody reads.
+    Two ways it can: untracked and covered by nobody's ignore list, or tracked
+    and not yet told to leave this clone's copy alone. Either way it sits in
+    `git status` forever — and the landing gate stashes everything it finds
+    there before a merge, so the next landing carries this machine's own
+    settings off into a stash nobody reads.
     """
+    if not git(["ls-files", "--error-unmatch", rel], root)[0]:
+        code, said = git(["ls-files", "-v", "--", rel], root)
+        return not code and said[:1] not in ("S", "s")
+    return bool(git(["check-ignore", "-q", rel], root)[0])
+
+
+def untidy(root):
+    """The files joining left that git is still watching, so they will be swept."""
     loose = [rel for rel in local(root)
-             if os.path.exists(os.path.join(root, rel))
-             and git(["ls-files", "--error-unmatch", rel], root)[0]
-             and git(["check-ignore", "-q", rel], root)[0]]
-    return ["%s is neither tracked nor ignored at %s — it belongs to this machine "
-            "alone, and the landing gate sweeps whatever it finds loose into a "
-            "stash before every merge" % (", ".join(loose), root)] if loose else []
+             if os.path.exists(os.path.join(root, rel)) and watched(root, rel)]
+    return ["git still watches %s at %s — it belongs to this machine alone, and "
+            "the landing gate sweeps whatever it finds loose into a stash before "
+            "every merge" % (", ".join(loose), root)] if loose else []
 
 
 def unserved(root):

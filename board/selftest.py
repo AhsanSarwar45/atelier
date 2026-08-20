@@ -4719,13 +4719,18 @@ def main():
     # refuses its deep checks on one outright. So joining puts the board on a
     # server — making one there if the project has none, and MOVING one it finds,
     # which is the half that could lose cards and so is counted on both sides.
-    def board_after_join(cards_first=0):
+    def board_after_join(cards_first=0, tracked=False):
         """A throwaway project put through the real `join`, and the board it has
         afterwards: how it says it runs, whether a server answers for it, and how
         many cards it holds.
 
         `cards_first` writes that many cards onto a board beads runs itself
         BEFORE joining, which is the case that has something to lose.
+
+        `tracked` commits the board server's settings file before joining, with a
+        port from another day in it, which is the shape every project joined
+        before this command existed carries: beads commits that file itself, and
+        then every server start rewrites the port inside it (bw-aisw.9).
         """
         tmp = tempfile.mkdtemp(prefix="board-join-served-")
         root = os.path.join(tmp, "project")
@@ -4754,6 +4759,27 @@ def main():
                     "not get one, so it proves nothing: %r" % (made.stdout + made.stderr)
                 for n in range(cards_first):
                     bd("create", "a card the move must not lose (%d)" % n)
+            if tracked:
+                settings = os.path.join(root, ".beads", "dolt-server-config.yaml")
+                os.makedirs(os.path.dirname(settings), exist_ok=True)
+                with open(settings, "w") as fh:
+                    fh.write("listener:\n  port: 40941\n")
+
+                def g(*args):
+                    return subprocess.run(
+                        ["git", "-c", "core.hooksPath=/dev/null"] + list(args),
+                        cwd=root, env=env, text=True, capture_output=True,
+                        timeout=120)
+
+                g("config", "user.email", "t@t")
+                g("config", "user.name", "t")
+                g("add", "-f", ".beads/dolt-server-config.yaml")
+                made = g("commit", "-qm", "the settings, committed by beads itself")
+                assert not g("ls-files", "--error-unmatch",
+                             ".beads/dolt-server-config.yaml").returncode, \
+                    "the case meant to start from a project that already commits " \
+                    "the board server's settings did not commit them, so it " \
+                    "proves nothing: %r" % (made.stdout + made.stderr)
             said = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
                                   text=True, capture_output=True, timeout=600, env=env)
             with open(os.path.join(root, ".beads", "metadata.json")) as fh:
@@ -4807,9 +4833,91 @@ def main():
         "in `git status` forever — and the next landing sweeps them into a " \
         "stash. join said %r" % (left, join_said)
 
+    # And the same promise for a project that already COMMITS the server settings
+    # file, which is every project joined before this command learned any of this:
+    # beads commits it at `bd init`, so an exclude line has no say over it and the
+    # port rewritten on every server start shows up as a change forever (bw-aisw.9).
+    join_said, runs_as, _, _, loose, _ = board_after_join(cards_first=1, tracked=True)
+    left = [line for line in loose.splitlines()
+            if "dolt-server-config.yaml" in line]
+    assert runs_as == "server" and not left, \
+        "a project that already commits the board server's settings joined and " \
+        "then reported them as changed: %s. The port inside is rewritten every " \
+        "time the server starts, so that line never goes away by itself, and the " \
+        "next landing sweeps it into a stash. join said %r" % (left, join_said)
+
+    # And the undo itself, which no run of the whole command can be made to take:
+    # it fires only when the moved board comes up holding a different number of
+    # cards, and a board that does that is a fault nobody can stage from outside.
+    # So this one asks `serve` directly, with the count lying on the way back, and
+    # then reads what the project is left holding (bw-aisw.10).
+    def undone_move():
+        """A board moved onto a server that comes up short, and what the project
+        holds once the move has undone itself."""
+        tmp = tempfile.mkdtemp(prefix="board-join-undone-")
+        root = os.path.join(tmp, "project")
+        env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
+        beads = os.path.join(root, ".beads")
+
+        def settings():
+            try:
+                with open(os.path.join(beads, "dolt-server-config.yaml"), "rb") as fh:
+                    return fh.read()
+            except OSError:
+                return None
+
+        try:
+            os.makedirs(root)
+            subprocess.run(["git", "init", "-q", "-b", "ours", "."], cwd=root,
+                           env=env, timeout=120)
+            made = subprocess.run(["bd", "init", "--prefix", "un"], cwd=root,
+                                  env=env, text=True, capture_output=True,
+                                  timeout=300)
+            assert os.path.isdir(os.path.join(beads, "embeddeddolt")), \
+                "the case meant to move a board beads runs itself has no such " \
+                "board to move: %r" % (made.stdout + made.stderr)
+            subprocess.run(["bd", "create", "the one card it holds"], cwd=root,
+                           env=env, capture_output=True, text=True, timeout=300)
+            loader = importlib.machinery.SourceFileLoader(
+                "joining", os.path.join(HOME, "join"))
+            joining = importlib.util.module_from_spec(
+                importlib.util.spec_from_loader("joining", loader))
+            loader.exec_module(joining)
+            # One card before the move, seven after it: the board came up wrong,
+            # which is the only thing that sets the undo going.
+            counted = iter([1, 7])
+            joining.cards = lambda where: next(counted, 7)
+            was, said = settings(), []
+            joining.serve(root, project.Declaration(
+                root, {"name": "undone", "prefix": "un"}), said.append)
+            with open(os.path.join(beads, "metadata.json")) as fh:
+                mode = json.load(fh).get("dolt_mode")
+            return (" ".join(said), mode, was, settings(),
+                    os.path.isdir(os.path.join(beads, "embeddeddolt")),
+                    sorted(name for name in os.listdir(beads)
+                           if name.startswith("dolt-server")))
+        finally:
+            subprocess.run(["bd", "dolt", "stop"], cwd=root, env=env,
+                           capture_output=True, text=True, timeout=120)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    said, mode, was, now, back, running = undone_move()
+    assert "NOT moved" in said and mode != "server" and back, \
+        "a board that came up on a server holding the wrong number of cards was " \
+        "left there: it says it runs as %r, the database it ran itself is %s, " \
+        "and the move said %r" % (mode, "back" if back else "gone", said)
+    assert now == was, \
+        "the move undid itself and left the server's own settings file behind " \
+        "(%s, %s) — the board was promised back exactly as it was, and a project " \
+        "handed a file it never had is not that. What it is left holding: %s" \
+        % ("held none before" if was is None else "held other settings before",
+           "holds none now" if now is None else "holds settings now", running)
+
     print("ok: joining gives a project with no board one on a database server, "
-          "and moves a board beads was running itself onto a server with every "
-          "card still on it")
+          "moves a board beads was running itself onto a server with every card "
+          "still on it, and leaves nothing of its own in `git status` — the "
+          "server settings included, whether or not the project already commits "
+          "them")
 
     # The session gates, which every project runs and corsetta was found running
     # none of (bw-aisw.3). A project's `.claude/settings.json` is its own — five

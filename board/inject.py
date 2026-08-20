@@ -566,6 +566,16 @@ FAULTS = [
     # The two states bd does not ship. Both halves of the fault are here — the
     # board never told, and the refusal never said — because either one alone
     # puts the review half of a job back into silence (bw-n5k4).
+    # The two faults the outside reader found on this job (bw-aisw.9, .10): a
+    # file the project already commits is left in `git status` forever, and a
+    # move that undoes itself leaves the server's own settings behind.
+    ("a machine-local file the project already commits is left in `git status`",
+     JOIN,
+     lambda s: s.replace("        return unwatch_tracked(root, rel)\n",
+                         "        return\n")),
+    ("a board move that undoes itself leaves the server's settings file behind",
+     JOIN,
+     lambda s: s.replace("    putback(os.path.join(beads, CONFIG), settled)\n", "")),
     ("joining a project never tells its board about the review states", JOIN,
      lambda s: s.replace("    states(root, said.append)\n", "")),
     ("joining takes away the states a board already had of its own", JOIN,
