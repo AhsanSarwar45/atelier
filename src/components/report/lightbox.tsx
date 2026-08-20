@@ -136,11 +136,11 @@ function LightboxOverlay({ images, onClose }: { images: LightboxImage[] | null; 
       }}
     >
       <div className="absolute right-3 top-3 z-10 flex gap-2">
-        <Button variant="outline" size="sm" onClick={reset} aria-label="Fit to screen">
-          <Maximize2 className="size-3.5" aria-hidden="true" /> Fit
+        <Button variant="outline" size="sm" onClick={reset} aria-label="Fit to screen" title="Fit to screen">
+          <Maximize2 className="size-3.5" aria-hidden="true" />
         </Button>
-        <Button variant="outline" size="sm" onClick={onClose} aria-label="Close">
-          <X className="size-3.5" aria-hidden="true" /> Close
+        <Button variant="outline" size="sm" onClick={onClose} aria-label="Close" title="Close">
+          <X className="size-3.5" aria-hidden="true" />
         </Button>
       </div>
       <div className={`flex h-full w-full ${images.length > 1 ? 'divide-x divide-b-strong' : ''}`}>

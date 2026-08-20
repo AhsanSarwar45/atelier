@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { X } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { Button } from '@/components/ui/button';
@@ -144,8 +145,15 @@ export function SpendView({ onClose }: { onClose: () => void }) {
       <div className="w-full max-w-4xl space-y-3 overflow-y-auto rounded-lg border border-border/60 bg-background p-4 shadow-2xl">
         <div className="flex items-center">
           <h2 className="text-base font-semibold text-foreground">What it cost</h2>
-          <Button size="xs" variant="outline" className="ml-auto" data-testid="spend-close" onClick={onClose}>
-            Close
+          <Button
+            size="xs"
+            variant="ghost"
+            className="ml-auto"
+            data-testid="spend-close"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
         <Chart

@@ -11,6 +11,8 @@ import { useEffect, useState } from 'react';
 
 import { useRouter } from 'next/navigation';
 
+import { X } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-base';
 import * as api from '@/lib/api';
@@ -75,8 +77,8 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
             placeholder="Search every conversation…"
             className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
           />
-          <Button size="xs" variant="outline" data-testid="search-close" onClick={onClose}>
-            Close
+          <Button size="xs" variant="ghost" data-testid="search-close" aria-label="Close" onClick={onClose}>
+            <X className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
 

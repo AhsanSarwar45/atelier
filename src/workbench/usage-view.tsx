@@ -15,6 +15,8 @@
  */
 'use client';
 
+import { X } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { usePlanUsage } from '@/workbench/live';
@@ -131,8 +133,15 @@ export function UsageView({ onClose }: { onClose: () => void }) {
               {usage.plan}
             </Badge>
           )}
-          <Button size="xs" variant="outline" className="ml-auto" data-testid="usage-close" onClick={onClose}>
-            Close
+          <Button
+            size="xs"
+            variant="ghost"
+            className="ml-auto"
+            data-testid="usage-close"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
 
