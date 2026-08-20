@@ -26,6 +26,12 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * helper asked only to run a command and answer produced one forwarded sentence
  * on the first run and none on the second.
  *
+ * The wait is a Python sleep rather than the shell's own, because a rule on
+ * this machine blocks a bare `sleep` and the helper inherits it: told to sleep,
+ * it spent its minute working around the refusal instead of waiting, and the
+ * picture this case leaves behind carried a red failed command that had nothing
+ * to do with what is being proved (measured 2026-08-20).
+ *
  * Reasoning is not asserted here, and that is a limit of the machine rather
  * than a gap: asked for a thinking budget, this account's answers come back
  * with the reasoning withheld — token counts and no words — so a block of
@@ -129,10 +135,12 @@ test.describe('the agents a chat sends off', () => {
     await say(
       request,
       chat,
-      'Use the Task tool exactly once to launch one general-purpose subagent, and do no work yourself. ' +
+      'First write one short sentence of your own saying you are about to send a helper off. ' +
+        'Then use the Task tool exactly once to launch one general-purpose subagent, and do no work yourself. ' +
         'Tell that subagent, in its prompt, to do these four things in order: ' +
         'first write one sentence saying what it is about to do; ' +
-        `then run the shell command "sleep ${HELPER_WAITS}"; ` +
+        `then run the shell command "python3 -c 'import time; time.sleep(${HELPER_WAITS})'" ` +
+        'in the foreground, waiting for it, and do not put it in the background; ' +
         'then write one sentence saying whether the wait worked; then reply with the single word DONE. ' +
         'When it comes back, reply with the single word FINISHED and nothing else.',
     );
@@ -169,12 +177,16 @@ test.describe('the agents a chat sends off', () => {
     expect(order, 'the helper spoke above the call that sent it').toBe('after');
 
     // And the chat's own words are still the chat's own: nothing was attributed
-    // to a helper that no helper said.
-    expect(
-      await page.locator('[data-testid="assistant-message"]:not([data-sent-by])').count(),
-      'the agent you are talking to said nothing of its own',
-    ).toBeGreaterThan(0);
+    // to a helper that no helper said. Read from the sentence it was told to
+    // write BEFORE it delegated, because what it says afterwards is not its to
+    // decide — asked to answer one word when its helper came back, one run in
+    // four said nothing at all and the case waited five minutes for a sentence
+    // that was never coming (measured 2026-08-20).
+    await expect(page.locator('[data-testid="assistant-message"]:not([data-sent-by])').first()).toBeVisible();
 
+    // Taken while the helper is still working, because that is the picture
+    // this case is about: a call still running, the helper's own sentences
+    // under it, and a line saying what it is doing now.
     await page.screenshot({ path: `${SHOTS}/chat-agent-own-words.png`, fullPage: false });
 
     // Stopped when the case is over, so a run leaves no agent behind.
