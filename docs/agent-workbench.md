@@ -926,11 +926,12 @@ Every kind therefore carries an audience beside its family, in `FOR`
   agent sent off or home unharmed. The panel is the list of agents (§8.2.7), so
   the chat drawing a line per dispatch says the same thing twice — the manager's
   ruling of 2026-08-20.
-- **A kind that means different things by how it went is split on its rank**, the
-  same trick the families use: an allowance window that has *closed* on him is
-  `note` and his, one merely open is `detail` and the machine's. So is
-  `system/status`: the ping is the machine's, the compaction answer riding on it
-  is his.
+- **A kind that means different things by how it went is settled by the driver,
+  which is the only place the state exists.** Rank was doing this job and cannot:
+  it has two values, and an allowance window filling up and one that has stopped
+  his work are both "not simply open". The driver reads the state, decides, and
+  carries the answer on the note (`audience?` on the `note` event); `forWhom`
+  is what answers for a line written before that existed. See §8.2.4.1.
 - **The switch is the audience**, not the family: `OFF_BY_DEFAULT = ['machine']`
   is the one fact the browser's filter and the check script both read, the
   status tree stacks families under "For you" and "The machine's own", and what
@@ -954,21 +955,25 @@ sentence that admits the app has no words for it rather than to the name itself.
 **It is checked against his own record, not a copy of it.**
 `scripts/chat-shows-what-is-yours.mjs` reads the workbench store read-only,
 rebuilds every chat through the real driver, folds it with the real screen's
-fold and asks three things: that nothing meant for the machine reaches him
-unasked, that no line's sentence is its own wire name, and that a chat which just
-opened announces no mode. Any one of them red is a failure. Same record, sorted
-the new way: **81 rows drawn instead of 123**. Of those 81, 37 are the opening
-mode line, frozen into chats made before this build and never written again — so
-the same three days of work started today would draw 44. A model line is not
-among them: it is only ever written when somebody asked for the model, so every
-one of the 6 in the record was a real change.
+fold, and — since §8.2.4.1 — reads the kit's own type file as well. Six things,
+any one of them red being a failure: that nothing meant for the machine reaches
+him unasked; that no line's sentence is its own wire name; that every kind and
+state the kit declares is named in the table; that no state draws a wire word or
+draws nothing; that every state lands in front of the reader it was ruled for;
+and that a chat which just opened announces no mode. Measured 2026-08-21 over
+122 chats and 961 machine lines, folded to 534 rows: **81 rows drawn instead of
+126**, 15%. Of those 81, 37 are the opening mode line, frozen into chats made
+before this build and never written again — so the same days of work started
+today would draw 44. A model line is not among them: it is only ever written
+when somebody asked for the model, so every one of the 6 in the record was a
+real change.
 
 **What this leaves owed (bw-6jq5).**
 
-- **A line's wording is frozen when it is written**, so the 37 rows in the
-  record above that still read as a wire name keep reading that way; only chats
-  made after this build get the sentence. Rewording what is already stored is
-  `bw-x6hb`, and is deliberately not this job.
+- **A line's wording is frozen when it is written**, so a fix to a sentence never
+  reaches a chat that already holds it. Rewriting the store is `bw-x6hb` and is
+  still not done; what §8.2.4.1 does instead is restate the frozen ones on the
+  way to the screen, for the three that mattered.
 - **The check needs a real record and is run by hand.** It opens the workbench
   store read-only and dies if there is none, so it is not in `npm test`, which
   has to pass on a machine that has never held a chat. `STORE=` points it at
@@ -1106,6 +1111,61 @@ message carries the mode in force, so the driver compares it with what it last
 knew and, when it differs, says the line and republishes the pinned mode; the
 sidecar stores it, so the chat does not wake up back in the old mode
 (bw-1u1.43).
+
+##### 8.2.4.1 One table of everything the kit can say (bw-iiv6)
+
+"Allowance: the seven-day window is allowed_warning until 12:00 PM", drawn in
+his own group. "again, this message and others like it are not for me... go
+through all statuses and actually read them, and then properly categorise them"
+— the manager, 2026-08-21. Two faults in one row, and they have one cause.
+
+The sentence was **built by pasting the wire's own word into English prose**, so
+the reader was handed `allowed_warning` and `seven_day` and left to guess. And
+the audience was **derived from the wording and the loudness** by the screen,
+which never saw the state at all: `allowed_warning` and `rejected` are one thing
+to a rank with two values, so a window filling up rode in beside a window that
+had stopped his work.
+
+So the kit's own type file is read end to end into one table,
+`src/workbench/machine-words.ts`, and for every kind and every state it holds
+both answers together: **the English sentence it draws, and who it is for.**
+
+| what the table holds | how many | example |
+|---|---|---|
+| kinds the kit declares, all named | 38 | `rate_limit_event`, `system/hook_response` |
+| states over 14 of those kinds | 47 | `allowed_warning`, `error_max_budget_usd` |
+| kinds deliberately silent, each with its reason | 4 | a guess at what he might type next belongs in the writing box |
+
+Four rulings hold it:
+
+- **The driver decides the reader, because the driver is the only thing that has
+  the state.** It puts the answer on the note (`audience?` on the `note` event),
+  and the screen takes it over anything it would have guessed. The allowance is
+  the case that forced it: merely running low is the machine's, and only a window
+  that has actually turned work away — or one that wants credits, which the kit
+  files on `errorCode` beside a rejected status and never on `status` itself —
+  reaches him, saying "nothing more runs until 03:20 AM".
+- **A state the table has never met is readable and quiet**, never its own wire
+  name: the sentence admits the build has no words for it, and it waits on the
+  machine's side. A wire word that must be shown at all has its seams opened up
+  (`inWords`), which is the fallback and never the substitute.
+- **The lines already in the record are restated on the way to the screen.**
+  Wording is frozen at write time (bw-x6hb), and three sets of frozen lines were
+  worth restating rather than leaving: the 37 that announced a chat had stopped
+  asking before it runs things by naming the setting — "Permission mode is now
+  bypassPermissions." — the allowance sentences from his screenshot, and the
+  lines whose whole text was the kind itself. Only wording the app itself wrote
+  is matched, so anything reworded since passes through untouched.
+- **The picker says what the setting does**, not what it is spelled: "Skip all
+  checks", not `bypassPermissions`. The one line on this screen that MUST be read
+  was the one written in the machine's own language.
+
+The check reads `sdk.d.ts` as text rather than as types — a union member the kit
+adds is not a type error anywhere, which is exactly how these gaps opened — and
+then drives the real driver once per kind and state. It fails on a kind or state
+the table has never heard of, on a sentence with an identifier-shaped word in it,
+on a state that draws nothing, and on one that lands in front of the wrong
+reader.
 
 #### 8.2.5 What this costs the log
 
