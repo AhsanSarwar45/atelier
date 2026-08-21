@@ -104,8 +104,18 @@ export function openableIn(text: string, existing: Existing, where: Rooted, disk
  * A name written out as a whole address.
  * ------------------------------------------------------------------ */
 
-/** What an address of this app's own names. */
-export type Addressed = { kind: 'card'; id: string } | { kind: 'report'; slug: string };
+/**
+ * What an address of this app's own names.
+ *
+ * `project` is the project the address itself asks for, which is not always the
+ * one the reader is standing in: an agent hands over a card by its whole
+ * address, and card ids repeat across boards. Null when the address names no
+ * project — one written inside the app, which can only mean this one.
+ */
+export type Addressed = { project: string | null } & (
+  | { kind: 'card'; id: string }
+  | { kind: 'report'; slug: string }
+);
 
 /**
  * The machine an address has to be on to be one of ours.
@@ -119,10 +129,14 @@ export type Addressed = { kind: 'card'; id: string } | { kind: 'report'; slug: s
  * The port is deliberately not part of it: a report is written by an agent
  * against one copy of the app and read against another — the installed one on
  * 3008, a preview on some other port — and both are the same reader's own
- * machine. Two copies serving different projects on one machine can therefore
- * still trade an id, which is a wrong card rather than a stolen click.
+ * machine. What the address names is then checked against the project the
+ * reader is actually in, so two copies on one machine cannot trade an id
+ * either (bw-8fh2.8).
+ *
+ * An IPv6 address is spelled bracketed and only bracketed: `hostname` hands
+ * back `[::1]`, never the bare form, so there is no second spelling to list.
  */
-const HERE = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0']);
+const HERE = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 
 /** The base for an address written relative: a link made inside the app is `/project?…`. */
 const NO_HOST = 'http://localhost';
@@ -138,7 +152,8 @@ const NO_HOST = 'http://localhost';
  *
  * Three things have to hold: the address is on this machine, its screen is
  * `/project`, and it carries a `report` or a `card`. Whether the thing it names
- * exists is the caller's question, the same as it is for a bare name.
+ * exists — and whether the project it asks for is the one the reader is in —
+ * is the caller's question, the same as it is for a bare name.
  */
 export function addressedBy(href: string): Addressed | null {
   let url: URL;
@@ -152,10 +167,11 @@ export function addressedBy(href: string): Addressed | null {
   if (!/(^|\/)project\/?$/.test(url.pathname)) return null;
   // A card wins a tie: its panel is drawn OVER whichever tab the address asks
   // for, so it is what the reader would land on.
+  const project = url.searchParams.get('id');
   const card = url.searchParams.get('card') ?? url.searchParams.get(OLD_CARD);
-  if (card) return { kind: 'card', id: card };
+  if (card) return { kind: 'card', id: card, project };
   const report = url.searchParams.get('report');
-  return report ? { kind: 'report', slug: report } : null;
+  return report ? { kind: 'report', slug: report, project } : null;
 }
 
 /* ------------------------------------------------------------------ *

@@ -29,6 +29,9 @@ vi.mock('next/navigation', () => ({
 
 const REPORT = { project: 'beads-web', slug: 'agents-you-cannot-see', title: 'Agents you cannot see' };
 
+/** The project the reader is standing in, as an address spells it. */
+const HERE = '7ec315b6-f66e-421e-84ae-a28088bdf16b';
+
 /** The chat's own wiring, as far as this is about: what exists, and what it draws. */
 const MENTIONS: Mentions = {
   split: (text) => [{ kind: 'text', text }],
@@ -37,6 +40,7 @@ const MENTIONS: Mentions = {
   link: (href) => {
     const named = addressedBy(href);
     if (!named) return null;
+    if (named.project && named.project !== HERE) return null;
     if (named.kind === 'card') return named.id === 'bw-1u1' ? MENTIONS.card(named.id) : null;
     return named.slug === REPORT.slug ? MENTIONS.report(named.slug) : null;
   },
@@ -54,7 +58,7 @@ describe('an address a message carries', () => {
   });
 
   it('is drawn as the card it names', () => {
-    say('Landed: http://127.0.0.1:3008/project?id=p&card=bw-1u1');
+    say(`Landed: http://127.0.0.1:3008/project?id=${HERE}&card=bw-1u1`);
     expect(screen.getByTestId('mention-card')).toHaveTextContent('bw-1u1');
     expect(screen.queryByTestId('markdown-link')).toBeNull();
   });
@@ -77,6 +81,18 @@ describe('an address a message carries', () => {
     );
   });
 
+  // Every board spells its cards the same way, so an address that names another
+  // project is not this project's card of that id — and drawing one would open
+  // the wrong card without a word about it (bw-8fh2.8).
+  it('stays a link when it asks for another project on this same machine', () => {
+    say('http://127.0.0.1:3008/project?id=some-other-board&card=bw-1u1');
+    expect(screen.queryByTestId('mention-card')).toBeNull();
+    expect(screen.getByTestId('markdown-link')).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:3008/project?id=some-other-board&card=bw-1u1',
+    );
+  });
+
   it('stays a link when it names nothing of ours', () => {
     say('See https://github.com/gastownhall/beads for the rest');
     expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', 'https://github.com/gastownhall/beads');
@@ -91,7 +107,7 @@ describe('an address a message carries', () => {
 
 describe('where a chip sits on the line', () => {
   it('is centred on the words, never aligned on a baseline the icon decides', () => {
-    say('Landed: http://127.0.0.1:3008/project?id=p&card=bw-1u1');
+    say(`Landed: http://127.0.0.1:3008/project?id=${HERE}&card=bw-1u1`);
     const chip = screen.getByTestId('mention-card');
     expect(chip.className).toContain('align-middle');
     expect(chip.className).not.toContain('align-baseline');

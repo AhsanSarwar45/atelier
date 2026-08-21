@@ -433,9 +433,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       // thing in a message that stayed raw blue text (bw-8fh2.2). Only ours,
       // and only when the thing it names really is on this project — anything
       // else stays the link it was.
+      //
+      // An address that asks for a DIFFERENT project stays a link too, however
+      // familiar its id looks: card ids repeat across boards, and a chip drawn
+      // here would open this project's card of the same id and say nothing
+      // about having gone somewhere else (bw-8fh2.8).
       link: (href) => {
         const named = addressedBy(href);
         if (!named) return null;
+        if (named.project && named.project !== projectId) return null;
         if (named.kind === 'card') return knownCards.has(named.id) ? card(named.id) : null;
         return byName.has(named.slug) ? report(named.slug) : null;
       },

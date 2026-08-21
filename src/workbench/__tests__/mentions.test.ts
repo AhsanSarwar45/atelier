@@ -114,19 +114,34 @@ describe('the rewriting step', () => {
  * it names (bw-8fh2.2).
  */
 describe('an address written out in full', () => {
+  /** What an address that names no project at all comes back as. */
+  const HERE_CARD = { kind: 'card', id: 'bw-1u1', project: null };
+
   it('names the report it carries', () => {
     const written =
       'http://127.0.0.1:3008/project?id=7ec315b6-f66e-421e-84ae-a28088bdf16b&tab=reports&report=agents-you-cannot-see';
-    expect(addressedBy(written)).toEqual({ kind: 'report', slug: 'agents-you-cannot-see' });
+    expect(addressedBy(written)).toEqual({
+      kind: 'report',
+      slug: 'agents-you-cannot-see',
+      project: '7ec315b6-f66e-421e-84ae-a28088bdf16b',
+    });
   });
 
   it('names the card it carries, however the address spells it', () => {
-    expect(addressedBy('http://localhost:3008/project?id=p&card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
-    expect(addressedBy('/project?id=p&bead=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+    expect(addressedBy('http://localhost:3008/project?id=p&card=bw-1u1')).toEqual({
+      kind: 'card',
+      id: 'bw-1u1',
+      project: 'p',
+    });
+    expect(addressedBy('/project?id=p&bead=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1', project: 'p' });
   });
 
   it('gives the card when an address carries both, because its panel is what opens', () => {
-    expect(addressedBy('/project?tab=reports&report=a-report&card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+    expect(addressedBy('/project?tab=reports&report=a-report&card=bw-1u1')).toEqual({
+      kind: 'card',
+      id: 'bw-1u1',
+      project: null,
+    });
   });
 
   it('names nothing in an address that is not one of ours', () => {
@@ -145,9 +160,19 @@ describe('an address written out in full', () => {
     expect(addressedBy('ftp://localhost/project?card=bw-1u1')).toBeNull();
   });
 
+  // Card ids repeat across boards, so which board an address asks for is the
+  // difference between the right card and a silent wrong one (bw-8fh2.8).
+  it('carries the project it asks for, so a chat can refuse another one', () => {
+    expect(addressedBy('http://127.0.0.1:3008/project?id=other-board&card=bw-3')).toEqual({
+      kind: 'card',
+      id: 'bw-3',
+      project: 'other-board',
+    });
+  });
+
   it('reads the reader’s own machine by any of its names, on any port', () => {
-    expect(addressedBy('http://localhost:3008/project?card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
-    expect(addressedBy('http://127.0.0.1:3027/project?card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
-    expect(addressedBy('http://[::1]:3008/project?card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+    expect(addressedBy('http://localhost:3008/project?card=bw-1u1')).toEqual(HERE_CARD);
+    expect(addressedBy('http://127.0.0.1:3027/project?card=bw-1u1')).toEqual(HERE_CARD);
+    expect(addressedBy('http://[::1]:3008/project?card=bw-1u1')).toEqual(HERE_CARD);
   });
 });
