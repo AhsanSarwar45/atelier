@@ -1307,7 +1307,7 @@ both answers together: **the English sentence it draws, and who it is for.**
 | what the table holds | how many | example |
 |---|---|---|
 | kinds the kit sends, all named | 42 | `rate_limit_event`, `system/hook_response` |
-| of those, kinds its type file never declares | 4 | `active_goal`, `system/post_turn_summary` |
+| of those, kinds the union its iterator reads leaves out | 4 (3 written down nowhere) | `active_goal`, `system/post_turn_summary` |
 | states over 18 of those kinds | 59 | `allowed_warning`, `error_max_budget_usd` |
 | kinds deliberately silent, each with its reason | 4 | a guess at what he might type next belongs in the writing box |
 | sentences the kit writes in the chat's own voice | 6 | "You've hit your session limit" (§8.2.4.2) |

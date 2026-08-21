@@ -579,13 +579,24 @@ export const WORDS: Record<string, KindWords> = {
   },
 
   /*
-   * The four below are the kit's, and its type file admits to none of them.
-   * Its declared union of messages carries neither `active_goal` nor
-   * `autocompact_state` nor either of these two system subtypes, and its
-   * shipped read loop hands all four to whoever is reading the run — which is
-   * this app. So the states are read off the kit's own program rather than off
-   * its types, and the check reads that program too, so the day it hands on a
-   * fifth this table is what fails (bw-cx70).
+   * The four below are the kit's, and its declared union of messages carries
+   * none of them: not `active_goal`, not `autocompact_state`, and neither of
+   * these two system subtypes. Its shipped read loop hands all four to
+   * whoever is reading the run — which is this app — so reading that union
+   * alone finds none of them (bw-cx70).
+   *
+   * Outside the union is not the same as written down nowhere, and the
+   * difference decides where the shapes below come from (bw-cx70.7).
+   * `active_goal` IS declared, fully and with a doc comment of its own, as
+   * SDKActiveGoalMessage; it is reachable only through StdoutMessage, the
+   * transport's own union, and never through the one the kit's iterator is
+   * typed with. Its shape and its null-means-cleared rule are read off that
+   * declaration. The other three are named in the type file nowhere at all,
+   * so their shapes are read off the kit's shipped program instead, and the
+   * lines below say only what that program is caught writing.
+   *
+   * The check reads both, and it counts the two cases separately, so the day
+   * the kit hands on a fifth this table is what fails.
    */
 
   /**
@@ -599,7 +610,7 @@ export const WORDS: Record<string, KindWords> = {
     from: 'whether value carries a goal at all',
     kit: null,
     ours: {
-      chasing: "the kit declares no state here; a message whose value carries a condition is a goal still being worked towards",
+      chasing: "the kit's type for this carries no state of its own; a message whose value carries a condition is a goal still being worked towards",
       cleared: "the same message with value null, which the kit's own note on the type calls the goal being cleared",
     },
     sample: (state) => ({

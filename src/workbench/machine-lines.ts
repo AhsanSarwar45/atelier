@@ -169,9 +169,11 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // will never see, and he is the one who can send it again.
   'system/files_persisted': { note: 'failed', detail: 'breathing' },
 
-  // Four the kit's type file never declares and its own program hands on all
-  // the same (bw-cx70). A goal of his going away ends a loop nobody but him
-  // started; a turn stopped waiting on him is why nothing is moving. The
+  // Four the kit's own iterator is not typed to carry and its program hands on
+  // all the same — three of them written down nowhere, `active_goal` declared
+  // but only in the transport's union (bw-cx70, bw-cx70.7). A goal of his going
+  // away ends a loop nobody but him started; a turn stopped waiting on him is
+  // why nothing is moving. The
   // history setting is the chat's memory, and the commentary on what it is
   // doing now is drawn on the chip and the panel already.
   active_goal: { note: 'stopped', detail: 'breathing' },

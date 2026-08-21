@@ -1,21 +1,25 @@
 /**
  * @vitest-environment node
  *
- * Four kinds of message the kit really sends and its type file never declares.
+ * Four kinds of message the kit really sends and its SDKMessage union leaves out.
  *
  * The manager asked whether this app was reading the toolkit's own sources or
  * only what we happened to know: "maybe other messages that you missed. are
  * you checking their sdk and dcos?" It was reading half of them. The kit's
- * types name a union of everything it sends; its shipped program hands four
- * kinds to whoever is reading a run that appear in that union nowhere —
- * `active_goal`, `autocompact_state`, and two system subtypes. Two of them
- * drew the wire's own word into the middle of a conversation, and two drew
- * whatever text they carried with nobody having ruled who it was for
+ * types name a union its own iterator is declared with; its shipped program
+ * hands four kinds to whoever is reading a run that appear in that union
+ * nowhere — `active_goal`, `autocompact_state`, and two system subtypes. Two
+ * of them drew the wire's own word into the middle of a conversation, and two
+ * drew whatever text they carried with nobody having ruled who it was for
  * (bw-cx70).
  *
- * Shapes are read off the kit's own program, which is the only place they are
- * written down, so each line here reads only fields that program is caught
- * writing.
+ * Outside that union is not the same as written down nowhere (bw-cx70.7).
+ * `active_goal` is declared in full, with its own doc comment, as
+ * SDKActiveGoalMessage — reachable only through the transport's union — and
+ * its shape and its null-means-cleared rule come from there. The other three
+ * are named in the type file nowhere at all, so their shapes are read off the
+ * kit's shipped program and each line reads only fields that program is
+ * caught writing.
  */
 import { describe, expect, it } from 'vitest';
 

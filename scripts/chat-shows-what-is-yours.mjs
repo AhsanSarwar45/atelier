@@ -372,13 +372,37 @@ function kindsTheKitDeclares() {
 }
 
 /**
+ * Every kind the kit's type file names ANYWHERE, union or no union.
+ *
+ * The union above answers "would a chat reading SDKMessage know about this?".
+ * This answers the different question "is it written down at all?" — and the
+ * two differ, so a kind outside the union is not automatically a kind nobody
+ * declared (bw-cx70.7).
+ */
+function kindsTheKitNamesAnywhere() {
+  const kinds = new Set();
+  for (const spelled of KIT.matchAll(/^\s*type: '([^']+)';/gm)) {
+    const after = KIT.slice(spelled.index, spelled.index + 400);
+    const subtype = after.match(/^\s*subtype: '([^']+)';/m);
+    kinds.add(spelled[1] === 'system' && subtype ? `system/${subtype[1]}` : spelled[1]);
+  }
+  return [...kinds];
+}
+
+/**
  * The kit's shipped program, read as text as well.
  *
- * The union above is what the kit SAYS it can send; this is what it does. Its
- * read loop eats some kinds where they arrive and hands the rest on to
- * whoever is iterating the run — including kinds its own type file never
- * declares anywhere (bw-cx70). Neither file stands in for the other, so both
- * are read.
+ * The union above is what the kit SAYS a chat receives; this is what it hands
+ * one. Its read loop eats some kinds where they arrive and hands the rest on
+ * to whoever is iterating the run — including four the SDKMessage union does
+ * not carry, so reading that union alone finds none of them (bw-cx70).
+ *
+ * Being outside the union is not the same as being written down nowhere, and
+ * the check says which is which. `active_goal` IS declared, fully and with a
+ * doc comment, as SDKActiveGoalMessage; it is simply reachable only through
+ * StdoutMessage, the transport's own union, and never through the one the
+ * iterator is typed with. The other three are named nowhere in the file at
+ * all. Neither file stands in for the other, so both are read (bw-cx70.7).
  */
 const KIT_PROGRAM = readFileSync(
   join(REPO, 'workbench', 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs'),
@@ -455,8 +479,10 @@ const kitDeclared = kindsTheKitDeclares();
 const { handedOn, loopFound } = kindsTheKitHandsOn();
 /** What the kit says it sends, and what its program is caught sending. */
 const kitKinds = [...new Set([...kitDeclared, ...handedOn])];
-/** Kinds only the program admits to: really sent, declared in no type at all. */
+/** Handed to a chat, and outside the union the kit's own iterator is typed with. */
 const undeclared = handedOn.filter((kind) => !kitDeclared.includes(kind));
+/** Of those, the ones the type file does not name anywhere at all. */
+const unwritten = undeclared.filter((kind) => !kindsTheKitNamesAnywhere().includes(kind));
 const cased = new Set(known);
 const undecided = kitKinds.filter(
   (kind) => !cased.has(kind) && !(kind in SAID_NOTHING) && !(kind in DRAWN_ELSEWHERE),
@@ -968,7 +994,7 @@ console.log(
   }`,
 );
 console.log(
-  `  ${mark(loopFound)} The kit's own program is read as well as its types — ${handedOn.length} kinds its read loop hands on, ${undeclared.length} of them declared in no type.${
+  `  ${mark(loopFound)} The kit's own program is read as well as its types — ${handedOn.length} kinds its read loop hands on, ${undeclared.length} of them outside the union its own iterator declares, ${unwritten.length} named in the type file nowhere at all.${
     loopFound ? (undeclared.length === 0 ? '' : ` — ${undeclared.join(', ')}`) : ' — its read loop could not be found'
   }`,
 );
