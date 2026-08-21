@@ -278,7 +278,7 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
       onClick={onClick}
       title={missed > 0 ? `${missed} more since you scrolled up — back to now` : 'Back to the newest message'}
       className={cn(
-        'absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-border',
+        'absolute bottom-2 right-4 z-10 flex items-center gap-1.5 rounded-full border border-border',
         'bg-surface-raised px-3 py-1.5 text-muted-foreground shadow-lg transition-all hover:text-foreground',
         shown ? 'opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
       )}
@@ -924,7 +924,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
         </div>
       </div>
-      <BackToNow missed={missed} shown={!atTheEnd} onClick={() => toTheEnd('smooth')} />
+      {/* The way back gets a strip of its own under the conversation rather
+          than floating over its bottom corner, where it sat on the last line
+          the reader could see — and it is shown exactly while he is reading
+          history, which is the one moment this must not cover a word
+          (bw-n6yh.9). The strip is there only while the control is. */}
+      <div
+        className={cn(
+          'relative mx-auto w-full max-w-[110ch] shrink-0',
+          atTheEnd ? 'h-0' : 'h-12',
+        )}
+      >
+        <BackToNow missed={missed} shown={!atTheEnd} onClick={() => toTheEnd('smooth')} />
+      </div>
       </div>
       </SplitPaths.Provider>
 

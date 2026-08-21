@@ -102,6 +102,11 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
     if (landed) {
       gliding.current = false;
       left.current = now;
+      // A smooth move is aimed at the end as it stood when it set off, and the
+      // conversation goes on growing under it — a word arriving, or the way
+      // back giving its own strip of screen up as it leaves. Whatever the end
+      // is now is where he asked to be.
+      if (holding.current && now.end - now.top > 1) toTheEnd();
       return;
     }
     // The pane exactly where it was left, inside a box that is no longer the

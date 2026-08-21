@@ -187,6 +187,30 @@ async function inView(page: Page, text: string): Promise<boolean> {
   );
 }
 
+/**
+ * Whether the way back is drawn clear of the conversation. It floated over the
+ * pane's bottom corner, which is a message the reader can see and has not read
+ * yet — and it is on the screen exactly while he is reading history, the one
+ * moment nothing may cover a word (bw-n6yh.9).
+ */
+async function coversNothing(page: Page): Promise<boolean> {
+  return page.evaluate((message: string) => {
+    const pill = document.querySelector('[data-testid="back-to-now"]')?.getBoundingClientRect();
+    const pane = document.querySelector('[data-testid="transcript"]')?.getBoundingClientRect();
+    if (!pill || !pane) return false;
+    return [...document.querySelectorAll(message)].every((row) => {
+      // Only the part of the row that is actually on the screen: a message
+      // scrolled past the bottom of the pane still has a place in the page,
+      // below the pane and behind everything under it, and is drawn nowhere.
+      const mine = row.getBoundingClientRect();
+      const top = Math.max(mine.top, pane.top);
+      const bottom = Math.min(mine.bottom, pane.bottom);
+      if (bottom <= top) return true;
+      return bottom <= pill.top || top >= pill.bottom || mine.right <= pill.left || mine.left >= pill.right;
+    });
+  }, MESSAGE);
+}
+
 /** Says `many` more things into the record, and waits for them all to be drawn. */
 async function arrives(page: Page, chat: LongChat, many: number): Promise<string> {
   let last = '';
@@ -425,6 +449,10 @@ test.describe('how a chat scrolls', () => {
       await expect(back).toHaveAttribute('data-missed', '7');
       await expect(page.getByTestId('back-to-now-count')).toHaveText('7');
       await page.screenshot({ path: `${SHOTS}/chat-scroll-back-to-now.png` });
+      expect(
+        await coversNothing(page),
+        'the way back was drawn on top of the words he was reading',
+      ).toBe(true);
 
       await back.click();
       await expect.poll(() => offTheEnd(page), { timeout: 10_000 }).toBeLessThanOrEqual(AT_THE_END);
