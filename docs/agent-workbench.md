@@ -1229,14 +1229,18 @@ phone's width, and the conversation is what the reader came for.
 
 What it holds, in this order:
 
+- **The agents it sent off** — §8.2.7. The tallest thing in the rail, the reason
+  the rail exists, and first in it because it is the only part of the column
+  that MOVES. Cards and reports are a record and will still be there in an hour;
+  a helper four minutes into its work is the thing the reader opened this rail
+  to look at, and it is not going below two lists that are finished with
+  (bw-7ks.22.33 — this order is the built one, and a test pins it).
 - **The cards this chat has touched** — all of them, one per line, id and title,
   clicking through to the Board tab. This is where they live now (§8.2.1). A
   card touched only by an agent the chat sent off is still this chat's card,
   which is the fault §8.2.7 fixes on the way past.
 - **The reports it produced** — `report.available` already crosses the wire and
   is drawn nowhere.
-- **The agents it sent off** — §8.2.7. The tallest thing in the rail, and the
-  reason the rail exists.
 What it has spent does **not** live here. Manager's ruling, 2026-08-20
 (bw-7ks.22.13): the running spend and how full the conversation is are numbers
 that say whether the work can go on at all, so they stay on the chat's own line
