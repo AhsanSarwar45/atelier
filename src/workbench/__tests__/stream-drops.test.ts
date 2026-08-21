@@ -109,4 +109,53 @@ describe('when the live stream drops', () => {
     });
     expect(opened.length).toBe(3);
   });
+
+  it('stops saying what each held chat is doing, rather than freezing on the last word', async () => {
+    const { useHolds } = await freshModule();
+    const { result } = renderHook(() => useHolds());
+
+    act(() => opened[0].says(['held-by-somebody-else']));
+    expect(result.current?.get('held-by-somebody-else')?.holder).toBe('terminal');
+
+    // The sibling of the set above, and the half that goes stale where it can
+    // be seen: the open chat draws this straight, so a dead connection used to
+    // leave the moving mark turning and its seconds climbing on whatever was
+    // said last — through up to half a minute of retrying, and identical on
+    // screen to a chat really being worked in (bw-96is.22).
+    act(() => opened[0].dies());
+    expect(result.current, 'the screen went on drawing a dead stream’s last word').toBeNull();
+
+    // And it is known again as soon as anybody is speaking.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    act(() => opened[1].says(['held-by-somebody-else']));
+    expect(result.current?.get('held-by-somebody-else')?.holder).toBe('terminal');
+  });
+
+  it('tells a silence nobody has spoken into from one that follows an answer', async () => {
+    // Both leave the screens with null in their hands, and they are opposite
+    // situations. Before anybody has spoken, what a screen fetched for itself
+    // is the freshest thing there is and it draws it. After the stream has
+    // spoken and gone away, that same fetch is older than what was just thrown
+    // out — the open chat's facts date from when the pane was opened, a row's
+    // from when the list was drawn — so drawing it restarts a mark and counts
+    // its seconds from a moment long gone (bw-96is.22).
+    const { useHeldFactsAreOld } = await freshModule();
+    const { result } = renderHook(() => useHeldFactsAreOld());
+    expect(result.current, 'a page accused its own facts before the stream had said a word').toBe(false);
+
+    act(() => opened[0].says(['held-by-somebody-else']));
+    expect(result.current, 'the facts were called old while the stream was speaking').toBe(false);
+
+    act(() => opened[0].dies());
+    expect(result.current, 'the screens went on drawing what they were given at build time').toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    act(() => opened[1].says([]));
+    expect(result.current, 'the accusation outlived the stream coming back').toBe(false);
+  });
+
 });

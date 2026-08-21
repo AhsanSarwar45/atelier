@@ -9,7 +9,16 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { HOLDER_WORD, RECORD_QUIET_MS, chatState, counting, heldDoing, heldLine, type HeldChat } from '@/workbench/chat-state';
+import {
+  HOLDER_WORD,
+  RECORD_QUIET_MS,
+  chatState,
+  counting,
+  heldDoing,
+  heldLine,
+  holderOnly,
+  type HeldChat,
+} from '@/workbench/chat-state';
 import type { SessionState } from '@/workbench/protocol';
 
 /** Every state a chat of ours can be published in, in the protocol's own order. */
@@ -105,6 +114,25 @@ describe('a chat another program holds', () => {
     // of what the screen can honestly say.
     expect([read.working, read.waiting, read.word]).toEqual([false, false, '']);
     expect(read.external).toEqual({ holder: 'terminal' });
+  });
+
+  it('keeps the holder and drops the doing when the stream that kept it current is gone', () => {
+    // The screens hold this answer for as long as nobody is speaking, which is
+    // up to half a minute of retrying, and a mark drawn from it goes on turning
+    // and counting all the while — identical on screen to a chat somebody is
+    // really working in (bw-96is.22).
+    const read = chatState({ state: 'dormant', held: holderOnly(held({ doing: 'working', since: 1_000 })) });
+    expect(read.external, 'the badge went with it, and who is in there had not changed').toEqual({ holder: 'terminal' });
+    expect([read.working, read.word, read.since], 'a dead fact was still being drawn as work').toEqual([
+      false,
+      '',
+      null,
+    ]);
+  });
+
+  it('has nothing to forget about a chat nobody holds', () => {
+    expect(holderOnly(null)).toBeNull();
+    expect(holderOnly(undefined)).toBeNull();
   });
 
   it('never mistakes one kind of holder for the other', () => {

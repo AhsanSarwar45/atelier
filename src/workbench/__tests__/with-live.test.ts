@@ -200,4 +200,41 @@ describe('what the stream may move a row for', () => {
     expect(merged!.lastSpokeAt, 'silence was written down as a time').toBeNull();
     expect(merged!.lastActiveAt).toBe('2026-08-16T12:00:00.000Z');
   });
+
+  it('a held row keeps its holder and forgets what they were doing once the stream is gone', () => {
+    // The stream said this, then died. The row was fetched before any of it and
+    // is not fetched again while nothing is speaking, so its own copy is older
+    // than the one just thrown away: drawn as it stands, the mark starts
+    // turning again and counts from a moment long gone (bw-96is.22).
+    const working = row({
+      sessionId: 'in-a-terminal',
+      externalId: 'x1',
+      origin: 'terminal',
+      runningElsewhere: true,
+      held: { id: 'x1', holder: 'terminal', doing: 'working', since: 1_000 },
+    });
+
+    const [drawn] = withLive([working], [], PROJECT, null, null, true);
+    expect(drawn!.held?.holder, 'the badge went with it: a terminal does not leave because a browser did').toBe('terminal');
+    expect(drawn!.held?.doing, 'the row went on saying what a dead connection last saw').toBe('unknown');
+    expect(drawn!.held?.since, 'the seconds went on counting from a fact nobody stands behind').toBeNull();
+    expect(drawn!.runningElsewhere, 'the door was opened on a chat somebody is in').toBe(true);
+  });
+
+  it('leaves the row alone while the stream has simply not spoken yet', () => {
+    // The same null holds, and the opposite answer: nothing has been said, so
+    // what the list was fetched with is the freshest thing there is.
+    const working = row({
+      sessionId: 'in-a-terminal',
+      externalId: 'x1',
+      origin: 'terminal',
+      runningElsewhere: true,
+      held: { id: 'x1', holder: 'terminal', doing: 'working', since: 1_000 },
+    });
+
+    const [drawn] = withLive([working], [], PROJECT, null, null, false);
+    expect(drawn!.held?.doing, 'a list rubbed its own marks out before anybody had spoken').toBe('working');
+    expect(drawn!.held?.since).toBe(1_000);
+  });
+
 });

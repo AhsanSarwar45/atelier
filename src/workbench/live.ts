@@ -123,6 +123,20 @@ let running: Set<string> | null = null;
  */
 let holds: Map<string, HeldChat> | null = null;
 /**
+ * The stream has said who is holding chats at least once since this page was
+ * loaded, which is a different question from whether it is speaking now.
+ *
+ * The two together are what a screen needs to be honest after a drop. `holds`
+ * goes back to null when the connection dies, and null means "nobody has said"
+ * — so every screen falls back to the answer it was handed when it was built:
+ * the open chat to the facts it fetched when the chat was opened, a row to the
+ * list it fetched when the list was drawn. Before the stream has ever spoken
+ * those are the freshest thing there is. After it has spoken and gone away
+ * they are older than what was just thrown out, and a held chat would start
+ * spinning again and count its seconds from a moment long gone (bw-96is.22).
+ */
+let saidWhoHolds = false;
+/**
  * The helper on the other end of the stream is not saying what this page reads.
  *
  * It is one process, started once, and nothing restarts it when its own code
@@ -319,6 +333,7 @@ function absorb(frame: WatchFrame): void {
     noteMismatch(false);
     running = new Set(frame.holds.map((h) => h.id));
     holds = new Map(frame.holds.map((h) => [h.id, h]));
+    saidWhoHolds = true;
     announce();
     return;
   }
@@ -467,8 +482,16 @@ function dropped(): void {
   source?.close();
   source = null;
   missedSomething = true;
-  if (running !== null) {
+  // Both, together. What each held chat is DOING is the half that goes stale
+  // visibly: the mark keeps spinning and its seconds keep climbing on the last
+  // thing a dead connection said, for up to half a minute of retrying, and
+  // nothing on screen tells the two apart from a live one. Whether a chat is
+  // held at all is dropped for the older reason — the writing box reads it, and
+  // a chat somebody started working in after this would be missing from it
+  // (bw-dmxj.12). Neither is an answer once nobody is speaking (bw-96is.22).
+  if (running !== null || holds !== null) {
     running = null;
+    holds = null;
     announce();
   }
   if (retrying !== null || listeners.size === 0) return;
@@ -594,6 +617,28 @@ export function useHolds(): Map<string, HeldChat> | null {
     subscribe,
     () => holds,
     () => null,
+  );
+}
+
+/**
+ * What this page still holds about who is in a chat is out of date: the stream
+ * has spoken about it before, and is not speaking now.
+ *
+ * The screens keep their own older answer for the moment the stream has not
+ * spoken yet — the open chat the facts it fetched on opening, a row the list it
+ * fetched when it was drawn — and that is right exactly once, before anybody
+ * has said anything. This is the word for after: keep the badge, because who is
+ * in there is not the sort of thing that changes while nobody is looking, and
+ * drop what they were doing, because that is precisely the thing that does. A
+ * mark that went on turning through half a minute of retrying, counting from a
+ * moment minutes gone, is indistinguishable on screen from a chat somebody is
+ * really working in (bw-96is.22).
+ */
+export function useHeldFactsAreOld(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => saidWhoHolds && holds === null,
+    () => false,
   );
 }
 

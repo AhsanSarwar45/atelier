@@ -49,7 +49,7 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
-import { chatState, heldLine } from '@/workbench/chat-state';
+import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
@@ -60,7 +60,7 @@ import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
-import { useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
+import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
@@ -569,7 +569,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // What that program is doing, from the stream while it is connected and from
   // the chat's own facts until it has spoken (bw-96is).
   const holds = useHolds();
-  const holder = !held || !externalId ? null : (holds?.get(externalId) ?? (holds ? null : facts?.held) ?? null);
+  // Those facts were fetched when this chat was opened and are never fetched
+  // again, so they answer for the moment before the stream speaks and for no
+  // other. Once it has spoken and gone away they are the oldest thing on the
+  // screen, and drawing them would restart the mark and count its seconds from
+  // whenever the pane happened to be opened (bw-96is.22).
+  const heldFactsAreOld = useHeldFactsAreOld();
+  const said = holds?.get(externalId ?? '') ?? (holds ? null : facts?.held) ?? null;
+  const holder = !held || !externalId ? null : heldFactsAreOld ? holderOnly(said) : said;
 
   /**
    * When the agent started owing an answer. The counting itself is the working

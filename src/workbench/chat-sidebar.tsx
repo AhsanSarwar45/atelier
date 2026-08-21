@@ -18,10 +18,11 @@ import { Badge } from '@/components/ui/badge';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { chatState, type HeldChat } from '@/workbench/chat-state';
+import { chatState, holderOnly, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import {
   useHeardFromOutside,
+  useHeldFactsAreOld,
   useHelperMismatch,
   useHolds,
   useLiveSessions,
@@ -175,6 +176,14 @@ export function withLive(
    * (bw-96is).
    */
   holds: ReadonlyMap<string, HeldChat> | null = null,
+  /**
+   * The stream has spoken about all this before and has stopped, so each row's
+   * own answer — fetched when the list was drawn and not since — is older than
+   * the one just thrown away. Who is in a chat is kept and what they were doing
+   * is dropped, so a mark cannot go on turning on a dead connection's last word
+   * (live.ts, `useHeldFactsAreOld`, bw-96is.22).
+   */
+  heldFactsAreOld = false,
 ): RestoreRow[] {
   const byId = new Map(rows.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
   const merged = [...rows];
@@ -233,7 +242,9 @@ export function withLive(
             }
           : r,
       )
-    : merged;
+    : heldFactsAreOld
+      ? merged.map((r) => (r.externalId ? { ...r, held: holderOnly(r.held) } : r))
+      : merged;
 
   return marked.sort(byWhatIsWorking);
 }
@@ -252,13 +263,14 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
   const live = useLiveSessions();
   const running = useRunningElsewhere();
   const holds = useHolds();
+  const heldFactsAreOld = useHeldFactsAreOld();
   const outOfStep = useHelperMismatch();
   // The order as it was last drawn. Read while rendering and written after, so
   // what he is pointing at is what decides where the rows go (holdStill).
   const settled = useRef<string[]>([]);
   const rows = useMemo(
-    () => holdStill(withLive(fetched, live, projectId, running, holds), settled.current),
-    [fetched, live, projectId, running, holds],
+    () => holdStill(withLive(fetched, live, projectId, running, holds, heldFactsAreOld), settled.current),
+    [fetched, live, projectId, running, holds, heldFactsAreOld],
   );
   useEffect(() => {
     settled.current = rows.map(rowKey);

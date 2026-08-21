@@ -51,6 +51,22 @@ export interface HeldChat {
   since: number | null;
 }
 
+/**
+ * The same held chat with what it was doing taken out of it.
+ *
+ * For the moment a screen is holding an answer it can no longer stand behind:
+ * the stream that keeps this current has dropped, and what it said last is a
+ * memory. Who is in there survives that — a terminal does not walk away
+ * because a browser lost its connection — and what they were doing does not,
+ * because that is the half that was changing second by second. The reading
+ * then draws the badge and no mark at all, which is the screen saying it does
+ * not know rather than drawing a clock that is still ticking on a dead fact
+ * (bw-96is.22).
+ */
+export function holderOnly(held: HeldChat | null | undefined): HeldChat | null {
+  return held ? { ...held, doing: 'unknown', since: null } : null;
+}
+
 /** The three facts, as every screen draws them. */
 export interface ChatState {
   /** Draw the moving mark: something is happening and the screen must not look still. */
