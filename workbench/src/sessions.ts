@@ -1561,10 +1561,13 @@ export class Sessions {
    * the record this would be reading.
    */
   async lookedAt(sessionId: string): Promise<void> {
-    const summary = this.store.getSession(sessionId);
-    if (!summary) return;
-    if (this.drivers.has(sessionId) || this.followers.has(sessionId)) return;
+    // Nothing here may throw: the stream starts this and does not wait for it,
+    // so a rejection nobody is holding would take the whole helper down with it
+    // (bw-ja9l.9).
     try {
+      const summary = this.store.getSession(sessionId);
+      if (!summary) return;
+      if (this.drivers.has(sessionId) || this.followers.has(sessionId)) return;
       const live = this.heldElsewhere(summary);
       this.follow(summary, await this.importPast(summary, live));
     } catch {

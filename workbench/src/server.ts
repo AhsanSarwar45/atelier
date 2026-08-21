@@ -275,10 +275,18 @@ const server = createServer((req, res) => {
         const sessionId = url.searchParams.get('session');
         if (!sessionId) return json(res, 400, { error: 'session is required' });
         const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
-        // Reading a chat is what starts the watching of it. Before the frame
-        // below goes out, so a reader who arrived by the address alone is
-        // caught up exactly as far as one who clicked the row (bw-ja9l.8).
-        await sessions.lookedAt(sessionId);
+        // Reading a chat is what starts the watching of it, so a reader who
+        // arrived by the address alone is caught up exactly as far as one who
+        // clicked the row (bw-ja9l.8).
+        //
+        // Started, never waited for: reading a record takes as long as the
+        // record is long, and awaited here it held the whole stream shut —
+        // a chat with a day's work behind it drew nothing at all for half a
+        // minute, and this helper answers one thing at a time, so every other
+        // reader waited with it (bw-ja9l.9). What the record says arrives on
+        // this same stream a moment later, which is the way every other fact
+        // about a followed chat already arrives.
+        void sessions.lookedAt(sessionId);
         streamEvents(req, res, sessionId, Number.isFinite(since) ? since : 0);
       } else if (path === '/search' && req.method === 'GET') {
         const q = (url.searchParams.get('q') ?? '').trim();
