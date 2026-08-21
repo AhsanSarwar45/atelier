@@ -103,7 +103,12 @@ chat helper is started beside it, so one command is the whole product.
 
 Where it listens:
   ATELIER_PORT                the port (default {PORT})
-  ATELIER_HOST                the address to bind (default 0.0.0.0)
+  ATELIER_HOST                who may reach it (default 0.0.0.0, everyone on
+                              your network; 127.0.0.1 for this computer alone)
+
+It answers the whole network by default, so the board opens on your phone.
+Starting it prints the address to type there. If it does not answer, your
+computer's firewall is holding the port shut.
 "
     )
 }

@@ -9,6 +9,7 @@ mod dolt;
 mod helper;
 mod identity;
 mod laid_down;
+mod reachable;
 mod report_tools;
 mod routes;
 mod serving;
@@ -316,11 +317,19 @@ async fn serve(open_browser: bool) {
         .await
         .expect("Failed to bind to address");
 
-    info!("{} is serving http://{}", identity::DISPLAY, addr);
+    // Where it bound, not an address to open: `http://0.0.0.0:3008` is not
+    // something a browser can be pointed at, and offering it beside the two
+    // that work is what leaves a reader typing the wrong one (bw-hkai.1).
+    info!("{} is listening on {}", identity::DISPLAY, addr);
 
     // One command, and the reader is looking at the board — not reading a port
-    // number out of a log line and typing it into a browser themselves.
-    println!("{} is running. Open http://localhost:{}", identity::DISPLAY, port);
+    // number out of a log line and typing it into a browser themselves. Both
+    // addresses, because the one a phone needs is not the one this computer
+    // needs, and it has always answered on both without saying so (bw-hkai.1).
+    println!("{} is running.", identity::DISPLAY);
+    for line in reachable::openable_at(&host, port, reachable::on_this_network()) {
+        println!("  {line}");
+    }
     println!("The screens and the chat are inside this program; there is nothing else to start.");
 
     if open_browser || env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {

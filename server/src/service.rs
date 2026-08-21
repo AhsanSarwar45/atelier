@@ -246,9 +246,14 @@ fn install(exe: &str) -> Result<(), String> {
         say(&step)?;
     }
 
-    println!(
-        "{DISPLAY} will start with this computer and serve http://localhost:{port}"
-    );
+    // The address a phone would type, not only the one this computer uses:
+    // the registration carries the bind address, so this is the same answer
+    // the running copy gives (bw-hkai.1).
+    let host = std::env::var("ATELIER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    println!("{DISPLAY} will start with this computer.");
+    for line in crate::reachable::openable_at(&host, port, crate::reachable::on_this_network()) {
+        println!("  {line}");
+    }
     Ok(())
 }
 

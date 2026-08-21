@@ -182,8 +182,25 @@ chat helper is started beside it. No Node.js or Rust needed.
 | `atelier --help` | List the above |
 
 It serves on http://localhost:3008 unless `ATELIER_PORT` says otherwise;
-`ATELIER_HOST` sets the address it binds, and `ATELIER_DATA_DIR` moves where it
+`ATELIER_HOST` sets who may reach it, and `ATELIER_DATA_DIR` moves where it
 keeps its data.
+
+### Open it on your phone
+
+It answers everyone on your network by default, so the board opens on a phone,
+a tablet or another computer. Starting it prints both addresses:
+
+```
+Atelier is running.
+  On this computer   http://localhost:3008
+  On your network    http://192.168.1.11:3008   — phone, tablet, another computer
+```
+
+Type the second one on the phone. If nothing answers, your computer's firewall
+is holding the port shut — open 3008, or whichever port you set.
+
+To keep it to this computer alone, set `ATELIER_HOST=127.0.0.1`; it then says
+so instead of offering an address that will not answer.
 
 ### Start it with the computer
 
