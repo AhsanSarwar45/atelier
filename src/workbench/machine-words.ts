@@ -34,7 +34,7 @@
  * and drive the real driver rather than keeping a copy of either
  * (`machine-lines.ts` is the same bargain).
  */
-import type { Audience } from './protocol';
+import type { Audience, NoteRank } from './protocol';
 
 /** One state of one kind: what it reads as, and whose business it is. */
 export interface StateWord {
@@ -87,6 +87,75 @@ export const ALLOWANCE_WINDOW: Record<string, string> = {
   seven_day_overage_included: 'weekly, extra usage included',
   overage: 'extra usage',
 };
+
+/**
+ * Why there is no extra usage to fall back on, in words that say whose problem
+ * it is.
+ *
+ * The kit carries a second, sibling status beside the allowance: whether paid
+ * overflow can carry him past a full window, and when it cannot, which of
+ * thirteen reasons it is. Every one of them is identifier-shaped —
+ * `out_of_credits`, `org_level_disabled` — so this is the same wire-word fault
+ * as the state itself, one field over, and it was never read at all: a chat
+ * whose window was fine but whose overflow was switched off read "Your weekly
+ * allowance is fine." and nothing more (bw-iiv6.16).
+ *
+ * The split that matters is who can do something: the first three are his own
+ * account and he can act on them; the rest are somebody else's switch, and the
+ * only honest thing to say is who holds it.
+ */
+export const OVERAGE_BLOCKED: Record<string, string> = {
+  out_of_credits: 'you are out of credits',
+  overage_not_provisioned: 'this account has no extra usage set up',
+  no_limits_configured: 'this account has no extra usage set up',
+  seat_tier_zero_credit_limit: 'your seat is allowed none',
+  member_zero_credit_limit: 'you are allowed none',
+  group_zero_credit_limit: 'your group is allowed none',
+  org_level_disabled: 'your organisation has turned it off',
+  org_level_disabled_until: 'your organisation has turned it off for now',
+  org_service_level_disabled: 'your organisation has turned it off',
+  seat_tier_level_disabled: 'your seat does not include it',
+  member_level_disabled: 'it is turned off for you',
+  fetch_error: 'the kit could not find out why',
+  unknown: 'the kit does not say why',
+};
+
+/**
+ * The clause about extra usage that goes on the end of an allowance line.
+ *
+ * Only ever a clause: the window is the sentence, and the overflow behind it
+ * changes what the window MEANS rather than replacing it. Empty when there is
+ * nothing to add, which is the ordinary case.
+ */
+export function extraUsage(status: string, why: string, onIt: boolean): string {
+  if (status === 'rejected') {
+    const because = OVERAGE_BLOCKED[why];
+    return ` There is no extra usage behind it${because ? `: ${because}` : ''}.`;
+  }
+  if (status === 'allowed_warning') return ' The extra usage behind it is running low.';
+  return onIt ? ' You are running on extra usage now.' : '';
+}
+
+/**
+ * Why a chat's own program stopped, in English.
+ *
+ * The kit declares this field as "a short snake_case reason set by the host
+ * CLI", with `host_exit` and `remote_control_disabled` for its examples — a
+ * code word by the kit's own description, pasted straight into the line, and a
+ * bare "Shutting down: " on the day it arrived empty (bw-iiv6.19). The list is
+ * open, so a reason nobody here has met is put into words rather than quoted:
+ * it is the host's wording, not anything he ever typed.
+ */
+export const WORKER_STOPPED: Record<string, string> = {
+  host_exit: 'the app it was running under closed',
+  remote_control_disabled: 'driving it from elsewhere was turned off',
+};
+
+/** What a chat says when its own program stops, whatever reason the host gives. */
+export function workerStopped(reason: string): string {
+  const said = WORKER_STOPPED[reason] ?? (reason ? inWords(reason).toLowerCase() : '');
+  return said ? `This chat stopped running: ${said}.` : 'This chat stopped running.';
+}
 
 /**
  * When a rule of his runs. The kit's `hook_event` is an open string, so this is
@@ -203,23 +272,40 @@ export const WORDS: Record<string, KindWords> = {
    * stopped, so that one is his and says the time it comes back.
    */
   rate_limit_event: {
-    from: 'rate_limit_info.status, and errorCode when it says credits are needed',
+    from: 'rate_limit_info.status, errorCode when it says credits are needed, and overageStatus when the window itself is fine',
     kit: { type: 'SDKRateLimitInfo', field: 'status' },
     ours: {
       credits_required: 'the kit puts this on errorCode, beside a rejected status, not on status itself',
+      overage_low: 'the sibling overageStatus, which has the same three words as the window and had never been read at all',
+      overage_blocked: 'the same sibling field saying there is no overflow, with overageDisabledReason for why',
     },
     sample: (state) => ({
       type: 'rate_limit_event',
       rate_limit_info:
         state === 'credits_required'
           ? { status: 'rejected', errorCode: 'credits_required', rateLimitType: 'seven_day' }
-          : { status: state, rateLimitType: 'seven_day', resetsAt: 1_700_000_000 },
+          : state === 'overage_low'
+            ? { status: 'allowed', overageStatus: 'allowed_warning', rateLimitType: 'seven_day', resetsAt: 1_700_000_000 }
+            : state === 'overage_blocked'
+              ? {
+                  status: 'allowed',
+                  overageStatus: 'rejected',
+                  overageDisabledReason: 'out_of_credits',
+                  rateLimitType: 'seven_day',
+                  resetsAt: 1_700_000_000,
+                }
+              : { status: state, rateLimitType: 'seven_day', resetsAt: 1_700_000_000 },
     }),
     states: {
       allowed: machine('is fine'),
       allowed_warning: machine('is running low'),
       rejected: his('has run out'),
       credits_required: his('has run out, and buying credits is the way on'),
+      // The window still has room, so nothing has stopped and neither of these
+      // is his to act on today; both say what happens when the room runs out,
+      // and that clause rides along on the line that DOES stop his work.
+      overage_low: machine('is fine'),
+      overage_blocked: machine('is fine'),
     },
   },
 
@@ -687,3 +773,220 @@ export function kitSpoke(text: string): string | null {
 
 /** Every kind the kit speaks in its own voice, for the check and the tests. */
 export const SPOKEN_KINDS: string[] = KIT_SPEAKS.map((spoken) => spoken.kind);
+
+/* ------------------------------------------------------------------ *
+ * The third door: what the kit writes in HIS name.
+ * ------------------------------------------------------------------ */
+
+/**
+ * A message that stands in the conversation as HIS, and that he never typed.
+ *
+ * Two doors were shut before this one. A message ABOUT the run arrives with a
+ * kind and a state on it, and the table above sorts it. A run's own answer that
+ * is really one of the kit's own sentences is caught by `KIT_SPEAKS`. This is
+ * the third: the kit opens a message with the role `user` — his side of the
+ * page, his colour — and writes something itself.
+ *
+ * Sixty-four of the 525 messages standing in the manager's name are these, and
+ * one shape of them was recognised: a single line in square brackets. So a
+ * whole automated background-task event, five paragraphs long and opening "NOT
+ * A MESSAGE FROM THE USER", was drawn as five paragraphs he had typed —
+ * twenty-one times. A worker fork's briefing, the same. The kit's note about
+ * the size of a picture he pasted was drawn as an interrupt, seven times, each
+ * one telling him to multiply coordinates by 1.76.
+ *
+ * Recognised by SHAPE and never by wording, for the reason the bracket rule
+ * already gave: the wordings are the kit's and change without us.
+ *
+ * Two of these are his after all, and the only thing wrong with them is the
+ * wrapper: a slash command he ran, and a message he typed mid-turn that the kit
+ * re-sent inside an explanation of how it re-sends things. Those come back as
+ * his own words with the wrapper taken off, which is what `kind: null` means
+ * below.
+ */
+export interface HisNameLine {
+  /** What the app files it under; `null` when what is left is his own words. */
+  kind: string | null;
+  /** How loud, which is what the family and the reader are settled from. */
+  rank: NoteRank;
+  /** Who it is for, when the shape itself settles that; `null` leaves it to the kind. */
+  audience: Audience | null;
+  /** The English the chat draws, or his own words unwrapped. */
+  text: string;
+  /** Everything the wrapper carried, behind the line. */
+  body: string | null;
+}
+
+export interface NotHisWords {
+  /** Every kind this shape can be filed under, for the check and the docs. */
+  kinds: string[];
+  /** What a message of this shape IS. Prose, for whoever reads this next. */
+  means: string;
+  /** The shape itself. Anchored at the start: it is a wrapper, not a phrase. */
+  knownBy: RegExp;
+  /** This message, read. */
+  read: (text: string) => HisNameLine;
+}
+
+/** The colours a terminal writes around its own output. */
+const COLOUR_CODE = /\u001B\[[\d;]*[A-Za-z]/g;
+
+/** What one of the kit's tags holds, or an empty string. */
+const inside = (text: string, tag: string): string =>
+  new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(text)?.[1]?.trim() ?? '';
+
+/** A sentence, with the full stop it may not have brought. */
+const ended = (said: string): string => (/[.!?:]$/.test(said) ? said : `${said}.`);
+
+/**
+ * The two stop markers the kit writes, in English.
+ *
+ * The bracket rule underneath catches any marker at all and quotes it. These
+ * two are 30 of the 37 in his record, and both read better said than quoted.
+ */
+const STOP_SAID: Record<string, string> = {
+  '[Request interrupted by user]': 'You stopped this run.',
+  '[Request interrupted by user for tool use]': 'You stopped this run while a tool was going.',
+};
+
+export const IN_HIS_NAME: NotHisWords[] = [
+  {
+    kinds: ['system/task_notification'],
+    means:
+      'a sent-off agent reporting back, arriving as a message in his name rather than as a message about the run. The same event and the same ruling: the panel is the list of agents, so the chat says nothing about one unless it FAILED',
+    knownBy: /^\[SYSTEM NOTIFICATION - NOT USER INPUT\]/,
+    read: (text) => {
+      const state = inside(text, 'status') || 'completed';
+      const who = whoFor('system/task_notification', state) ?? 'machine';
+      const summary = inside(text, 'summary');
+      const said = saidOf('system/task_notification', state) ?? 'came home';
+      return {
+        kind: 'system/task_notification',
+        rank: who === 'you' ? 'note' : 'detail',
+        audience: who,
+        text: summary ? ended(summary) : `A sent-off agent ${said}.`,
+        body: text,
+      };
+    },
+  },
+  {
+    kinds: ['user/pasted_image'],
+    means:
+      "the kit's note about a picture he pasted, written for the model that has to point at things inside it. It is one bracketed line, so the rule under this one drew it as an interrupt",
+    knownBy: /^\[Image: /,
+    read: (text) => ({
+      kind: 'user/pasted_image',
+      rank: 'detail',
+      audience: 'machine',
+      text: 'You pasted a picture.',
+      body: text,
+    }),
+  },
+  {
+    kinds: ['user/synthetic'],
+    means:
+      'a marker the kit writes where something of his interrupted the run. Recognised by shape, so a marker this build has never met is still not drawn as words he typed',
+    knownBy: /^\[[^\n\]]+\]$/,
+    read: (text) => ({
+      kind: 'user/synthetic',
+      rank: 'note',
+      audience: null,
+      text: STOP_SAID[text] ?? text,
+      body: null,
+    }),
+  },
+  {
+    kinds: [],
+    means:
+      'a slash command he ran, wrapped in the kit’s own tags. He typed it, so the tags come off and the command stands as his message',
+    knownBy: /^<command-name>/,
+    read: (text) => {
+      const name = inside(text, 'command-name');
+      const args = inside(text, 'command-args');
+      return {
+        kind: null,
+        rank: 'note',
+        audience: null,
+        text: [name, args].filter(Boolean).join(' ') || text,
+        body: null,
+      };
+    },
+  },
+  {
+    kinds: ['user/command_output'],
+    means: 'what that command printed back, terminal colours and all',
+    knownBy: /^<local-command-stdout>/,
+    read: (text) => {
+      const said = inside(text, 'local-command-stdout').replace(COLOUR_CODE, '').trim();
+      return {
+        kind: 'user/command_output',
+        rank: 'detail',
+        audience: 'machine',
+        text: said ? `That command said: ${said.split('\n')[0]}` : 'That command printed nothing.',
+        body: said || null,
+      };
+    },
+  },
+  {
+    kinds: ['user/fork_brief'],
+    means:
+      'the briefing handed to a worker carrying this chat on: pages of standing orders to the machine, and then the one line he actually asked for. That line is his, so the briefing comes off and his own words stand. Should a later kit stop marking where the briefing ends, the whole thing files as a machine line rather than reaching him as pages of orders in his own colour',
+    knownBy: /^<fork-boilerplate>/,
+    read: (text) => {
+      const asked = /\n\s*Your directive:[ \t]*([\s\S]+)$/.exec(text)?.[1]?.trim() ?? '';
+      if (asked.length > 0) return { kind: null, rank: 'note', audience: null, text: asked, body: null };
+      return {
+        kind: 'user/fork_brief',
+        rank: 'detail',
+        audience: 'machine',
+        text: 'This chat was handed to a worker to carry on.',
+        body: text,
+      };
+    },
+  },
+  {
+    kinds: [],
+    means:
+      'something he typed while the run was working, which the kit re-sends wrapped in an explanation of how it re-sends things. The explanation is the machine’s; the words in the middle are his',
+    knownBy: /^The user sent a new message while you were working:\n/,
+    read: (text) => {
+      const said = text
+        .replace(/^The user sent a new message while you were working:\n/, '')
+        .replace(/\n+This is how [\s\S]*$/, '')
+        .trim();
+      return { kind: null, rank: 'note', audience: null, text: said || text, body: null };
+    },
+  },
+  {
+    kinds: ['user/note'],
+    means:
+      'any other message that is nothing but one of the kit’s own tagged blocks. The net under the six above, so a wrapper a new kit version invents arrives as a machine line rather than as markup in his own colour',
+    knownBy: /^<([a-z][\w-]*)(?:\s[^>]*)?>[\s\S]*<\/\1>$/,
+    read: (text) => ({
+      kind: 'user/note',
+      rank: 'detail',
+      audience: 'machine',
+      text: `The chat wrote a note of its own here: ${inWords(/^<([a-z][\w-]*)/.exec(text)?.[1] ?? '').toLowerCase()}.`,
+      body: text,
+    }),
+  },
+];
+
+/**
+ * A message standing in his name, read — or `null` when he really did type it.
+ *
+ * Order is the rule: the picture note and the agent report are both bracketed
+ * and the bracket rule would swallow either, so the shapes that say something
+ * specific are asked first.
+ */
+export function notHisWords(text: string): HisNameLine | null {
+  const said = text.trim();
+  if (said.length === 0) return null;
+  for (const shape of IN_HIS_NAME) {
+    if (shape.knownBy.test(said)) return shape.read(said);
+  }
+  return null;
+}
+
+/** Every kind the kit writes in his name, for the check and the tests. */
+export const HIS_NAME_KINDS: string[] = Array.from(new Set(IN_HIS_NAME.flatMap((shape) => shape.kinds)));

@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import {
   ALLOWANCE_WINDOW,
+  extraUsage,
   inWords,
   PERMISSION_MODE,
   ruleFinished,
@@ -22,6 +23,7 @@ import {
   TURN_ENDED,
   whenItComesBack,
   whoFor,
+  workerStopped,
 } from '../../../src/workbench/machine-words.ts';
 import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
@@ -343,8 +345,24 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         body: String(m.message ?? ''),
       };
 
-    case 'system/model_refusal_no_fallback':
-      return { rank: 'note', kind, text: oneLine(m.content), body: String(m.content ?? '') };
+    // The refusal nobody retried. The kit puts a human sentence on `content`
+    // when it has one, and sends the message with that field empty when it does
+    // not — which drew a machine line with no text in it at all, the fault
+    // bw-iiv6.15 removed from its neighbours and left standing here
+    // (bw-iiv6.17). So the sentence is built from what the message always
+    // carries: which model refused, and why, when the kit says why.
+    case 'system/model_refusal_no_fallback': {
+      const why = oneLine(m.api_refusal_explanation ?? '');
+      const said = oneLine(m.content);
+      return {
+        rank: 'note',
+        kind,
+        text:
+          said ||
+          `${oneLine(m.original_model ?? 'The model')} would not answer, and there was nothing else to try${why ? `: ${why}` : ''}.`,
+        body: String(m.content ?? '') || whole(),
+      };
+    }
 
     case 'system/model_refusal_fallback': {
       const state = String(m.direction ?? 'retry');
@@ -431,7 +449,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
       };
 
     case 'system/worker_shutting_down':
-      return { rank: 'note', kind, text: `Shutting down: ${oneLine(m.reason)}`, body: String(m.reason ?? '') };
+      return { rank: 'note', kind, text: workerStopped(oneLine(m.reason)), body: whole() };
 
     case 'system/plugin_install': {
       const state = String(m.status ?? 'started');
@@ -478,7 +496,21 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     // loud, and the pair is what the chat sorts on (bw-6jq5).
     case 'rate_limit_event': {
       const info = m.rate_limit_info ?? {};
-      const state = info.errorCode === 'credits_required' ? 'credits_required' : String(info.status ?? 'allowed');
+      const stopped = info.errorCode === 'credits_required' ? 'credits_required' : String(info.status ?? 'allowed');
+      // The kit carries a SECOND window behind this one — paid overflow — with
+      // its own three-word status and its own thirteen reasons for being shut,
+      // and none of it was read: a window that was fine with nothing behind it
+      // said only "is fine" (bw-iiv6.16). The window that has actually turned
+      // work away is still the sentence; the overflow is a clause on the end of
+      // it, and only names the state when the window itself has room left.
+      const overage = String(info.overageStatus ?? '');
+      const behind = extraUsage(overage, String(info.overageDisabledReason ?? ''), Boolean(info.isUsingOverage ?? info.overageInUse));
+      const state =
+        stopped === 'allowed' && overage === 'rejected'
+          ? 'overage_blocked'
+          : stopped === 'allowed' && overage === 'allowed_warning'
+            ? 'overage_low'
+            : stopped;
       const window = ALLOWANCE_WINDOW[String(info.rateLimitType ?? '')] ?? 'usage';
       const said = saidOf(kind, state) ?? 'is in a state this build has no words for';
       const who = whoFor(kind, state) ?? 'machine';
@@ -492,7 +524,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         rank: who === 'you' ? 'note' : 'detail',
         kind,
         audience: who,
-        text: `Your ${window} allowance ${said}${tail}`,
+        text: `Your ${window} allowance ${said}${tail}${behind}`,
         body: whole(),
       };
     }

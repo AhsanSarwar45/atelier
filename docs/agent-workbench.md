@@ -1237,9 +1237,10 @@ both answers together: **the English sentence it draws, and who it is for.**
 | what the table holds | how many | example |
 |---|---|---|
 | kinds the kit declares, all named | 38 | `rate_limit_event`, `system/hook_response` |
-| states over 14 of those kinds | 47 | `allowed_warning`, `error_max_budget_usd` |
+| states over 14 of those kinds | 49 | `allowed_warning`, `error_max_budget_usd` |
 | kinds deliberately silent, each with its reason | 4 | a guess at what he might type next belongs in the writing box |
 | sentences the kit writes in the chat's own voice | 6 | "You've hit your session limit" (§8.2.4.2) |
+| shapes the kit writes in HIS name | 8 | a background agent's report, a note about a picture he pasted (§8.2.4.3) |
 
 And then the table itself: every kind, every state of it, the line a reader
 actually gets, and whose line it is. It is **printed by the check, not typed** —
@@ -1264,6 +1265,8 @@ value shown is the sample's.
 | `rate_limit_event` | `allowed_warning` | Your weekly allowance is running low (it renews at 03:13 AM). | machine |
 | `rate_limit_event` | `allowed` | Your weekly allowance is fine (it renews at 03:13 AM). | machine |
 | `rate_limit_event` | `credits_required` | Your weekly allowance has run out, and buying credits is the way on. | you |
+| `rate_limit_event` | `overage_blocked` | Your weekly allowance is fine (it renews at 03:13 AM). There is no extra usage behind it: you are out of credits. | machine |
+| `rate_limit_event` | `overage_low` | Your weekly allowance is fine (it renews at 03:13 AM). The extra usage behind it is running low. | machine |
 | `rate_limit_event` | `rejected` | Your weekly allowance has run out — nothing more runs until 03:13 AM. | you |
 | `system/api_retry` | — | Retrying | you |
 | `system/background_tasks_changed` | — | Nothing is running in the background now | machine |
@@ -1291,7 +1294,7 @@ value shown is the sample's.
 | `system/model_refusal_fallback` | `retry` | the model you picked would not answer, so the same question went to another model. | you |
 | `system/model_refusal_fallback` | `revert` | the model you picked would not answer, so the chat went back to another model. | you |
 | `system/model_refusal_fallback` | `sticky` | the model you picked would not answer, so the rest of this chat is answered by another model. | you |
-| `system/model_refusal_no_fallback` | — |  | you |
+| `system/model_refusal_no_fallback` | — | The model would not answer, and there was nothing else to try. | you |
 | `system/notification` | `high` | something to know | machine |
 | `system/notification` | `immediate` | something to know | machine |
 | `system/notification` | `low` | something to know | machine |
@@ -1321,7 +1324,7 @@ value shown is the sample's.
 | `system/task_updated` | `pending` | A sent-off agent is waiting to start. | machine |
 | `system/task_updated` | `running` | A sent-off agent is running. | machine |
 | `system/thinking_tokens` | — | *nothing, on purpose: an estimate twice a second, drawn as the thinking counter* | — |
-| `system/worker_shutting_down` | — | Shutting down:  | you |
+| `system/worker_shutting_down` | — | This chat stopped running. | you |
 | `tool_use_summary` | — | A tool call, summarised. | machine |
 <!-- /every-line-says -->
 
@@ -1334,6 +1337,19 @@ Four rulings hold it:
   that has actually turned work away — or one that wants credits, which the kit
   files on `errorCode` beside a rejected status and never on `status` itself —
   reaches him, saying "nothing more runs until 03:20 AM".
+- **A line is written from the WHOLE message, not from the fields somebody
+  read.** His allowance carries a second window behind the first — paid overflow,
+  with its own three-word status and thirteen reasons for being shut — and none
+  of it was read, so a chat that could not spend another penny said "Your weekly
+  allowance is fine." and stopped there (bw-iiv6.16). The window that turned work
+  away is still the sentence; the overflow is a clause on the end of it, and it
+  names whose switch it is — his own credits, or an organisation that has turned
+  it off. Two neighbours of the same fault went with it: a refusal with nothing
+  left to try drew a completely blank row when the refusal carried no words of
+  its own (bw-iiv6.17), and a chat whose program stopped read "Shutting down:
+  host_exit" — a code word the kit's own type file spells out as one, now said in
+  English and no longer ending on a dangling colon when the host gives no reason
+  (bw-iiv6.19).
 - **A state the table has never met is readable and quiet**, never its own wire
   name: the sentence admits the build has no words for it, and it waits on the
   machine's side. A wire word that must be shown at all has its seams opened up
@@ -1365,8 +1381,17 @@ the table has never heard of, on a sentence with an identifier-shaped word in it
 on a state that draws nothing, on one that lands in front of the wrong reader, on
 a sentence that prints a field its message never carried — `Retrying (undefined
 of undefined)`, and `A sent-off agent finished: ""`, which was the two quote
-marks JSON writes for a missing value (bw-iiv6.15) — and on any of the 543 rows
+marks JSON writes for a missing value (bw-iiv6.15) — and on any of the 626 rows
 of the manager's own record drawing a wire word once restated.
+
+One gap in that sweep took a third pass to close. Every kind is driven with a
+message carrying no fields on it, so a line that pastes a field IN draws an empty
+gap and passes — which is how "Shutting down: host_exit" sat there through every
+gate. So the check now reads the kit's own doc comments as well: a field whose
+comment spells it out with a code word ("a short snake_case reason set by the
+host CLI", `host_exit`) is filled with the kit's own example and must not reach
+the drawn line. Two fields qualify today, and the day the kit documents another
+one the gate covers it without being told (bw-iiv6.19).
 
 ##### 8.2.4.2 The kit talking in the chat's own voice (bw-iiv6.12)
 
@@ -1415,6 +1440,58 @@ the duplicate the kit writes on a retry costs him nothing.
 The check reads the four lists on every run: a sentence a new kit version adds
 fails until somebody has given it a family and a reader, and an opening this
 build watches for that the kit has dropped fails too.
+
+##### 8.2.4.3 The third door: what the kit writes in HIS name (bw-iiv6.18)
+
+Two doors were shut before this one, and the leak was through neither. A message
+ABOUT the run arrives with a kind and a state on it, and §8.2.4.1 sorts it. A
+run's own answer that is really one of the kit's sentences is caught by §8.2.4.2.
+The third door is the kit opening a message with the role `user` — his side of
+the page, his colour, his name on it — and writing something itself.
+
+**Sixty-three of the 526 messages standing in the manager's name are the kit's.**
+One shape of them was recognised: a single line in square brackets. So a whole
+background-task report, five paragraphs long and opening "SYSTEM NOTIFICATION -
+NOT USER INPUT", was drawn as five paragraphs he had typed — twenty-one times.
+The kit's note about a picture he pasted was drawn as a grey interrupt chip,
+seven times, each one telling him to multiply coordinates by 1.76.
+
+Eight shapes, each recognised by its **shape and never by its wording** — the
+wordings are the kit's and change without us — and asked in this order, because
+the picture note and the agent report are both bracketed and a bracket rule would
+swallow either:
+
+| what it is | filed as | the line he gets |
+|---|---|---|
+| a sent-off agent reporting back | `system/task_notification` | what the agent said, and to him only when it FAILED |
+| the kit's note about a picture he pasted | `user/pasted_image` | "You pasted a picture." |
+| a marker where something of his interrupted the run | `user/synthetic` | "You stopped this run." |
+| a slash command he ran | — *his* | the command, with the kit's tags off |
+| what that command printed | `user/command_output` | its first line, terminal colours stripped |
+| the briefing handed to a worker | — *his*, or `user/fork_brief` | the one line he asked for, with pages of standing orders off |
+| a line he sent while the run was working | — *his* | his line, without the kit's explanation around it |
+| any other message that is one tagged block | `user/note` | "The chat wrote a note of its own here: …" |
+
+**Three of them are his after all.** A slash command, the line he sent mid-turn
+and the directive at the end of a worker's briefing are his own words inside the
+kit's wrapper, so those come back as his message with the wrapper taken off
+rather than as a machine line — which is the half a rule written only to hide
+things gets wrong. The briefing is the sharpest case: filing the whole thing as
+the machine's would have hidden the question he actually asked along with it.
+
+Over his own record: 59 filed as machine lines — 30 stops, 21 agent reports (17
+of them the machine's, 4 his because they failed), 7 pictures, 1 command's
+output — and 4 given back to him as his own words.
+
+The check cannot ask `notHisWords` whether a line is the kit's, because it would
+only ever agree with it. It uses **six structural tells** instead, each read off
+his own record and not one of them a wording: a message that IS one tagged block,
+one that OPENS with a tagged block and carries his line after it, one that is a
+single bracketed marker, a shouted disclaimer in capitals, a terminal's own
+colour codes, and prose that writes about him in the third person while standing
+in his name. Anything a tell catches must come back either as a machine line or
+as his own words with the wrapper off — never as text he typed. A person sending
+one of these as an entire message costs himself one grey chip; the kit sends 63.
 
 #### 8.2.5 What this costs the log
 

@@ -481,6 +481,51 @@ const wiredKinds = [...new Set(drawnWired.map((d) => `${d.kind} (${d.word})`))];
 
 
 /* ------------------------------------------------------------------ *
+ * 5b. The fields the kit itself spells out as code words.
+ * ------------------------------------------------------------------ */
+
+/**
+ * A field whose own doc comment describes it as an identifier.
+ *
+ * The kinds sweep above sends each kind a message carrying no fields, so a line
+ * that pastes a field in draws an empty gap and passes — which is how "Shutting
+ * down: host_exit" sat there through every gate this check has (bw-iiv6.19).
+ * One class of field cannot be let through that gap: the ones the kit's own
+ * comment spells out with a code word — "a short snake_case reason set by the
+ * host CLI", `host_exit`, `remote_control_disabled`. They are read out of the
+ * type file with the kit's own example, so the day it documents another one
+ * this gate covers it without being told.
+ */
+function codeWordFields() {
+  const found = [];
+  for (const decl of KIT.matchAll(/declare type (SDK\w+) = \{([\s\S]*?)\n\};/g)) {
+    const body = decl[2];
+    const type = /\n\s*type\??:\s*'([^']+)'/.exec(body)?.[1];
+    if (!type) continue;
+    const sub = /\n\s*subtype\??:\s*'([^']+)'/.exec(body)?.[1];
+    for (const field of body.matchAll(/\/\*\*([\s\S]{0,600}?)\*\/\s*\n\s*(\w+)\??:\s*([^;\n]+);/g)) {
+      const [, says, name, holds] = field;
+      if (!holds.includes('string')) continue;
+      const example = /'([a-z]+(?:_[a-z]+)+)'/.exec(says)?.[1];
+      if (example) found.push({ kind: sub ? `${type}/${sub}` : type, field: name, example });
+    }
+  }
+  return found;
+}
+
+const codeWords = codeWordFields();
+
+/** Each of them, carrying the kit's own example, through the real driver. */
+const pasted = [];
+for (const { kind, field, example } of codeWords) {
+  const { said } = notesFrom([{ ...wireFor(kind), [field]: example }]);
+  for (const note of said) {
+    if (String(note.text).includes(example)) pasted.push({ kind, field, example, text: note.text });
+  }
+}
+
+
+/* ------------------------------------------------------------------ *
  * 7. The written record: does the doc carry the same table the code does?
  * ------------------------------------------------------------------ */
 
@@ -592,13 +637,17 @@ for (const spoken of KIT_SPEAKS) {
  * that is the whole of the fault — they arrive on the side of the record that
  * holds his answers.
  */
-function spokenInTheRecord() {
+let recorded = null;
+
+/** Every chat in his record, as the messages a chat would draw. Read once. */
+function theRecord() {
+  if (recorded !== null) return recorded;
   const db = new DatabaseSync(STORE, { readOnly: true });
   const rows = db.prepare('select session_id, role, text, at from message order by session_id, at').all();
   db.close();
-  const chats = new Map();
+  recorded = new Map();
   for (const row of rows) {
-    const held = chats.get(row.session_id) ?? [];
+    const held = recorded.get(row.session_id) ?? [];
     held.push({
       kind: 'message',
       id: `${row.session_id}:${held.length}`,
@@ -608,8 +657,13 @@ function spokenInTheRecord() {
       done: true,
       parentId: null,
     });
-    chats.set(row.session_id, held);
+    recorded.set(row.session_id, held);
   }
+  return recorded;
+}
+
+function spokenInTheRecord() {
+  const chats = theRecord();
   let lines = 0;
   let rows_ = 0;
   let his = 0;
@@ -635,6 +689,89 @@ console.log(
 );
 for (const [kind, count] of [...spokenHere.byKind.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`  ${wide(kind, 34)}${wide(forWhom(kind, 'note'), 9)}${num(count, 6)}`);
+}
+
+
+/* ------------------------------------------------------------------ *
+ * 6b. What the kit writes in HIS name.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Text nobody types.
+ *
+ * Deliberately NOT the table's own list of shapes: a check that asked
+ * `notHisWords` whether a line was the kit's could only ever agree with it.
+ * These are six structural tells instead, each one read off his own record
+ * and not one of them a wording — a message that IS one tagged block, one
+ * that OPENS with a tagged block and carries his own line after it, a message
+ * that is one bracketed marker, a shouted disclaimer in capitals, a
+ * terminal's own colour codes, and prose that writes about him in the third
+ * person while standing in his name. A person sending one of these as an
+ * entire message is rare enough to cost him one grey chip; the kit sends 63
+ * of them.
+ */
+const NOT_TYPED = [
+  ['one tagged block', /^<[a-z][\w-]*(?:\s[^>]*)?>[\s\S]*<\/[a-z][\w-]*>$/],
+  ['a tagged block at the front', /^<([a-z][\w-]*)(?:\s[^>]*)?>[\s\S]*<\/\1>/],
+  ['one bracketed marker', /^\[[^\n\]]+\]$/],
+  ['a disclaimer in capitals', /^\[[A-Z][A-Z –-]{6,}\]/],
+  ['a terminal colour code', /\u001B\[/],
+  ['him written about in the third person', /^The user /],
+];
+
+/**
+ * The same question of his record, on the third door: how many messages
+ * standing in his name did he never write, and how many of those does a chat
+ * now draw as something other than words he typed.
+ *
+ * A message the kit only WRAPPED — a slash command, something he sent
+ * mid-turn — is his, and passes by having the wrapper taken off. So the
+ * question asked here is whether the drawn text is still the stored text, not
+ * whether a machine line came back.
+ *
+ * One message at a time on purpose: folding is about a line's neighbours, and
+ * this is about the line.
+ */
+function inHisNameInTheRecord() {
+  let his = 0;
+  let notHis = 0;
+  let filed = 0;
+  let unwrapped = 0;
+  const byKind = new Map();
+  const stillDrawnAsHis = [];
+  for (const items of theRecord().values()) {
+    for (const item of items) {
+      if (item.role !== 'user') continue;
+      const said = item.text.trim();
+      const tell = NOT_TYPED.find(([, shape]) => shape.test(said));
+      if (!tell) {
+        his += 1;
+        continue;
+      }
+      notHis += 1;
+      const row = drawnRows([item])[0];
+      if (row?.row === 'machine') {
+        filed += 1;
+        const at = `${row.kind} ${row.audience}`;
+        byKind.set(at, (byKind.get(at) ?? 0) + 1);
+      } else if (row?.row === 'other' && row.item.text.trim() !== said) {
+        unwrapped += 1;
+      } else {
+        stillDrawnAsHis.push(`${tell[0]}: ${said.slice(0, 60).replace(/\n/g, ' ')}`);
+      }
+    }
+  }
+  return { his, notHis, filed, unwrapped, byKind, stillDrawnAsHis };
+}
+
+const hisName = inHisNameInTheRecord();
+
+console.log(
+  `\n  Messages standing in his name: ${hisName.his + hisName.notHis}, and ${hisName.notHis} of them are the kit's — ${hisName.filed} drawn as machine lines, ${hisName.unwrapped} unwrapped back to what he typed.`,
+);
+for (const [at, count] of [...hisName.byKind.entries()].sort((a, b) => b[1] - a[1])) {
+  const [kind, who] = at.split(' ');
+  console.log(`  ${wide(kind, 34)}${wide(who, 9)}${num(count, 6)}`);
 }
 
 /* ------------------------------------------------------------------ *
@@ -672,6 +809,10 @@ if (docStale) {
 if (wireNamed.size > 0) {
   faults.push(`${[...wireNamed.values()].reduce((n, c) => n + c, 0)} rows of the record draw their own wire name`);
 }
+if (hisName.stillDrawnAsHis.length > 0)
+  faults.push(`${hisName.stillDrawnAsHis.length} messages the kit wrote in his name are drawn as words he typed`);
+if (pasted.length > 0)
+  faults.push(`${pasted.length} lines paste in a field the kit itself spells out as a code word`);
 if (onOpening !== 0) faults.push(`a chat that just opened announced its mode ${onOpening} times`);
 if (afterSwitch !== 1) faults.push(`switching the mode said so ${afterSwitch} times, not once`);
 
@@ -716,6 +857,16 @@ console.log(
     drawnWired.length === 0 && wireNamed.size === 0
       ? ''
       : ` — ${[...wiredKinds, ...wireNamed.keys()].join(', ')}`
+  }`,
+);
+console.log(
+  `  ${mark(pasted.length === 0)} No line pastes in a field the kit itself spells out as a code word — ${codeWords.length} of them.${
+    pasted.length === 0 ? '' : ` — ${pasted.map((n) => `${n.kind}.${n.field}`).join(', ')}`
+  }`,
+);
+console.log(
+  `  ${mark(hisName.stillDrawnAsHis.length === 0)} Nothing the kit writes in his name is drawn as words he typed — ${hisName.notHis} of his ${hisName.his + hisName.notHis} messages are the kit's.${
+    hisName.stillDrawnAsHis.length === 0 ? '' : ` — ${hisName.stillDrawnAsHis.slice(0, 3).join('; ')}`
   }`,
 );
 console.log(

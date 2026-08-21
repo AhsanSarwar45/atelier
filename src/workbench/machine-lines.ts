@@ -33,6 +33,7 @@
 import {
   inWords,
   kitSpoke,
+  notHisWords,
   PERMISSION_MODE,
   ruleFinished,
   ruleIsRunning,
@@ -80,6 +81,14 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // The owner reached for Stop, the agent is going down, the chat begins again.
   'user/synthetic': 'stopped',
   'system/worker_shutting_down': 'stopped',
+  // The rest of what the kit writes in his own name (machine-words.ts,
+  // IN_HIS_NAME). None of it is a thing he did: a picture's measurements, a
+  // slash command's output, the briefing handed to a worker, and any wrapper a
+  // later kit invents. It is the chat's own paperwork, and it reads as that.
+  'user/pasted_image': 'breathing',
+  'user/command_output': 'breathing',
+  'user/fork_brief': 'background',
+  'user/note': 'breathing',
   conversation_reset: 'stopped',
   // The kit speaking in the chat's own voice, and both of these mean the same
   // thing: nothing further happens here. An allowance can be waited out and a
@@ -203,6 +212,10 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   // He stopped it, or it stopped.
   'user/synthetic': 'you',
   'system/worker_shutting_down': 'you',
+  'user/pasted_image': 'machine',
+  'user/command_output': 'machine',
+  'user/fork_brief': 'machine',
+  'user/note': 'machine',
   conversation_reset: 'you',
   // The two that mean the work has stopped dead. Nothing else on the screen
   // says so, and one of them carries the time it comes back.
@@ -472,7 +485,7 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
   for (const item of items) {
     const line = machineLine(item);
     if (!line) {
-      rows.push({ row: 'other', item });
+      rows.push({ row: 'other', item: hisOwnWords(item) });
       continue;
     }
     const last = rows[rows.length - 1];
@@ -500,23 +513,27 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
 }
 
 /**
- * A line the kit wrote in the reader's name rather than one he typed.
+ * A message standing in the reader's name that he did not type, drawn as what
+ * it really is — or, where the kit only wrapped his own words, unwrapped.
  *
  * Stopping a turn puts "[Request interrupted by user]" into the conversation as
- * a message FROM him, and every such marker the kit writes has the same shape:
- * one line, wrapped in square brackets, standing alone. Drawn as a message it
- * wore his own colour and his own side of the page, so the thing that stopped
- * the work read as the thing he said — which is the complaint this whole job
- * began with (bw-jkh2.12).
+ * a message FROM him, and that one shape was the whole of what this recognised.
+ * It is not the whole of what the kit writes there: an automated background
+ * event, a worker fork's briefing, a slash command, that command's output and
+ * the note about a picture he pasted all arrive the same way, and all of them
+ * were drawn in his colour, on his side of the page, as things he had said
+ * (bw-iiv6.18). The shapes and what each one means are settled once, beside
+ * every other sentence the app writes (`machine-words.ts`).
  *
- * Recognised by shape rather than by wording, because the wordings are the
- * kit's and change without us. The live driver already flags these as they
- * arrive; this is what catches the ones read back from a chat's own record,
- * where the flag was never written down. A message he really did type that is
- * nothing but one bracketed line costs him a grey chip, which is the whole
- * price of it.
+ * The live driver already flags the markers as they arrive; this is what
+ * catches every one of them read back from a chat's own record, where nothing
+ * was written down beyond the text itself.
  */
-export const writtenInHisName = (text: string): boolean => /^\[[^\n\]]+\]$/.test(text.trim());
+export function hisOwnWords(item: TranscriptItem): TranscriptItem {
+  if (item.kind !== 'message' || item.role !== 'user') return item;
+  const read = notHisWords(item.text);
+  return read === null || read.kind !== null ? item : { ...item, text: read.text };
+}
 
 /**
  * A note, or one of the app's own asides, as the same kind of row.
@@ -555,16 +572,22 @@ function machineLine(item: TranscriptItem): {
       };
     }
   }
-  if (item.kind === 'message' && item.role === 'user' && writtenInHisName(item.text)) {
-    return {
-      id: item.id,
-      family: familyOf('user/synthetic', 'note'),
-      audience: forWhom('user/synthetic', 'note'),
-      kind: 'user/synthetic',
-      rank: 'note',
-      text: item.text.trim(),
-      body: null,
-    };
+  // The kit writing in HIS name. A shape with no kind is one where it only
+  // wrapped words he really typed, and that is his message, not a line about
+  // the machine — `hisOwnWords` takes the wrapper off on the way past.
+  if (item.kind === 'message' && item.role === 'user') {
+    const read = notHisWords(item.text);
+    if (read !== null && read.kind !== null) {
+      return {
+        id: item.id,
+        family: familyOf(read.kind, read.rank),
+        audience: read.audience ?? forWhom(read.kind, read.rank),
+        kind: read.kind,
+        rank: read.rank,
+        text: read.text,
+        body: read.body,
+      };
+    }
   }
   if (item.kind === 'note') {
     return {
