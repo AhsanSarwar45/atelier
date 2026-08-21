@@ -442,6 +442,126 @@ test.describe('a chat another program is in', () => {
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
     chat.forget();
   });
+
+  /**
+   * The marks on a row and the marks on the open chat's own line are one size.
+   *
+   * The manager photographed them side by side: the same chip, drawn a step
+   * smaller on the list than in the chat beside it, so its word sat one point
+   * off each edge instead of four and the row read as crammed and high
+   * (bw-jaoz.1). Measured off the drawn boxes rather than off a class name,
+   * because a class name is what the two screens disagreed about while both
+   * believed they were drawing the same chip.
+   */
+  test('draws its marks at one size, on the row and on the open chat’s own line', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const project = await aFixtureProject(request);
+    const opening = 'Measure the chips';
+    const chat = aChatSomebodyElseIsIn(project.path, opening);
+    const release = claimConversation(chat.id, { status: 'busy' });
+
+    try {
+      await openChatTab(page, project);
+      const row = rowFor(page, chat.id);
+      await expect(row.getByTestId('row-pill')).toHaveAttribute('data-working', 'yes', { timeout: 30_000 });
+      await row.getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('session-state-chip')).toBeVisible({ timeout: 30_000 });
+
+      /** The chip's own box, and the box its word is drawn in. */
+      const measure = async (chip: ReturnType<Page['getByTestId']>) => {
+        const box = await chip.boundingBox();
+        expect(box, 'a chip drew no box at all').not.toBeNull();
+        const word = await chip.evaluate((el) => {
+          const said = el.getAttribute('data-word') ?? '';
+          const span = Array.from(el.querySelectorAll('span')).find((s) => s.textContent?.trim() === said.trim());
+          const r = span?.getBoundingClientRect();
+          return r ? { top: r.top, bottom: r.bottom } : null;
+        });
+        expect(word, 'a chip drew no word to measure').not.toBeNull();
+        return { box: box!, word: word! };
+      };
+
+      const onRow = await measure(row.getByTestId('row-pill'));
+      const onLine = await measure(page.getByTestId('session-state-chip'));
+
+      expect(
+        onRow.box.height,
+        `the row's chip is ${onRow.box.height}px tall and the chat's own line draws the same chip at ${onLine.box.height}px`,
+      ).toBeCloseTo(onLine.box.height, 0);
+
+      // Clear of both edges, and by the same amount top and bottom: a word
+      // pressed against the top of its chip is what "sitting high" was.
+      for (const [where, chip] of [['row', onRow], ['line', onLine]] as const) {
+        const above = chip.word.top - chip.box.y;
+        const below = chip.box.y + chip.box.height - chip.word.bottom;
+        expect(above, `the word on the ${where}'s chip touches its top edge`).toBeGreaterThan(0);
+        expect(below, `the word on the ${where}'s chip touches its bottom edge`).toBeGreaterThan(0);
+        expect(
+          Math.abs(above - below),
+          `the word on the ${where}'s chip sits ${above}px from the top and ${below}px from the bottom`,
+        ).toBeLessThanOrEqual(1);
+      }
+
+      // The badge beside it is the other half of what he compared, and it is
+      // drawn from the same size.
+      const badge = await row.getByTestId('chat-external').boundingBox();
+      expect(badge, 'the row drew no badge').not.toBeNull();
+      expect(
+        badge!.height,
+        `the badge is ${badge!.height}px tall against the chip's ${onRow.box.height}px`,
+      ).toBeCloseTo(onRow.box.height, 0);
+    } finally {
+      release();
+    }
+    chat.forget();
+  });
+
+  /**
+   * The command they are running now, on the screen while it runs.
+   *
+   * The record's tail is held back from SETTLING, never from the screen: a
+   * two-minute command used to be two minutes of blank chat beside a terminal
+   * saying `Bash(…) Running… 14s` the whole time, and the foot of the chat drew
+   * nothing at all because it asked whether a driver of OURS was busy
+   * (bw-jaoz.3, bw-jaoz.5).
+   */
+  test('draws the command its holder is running, and settles that same row', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const project = await aFixtureProject(request);
+    const opening = 'Run the suite';
+    const chat = aChatSomebodyElseIsIn(project.path, opening);
+    const release = claimConversation(chat.id, { status: 'busy' });
+
+    try {
+      await openChatTab(page, project);
+      await expect(rowFor(page, chat.id)).toBeVisible({ timeout: 30_000 });
+      await rowFor(page, chat.id).getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
+
+      // Their terminal starts a command; nothing has come back yet.
+      const call = chat.runs('Bash', { command: 'npm test' });
+      const drawn = page.locator('[data-testid="tool-row"][data-tool-name="Bash"]');
+      await expect(drawn, 'the command they are running is not on the screen').toHaveCount(1, { timeout: 30_000 });
+      await expect(drawn).toHaveAttribute('data-tool-status', 'running');
+
+      // And the foot of the chat says the same thing the chip above it does.
+      const foot = page.getByTestId('working-line');
+      await expect(foot, 'the body of a held chat says nothing while its holder works').toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(foot).toContainText('npm test');
+
+      // What it printed lands: the row already standing is the row that
+      // settles, and there is never a second one.
+      chat.printed(call, '313 passed, 0 failed');
+      await expect(drawn).toHaveAttribute('data-tool-status', 'ok', { timeout: 30_000 });
+      await expect(drawn, 'the settled command was drawn a second time').toHaveCount(1);
+    } finally {
+      release();
+    }
+    chat.forget();
+  });
 });
 
 test.describe('a chat nothing is running', () => {

@@ -28,11 +28,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { heldDoing } from '../../src/workbench/chat-state.ts';
+import { answerOwed, heldDoing } from '../../src/workbench/chat-state.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { parseMarker, procStartFromStat, runningChats } from '../../src/workbench/running.ts';
 import type { RunningChat, SessionMarker } from '../../src/workbench/running.ts';
-import { findRecord } from './record-tail.ts';
+import { findRecord, lastSaidSync } from './record-tail.ts';
 
 /**
  * Where the tool keeps its state, resolved the way the tool resolves it:
@@ -170,6 +170,24 @@ export function runningNow(fresh = false): Map<string, RunningChat> {
 const burstAt = new Map<string, number>();
 
 /**
+ * The last answer about a record's end, kept against the moment it was written.
+ *
+ * Reading the tail is cheap and reading it three times a second for a chat that
+ * has not moved is still waste: nothing at the end of a file can change without
+ * the file changing, so the answer stands until its mtime does.
+ */
+const owedFor = new Map<string, { at: number; owed: boolean }>();
+
+/** Whether the end of this record leaves an answer owed, remembered per write. */
+function owedAt(record: string, movedAt: number): boolean {
+  const had = owedFor.get(record);
+  if (had && had.at === movedAt) return had.owed;
+  const owed = answerOwed(lastSaidSync(record));
+  owedFor.set(record, { at: movedAt, owed });
+  return owed;
+}
+
+/**
  * What every held conversation is doing, ready for the wire.
  *
  * The holder's own `status` answers where there is one, and a stat of its
@@ -183,6 +201,7 @@ export function holdsNow(fresh = false): HeldChat[] {
   const now = Date.now();
   const holds: HeldChat[] = [];
   const seen = new Set<string>();
+  const read = new Set<string>();
 
   running.forEach((chat, id) => {
     seen.add(id);
@@ -198,10 +217,18 @@ export function holdsNow(fresh = false): HeldChat[] {
         movedAt = null;
       }
     }
+    // Whether a turn is in flight, which the mtime above cannot say: a think
+    // writes nothing for minutes at a time (bw-jaoz.4).
+    let owed: boolean | null = null;
+    if (record && movedAt !== null) {
+      read.add(record);
+      owed = owedAt(record, movedAt);
+    }
     const { doing, since } = heldDoing({
       status: chat.status,
       statusAt: chat.statusAt,
       recordMovedAt: movedAt,
+      owed,
       burstAt: burstAt.get(id) ?? null,
       now,
     });
@@ -224,6 +251,9 @@ export function holdsNow(fresh = false): HeldChat[] {
 
   burstAt.forEach((_, id) => {
     if (!seen.has(id)) burstAt.delete(id);
+  });
+  owedFor.forEach((_, record) => {
+    if (!read.has(record)) owedFor.delete(record);
   });
   return holds.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }

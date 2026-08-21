@@ -75,7 +75,12 @@ const badgeVariants = cva(
       size: {
         lg: 'rounded-md px-[0.5rem] h-7 min-w-7 gap-1.5 text-xs [&_svg]:size-3.5',
         md: 'rounded-md px-[0.45rem] h-6 min-w-6 gap-1.5 text-xs [&_svg]:size-3.5 ',
-        sm: 'rounded-sm px-[0.325rem] h-5 min-w-5 gap-1 text-[0.6875rem] leading-[0.75rem] [&_svg]:size-3',
+        // Same fault as `xs` below, one size up, and it arrived the moment the
+        // rail's chips were moved onto this size: 0.75rem of line for 0.6875rem
+        // of letters cuts the tail off every g and y inside a `truncate`
+        // (bw-jaoz.1). The letters get room to be whole; the badge's own 1.25rem
+        // is untouched, so nothing beside it moves.
+        sm: 'rounded-sm px-[0.325rem] h-5 min-w-5 gap-1 text-[0.6875rem] leading-[0.9375rem] [&_svg]:size-3',
         // The line the text is drawn on used to be shorter than the text
         // itself — 0.5rem of room for 0.625rem of letters — and a label inside
         // a badge is usually wrapped in `truncate`, which hides whatever will

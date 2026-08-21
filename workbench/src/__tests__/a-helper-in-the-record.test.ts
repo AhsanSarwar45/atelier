@@ -139,7 +139,17 @@ describe('the agents a chat sent off, read back from the record', () => {
     // command it ran with what that printed, and the answer it came back with.
     expect(helper!.entries).toEqual([
       { kind: 'said', role: 'user', text: 'Count the rows and report', images: [] },
-      { kind: 'call', id: 'toolu_inside', name: 'Bash', input: { command: 'wc -l rows.csv' }, output: '412 rows.csv', ok: true },
+      {
+        kind: 'call',
+        id: 'toolu_inside',
+        name: 'Bash',
+        input: { command: 'wc -l rows.csv' },
+        output: '412 rows.csv',
+        ok: true,
+        // When it was made, off the line's own stamp: a call still running is
+        // drawn with the seconds counted from here (bw-jaoz.5).
+        at: Date.parse('2026-08-20T12:00:20.000Z'),
+      },
       { kind: 'said', role: 'assistant', text: '412 rows.', images: [] },
     ]);
   });

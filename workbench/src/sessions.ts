@@ -67,6 +67,14 @@ const READ_AHEAD_PAUSE_MS = 250;
 const FOLLOW_BEAT_MS = 1_500;
 
 /**
+ * How often a row drawn as running is told how long it has been running.
+ *
+ * Slower than the beat that reads the record, because this one WRITES: every
+ * line published is a line in the chat's own log for good (§8.2.2).
+ */
+const PROGRESS_BEAT_MS = 10_000;
+
+/**
  * Where reading a chat's record got to, so the follower carries on from there
  * rather than reading the whole thing again.
  *
@@ -493,13 +501,32 @@ export class Sessions {
     // touched: a chat that touched none failed that test forever, so every click
     // read the whole conversation off the disk again and re-ran the card scan,
     // which forks the board's own tool per candidate (bw-m8o.14).
-    // A mark left with rows still held back says the record holds lines nobody
-    // has drawn: the follower stopped mid-turn. While the chat is being driven
-    // the follower picks them up; once it is not, nothing ever will, so the
-    // record is read again from the top and the mark dropped (bw-dmxj.14).
+    // A mark left short of the end of the record says the record holds lines
+    // nobody has drawn: the follower stopped mid-turn. While the chat is being
+    // driven the follower picks them up; once it is not, nothing ever will —
+    // the follower was torn down when the reader looked away, and a chat
+    // written down as read is never read again. So the record is read from the
+    // top and every mark on it dropped, the reading mark included: left
+    // standing, it refuses the reading before it starts and the reader is
+    // handed the same stale copy on every open for the life of the chat
+    // (bw-dmxj.14, bw-jaoz.9).
+    //
+    // The record's own length is what says it. How many of the mark's rows are
+    // drawn does not: a follower holding a command back until its answer lands
+    // marks the byte that command BEGINS at with none of it drawn, and that is
+    // the state every chat the manager watches is permanently in.
+    let stale = false;
     if (!live) {
       const held = this.store.followedTo(summary.id);
-      if (held !== null && held.drawn > 0) this.store.forgetImported(summary.id);
+      const reaches = held === null ? null : recordSize(summary.externalId);
+      if (held !== null && reaches !== null && reaches !== held.at) {
+        // Whether the reader has a copy of this chat in front of him, asked
+        // before it is thrown away: he is owed the word to drop it, or the
+        // replacement is drawn underneath what it replaces.
+        stale = this.store.importedBy(summary.id) !== null || this.store.messageCount(summary.id) > 0;
+        this.store.forgetImported(summary.id);
+        this.store.forgetRead(summary.id);
+      }
     }
     const readBy = this.store.importedBy(summary.id);
     // A chat another program is driving is never finished being read, so it was
@@ -528,7 +555,7 @@ export class Sessions {
       this.store.markImported(summary.id, IMPORT_RECIPE);
       return NOTHING_READ;
     }
-    const drawnAlready = readBy !== null || drawn() > 0;
+    const drawnAlready = stale || readBy !== null || drawn() > 0;
 
     // Where the record stands before a byte of it is read: what arrives while
     // the reading is going on is the follower's, and it can only know that if
@@ -730,11 +757,31 @@ export class Sessions {
    * so a command read off the disk and one watched as it ran open the same way
    * (docs/agent-workbench.md §8.2.4).
    */
-  private draw(sessionId: string, entry: PastEntry, parent: string | null = null): void {
+  private draw(sessionId: string, entry: PastEntry, parent: string | null = null, already = false): void {
     if (entry.kind === 'said') {
       for (const e of spokenAsEvents(entry, randomUUID(), parent)) this.publish(sessionId, e);
       return;
     }
+    // `already` when the call was drawn as running on an earlier beat: it is
+    // one row, and it settles where it stands rather than being said twice
+    // (bw-jaoz.5).
+    if (!already) this.announce(sessionId, entry, parent);
+    this.publish(sessionId, {
+      type: 'tool.completed',
+      toolCallId: entry.id,
+      ok: entry.ok,
+      output: cut(entry.output),
+    });
+  }
+
+  /**
+   * A call put on the screen, with nothing back from it yet.
+   *
+   * Its own step, because a record being followed says a call was made a beat
+   * or two before it says what the call printed — and the reader is entitled to
+   * see the command in between (bw-jaoz.5).
+   */
+  private announce(sessionId: string, entry: Extract<PastEntry, { kind: 'call' }>, parent: string | null = null): void {
     this.publish(sessionId, {
       type: 'tool.started',
       toolCallId: entry.id,
@@ -749,12 +796,6 @@ export class Sessions {
     // was no diff (bw-4wcd.1).
     const change = diffOf(entry.name, entry.input);
     if (change) this.publish(sessionId, { type: 'diff', toolCallId: entry.id, ...change });
-    this.publish(sessionId, {
-      type: 'tool.completed',
-      toolCallId: entry.id,
-      ok: entry.ok,
-      output: cut(entry.output),
-    });
   }
 
   /**
@@ -945,6 +986,54 @@ export class Sessions {
      * say every turn of every agent twice.
      */
     const sentOff = new Map<string, { size: number; drawn: number; over: boolean }>();
+    /**
+     * Calls drawn as running, waiting on the answer that ends their row.
+     *
+     * The settling rule holds back a record's trailing calls until something
+     * follows them, so that nothing is ever drawn finished and empty. The cost
+     * was that a two-minute command was two minutes of blank chat, in a chat
+     * the manager could watch working in a terminal beside it. Held back from
+     * SETTLING is not the same as held back from the screen: these are put up
+     * as running, and settle in place when the answer lands (bw-jaoz.5).
+     */
+    const announced = new Map<string, { since: number; told: number }>();
+    /**
+     * Ends every row still drawn as running.
+     *
+     * Nothing else will: this follower is the only thing that would have
+     * settled them, and it is stopping — the record was rewritten under it, or
+     * this app has taken the chat over. A row left running would spin for as
+     * long as the chat is open.
+     */
+    const settleAnnounced = (): void => {
+      for (const id of announced.keys()) {
+        this.publish(summary.id, { type: 'tool.completed', toolCallId: id, ok: true, output: '' });
+      }
+      announced.clear();
+    };
+    /**
+     * How long each running row has been running.
+     *
+     * The row shows a timer only when it is given one, and the record says
+     * nothing at all about a call between making it and its answer landing — so
+     * a command that takes two minutes would sit at nothing for two minutes.
+     *
+     * Once every ten seconds, not every beat: the log IS the transcript
+     * (§8.2.2), and a command left running overnight would otherwise write
+     * twenty thousand lines into the chat the reader scrolls.
+     */
+    const tellHowLong = (): void => {
+      const now = Date.now();
+      for (const [id, run] of announced) {
+        if (now - run.told < PROGRESS_BEAT_MS) continue;
+        run.told = now;
+        this.publish(summary.id, {
+          type: 'tool.progress',
+          toolCallId: id,
+          seconds: Math.max(0, Math.round((now - run.since) / 1000)),
+        });
+      }
+    };
     /** Which agent each call sent off, so the answer to that call ends its row. */
     const startedBy = new Map<string, string>();
     for (const [agentId, size] of helpersNow(path)) {
@@ -1067,6 +1156,7 @@ export class Sessions {
       // drawn stays drawn — it is the only copy of those turns — and reading
       // carries on from the new end rather than replaying it as if it were new.
       if (grown.rewritten) {
+        settleAnnounced();
         carry = [];
         drawn = 0;
         through = null;
@@ -1127,8 +1217,20 @@ export class Sessions {
       }
       for (const entry of said) {
         if (entry.kind === 'call') links.observe(entry.name, entry.input);
-        this.draw(summary.id, entry);
+        // A call already on the screen as running settles where it stands
+        // rather than being drawn a second time (bw-jaoz.5).
+        this.draw(summary.id, entry, null, entry.kind === 'call' && announced.delete(entry.id));
         if (entry.kind === 'call') answered(entry.id, entry.ok);
+      }
+      // And the tail the settling rule held back, put up as running.
+      for (const entry of entries.slice(upto)) {
+        if (entry.kind !== 'call' || announced.has(entry.id)) continue;
+        // Counted from the record's own line rather than from this instant: a
+        // reader who opens a chat a minute into a command must be told a
+        // minute, not nothing (bw-jaoz.5).
+        announced.set(entry.id, { since: entry.at ?? Date.now(), told: 0 });
+        links.observe(entry.name, entry.input);
+        this.announce(summary.id, entry);
       }
       mark();
     };
@@ -1146,6 +1248,7 @@ export class Sessions {
         // manager answers a prompt, walks away, and comes back to a chat that
         // stopped growing at the first answer (bw-4wcd.20).
         await draw();
+        tellHowLong();
       } catch {
         // Being written to this instant, or moved: try the next beat.
       } finally {
@@ -1156,7 +1259,10 @@ export class Sessions {
     const beat = setInterval(() => void look(), FOLLOW_BEAT_MS);
     // Watching a chat is not a reason for the sidecar to stay up.
     beat.unref?.();
-    this.followers.set(summary.id, () => clearInterval(beat));
+    this.followers.set(summary.id, () => {
+      clearInterval(beat);
+      settleAnnounced();
+    });
     void look();
   }
 

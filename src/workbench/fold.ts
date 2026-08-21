@@ -382,24 +382,32 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       );
       return next;
 
-    case 'tool.started':
-      next.items = [
-        ...items,
-        {
-          kind: 'tool',
-          id: e.toolCallId,
-          name: e.name,
-          title: e.title,
-          status: 'running',
-          seconds: 0,
-          summary: null,
-          parentId: e.parentToolCallId,
-          diff: null,
-          input: e.input,
-          output: null,
-        },
-      ];
+    case 'tool.started': {
+      const row: TranscriptTool = {
+        kind: 'tool',
+        id: e.toolCallId,
+        name: e.name,
+        title: e.title,
+        status: 'running',
+        seconds: 0,
+        summary: null,
+        parentId: e.parentToolCallId,
+        diff: null,
+        input: e.input,
+        output: null,
+      };
+      // One call is one row, wherever the word about it came from. A chat
+      // somebody else is working in now draws a command while it runs and
+      // settles it in place when the answer lands, and a reader who looks away
+      // and back is told about that same running command again — which has to
+      // refresh the row already standing rather than add a second one below it
+      // (bw-jaoz.5).
+      const twice = items.some((it) => it.kind === 'tool' && it.id === e.toolCallId);
+      next.items = twice
+        ? items.map((it) => (it.kind === 'tool' && it.id === e.toolCallId ? row : it))
+        : [...items, row];
       return next;
+    }
 
     case 'tool.completed':
       // The output is KEPT. It always crossed the wire and was thrown away
@@ -721,9 +729,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
       }
 
-      case 'tool.started':
-        toolAt.set(e.toolCallId, items.length);
-        items.push({
+      case 'tool.started': {
+        const row: TranscriptTool = {
           kind: 'tool',
           id: e.toolCallId,
           name: e.name,
@@ -735,8 +742,17 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           diff: null,
           input: e.input,
           output: null,
-        });
+        };
+        // The same call twice is the same row: see the note on the other fold.
+        const at = toolAt.get(e.toolCallId);
+        if (at === undefined) {
+          toolAt.set(e.toolCallId, items.length);
+          items.push(row);
+        } else {
+          items[at] = row;
+        }
         break;
+      }
 
       case 'tool.completed': {
         const at = toolAt.get(e.toolCallId);

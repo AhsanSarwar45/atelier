@@ -19,6 +19,7 @@ import { Bot, Hand, Loader2, SquareTerminal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { HOLDER_WORD, type ChatState, type Holder } from '@/workbench/chat-state';
+import { forHowLong } from '@/workbench/elapsed';
 
 /**
  * The mark on the badge, one per kind of holder.
@@ -65,24 +66,29 @@ function useSecond(): number {
 /** How long it has been at it, or an empty string when nothing is counting. */
 function seconds(since: number | null, now: number): string {
   if (!since) return '';
-  const s = Math.max(0, Math.floor((now - since) / 1000));
-  return `${s}s`;
+  return forHowLong(Math.max(0, Math.floor((now - since) / 1000)));
 }
 
 /**
  * The chip.
  *
- * `size` is the only thing that varies between the places it is drawn: a row in
- * the list, the open chat's own line, and the small print on a board card.
+ * `size` says whether it is a chip of its own — a row in the list, the open
+ * chat's own line — or the small print inside a board card's line of text.
+ *
+ * A row and a line are the same size now. The row's was one step smaller, which
+ * put its word one point off each edge against the line's four, so the same
+ * chip read as crammed and sitting high on the list and correct in the chat
+ * beside it — one screen disagreeing with another about a thing the reader
+ * compares directly (bw-jaoz.1).
  */
 export function ChatStateChip({
   state,
-  size = 'row',
+  size = 'chip',
   testId = 'chat-state',
   className,
 }: {
   state: ChatState;
-  size?: 'row' | 'line' | 'inline';
+  size?: 'chip' | 'inline';
   testId?: string;
   className?: string;
 }) {
@@ -131,7 +137,7 @@ export function ChatStateChip({
     <Badge
       variant={state.working ? 'primary' : state.waiting ? 'warning' : 'secondary'}
       appearance="light"
-      size={size === 'line' ? 'sm' : 'xs'}
+      size="sm"
       shape="circle"
       data-testid={testId}
       data-working={state.working ? 'yes' : 'no'}
@@ -166,11 +172,9 @@ export function ChatStateChip({
  */
 export function ExternalBadge({
   holder,
-  size = 'row',
   className,
 }: {
   holder: Holder;
-  size?: 'row' | 'line';
   className?: string;
 }) {
   const Mark = HOLDER_ICON[holder];
@@ -178,7 +182,7 @@ export function ExternalBadge({
     <Badge
       variant="info"
       appearance="outline"
-      size={size === 'line' ? 'sm' : 'xs'}
+      size="sm"
       shape="default"
       data-testid="chat-external"
       data-holder={holder}

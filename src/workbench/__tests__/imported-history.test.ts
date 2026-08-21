@@ -344,6 +344,7 @@ describe('how much of a record still being written may be drawn', () => {
     input: {},
     output,
     ok: true,
+    at: null,
   });
 
   it('draws all of a record whose last entry is a finished command', () => {

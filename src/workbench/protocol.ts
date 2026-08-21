@@ -37,6 +37,23 @@ export type SessionState =
   /** Known, not running: nothing wakes it but a click. */
   | 'dormant';
 
+/**
+ * Whether no driver of ours is attached to this chat.
+ *
+ * The one test behind every "somebody else has it" on every screen. Every agent
+ * this app drives is itself a Claude Code process and leaves the same trace on
+ * the machine a terminal does, so the trace alone cannot tell our own chat from
+ * a stranger's — what tells them apart is that a chat we drive is idle between
+ * turns and never asleep.
+ *
+ * The chat's own line has always asked it. The list did not, which is how one
+ * chat drew "external" on the list and "Ready" in the bar above it at the same
+ * moment (bw-jaoz.2). Here, so neither can ask it differently.
+ */
+export function asleepHere(state: SessionState): boolean {
+  return state === 'dormant' || state === 'ended';
+}
+
 /** A button on a permission card. */
 export interface AskOption {
   id: string;

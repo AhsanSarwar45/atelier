@@ -19,7 +19,7 @@
  */
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 
-import { byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
+import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
 import { holdsNow, runningNow } from './running.ts';
 import { lastSpokeAt } from './spoken.ts';
@@ -141,12 +141,15 @@ export async function restoreList(
       folder: folderOf(seen?.cwd ?? s.cwd),
       branch: seen?.branch ?? null,
       beads: store.beadsForSession(s.id),
-      // A chat this app started can be running in a process of its own too:
-      // the driver's child writes a marker like any other Claude Code. The row
-      // says so either way, and `state` stays the authority on whether a driver
-      // of ours is attached to it.
-      runningElsewhere: !!s.externalId && running.has(s.externalId),
-      held: (s.externalId ? holds.get(s.externalId) : null) ?? null,
+      // A chat this app started runs in a process of its own, and that process
+      // writes a marker like any other Claude Code — so the marker alone says
+      // nothing about whether somebody ELSE has the conversation. Only a chat
+      // no driver of ours is attached to is somebody else's, which is the test
+      // the chat's own line has always applied and this row did not: one chat
+      // drew "external" here and "Ready" in the bar above it at the same moment
+      // (bw-jaoz.2).
+      runningElsewhere: !!s.externalId && asleepHere(s.state) && running.has(s.externalId),
+      held: (s.externalId && asleepHere(s.state) ? holds.get(s.externalId) : null) ?? null,
     };
   });
 

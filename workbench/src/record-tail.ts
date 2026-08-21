@@ -17,7 +17,7 @@
  * it follows the record's parent links and hands back the conversation as it
  * now stands, which appended lines alone cannot say.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -234,6 +234,61 @@ export async function runningIn(path: string): Promise<Running> {
     }
   } finally {
     await handle.close();
+  }
+}
+
+/**
+ * How much of the end of a record is read to find its last word.
+ *
+ * A conversation line is a few hundred bytes and a command's output can be
+ * tens of thousands, so this starts small and doubles. The cap is what stops a
+ * record whose last line is a megabyte of output from being read whole on every
+ * beat: past it, nothing is claimed.
+ */
+const TAIL_WINDOW = 1 << 14;
+const TAIL_CAP = 1 << 20;
+
+/**
+ * The last thing said in a record, without reading the record.
+ *
+ * Synchronous, because the one caller is the marker beat, which is synchronous
+ * for the same reason: a handful of small reads a couple of times a second
+ * (running.ts). Null when there is nothing to read, or when the end of the file
+ * is one line longer than {@link TAIL_CAP} — either way nothing is claimed
+ * about the chat rather than something guessed.
+ */
+export function lastSaidSync(path: string): RecordLine | null {
+  let size: number;
+  try {
+    size = statSync(path).size;
+  } catch {
+    return null;
+  }
+  if (size === 0) return null;
+  for (let window = TAIL_WINDOW; ; window *= 2) {
+    const from = Math.max(0, size - window);
+    let text: string;
+    try {
+      const handle = openSync(path, 'r');
+      try {
+        const buffer = Buffer.alloc(size - from);
+        readSync(handle, buffer, 0, buffer.length, from);
+        text = buffer.toString('utf8');
+      } finally {
+        closeSync(handle);
+      }
+    } catch {
+      return null;
+    }
+    const lines = text.split('\n');
+    // The first piece is only a whole line when the window reached the start of
+    // the file; otherwise it is whatever the read cut in half.
+    if (from > 0) lines.shift();
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const said = readLine(lines[i]!);
+      if (said) return said;
+    }
+    if (from === 0 || window >= TAIL_CAP) return null;
   }
 }
 

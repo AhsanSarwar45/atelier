@@ -3,6 +3,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import {
   aChatSomebodyElseIsIn,
   aProject,
+  aProjectOfItsOwn,
   backend,
   claimConversation,
   command,
@@ -52,19 +53,81 @@ function keyOf(row: RestoreRow): string {
   return row.sessionId ?? `ext:${row.externalId}`;
 }
 
-/** The first project the instance lists that has a chat being worked in. */
+/**
+ * A project with a chat somebody else is working in, and an idle one beside it.
+ *
+ * A stack built from a separate copy of the work starts with an empty settings
+ * database and no chats at all, so there is nothing to borrow: the case stands
+ * both chats up itself, in a project of its own, and puts all three away when
+ * it ends (bw-jaoz.8). The project has to be its own: the cases run side by
+ * side, and a shared one puts another case's chats on the list this case
+ * counts — rows it is asserting about while their owner deletes them.
+ *
+ * An instance that already has a chat being worked in — the owner's own board,
+ * pointed at with BEADS_E2E_PROJECT — is taken as it stands, because that is
+ * the machine the complaint came from.
+ */
 async function withAWorkingChat(request: APIRequestContext): Promise<{ project: Project; rows: RestoreRow[] }> {
   const api = backend();
-  const projects = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
-  expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
-  const wanted = process.env.BEADS_E2E_PROJECT;
-  for (const project of wanted ? projects.filter((p) => p.id === wanted) : projects) {
+  const listed = async (project: Project): Promise<RestoreRow[]> => {
     const q = new URLSearchParams({ project: project.id, path: project.path });
-    const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as RestoreRow[];
-    if (rows.some((r) => r.runningElsewhere)) return { project, rows };
+    return (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as RestoreRow[];
+  };
+
+  // The owner's own board, pointed at with BEADS_E2E_PROJECT, is taken as it
+  // stands when it already has a chat being worked in: that is the machine the
+  // complaint came from and its list is the thing under suspicion.
+  if (process.env.BEADS_E2E_PROJECT) {
+    const borrowed = await aProject(request);
+    const had = await listed(borrowed);
+    if (had.some((r) => r.runningElsewhere) && had.some((r) => !r.runningElsewhere && r.externalId)) {
+      return { project: borrowed, rows: had };
+    }
   }
-  throw new Error('no chat is running on this machine: open one in a terminal, then run this again');
+
+  const project = await aProjectOfItsOwn(request, 'working');
+  putAwayAfter(() => project.remove());
+  const held = aChatSomebodyElseIsIn(project.path, 'Look at the routing on the chat tab');
+  const idle = aChatSomebodyElseIsIn(project.path, 'Read the release notes back to me');
+  putAwayAfter(claimConversation(held.id, { status: 'busy' }));
+
+  let rows: RestoreRow[] = [];
+  await expect
+    .poll(
+      async () => {
+        rows = await listed(project);
+        const on = new Set(rows.map((r) => r.externalId));
+        return on.has(held.id) && on.has(idle.id) && rows.some((r) => r.runningElsewhere);
+      },
+      { timeout: 30_000, message: 'the chats this run made never turned up on the list' },
+    )
+    .toBe(true);
+  return { project, rows };
 }
+
+/**
+ * What a case stood up, put away when it ends however it ends.
+ *
+ * A marker left behind says a chat is being worked in for every run after this
+ * one, and a project left behind is a row on the reader's own list. Both go.
+ *
+ * The RECORDS stay where they are, on purpose. The sidecar watches the whole
+ * of the config folder and says one word when it moves; a folder it cannot
+ * place — one whose records have just been deleted — makes that word bare, and
+ * a bare word means "this could be yours" to every browser on the stream. A
+ * case tidying its records away therefore makes the case running beside it
+ * fetch its list again, which is the very thing that case is there to prove
+ * does not happen. Nothing is leaked by leaving them: the stack under test runs
+ * against a copy of the config that the runner throws away whole before every
+ * run (scripts/workbench-e2e.sh).
+ */
+const putAway: (() => void | Promise<void>)[] = [];
+function putAwayAfter(fn: () => void | Promise<void>): void {
+  putAway.push(fn);
+}
+test.afterEach(async () => {
+  while (putAway.length) await putAway.pop()!();
+});
 
 /**
  * What a row says about its chat.
@@ -120,6 +183,25 @@ async function rowNow(page: Page, key: string): Promise<RowMark | null> {
     };
   }, key);
 }
+
+/**
+ * A project the run made for itself is marked `isTest`, which keeps it off the
+ * owner's dashboard — and out of the plain project list the project page reads
+ * to resolve a name, so without this the run's own project would be invisible
+ * to its own browser tab (bw-jaoz.8). Scoped to this page alone: a real visitor
+ * typing the same address still sees none of them.
+ */
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
+    const url = new URL(route.request().url());
+    url.searchParams.set('include_test', 'true');
+    await route.continue({ url: url.toString() });
+  });
+});
 
 test.describe('a chat that is working', () => {
   test('marks what is working, and puts it at the top', async ({ page, request }) => {
@@ -223,7 +305,8 @@ test.describe('the door into a conversation somebody else is in', () => {
    * stream asks it: no screen, no stream, just the message (bw-dmxj.12).
    */
   test('the server refuses a message into it, whatever the screen believes', async ({ request }) => {
-    const project = await aProject(request);
+    const project = await aProjectOfItsOwn(request, 'held');
+    putAwayAfter(() => project.remove());
     const chat = aChatSomebodyElseIsIn(project.path, 'Rework the restore list');
     const release = claimConversation(chat.id);
 
@@ -277,7 +360,6 @@ test.describe('the door into a conversation somebody else is in', () => {
     });
     expect(again.ok, `the chat stayed shut after the other program stopped: ${again.body}`).toBe(true);
     await command(request, { type: 'session.stop', sessionId });
-    chat.forget();
   });
 });
 
@@ -287,7 +369,8 @@ test.describe('a chat another program is running', () => {
     // be opened and read, then twice for something said in another program to
     // arrive. Each wait is short; the sum of them is not.
     test.setTimeout(180_000);
-    const project = await aProject(request);
+    const project = await aProjectOfItsOwn(request, 'held');
+    putAwayAfter(() => project.remove());
     const opening = 'Look at the routing on the chat tab';
     const chat = aChatSomebodyElseIsIn(project.path, opening);
     const release = claimConversation(chat.id);
@@ -322,7 +405,7 @@ test.describe('a chat another program is running', () => {
       // true of our own agent and false of what is on the screen, which is a
       // conversation being worked in as the reader watches (bw-dmxj.10).
       await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'held');
-      await expect(page.getByTestId('chat-external')).toBeVisible();
+      await expect(page.getByTestId('session-state').getByTestId('chat-external')).toBeVisible();
 
       // The whole of it: something said over there turns up here, with nobody
       // reloading anything.
@@ -342,25 +425,27 @@ test.describe('a chat another program is running', () => {
     // box is back by itself because the stream it went away on says so.
     await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
-    await expect(page.getByTestId('chat-external')).toHaveCount(0);
+    await expect(page.getByTestId('session-state').getByTestId('chat-external')).toHaveCount(0);
     await expect(page.getByTestId('session-state')).not.toHaveAttribute('data-state', 'held');
-    chat.forget();
   });
 
   /**
    * What the other program was in the middle of when the reader walked away.
    *
    * A record being written to right now ends in commands whose answers have not
-   * landed, and those are held back rather than drawn finished and empty. Only
-   * the follower ever draws them — so when the reader leaves, the follower is
-   * torn down and that tail belongs to nobody. The chat had already been written
-   * down as read in full, so opening it again read nothing and drew nothing, and
-   * what the other program did while nobody was watching was gone for good
-   * (bw-dmxj.14).
+   * landed. Those are held back from SETTLING — drawing one finished and empty
+   * is a lie about what it printed — but not from the screen: the row goes up
+   * as running, which is what the holder's own terminal is showing them
+   * (bw-jaoz.5). Only the follower ever draws that tail, so when the reader
+   * leaves, the follower is torn down and it belongs to nobody. The chat had
+   * already been written down as read in full, so opening it again read nothing
+   * and drew nothing, and what the other program did while nobody was watching
+   * was gone for good (bw-dmxj.14).
    */
   test('a command left mid-air is drawn when the chat is opened again', async ({ page, request }) => {
     test.setTimeout(180_000);
-    const project = await aProject(request);
+    const project = await aProjectOfItsOwn(request, 'held');
+    putAwayAfter(() => project.remove());
     const opening = 'Run the suite and tell me what broke';
     const chat = aChatSomebodyElseIsIn(project.path, opening);
     const release = claimConversation(chat.id);
@@ -373,8 +458,12 @@ test.describe('a chat another program is running', () => {
       await expect(page.locator(row), 'the chat being worked in was not offered').toBeVisible({ timeout: 30_000 });
       await page.locator(row).getByTestId('row-name').click();
       await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
-      // Held back, because drawing it now would draw it finished and empty.
-      await expect(page.locator('[data-testid="tool-row"]')).toHaveCount(0);
+      // On the screen while it runs, and running: what it printed has not
+      // landed, so nothing about it may be drawn as over (bw-jaoz.5).
+      await expect(page.locator('[data-testid="tool-row"][data-tool-name="Bash"]')).toHaveCount(1, {
+        timeout: 30_000,
+      });
+      await expect(page.locator('[data-testid="tool-row"]')).toHaveAttribute('data-tool-status', 'running');
 
       // He looks at something else, and what was in the air lands while nobody
       // is watching that chat.
@@ -393,7 +482,10 @@ test.describe('a chat another program is running', () => {
       page.locator('[data-testid="tool-row"][data-tool-name="Bash"]'),
       'what the other program did while nobody watched was dropped',
     ).toHaveCount(1, { timeout: 30_000 });
+    await expect(
+      page.locator('[data-testid="tool-row"][data-tool-name="Bash"]'),
+      'the command that was in the air is still drawn as running after its answer landed',
+    ).toHaveAttribute('data-tool-status', 'ok', { timeout: 30_000 });
     await expect(page.getByTestId('transcript').getByText('Nothing broke.')).toBeVisible({ timeout: 30_000 });
-    chat.forget();
   });
 });

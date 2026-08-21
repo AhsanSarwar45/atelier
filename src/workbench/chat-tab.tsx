@@ -75,6 +75,7 @@ import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
+import { workingLine } from '@/workbench/working-line';
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
@@ -616,8 +617,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     held: held ? (holder ?? { id: externalId ?? '', holder: 'program', doing: 'unknown', since: null }) : null,
   });
 
-  const running = view.items.find((it) => it.kind === 'tool' && it.status === 'running');
-  const reported = running && running.kind === 'tool' ? running.seconds : 0;
+  // The call in flight, whoever is making it: our own driver's, or — since the
+  // record's tail is drawn as it is written (bw-jaoz.5) — the holder's.
+  const inFlight = view.items.find((it) => it.kind === 'tool' && it.status === 'running');
+  const running = inFlight?.kind === 'tool' ? inFlight : null;
+  /** The turn under the last message, in the words of whoever owes it. */
+  const atWork = workingLine({
+    busy,
+    label: view.stateLabel,
+    since: busySince,
+    waiting: view.state === 'waiting_permission',
+    thought: view.thinkingTokens,
+    state,
+    running,
+  });
 
   /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */
   const typedCommand = /^\/(\S*)$/.exec(draft)?.[1] ?? null;
@@ -832,8 +845,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-state={held ? 'held' : view.state}
           className="flex shrink-0 items-center gap-2"
         >
-          <ChatStateChip state={state} size="line" testId="session-state-chip" />
-          {state.external && <ExternalBadge holder={state.external.holder} size="line" />}
+          <ChatStateChip state={state} testId="session-state-chip" />
+          {state.external && <ExternalBadge holder={state.external.holder} />}
         </span>
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
@@ -948,16 +961,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         />
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes
-            an answer (docs/agent-workbench.md §8.2.2). */}
-        {busy && (
-          <WorkingLine
-            label={view.stateLabel}
-            since={busySince}
-            reported={reported}
-            waiting={view.state === 'waiting_permission'}
-            thought={view.thinkingTokens}
-          />
-        )}
+            an answer (docs/agent-workbench.md §8.2.2) — whoever owes it, which
+            is the whole of what `workingLine` decides. */}
+        {atWork && <WorkingLine {...atWork} />}
         </div>
       </div>
       {/* The way back floats over the conversation's own bottom corner, the way

@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
+import { forHowLong } from '@/workbench/elapsed';
 import type { SentAway } from '@/workbench/fold';
 import type { AgentControl, AgentKind, AgentState } from '@/workbench/protocol';
 import { isOver } from '@/workbench/protocol';
@@ -68,16 +69,12 @@ export const STATES: Record<AgentState, { label: string; variant: 'secondary' | 
 /**
  * Seconds, rounded to the unit a glance needs.
  *
- * Minutes keep their seconds — a helper is usually gone for two or three of
- * them, and `2m` for anything between two and three minutes is the whole scale
- * a reader has.
+ * The reading itself is the app's one clock (elapsed.ts) — it started here, and
+ * moved out when the chat's own counts turned out to be saying `109s` for the
+ * same length of time this column has always called `1m 49s` (bw-jaoz.6). Still
+ * exported from here, because this is the name every caller knows it by.
  */
-export function forHowLong(seconds: number): string {
-  const secs = Math.max(0, Math.round(seconds));
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`;
-  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
-}
+export { forHowLong };
 
 /**
  * Tokens, short enough to sit beside a clock.

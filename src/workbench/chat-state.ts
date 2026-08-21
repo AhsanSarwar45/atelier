@@ -201,15 +201,50 @@ export function heldDoing(args: {
   status: string | null;
   statusAt: number | null;
   recordMovedAt: number | null;
+  /**
+   * Whether the end of the record leaves an answer owed, or null when nothing
+   * could be read. {@link answerOwed}.
+   */
+  owed: boolean | null;
   burstAt: number | null;
   now: number;
 }): { doing: HeldDoing; since: number | null } {
   if (args.status === 'busy') return { doing: 'working', since: args.statusAt };
   if (args.status === 'idle') return { doing: 'idle', since: null };
+  // A turn in flight, whether or not anything has been written this minute.
+  if (args.owed === true) {
+    return { doing: 'working', since: args.burstAt ?? args.recordMovedAt ?? args.now };
+  }
   if (args.recordMovedAt === null) return { doing: 'unknown', since: null };
   const moving = args.now - args.recordMovedAt < RECORD_QUIET_MS;
   if (!moving) return { doing: 'idle', since: null };
   return { doing: 'working', since: args.burstAt ?? args.recordMovedAt };
+}
+
+/**
+ * Does the end of a chat's record leave an answer owed?
+ *
+ * The question the ten-second rule below could not answer. A think writes
+ * nothing at all — a minute of it, two minutes of it — so a chat in the middle
+ * of one looked exactly like a chat somebody had walked away from, and the mark
+ * on it went out and came back with every command it ran: the manager's "the
+ * working chip only shows when its running some commands" (bw-jaoz.4).
+ *
+ * The last thing written says it outright. A line of the person's own, or a
+ * command's output coming back, both leave the agent owing the next word. An
+ * assistant line owes one only when it asked for a tool. And an assistant line
+ * that just said its piece owes nothing — that is the turn over.
+ *
+ * Null, not false, when nothing could be read: a record that is not there
+ * cannot say the chat is idle.
+ */
+export function answerOwed(said: { type?: string; message?: unknown } | null): boolean {
+  if (!said) return false;
+  if (said.type === 'user') return true;
+  if (said.type !== 'assistant') return false;
+  const content = (said.message as { content?: unknown } | null | undefined)?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => (block as { type?: string } | null)?.type === 'tool_use');
 }
 
 /**

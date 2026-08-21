@@ -325,12 +325,31 @@ export function linkPast(
 interface RecordedMessage {
   type?: string;
   message?: unknown;
+  /** When the record says this line was written, as the tool writes it. */
+  timestamp?: string;
 }
 
 /** One row of a chat that already happened, in the order it happened. */
 export type PastEntry =
   | { kind: 'said'; role: 'user' | 'assistant'; text: string; images: ImagePayload[] }
-  | { kind: 'call'; id: string; name: string; input: Record<string, unknown>; output: string; ok: boolean };
+  | {
+      kind: 'call';
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+      output: string;
+      ok: boolean;
+      /**
+       * When the call was made, off the record's own line, or null when the
+       * line does not say.
+       *
+       * Only a call drawn while it is still running has any use for it — a
+       * finished row says what it printed, not how long ago it started — and
+       * that row's timer counts from here rather than from the moment this app
+       * noticed, which may be a beat or an hour later (bw-jaoz.5).
+       */
+      at: number | null;
+    };
 
 /**
  * How much of any one body is kept: a command's arguments, what it printed, a
@@ -442,12 +461,14 @@ export function pastTranscript(messages: RecordedMessage[]): PastEntry[] {
       const b = block as { type?: string; id?: string; name?: string; input?: unknown };
       if (b.type !== 'tool_use' || typeof b.id !== 'string' || typeof b.name !== 'string') continue;
       const result = results.get(b.id);
+      const at = m.timestamp === undefined ? NaN : Date.parse(m.timestamp);
       entries.push({
         kind: 'call',
         id: b.id,
         name: b.name,
         input: (typeof b.input === 'object' && b.input !== null ? b.input : {}) as Record<string, unknown>,
         output: result?.output ?? '',
+        at: Number.isFinite(at) ? at : null,
         // No result in the record means the chat ended before the call came
         // back; that is not a failure, so it is not drawn as one.
         ok: result?.ok ?? true,

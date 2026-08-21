@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HOLDER_WORD,
   RECORD_QUIET_MS,
+  answerOwed,
   chatState,
   counting,
   heldDoing,
@@ -146,27 +147,28 @@ describe('what a held chat is doing, from the two signals there are', () => {
   const now = 1_787_138_400_000;
 
   it('takes the holder’s own word first, and the moment it said it', () => {
-    expect(heldDoing({ status: 'busy', statusAt: now - 4_000, recordMovedAt: null, burstAt: null, now })).toEqual({
+    expect(heldDoing({ status: 'busy', statusAt: now - 4_000, recordMovedAt: null, owed: null, burstAt: null, now })).toEqual({
       doing: 'working',
       since: now - 4_000,
     });
     // Its word beats the record even when the record disagrees: a chat that
     // has just been told to stop is idle the moment it says so, however
     // recently it was writing.
-    expect(heldDoing({ status: 'idle', statusAt: now, recordMovedAt: now, burstAt: null, now })).toEqual({
+    expect(heldDoing({ status: 'idle', statusAt: now, recordMovedAt: now, owed: null, burstAt: null, now })).toEqual({
       doing: 'idle',
       since: null,
     });
   });
 
   it('falls back to the record moving when nothing says a word', () => {
-    const moving = heldDoing({ status: null, statusAt: null, recordMovedAt: now - 2_000, burstAt: null, now });
+    const moving = heldDoing({ status: null, statusAt: null, recordMovedAt: now - 2_000, owed: null, burstAt: null, now });
     expect(moving).toEqual({ doing: 'working', since: now - 2_000 });
 
     const quiet = heldDoing({
       status: null,
       statusAt: null,
       recordMovedAt: now - RECORD_QUIET_MS - 1,
+      owed: null,
       burstAt: null,
       now,
     });
@@ -179,24 +181,78 @@ describe('what a held chat is doing, from the two signals there are', () => {
     // the reader is watching.
     const begun = now - 30_000;
     expect(
-      heldDoing({ status: null, statusAt: null, recordMovedAt: now - 1_000, burstAt: begun, now }),
+      heldDoing({ status: null, statusAt: null, recordMovedAt: now - 1_000, owed: null, burstAt: begun, now }),
     ).toEqual({ doing: 'working', since: begun });
   });
 
   it('says it does not know rather than guessing idle', () => {
     // A host-driven process writes no status; if its record is not found
     // either, the honest answer is nothing at all — not that it is idle.
-    expect(heldDoing({ status: null, statusAt: null, recordMovedAt: null, burstAt: null, now })).toEqual({
+    expect(heldDoing({ status: null, statusAt: null, recordMovedAt: null, owed: null, burstAt: null, now })).toEqual({
       doing: 'unknown',
       since: null,
     });
   });
 
+  it('stays working through a long think, which writes nothing at all', () => {
+    // The manager's own words: "the working chip only shows when its running
+    // some commands or soemthing". A think writes nothing for a minute or two,
+    // so the ten-second rule below called it idle and the mark went out — and
+    // came back the instant a command finished (bw-jaoz.4).
+    const thinking = heldDoing({
+      status: null,
+      statusAt: null,
+      recordMovedAt: now - 100_000,
+      owed: true,
+      burstAt: now - 100_000,
+      now,
+    });
+    expect(thinking).toEqual({ doing: 'working', since: now - 100_000 });
+  });
+
+  it('and the holder’s own word still beats it, either way', () => {
+    // A chat told to stop mid-command owes an answer that is never coming.
+    expect(
+      heldDoing({ status: 'idle', statusAt: now, recordMovedAt: now, owed: true, burstAt: null, now }),
+    ).toEqual({ doing: 'idle', since: null });
+  });
+
   it('is silent about when a chat went idle, so nothing counts against it', () => {
     for (const status of ['idle', null]) {
-      const read = heldDoing({ status, statusAt: now, recordMovedAt: now - RECORD_QUIET_MS - 1, burstAt: now, now });
+      const read = heldDoing({ status, statusAt: now, recordMovedAt: now - RECORD_QUIET_MS - 1, owed: null, burstAt: now, now });
       expect(read.since, `${status ?? 'no'} status left a count running`).toBeNull();
     }
+  });
+});
+
+describe('what the end of a record says about the turn', () => {
+  const call = { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: {} };
+
+  it('owes an answer after anything the person said', () => {
+    expect(answerOwed({ type: 'user', message: { role: 'user', content: 'run the tests' } })).toBe(true);
+  });
+
+  it('owes one after a command’s output comes back, which is written as his line', () => {
+    expect(
+      answerOwed({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: '282 passed' }] },
+      }),
+    ).toBe(true);
+  });
+
+  it('owes one after the agent asks for a tool', () => {
+    expect(answerOwed({ type: 'assistant', message: { role: 'assistant', content: [call] } })).toBe(true);
+  });
+
+  it('owes nothing once the agent has said its piece: that is the turn over', () => {
+    expect(
+      answerOwed({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } }),
+    ).toBe(false);
+  });
+
+  it('says nothing rather than idle when there was nothing to read', () => {
+    expect(answerOwed(null)).toBe(false);
   });
 });
 

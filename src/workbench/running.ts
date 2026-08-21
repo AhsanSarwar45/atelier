@@ -32,6 +32,9 @@
  * would draw that chat as asleep and offer to wake a second agent on it — which
  * is the whole of what this signal exists to prevent.
  */
+// Named the way Node resolves it — the file, extension and all: the chat's own
+// server reads this file raw, and knows nothing of the browser build's `@/`.
+import { asleepHere, type SessionState } from './protocol.ts';
 
 /**
  * One marker file, as the tool writes it.
@@ -232,13 +235,12 @@ export function runningChats(markers: SessionMarker[], alive: IsAlive): Map<stri
  * stopped since (bw-dmxj.8).
  */
 export function heldElsewhere(
-  state: string,
+  state: SessionState,
   externalId: string | null | undefined,
   running: ReadonlySet<string> | null,
   saidAtOpen = false,
 ): boolean {
-  const asleep = state === 'dormant' || state === 'ended';
-  if (!asleep) return false;
+  if (!asleepHere(state)) return false;
   if (!externalId) return false;
   if (running === null) return saidAtOpen;
   return running.has(externalId);

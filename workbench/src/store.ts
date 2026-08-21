@@ -260,6 +260,18 @@ export class Store {
     return { at: r.followed_to, drawn: r.followed_drawn ?? 0 };
   }
 
+  /**
+   * Drops the mark that says this chat's record has been read.
+   *
+   * Apart from the drawing, because they are different claims: a chat whose
+   * follower stopped short of the end of its record has NOT been read, however
+   * much of it is on the screen, and while that mark stands the reading is
+   * refused before it starts (bw-jaoz.9).
+   */
+  forgetRead(id: string): void {
+    this.db.prepare('UPDATE session SET imported_at = NULL, imported_recipe = NULL WHERE id = ?').run(id);
+  }
+
   /** Says where the follower has read to, for the next open to carry on from. */
   rememberFollowed(id: string, at: number, drawn: number, recipe: number): void {
     // Read, in the same breath. A record being written always ends in commands

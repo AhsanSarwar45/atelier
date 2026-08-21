@@ -150,6 +150,34 @@ describe('the working mark keeps up', () => {
     const merged = withLive([row({ externalId: null, runningElsewhere: true })], [], PROJECT, new Set<string>());
     expect(merged[0]!.runningElsewhere).toBe(true);
   });
+
+  it('a chat this app is driving is not somebody else’s, whatever is holding its record', () => {
+    // Anything answering a chat leaves the same trace on disk, this app's own
+    // helpers included, and the list believed the trace without asking who was
+    // making it: the rail said external for a chat whose own top bar, which
+    // does ask, said ready (bw-jaoz.2).
+    const merged = withLive(
+      [row({ externalId: 'x1', runningElsewhere: true })],
+      [session({ id: 's1', externalId: 'x1', state: 'thinking' })],
+      PROJECT,
+      new Set(['x1']),
+      new Map([['x1', { id: 'x1', holder: 'terminal' as const, doing: 'working' as const, since: null }]]),
+    );
+    expect(merged[0]!.runningElsewhere, 'the rail called a chat we are driving somebody else’s').toBe(false);
+    expect(merged[0]!.held, 'and hung a holder on it').toBeNull();
+  });
+
+  it('and still says so for a chat nothing of ours is on', () => {
+    const merged = withLive(
+      [row({ externalId: 'x1' })],
+      [],
+      PROJECT,
+      new Set(['x1']),
+      new Map([['x1', { id: 'x1', holder: 'terminal' as const, doing: 'working' as const, since: null }]]),
+    );
+    expect(merged[0]!.runningElsewhere).toBe(true);
+    expect(merged[0]!.held?.holder).toBe('terminal');
+  });
 });
 
 /**

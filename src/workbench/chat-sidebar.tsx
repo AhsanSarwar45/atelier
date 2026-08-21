@@ -30,6 +30,7 @@ import {
   type LiveSession,
 } from '@/workbench/live';
 import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
+import { heldElsewhere } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 
 /**
@@ -232,16 +233,20 @@ export function withLive(
 
   // The mark last, and over everything: a chat that starts or stops being worked
   // in changes nothing else about its row, and the reader is not reloading.
+  // Somebody ELSE has it, which is not the same question as a live process
+  // being on it: our own driver's child is a live process on our own chat. The
+  // chat's own line asks it this way and the row did not, so one chat read
+  // "external" on the list and "Ready" in the bar above it (bw-jaoz.2).
   const marked = running
-    ? merged.map((r) =>
-        r.externalId
-          ? {
-              ...r,
-              runningElsewhere: running.has(r.externalId),
-              held: holds ? (holds.get(r.externalId) ?? null) : r.held,
-            }
-          : r,
-      )
+    ? merged.map((r) => {
+        if (!r.externalId) return r;
+        const theirs = heldElsewhere(r.state, r.externalId, running);
+        return {
+          ...r,
+          runningElsewhere: theirs,
+          held: theirs ? (holds ? (holds.get(r.externalId) ?? null) : r.held) : null,
+        };
+      })
     : heldFactsAreOld
       ? merged.map((r) => (r.externalId ? { ...r, held: holderOnly(r.held) } : r))
       : merged;
@@ -472,7 +477,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       <Badge
                         hue={hueFor(row.folder)}
                         appearance="light"
-                        size="xs"
+                        size="sm"
                         shape="circle"
                         data-testid="row-folder-chip"
                         data-folder={row.folder}
@@ -489,7 +494,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       <Badge
                         variant="warning"
                         appearance="light"
-                        size="xs"
+                        size="sm"
                         shape="circle"
                         data-testid="row-pill"
                         data-pill="opening"

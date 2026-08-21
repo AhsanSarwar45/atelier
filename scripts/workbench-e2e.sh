@@ -23,11 +23,21 @@ export BEADS_E2E_URL="http://$BEADS_WEB_HOST:$BEADS_WEB_PORT"
 # The links test builds its own reporting tree; the real one is never written to.
 export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
 
+# Where the stack looks for chats begun in a terminal: a scratch directory of
+# this run's own, never the tool's. The cases that need a chat somebody else is
+# working in write a record and a marker there themselves, and the tool's own
+# directory is where the manager's REAL chats live — a run that wrote into it
+# would be handing markers to the agent he is talking to, and the `.key` files
+# beside them are the credentials of his own messaging socket.
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$RUN/claude}"
+export BEADS_E2E_MARKERS="${BEADS_E2E_MARKERS:-$CLAUDE_CONFIG_DIR/sessions}"
+
 # A run starts from nothing: sessions left in the store by the last one are
 # offered again by the restore list, and a test that resumes one of those is
-# testing last week.
-rm -rf "$XDG_DATA_HOME"
-mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results"
+# testing last week. The scratch records go the same way, or the chats one run
+# leaves behind are rows the next run counts.
+rm -rf "$XDG_DATA_HOME" "$RUN/claude"
+mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results" "$BEADS_E2E_MARKERS" "$CLAUDE_CONFIG_DIR/projects"
 
 SERVER_LOG="$RUN/server.log"
 : > "$SERVER_LOG"
@@ -84,4 +94,18 @@ for arg in "$@"; do
   if [ -f "$arg" ]; then specs+=("$arg"); else rest+=("$arg"); fi
 done
 [ ${#specs[@]} -eq 0 ] && specs=(tests/e2e/workbench.spec.ts)
-npx playwright test "${specs[@]}" ${rest[@]+"${rest[@]}"}
+ran=0
+npx playwright test "${specs[@]}" ${rest[@]+"${rest[@]}"} || ran=$?
+
+# A case that stands up a project of its own takes it away again. One left
+# behind is a row on the reader's own project list for ever, and the cases that
+# borrow "whatever is listed" would then be borrowing it (bw-jaoz.8).
+listed=$(curl -sf "$BEADS_E2E_URL/api/projects?include_test=true" || true)
+# The braces keep grep's "found nothing" — the good answer here — from ending
+# the run under `set -e -o pipefail`.
+left=$(printf '%s' "$listed" | { grep -o '"local_path":"[^"]*\.held-run[^"]*"' || true; } | wc -l)
+if [ "${left:-0}" -ne 0 ]; then
+  echo "the run left $left project(s) of its own on the list"
+  exit 1
+fi
+exit "$ran"

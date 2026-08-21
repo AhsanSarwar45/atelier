@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
+import { forHowLong } from '@/workbench/elapsed';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
 import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
@@ -394,7 +395,7 @@ export const ToolRow = memo(function ToolRow({
               minute must not look the same as one that took none. */}
           {item.status === 'running' && item.seconds > 0 && (
             <span data-testid="tool-elapsed" className="shrink-0 tabular-nums">
-              {Math.round(item.seconds)}s
+              {forHowLong(item.seconds)}
             </span>
           )}
           <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
@@ -609,7 +610,7 @@ export function WorkingLine({
         {!waiting && thought > 0 ? ` · ~${Math.round(thought / 100) / 10}k thought` : ''}
       </span>
       <span data-testid="working-elapsed" className="shrink-0 font-mono text-xs tabular-nums opacity-70">
-        {seconds}s
+        {forHowLong(seconds)}
       </span>
     </div>
   );

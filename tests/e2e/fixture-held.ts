@@ -85,9 +85,18 @@ export interface Holding {
   entrypoint?: string;
 }
 
-/** Says a live process is holding this conversation, until it is taken away. */
+/**
+ * Says a live process is holding this conversation, until it is taken away.
+ *
+ * One file per conversation, not one per process: a case that claims a second
+ * chat while its first claim still stands would otherwise write over the first
+ * marker and quietly un-hold a chat the case is still asserting about. The pid
+ * inside is ours either way, which is what the reader checks — it keys what it
+ * finds by conversation, so two markers naming one process is an ordinary
+ * state and not a clash.
+ */
 export function claimConversation(conversation: string, how: Holding = {}): () => void {
-  const file = join(markerDir(), `${process.pid}.json`);
+  const file = join(markerDir(), `${process.pid}-${conversation.slice(0, 8)}.json`);
   writeFileSync(
     file,
     JSON.stringify({
@@ -202,14 +211,75 @@ export function aChatSomebodyElseIsIn(projectPath: string, opening: string) {
   };
 }
 
-/** The project the run is pointed at, or the first the instance lists. */
+/** Where a run that has to make its own project puts it. */
+const OWN_PROJECT_DIR = join(__dirname, '..', '.held-run');
+
+/**
+ * A project of this case's own, and how to take it away again.
+ *
+ * The cases run side by side against one instance, and each of them stands up
+ * chats that land on the same list: a case that borrows the project next door
+ * is asserting about rows another case is at that moment deleting, and it fails
+ * on work that is not its own (bw-jaoz.8). A project to itself is the only
+ * thing that gives a case a list it owns. Marked `isTest`, so it is off the
+ * dashboard while it exists, and taken off the list entirely when the case ends.
+ */
+export async function aProjectOfItsOwn(
+  request: APIRequestContext,
+  what: string,
+): Promise<Project & { remove: () => Promise<void> }> {
+  const dir = join(OWN_PROJECT_DIR, `${what}-${randomUUID().slice(0, 8)}`);
+  mkdirSync(dir, { recursive: true });
+  const made = await request.post(`${backend()}/api/projects`, {
+    data: { name: `held-${what}`, path: dir, isTest: true },
+  });
+  expect(made.status(), `could not make a project: ${await made.text()}`).toBe(201);
+  const project = (await made.json()) as Project;
+  return {
+    ...project,
+    async remove() {
+      await request.delete(`${backend()}/api/projects/${project.id}`);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+/**
+ * The project the run is pointed at, the first the instance lists, or one of
+ * its own.
+ *
+ * A stack built from a worktree starts with an empty settings database, so
+ * borrowing "the first project" only ever worked against the owner's own
+ * running board — and every case that borrows one could not be run on the
+ * checkout it was meant to be proving (bw-jaoz.8). Its own is marked `isTest`,
+ * so it stays off the dashboard and the teardown sweeps it up.
+ */
 export async function aProject(request: APIRequestContext): Promise<Project> {
   const projects = (await (await request.get(`${backend()}/api/projects`)).json()) as Project[];
-  expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
   const wanted = process.env.BEADS_E2E_PROJECT;
-  const project = wanted ? projects.find((p) => p.id === wanted) : projects[0];
-  expect(project, `no project ${wanted ?? ''}`).toBeTruthy();
-  return project!;
+  if (wanted) {
+    const named = projects.find((p) => p.id === wanted);
+    expect(named, `no project ${wanted}`).toBeTruthy();
+    return named!;
+  }
+  if (projects.length > 0) return projects[0]!;
+
+  mkdirSync(OWN_PROJECT_DIR, { recursive: true });
+  const listed = (await (await request.get(`${backend()}/api/projects?include_test=true`)).json()) as Project[];
+  const had = listed.find((p) => p.path === OWN_PROJECT_DIR);
+  if (had) return had;
+  const made = await request.post(`${backend()}/api/projects`, {
+    data: { name: 'held-run', path: OWN_PROJECT_DIR, isTest: true },
+  });
+  // The cases run side by side and all want the one project, so losing the
+  // race to create it is not a failure — the winner's row is the answer.
+  if (made.status() !== 201) {
+    const again = (await (await request.get(`${backend()}/api/projects?include_test=true`)).json()) as Project[];
+    const other = again.find((p) => p.path === OWN_PROJECT_DIR);
+    expect(other, `could not make or find a project: ${await made.text()}`).toBeTruthy();
+    return other!;
+  }
+  return (await made.json()) as Project;
 }
 
 /** One command to the sidecar, and what it said back. */
