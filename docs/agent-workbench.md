@@ -2255,6 +2255,20 @@ search, spend, plan usage, the token picture, report viewer), `tests/e2e/workben
   us; a node that drops it degrades to a Chat tab that never comes up, which is
   loud rather than subtle.
 
+- What the kit writes in the manager's own name is recognised by SHAPE, never
+  by wording (§8.2.4.3), so a message he genuinely types that is entirely one
+  tagged block, or one line in square brackets, is drawn as a machine note
+  rather than as his words. The cost of being wrong is one grey chip on a
+  message nobody was going to re-read; the alternative, matching the kit's
+  wordings, is wrong the day the kit rewords one of the sixty-three.
+- The gate that catches a code word pasted into a line reads the kit's own doc
+  comments, and only sees a field whose comment carries an example of the word
+  ("a short snake_case reason set by the host CLI", `host_exit`). Two fields
+  qualify today. A code word the kit documents in prose without an example, or
+  does not document at all, is not covered — that one is still caught by the
+  sweep over the manager's real record, but only once it has actually happened
+  to him.
+
 Three faults found under this section's work are filed rather than fixed, and
 each is still open: the menu of what a chat can do is republished whole every
 turn and is four fifths of the stored log (`bw-7bj`); a frontend-only change is
