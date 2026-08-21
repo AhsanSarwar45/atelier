@@ -1,6 +1,6 @@
 <div align="center">
 
-# BEADS WEB
+# ATELIER
 
 **Визуальный центр управления задачами beads.**
 
@@ -8,7 +8,7 @@
 
 <br>
 
-![Beads Web — Kanban Board](screenshots/kanban-main.png)
+![Atelier — Kanban Board](screenshots/kanban-main.png)
 
 <br>
 
@@ -28,7 +28,7 @@ Beads CLI — мощный инструмент для трекинга зада
 - Нет возможности увидеть прогресс epic-ов одним взглядом
 - Нет визуального разделения между заблокированными, готовыми и задачами в работе
 
-Beads Web даёт вам Kanban-доску в реальном времени, мультипроектный дашборд и git-операции — не покидая браузер.
+Atelier даёт вам Kanban-доску в реальном времени, мультипроектный дашборд и git-операции — не покидая браузер.
 
 ## Происхождение
 
@@ -111,21 +111,21 @@ Beads Web даёт вам Kanban-доску в реальном времени, 
 
 | Платформа | Файл |
 |----------|------|
-| Windows x64 | `beads-web-win-x64.exe` |
-| macOS Apple Silicon | `beads-web-darwin-arm64` |
-| macOS Intel | `beads-web-darwin-x64` |
-| Linux x64 | `beads-web-linux-x64` |
+| Windows x64 | `atelier-win-x64.exe` |
+| macOS Apple Silicon | `atelier-darwin-arm64` |
+| macOS Intel | `atelier-darwin-x64` |
+| Linux x64 | `atelier-linux-x64` |
 
 ### Менеджеры пакетов
 
 **Scoop (Windows):**
 
 ```powershell
-scoop bucket add beads-web https://github.com/weselow/beads-web
-scoop install beads-web
+scoop bucket add atelier https://github.com/weselow/beads-web
+scoop install atelier
 ```
 
-Обновление: `scoop update beads-web`.
+Обновление: `scoop update atelier`.
 
 **Nix (macOS / Linux / WSL):**
 
@@ -136,13 +136,13 @@ nix run github:weselow/beads-web
 **Homebrew (macOS / Linux):**
 
 ```bash
-brew install weselow/beads-web/beads-web
+brew install weselow/beads-web/atelier
 ```
 
 **winget (Windows):**
 
 ```powershell
-winget install weselow.beads-web
+winget install weselow.atelier
 ```
 
 > winget станет доступен после того, как заявка будет принята в общий каталог winget.
@@ -151,11 +151,11 @@ winget install weselow.beads-web
 
 ```bash
 # macOS/Linux — сделайте исполняемым, затем запустите
-chmod +x beads-web-*
-./beads-web-darwin-arm64
+chmod +x atelier-*
+./atelier-darwin-arm64
 
 # Windows
-beads-web-win-x64.exe
+atelier-win-x64.exe
 ```
 
 Откройте http://localhost:3008. Frontend встроен в бинарник — Node.js и Rust не требуются.
@@ -210,19 +210,19 @@ npm install
 # оставьте `output: 'export'` включённым в next.config.js (это значение по умолчанию)
 npm run build                 # статический экспорт → out/
 cd server
-cargo build --release         # бинарник → server/target/release/beads-server (.exe на Windows)
+cargo build --release         # бинарник → server/target/release/atelier (.exe на Windows)
 ```
 
 Запустите бинарник и откройте **http://localhost:3008**:
 
 ```bash
-./server/target/release/beads-server
+./server/target/release/atelier
 ```
 
 ## FAQ
 
 **В: Нужен ли Dolt?**
-О: Нет. Beads Web работает с локальными проектами через `bd` CLI. Dolt добавляет прямой доступ по SQL и поддержку удалённых баз данных.
+О: Нет. Atelier работает с локальными проектами через `bd` CLI. Dolt добавляет прямой доступ по SQL и поддержку удалённых баз данных.
 
 **В: Как добавить проект?**
 О: Нажмите "Add Project" на дашборде. Перейдите в папку проекта или введите `dolt://` URL.

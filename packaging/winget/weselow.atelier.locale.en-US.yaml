@@ -1,15 +1,15 @@
-PackageIdentifier: weselow.beads-web
+PackageIdentifier: weselow.atelier
 PackageVersion: 0.11.2
 PackageLocale: en-US
 Publisher: weselow
 PublisherUrl: https://github.com/weselow
 PublisherSupportUrl: https://github.com/weselow/beads-web/issues
-PackageName: beads-web
+PackageName: Atelier
 PackageUrl: https://github.com/weselow/beads-web
 License: MIT
 LicenseUrl: https://github.com/weselow/beads-web/blob/main/LICENSE
 ShortDescription: Visual Kanban board and multi-project dashboard for beads task tracking
-Moniker: beads-web
+Moniker: atelier
 Tags:
   - kanban
   - beads

@@ -14,7 +14,7 @@ use tracing::{info, warn};
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// GitHub repository for release checks.
-const GITHUB_REPO: &str = "weselow/beads-web";
+const GITHUB_REPO: &str = "weselow/beads-web"; // the repository address, not the product name
 
 /// Cache duration in seconds (1 hour).
 const CACHE_TTL_SECS: u64 = 3600;
@@ -107,7 +107,7 @@ async fn check_github_release() -> VersionCheckResponse {
     );
 
     let client = match reqwest::Client::builder()
-        .user_agent("beads-web")
+        .user_agent(crate::identity::NAME)
         .timeout(std::time::Duration::from_secs(10))
         .build()
     {
@@ -197,21 +197,21 @@ fn fallback_response() -> VersionCheckResponse {
 /// Returns the platform-specific binary asset name used in GitHub Releases.
 ///
 /// Matches the naming convention from `.github/workflows/release.yml`:
-/// - `beads-web-darwin-arm64` (macOS ARM)
-/// - `beads-web-darwin-x64` (macOS Intel)
-/// - `beads-web-linux-x64` (Linux)
-/// - `beads-web-win-x64.exe` (Windows)
+/// - `atelier-darwin-arm64` (macOS ARM)
+/// - `atelier-darwin-x64` (macOS Intel)
+/// - `atelier-linux-x64` (Linux)
+/// - `atelier-win-x64.exe` (Windows)
 fn current_platform_asset() -> String {
     if cfg!(target_os = "windows") {
-        "beads-web-win-x64.exe".to_string()
+        "atelier-win-x64.exe".to_string()
     } else if cfg!(target_os = "macos") {
         if cfg!(target_arch = "aarch64") {
-            "beads-web-darwin-arm64".to_string()
+            "atelier-darwin-arm64".to_string()
         } else {
-            "beads-web-darwin-x64".to_string()
+            "atelier-darwin-x64".to_string()
         }
     } else {
-        "beads-web-linux-x64".to_string()
+        "atelier-linux-x64".to_string()
     }
 }
 
@@ -283,9 +283,9 @@ pub async fn perform_update(
     };
 
     let new_binary_name = if cfg!(windows) {
-        "beads-server-new.exe"
+        "atelier-new.exe"
     } else {
-        "beads-server-new"
+        "atelier-new"
     };
     let new_binary = current_dir.join(new_binary_name);
 
@@ -293,7 +293,7 @@ pub async fn perform_update(
 
     // 3. Download new binary
     let client = match reqwest::Client::builder()
-        .user_agent("beads-web")
+        .user_agent(crate::identity::NAME)
         .timeout(std::time::Duration::from_secs(300))
         .build()
     {
@@ -433,7 +433,7 @@ fn generate_unix_update_script(
 
     let content = format!(
         r#"#!/bin/sh
-# beads-web auto-updater (self-deleting)
+# atelier auto-updater (self-deleting)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 PID={pid}
@@ -512,7 +512,7 @@ fn generate_windows_update_script(
 
     let content = format!(
         r#"@echo off
-rem beads-web auto-updater (self-deleting)
+rem atelier auto-updater (self-deleting)
 cd /d "%~dp0"
 set PID={pid}
 set PORT={port}
@@ -664,8 +664,8 @@ mod tests {
     #[test]
     fn test_windows_update_script_uses_poll_loop() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        let current_exe = dir.path().join("beads-web.exe");
-        let new_binary = dir.path().join("beads-server-new.exe");
+        let current_exe = dir.path().join("atelier.exe");
+        let new_binary = dir.path().join("atelier-new.exe");
 
         let script_path =
             generate_windows_update_script(dir.path(), &current_exe, &new_binary, 4242, "3008")
@@ -695,8 +695,8 @@ mod tests {
     #[test]
     fn test_unix_update_script_uses_poll_loop() {
         let dir = tempfile::tempdir().expect("create temp dir");
-        let current_exe = dir.path().join("beads-web");
-        let new_binary = dir.path().join("beads-server-new");
+        let current_exe = dir.path().join("atelier");
+        let new_binary = dir.path().join("atelier-new");
 
         let script_path =
             generate_unix_update_script(dir.path(), &current_exe, &new_binary, 4242, "3008")

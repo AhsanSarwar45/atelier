@@ -1,21 +1,21 @@
 # Release Process
 
-How to cut a release of **beads-web** and where the built binaries are
+How to cut a release of **Atelier** and where the built binaries are
 published. Most of the pipeline is automated by GitHub Actions; the manual parts
 are called out explicitly.
 
 ## Overview
 
-beads-web ships as a single self-contained binary per platform — the frontend is
+Atelier ships as a single self-contained binary per platform — the frontend is
 embedded into the Rust binary via `rust-embed`. One tag push fans out to every
 distribution channel.
 
 | Channel | Where copies live | Updated by | One-time setup |
 |---------|-------------------|-----------|----------------|
 | GitHub Releases | `weselow/beads-web` → Releases | `release.yml` (automatic) | — |
-| Scoop (Windows) | `bucket/beads-web.json` (this repo) | `release.yml` (automatic) | — |
+| Scoop (Windows) | `bucket/atelier.json` (this repo) | `release.yml` (automatic) | — |
 | Nix (macOS/Linux/WSL) | `flake.nix` (this repo) | `ci.yml` refreshes deps hash; version is manual | — |
-| Homebrew (macOS/Linux) | `Formula/beads-web.rb` in `weselow/homebrew-beads-web` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
+| Homebrew (macOS/Linux) | `Formula/atelier.rb` in `weselow/homebrew-beads-web` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
 | winget (Windows) | `microsoft/winget-pkgs` | `release.yml` `winget` job via `wingetcreate` | first submission manual + `WINGET_TOKEN` |
 
 ## Cutting a release
@@ -27,7 +27,7 @@ them to the new version (e.g. `0.12.0`):
 
 - `package.json` → `"version"`
 - `server/Cargo.toml` → `version`
-- `server/Cargo.lock` → `version` in the `[[package]] name = "beads-server"` block
+- `server/Cargo.lock` → `version` in the `[[package]] name = "atelier"` block
 - `flake.nix` → **both** `version = "…"` lines (the frontend package and the default package)
 
 > `Cargo.lock` is easy to miss and easy to get wrong. The Nix build reads it
@@ -35,7 +35,7 @@ them to the new version (e.g. `0.12.0`):
 > `nix build` even though `cargo` itself would silently repair it. Do **not**
 > blind-replace the old version string in that file — unrelated dependencies can
 > sit at the same version number (at 0.11.2 the crate `zerovec-derive` did).
-> Anchor on the `name = "beads-server"` line.
+> Anchor on the `name = "atelier"` line.
 
 The package-manager manifests (Scoop, Homebrew, winget) are refreshed
 automatically from the git tag — do **not** hand-edit them.
@@ -67,17 +67,17 @@ entering the version (e.g. `v0.12.0`).
    - downloads all four binaries,
    - generates `SHA256SUMS.txt`,
    - creates the GitHub Release (binaries + checksums + auto-generated notes),
-   - refreshes the Scoop manifest (`bucket/beads-web.json`) and commits it to `main`,
-   - renders the Homebrew formula from `packaging/homebrew/beads-web.rb.tmpl` and
+   - refreshes the Scoop manifest (`bucket/atelier.json`) and commits it to `main`,
+   - renders the Homebrew formula from `packaging/homebrew/atelier.rb.tmpl` and
      pushes it to the tap repo (skipped if `HOMEBREW_TAP_TOKEN` is unset).
 3. **winget** job (Windows): downloads `wingetcreate` and runs
-   `wingetcreate update weselow.beads-web` to open a version-bump PR against
+   `wingetcreate update weselow.atelier` to open a version-bump PR against
    `microsoft/winget-pkgs` (skipped if `WINGET_TOKEN` is unset).
 
 > **A red winget job does not mean a failed release.** `wingetcreate update`
 > only works once the package exists in the catalog, so until the first
 > submission PR is merged this job fails with
-> `repos/microsoft/winget-pkgs/contents/manifests/w/weselow/beads-web was not
+> `repos/microsoft/winget-pkgs/contents/manifests/w/weselow/atelier was not
 > found`. It runs after `release`, so the GitHub Release, Scoop, and Homebrew are
 > already published by then and are unaffected. Nothing to fix — just don't
 > re-run the release on account of it.
@@ -88,8 +88,8 @@ Nix `npmDepsHash` current, auto-committing the refreshed hash when it drifts.
 ### 4. After the release
 
 - Confirm the GitHub Release has all four binaries + `SHA256SUMS.txt`.
-- Homebrew: `brew update && brew upgrade beads-web`.
-- Scoop: `scoop update beads-web`.
+- Homebrew: `brew update && brew upgrade atelier`.
+- Scoop: `scoop update atelier`.
 - winget: the CI-opened PR in `microsoft/winget-pkgs` must pass Microsoft's
   validation and be merged (usually hours to a couple of days). You only sign the
   Microsoft CLA on the **first** PR.
@@ -108,7 +108,7 @@ Both the Homebrew step and the winget job no-op cleanly when their token is abse
 
 ## One-time setup (already completed)
 
-- Tap repo `weselow/homebrew-beads-web` created and seeded with `Formula/beads-web.rb`.
+- Tap repo `weselow/homebrew-beads-web` created and seeded with `Formula/atelier.rb`.
 - Secrets `HOMEBREW_TAP_TOKEN` and `WINGET_TOKEN` added.
 - First winget submission opened against `microsoft/winget-pkgs` and the Microsoft
   CLA signed. Subsequent releases update winget automatically.

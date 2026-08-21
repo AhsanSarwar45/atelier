@@ -18,7 +18,7 @@ PORT="${PORT:-3007}"
 if ! curl -sf -o /dev/null "$BOARD/api/projects"; then
   echo "No board answering at $BOARD."
   echo "The preview reads its projects, cards and chats from a running instance;"
-  echo "start one (systemctl --user start beads-web) or point BEADS_BOARD_URL at it."
+  echo "start one (systemctl --user start atelier) or point BEADS_BOARD_URL at it."
   exit 1
 fi
 

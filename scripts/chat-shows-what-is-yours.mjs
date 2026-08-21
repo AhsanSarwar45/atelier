@@ -50,7 +50,7 @@ const { ClaudeDriver } = await import('../workbench/src/drivers/claude.ts');
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const DATA = process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share');
-const STORE = process.env.STORE ?? join(DATA, 'kanban-ui', 'workbench.db');
+const STORE = process.env.STORE ?? join(DATA, 'atelier', 'workbench.db');
 
 const hidden = new Set(OFF_BY_DEFAULT);
 

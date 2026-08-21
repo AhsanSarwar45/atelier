@@ -39,7 +39,7 @@ const PROJECT_DIR = join(RUN_DIR, PROJECT_NAME);
 /** Where the instance under test keeps its report specs and built pages. */
 function reportsHome(): string {
   const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
-  return join(data, 'kanban-ui', 'reports', PROJECT_NAME);
+  return join(data, 'atelier', 'reports', PROJECT_NAME);
 }
 
 /**

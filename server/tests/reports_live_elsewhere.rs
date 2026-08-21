@@ -129,7 +129,7 @@ fn the_shell_tool_and_the_program_agree_on_where_data_goes() {
         String::from_utf8_lossy(&out.stderr)
     );
     let said = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let ours = beads_server::identity::data_dir().expect("a machine running tests has a home");
+    let ours = atelier::identity::data_dir().expect("a machine running tests has a home");
     assert_eq!(
         said,
         ours.display().to_string(),

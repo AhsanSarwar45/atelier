@@ -9,14 +9,14 @@
  * The board's own test harness expects @playwright/test, which is not
  * installed; the playwright library is, so this drives the browser itself.
  *
- * Prerequisite: beads-server on localhost:3008, serving a project whose board
+ * Prerequisite: atelier on localhost:3008, serving a project whose board
  * has at least one job standing in Manager Review.
  *
  *   node tests/signoff-column.mjs
  */
 import { chromium } from 'playwright';
 
-const HOST = process.env.BEADS_WEB ?? 'http://127.0.0.1:3008';
+const HOST = process.env.ATELIER_URL ?? 'http://127.0.0.1:3008';
 const SIGNOFF = /mark done/i;
 const MANAGER = 'manager_review';
 

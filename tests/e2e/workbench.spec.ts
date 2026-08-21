@@ -12,7 +12,7 @@ import { quadrantPng } from './fixture-png';
  * Agent workbench end-to-end. Design: docs/agent-workbench.md.
  *
  * Drives a REAL Claude session through the app, so it needs:
- *   - a beads-server built from this worktree, with the workbench sidecar,
+ *   - a atelier built from this worktree, with the workbench sidecar,
  *     reachable at BEADS_E2E_URL (default http://localhost:3008);
  *   - the terminal's own Claude sign-in. No API key is set or read.
  *
@@ -36,7 +36,7 @@ const SHOTS = join(__dirname, '..', 'results');
  */
 function reportsHome(project: string): string {
   const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
-  return join(data, 'kanban-ui', 'reports', project);
+  return join(data, 'atelier', 'reports', project);
 }
 
 /**
@@ -466,7 +466,7 @@ test.describe('workbench', () => {
 
       // ---- the restart the whole item is about ----------------------------
       await restartInstance({
-        binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'beads-server'),
+        binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'atelier'),
         serverPort: Number(process.env.BEADS_WEB_PORT ?? 3018),
         sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT ?? 3019),
         env: process.env,

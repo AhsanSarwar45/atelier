@@ -4,7 +4,7 @@ set -uo pipefail
 # ── Configuration ──────────────────────────────────────────────────────────────
 PORT="${PORT:-3008}"
 BASE_URL="http://localhost:${PORT}"
-SERVER_BIN="/app/server/target/release/beads-server"
+SERVER_BIN="/app/server/target/release/atelier"
 PASSED=0
 FAILED=0
 SERVER_PID=""
@@ -100,7 +100,7 @@ if ! kill -0 "$DOLT_PID" 2>/dev/null; then
 fi
 echo "  Dolt server running on port $DOLT_PORT (PID $DOLT_PID)"
 
-# Write port file so beads-server can find the dolt server
+# Write port file so atelier can find the dolt server
 echo "$DOLT_PORT" > "$PROJECT_DIR/.beads/dolt-server.port"
 
 # Initialize beads with the running dolt server
@@ -143,7 +143,7 @@ echo "  Beads in project: $BEAD_COUNT"
 
 # ── Start server ──────────────────────────────────────────────────────────────
 
-echo "=== Starting beads-server on port $PORT ==="
+echo "=== Starting atelier on port $PORT ==="
 
 PORT="$PORT" "$SERVER_BIN" &
 SERVER_PID=$!

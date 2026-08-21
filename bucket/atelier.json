@@ -4,14 +4,14 @@
   "homepage": "https://github.com/weselow/beads-web",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/weselow/beads-web/releases/download/v0.12.2/beads-web-win-x64.exe#/beads-web.exe",
+      "url": "https://github.com/weselow/beads-web/releases/download/v0.12.2/atelier-win-x64.exe#/atelier.exe",
       "hash": "3aa5ddcd0309567f9dffc4b47bf8de5f03433dc420efeb64fb09e3aa9a877f68"
     }
   },
-  "bin": "beads-web.exe",
+  "bin": "atelier.exe",
   "notes": [
-    "beads-web needs the Beads CLI (bd) on your PATH: https://github.com/gastownhall/beads",
-    "Run 'beads-web' and open http://localhost:3008"
+    "atelier needs the Beads CLI (bd) on your PATH: https://github.com/gastownhall/beads",
+    "Run 'atelier' and open http://localhost:3008"
   ],
   "checkver": {
     "github": "https://github.com/weselow/beads-web"
@@ -19,7 +19,7 @@
   "autoupdate": {
     "architecture": {
       "64bit": {
-        "url": "https://github.com/weselow/beads-web/releases/download/v$version/beads-web-win-x64.exe#/beads-web.exe"
+        "url": "https://github.com/weselow/beads-web/releases/download/v$version/atelier-win-x64.exe#/atelier.exe"
       }
     }
   }

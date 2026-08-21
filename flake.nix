@@ -1,5 +1,5 @@
 {
-  description = "Beads Web";
+  description = "Atelier";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -21,7 +21,7 @@
           pkgs = import nixpkgs { inherit system; };
 
           frontend = pkgs.buildNpmPackage {
-            pname = "beads-web-frontend";
+            pname = "atelier-frontend";
             version = "0.12.2";
             src = ./.;
 
@@ -40,7 +40,7 @@
         in
         {
           default = pkgs.rustPlatform.buildRustPackage {
-            pname = "beads-web";
+            pname = "atelier";
             version = "0.12.2";
             src = ./.;
 
@@ -62,18 +62,18 @@
 
             installPhase = ''
               runHook preInstall
-              binary="target/${pkgs.stdenv.hostPlatform.config}/release/beads-server"
+              binary="target/${pkgs.stdenv.hostPlatform.config}/release/atelier"
               if [ ! -x "$binary" ]; then
-                binary="target/release/beads-server"
+                binary="target/release/atelier"
               fi
-              install -Dm755 "$binary" "$out/bin/beads-web"
+              install -Dm755 "$binary" "$out/bin/atelier"
               runHook postInstall
             '';
 
             meta = {
               description = "Visual Kanban UI for Beads CLI";
               homepage = "https://github.com/weselow/beads-web";
-              mainProgram = "beads-web";
+              mainProgram = "atelier";
             };
           };
         }

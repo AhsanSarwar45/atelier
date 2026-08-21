@@ -52,4 +52,4 @@ mysql -h 127.0.0.1 -P $(cat .beads/dolt-server.port) -u root -e \
 
 Known bug. Fix expected in future bd releases.
 
-beads-web works around this by reading data directly from Dolt via SQL, bypassing bd CLI.
+Atelier works around this by reading data directly from Dolt via SQL, bypassing bd CLI.

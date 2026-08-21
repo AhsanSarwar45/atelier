@@ -1,8 +1,8 @@
-# Beads Web
+# Atelier
 
 ## Project Overview
 
-Beads Web — visual Kanban board and multi-project dashboard for beads task tracking. Next.js 14 frontend with Rust/Axum backend. Real-time sync, epic support, 11 themes, GitOps, Dolt integration.
+Atelier — visual Kanban board and multi-project dashboard for beads task tracking. Next.js 14 frontend with Rust/Axum backend. Real-time sync, epic support, 11 themes, GitOps, Dolt integration.
 
 ## Tech Stack
 
@@ -93,9 +93,9 @@ The more specific the LEARNED comment, the more useful it is next time.
 
 ## Current State
 
-- Independent project (beads-web), forked from AvivK5498/Beads-Kanban-UI
+- Independent project, checked out as `beads-web` (the repository name), forked from AvivK5498/Beads-Kanban-UI
 - GitHub: https://github.com/weselow/beads-web
-- npm package name: `beads-web`
+- npm package name: `atelier`
 - Default branch: `main` (merged from production, production branch kept for now)
 - 11 themes implemented with CSS variables and persistence
 - Dolt direct SQL integration working

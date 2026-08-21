@@ -1,4 +1,4 @@
-//! Database module for beads-server
+//! Database module for atelier
 //!
 //! Provides SQLite storage for projects, tags, and their relationships.
 //! Uses rusqlite with Arc<Mutex<>> for thread-safe access from Axum handlers.

@@ -33,7 +33,7 @@
  *   scripts/live-preview.sh                        # or any instance of this build
  *   BEADS_E2E_URL=http://127.0.0.1:3017 \
  *   BEADS_E2E_BACKEND=http://127.0.0.1:3018 \
- *   BEADS_WORKBENCH_DB=$XDG_DATA_HOME/kanban-ui/workbench.db \
+ *   BEADS_WORKBENCH_DB=$XDG_DATA_HOME/atelier/workbench.db \
  *     node scripts/chat-reads-like-work.mjs
  *
  * SHOTS=<dir> writes a picture of each failure. ONLY=4,5 runs some of them.

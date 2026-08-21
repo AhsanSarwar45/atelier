@@ -665,7 +665,7 @@ test.describe('the agents a chat sends off', () => {
 
     // ---- and again, off the record, after the program is restarted -------
     await restartInstance({
-      binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'beads-server'),
+      binary: join(__dirname, '..', '..', 'server', 'target', 'debug', 'atelier'),
       serverPort: Number(process.env.BEADS_WEB_PORT ?? 3018),
       sidecarPort: Number(process.env.BEADS_WORKBENCH_PORT ?? 3019),
       env: process.env,

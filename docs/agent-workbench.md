@@ -415,7 +415,7 @@ strips hop-by-hop headers and never sets `Content-Length` on a streamed body.
 
 A second SQLite file, `workbench.db`, in the same app-data directory the server
 already uses for `settings.db`
-(`ProjectDirs::from("com","beads","kanban-ui").data_dir()`). The sidecar is its
+(`ProjectDirs::from("com","weselow","atelier").data_dir()`). The sidecar is its
 only writer. `server/src/db.rs` is not touched.
 
 ```sql

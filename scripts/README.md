@@ -11,7 +11,7 @@ way.
 
 ## Screen checks
 
-Both need a screen already serving (`beads-web`, 127.0.0.1:3008 by default), a
+Both need a screen already serving (`atelier`, 127.0.0.1:3008 by default), a
 `google-chrome` on the path, and `websocket-client` in the Python running them.
 
 ## `board-columns-agree.py <project-path>`
@@ -92,7 +92,7 @@ board is usually empty, so waiting for such a job to turn up is not a check.
 The two jobs it pours are identical apart from the column they sit in, which is
 what makes the contrast a real one rather than two separate readings.
 
-The board lives under `~/.cache/beads-web-checks` and the project is removed on
+The board lives under `~/.cache/atelier-checks` and the project is removed on
 the way out, pass or fail — the server refuses to read a board from outside the
 home directory, which is why it is not in the system temp directory. `--keep`
 leaves both standing to be looked at.

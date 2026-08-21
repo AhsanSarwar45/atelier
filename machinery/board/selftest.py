@@ -5125,7 +5125,7 @@ def main():
         # Read before HOME on this system, and set on plenty of desktops — left
         # alone, every case here writes into the real list on this machine.
         env.pop("XDG_DATA_HOME", None)
-        listing = os.path.join(tmp, ".local", "share", "kanban-ui", "settings.db")
+        listing = os.path.join(tmp, ".local", "share", "atelier", "settings.db")
         try:
             mine = os.path.join(tmp, "machinery")
             os.makedirs(os.path.join(mine, "hooks"))
@@ -5254,7 +5254,7 @@ def main():
             # the shared report tools. Without them a project joins as far as it
             # can and says which machine-wide thing is missing — which is honest,
             # and would make "one command and it is green" unaskable here.
-            listed = os.path.join(tmp, ".local", "share", "kanban-ui")
+            listed = os.path.join(tmp, ".local", "share", "atelier")
             os.makedirs(listed)
             with sqlite3.connect(os.path.join(listed, "settings.db")) as db:
                 db.execute(SCREEN_LIST)

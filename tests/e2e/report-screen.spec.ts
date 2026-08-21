@@ -333,7 +333,7 @@ const FIXTURE = 'zz-screen-check';
 
 function reportsHome(project: string): string {
   const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
-  return join(data, 'kanban-ui', 'reports', project);
+  return join(data, 'atelier', 'reports', project);
 }
 
 function fixturePaths(project: string): string[] {

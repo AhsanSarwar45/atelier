@@ -18,16 +18,16 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: beads-web-darwin-arm64
+            artifact: atelier-darwin-arm64
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: beads-web-darwin-x64
+            artifact: atelier-darwin-x64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: beads-web-linux-x64
+            artifact: atelier-linux-x64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: beads-web-win-x64.exe
+            artifact: atelier-win-x64.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -58,11 +58,11 @@ jobs:
 
       - name: Copy binary (Unix)
         if: runner.os != 'Windows'
-        run: cp server/target/${{ matrix.target }}/release/beads-server ${{ matrix.artifact }}
+        run: cp server/target/${{ matrix.target }}/release/atelier ${{ matrix.artifact }}
 
       - name: Copy binary (Windows)
         if: runner.os == 'Windows'
-        run: copy server\target\${{ matrix.target }}\release\beads-server.exe ${{ matrix.artifact }}
+        run: copy server\target\${{ matrix.target }}\release\atelier.exe ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -102,7 +102,7 @@ jobs:
           files: release/*
           generate_release_notes: true
 
-      # Keep the self-hosted Scoop manifest (bucket/beads-web.json) in sync with
+      # Keep the self-hosted Scoop manifest (bucket/atelier.json) in sync with
       # each release: refresh version + Windows-exe hash and commit to main.
       # Mirrors the Nix hash-refresh auto-commit already used by ci.yml.
       - name: Checkout main for Scoop manifest
@@ -117,21 +117,21 @@ jobs:
           set -euo pipefail
           TAG="${{ inputs.version || github.ref_name }}"
           VERSION="${TAG#v}"
-          HASH="$(sha256sum release/beads-web-win-x64.exe | cut -d' ' -f1)"
+          HASH="$(sha256sum release/atelier-win-x64.exe | cut -d' ' -f1)"
           cd repo
           jq --arg v "$VERSION" --arg h "$HASH" --arg tag "$TAG" \
             '.version = $v
-             | .architecture."64bit".url = "https://github.com/weselow/beads-web/releases/download/" + $tag + "/beads-web-win-x64.exe#/beads-web.exe"
+             | .architecture."64bit".url = "https://github.com/weselow/beads-web/releases/download/" + $tag + "/atelier-win-x64.exe#/atelier.exe"
              | .architecture."64bit".hash = $h' \
-            bucket/beads-web.json > bucket/beads-web.json.tmp
-          mv bucket/beads-web.json.tmp bucket/beads-web.json
-          if git diff --quiet -- bucket/beads-web.json; then
+            bucket/atelier.json > bucket/atelier.json.tmp
+          mv bucket/atelier.json.tmp bucket/atelier.json
+          if git diff --quiet -- bucket/atelier.json; then
             echo "Scoop manifest already up to date"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bucket/beads-web.json
+          git add bucket/atelier.json
           git commit -m "chore(scoop): update manifest for $TAG"
           git push origin main
 
@@ -146,25 +146,25 @@ jobs:
           fi
           TAG="${{ inputs.version || github.ref_name }}"
           VERSION="${TAG#v}"
-          ARM=$(sha256sum release/beads-web-darwin-arm64 | cut -d' ' -f1)
-          INTEL=$(sha256sum release/beads-web-darwin-x64 | cut -d' ' -f1)
-          LINUX=$(sha256sum release/beads-web-linux-x64 | cut -d' ' -f1)
+          ARM=$(sha256sum release/atelier-darwin-arm64 | cut -d' ' -f1)
+          INTEL=$(sha256sum release/atelier-darwin-x64 | cut -d' ' -f1)
+          LINUX=$(sha256sum release/atelier-linux-x64 | cut -d' ' -f1)
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/weselow/homebrew-beads-web.git" tap
           mkdir -p tap/Formula
           sed -e "s|__VERSION__|${VERSION}|g" \
               -e "s|__ARM_SHA__|${ARM}|g" \
               -e "s|__INTEL_SHA__|${INTEL}|g" \
               -e "s|__LINUX_SHA__|${LINUX}|g" \
-              repo/packaging/homebrew/beads-web.rb.tmpl > tap/Formula/beads-web.rb
+              repo/packaging/homebrew/atelier.rb.tmpl > tap/Formula/atelier.rb
           cd tap
-          git add Formula/beads-web.rb
+          git add Formula/atelier.rb
           if git diff --cached --quiet; then
             echo "Homebrew formula already up to date"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "beads-web ${VERSION}"
+          git commit -m "atelier ${VERSION}"
           git push origin HEAD:main
 
   # `wingetcreate update` only works AFTER the package already exists in
@@ -186,6 +186,6 @@ jobs:
           }
           $tag = "${{ inputs.version || github.ref_name }}"
           $version = $tag.TrimStart('v')
-          $url = "https://github.com/weselow/beads-web/releases/download/$tag/beads-web-win-x64.exe"
+          $url = "https://github.com/weselow/beads-web/releases/download/$tag/atelier-win-x64.exe"
           Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
-          .\wingetcreate.exe update weselow.beads-web --version $version --urls $url --submit --token $env:WINGET_TOKEN
+          .\wingetcreate.exe update weselow.atelier --version $version --urls $url --submit --token $env:WINGET_TOKEN

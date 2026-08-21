@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Known issues and solutions for beads-web and bd CLI.
+Known issues and solutions for Atelier and the bd CLI.
 
 ---
 

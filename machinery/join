@@ -89,7 +89,7 @@ EXAMPLE = "machinery.toml.example"
 # The app names itself once, in the product's `identity.rs`, and asks the
 # operating system where a program of that name keeps its data. These two lines
 # are that answer written out for the systems this machinery runs on.
-APP = "kanban-ui"
+APP = "atelier"
 LIST = "settings.db"
 # How long to wait for the screen's own writer to let go of the list. The screen
 # may be running while a project joins, and sqlite lets one writer in at a time.

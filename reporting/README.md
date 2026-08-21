@@ -67,7 +67,7 @@ for one — both are refused. Five pages once named their pictures at a checkout
 this product's reports were moved out of, and every one of them died on the
 next build with the file sitting beside its own spec the whole time.
 
-**Where `<data>` is, is the program's answer, not this script's.** `beads-web
+**Where `<data>` is, is the program's answer, not this script's.** `atelier
 --data-dir` prints it, and `bin/report` asks before falling back to the three
 per-platform paths. One definition, in `server/src/identity.rs`; renaming the
 product there moves the shell tool with it, and

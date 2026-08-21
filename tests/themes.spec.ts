@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 /**
  * Theme visual regression tests.
  *
- * Prerequisite: beads-server running on localhost:3008 with at least one project.
+ * Prerequisite: atelier running on localhost:3008 with at least one project.
  *
  * Run: npx playwright test tests/themes.spec.ts
  * Update snapshots: npx playwright test tests/themes.spec.ts --update-snapshots

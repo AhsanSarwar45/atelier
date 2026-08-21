@@ -226,7 +226,7 @@ export default function ProjectsPage() {
             <div role="alert" className="rounded-lg border border-danger/50 bg-danger/70 p-6 text-center">
               <p className="text-danger">Error loading projects: {error.message}</p>
               <p className="mt-2 text-sm text-danger">
-                Make sure the Beads Web server is reachable.
+                Make sure the Atelier server is reachable.
               </p>
             </div>
           ) : filteredProjects.length === 0 ? (
@@ -296,7 +296,7 @@ export default function ProjectsPage() {
             className="flex items-center gap-2 text-sm text-t-muted transition-colors hover:text-t-secondary"
           >
             <Github className="h-4 w-4" aria-hidden="true" />
-            <span>Beads Kanban UI</span>
+            <span>Atelier</span>
           </a>
           <span className="text-t-faint" aria-hidden="true">·</span>
           <a

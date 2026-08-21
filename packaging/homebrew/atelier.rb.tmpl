@@ -1,0 +1,40 @@
+class Atelier < Formula
+  desc "Visual Kanban board and multi-project dashboard for beads task tracking"
+  homepage "https://github.com/weselow/beads-web"
+  version "__VERSION__"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/weselow/beads-web/releases/download/v__VERSION__/atelier-darwin-arm64"
+      sha256 "__ARM_SHA__"
+    end
+    on_intel do
+      url "https://github.com/weselow/beads-web/releases/download/v__VERSION__/atelier-darwin-x64"
+      sha256 "__INTEL_SHA__"
+    end
+  end
+
+  on_linux do
+    on_intel do
+      url "https://github.com/weselow/beads-web/releases/download/v__VERSION__/atelier-linux-x64"
+      sha256 "__LINUX_SHA__"
+    end
+  end
+
+  def install
+    bin.install Dir["atelier-*"].first => "atelier"
+  end
+
+  def caveats
+    <<~EOS
+      atelier needs the Beads CLI (bd) on your PATH:
+        https://github.com/gastownhall/beads
+      Run `atelier` and open http://localhost:3008
+    EOS
+  end
+
+  test do
+    assert_path_exists bin/"atelier"
+  end
+end

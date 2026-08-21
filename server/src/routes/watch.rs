@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn a_dolt_project_resolves_to_the_dolt_store() {
-        let dir = std::env::temp_dir().join("beads-web-watch-store-test");
+        let dir = std::env::temp_dir().join("atelier-watch-store-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".beads").join("dolt")).unwrap();
 
@@ -404,7 +404,7 @@ mod tests {
     fn a_board_dolt_runs_itself_resolves_to_the_dolt_store() {
         // The board this app is built on is one of these, and it was being
         // watched as a jsonl board that has no file (bw-uiyz.15).
-        let dir = std::env::temp_dir().join("beads-web-watch-store-test-embedded");
+        let dir = std::env::temp_dir().join("atelier-watch-store-test-embedded");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".beads").join("embeddeddolt").join("bw")).unwrap();
 
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn a_project_without_dolt_resolves_to_the_jsonl_store() {
-        let dir = std::env::temp_dir().join("beads-web-watch-store-test-jsonl");
+        let dir = std::env::temp_dir().join("atelier-watch-store-test-jsonl");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".beads")).unwrap();
 

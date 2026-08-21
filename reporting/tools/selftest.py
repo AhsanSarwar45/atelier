@@ -334,7 +334,7 @@ def run() -> int:
     # where that project lives — the build's directory is only the fallback
     import sqlite3
     import board as board_mod
-    home = tmp / "kanban-ui"
+    home = tmp / "atelier"
     spec_dir = home / "reports" / "some-project"
     spec_dir.mkdir(parents=True)
     con = sqlite3.connect(home / "settings.db")

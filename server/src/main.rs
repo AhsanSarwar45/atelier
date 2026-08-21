@@ -1,7 +1,7 @@
-//! Beads Kanban UI Server
+//! Atelier — the server.
 //!
-//! An Axum-based HTTP server that serves the beads-kanban-ui frontend
-//! and provides API endpoints for backend functionality.
+//! An Axum-based HTTP server that serves the screens and answers the API
+//! behind them. The one name the product answers to lives in `identity.rs`.
 
 mod db;
 mod dolt;
@@ -95,6 +95,13 @@ async fn main() {
     // The report command runs from a shell and needs the same answer this
     // program uses; asking the program is what stops it working the three
     // per-platform paths out a second time in bash (bw-pqt.24).
+    // An install made under the earlier name is carried across before anything
+    // reads the settings, so a person who upgrades finds their projects where
+    // they left them rather than an empty list (bw-8um.3.8).
+    if let Err(e) = identity::adopt_earlier_install() {
+        eprintln!("the earlier install could not be carried over: {e}");
+    }
+
     if env::args().nth(1).as_deref() == Some("--data-dir") {
         match identity::data_dir() {
             Some(dir) => println!("{}", dir.display()),
@@ -114,11 +121,13 @@ async fn main() {
         .expect("Failed to set tracing subscriber");
 
     // Parse bind host and port from environment variables.
-    let host = env::var("BEADS_WEB_HOST")
+    let host = env::var("ATELIER_HOST")
+        .or_else(|_| env::var("BEADS_WEB_HOST"))
         .or_else(|_| env::var("HOST"))
         .unwrap_or_else(|_| "0.0.0.0".to_string());
 
-    let port: u16 = env::var("BEADS_WEB_PORT")
+    let port: u16 = env::var("ATELIER_PORT")
+        .or_else(|_| env::var("BEADS_WEB_PORT"))
         .or_else(|_| env::var("PORT"))
         .ok()
         .and_then(|p| p.parse().ok())
@@ -242,7 +251,7 @@ async fn main() {
 
     info!("Server starting on http://{}", addr);
 
-    if env_flag("BEADS_WEB_OPEN_BROWSER") {
+    if env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {
         if let Err(e) = open::that(format!("http://localhost:{}", port)) {
             tracing::warn!("Failed to open browser: {}", e);
         }

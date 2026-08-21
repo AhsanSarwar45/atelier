@@ -86,9 +86,9 @@ config.yaml
 beads_*/
 
 # Compiled binaries
-beads-web-linux-*
-beads-web-win-*
-beads-web-darwin-*
+atelier-linux-*
+atelier-win-*
+atelier-darwin-*
 
 # Reports are a person's own work and live in the data folder, never here.
 reporting/pages/

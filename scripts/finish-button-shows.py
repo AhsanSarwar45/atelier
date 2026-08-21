@@ -178,7 +178,7 @@ def main():
 
     # Under the home directory: the server refuses to read a board from
     # anywhere else, and the system temp directory is not under it.
-    holding = os.path.expanduser("~/.cache/beads-web-checks")
+    holding = os.path.expanduser("~/.cache/atelier-checks")
     os.makedirs(holding, exist_ok=True)
     root = tempfile.mkdtemp(prefix="finish-button-", dir=holding)
     project = None

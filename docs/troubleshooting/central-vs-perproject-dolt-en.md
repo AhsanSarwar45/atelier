@@ -2,7 +2,7 @@
 
 ## Symptoms
 
-beads-web shows 0 beads for a project even though `bd list` works in the terminal. Or: `bd sql` returns "Dolt server unreachable at 127.0.0.1:3307".
+Atelier shows 0 beads for a project even though `bd list` works in the terminal. Or: `bd sql` returns "Dolt server unreachable at 127.0.0.1:3307".
 
 ## What changed
 
@@ -44,11 +44,11 @@ bd list
 # Server starts automatically
 ```
 
-### beads-web doesn't see project beads
+### Atelier doesn't see project beads
 
-beads-web connects to the central server (3307). Per-project databases on other ports are invisible to it.
+Atelier connects to the central server (3307). Per-project databases on other ports are invisible to it.
 
-Fix: beads-web v0.6+ reads `.beads/dolt-server.port` and connects to the per-project server directly. Update beads-web.
+Fix: Atelier v0.6+ reads `.beads/dolt-server.port` and connects to the per-project server directly. Update Atelier.
 
 ### metadata.json points to 3307 but database is on another port
 

@@ -855,15 +855,28 @@ def specs_dir():
     said = os.environ.get("REPORTS_DIR")
     if said:
         return os.path.expanduser(said)
+    home = _app_home("atelier", ("com.weselow.atelier", ("weselow", "atelier")))
+    # A machine where the renamed product has not been run yet still has its
+    # reports under the earlier folder; the program moves them across on its
+    # first run, and until then this reads where they actually are.
+    if not os.path.isdir(home):
+        earlier = _app_home("kanban-ui", ("com.beads.kanban-ui", ("beads", "kanban-ui")))
+        if os.path.isdir(earlier):
+            home = earlier
+    return os.path.join(home, "reports")
+
+
+def _app_home(name, windows_and_mac):
+    """Where a program of this name keeps its data, per platform."""
+    mac, (org, app) = windows_and_mac
     if sys.platform == "darwin":
-        home = "~/Library/Application Support/com.beads.kanban-ui"
+        home = "~/Library/Application Support/" + mac
     elif os.name == "nt":
         roaming = os.environ.get("APPDATA") or "~/AppData/Roaming"
-        home = os.path.join(roaming, "beads", "kanban-ui", "data")
+        home = os.path.join(roaming, org, app, "data")
     else:
-        home = os.path.join(os.environ.get("XDG_DATA_HOME") or "~/.local/share",
-                            "kanban-ui")
-    return os.path.join(os.path.expanduser(home), "reports")
+        home = os.path.join(os.environ.get("XDG_DATA_HOME") or "~/.local/share", name)
+    return os.path.expanduser(home)
 
 
 def page_asking(spec):

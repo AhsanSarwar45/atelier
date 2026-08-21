@@ -1,7 +1,12 @@
 [package]
-name = "beads-server"
+name = "atelier"
 version = "0.12.2"
 edition = "2021"
+
+# The command a person types. One name, from `src/identity.rs`.
+[[bin]]
+name = "atelier"
+path = "src/main.rs"
 
 [dependencies]
 axum = "0.7"

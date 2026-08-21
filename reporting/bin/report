@@ -29,16 +29,16 @@ TOOLS="$HERE/tools"
 # `the-shell-tool-and-the-program-agree-on-where-data-goes` keeps them in step.
 data_home() {
   local dir
-  for exe in beads-web beads-server; do
+  for exe in atelier beads-web; do
     if command -v "$exe" >/dev/null 2>&1; then
       dir="$("$exe" --data-dir 2>/dev/null)" || dir=""
       if [ -n "$dir" ]; then echo "$dir"; return; fi
     fi
   done
   case "$(uname -s)" in
-    Darwin) echo "$HOME/Library/Application Support/com.beads.kanban-ui" ;;
-    MINGW*|MSYS*|CYGWIN*) echo "${APPDATA:-$HOME/AppData/Roaming}/beads/kanban-ui/data" ;;
-    *) echo "${XDG_DATA_HOME:-$HOME/.local/share}/kanban-ui" ;;
+    Darwin) echo "$HOME/Library/Application Support/com.weselow.atelier" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "${APPDATA:-$HOME/AppData/Roaming}/weselow/atelier/data" ;;
+    *) echo "${XDG_DATA_HOME:-$HOME/.local/share}/atelier" ;;
   esac
 }
 PAGES="${REPORTS_DIR:-$(data_home)/reports}"

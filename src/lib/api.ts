@@ -1,5 +1,5 @@
 /**
- * Frontend API layer for beads-kanban-ui webapp
+ * Frontend API layer for Atelier
  * Replaces Tauri invoke() calls with HTTP fetch to backend
  */
 

@@ -26,9 +26,9 @@ async fn start_test_server() -> String {
     // router in-test that wires the same handlers.
     let app = Router::new().route(
         "/api/memory",
-        get(beads_server::routes::memory::list_memory)
-            .put(beads_server::routes::memory::update_memory)
-            .delete(beads_server::routes::memory::delete_memory),
+        get(atelier::routes::memory::list_memory)
+            .put(atelier::routes::memory::update_memory)
+            .delete(atelier::routes::memory::delete_memory),
     );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

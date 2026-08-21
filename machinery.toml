@@ -9,7 +9,7 @@ prefix = "bw"
 # Finished work lands on `ours`, not on `main`: `main` here tracks the upstream
 # project this one is a fork of.
 lands_on = "ours"
-brand = "BEADSWEB"
+brand = "ATELIER"
 
 # The manager's own project: an agent lands its work here without asking. `main`
 # here is the upstream fork point and nobody ships from it.

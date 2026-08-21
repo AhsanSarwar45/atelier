@@ -17,13 +17,13 @@ import type { SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 
 /**
  * Beside the server's own settings.db: `directories`' data_dir on Linux is
- * `$XDG_DATA_HOME/kanban-ui`, which is what server/src/db.rs resolves to.
+ * `$XDG_DATA_HOME/atelier`, which is what server/src/db.rs resolves to.
  * Both must move together when XDG_DATA_HOME is redirected.
  */
 function defaultDbPath(): string {
   if (process.env.BEADS_WORKBENCH_DB) return process.env.BEADS_WORKBENCH_DB;
   const base = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
-  return join(base, 'kanban-ui', 'workbench.db');
+  return join(base, 'atelier', 'workbench.db');
 }
 
 /** Numbered and applied in order above the recorded version, matching the idiom in server/src/db.rs. */

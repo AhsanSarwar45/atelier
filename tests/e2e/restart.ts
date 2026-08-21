@@ -4,7 +4,7 @@ import { openSync } from 'node:fs';
 /**
  * Killing and restarting the instance under test, by port.
  *
- * ⛔ By port and never by name: another beads-web serves the owner's own board
+ * ⛔ By port and never by name: another Atelier serves the owner's own board
  * on this machine, and a name-matching kill would take it down with it.
  */
 

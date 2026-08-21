@@ -1,4 +1,4 @@
-//! Route handlers for the beads-server API.
+//! Route handlers for the atelier API.
 //!
 //! This module contains all HTTP route handlers.
 //! Additional handlers will be added as API endpoints are implemented.

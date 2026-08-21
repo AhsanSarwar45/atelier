@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the workbench end-to-end test against an instance built from THIS
-# worktree, isolated from any other beads-web running on this machine:
+# worktree, isolated from any other Atelier running on this machine:
 # its own ports and its own XDG_DATA_HOME, so it shares neither settings.db
 # nor workbench.db with them.
 #
@@ -50,7 +50,7 @@ mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results" "$BEADS_E2E_MARKERS" "$CLAUDE_CO
 SERVER_LOG="$RUN/server.log"
 : > "$SERVER_LOG"
 
-# By port, never by name: another beads-web serves the owner's board on this
+# By port, never by name: another Atelier serves the owner's board on this
 # machine. A run that leaves a helper behind, or a hand-started instance, keeps
 # its port — and the server we are about to start cannot bind it, so the browser
 # is served by yesterday's code while every log here says the run is fresh.
@@ -69,9 +69,9 @@ for p in "$BEADS_WEB_PORT" "$BEADS_WORKBENCH_PORT"; do
   fi
 done
 
-"$ROOT/server/target/debug/beads-server" >> "$SERVER_LOG" 2>&1 &
+"$ROOT/server/target/debug/atelier" >> "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
-# By port, never by name: another beads-web serves the owner's board on this
+# By port, never by name: another Atelier serves the owner's board on this
 # machine. A test may also have restarted the instance, so the pid we spawned
 # is not necessarily the one still listening.
 cleanup() {

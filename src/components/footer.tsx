@@ -2,7 +2,7 @@ export function Footer() {
   return (
     <footer className="border-t border-b-default px-6 py-4">
       <div className="flex flex-col items-center justify-center gap-2 text-sm text-t-muted sm:flex-row sm:gap-4">
-        <span>Beads Kanban UI</span>
+        <span>Atelier</span>
         <span className="hidden sm:inline">·</span>
         <a
           href="https://github.com/weselow/claude-protocol"

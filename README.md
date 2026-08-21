@@ -1,6 +1,6 @@
 <div align="center">
 
-# BEADS WEB
+# ATELIER
 
 **Visual command center for beads task tracking.**
 
@@ -8,7 +8,7 @@
 
 <br>
 
-![Beads Web — Kanban Board](screenshots/kanban-main.png)
+![Atelier — Kanban Board](screenshots/kanban-main.png)
 
 <br>
 
@@ -28,7 +28,7 @@ Beads CLI is powerful for task tracking, but:
 - No way to see epic progress at a glance
 - No visual diff between blocked, ready, and in-progress
 
-Beads Web gives you a real-time Kanban board, multi-project dashboard, and git operations — without leaving the browser.
+Atelier gives you a real-time Kanban board, multi-project dashboard, and git operations — without leaving the browser.
 
 ## Origin
 
@@ -114,10 +114,10 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 
 | Platform | File |
 |----------|------|
-| Windows x64 | `beads-web-win-x64.exe` |
-| macOS Apple Silicon | `beads-web-darwin-arm64` |
-| macOS Intel | `beads-web-darwin-x64` |
-| Linux x64 | `beads-web-linux-x64` |
+| Windows x64 | `atelier-win-x64.exe` |
+| macOS Apple Silicon | `atelier-darwin-arm64` |
+| macOS Intel | `atelier-darwin-x64` |
+| Linux x64 | `atelier-linux-x64` |
 
 Each release also ships a `SHA256SUMS.txt` to verify your download.
 
@@ -126,11 +126,11 @@ Each release also ships a `SHA256SUMS.txt` to verify your download.
 **Scoop (Windows):**
 
 ```powershell
-scoop bucket add beads-web https://github.com/weselow/beads-web
-scoop install beads-web
+scoop bucket add atelier https://github.com/weselow/beads-web
+scoop install atelier
 ```
 
-Update later with `scoop update beads-web`.
+Update later with `scoop update atelier`.
 
 **Nix (macOS / Linux / WSL):**
 
@@ -141,13 +141,13 @@ nix run github:weselow/beads-web
 **Homebrew (macOS / Linux):**
 
 ```bash
-brew install weselow/beads-web/beads-web
+brew install weselow/beads-web/atelier
 ```
 
 **winget (Windows):**
 
 ```powershell
-winget install weselow.beads-web
+winget install weselow.atelier
 ```
 
 > winget becomes available once the submission is accepted into the winget community repository.
@@ -156,11 +156,11 @@ winget install weselow.beads-web
 
 ```bash
 # macOS/Linux — make executable, then run
-chmod +x beads-web-*
-./beads-web-darwin-arm64
+chmod +x atelier-*
+./atelier-darwin-arm64
 
 # Windows
-beads-web-win-x64.exe
+atelier-win-x64.exe
 ```
 
 Open http://localhost:3008. The frontend is embedded in the binary — no Node.js or Rust needed.
@@ -179,7 +179,7 @@ There are two workflows: **Dev Mode** (frontend hot-reload) and **Build from Sou
 
 ### Live preview (against the instance you already run)
 
-If a beads-web is already serving your real board — the installed service on
+If an Atelier is already serving your real board — the installed service on
 :3008 — one command puts this checkout's screen on top of that data:
 
 ```bash
@@ -229,19 +229,19 @@ npm install
 # keep `output: 'export'` enabled in next.config.js (the default)
 npm run build                 # static export → out/
 cd server
-cargo build --release         # binary → server/target/release/beads-server (.exe on Windows)
+cargo build --release         # binary → server/target/release/atelier (.exe on Windows)
 ```
 
 Run the binary and open **http://localhost:3008**:
 
 ```bash
-./server/target/release/beads-server
+./server/target/release/atelier
 ```
 
 ## FAQ
 
 **Q: Do I need Dolt?**
-A: No. Beads Web works with local filesystem projects using `bd` CLI. Dolt adds direct SQL access and remote database support.
+A: No. Atelier works with local filesystem projects using `bd` CLI. Dolt adds direct SQL access and remote database support.
 
 **Q: How do I add a project?**
 A: Click "Add Project" on the dashboard. Browse to your project folder or enter a `dolt://` URL.
