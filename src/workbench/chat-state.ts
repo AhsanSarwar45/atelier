@@ -197,6 +197,27 @@ export function heldDoing(args: {
 }
 
 /**
+ * Who has the chat, in words, one per kind of holder — and the only place they
+ * are written.
+ *
+ * Two screens say this: the badge's tooltip on a row, and the line standing
+ * where a held chat's writing box would be. They were typed out separately, so
+ * a wording change had to be made twice and could drift apart between two
+ * things the reader sees within a second of each other (bw-96is.13).
+ *
+ * Who has it, never what they are doing. The mark beside it is the only thing
+ * that speaks for that, and a sentence claiming somebody was working
+ * contradicted an "Idle" mark an inch away (bw-96is.9).
+ *
+ * No full stop: the callers punctuate, because one of them continues the
+ * sentence.
+ */
+export const HOLDER_WORD: Record<Holder, string> = {
+  terminal: 'Somebody has this chat open in a terminal',
+  program: 'Another program has this chat open',
+};
+
+/**
  * The line drawn where a held chat's writing box would be.
  *
  * Here rather than in the component because it has to agree with the mark
@@ -210,10 +231,7 @@ export function heldDoing(args: {
  * conversation, and a terminal that has merely stopped working still holds it.
  */
 export function heldLine(state: ChatState): string {
-  const open =
-    state.external?.holder === 'terminal'
-      ? 'Somebody has this chat open in a terminal'
-      : 'Another program has this chat open';
+  const open = HOLDER_WORD[state.external?.holder ?? 'program'];
   const now = state.working ? ', and is working in it now' : '';
   return `${open}${now}. It draws here as it goes; the writing box comes back when they let go of it.`;
 }

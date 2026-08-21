@@ -24,6 +24,7 @@ import {
   trimInput,
   withoutMachineChatter,
 } from '../../src/workbench/imported-history.ts';
+import { HOLDER_WORD } from '../../src/workbench/chat-state.ts';
 import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
 import { type Split, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
@@ -83,8 +84,14 @@ const NOTHING_READ: ReadSoFar = { at: null, through: null, carry: [], drawn: 0 }
  * What the reader is told when the chat he typed into belongs to somebody else
  * for the moment. The screen says the same thing under the writing box, so the
  * refusal reads as the same rule twice rather than as a fault.
+ *
+ * Which is why the first half is not typed here: it is the screen's own
+ * sentence, imported. Written out separately it had already drifted — this said
+ * the holder was "working in" the chat, and holding is not working; a terminal
+ * left at a prompt holds one all night (bw-96is.13). "When they let go", for
+ * the same reason: a holder that has merely stopped working still has it.
  */
-export const HELD_ELSEWHERE = 'Another program is working in this chat. It draws here as it goes; you can type when it stops.';
+export const HELD_ELSEWHERE = `${HOLDER_WORD.program}. It draws here as it goes; you can type when they let go of it.`;
 
 /** The window these lines state, if any of them does; the last one wins. */
 function windowIn(messages: readonly Recorded[]): number | null {

@@ -1,5 +1,8 @@
 /**
- * The disk and the process table behind "who is working in this chat right now".
+ * The disk and the process table behind "who has this chat open right now".
+ *
+ * Which is not the same question as who is working in it, and this file only
+ * ever answered the first (bw-96is).
  *
  * Claude Code writes one marker file per running process at
  * `<config>/sessions/<pid>.json` and names in it the conversation that process

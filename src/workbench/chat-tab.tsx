@@ -1067,8 +1067,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 void submit();
               }
             }}
-            disabled={held}
-            placeholder={held ? 'Another program is working in this chat.' : 'Ask the agent to do something…'}
+            // No held case here: a held chat draws no box at all, so a disabled
+            // one with a sentence in it is unreachable — and the sentence it
+            // still carried claimed the holder was working, which is the whole
+            // thing this job took out of the screens (bw-96is.13).
+            placeholder="Ask the agent to do something…"
             // The frame is the box; the typing area inside it carries no second
             // edge, no shadow and no colour of its own, and it grows with what
             // is written until it would take the conversation's room.

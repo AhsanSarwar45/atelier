@@ -242,7 +242,7 @@ test.describe('the door into a conversation somebody else is in', () => {
       // Reading it is allowed; typing into it is not.
       const sent = await command(request, { type: 'prompt.send', sessionId, text: 'do the thing' });
       expect(sent.ok, 'the sidecar accepted a message into somebody else’s conversation').toBe(false);
-      expect(sent.said.error ?? sent.body).toContain('Another program is working in this chat');
+      expect(sent.said.error ?? sent.body).toContain('Another program has this chat open');
 
       // The other door into attaching, asked directly.
       const resumed = await command(request, {
@@ -254,7 +254,7 @@ test.describe('the door into a conversation somebody else is in', () => {
         projectPath: project.path,
       });
       expect(resumed.ok, 'the sidecar attached a driver to somebody else’s conversation').toBe(false);
-      expect(resumed.said.error ?? resumed.body).toContain('Another program is working in this chat');
+      expect(resumed.said.error ?? resumed.body).toContain('Another program has this chat open');
     } finally {
       release();
     }

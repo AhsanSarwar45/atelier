@@ -18,19 +18,7 @@ import { Bot, Hand, Loader2, SquareTerminal } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import type { ChatState, Holder } from '@/workbench/chat-state';
-
-/**
- * What the badge's tooltip calls each kind of holder.
- *
- * Who has it, never what they are doing: the chip beside the badge is the only
- * thing that speaks for that, and a tooltip claiming somebody was working
- * contradicted an "Idle" chip an inch away (bw-96is.9).
- */
-const HOLDER_WORD: Record<Holder, string> = {
-  terminal: 'Somebody has this chat open in a terminal.',
-  program: 'Another program has this chat open.',
-};
+import { HOLDER_WORD, type ChatState, type Holder } from '@/workbench/chat-state';
 
 /**
  * The mark on the badge, one per kind of holder.
@@ -177,7 +165,11 @@ export function ExternalBadge({
       shape="default"
       data-testid="chat-external"
       data-holder={holder}
-      title={HOLDER_WORD[holder]}
+      // The sentence is the reading's, not this file's, so the tooltip on a row
+      // and the line where that chat's writing box would be cannot drift apart
+      // (bw-96is.13). It punctuates here because a tooltip is one sentence; the
+      // line continues its own.
+      title={`${HOLDER_WORD[holder]}.`}
       // Outline, not fill. A filled badge in its own colour beat the chip
       // beside it, so the eye landed on who holds the chat before what the
       // chat is doing, which is the wrong way round. The border is named

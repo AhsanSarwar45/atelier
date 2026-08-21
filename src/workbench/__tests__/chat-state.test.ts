@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { RECORD_QUIET_MS, chatState, counting, heldDoing, heldLine, type HeldChat } from '@/workbench/chat-state';
+import { HOLDER_WORD, RECORD_QUIET_MS, chatState, counting, heldDoing, heldLine, type HeldChat } from '@/workbench/chat-state';
 import type { SessionState } from '@/workbench/protocol';
 
 /** Every state a chat of ours can be published in, in the protocol's own order. */
@@ -205,5 +205,25 @@ describe('the line where a held chat’s writing box would be', () => {
     const line = heldLine(held('idle'));
     expect(line).toContain('comes back when they let go');
     expect(line).not.toContain('when they stop');
+  });
+
+  it('opens with the same sentence the badge’s tooltip is built from', () => {
+    // Three screens say who has the chat — this line, the badge on a row, and
+    // the sidecar's refusal when he types into one anyway — and all three read
+    // it from here. Typed out separately they had already drifted: two said the
+    // holder "has this chat open" and the third said it was "working in" it
+    // (bw-96is.13).
+    for (const holder of ['terminal', 'program'] as const) {
+      expect(heldLine(held('idle', holder)).startsWith(HOLDER_WORD[holder])).toBe(true);
+    }
+  });
+
+  it('the shared sentence says who has it and nothing about work', () => {
+    for (const [holder, word] of Object.entries(HOLDER_WORD)) {
+      expect(word, `${holder} claims activity`).not.toContain('working');
+      // The callers punctuate: this line continues the sentence, the tooltip
+      // ends it.
+      expect(word.endsWith('.'), `${holder} punctuates for its callers`).toBe(false);
+    }
   });
 });

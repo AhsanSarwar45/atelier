@@ -1611,6 +1611,17 @@ the box back when they **let go**, not when they stop — a terminal that has go
 quiet still holds the conversation, and the box does not return until it exits
 (bw-96is.9).
 
+**Three screens say who has the chat, and the sentence is written once.** The
+badge's tooltip, the line where the writing box would be, and the sidecar's
+refusal when a message is sent into a held conversation anyway all read
+`HOLDER_WORD` (`chat-state.ts`), which the sidecar imports across the process
+boundary like everything else it shares with the screen. Typed out separately
+they had already drifted — two of them said the holder *has this chat open* and
+the third said it was *working in* it, which is the swap this whole change
+removed, surviving in the one sentence a reader sees only when he has already
+been refused (bw-96is.13). The constant carries no full stop: the tooltip ends
+the sentence, the line continues it.
+
 **A chat that is asleep says nothing at all.** Most of a list is asleep, and a
 pill on every row is a pill on none. The mark appears only when there is
 something to say — working, waiting, reachable, or held.
