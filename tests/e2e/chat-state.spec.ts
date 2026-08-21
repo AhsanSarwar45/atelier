@@ -230,6 +230,35 @@ test.describe('a chat another program is in', () => {
       expect(opened!.width, 'the badge changed width when its row was selected').toBeCloseTo(alone!.width, 0);
       expect(opened!.height, 'the badge changed height when its row was selected').toBeCloseTo(alone!.height, 0);
 
+      // A box the right size is not a box anybody can see. The badge went on
+      // vanishing into the open row long after this case was written, because
+      // all this case asked of its border was that it be SOME colour — and the
+      // colour it was, was the open row's own (bw-96is.19). What the eye does
+      // is compare the badge against what is behind it, so that is what is
+      // compared here: a shape survives by having a fill of its own or an edge
+      // of its own, and the open row is the case where it has neither.
+      const against = await page.evaluate((id: string) => {
+        const row_ = document.querySelector(`[data-testid="restore-row"][data-external-id="${id}"]`);
+        const seen = row_?.querySelector('[data-testid="chat-external"]');
+        if (!row_ || !seen) return null;
+        const a = getComputedStyle(seen);
+        return {
+          fill: a.backgroundColor,
+          edge: a.borderTopColor,
+          edgeWidth: parseFloat(a.borderTopWidth),
+          behind: getComputedStyle(row_).backgroundColor,
+        };
+      }, chat.id);
+      expect(against, 'the open row drew no badge').not.toBeNull();
+      const gone = /rgba\(0, 0, 0, 0\)|transparent/;
+      const stands =
+        (against!.fill !== against!.behind && !gone.test(against!.fill)) ||
+        (against!.edgeWidth > 0 && !gone.test(against!.edge) && against!.edge !== against!.behind);
+      expect(
+        stands,
+        `the badge has neither a fill nor an edge of its own on the open row: fill ${against!.fill}, edge ${against!.edge}, row ${against!.behind}`,
+      ).toBe(true);
+
       // And it is not the mark: a reader who does not stop to read the words
       // still has the colour and the corners to go on.
       //
@@ -273,6 +302,46 @@ test.describe('a chat another program is in', () => {
       expect(apart!.edge, 'the badge border is invisible, which is how it vanished before').not.toMatch(
         /rgba\(0, 0, 0, 0\)|transparent/,
       );
+    } finally {
+      release();
+    }
+    chat.forget();
+  });
+
+  test('draws the whole of the word on its mark, tails and all', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const project = await aFixtureProject(request);
+    const chat = aChatSomebodyElseIsIn(project.path, 'Read the word on the rail');
+    // "Working" is the word that showed it: the g is the only letter on any of
+    // these marks that hangs below the line.
+    const release = claimConversation(chat.id, { status: 'busy' });
+
+    try {
+      await openChatTab(page, project);
+      const row = rowFor(page, chat.id);
+      const mark = row.getByTestId('row-pill');
+      await expect(mark).toHaveAttribute('data-working', 'yes', { timeout: 30_000 });
+      await expect(mark).toHaveAttribute('data-word', 'Working');
+
+      // The small mark gave its letters less room than the letters need and
+      // hid the overflow, so the rail read "Workina" while the same word in
+      // the open chat's line — drawn one size up — was whole (bw-96is.20).
+      // Measured on the box that does the hiding, not on the badge around it:
+      // the badge had height to spare, which is why this looked fine to
+      // everything that measured the badge.
+      const cut = await page.evaluate((id: string) => {
+        const row_ = document.querySelector(`[data-testid="restore-row"][data-external-id="${id}"]`);
+        const chip = row_?.querySelector('[data-testid="row-pill"]');
+        const word = chip?.querySelector('span');
+        if (!word) return null;
+        return { shown: word.clientHeight, needed: word.scrollHeight, text: word.textContent ?? '' };
+      }, chat.id);
+      expect(cut, 'the working row drew no word at all').not.toBeNull();
+      expect(cut!.text, 'the mark is not the one this case measures').toContain('Working');
+      expect(
+        cut!.needed,
+        `the word is ${cut!.needed}px tall in a ${cut!.shown}px box, so its tails are cut off`,
+      ).toBeLessThanOrEqual(cut!.shown);
     } finally {
       release();
     }

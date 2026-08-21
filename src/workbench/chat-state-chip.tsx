@@ -189,10 +189,23 @@ export function ExternalBadge({
       title={`${HOLDER_WORD[holder]}.`}
       // Outline, not fill. A filled badge in its own colour beat the chip
       // beside it, so the eye landed on who holds the chat before what the
-      // chat is doing, which is the wrong way round. The border is named
-      // rather than left transparent, because transparent is exactly how it
-      // used to disappear into a selected row (bw-96is.10).
-      className={cn('shrink-0 gap-1 border-[var(--color-info-accent)]/45 bg-transparent', className)}
+      // chat is doing, which is the wrong way round.
+      //
+      // Which makes the border the whole of its shape, and the first attempt
+      // at one drew nothing: `border-[var(--color-info-accent)]/45` asks the
+      // styling tool to fade an arbitrary variable, which it cannot do, so it
+      // emitted no border rule at all — the built sheet had that colour as
+      // text and as a background and never as an edge — and the badge went on
+      // vanishing into the open row exactly as before (bw-96is.19).
+      //
+      // Mixed from its own text colour instead, the same way the chip beside
+      // it is (bw-96is.16): that compiles, and it cannot collide with what the
+      // badge is standing on, because the text has to be readable against
+      // whatever that is or there would be nothing to read.
+      className={cn(
+        'shrink-0 gap-1 border-[color-mix(in_srgb,currentColor_55%,transparent)] bg-transparent',
+        className,
+      )}
     >
       <Mark aria-hidden="true" />
       external
