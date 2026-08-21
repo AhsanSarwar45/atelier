@@ -26,7 +26,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ModelChoice } from '@/workbench/protocol';
-import { WhatItRuns } from '@/workbench/what-it-runs';
+import { modelKey, WhatItRuns } from '@/workbench/what-it-runs';
 
 /** The picker's own list, as a chat this app drives announces it. */
 const MENU: ModelChoice[] = [
@@ -123,6 +123,43 @@ describe('what the chat is running, on its own line', () => {
     draw(null, null, NO_MENU);
     expect(modelChip()).toBeNull();
     expect(modeChip()).toBeNull();
+  });
+
+  it('gives one model one colour, whoever started the chat', () => {
+    // The colour is hashed off the data, and the same model arrives here under
+    // three spellings: the picker's key from the store on a chat this app
+    // drives, and the id the kit resolved to on one read off its record. Hashed
+    // raw, each of them was a different colour for the same model (bw-ja9l.6).
+    const hue = (model: string, models = MENU): string => {
+      const { unmount } = draw(model, 'default', models);
+      const said = (modelChip() as HTMLElement).style.getPropertyValue('--tag-h');
+      unmount();
+      return said;
+    };
+
+    const driven = hue('opus');
+    expect(driven, 'the chip must carry a hue at all').not.toBe('');
+    expect(hue('claude-opus-5', NO_MENU), 'read off a record').toBe(driven);
+    expect(hue('claude-opus-5[1m]', NO_MENU), 'the long-context build').toBe(driven);
+    expect(hue('claude-opus-4-5-20251101', NO_MENU), 'an older build').toBe(driven);
+
+    // And a different model is still a different colour: one colour for
+    // everything would close this card and lose the point of it.
+    expect(hue('claude-sonnet-5', NO_MENU)).not.toBe(driven);
+  });
+
+  it('reads one family name out of every spelling of a model', () => {
+    for (const [wire, family] of [
+      ['opus', 'opus'],
+      ['claude-opus-5', 'opus'],
+      ['claude-opus-5[1m]', 'opus'],
+      ['claude-opus-4-5-20251101', 'opus'],
+      ['claude-haiku-4-5-20251001', 'haiku'],
+      ['claude-sonnet-5-latest', 'sonnet'],
+      ['default', 'default'],
+    ] as const) {
+      expect(modelKey(wire), wire).toBe(family);
+    }
   });
 
   it('gives way before the folder chip does', () => {

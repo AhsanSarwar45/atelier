@@ -41,9 +41,8 @@ import {
   recordSize,
   RecordTail,
   runningIn,
-  SAYS_NOTHING,
+  saysWhatItRuns,
   type RecordLine,
-  type Running,
 } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
 import { runningNow } from './running.ts';
@@ -917,22 +916,18 @@ export class Sessions {
      * fold. Said again whenever either changes, so a terminal switched into
      * another mode says so on the screen as it happens.
      */
-    const running: Running = { ...SAYS_NOTHING };
-    const saysWhatItRuns = (found: Running): void => {
-      // A null field is one this read said nothing about, which leaves what was
-      // already known standing — the same rule the event itself carries.
-      const permissionMode = found.permissionMode ?? running.permissionMode;
-      const model = found.model ?? running.model;
-      if (permissionMode === running.permissionMode && model === running.model) return;
-      running.permissionMode = permissionMode;
-      running.model = model;
-      this.publish(summary.id, { type: 'session.pinned', permissionMode, model });
-    };
+    const runs = saysWhatItRuns(({ permissionMode, model }) =>
+      this.publish(summary.id, { type: 'session.pinned', permissionMode, model }));
     // Once as the watching starts, over the record as it already stands: a
     // terminal that has not changed mode since it opened writes nothing further
     // about it, so a reader waiting for the next line would wait for ever.
+    //
+    // It reads the whole record, so it is the slow one, and it is the one that
+    // may not overwrite: `caughtUp` fills a blank and nothing else, or a
+    // terminal switched a moment after the click has its beat's answer rubbed
+    // out by this one's older snapshot (bw-ja9l.5).
     void runningIn(path)
-      .then(saysWhatItRuns)
+      .then(runs.caughtUp)
       // Being written this instant, or moved: the beat below reads it again.
       .catch(() => {});
 
@@ -1082,7 +1077,7 @@ export class Sessions {
       }
       // Before the early return below: a terminal switched into another mode
       // writes that line and no conversation, and the screen has to follow it.
-      saysWhatItRuns(grown.running);
+      runs.beat(grown.running);
       let fresh = grown.fresh;
       // Nothing held back yet, so these lines are the first this follower has
       // in hand and `from` is where they begin.

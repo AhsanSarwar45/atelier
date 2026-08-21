@@ -43,6 +43,33 @@ export function modelWords(model: string | null, models: ModelChoice[]): string 
   return named ?? inWords(model);
 }
 
+/**
+ * The one name a model is coloured by, whichever spelling arrived.
+ *
+ * The same model reaches this line under three different strings. A chat this
+ * app drives carries whatever the picker put in the store — `opus`. A chat read
+ * off its own record carries the id the kit resolved to — `claude-opus-5`, or
+ * `claude-opus-5[1m]` for the long-context build. Hashing any of those raw gave
+ * one model a different colour in each case, which is the whole of what
+ * colouring by data is for (bw-ja9l.6).
+ *
+ * So the vendor, the build tag, the date and the version are taken off and what
+ * is left is the family: `opus`, `sonnet`, `haiku`. Two builds of one model are
+ * one colour and their two names are still on the chip, which is the right way
+ * round — the colour is what a reader scans and the words are what a reader
+ * reads.
+ */
+export function modelKey(model: string): string {
+  const family = model
+    .toLowerCase()
+    .replace(/^claude-/, '')
+    .replace(/\[[^\]]*\]$/, '')
+    .replace(/-\d{8}$/, '')
+    .replace(/-(latest|v\d+)$/, '')
+    .replace(/-\d+(-\d+)*$/, '');
+  return family || model.toLowerCase();
+}
+
 /** The mode's name and colour, both off the one table (§8.2.4). */
 export function modeWords(mode: string | null): { label: string; tone: typeof UNKNOWN_MODE_TONE } | null {
   if (!mode) return null;
@@ -92,7 +119,11 @@ export function WhatItRuns({
     >
       {modelLabel && (
         <Badge
-          hue={hueFor(modelLabel)}
+          // Hashed off the model's family and never off the words: the words
+          // are the picker's where there is a picker and `inWords` where there
+          // is not, so hashing them gave one model two colours across the
+          // driven and the followed case (bw-ja9l.6).
+          hue={hueFor(model ? modelKey(model) : modelLabel)}
           appearance="light"
           size="sm"
           shape="circle"

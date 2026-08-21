@@ -63,6 +63,50 @@ export interface Running {
 /** Nothing said either way. */
 export const SAYS_NOTHING: Running = { permissionMode: null, model: null };
 
+/**
+ * Saying what a chat is running, in an order that never unsays it.
+ *
+ * Two readers answer the same question about a followed chat. One is a
+ * catch-up: a single read of the record as it already stands, so a terminal
+ * that has not changed mode since it opened still says which mode that is. The
+ * other is the beat, which reads the lines that arrive after it.
+ *
+ * They resolve in whatever order the disk hands them back, and the catch-up
+ * reads the WHOLE record, so it is the slow one. A terminal switched into
+ * `bypassPermissions` a moment after the chat was opened is published by the
+ * first beat and then overwritten by the catch-up's older snapshot — the chip
+ * goes back to saying the chat still asks first, which is the one thing the
+ * chip exists to be right about (bw-ja9l.5).
+ *
+ * So the catch-up only ever fills a blank. It cannot be newer than a beat: it
+ * read the file as it stood before the beat's lines were written. The beat may
+ * overwrite anything, because every line it reads was written after everything
+ * the catch-up saw.
+ *
+ * A null field says nothing on that subject and leaves what is known standing,
+ * which is the rule the event itself carries.
+ */
+export function saysWhatItRuns(publish: (running: Running) => void): {
+  beat: (found: Running) => void;
+  caughtUp: (found: Running) => void;
+} {
+  const shown: Running = { ...SAYS_NOTHING };
+  const say = (found: Running, catchingUp: boolean): void => {
+    const keep = <T>(mine: T | null, standing: T | null): T | null =>
+      catchingUp && standing !== null ? standing : (mine ?? standing);
+    const permissionMode = keep(found.permissionMode, shown.permissionMode);
+    const model = keep(found.model, shown.model);
+    if (permissionMode === shown.permissionMode && model === shown.model) return;
+    shown.permissionMode = permissionMode;
+    shown.model = model;
+    publish({ permissionMode, model });
+  };
+  return {
+    beat: (found) => say(found, false),
+    caughtUp: (found) => say(found, true),
+  };
+}
+
 /** What one look at the end of the record found. */
 export interface Grown {
   /** The lines that have arrived since the last look, in the order written. */

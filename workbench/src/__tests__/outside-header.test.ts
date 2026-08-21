@@ -26,7 +26,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runningIn, RecordTail } from '../record-tail.ts';
+import { runningIn, RecordTail, saysWhatItRuns, type Running } from '../record-tail.ts';
 
 let dir: string;
 let path: string;
@@ -160,5 +160,89 @@ describe('what a chat begun outside this app is running', () => {
 
     expect(grown.fresh).toEqual([]);
     expect(grown.running).toEqual({ permissionMode: 'bypassPermissions', model: null });
+  });
+});
+
+/**
+ * The order the two readers are allowed to speak in.
+ *
+ * A followed chat is read twice over: once through the whole record as it
+ * already stands, so a terminal that has not changed mode since it opened still
+ * says which mode it is in, and then a beat at a time as lines arrive. The
+ * catch-up is the one that reads the whole file, so it is the slow one, and
+ * nothing made it wait its turn — the LAST promise to resolve won, not the
+ * newest fact.
+ *
+ * A terminal switched into `bypassPermissions` a moment after the chat is
+ * opened is exactly the case that breaks: the beat says so, the catch-up lands
+ * afterwards carrying the record as it was BEFORE the switch, and the chip goes
+ * quietly back to saying the chat still asks first — the one thing the chip
+ * exists to be right about, un-shown (bw-ja9l.5).
+ */
+describe('what the screen is told, when the two readers finish out of order', () => {
+  /** Every `session.pinned` the follower would publish, in order. */
+  const heard = (): { said: Running[]; runs: ReturnType<typeof saysWhatItRuns> } => {
+    const said: Running[] = [];
+    return { said, runs: saysWhatItRuns((running) => said.push({ ...running })) };
+  };
+
+  it('never puts back a mode a beat has already moved on from', async () => {
+    const { said, runs } = heard();
+
+    // The chat is opened. The catch-up read starts over a record that says
+    // `default`, and takes its time: the whole file has to be read.
+    const slow = new Promise<Running>((answer) => {
+      setTimeout(() => answer({ permissionMode: 'default', model: 'claude-opus-5' }), 5);
+    });
+    void slow.then(runs.caughtUp);
+
+    // Meanwhile the terminal is switched, and the first beat reads the one new
+    // line and says so.
+    runs.beat({ permissionMode: 'bypassPermissions', model: null });
+    expect(said).toEqual([{ permissionMode: 'bypassPermissions', model: null }]);
+
+    await slow;
+    await new Promise((wake) => setTimeout(wake, 0));
+
+    // The catch-up filled the blank it could fill and left the mode alone.
+    expect(said).toEqual([
+      { permissionMode: 'bypassPermissions', model: null },
+      { permissionMode: 'bypassPermissions', model: 'claude-opus-5' },
+    ]);
+    expect(said.map((s) => s.permissionMode)).not.toContain('default');
+  });
+
+  it('still answers with the record as it stands when no beat got there first', () => {
+    const { said, runs } = heard();
+
+    runs.caughtUp({ permissionMode: 'plan', model: 'claude-sonnet-5' });
+
+    expect(said).toEqual([{ permissionMode: 'plan', model: 'claude-sonnet-5' }]);
+  });
+
+  it('lets a beat overwrite anything, because its lines are the newer ones', () => {
+    const { said, runs } = heard();
+
+    runs.caughtUp({ permissionMode: 'default', model: 'claude-opus-5' });
+    runs.beat({ permissionMode: 'bypassPermissions', model: null });
+    runs.beat({ permissionMode: null, model: 'claude-sonnet-5' });
+
+    expect(said).toEqual([
+      { permissionMode: 'default', model: 'claude-opus-5' },
+      { permissionMode: 'bypassPermissions', model: 'claude-opus-5' },
+      { permissionMode: 'bypassPermissions', model: 'claude-sonnet-5' },
+    ]);
+  });
+
+  it('says nothing at all when neither reader has anything to add', () => {
+    const { said, runs } = heard();
+
+    runs.beat({ permissionMode: null, model: null });
+    runs.caughtUp({ permissionMode: null, model: null });
+    runs.beat({ permissionMode: 'plan', model: null });
+    // The same fact twice is one sentence, not two: the screen redraws on each.
+    runs.beat({ permissionMode: 'plan', model: null });
+
+    expect(said).toEqual([{ permissionMode: 'plan', model: null }]);
   });
 });
