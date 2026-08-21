@@ -83,7 +83,18 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
       // an animation there is the words he is reading sliding away from him.
       if (how === 'smooth' && typeof there.scrollTo === 'function') {
         gliding.current = true;
-        there.scrollTo({ top, behavior: 'smooth' });
+        // Taking hold changes the page under the move: the way back gives up
+        // its own strip of screen as it goes, which makes the pane taller and
+        // its end that much nearer. Aim once the browser has laid that out, or
+        // the move is aimed past anywhere the pane can go and never arrives.
+        requestAnimationFrame(() => {
+          const there2 = pane.current;
+          if (!there2 || !gliding.current) return;
+          const now = end(there2);
+          aimed.current = now;
+          left.current = { top: now, end: now };
+          there2.scrollTo({ top: now, behavior: 'smooth' });
+        });
       } else {
         there.scrollTop = top;
       }
@@ -94,14 +105,22 @@ export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>
   const read = useCallback(() => {
     if (!box) return;
     const now = { top: box.scrollTop, end: end(box) };
-    const landed = aimed.current !== null && Math.abs(now.top - aimed.current) <= 1;
+    // Where it was aimed, or as far as the pane can go — a move aimed at an
+    // end that has come nearer since is over when the pane runs out of room,
+    // and waiting for an exact arrival that can never happen would leave the
+    // chat gliding for ever and following nothing.
+    const landed =
+      (aimed.current !== null && Math.abs(now.top - aimed.current) <= 1) || now.top >= now.end - 1;
     // A smooth move is a hundred frames of the pane being somewhere it was not
-    // aimed. None of them is the reader, and only the landing ends it.
+    // aimed. None of them is the reader, and only the arrival ends it.
     if (gliding.current && !landed) return;
     aimed.current = null;
     if (landed) {
       gliding.current = false;
       left.current = now;
+      // Wherever it came from, the pane is at the end: that is what watching
+      // the end means, whether the app put it there or he scrolled back to it.
+      hold(true);
       // A smooth move is aimed at the end as it stood when it set off, and the
       // conversation goes on growing under it — a word arriving, or the way
       // back giving its own strip of screen up as it leaves. Whatever the end
