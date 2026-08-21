@@ -50,6 +50,8 @@ function marker(over: Partial<SessionMarker> = {}): SessionMarker {
     procStart: '1558291',
     entrypoint: 'cli',
     kind: 'interactive',
+    status: null,
+    statusAt: null,
     ...over,
   };
 }
@@ -74,7 +76,30 @@ describe('reading one marker file', () => {
       procStart: '1558291',
       entrypoint: 'cli',
       kind: 'interactive',
+      // The tool's own word for what it is doing, which is the whole reason a
+      // chat somebody else holds can say whether it is working (bw-96is).
+      status: 'busy',
+      statusAt: 1787138388339,
     });
+  });
+
+  it('carries the tool’s own word for what it is doing, or nothing when it says none', () => {
+    const whole = JSON.parse(REAL_MARKER) as Record<string, unknown>;
+    expect(parseMarker(JSON.stringify({ ...whole, status: 'idle' }))?.status).toBe('idle');
+
+    // Measured on this machine, 2026-08-21: of thirteen markers, the seven
+    // written by a terminal carried a status and the six a host drove carried
+    // none. A chat with no word said about it must read as no word said, never
+    // as idle (chat-state.ts, heldDoing).
+    const silent = { ...whole };
+    delete silent.status;
+    delete silent.statusUpdatedAt;
+    expect(parseMarker(JSON.stringify(silent))).toMatchObject({ status: null, statusAt: null });
+
+    // Present but not what it should be: a status that is not a word, and a
+    // moment that is not a number, are each as good as unsaid.
+    expect(parseMarker(JSON.stringify({ ...whole, status: 7 }))?.status).toBeNull();
+    expect(parseMarker(JSON.stringify({ ...whole, statusUpdatedAt: 'now' }))?.statusAt).toBeNull();
   });
 
   it('says nothing rather than throwing, on a file caught half-written', () => {
@@ -130,6 +155,8 @@ describe('which chats somebody is working in', () => {
       cwd: '/home/ahsan/dev/beads-web/worktrees/bw-dmxj',
       startedAt: 1787137216129,
       entrypoint: 'cli',
+      status: null,
+      statusAt: null,
     });
   });
 
@@ -168,6 +195,14 @@ describe('which chats somebody is working in', () => {
     const newer = marker({ pid: 200, procStart: '222', startedAt: 2_000 });
     const running = runningChats([newer, older], machine({ 100: '111' }));
     expect(running.get(older.sessionId)?.pid).toBe(100);
+  });
+
+  it('hands the tool’s own word through to whoever draws the chat', () => {
+    const busy = marker({ status: 'busy', statusAt: 1787138388339 });
+    const idle = marker({ sessionId: 'a-terminal-chat', pid: 12937, procStart: '5608', status: 'idle', statusAt: 1 });
+    const running = runningChats([busy, idle], machine({ 1870877: '1558291', 12937: '5608' }));
+    expect(running.get(busy.sessionId)).toMatchObject({ status: 'busy', statusAt: 1787138388339 });
+    expect(running.get('a-terminal-chat')).toMatchObject({ status: 'idle', statusAt: 1 });
   });
 
   it('nothing running is an empty answer, not a failure', () => {

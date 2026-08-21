@@ -21,7 +21,7 @@ import { listSessions } from '@anthropic-ai/claude-agent-sdk';
 
 import { byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
-import { runningNow } from './running.ts';
+import { holdsNow, runningNow } from './running.ts';
 import { lastSpokeAt } from './spoken.ts';
 import type { Store } from './store.ts';
 
@@ -104,6 +104,9 @@ export async function restoreList(
   // writing (bw-dmxj). The tool's own markers are asked instead, and the
   // answer is cached, so listing forty rows costs one look at the machine.
   const running = runningNow();
+  // What each held chat is doing, so a row draws the same moving mark as the
+  // chat's own line does (bw-96is). Read off the same beat as the set above.
+  const holds = new Map(holdsNow().map((h) => [h.id, h]));
   // When the person last spoke, asked for every chat at once. Bounded and
   // remembered per record (spoken.ts), so a list of forty rows costs forty
   // looks at a file's length plus whatever each record has gained since the
@@ -143,6 +146,7 @@ export async function restoreList(
       // says so either way, and `state` stays the authority on whether a driver
       // of ours is attached to it.
       runningElsewhere: !!s.externalId && running.has(s.externalId),
+      held: (s.externalId ? holds.get(s.externalId) : null) ?? null,
     };
   });
 
@@ -170,6 +174,7 @@ export async function restoreList(
       // a terminal is `dormant` here, because nothing of ours is attached to
       // it, and until now it was drawn identically to one that died last week.
       runningElsewhere: running.has(s.externalId),
+      held: holds.get(s.externalId) ?? null,
     });
   }
 

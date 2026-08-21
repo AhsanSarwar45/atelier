@@ -37,8 +37,11 @@
  * One marker file, as the tool writes it.
  *
  * Only the fields we act on are named; a marker also carries the version, a
- * messaging socket path, a derived display name, and on some of them a
- * `status`/`updatedAt` pair. Those are the tool's business, not ours.
+ * messaging socket path and a derived display name, which are the tool's
+ * business and not ours. The `status` pair beside them IS ours now: it is the
+ * only thing on the machine that says whether a chat somebody else holds is
+ * working or waiting, and drawing "working" over a terminal sitting at an
+ * empty prompt was what made the word meaningless (bw-96is).
  */
 export interface SessionMarker {
   /** The conversation this process is on — the id the SDK's index uses too. */
@@ -59,6 +62,20 @@ export interface SessionMarker {
   entrypoint: string;
   /** `interactive` for a chat somebody talks to. */
   kind: string;
+  /**
+   * What that process says it is doing — `busy` while it owes an answer,
+   * `idle` when it is waiting on its own reader — or null when it says
+   * nothing.
+   *
+   * Optional where the seven above are required, because only some processes
+   * write it: measured on this machine 2026-08-21, all seven terminal markers
+   * carried it and none of the six host-driven ones did. It is the difference
+   * between knowing a chat is occupied and knowing it is working, so a marker
+   * without it is still a marker.
+   */
+  status: string | null;
+  /** When it last said so, ms since the epoch, or null with no status. */
+  statusAt: number | null;
 }
 
 /** A conversation a live process is holding, as the rest of the app needs it. */
@@ -68,6 +85,10 @@ export interface RunningChat {
   cwd: string;
   startedAt: number;
   entrypoint: string;
+  /** What that process last said it was doing, or null when it does not say. */
+  status: string | null;
+  /** When it said it, ms since the epoch, or null. */
+  statusAt: number | null;
 }
 
 /**
@@ -88,7 +109,11 @@ function isText(v: unknown): v is string {
  * them, so a half-written line, a truncated file or a shape a later version
  * invents must all come back as "no marker" rather than take the sidecar down.
  *
- * Every named field is required. A marker missing one is a shape we have not
+ * The seven that describe the process are required; the `status` pair is not,
+ * because only some processes write it (see {@link SessionMarker.status}), and
+ * a marker without it still says who is holding what.
+ *
+ * Every other named field is required. A marker missing one is a shape we have not
  * measured, and the house rule on other people's formats holds here as it does
  * for the session index (§6.3): we stand behind what the tool documented by
  * writing it, and ignore what we would have to guess at. If a later version
@@ -117,6 +142,10 @@ export function parseMarker(text: string): SessionMarker | null {
     procStart: m.procStart,
     entrypoint: m.entrypoint,
     kind: m.kind,
+    status: isText(m.status) ? m.status : null,
+    statusAt: typeof m.statusUpdatedAt === 'number' && Number.isFinite(m.statusUpdatedAt)
+      ? m.statusUpdatedAt
+      : null,
   };
 }
 
@@ -174,6 +203,8 @@ export function runningChats(markers: SessionMarker[], alive: IsAlive): Map<stri
       cwd: m.cwd,
       startedAt: m.startedAt,
       entrypoint: m.entrypoint,
+      status: m.status,
+      statusAt: m.statusAt,
     });
   });
   return running;

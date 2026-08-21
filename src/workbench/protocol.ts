@@ -14,6 +14,7 @@
  */
 
 /** Brands we can drive. One string per driver. */
+import type { HeldChat } from './chat-state';
 import type { PlanUsage } from './plan-usage';
 
 export type Brand = 'claude' | 'codex';
@@ -530,6 +531,13 @@ export interface RestoreRow {
    * sessions this app is driving, which it already knows everything about.
    */
   runningElsewhere?: boolean;
+  /**
+   * What that program says it is doing, when one holds it: the row draws the
+   * same moving mark as a chat of our own, in the same place, rather than a
+   * word that means only "occupied" (bw-96is). Absent for the same reasons
+   * `runningElsewhere` is.
+   */
+  held?: HeldChat | null;
 }
 
 /**
@@ -557,6 +565,13 @@ export interface SessionFacts {
    * this says only what was true at open.
    */
   runningElsewhere: boolean;
+  /**
+   * What the program holding it says it is doing, when one is — the same
+   * reading the app-wide stream carries, said here so a chat opened by its own
+   * address draws a moving mark from its first frame instead of a beat later
+   * (bw-96is).
+   */
+  held: HeldChat | null;
   title: string | null;
   cwd: string | null;
   folder: string | null;
@@ -578,7 +593,8 @@ export type WatchFrame =
   | { kind: 'opened'; session: SessionSummary & { activity: string; beads: string[] } }
   /**
    * Every conversation a live process is holding right now, by the tool's own
-   * id for it — sent once when the stream opens and again whenever the set
+   * id for it, each with what that process says it is doing — sent once when
+   * the stream opens and again whenever the set or what any of them is doing
    * changes. Unlike the other frames this is not about sessions this app
    * drives: a chat being typed at in a terminal has no row in our store to
    * carry an event, and it is exactly the chat the reader is looking for
@@ -586,7 +602,7 @@ export type WatchFrame =
    * running chat on the machine — and a set is unambiguous where a
    * started/stopped pair after a missed frame is not.
    */
-  | { kind: 'running'; conversations: string[] }
+  | { kind: 'running'; holds: HeldChat[] }
   /**
    * The tools' own session folders have changed — a conversation written that
    * this app did not write, or one of them added to. A bare word, said no more
