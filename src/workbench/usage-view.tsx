@@ -122,11 +122,14 @@ export function UsageView({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-8" data-testid="usage-view">
+      {/* Capped and scrolled inside, as the token panel is: an uncapped box
+          runs off the bottom of the window the moment the account has enough
+          models to list (bw-3ug7.14). */}
       <div
-        className="w-full max-w-2xl space-y-3 overflow-y-auto rounded-lg border border-border/60 bg-background p-4 shadow-2xl"
+        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-border/60 bg-background shadow-2xl"
         data-available={usage.available}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 border-b border-border/60 p-4">
           <h2 className="text-base font-semibold text-foreground">Plan usage</h2>
           {usage.plan && (
             <Badge variant="secondary" appearance="light" size="sm" data-testid="usage-plan">
@@ -145,6 +148,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
           </Button>
         </div>
 
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" data-testid="usage-scroll">
         {windows.length > 0 ? (
           <div className="space-y-3 rounded-lg border border-border/60 p-3">
             {windows.map((w) => (
@@ -182,6 +186,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
           This is the whole account’s allowance, not this chat’s: every chat on this machine spends it, and every
           chat shows the same figure. Read {clockReads(usage.at) ?? 'just now'}.
         </p>
+        </div>
       </div>
     </div>
   );

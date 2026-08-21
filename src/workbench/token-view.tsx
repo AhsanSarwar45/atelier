@@ -130,10 +130,15 @@ export function splitRows(s: Split): SplitRow[] {
  * Said in words and not left to the layout, because the whole defect this panel
  * exists for is a reader believing the small number is the whole story.
  */
-export function resetLine(spent: TaskSpend | null): string {
+export function resetLine(spent: TaskSpend | null, drewWindow = true): string {
   const forgot = spent?.forgettings ?? 0;
   const times = forgot === 1 ? 'once' : `${forgot} times`;
-  const above = 'The window above empties every time the chat forgets itself and carries on from a summary';
+  // Points at the picture only when there is one: a chat read from its record
+  // has no window drawn above this line, and saying "the window above" sent the
+  // reader looking for something that was never there (bw-3ug7.10).
+  const above = drewWindow
+    ? 'The window above empties every time the chat forgets itself and carries on from a summary'
+    : "A chat's window empties every time it forgets itself and carries on from a summary";
   const below = 'The total below never resets: it is every turn this task has ever taken, the agents it sent off included.';
   if (spent === null) return `${above}. ${below}`;
   if (forgot === 0) return `${above} — this one has not yet. ${below}`;
@@ -385,8 +390,12 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-8" data-testid="token-view">
-      <div className="w-full max-w-3xl space-y-3 overflow-y-auto rounded-lg border border-border/60 bg-background p-4 shadow-2xl">
-        <div className="flex items-center gap-2">
+      {/* The panel stands where the screen ends and scrolls inside itself. It
+          used to be one growing box with `overflow-y-auto` and no ceiling, so a
+          long chat's picture ran off the bottom of the window with its last
+          rows unreachable (bw-3ug7.13). Header stays; only the body moves. */}
+      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border/60 bg-background shadow-2xl">
+        <div className="flex items-center gap-2 border-b border-border/60 p-4">
           <h2 className="text-base font-semibold text-foreground">Tokens</h2>
           <Badge variant="secondary" appearance="light" size="sm">
             this chat
@@ -396,6 +405,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
           </Button>
         </div>
 
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" data-testid="token-scroll">
         {broke && <Missing note="This chat could not be asked about its tokens just now." testId="token-broke" />}
         {!broke && picture === null && <p className="p-3 text-sm text-muted-foreground">Reading…</p>}
 
@@ -404,7 +414,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
             {picture.window ? <Window window={picture.window} /> : <Missing note={picture.windowNote ?? 'No window to show.'} testId="token-no-window" />}
 
             <p className="text-xs text-muted-foreground" data-testid="token-reset-line">
-              {resetLine(picture.spent)}
+              {resetLine(picture.spent, picture.window !== null)}
             </p>
 
             {picture.spent ? <Spent spent={picture.spent} /> : <Missing note={picture.spentNote ?? 'No spend to show.'} testId="token-no-spend" />}
@@ -417,6 +427,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
             </p>
           </>
         )}
+        </div>
       </div>
     </div>
   );
@@ -441,18 +452,24 @@ export function ContextChip({
   onOpen: () => void;
 }) {
   return (
+    // The hook sits on the pill, not on the button inside it: the line above a
+    // conversation is measured by these hooks, and a hook on the inner button
+    // reports a box a padding narrower than the one that is actually painted —
+    // which would hide the very overlap that check exists to catch (bw-3ug7.9).
+    // The button carries its own hook, as the plan chips do.
     <Badge
       variant={used / room >= TIGHT ? 'warning' : 'secondary'}
       appearance="light"
       size="sm"
+      data-testid="context-chip"
+      data-used={used}
+      data-window={room}
+      title={`${used.toLocaleString()} of ${room.toLocaleString()} tokens of this conversation are in use\nClick for the whole token picture`}
       className="font-mono"
     >
       <button
         type="button"
-        data-testid="context-chip"
-        data-used={used}
-        data-window={room}
-        title={`${used.toLocaleString()} of ${room.toLocaleString()} tokens of this conversation are in use\nClick for the whole token picture`}
+        data-testid="context-chip-open"
         aria-label={`Context — ${used.toLocaleString()} of ${room.toLocaleString()} tokens in use. Opens the whole token picture.`}
         className="flex items-center gap-1"
         onClick={onOpen}

@@ -81,6 +81,11 @@ describe('how it reads on the line', () => {
     expect(reads(128_412, 200_000)).toBe('128k/200k');
   });
 
+  it('says a million-token window as 1M, because 1000k is four digits nobody reads as a million', () => {
+    expect(reads(25_859, 1_000_000)).toBe('26k/1M');
+    expect(reads(1_500_000, 2_000_000)).toBe('1.5M/2M');
+  });
+
   it('warns while there is still room to act on the warning', () => {
     expect(TIGHT).toBeLessThan(1);
     expect(160_000 / 200_000).toBeGreaterThanOrEqual(TIGHT);

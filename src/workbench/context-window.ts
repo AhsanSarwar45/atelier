@@ -73,9 +73,16 @@ export function fullness(usage: Usage | null | undefined): number | null {
  *
  * Rounded to whole thousands, because a number that moves in the hundreds on
  * every frame reads as noise and the question being asked is "how close am I".
+ * A million-token window is said as `1M`: written in thousands it came out as
+ * `1000k`, which is four digits nobody reads as a million (bw-3ug7.12).
  */
 export function reads(used: number, window: number): string {
-  return `${Math.round(used / 1000)}k/${Math.round(window / 1000)}k`;
+  return `${scaled(used)}/${scaled(window)}`;
+}
+
+/** Thousands up to a million, then millions to one decimal. */
+function scaled(n: number): string {
+  return n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}M` : `${Math.round(n / 1000)}k`;
 }
 
 /** Past this much of the window, the kit is close to compacting. */

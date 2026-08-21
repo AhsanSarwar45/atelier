@@ -492,6 +492,10 @@ export class ClaudeDriver implements Driver {
    * when it was asked for its own context report (bw-4wcd.15).
    */
   private window = WINDOW;
+  /** What the last turn left in the window, so a corrected window can be re-stated. */
+  private used: number | null = null;
+  /** The kit is asked for its real window once per session, not once per turn. */
+  private windowAsked = false;
   /**
    * True from the moment a turn is handed over until the brand says it is done.
    *
@@ -1341,6 +1345,25 @@ export class ClaudeDriver implements Driver {
    * into the browser's, and this is the one line that knows the method's name
    * (bw-3ug7).
    */
+  /**
+   * Takes the window the kit itself is measuring against, and re-states the
+   * gauge if it differs from what was assumed.
+   */
+  private async adoptWindow(): Promise<void> {
+    try {
+      const raw = (await this.windowNow()) as { rawMaxTokens?: unknown; maxTokens?: unknown } | null;
+      const stated = [raw?.rawMaxTokens, raw?.maxTokens].find(
+        (n): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0,
+      );
+      if (stated === undefined || stated === this.window) return;
+      this.window = stated;
+      if (this.used !== null) this.emit({ type: 'context', used: this.used, window: this.window });
+    } catch {
+      // An unanswerable kit leaves the assumed window standing, which is what
+      // was drawn before this asked at all.
+    }
+  }
+
   async windowNow(): Promise<unknown | null> {
     const q = this.q as { getContextUsage?: () => Promise<unknown> } | null;
     if (!q?.getContextUsage) return null;
@@ -1540,7 +1563,17 @@ export class ClaudeDriver implements Driver {
           if (named !== null) this.window = named;
           const used = fullness(m.message?.usage);
           if (used !== null) {
+            this.used = used;
             this.emit({ type: 'context', used, window: this.window });
+            // The messages rarely state the window, so the gauge would sit on
+            // the ordinary 200k while a session actually running on a million
+            // was 3% full — and the panel the gauge opens, which asks the kit
+            // outright, said so on the same screen (bw-3ug7.11). Ask once, off
+            // the turn: the answer costs nothing and takes no turn.
+            if (!this.windowAsked) {
+              this.windowAsked = true;
+              void this.adoptWindow();
+            }
           }
         }
         for (const b of m.message?.content ?? []) {

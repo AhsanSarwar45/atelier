@@ -97,4 +97,10 @@ describe('saying which number resets', () => {
   it('still says which of the two resets when there is no record to count', () => {
     expect(resetLine(null)).toContain('never resets');
   });
+
+  it('points at no window when there is no window drawn above it', () => {
+    expect(resetLine(spent(0), false)).not.toContain('above');
+    expect(resetLine(spent(0), false)).toContain('never resets');
+    expect(resetLine(spent(0), true)).toContain('The window above');
+  });
 });
