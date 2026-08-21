@@ -302,14 +302,32 @@ describe('a conversation handed over by an older sidecar', () => {
 
   it('fills a chat handed over as nothing at all', () => {
     // Whatever the far end sends, the screen holds a whole chat: a null, an
-    // empty object, a list where an object belongs.
-    for (const sent of [null, undefined, {}, { agents: null }, { menu: null }]) {
+    // empty object, a list where an object belongs, an object where a list
+    // belongs. Every list of the menu, not only the ones that came first —
+    // guarding the old fields and not the new one guards exactly the fields
+    // that were never going to be missing (bw-7ks.22.31).
+    const bad = [null, undefined, {}, { agents: null }, { menu: null }, { menu: { agentControls: null } }, { menu: { agentControls: 'stop' } }];
+    for (const sent of bad) {
       const view = asView(sent as never);
       expect(Array.isArray(view.agents)).toBe(true);
       expect(Array.isArray(view.items)).toBe(true);
       expect(Array.isArray(view.menu.commands)).toBe(true);
+      expect(Array.isArray(view.menu.agentControls)).toBe(true);
       expect(view.state).toBe(EMPTY.state);
     }
+  });
+
+  it('takes a menu from a sidecar that has never heard of steering controls', () => {
+    // The menu the sidecar announces is the menu the code it was started with
+    // knew about. Both ways of building a chat have to survive it, or the panel
+    // asks a list that is not there whether it contains `stop`.
+    stamped = 0;
+    const older = said({ type: 'session.menu', commands: [], skills: [], models: [], permissionModes: ['default'] } as never);
+
+    expect(reduce(EMPTY, older).menu.agentControls).toEqual([]);
+    expect(foldAll([older]).menu.agentControls).toEqual([]);
+    // And what it did send is still there.
+    expect(foldAll([older]).menu.permissionModes).toEqual(['default']);
   });
 
   it('keeps what the sidecar did send', () => {

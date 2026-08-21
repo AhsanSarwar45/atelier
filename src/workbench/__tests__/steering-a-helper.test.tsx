@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
 import { AgentView } from '@/workbench/agent-view';
-import { foldAll, type SentAway } from '@/workbench/fold';
+import { asView, foldAll, type SentAway } from '@/workbench/fold';
 import type { WbpEvent } from '@/workbench/protocol';
 import { SentAwayPanel } from '@/workbench/sent-away';
 import { PermissionCard } from '@/workbench/transcript-rows';
@@ -91,6 +91,19 @@ describe('the controls on a row', () => {
     expect(screen.queryByTestId('sent-away-steer')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sent-away-stop')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sent-away-park')).not.toBeInTheDocument();
+  });
+
+  it('draws the rows anyway when the controls arrive malformed', () => {
+    // The controls list is what the screen was handed, and what it was handed
+    // is whatever the running sidecar sent. A value that is not a list is not a
+    // reason to lose the panel: the rows are the point, the controls are the
+    // trimming, and a chat that cannot say what it can steer can steer nothing
+    // (bw-7ks.22.31).
+    const view = asView({ menu: { agentControls: null } } as never);
+    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={view.menu.agentControls} onOpen={() => {}} />);
+
+    expect(screen.getByTestId('sent-away-open')).toBeInTheDocument();
+    expect(screen.queryByTestId('sent-away-steer')).not.toBeInTheDocument();
   });
 
   it('draws only the ones the brand named', () => {

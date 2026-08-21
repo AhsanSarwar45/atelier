@@ -262,6 +262,28 @@ function list<T>(sent: T[] | undefined, blank: T[]): T[] {
 }
 
 /**
+ * A menu off the wire, every list of it guarded — including the one that
+ * arrives from a running sidecar as nothing at all.
+ *
+ * Same reason the whole conversation is guarded (asView below): the sidecar
+ * goes on running the code it was started with, so it announces the menu it
+ * knew about when it started. A sidecar older than the controls has no
+ * `agentControls` to send, and a panel that asks that absent list whether it
+ * contains `stop` takes the chat down with it. Guarding four of the five and
+ * not the newest one guards exactly the fields that were never going to be
+ * missing (bw-7ks.22.31).
+ */
+function menuOf(sent: Partial<SessionMenu>): SessionMenu {
+  return {
+    commands: list(sent.commands, NO_MENU.commands),
+    skills: list(sent.skills, NO_MENU.skills),
+    models: list(sent.models, NO_MENU.models),
+    permissionModes: list(sent.permissionModes, NO_MENU.permissionModes),
+    agentControls: list(sent.agentControls, NO_MENU.agentControls),
+  };
+}
+
+/**
  * A conversation off the wire, filled against a blank one.
  *
  * The sidecar is a process and the screen is a page: it goes on running the
@@ -284,14 +306,7 @@ export function asView(sent: Partial<SessionView> | null | undefined): SessionVi
     todos: list(raw.todos, EMPTY.todos),
     agents: list(raw.agents, EMPTY.agents),
     beads: list(raw.beads, EMPTY.beads),
-    menu: {
-      ...NO_MENU,
-      ...menu,
-      commands: list(menu.commands, NO_MENU.commands),
-      skills: list(menu.skills, NO_MENU.skills),
-      models: list(menu.models, NO_MENU.models),
-      permissionModes: list(menu.permissionModes, NO_MENU.permissionModes),
-    },
+    menu: menuOf(menu),
   };
 }
 
@@ -546,13 +561,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'session.menu':
-      next.menu = {
-        commands: e.commands,
-        skills: e.skills,
-        models: e.models,
-        permissionModes: e.permissionModes,
-        agentControls: e.agentControls,
-      };
+      next.menu = menuOf(e);
       return next;
 
     case 'session.pinned':
@@ -874,13 +883,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
 
       case 'session.menu':
-        view.menu = {
-          commands: e.commands,
-          skills: e.skills,
-          models: e.models,
-          permissionModes: e.permissionModes,
-          agentControls: e.agentControls,
-        };
+        view.menu = menuOf(e);
         break;
 
       case 'session.pinned':
