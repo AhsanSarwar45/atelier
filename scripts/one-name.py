@@ -29,6 +29,14 @@ Three halves, and all of them have to hold:
               exactly the failure a person meets first, so the built page is
               read rather than the file it came from (bw-8um.3.16).
 
+  THE DOWNLOADS  every version and every download address a checked-in install
+              manifest names is one a release really published under these
+              names — or a placeholder the release run fills. A manifest
+              carrying a version from before the rename sends anyone installing
+              through a package manager at a file that is not there, and the
+              spelling sweep cannot see it because the address it names is
+              spelled correctly and simply does not exist (bw-8um.3.15).
+
 ## What is NOT the product name
 
 Three things share the old spelling and are not it, so each is exempt by a
@@ -225,6 +233,86 @@ def built_screen(display):
     return failures
 
 
+# ------------------------------------------------------- the downloads named
+
+RELEASE_RUN = ".github/workflows/release.yml"
+
+# The manifests a package manager reads, all of which name a download.
+MANIFESTS = ("bucket/", "packaging/winget/", "packaging/homebrew/")
+
+# A value the release run fills in. `__VERSION__` is ours; `$version` is what
+# scoop writes into an autoupdate address for a version it has not seen yet.
+FILLED_IN = re.compile(r"__[A-Z_]+__|\$version|\$\{[^}]+\}")
+
+DOWNLOAD = re.compile(r"releases/download/([^/\s\"']+)/([^\s\"'\)]+)")
+VERSION_FIELD = re.compile(
+    r'^\s*(?:"version"\s*:\s*"|PackageVersion:\s*|version\s+")([^"\s]+)', re.M
+)
+
+
+def publishes(workflow_text):
+    """The file names a release run really uploads."""
+    return set(re.findall(r"artifact:\s*(\S+)", workflow_text))
+
+
+def workflow_at(tag):
+    """That same run as it stood at a tag, or None if the tag has none."""
+    out = subprocess.run(["git", "show", "%s:%s" % (tag, RELEASE_RUN)], cwd=HERE,
+                         capture_output=True, text=True, timeout=120)
+    return out.stdout if out.returncode == 0 else None
+
+
+def tags():
+    out = subprocess.run(["git", "tag", "-l", "v*"], cwd=HERE, capture_output=True,
+                         text=True, timeout=120)
+    return set(out.stdout.split())
+
+
+def downloads_named(files):
+    """Every manifest promise that no release ever kept."""
+    published_now = publishes(open(os.path.join(HERE, RELEASE_RUN), encoding="utf-8").read())
+    published_at = {}
+    known = tags()
+    failures = []
+
+    for path in files:
+        if not path.startswith(MANIFESTS):
+            continue
+        try:
+            text = open(os.path.join(HERE, path), encoding="utf-8").read()
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        for tag, filename in DOWNLOAD.findall(text):
+            filename = filename.split("#", 1)[0]
+            if FILLED_IN.search(tag):
+                # The version is the release run's to write. The file name is
+                # still ours, and still has to be one it uploads.
+                if filename not in published_now:
+                    failures.append("%s asks for %r, which no release publishes"
+                                    % (path, filename))
+                continue
+            if tag not in known:
+                failures.append("%s names release %s, which was never tagged, so the"
+                                " download is not there" % (path, tag))
+                continue
+            if tag not in published_at:
+                published_at[tag] = publishes(workflow_at(tag) or "")
+            if filename not in published_at[tag]:
+                failures.append("%s asks release %s for %r, which that release never"
+                                " published" % (path, tag, filename))
+
+        for version in VERSION_FIELD.findall(text):
+            if FILLED_IN.search(version):
+                continue
+            tag = version if version.startswith("v") else "v" + version
+            if tag not in known:
+                failures.append("%s says it is version %s, which was never released"
+                                % (path, version))
+
+    return failures
+
+
 def main():
     name = defined_name()
     display = defined_display()
@@ -245,10 +333,12 @@ def main():
         failures.append("%s:%d still on an older name: %s" % (path, number, line))
 
     failures.extend(built_screen(display))
+    failures.extend(downloads_named(files))
 
     print("the product is named %r, read as %r, defined in %s" % (name, display, IDENTITY))
     print("%d places must agree, %d tracked files swept, and %d built pages read as the"
-          " reader meets them" % (len(agreements(name)), len(files), len(LANDED_ON)))
+          " reader meets them; every download a manifest names checked against the"
+          " releases that exist" % (len(agreements(name)), len(files), len(LANDED_ON)))
     for line in failures:
         print("  FAIL " + line)
     print("%d failures" % len(failures))

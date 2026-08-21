@@ -8,8 +8,13 @@ Nothing here is built into the binary — these files feed the release automatio
 
 - `atelier.rb.tmpl` — Homebrew formula template with `__VERSION__`, `__ARM_SHA__`,
   `__INTEL_SHA__`, and `__LINUX_SHA__` placeholders.
-- `atelier.rb` — a rendered copy of the template (bootstrap for v0.11.2 with real
-  hashes). Use it to seed the tap repo the first time.
+
+There is no rendered copy of it here, and there must not be one. A formula
+checked in with a version and hashes already filled in can only be right for a
+release that published under exactly these download names, and it goes silently
+wrong the moment they change — which is what happened to the one that used to
+sit here (bw-8um.3.15). The release run renders the template itself and pushes
+the result to the tap, including the first time.
 
 On each release the `Update Homebrew formula` step renders the template with the new
 version and freshly computed SHA-256 hashes and pushes the result to

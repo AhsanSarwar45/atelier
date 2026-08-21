@@ -1,5 +1,5 @@
 PackageIdentifier: weselow.atelier
-PackageVersion: 0.11.2
+PackageVersion: __VERSION__
 DefaultLocale: en-US
 ManifestType: version
 ManifestVersion: 1.6.0

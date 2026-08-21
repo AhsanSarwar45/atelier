@@ -102,17 +102,19 @@ jobs:
           files: release/*
           generate_release_notes: true
 
-      # Keep the self-hosted Scoop manifest (bucket/atelier.json) in sync with
-      # each release: refresh version + Windows-exe hash and commit to main.
-      # Mirrors the Nix hash-refresh auto-commit already used by ci.yml.
-      - name: Checkout main for Scoop manifest
+      # The Scoop bucket is served straight out of this repository, so it is
+      # the one manifest that has to carry a real version — and this step is
+      # what puts one there, from the release that just published. It ships
+      # holding placeholders so it can never name a download that does not
+      # exist, which is what it used to do (bw-8um.3.15).
+      - name: Checkout main for the Scoop manifest
         uses: actions/checkout@v5
         with:
           ref: main
           path: repo
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update Scoop manifest
+      - name: Fill the Scoop manifest from this release
         run: |
           set -euo pipefail
           TAG="${{ inputs.version || github.ref_name }}"
@@ -126,13 +128,13 @@ jobs:
             bucket/atelier.json > bucket/atelier.json.tmp
           mv bucket/atelier.json.tmp bucket/atelier.json
           if git diff --quiet -- bucket/atelier.json; then
-            echo "Scoop manifest already up to date"
+            echo "The Scoop manifest already names this release"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add bucket/atelier.json
-          git commit -m "chore(scoop): update manifest for $TAG"
+          git commit -m "chore(scoop): name the download $TAG published"
           git push origin main
 
       - name: Update Homebrew formula
@@ -168,7 +170,12 @@ jobs:
           git push origin HEAD:main
 
   # `wingetcreate update` only works AFTER the package already exists in
-  # microsoft/winget-pkgs. The first submission is a one-time manual step:
+  # microsoft/winget-pkgs, and it builds the manifest it submits from the
+  # download address alone — it never reads the files under `packaging/winget`.
+  # Those ship holding placeholders so they can never name a download that does
+  # not exist (bw-8um.3.15). The first submission is a one-time manual step, and
+  # it is where they get filled in, from a release that has already published:
+  #   sed -i -e "s|__VERSION__|<version>|g" -e "s|__HASH__|<sha256, upper case>|g" packaging/winget/*.yaml
   #   wingetcreate submit packaging/winget --token <PAT>
   # This job no-ops when WINGET_TOKEN is absent.
   winget:
