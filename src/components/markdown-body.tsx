@@ -40,6 +40,11 @@ const PROSE_CLASSES =
   "prose-pre:bg-zinc-900 prose-pre:text-zinc-100 " +
   "prose-code:text-sm prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 " +
   "prose-code:px-1 prose-code:py-0.5 prose-code:rounded " +
+  // The typography preset draws a backtick of its own before and after every
+  // quoted word — the markdown that was already spent making the chip. So a
+  // command in a message read `like this`, quote marks and all, while a fenced
+  // block (which the preset exempts) read correctly (bw-3ndt.1).
+  "prose-code:before:content-none prose-code:after:content-none " +
   // A pasted path or a long address must not push the column wider than its box.
   "prose-pre:overflow-x-auto break-words";
 
