@@ -34,7 +34,7 @@ export interface Where {
 }
 
 /** What a chip and a link used to spell `card` as. Still read, never written. */
-const OLD_CARD = 'bead';
+export const OLD_CARD = 'bead';
 
 /** Where the address says we are. */
 export function whereFrom(params: URLSearchParams): Where {

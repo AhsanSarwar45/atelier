@@ -1,5 +1,8 @@
 /**
- * The disk and the process table behind "who is working in this chat right now".
+ * The disk and the process table behind "who has this chat open right now".
+ *
+ * Which is not the same question as who is working in it, and this file only
+ * ever answered the first (bw-96is).
  *
  * Claude Code writes one marker file per running process at
  * `<config>/sessions/<pid>.json` and names in it the conversation that process
@@ -21,12 +24,15 @@
  * reader that starts removing another program's state is a bug waiting for a
  * race.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { heldDoing } from '../../src/workbench/chat-state.ts';
+import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { parseMarker, procStartFromStat, runningChats } from '../../src/workbench/running.ts';
 import type { RunningChat, SessionMarker } from '../../src/workbench/running.ts';
+import { findRecord } from './record-tail.ts';
 
 /**
  * Where the tool keeps its state, resolved the way the tool resolves it:
@@ -150,4 +156,74 @@ export function runningNow(fresh = false): Map<string, RunningChat> {
   cachedAt = now;
   cached = runningChats(readMarkers(), processIsAlive);
   return cached;
+}
+
+/**
+ * When each held conversation was first seen working in the burst it is in now.
+ *
+ * The seconds a reader watches must be the turn's, not the beat's: the record
+ * of a host-driven chat is re-stat-ed every couple of seconds, and counting
+ * from the last stat would reset the number to zero on every look. Entries for
+ * conversations nothing holds any more are dropped on the next look, so this
+ * cannot grow past the number of chats running on the machine.
+ */
+const burstAt = new Map<string, number>();
+
+/**
+ * What every held conversation is doing, ready for the wire.
+ *
+ * The holder's own `status` answers where there is one, and a stat of its
+ * record answers where there is not — see {@link heldDoing} for why that is the
+ * right signal for THIS question and the wrong one for liveness. One stat per
+ * held chat with no status, on the same beat that already reads the marker
+ * directory.
+ */
+export function holdsNow(fresh = false): HeldChat[] {
+  const running = runningNow(fresh);
+  const now = Date.now();
+  const holds: HeldChat[] = [];
+  const seen = new Set<string>();
+
+  running.forEach((chat, id) => {
+    seen.add(id);
+    const record = chat.status === null ? findRecord(id) : null;
+    let movedAt: number | null = null;
+    if (record) {
+      try {
+        movedAt = statSync(record).mtimeMs;
+      } catch {
+        // The record can be rotated or removed while we look; a chat whose
+        // record we cannot stat is one we know nothing about, which is what
+        // `unknown` is for.
+        movedAt = null;
+      }
+    }
+    const { doing, since } = heldDoing({
+      status: chat.status,
+      statusAt: chat.statusAt,
+      recordMovedAt: movedAt,
+      burstAt: burstAt.get(id) ?? null,
+      now,
+    });
+    if (doing === 'working') {
+      if (!burstAt.has(id)) burstAt.set(id, since ?? now);
+    } else {
+      burstAt.delete(id);
+    }
+    holds.push({
+      id,
+      // A person at a terminal and a program driving through the kit are the
+      // same fact to everything that acts on this (§6.3.4); the badge names
+      // which only because a reader looking for their own terminal wants to
+      // know which window to go to.
+      holder: chat.entrypoint === 'cli' ? 'terminal' : 'program',
+      doing,
+      since: doing === 'working' ? (burstAt.get(id) ?? since) : null,
+    });
+  });
+
+  burstAt.forEach((_, id) => {
+    if (!seen.has(id)) burstAt.delete(id);
+  });
+  return holds.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }

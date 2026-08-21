@@ -64,18 +64,24 @@ export function saidBy(items: TranscriptItem[], row: Pick<SentAway, 'id' | 'tool
  * the CHAT that sent the agent, naming which agent it is for, and the pane says
  * so both before it is sent and after. A word drawn as delivered would be a lie
  * about the road it took.
+ *
+ * A word that never left says so, and stays in the box. Clearing the box is how
+ * this pane says the words went; clearing it on a refusal would be the same lie
+ * with the evidence thrown away (bw-7ks.22.34).
  */
 function RelayBox({ row, sessionId }: { row: SentAway; sessionId: string }) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
 
   const send = (): void => {
     const said = text.trim();
     if (!said || sending) return;
     setSending(true);
+    setRefused(null);
     void sendCommand({ type: 'agent.say', sessionId, agentId: row.id, text: said })
       .then(() => setText(''))
-      .catch(() => {})
+      .catch((e: unknown) => setRefused(`Not sent. ${e instanceof Error ? e.message : String(e)}`))
       .finally(() => setSending(false));
   };
 
@@ -110,6 +116,11 @@ function RelayBox({ row, sessionId }: { row: SentAway; sessionId: string }) {
           Relay
         </Button>
       </div>
+      {refused && (
+        <p data-testid="agent-view-relay-error" className="mt-2 text-[11px] text-red-500">
+          {refused}
+        </p>
+      )}
     </div>
   );
 }

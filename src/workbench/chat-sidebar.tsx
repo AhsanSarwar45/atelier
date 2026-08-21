@@ -18,7 +18,17 @@ import { Badge } from '@/components/ui/badge';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { useHeardFromOutside, useLiveSessions, useRunningElsewhere, type LiveSession } from '@/workbench/live';
+import { chatState, holderOnly, type HeldChat } from '@/workbench/chat-state';
+import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
+import {
+  useHeardFromOutside,
+  useHeldFactsAreOld,
+  useHelperMismatch,
+  useHolds,
+  useLiveSessions,
+  useRunningElsewhere,
+  type LiveSession,
+} from '@/workbench/live';
 import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -47,18 +57,33 @@ export function clockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
-/** What stands over the chats somebody is working in, in place of a date. */
-export const WORKING_NOW = 'Working now';
+/**
+ * What stands over the chats another program is holding, in place of a date.
+ *
+ * It said "Working now", which is the swap this whole job removed: the block
+ * is filled by who holds a chat, not by what they are doing, so a terminal
+ * left at a prompt overnight was filed under a heading that said it was
+ * working. What each of those chats is actually doing is on the row itself,
+ * and the heading says only why they are up here (bw-96is.15).
+ */
+export const OPEN_ELSEWHERE = 'Open elsewhere';
 
 /**
  * Rows in the order given, split into the blocks they are drawn under, without
  * reordering them.
  *
- * A chat being worked in sits at the top whatever its date (protocol.ts,
+ * A chat another program holds sits at the top whatever its date (protocol.ts,
  * byWhatIsWorking), so a day over it would be wrong twice over: it explains a
  * row that is up there for another reason, and it leaves today's heading to be
  * drawn a second time over the idle chats below it (bw-dmxj.11). Those rows get
  * a heading that says why they are first, and the days start under them.
+ *
+ * One block, not two — held-and-working over held-and-idle. The list's order is
+ * held still while the reader is looking at it (holdStill), and a heading here
+ * is never opened twice, so a chat whose terminal stopped working would have to
+ * cross from one block to the other while his hand was moving, or else sit
+ * under a heading the block above already used. What each held chat is doing
+ * this second is on the row itself, where it changes without moving anything.
  *
  * A heading is never opened twice: a row joins the block already carrying its
  * heading. With the list in its own order that is the block above it anyway,
@@ -67,7 +92,7 @@ export const WORKING_NOW = 'Working now';
 export function groupRows(rows: RestoreRow[], now = new Date()): { heading: string; rows: RestoreRow[] }[] {
   const groups: { heading: string; rows: RestoreRow[] }[] = [];
   for (const row of rows) {
-    const heading = row.runningElsewhere ? WORKING_NOW : dayHeading(whenHeSpoke(row), now);
+    const heading = row.runningElsewhere ? OPEN_ELSEWHERE : dayHeading(whenHeSpoke(row), now);
     const already = groups.find((g) => g.heading === heading);
     if (already) already.rows.push(row);
     else groups.push({ heading, rows: [row] });
@@ -144,6 +169,21 @@ export function withLive(
    * would rub those marks out before the stream had spoken.
    */
   running: ReadonlySet<string> | null = null,
+  /**
+   * What each of those conversations is doing, by the same id, or `null` while
+   * the stream has not said. Kept beside the set rather than replacing it: the
+   * set is what the writing box turns on, and this is what the row draws
+   * (bw-96is).
+   */
+  holds: ReadonlyMap<string, HeldChat> | null = null,
+  /**
+   * The stream has spoken about all this before and has stopped, so each row's
+   * own answer — fetched when the list was drawn and not since — is older than
+   * the one just thrown away. Who is in a chat is kept and what they were doing
+   * is dropped, so a mark cannot go on turning on a dead connection's last word
+   * (live.ts, `useHeldFactsAreOld`, bw-96is.22).
+   */
+  heldFactsAreOld = false,
 ): RestoreRow[] {
   const byId = new Map(rows.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
   const merged = [...rows];
@@ -193,8 +233,18 @@ export function withLive(
   // The mark last, and over everything: a chat that starts or stops being worked
   // in changes nothing else about its row, and the reader is not reloading.
   const marked = running
-    ? merged.map((r) => (r.externalId ? { ...r, runningElsewhere: running.has(r.externalId) } : r))
-    : merged;
+    ? merged.map((r) =>
+        r.externalId
+          ? {
+              ...r,
+              runningElsewhere: running.has(r.externalId),
+              held: holds ? (holds.get(r.externalId) ?? null) : r.held,
+            }
+          : r,
+      )
+    : heldFactsAreOld
+      ? merged.map((r) => (r.externalId ? { ...r, held: holderOnly(r.held) } : r))
+      : merged;
 
   return marked.sort(byWhatIsWorking);
 }
@@ -212,12 +262,15 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
   const running = useRunningElsewhere();
+  const holds = useHolds();
+  const heldFactsAreOld = useHeldFactsAreOld();
+  const outOfStep = useHelperMismatch();
   // The order as it was last drawn. Read while rendering and written after, so
   // what he is pointing at is what decides where the rows go (holdStill).
   const settled = useRef<string[]>([]);
   const rows = useMemo(
-    () => holdStill(withLive(fetched, live, projectId, running), settled.current),
-    [fetched, live, projectId, running],
+    () => holdStill(withLive(fetched, live, projectId, running, holds, heldFactsAreOld), settled.current),
+    [fetched, live, projectId, running, holds, heldFactsAreOld],
   );
   useEffect(() => {
     settled.current = rows.map(rowKey);
@@ -346,6 +399,20 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
         </p>
       )}
 
+      {/*
+        The helper feeding this list is older than the page reading it, so what
+        each chat is doing cannot be known — and the loss is otherwise silent:
+        every row still draws, with its title and its time and its cards, and
+        only the marks are missing. Said here because here is where they are
+        missing from, and said as the thing to do about it rather than as a
+        fault, because there is exactly one thing to do (bw-96is.24, bw-kr4m).
+      */}
+      {outOfStep && (
+        <p data-testid="helper-stale" className="border-b border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+          The helper behind this list is out of date, so no chat here can say what it is doing. Restart the app.
+        </p>
+      )}
+
       <div data-testid="chat-list" className="min-h-0 flex-1 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.heading}>
@@ -358,6 +425,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
             {group.rows.map((row) => {
               const key = rowKey(row);
               const live = row.state !== 'dormant' && row.state !== 'ended';
+              const state = chatState({ state: row.state, held: row.held ?? null });
               return (
                 <div
                   key={key}
@@ -429,34 +497,18 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       >
                         opening
                       </Badge>
-                    ) : row.runningElsewhere ? (
-                      // The strongest thing a row can say, so it says it in
-                      // place of "ready" rather than beside it: one pill's
-                      // worth of room, and two would read as two facts.
-                      <Badge
-                        variant="success"
-                        appearance="default"
-                        size="xs"
-                        shape="circle"
-                        data-testid="row-pill"
-                        data-pill="working"
-                        className="ml-auto shrink-0"
-                      >
-                        working
-                      </Badge>
                     ) : (
-                      live && (
-                        <Badge
-                          variant="success"
-                          appearance="light"
-                          size="xs"
-                          shape="circle"
-                          data-testid="row-pill"
-                          data-pill="ready"
-                          className="ml-auto shrink-0"
-                        >
-                          ready
-                        </Badge>
+                      // The same reading the chat's own line draws, in the same
+                      // words (chat-state.ts): what it is doing, and beside it
+                      // — never in place of it — the badge that says somebody
+                      // else is in there. A row that is asleep says nothing at
+                      // all, because most of the list is asleep and a pill on
+                      // every one of them is a pill on none (bw-96is).
+                      (state.working || state.waiting || live || state.external) && (
+                        <span className="ml-auto flex shrink-0 items-center gap-1">
+                          <ChatStateChip state={state} testId="row-pill" />
+                          {state.external && <ExternalBadge holder={state.external.holder} />}
+                        </span>
                       )
                     )}
                   </div>

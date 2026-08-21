@@ -56,7 +56,7 @@ describe('a line about sent-off work', () => {
       },
     ]);
 
-    expect(said).toContain('Idle dummy agent was stopped');
+    expect(said).toContain('Idle dummy agent was stopped.');
     expect(said).not.toContain('system/task_updated');
   });
 
@@ -67,7 +67,7 @@ describe('a line about sent-off work', () => {
       { type: 'system', subtype: 'task_updated', task_id: 'unheard-of', patch: { status: 'failed' } },
     ]);
 
-    expect(said).toEqual(['A sent-off agent failed']);
+    expect(said).toEqual(['A sent-off agent failed.']);
   });
 
   it('reads the background list out by name, and says so when it empties', () => {

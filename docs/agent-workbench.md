@@ -75,13 +75,22 @@ the drivers across two runtimes.
 ### 1.2 Sidecar lifecycle
 
 `routes::workbench::spawn_sidecar()` is called once at axum startup. It spawns
-`node workbench/dist/server.js` bound to `127.0.0.1:3009`, restarts it with
-backoff if it exits, and logs its stdout/stderr into the server's log. Two
-environment escapes:
+`node --experimental-strip-types workbench/src/server.ts` bound to
+`127.0.0.1:3009`, restarts it with backoff if it exits, and logs its
+stdout/stderr into the server's log. Three environment escapes:
 
 - `BEADS_WORKBENCH_URL` — if set, do not spawn; proxy to that URL. This is dev
   mode: run `npm run workbench` in your own terminal and get hot reload.
 - `BEADS_WORKBENCH_PORT` — the port the spawned sidecar binds. Default 3009.
+- `BEADS_WORKBENCH_ENTRY` — the file to run. Default is the source above; a
+  missing file is a warning and an offline Chat tab, not a crash.
+
+**There is no build step for the sidecar: node runs the TypeScript as it
+stands**, types stripped in memory. That is what makes a chat's server one
+edit away from running, and it is also the reason for the import rule in §1.3.
+The restart is unconditional, so a sidecar that cannot even load its own
+modules restarts forever, once a second, and the only symptom on the screen is
+that no chat opens at all.
 
 The sidecar binds loopback only, always. It is never reachable from the
 network; the phone reaches it through the axum proxy and nothing else (§8.4).
@@ -108,6 +117,19 @@ workbench/
 The protocol types live at `src/workbench/protocol.ts` — inside the Next.js
 app, imported by the sidecar over a relative path. One definition, both sides,
 and no `tsconfig.json` path alias to add upstream.
+
+**Those shared files are read two ways, and only one of the two readers is
+forgiving.** The browser's build resolves `'./protocol'` and `'./protocol.ts'`
+alike; node, running the source directly (§1.2), resolves the exact filename or
+nothing. So every runtime relative import inside `src/workbench/*.ts` names the
+file with its extension, `import { isOver } from './protocol.ts'`, which the
+app's `tsconfig.json` allows by `allowImportingTsExtensions` (legal beside
+`noEmit`). A type-only import is erased before node ever sees it and is exempt,
+which is why the same file can spell one import both ways. Getting this wrong
+is invisible to the typecheck, the unit suite and the production build — all
+three passed on the commit that broke it — and shows up only as the restart
+loop above (bw-7ks.22.35). `src/workbench/__tests__/node-can-read-it.test.ts`
+pins it, so it is caught by the suite rather than by a chat that will not open.
 
 `node:sqlite` is built into Node 22 (verified on this machine, v22.20.0; it
 prints an experimental warning and works). No native module to compile.
@@ -178,7 +200,8 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 docs/designs/app-shell.md §1.9), `session.resume`, `prompt.send` (text +
 attachments + mentions), `ask.answer` (`askId, optionId, updatedInput?,
 freeText?`), `session.stop`, `session.end`, `session.mode` (`mode`) and
-`session.model` (`model`) — both acting on the LIVE session (§8.2.3) — and
+`session.model` (`model`) — both acting on the LIVE session and both kept in
+the owner's own settings afterwards (§8.2.3) — and
 `compact`, `clear`. A typed command is not its own message: it is sent as
 ordinary prompt text, which is how the brand runs one (§7).
 
@@ -229,11 +252,16 @@ and hooks.
 
 Fixed at launch, every session:
 
-- **The permission mode is always passed explicitly.** Defaults are shifting
-  and plan/bypass modes are *not* restored on resume, so the sidecar stores the
-  mode per session and re-pins it on every resume. The header shows the pinned
-  mode. Which mode asks about *every* tool was settled by running one and
-  watching: a permission request arrived for `Read` and again for `Edit`.
+- **The permission mode is always passed explicitly, and it is the owner's.**
+  Defaults are shifting and plan/bypass modes are *not* restored on resume, so
+  the sidecar stores the mode per session and re-pins it on every resume. The
+  header shows the pinned mode. What it is pinned TO is read out of his own
+  settings pile (§8.2.3) — passing a mode explicitly beats `permissions.
+  defaultMode`, so a value of this app's own invention here silently overrode
+  the one he had set (bw-b1o1, bw-7ks.23). The app's `default` is the last
+  answer, for a machine whose settings say nothing. Which mode asks about
+  *every* tool was settled by running one and watching: a permission request
+  arrived for `Read` and again for `Edit`.
 - **No MCP.** `--strict-mcp-config` with no `--mcp-config` — nothing attaches
   unless the owner asks (decision 6).
 - **His own commands, skills and settings are loaded** — `settingSources:
@@ -512,7 +540,7 @@ asked for it gone.
 At startup the sidecar marks every non-`ended` session `dormant`. A dormant
 session has no child process until it is clicked. The sidebar groups by day —
 Today, Yesterday, then dates — under one group that is not a day: the chats
-somebody is working in this minute, which stand above all of them and say so
+another program has open, which stand above all of them and say only that
 (§6.3.4).
 
 A row says three things and no more, because that is what tells two chats apart
@@ -522,7 +550,7 @@ when a project has forty of them:
 |---|---|
 | first | the conversation's own **name** — the brand's title for it, not ours |
 | second | a **chip per card** it worked on, which opens that card, and a **chip naming the folder** it ran in |
-| beside them | **working**, when a live process is holding that conversation right now (§6.3.4) |
+| beside them | the **state chip** — what it is doing this second — and, when another program holds the conversation, the **external badge** beside it (§6.3.4) |
 
 The folder is the whole point of the second chip: a worktree's directory is
 named after the worktree, so two chats on the same project in different trees
@@ -615,8 +643,8 @@ start on the first message sent into it, and that is the thing being refused.
 **The refusal lives in the sidecar, at both doors.** A driver of ours is
 attached in exactly two places — resuming a chat, and sending into one that has
 no driver yet — and each asks the marker directory at the moment of the attempt,
-reading it fresh rather than taking the remembered answer. The browser shuts the
-writing box and says why as well, but the browser learns who is working from a
+reading it fresh rather than taking the remembered answer. The browser takes the
+box away as well, but the browser learns who is working from a
 stream, and a stream can drop: one did on the owner's machine, after which the
 screen kept the last thing it had heard as if it were still true, never
 reconnected, and a chat the sidecar itself called running opened with an
@@ -633,7 +661,7 @@ message the sidecar refuses comes back into the box it was typed in with the
 reason under it, because the conversation being taken over between unlocking the
 box and pressing send does not make what was written any less the owner's.
 
-#### 6.3.4 Which chats are being worked in right now
+#### 6.3.4 Which chats another program has open
 
 Constraint: a row that is asleep is an offer to wake it, and the offer is wrong
 when somebody is already in there. Until this, every chat the app had not
@@ -675,6 +703,32 @@ a rule that counted only terminals would have drawn it asleep and offered to
 wake a second agent on it — the whole of what this signal exists to prevent
 (bw-dmxj.13).
 
+**Held is not working, and the marker says which.** Occupancy and activity are
+two facts, and until 2026-08-21 the screens drew the first and called it the
+second: a terminal left at an empty prompt overnight held its conversation, and
+every screen said "working" over it. The tool answers this itself where it can —
+a marker written by a terminal carries `status` (`busy` or `idle`) and
+`statusUpdatedAt`, which is the process saying what it is doing rather than us
+inferring it from a file. Measured on this machine, 2026-08-21: of thirteen
+live markers, the seven written by terminals carried a status and the six a host
+drove carried none.
+
+**Where there is no status, the record's own mtime answers — and only this
+question.** The mtime is measured wrong for liveness, which is why nothing above
+uses it: a working chat was silent for 488 seconds. It is right for the opposite
+question, because a record that grew a moment ago is a chat producing something
+now. A record written inside the last ten seconds reads as working, longer than
+that as idle, and the ten seconds are chosen to cover the gap between two lines
+of one answer while still letting a chat somebody walked away from stop claiming
+to work while the reader watches it. The seconds shown are counted from where
+the burst began, kept across beats, so a record written every second does not
+reset the count to zero every second.
+
+**And where neither will speak, nothing is claimed.** A host-driven process
+writes no status, and if its record cannot be found either then the honest
+answer is that we do not know — not that it is idle. Such a chat draws the badge
+that says somebody is in there and no activity word at all (bw-96is).
+
 **Cost.** A handful of files of a few hundred bytes, read at most once every two
 seconds however many callers ask, so a list of forty rows costs one look at the
 machine. A caller deciding something once must ask fresh instead: whether to
@@ -682,10 +736,17 @@ follow the chat being opened is decided at the click and never revisited, and a
 two-second-old answer would leave a chat that started a moment ago drawn as a
 dead record for as long as it stays open.
 
-**What the list does with it.** A working chat says the word, sorts above every
-idle one, and stands under a heading that says so in place of a date — they sort
-above the days, so writing a day over them printed today twice on one list and
-explained nothing about why they were first (bw-dmxj.11). Date alone was the
+**What the list does with it.** A held chat sorts above every chat nobody is in
+and stands under a heading in place of a date — they sort above the days, so
+writing a day over them printed today twice on one list and explained nothing
+about why they were first (bw-dmxj.11). That heading is "Open elsewhere", which
+is the one thing every row under it has in common; it said "Working now" and
+filed a terminal sitting at a prompt as working, the same swap of occupancy for
+activity corrected everywhere else (bw-96is.15). Held-and-working and
+held-and-idle share the block rather than splitting into two: the list's order
+is held still while the reader is looking at it, so a second block would make a
+chat cross the rail under his hand the moment its terminal fell quiet, while
+what each one is doing is on the row itself and changes without moving. Date alone was the
 wrong order for the question the reader is asking, which is where the work is,
 not what happened most recently: a chat running for an hour writes no more often
 than one read a minute ago, and the list draws a screenful, so the running one
@@ -698,12 +759,18 @@ the screen again after the stream has added to it.
 **It keeps up without a reload.** The set of held conversations is its own frame
 on the watch stream, sent when the stream opens and again whenever it changes,
 the whole set each time: it is one entry per running chat on the machine, and a
-set is unambiguous where a started/stopped pair after a missed frame is not. It
+set is unambiguous where a started/stopped pair after a missed frame is not.
+Each entry carries what that holder is doing and which kind of holder it is, so
+a screen needs nothing else to draw the chat; the frame is sent again when a
+chat starts or stops being held, or when one of them changes between working and
+idle, and **not** on the passing of the seconds, or a long answer would send a
+frame a beat for as long as it ran. It
 cannot ride a session's own events, because a chat being typed at in a terminal
 has no row here to carry one (bw-dmxj.5).
 
-**Inside such a chat, the messages arrive.** The header says working rather than
-asleep and clears itself when that program stops (bw-dmxj.10), and opening one
+**Inside such a chat, the messages arrive.** The line says what the holder is
+doing rather than asleep, and clears itself when that program stops
+(bw-dmxj.10, §8.2.9), and opening one
 is no longer a photograph of the record at the moment of the click (bw-dmxj.6).
 There is no event to subscribe to — the other program answers to its own
 terminal, not to us — so the record is watched: a beat every second and a half
@@ -809,7 +876,8 @@ thing that grows with the work on the axis there is least of. The header line
 now carries **no** cards at all: they move into the right rail (§8.2.6), which
 is a column, so twenty-six of them cost height nobody is competing for instead
 of width everything is. What stays on the line is what names the chat — brand,
-model, mode, state — none of which grows, so the constraint holds by
+model, mode, and the one mark that says what it is doing (§8.2.9) — none of
+which grows, so the constraint holds by
 construction rather than by a count. What it has spent stays here too, beside
 how full the conversation is and how much of the account's own allowance is
 left — three numbers that do not grow, each wearing its own mark so a row of
@@ -845,16 +913,23 @@ agent is processing/thinking/running command, i see nothing."
 The line is present exactly while `isBusy` holds, so it disappears the moment the
 turn ends and cannot be left behind by a state event that never arrives.
 
-#### 8.2.3 Steering the chat you are in (bw-f1q)
+These same three things — a moving mark, the verb, the seconds — are what every
+other screen draws about a chat as well, from one reading rather than four
+(§8.2.9).
+
+#### 8.2.3 Steering the chat, and the settings a chat opens on (bw-f1q, bw-7ks.23)
 
 Constraint: the mode, the model, the skills and the commands are chosen from the
-writing box, and they act on the chat that is open — not on the next one.
+writing box, and they act on the chat that is open. The mode and the model are
+not this app's to invent: a chat opens on what the owner's own settings already
+say, and picking one in the box changes those settings rather than that one chat.
 
 - **Permission mode** and **model** are pickers on the composer's own row. They
   send `session.mode` / `session.model`, which call the kit's
   `setPermissionMode` / `setModel` on the live session; the change comes back as
   an event, so every window watching that chat agrees and the header's pinned
-  mode is never a guess.
+  mode is never a guess. The same command then writes the pick into the owner's
+  settings, so the chat after it opens on it too.
 - **`/`** at the start of the box opens the command and skill menu (§7),
   filtered as he types, arrow keys and Enter to pick.
 - A **picture** — one waiting in the tray or one already sent — opens at full
@@ -863,6 +938,35 @@ writing box, and they act on the chat that is open — not on the next one.
 The mode a session is pinned to is still stored per session and re-pinned on
 resume (§3.1); a live change updates that store, so it survives the chat going
 to sleep and coming back.
+
+**Where those settings live.** The kit's own four files, in the kit's own order,
+the lowest first — the same order its command line reads them in:
+
+| whose | file |
+|---|---|
+| the owner's | `<config>/settings.json` — `CLAUDE_CONFIG_DIR`, else `~/.claude` |
+| the project's | `<project>/.claude/settings.json` |
+| this copy's | `<project>/.claude/settings.local.json` |
+| the company's | the managed file, where an install has one |
+
+The mode is `permissions.defaultMode` and the model is `model`; a chat is started
+on what the pile says, and only on the app's own `default` when it says nothing.
+The company's file is read and never written — it is the one an owner is not
+meant to be able to talk his way out of.
+
+**Where a pick is written.** Into the file that setting is already kept in —
+highest of the writable three that names the key, and the owner's own when none
+of them does. Writing a project file that never mentioned the key would put one
+person's choice in front of everyone who checks the repository out; writing under
+a file that overrides it would write a value that never takes effect. That second
+one is not left to reasoning: the write is read back through the whole pile, and
+a value that did not survive the trip is an error the picker shows rather than a
+change the owner thinks he made. Picking the model list's top row — the brand's
+own default — takes the key out of every file of his that holds it, because one
+left behind is the same as not having picked it.
+
+Only what HE picks is kept. A mode the kit changes by itself mid-turn arrives as
+a status and is drawn like one; it never reaches his settings.
 
 #### 8.2.4 Everything the agent does, on one page (bw-1u1)
 
@@ -926,11 +1030,12 @@ Every kind therefore carries an audience beside its family, in `FOR`
   agent sent off or home unharmed. The panel is the list of agents (§8.2.7), so
   the chat drawing a line per dispatch says the same thing twice — the manager's
   ruling of 2026-08-20.
-- **A kind that means different things by how it went is split on its rank**, the
-  same trick the families use: an allowance window that has *closed* on him is
-  `note` and his, one merely open is `detail` and the machine's. So is
-  `system/status`: the ping is the machine's, the compaction answer riding on it
-  is his.
+- **A kind that means different things by how it went is settled by the driver,
+  which is the only place the state exists.** Rank was doing this job and cannot:
+  it has two values, and an allowance window filling up and one that has stopped
+  his work are both "not simply open". The driver reads the state, decides, and
+  carries the answer on the note (`audience?` on the `note` event); `forWhom`
+  is what answers for a line written before that existed. See §8.2.4.1.
 - **The switch is the audience**, not the family: `OFF_BY_DEFAULT = ['machine']`
   is the one fact the browser's filter and the check script both read, the
   status tree stacks families under "For you" and "The machine's own", and what
@@ -954,21 +1059,25 @@ sentence that admits the app has no words for it rather than to the name itself.
 **It is checked against his own record, not a copy of it.**
 `scripts/chat-shows-what-is-yours.mjs` reads the workbench store read-only,
 rebuilds every chat through the real driver, folds it with the real screen's
-fold and asks three things: that nothing meant for the machine reaches him
-unasked, that no line's sentence is its own wire name, and that a chat which just
-opened announces no mode. Any one of them red is a failure. Same record, sorted
-the new way: **81 rows drawn instead of 123**. Of those 81, 37 are the opening
-mode line, frozen into chats made before this build and never written again — so
-the same three days of work started today would draw 44. A model line is not
-among them: it is only ever written when somebody asked for the model, so every
-one of the 6 in the record was a real change.
+fold, and — since §8.2.4.1 — reads the kit's own type file as well. Six things,
+any one of them red being a failure: that nothing meant for the machine reaches
+him unasked; that no line's sentence is its own wire name; that every kind and
+state the kit declares is named in the table; that no state draws a wire word or
+draws nothing; that every state lands in front of the reader it was ruled for;
+and that a chat which just opened announces no mode. Measured 2026-08-21 over
+122 chats and 961 machine lines, folded to 534 rows: **81 rows drawn instead of
+126**, 15%. Of those 81, 37 are the opening mode line, frozen into chats made
+before this build and never written again — so the same days of work started
+today would draw 44. A model line is not among them: it is only ever written
+when somebody asked for the model, so every one of the 6 in the record was a
+real change.
 
 **What this leaves owed (bw-6jq5).**
 
-- **A line's wording is frozen when it is written**, so the 37 rows in the
-  record above that still read as a wire name keep reading that way; only chats
-  made after this build get the sentence. Rewording what is already stored is
-  `bw-x6hb`, and is deliberately not this job.
+- **A line's wording is frozen when it is written**, so a fix to a sentence never
+  reaches a chat that already holds it. Rewriting the store is `bw-x6hb` and is
+  still not done; what §8.2.4.1 does instead is restate the frozen ones on the
+  way to the screen, for the three that mattered.
 - **The check needs a real record and is run by hand.** It opens the workbench
   store read-only and dies if there is none, so it is not in `npm test`, which
   has to pass on a machine that has never held a chat. `STORE=` points it at
@@ -1107,6 +1216,283 @@ knew and, when it differs, says the line and republishes the pinned mode; the
 sidecar stores it, so the chat does not wake up back in the old mode
 (bw-1u1.43).
 
+##### 8.2.4.1 One table of everything the kit can say (bw-iiv6)
+
+"Allowance: the seven-day window is allowed_warning until 12:00 PM", drawn in
+his own group. "again, this message and others like it are not for me... go
+through all statuses and actually read them, and then properly categorise them"
+— the manager, 2026-08-21. Two faults in one row, and they have one cause.
+
+The sentence was **built by pasting the wire's own word into English prose**, so
+the reader was handed `allowed_warning` and `seven_day` and left to guess. And
+the audience was **derived from the wording and the loudness** by the screen,
+which never saw the state at all: `allowed_warning` and `rejected` are one thing
+to a rank with two values, so a window filling up rode in beside a window that
+had stopped his work.
+
+So the kit's own type file is read end to end into one table,
+`src/workbench/machine-words.ts`, and for every kind and every state it holds
+both answers together: **the English sentence it draws, and who it is for.**
+
+| what the table holds | how many | example |
+|---|---|---|
+| kinds the kit declares, all named | 38 | `rate_limit_event`, `system/hook_response` |
+| states over 14 of those kinds | 49 | `allowed_warning`, `error_max_budget_usd` |
+| kinds deliberately silent, each with its reason | 4 | a guess at what he might type next belongs in the writing box |
+| sentences the kit writes in the chat's own voice | 6 | "You've hit your session limit" (§8.2.4.2) |
+| shapes the kit writes in HIS name | 8 | a background agent's report, a note about a picture he pasted (§8.2.4.3) |
+
+And then the table itself: every kind, every state of it, the line a reader
+actually gets, and whose line it is. It is **printed by the check, not typed** —
+`TABLE=1 node scripts/chat-shows-what-is-yours.mjs` drives the real driver once
+per kind and per state and prints these rows, and the check compares them
+against what is written here, so a sentence that is reworded and never brought
+back to this page fails the run (bw-iiv6.10). Where a line quotes a field, the
+value shown is the sample's.
+
+<!-- every-line-says -->
+| kind | state | the line it draws | for |
+|---|---|---|---|
+| `auth_status` | — | Checking sign-in | machine |
+| `conversation_reset` | — | This chat was started over. | you |
+| `kit/limit_near` | — | *quoted whole* — "You've used…" | machine |
+| `kit/limit_reached` | — | *quoted whole* — "You've hit your…" | you |
+| `kit/no_answer_wanted` | — | *quoted whole* — "No response requested.…" | machine |
+| `kit/org_blocked` | — | *quoted whole* — "This service is disabled for your org…" | you |
+| `kit/paying_differently` | — | *quoted whole* — "You're now using usage credits…" | you |
+| `kit/service_failed` | — | *quoted whole* — "API Error…" | you |
+| `prompt_suggestion` | — | *nothing, on purpose: a guess at what he might type next; it belongs in the writing box, never in the record* | — |
+| `rate_limit_event` | `allowed_warning` | Your weekly allowance is running low (it renews at 03:13 AM). | machine |
+| `rate_limit_event` | `allowed` | Your weekly allowance is fine (it renews at 03:13 AM). | machine |
+| `rate_limit_event` | `credits_required` | Your weekly allowance has run out, and buying credits is the way on. | you |
+| `rate_limit_event` | `overage_blocked` | Your weekly allowance is fine (it renews at 03:13 AM). There is no extra usage behind it: you are out of credits. | machine |
+| `rate_limit_event` | `overage_low` | Your weekly allowance is fine (it renews at 03:13 AM). The extra usage behind it is running low. | machine |
+| `rate_limit_event` | `rejected` | Your weekly allowance has run out — nothing more runs until 03:13 AM. | you |
+| `system/api_retry` | — | Retrying | you |
+| `system/background_tasks_changed` | — | Nothing is running in the background now | machine |
+| `system/commands_changed` | — | *nothing, on purpose: the list of commands, drawn as the list of commands* | — |
+| `system/compact_boundary` | `auto` | This chat filled up and folded itself up: 120000 → 30000 tokens. | you |
+| `system/compact_boundary` | `manual` | You asked this chat to fold itself up: 120000 → 30000 tokens. | you |
+| `system/control_request_progress` | `api_retry` | The app is asking the agent again after the service was busy. | machine |
+| `system/control_request_progress` | `started` | The app asked the agent to do something. | machine |
+| `system/elicitation_complete` | — | An add-on finished asking. | machine |
+| `system/files_persisted` | `some_failed` | Could not store 1 file: too large. | you |
+| `system/files_persisted` | `stored` | Stored 1 file. | machine |
+| `system/hook_progress` | — | Your own rule is running. | machine |
+| `system/hook_response` | `cancelled` | Your tidy-up rule was called off. | machine |
+| `system/hook_response` | `error` | Your tidy-up rule could not run. | machine |
+| `system/hook_response` | `success` | Your tidy-up rule ran. | machine |
+| `system/hook_started` | — | Your own rule is running. | machine |
+| `system/informational` | `info` | something worth saying | machine |
+| `system/informational` | `notice` | something worth saying | machine |
+| `system/informational` | `suggestion` | something worth saying | machine |
+| `system/informational` | `warning` | something worth saying | machine |
+| `system/local_command_output` | — | *nothing, on purpose: the command answers in the chat itself, as an ordinary reply* | — |
+| `system/memory_recall` | `select` | Recalled 1 memory | machine |
+| `system/memory_recall` | `synthesize` | Recalled 1 memory | machine |
+| `system/mirror_error` | — | Could not mirror this chat:  | machine |
+| `system/model_refusal_fallback` | `retry` | the model you picked would not answer, so the same question went to another model. | you |
+| `system/model_refusal_fallback` | `revert` | the model you picked would not answer, so the chat went back to another model. | you |
+| `system/model_refusal_fallback` | `sticky` | the model you picked would not answer, so the rest of this chat is answered by another model. | you |
+| `system/model_refusal_no_fallback` | — | The model would not answer, and there was nothing else to try. | you |
+| `system/notification` | `high` | something to know | machine |
+| `system/notification` | `immediate` | something to know | machine |
+| `system/notification` | `low` | something to know | machine |
+| `system/notification` | `medium` | something to know | machine |
+| `system/permission_denied` | — | A tool was not allowed: no reason given | you |
+| `system/plugin_install` | `completed` | Plugin an add-on finished installing. | machine |
+| `system/plugin_install` | `failed` | Plugin an add-on could not be installed. | machine |
+| `system/plugin_install` | `installed` | Plugin an add-on is installed. | machine |
+| `system/plugin_install` | `started` | Plugin an add-on is being installed. | machine |
+| `system/session_state_changed` | `idle` | This chat is idle. | machine |
+| `system/session_state_changed` | `requires_action` | This chat is waiting on you. | you |
+| `system/session_state_changed` | `running` | This chat is working. | machine |
+| `system/status` | `compact_failed` | Could not compact this chat: the summary would not fit | you |
+| `system/status` | `compacted` | Compacted this chat. | you |
+| `system/status` | `compacting` | Folding this chat up to make room | machine |
+| `system/status` | `idle` | Sitting idle | machine |
+| `system/status` | `requesting` | Asking the model | machine |
+| `system/task_notification` | `completed` | A sent-off agent finished: what it did | machine |
+| `system/task_notification` | `failed` | A sent-off agent failed: what it did | you |
+| `system/task_notification` | `stopped` | A sent-off agent was stopped: what it did | machine |
+| `system/task_progress` | — | A sent-off agent is still going | machine |
+| `system/task_started` | — | Sent off a piece of work. | machine |
+| `system/task_updated` | `completed` | A sent-off agent has finished. | machine |
+| `system/task_updated` | `failed` | A sent-off agent failed. | machine |
+| `system/task_updated` | `killed` | A sent-off agent was stopped. | machine |
+| `system/task_updated` | `paused` | A sent-off agent is parked. | machine |
+| `system/task_updated` | `pending` | A sent-off agent is waiting to start. | machine |
+| `system/task_updated` | `running` | A sent-off agent is running. | machine |
+| `system/thinking_tokens` | — | *nothing, on purpose: an estimate twice a second, drawn as the thinking counter* | — |
+| `system/worker_shutting_down` | — | This chat stopped running. | you |
+| `tool_use_summary` | — | A tool call, summarised. | machine |
+<!-- /every-line-says -->
+
+Four rulings hold it:
+
+- **The driver decides the reader, because the driver is the only thing that has
+  the state.** It puts the answer on the note (`audience?` on the `note` event),
+  and the screen takes it over anything it would have guessed. The allowance is
+  the case that forced it: merely running low is the machine's, and only a window
+  that has actually turned work away — or one that wants credits, which the kit
+  files on `errorCode` beside a rejected status and never on `status` itself —
+  reaches him, saying "nothing more runs until 03:20 AM".
+- **A line is written from the WHOLE message, not from the fields somebody
+  read.** His allowance carries a second window behind the first — paid overflow,
+  with its own three-word status and thirteen reasons for being shut — and none
+  of it was read, so a chat that could not spend another penny said "Your weekly
+  allowance is fine." and stopped there (bw-iiv6.16). The window that turned work
+  away is still the sentence; the overflow is a clause on the end of it, and it
+  names whose switch it is — his own credits, or an organisation that has turned
+  it off. Two neighbours of the same fault went with it: a refusal with nothing
+  left to try drew a completely blank row when the refusal carried no words of
+  its own (bw-iiv6.17), and a chat whose program stopped read "Shutting down:
+  host_exit" — a code word the kit's own type file spells out as one, now said in
+  English and no longer ending on a dangling colon when the host gives no reason
+  (bw-iiv6.19).
+- **A state the table has never met is readable and quiet**, never its own wire
+  name: the sentence admits the build has no words for it, and it waits on the
+  machine's side. A wire word that must be shown at all has its seams opened up
+  (`inWords`), which is the fallback and never the substitute.
+- **The lines already in the record are restated on the way to the screen.**
+  Wording is frozen at write time (bw-x6hb), so a reworded sentence never
+  reaches a chat that already holds the old one, and four sets were worth
+  restating rather than leaving: the 37 that announced a chat had stopped asking
+  before it runs things by naming the setting — "Permission mode is now
+  bypassPermissions." — the allowance sentences from his screenshot, the lines
+  whose whole text was the kind itself, and the 600 rules that named themselves
+  the way the kit does. `Hook SessionStart:startup (SessionStart)` handed him the
+  moment twice, once inside the name and once in the English after it; it now
+  reads "Your startup rule is running, when the chat opens." Only wording the app
+  itself wrote is matched, so anything reworded since passes through untouched.
+  A restatement keeps the **tone** as well as the words: an allowance that turned
+  work away says when the work starts again, and one merely keeping its books
+  says when the counter turns over, by the same rule the live line uses —
+  restating both in the softer half put the look-alike back for every record
+  already written (bw-iiv6.11).
+- **The picker says what the setting does**, not what it is spelled: "Skip all
+  checks", not `bypassPermissions`. The one line on this screen that MUST be read
+  was the one written in the machine's own language.
+
+The check reads `sdk.d.ts` as text rather than as types — a union member the kit
+adds is not a type error anywhere, which is exactly how these gaps opened — and
+then drives the real driver once per kind and state. It fails on a kind or state
+the table has never heard of, on a sentence with an identifier-shaped word in it,
+on a state that draws nothing, on one that lands in front of the wrong reader, on
+a sentence that prints a field its message never carried — `Retrying (undefined
+of undefined)`, and `A sent-off agent finished: ""`, which was the two quote
+marks JSON writes for a missing value (bw-iiv6.15) — and on any of the 626 rows
+of the manager's own record drawing a wire word once restated.
+
+One gap in that sweep took a third pass to close. Every kind is driven with a
+message carrying no fields on it, so a line that pastes a field IN draws an empty
+gap and passes — which is how "Shutting down: host_exit" sat there through every
+gate. So the check now reads the kit's own doc comments as well: a field whose
+comment spells it out with a code word ("a short snake_case reason set by the
+host CLI", `host_exit`) is filled with the kit's own example and must not reach
+the drawn line. Two fields qualify today, and the day the kit documents another
+one the gate covers it without being told (bw-iiv6.19).
+
+##### 8.2.4.2 The kit talking in the chat's own voice (bw-iiv6.12)
+
+A screenshot, 2026-08-21: `You've hit your session limit · resets 3:50pm
+(Asia/Karachi)`, drawn as a plain grey message among the answers. "this you hit
+your session limit which is the actual status that matters, shows as regular
+message" — the manager. And, when it was filed as separate work: "its not its
+own job, fix it as part of this. and there are many other predefined statuses
+like this that aren't treated as such."
+
+He is right twice over. **These sentences never arrive as messages about the
+run.** Everything §8.2.4.1 sorts is a kind and a state the driver reads off a
+message; this family arrives as the run's own answer text — an assistant
+message whose whole content is one sentence the kit wrote — so nothing that
+sorts messages ever saw it. It is not a status that was filed wrongly; it was
+never offered to the filing at all.
+
+**The kit says which sentences these are**, in four exported lists in the same
+`sdk.d.ts` this app already depends on, each with a doc comment telling a
+consumer to present that list differently:
+
+| the kit's list | what it means here | family | for |
+|---|---|---|---|
+| `USAGE_LIMIT_ERROR_PREFIXES` | the work has stopped and will not go on until the allowance comes back | stopped | you |
+| `ORG_POLICY_LIMIT_PREFIXES` | the org has switched this off; nothing he does in the app changes it | stopped | you |
+| `USAGE_WARNING_PREFIXES` | a window filling up, which the token gauge already draws (§8.7) | breathing | machine |
+| `USAGE_TRANSITION_PREFIXES` | the same work now being paid for differently | background | you |
+
+Two more are not on any list and are recognised by their opening all the same:
+the service failing (`API Error: 529 Overloaded`), which is his, and `No response
+requested.`, which is the machine noting that nobody wanted an answer.
+
+**They are quoted, never rewritten.** Each carries a time, a sum or a link this
+build cannot regenerate — `resets 3:50pm (Asia/Karachi)` is the whole use of the
+line — so the second table decides only what a sentence MEANS and who it is for,
+and the sentence itself goes through word for word. That is the opposite rule
+from §8.2.4.1, and for the opposite reason: there the app writes the sentence
+from a state, here the kit has already written it for a person.
+
+In the manager's own record, 61 of these sit in 26 chats — 44 stops, 11 "no
+answer wanted", 6 services failing — every one of them a single line under 150
+characters, which is why a long answer that merely opens with the same words is
+left alone. Two stops in a row fold into one row like any other machine line, so
+the duplicate the kit writes on a retry costs him nothing.
+
+The check reads the four lists on every run: a sentence a new kit version adds
+fails until somebody has given it a family and a reader, and an opening this
+build watches for that the kit has dropped fails too.
+
+##### 8.2.4.3 The third door: what the kit writes in HIS name (bw-iiv6.18)
+
+Two doors were shut before this one, and the leak was through neither. A message
+ABOUT the run arrives with a kind and a state on it, and §8.2.4.1 sorts it. A
+run's own answer that is really one of the kit's sentences is caught by §8.2.4.2.
+The third door is the kit opening a message with the role `user` — his side of
+the page, his colour, his name on it — and writing something itself.
+
+**Sixty-three of the 526 messages standing in the manager's name are the kit's.**
+One shape of them was recognised: a single line in square brackets. So a whole
+background-task report, five paragraphs long and opening "SYSTEM NOTIFICATION -
+NOT USER INPUT", was drawn as five paragraphs he had typed — twenty-one times.
+The kit's note about a picture he pasted was drawn as a grey interrupt chip,
+seven times, each one telling him to multiply coordinates by 1.76.
+
+Eight shapes, each recognised by its **shape and never by its wording** — the
+wordings are the kit's and change without us — and asked in this order, because
+the picture note and the agent report are both bracketed and a bracket rule would
+swallow either:
+
+| what it is | filed as | the line he gets |
+|---|---|---|
+| a sent-off agent reporting back | `system/task_notification` | what the agent said, and to him only when it FAILED |
+| the kit's note about a picture he pasted | `user/pasted_image` | "You pasted a picture." |
+| a marker where something of his interrupted the run | `user/synthetic` | "You stopped this run." |
+| a slash command he ran | — *his* | the command, with the kit's tags off |
+| what that command printed | `user/command_output` | its first line, terminal colours stripped |
+| the briefing handed to a worker | — *his*, or `user/fork_brief` | the one line he asked for, with pages of standing orders off |
+| a line he sent while the run was working | — *his* | his line, without the kit's explanation around it |
+| any other message that is one tagged block | `user/note` | "The chat wrote a note of its own here: …" |
+
+**Three of them are his after all.** A slash command, the line he sent mid-turn
+and the directive at the end of a worker's briefing are his own words inside the
+kit's wrapper, so those come back as his message with the wrapper taken off
+rather than as a machine line — which is the half a rule written only to hide
+things gets wrong. The briefing is the sharpest case: filing the whole thing as
+the machine's would have hidden the question he actually asked along with it.
+
+Over his own record: 59 filed as machine lines — 30 stops, 21 agent reports (17
+of them the machine's, 4 his because they failed), 7 pictures, 1 command's
+output — and 4 given back to him as his own words.
+
+The check cannot ask `notHisWords` whether a line is the kit's, because it would
+only ever agree with it. It uses **six structural tells** instead, each read off
+his own record and not one of them a wording: a message that IS one tagged block,
+one that OPENS with a tagged block and carries his line after it, one that is a
+single bracketed marker, a shouted disclaimer in capitals, a terminal's own
+colour codes, and prose that writes about him in the third person while standing
+in his name. Anything a tell catches must come back either as a machine line or
+as his own words with the wrapper off — never as text he typed. A person sending
+one of these as an entire message costs himself one grey chip; the kit sends 63.
+
 #### 8.2.5 What this costs the log
 
 Every rank is stored; only the drawing differs (§4 — the log is the transcript,
@@ -1169,14 +1555,18 @@ phone's width, and the conversation is what the reader came for.
 
 What it holds, in this order:
 
+- **The agents it sent off** — §8.2.7. The tallest thing in the rail, the reason
+  the rail exists, and first in it because it is the only part of the column
+  that MOVES. Cards and reports are a record and will still be there in an hour;
+  a helper four minutes into its work is the thing the reader opened this rail
+  to look at, and it is not going below two lists that are finished with
+  (bw-7ks.22.33 — this order is the built one, and a test pins it).
 - **The cards this chat has touched** — all of them, one per line, id and title,
   clicking through to the Board tab. This is where they live now (§8.2.1). A
   card touched only by an agent the chat sent off is still this chat's card,
   which is the fault §8.2.7 fixes on the way past.
 - **The reports it produced** — `report.available` already crosses the wire and
   is drawn nowhere.
-- **The agents it sent off** — §8.2.7. The tallest thing in the rail, and the
-  reason the rail exists.
 What it has spent does **not** live here. Manager's ruling, 2026-08-20
 (bw-7ks.22.13): the running spend and how full the conversation is are numbers
 that say whether the work can go on at all, so they stay on the chat's own line
@@ -1235,7 +1625,7 @@ helper, so we do not pretend to have one:
    no other door either. The row says the message was relayed, so nobody reads
    a delivered word as a private one.
 
-Five things about the built shape that the tiers above do not tell you, each of
+Six things about the built shape that the tiers above do not tell you, each of
 which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
 
 - **The two direct controls take two different ids.** `stopTask` takes the task
@@ -1277,6 +1667,14 @@ which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
   nothing there to steer with — and a tier not declared is not drawn. The relay
   sends the turn to the parent first and marks the row second, so a row never
   claims a relay that never left.
+- **A click that does not land says so.** All three tiers come back to life the
+  moment the ask is answered, a refusal included — so nothing on the screen
+  tells a refused stop from one that worked unless the refusal itself is drawn,
+  and the reader walks away believing an agent is stopped that is still running.
+  It is drawn where it happened: under the two controls on that row, and under
+  the relay box in the pane, in the far end's own words. The relay also keeps
+  the typed words in the box, because emptying the box is how the pane says they
+  went (bw-7ks.22.34).
 
 **Four faults this closes on the way past**, each of which is why the picture is
 missing today rather than merely thin:
@@ -1421,14 +1819,152 @@ bundle. What it does **not** yet do is keep the keyboard inside the panel once
 it is open; that gap is every overlay in this app, not this one, and is filed as
 bw-4dw5.
 
+#### 8.2.9 What a chat says about itself, on every screen (bw-96is)
+
+Constraint: a chat says the same three things wherever it is drawn, and they are
+three separate things — what it is doing this second, where it stands when it is
+doing nothing, and who holds it.
+
+Why: four screens answered this four ways and none of them answered all of it.
+The open chat's line drew one word; a row in the list drew a pill that was
+either "ready" or "working"; a board card drew a pulsing dot and an activity; the
+glance strip drew a dot, a word and a count of its own. The loudest of them, the
+green **working** pill, was derived from the marker directory alone — occupancy,
+not activity — so it sat on a terminal that had been at an empty prompt since
+last night, and a chat that really was answering said nothing different. The
+manager's reading of it, 2026-08-21: "just make sure everything about the state
+of chat is intuitive. currently its awful."
+
+**One reading, four drawings.** `src/workbench/chat-state.ts` is a pure function
+from what the driver last published and what the sidecar says about the holder,
+to the three facts. Every screen draws that and nothing else, so they cannot
+disagree; it is a function rather than a component because the sidebar row, the
+chat's own line, the board card and the glance strip all need the answer and
+only two of them are in the same tree.
+
+**The mark is the same mark, ours or somebody else's.** A spinner, the verb in
+its own words, and the seconds — the picture §8.2.2 defines for our own agent —
+is what a chat a terminal holds draws too, because to a reader those are the
+same fact. A chat waiting on the reader wears a different mark, a hand, since it
+is not working and saying so is the point.
+
+**The badge never stands in place of the doing.** Another program holding the
+conversation is a third fact, drawn as an `external` badge beside the mark, with
+the kind of holder in its tooltip — a terminal, or a program driving through the
+kit. It is drawn only on chats somebody else holds, so it means something by
+being there; the word it replaced meant "occupied" and was read as "working",
+which is the whole of what went wrong. Three cues keep it apart from the mark
+it stands beside without anyone reading either — its own colour, square corners
+against the mark's round ones, and a glyph for the kind of holder. It first
+shipped as `secondary`/`outline`, a pair `Badge` has no compound rule for, so
+it fell back to the same flat grey as an idle mark and disappeared altogether
+into the background of the selected row (bw-96is.10).
+
+**A held chat has no writing box, and the line in its place agrees with the
+mark.** The box used to be drawn in full and refuse every keystroke — a locked
+door where there is no door — because a message typed into it would wake a
+second agent on the same record (§6.3.3). What stands there instead is one
+sentence, and its words come from the same reading the mark does (`heldLine`),
+so the two cannot contradict: they *have this chat open*, and only when the mark
+says working does the sentence add that they are working in it now. It promises
+the box back when they **let go**, not when they stop — a terminal that has gone
+quiet still holds the conversation, and the box does not return until it exits
+(bw-96is.9). What refuses a send is that there is no box to send from, and not
+a flag on the button: the send carried a leftover `|| held` that could never
+come out true, since the branch it lives in only exists while nothing else holds
+the chat, and it is gone (bw-96is.23).
+
+**Three screens say who has the chat, and the sentence is written once.** The
+badge's tooltip, the line where the writing box would be, and the sidecar's
+refusal when a message is sent into a held conversation anyway all read
+`HOLDER_WORD` (`chat-state.ts`), which the sidecar imports across the process
+boundary like everything else it shares with the screen. Typed out separately
+they had already drifted — two of them said the holder *has this chat open* and
+the third said it was *working in* it, which is the swap this whole change
+removed, surviving in the one sentence a reader sees only when he has already
+been refused (bw-96is.13). The constant carries no full stop: the tooltip ends
+the sentence, the line continues it.
+
+**Both marks carry an edge, so their shape does not depend on what they stand
+on.** A mark at rest is filled with the theme's `secondary`, and in every theme
+this app ships that is the same colour as `accent`, which is what fills the row
+the reader has open — so "Idle" and "Asleep" lost their shape on exactly the row
+he was looking at and read as loose text (bw-96is.16). The fill stays, because
+on the other forty rows it is right; what is added is a border mixed from the
+mark's own text colour rather than named from a theme token, since `border` too
+equals `secondary` in half the themes while the text has to contrast with the
+fill or the mark could not be read at all.
+
+The badge beside it had the same disappearing act, and this document said for a
+while that it had already been cured. It had not. The cure named there —
+fading the badge's own colour by writing it as a faded arbitrary variable —
+**produced no border rule at all**: the styling tool cannot fade a colour it was
+handed by name rather than from its own palette, so it emitted nothing, warned
+about nothing, and the built sheet carried that colour as text and as a
+background and never once as an edge. What was left showing was the theme's
+plain `border`, which on the open row IS that row's fill: measured
+`rgb(39,39,42)` against `rgb(39,39,42)`, no shape whatever. The badge went on
+vanishing through four more cards while three of them recorded it as fixed
+(bw-96is.10, bw-96is.14, bw-96is.19).
+
+Two things follow. The border idiom is the mixed one on both marks, because a
+mix of the element's own text colour is a form the tool does compile and it
+cannot collide with whatever the mark is standing on — the text has to read
+against that surface or there would be nothing to read. And **the only proof a
+border exists is the built sheet or the drawn pixels**: a class name in the
+source proves nothing, and neither does a check that merely asks the border to
+be *some* colour, which is precisely the check that let this run for four cards.
+Both marks are now measured against the row behind them, and both cases fail
+when the fix is reverted.
+
+**The small mark gives its letters room to hang below the line.** The badge
+sizes set their own line height, and the smallest one set it shorter than its
+own text — while a badge's label is wrapped in `truncate`, which hides whatever
+does not fit. So every letter with a tail lost it and the rail read "Workina"
+where the mark says "Working", with the same word one size up in the open chat's
+line perfectly whole (bw-96is.20). The badge had height to spare all along,
+which is why nothing that measured the badge saw a fault: the box that does the
+hiding is the label inside it, and that is what the check measures.
+
+**A chat that is asleep says nothing at all.** Most of a list is asleep, and a
+pill on every row is a pill on none. The mark appears only when there is
+something to say — working, waiting, reachable, or held.
+
+**One clock for the page.** The seconds come off a single interval shared by
+every chip, so a list of forty rows costs one beat a second rather than forty,
+and the number they are all counting is the same number.
+
+**Two silences, and only one of them may be answered from.** The stream that
+says who holds a chat and what each is doing falls quiet for two different
+reasons, and the screens hold the same `null` in both. Before it has ever
+spoken, what each screen fetched for itself — the open chat's facts, read when
+the pane was opened; a row's, read when the list was drawn — is the freshest
+thing there is, and drawing it is right. After it has spoken and the connection
+has dropped, that same fetch is *older than what was just thrown away*: drawing
+it restarts a mark that had stopped and counts its seconds from whenever the
+pane happened to be opened, through up to the thirty-second retry ceiling, and
+nothing on the screen tells it from a chat somebody is really in. So the store
+remembers whether it has ever been told, and `useHeldFactsAreOld` is the one
+word both screens read — spoken before, silent now. On it each keeps the holder
+and forgets the doing (`holderOnly`): the badge stays, because a terminal does
+not walk away because a browser lost its connection, and the mark and its clock
+go, because that is the half that was changing second by second. Whether a chat
+is held at all is never degraded this way — it still falls back to what the
+fetch said, which is what keeps the writing box shut on somebody else's
+conversation (bw-dmxj.12, bw-96is.22). A drop clears both halves of what the
+stream said; the map of what each holder is doing carried a comment claiming it
+already did, and did not.
+
 ### 8.3 The board tab
 
 Unchanged, plus one thing: decision 11 — a card being worked on shows its live
 chat. `src/components/bead-card.tsx` gains a single `<CardLiveChat
 beadId={bead.id}/>`, which renders nothing at all unless a running session is
-linked to that card, and otherwise shows a pulsing dot, the session's current
-activity line, and the last line of assistant text, clicking through to the
-chat.
+linked to that card, and otherwise shows the same mark every other screen draws
+(§8.2.9) — spinner, verb and seconds while it works, one word where it stands
+otherwise — clicking through to the chat. The pulsing dot it used to draw said
+"attached" and was read as "working", and it kept pulsing over a chat sitting
+idle for as long as the tab stayed open.
 
 The card detail panel gains a **Chats** list from `GET /links/bead/:id`, and a
 **Start chat** button (decision 16b) which opens a new session pre-briefed with
@@ -1494,6 +2030,34 @@ The repo has no global store. It has one idiom for cross-component state:
 The workbench follows it — a single module-level store owns the one global
 `EventSource` and the per-session state that the tray, the strip and the board
 cards all read. One connection for the whole app, not one per component.
+
+**A frame the page cannot read is a fact about the sidecar, not a crash.** The
+sidecar is one long-lived process started once by the host, and nothing restarts
+it when its own source changes (bw-kr4m) — so a page served after an update
+routinely talks to a sidecar from before it. When `running` grew from a list of
+bare ids to a list of chats with what each is doing (bw-96is), a browser on the
+new page reading the old frame threw inside `EventSource.onmessage`, and the
+throw was invisible: every other frame went on arriving, the list went on
+drawing rows with their titles and times, and the screen was simply, silently,
+permanently wrong about the one fact the whole job was about — no moving mark
+and no badge on any held chat, until the tab was closed. Measured on the running
+copy 2026-08-21: sidecar up since 10:51, page served 13:48, the wire still
+carrying `conversations` at 14:00.
+
+So `absorb` checks the shape of the one frame that carries structure, the
+message handler catches anything else, and both answer the same way:
+`useHelperMismatch()` goes true, the list draws one line saying the helper is out
+of date, and the rest of the stream keeps working. What is known about who is
+holding a chat goes to `null` — never to an empty set, which would draw every
+held chat as free and open the writing box on a conversation somebody is typing
+in, the exact door `bw-dmxj.12` closed. It clears itself on the first frame that
+does read, so a restarted sidecar heals the open tab without a reload
+(bw-96is.24; `helper-of-another-age.test.tsx`).
+
+**The rule.** A wire word this app owns both ends of is still a wire word across
+time, because the two ends are restarted independently. Changing what one
+carries needs the reader to survive the older cargo and say so — the checks that
+matter are the ones that feed the page the PREVIOUS version's own frame.
 
 ### 8.7 The two token numbers
 
@@ -1596,8 +2160,8 @@ change and it gets said out loud, not absorbed.
 
 `workbench/` (the sidecar), `server/src/routes/workbench.rs` (proxy +
 supervisor), `src/workbench/**` (protocol types, store, chat UI, tray, strip,
-search, spend, plan usage, the token picture, report viewer), `tests/e2e/workbench.spec.ts`, this
-document.
+search, spend, plan usage, the token picture, report viewer), `tests/e2e/workbench.spec.ts`,
+`tests/e2e/chat-settings.spec.ts`, this document.
 
 ### 9.3 Declared shortcuts
 
@@ -1665,6 +2229,32 @@ document.
   only chats somebody has open are followed — and the beat does not hold the
   sidecar up.
 
+- The company-wide settings file has never been seen by this code. No machine
+  here has one, so the branch where it overrides a pick — the picker refusing
+  the change and saying which file beat it (§8.2.3) — is reasoned and unit-
+  tested against a stand-in, never watched on a real managed install. It fails
+  towards saying so rather than towards a change the owner thinks he made.
+- The browser proof of a chat opening on his settings drives the PROJECT's own
+  `.claude/settings.json`, one layer above his own file, so a run never reads
+  past or writes into anything in his home. Which layer wins is proved in the
+  unit cases instead, against real files in a temporary directory.
+
+- `tests/e2e/chat-live.spec.ts` carries this job's wording but has never been
+  run against it: its fixture wants the owner's own instance with a chat
+  actually running in it, which the isolated stack a check run builds cannot
+  provide. What it covers is covered there by `chat-state.spec.ts` against a
+  planted marker; the wording itself is unwatched.
+- No browser check kills the stream mid-session, so a held chat's mark stopping
+  when the connection drops (§8.2.9) is proved at both ends in unit cases — the
+  store's word, the reading, the row builder — and by reverting each half, never
+  on a drawn screen.
+
+- The sidecar runs its TypeScript through a flag node still calls experimental
+  (§1.2). It buys a chat server with no build step between an edit and a run,
+  at the price of the import rule in §1.3 and of a flag that could change under
+  us; a node that drops it degrades to a Chat tab that never comes up, which is
+  loud rather than subtle.
+
 Three faults found under this section's work are filed rather than fixed, and
 each is still open: the menu of what a chat can do is republished whole every
 turn and is four fifths of the stored log (`bw-7bj`); a frontend-only change is
@@ -1672,6 +2262,13 @@ never embedded in the installed binary, so the built product keeps serving the
 previous screen unless the frontend is built first by hand (`bw-a4o`); and
 every browser check and screenshot run leaves its chats on whichever list it
 was pointed at (`bw-guo`).
+
+Two more were found while the sent-off-agent panel was built and are filed
+open: a browser that loses its stream and reconnects is subscribed again but
+never re-follows the chat it was reading, so a chat another program is driving
+goes quiet after the first drop (`bw-tous`); and the chat's own working line
+keeps a spinner on a shell command that has already come back, because the line
+is only rewritten when the next call starts (`bw-qxep`).
 
 ---
 
@@ -1705,6 +2302,11 @@ capability matrix or has a stated fallback.
 6. **The raw control-frame shape of stream-json permissions.** Not known — and
    deliberately not needed, because the SDK owns it (§1.1). If we ever leave
    the SDK, this becomes a research task first.
+7. **Where the company-wide settings file sits on macOS and Windows.** The
+   three paths in §8.2.3 come from the tool's own documentation, and only the
+   Linux one could be looked at here — the other two are unvisitable from this
+   machine. A wrong path reads as "no company file", which is what an ordinary
+   install has anyway; it can never invent a setting that is not there.
 
 ---
 

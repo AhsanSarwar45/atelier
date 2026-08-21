@@ -39,7 +39,15 @@ const badgeVariants = cva(
   // keyboard alone and did nothing at all for the click he described
   // (bw-4wcd.12). The ring stays suppressed either way, so the keyboard reader
   // loses nothing: the same brightened border is what marks it.
-  'inline-flex items-center whitespace-nowrap justify-center border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
+  //
+  // `align-middle` is for the one place a chip is not a row's child: written
+  // into a sentence. A chip is an inline-flex box whose first item is its icon,
+  // and a browser reads such a box's baseline off that first item — an icon has
+  // none, so its BOTTOM edge is used, which hung every chip named in a message a
+  // third of a line above the words around it (bw-8fh2.1). Centring it on the
+  // text's own middle does not depend on the icon at all. Everywhere else a chip
+  // sits inside a flex row, where vertical-align is not read.
+  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
   {
     variants: {
       variant: {
@@ -68,7 +76,14 @@ const badgeVariants = cva(
         lg: 'rounded-md px-[0.5rem] h-7 min-w-7 gap-1.5 text-xs [&_svg]:size-3.5',
         md: 'rounded-md px-[0.45rem] h-6 min-w-6 gap-1.5 text-xs [&_svg]:size-3.5 ',
         sm: 'rounded-sm px-[0.325rem] h-5 min-w-5 gap-1 text-[0.6875rem] leading-[0.75rem] [&_svg]:size-3',
-        xs: 'rounded-sm px-[0.25rem] h-4 min-w-4 gap-1 text-[0.625rem] leading-[0.5rem] [&_svg]:size-3',
+        // The line the text is drawn on used to be shorter than the text
+        // itself — 0.5rem of room for 0.625rem of letters — and a label inside
+        // a badge is usually wrapped in `truncate`, which hides whatever will
+        // not fit. So every letter that hangs below the line lost its tail:
+        // the rail's chip read "Workina" where it says "Working" (bw-96is.20).
+        // Still well inside the badge's own 1rem height, so nothing beside it
+        // moves; only the box the letters are allowed to use grows.
+        xs: 'rounded-sm px-[0.25rem] h-4 min-w-4 gap-1 text-[0.625rem] leading-[0.875rem] [&_svg]:size-3',
       },
       shape: {
         default: '',

@@ -61,6 +61,52 @@ export const A_CALL = SPENT.input_tokens + SPENT.cache_creation_input_tokens + S
 /** How many turns of its own each helper below is written with. */
 export const HELPER_TURNS = 3;
 
+/**
+ * Each agent a chat sends off, when it sends off more than one — and every one
+ * of them different from its neighbours.
+ *
+ * A panel of three rows written from one template proves nothing: three
+ * identical rows are what a screen drawing the FIRST row three times would look
+ * like, and so are three rows drawn from a static picture. So each helper here
+ * is asked something else, runs on another model, takes its own time and costs
+ * its own money, and a case can hold every row to its own line (bw-7ks.22.29).
+ *
+ * The first is the one every single-helper case already knows.
+ */
+export const EACH_HELPER = [
+  { brief: HELPER_BRIEF, said: HELPER_SAID, answer: HELPER_ANSWERED, model: 'claude-fable-5', seconds: 45, costs: 1 },
+  {
+    brief: 'Read the last report and say when it was written',
+    said: 'Opening the report now.',
+    answer: 'The last report is from Tuesday.',
+    model: 'claude-opus-5',
+    seconds: 90,
+    costs: 2,
+  },
+  {
+    brief: 'List the branches this work left behind',
+    said: 'Listing the branches now.',
+    answer: 'Two branches, both merged.',
+    model: 'claude-haiku-4-5-20251001',
+    seconds: 150,
+    costs: 3,
+  },
+] as const;
+
+/** Which of the above the nth agent a chat sent off is. */
+export const helperNumber = (n: number): (typeof EACH_HELPER)[number] => EACH_HELPER[n % EACH_HELPER.length]!;
+
+/** What that one's turn cost, which is its own and not its neighbour's. */
+const spentBy = (n: number): Record<string, number> => {
+  const times = helperNumber(n).costs;
+  return {
+    input_tokens: SPENT.input_tokens * times,
+    cache_creation_input_tokens: SPENT.cache_creation_input_tokens * times,
+    cache_read_input_tokens: SPENT.cache_read_input_tokens * times,
+    output_tokens: SPENT.output_tokens * times,
+  };
+};
+
 /** Where the kit keeps its records, honouring a config dir set for a run. */
 export function configDir(): string {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
@@ -195,7 +241,11 @@ export function writeChatWithHelper(opts: {
                 type: 'tool_use',
                 id: callOf(n),
                 name: 'Task',
-                input: { subagent_type: 'general-purpose', description: HELPER_BRIEF, prompt: HELPER_BRIEF },
+                input: {
+                  subagent_type: 'general-purpose',
+                  description: helperNumber(n).brief,
+                  prompt: helperNumber(n).brief,
+                },
               },
             ],
           },
@@ -212,7 +262,7 @@ export function writeChatWithHelper(opts: {
             content: [
               n === soured
                 ? { type: 'tool_result', tool_use_id: callOf(n), is_error: true, content: HELPER_FAILED }
-                : { type: 'tool_result', tool_use_id: callOf(n), content: HELPER_ANSWERED },
+                : { type: 'tool_result', tool_use_id: callOf(n), content: helperNumber(n).answer },
             ],
           },
         },
@@ -244,11 +294,12 @@ export function writeChatWithHelper(opts: {
   const asLines = (rows: Record<string, unknown>[]): string => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
   for (let n = 0; n < many; n++) {
     const agentId = agentOf(n);
+    const mine = helperNumber(n);
     const sidechain = (extra: Record<string, unknown>, seconds: number): Record<string, unknown> =>
       stamp({ isSidechain: true, agentId, ...extra }, seconds);
     const helper = [
       sidechain(
-        { parentUuid: null, uuid: 'fixture-h1', type: 'user', message: { role: 'user', content: HELPER_BRIEF } },
+        { parentUuid: null, uuid: 'fixture-h1', type: 'user', message: { role: 'user', content: mine.brief } },
         3 + n,
       ),
       sidechain(
@@ -258,10 +309,10 @@ export function writeChatWithHelper(opts: {
           type: 'assistant',
           message: {
             id: 'msg_fixture_h1',
-            model: 'claude-fable-5',
+            model: mine.model,
             role: 'assistant',
-            usage: SPENT,
-            content: [{ type: 'text', text: HELPER_SAID }],
+            usage: spentBy(n),
+            content: [{ type: 'text', text: mine.said }],
           },
         },
         8 + n,
@@ -273,9 +324,9 @@ export function writeChatWithHelper(opts: {
           type: 'assistant',
           message: {
             id: 'msg_fixture_h2',
-            model: 'claude-fable-5',
+            model: mine.model,
             role: 'assistant',
-            usage: SPENT,
+            usage: spentBy(n),
             content: [
               { type: 'tool_use', id: `toolu_fixtureHelperRan${n}`, name: 'Bash', input: { command: `bd show ${card}` } },
             ],
@@ -302,13 +353,15 @@ export function writeChatWithHelper(opts: {
           type: 'assistant',
           message: {
             id: 'msg_fixture_h3',
-            model: 'claude-fable-5',
+            model: mine.model,
             role: 'assistant',
-            usage: SPENT,
-            content: [{ type: 'text', text: n === soured ? HELPER_FAILED : HELPER_ANSWERED }],
+            usage: spentBy(n),
+            content: [{ type: 'text', text: n === soured ? HELPER_FAILED : mine.answer }],
           },
         },
-        48 + n,
+        // Its own clock: the row says how long THIS one took, and three rows
+        // reading the same number prove nothing about any of them.
+        3 + n + mine.seconds,
       ),
     ];
     writeFileSync(join(helpers, `agent-${agentId}.jsonl`), asLines(helper));
@@ -316,7 +369,7 @@ export function writeChatWithHelper(opts: {
       join(helpers, `agent-${agentId}.meta.json`),
       JSON.stringify({
         agentType: 'general-purpose',
-        description: HELPER_BRIEF,
+        description: mine.brief,
         toolUseId: callOf(n),
         spawnDepth: 1,
       }) + '\n',
@@ -442,13 +495,105 @@ export function writeChatWithHelper(opts: {
   // The chat answered once per helper it sent off and once at the end; each
   // helper answered three times of its own.
   const own = (many + 1) * A_CALL;
-  const sentAway = many * HELPER_TURNS * A_CALL;
+  const sentAway = Array.from({ length: many }, (_, n) => helperNumber(n).costs * HELPER_TURNS * A_CALL).reduce(
+    (sum, one) => sum + one,
+    0,
+  );
   return {
     sessionId,
     path,
     calls,
     spend: { own, helpers: sentAway, total: own + sentAway },
     sendsOff,
+    remove: () => {
+      rmSync(path, { force: true });
+      rmSync(join(dir, sessionId), { recursive: true, force: true });
+    },
+  };
+}
+
+/**
+ * A long conversation on disk, and a way to say more into it while it is read.
+ *
+ * What every case about scrolling needs and nothing else here writes: enough
+ * messages that the pane is many screenfuls deep, each one findable by its own
+ * number, and a record another program is still appending to — which is how a
+ * row arrives under a reader who is looking somewhere else (bw-n6yh).
+ */
+export interface LongChat {
+  /** The conversation's own id, which is what a row is found by. */
+  sessionId: string;
+  /** The chat's own file. */
+  path: string;
+  /** How many messages it opens with. */
+  held: number;
+  /** Somebody else says one more into it. Hands back what was said, to find it by. */
+  says(text?: string): string;
+  /** Everything written, so a run can take it away again. */
+  remove: () => void;
+}
+
+/** How the nth message of a long chat reads. Numbered, so its place is readable. */
+export function longChatSaid(n: number): string {
+  return `Message ${n} of a long conversation, said so a scrolling case has something to find.`;
+}
+
+export function writeLongChat(opts: { cwd: string; sessionId: string; held?: number; branch?: string }): LongChat {
+  const { cwd, sessionId } = opts;
+  const held = opts.held ?? 120;
+  const branch = opts.branch ?? 'main';
+  const began = new Date(Date.now() - 60 * 60 * 1000);
+
+  const dir = join(configDir(), 'projects', projectSlug(cwd));
+  const path = join(dir, `${sessionId}.jsonl`);
+  mkdirSync(dir, { recursive: true });
+
+  let last: string | null = null;
+  const line = (n: number, text: string, at: Date): Record<string, unknown> => {
+    const uuid = `long-u${n}`;
+    const parentUuid = last;
+    last = uuid;
+    const said =
+      n % 2 === 0
+        ? { type: 'user', message: { role: 'user', content: text } }
+        : {
+            type: 'assistant',
+            message: {
+              id: `msg_long_${n}`,
+              model: 'claude-opus-5',
+              role: 'assistant',
+              usage: SPENT,
+              content: [{ type: 'text', text }],
+            },
+          };
+    return {
+      sessionId,
+      cwd,
+      gitBranch: branch,
+      version: '2.1.237',
+      userType: 'external',
+      timestamp: at.toISOString(),
+      parentUuid,
+      uuid,
+      ...said,
+    };
+  };
+
+  const rows: Record<string, unknown>[] = [];
+  for (let n = 0; n < held; n += 1) rows.push(line(n, longChatSaid(n), new Date(began.getTime() + n * 1000)));
+  writeFileSync(path, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+  let more = held;
+  return {
+    sessionId,
+    path,
+    held,
+    says: (text?: string): string => {
+      const n = more++;
+      const said = text ?? longChatSaid(n);
+      appendFileSync(path, JSON.stringify(line(n, said, new Date())) + '\n');
+      return said;
+    },
     remove: () => {
       rmSync(path, { force: true });
       rmSync(join(dir, sessionId), { recursive: true, force: true });

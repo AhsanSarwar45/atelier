@@ -10,6 +10,11 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // Some files under src/workbench are read twice: once by the browser's
+    // build and once by the chat's own server, which is Node running the
+    // TypeScript as it stands. Node resolves the exact filename or nothing, so
+    // those files name theirs (bw-7ks.22.35).
+    "allowImportingTsExtensions": true,
     "jsx": "preserve",
     "incremental": true,
     "plugins": [

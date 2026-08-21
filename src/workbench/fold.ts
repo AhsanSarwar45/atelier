@@ -34,6 +34,13 @@ import type {
   TodoItem,
   WbpEvent,
 } from './protocol';
+// With its extension, which is not a style: this file is read two ways. The
+// browser's build resolves it either way; the sidecar is Node running the
+// TypeScript as it stands, and Node resolves the exact filename or nothing —
+// so a bare `./protocol` here kills the sidecar on launch, forever, and no
+// chat opens at all (bw-7ks.22.35). Type-only imports are erased and never
+// meet Node, which is why the one above can be spelled the short way.
+import { isOver } from './protocol.ts';
 
 export interface TranscriptMessage {
   kind: 'message';
@@ -92,6 +99,12 @@ export interface TranscriptNote {
   noteKind: string;
   text: string;
   body: string | null;
+  /**
+   * Who this line is for, when the driver settled it from the message's own
+   * state. Absent on a line whose whole kind has one reader, and on every line
+   * written before there were audiences (bw-iiv6).
+   */
+  audience?: Audience;
 }
 
 export interface TranscriptAsk {
@@ -255,6 +268,28 @@ function list<T>(sent: T[] | undefined, blank: T[]): T[] {
 }
 
 /**
+ * A menu off the wire, every list of it guarded — including the one that
+ * arrives from a running sidecar as nothing at all.
+ *
+ * Same reason the whole conversation is guarded (asView below): the sidecar
+ * goes on running the code it was started with, so it announces the menu it
+ * knew about when it started. A sidecar older than the controls has no
+ * `agentControls` to send, and a panel that asks that absent list whether it
+ * contains `stop` takes the chat down with it. Guarding four of the five and
+ * not the newest one guards exactly the fields that were never going to be
+ * missing (bw-7ks.22.31).
+ */
+function menuOf(sent: Partial<SessionMenu>): SessionMenu {
+  return {
+    commands: list(sent.commands, NO_MENU.commands),
+    skills: list(sent.skills, NO_MENU.skills),
+    models: list(sent.models, NO_MENU.models),
+    permissionModes: list(sent.permissionModes, NO_MENU.permissionModes),
+    agentControls: list(sent.agentControls, NO_MENU.agentControls),
+  };
+}
+
+/**
  * A conversation off the wire, filled against a blank one.
  *
  * The sidecar is a process and the screen is a page: it goes on running the
@@ -277,14 +312,7 @@ export function asView(sent: Partial<SessionView> | null | undefined): SessionVi
     todos: list(raw.todos, EMPTY.todos),
     agents: list(raw.agents, EMPTY.agents),
     beads: list(raw.beads, EMPTY.beads),
-    menu: {
-      ...NO_MENU,
-      ...menu,
-      commands: list(menu.commands, NO_MENU.commands),
-      skills: list(menu.skills, NO_MENU.skills),
-      models: list(menu.models, NO_MENU.models),
-      permissionModes: list(menu.permissionModes, NO_MENU.permissionModes),
-    },
+    menu: menuOf(menu),
   };
 }
 
@@ -384,7 +412,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'note':
-      next.items = [...items, { kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body }];
+      next.items = [
+        ...items,
+        { kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body, audience: e.audience },
+      ];
       return next;
 
     case 'tool.progress':
@@ -433,17 +464,26 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'agent.progress':
       next.agents = view.agents.map((a) =>
         a.id === e.agentId
-          ? {
-              ...a,
-              seconds: e.seconds,
-              tokens: e.tokens,
-              calls: e.calls,
-              // Absent means "still whatever it last said", the same bargain
-              // tool.progress makes: a blank line would erase it.
-              doing: e.doing || a.doing,
-              model: e.model || a.model,
-              state: e.state ?? a.state,
-            }
+          ? isOver(a.state)
+            ? // A row that is over says what it ended with. Something still
+              // sending progress about work that has finished — or that he
+              // stopped — must not reopen it as running, nor wind its clock
+              // and its figure back to whatever that message happens to carry
+              // (bw-7ks.22.30). Only the model is taken, and only if the row
+              // never learned one: it is the one fact that arrives late by
+              // design.
+              { ...a, model: a.model || e.model || null }
+            : {
+                ...a,
+                seconds: e.seconds,
+                tokens: e.tokens,
+                calls: e.calls,
+                // Absent means "still whatever it last said", the same bargain
+                // tool.progress makes: a blank line would erase it.
+                doing: e.doing || a.doing,
+                model: e.model || a.model,
+                state: e.state ?? a.state,
+              }
           : a,
       );
       return next;
@@ -527,13 +567,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'session.menu':
-      next.menu = {
-        commands: e.commands,
-        skills: e.skills,
-        models: e.models,
-        permissionModes: e.permissionModes,
-        agentControls: e.agentControls,
-      };
+      next.menu = menuOf(e);
       return next;
 
     case 'session.pinned':
@@ -757,6 +791,13 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         const at = agentAt.get(e.agentId);
         if (at !== undefined) {
           const row = agents[at]!;
+          // Over is over here too, for the reason the live arm gives above: a
+          // late progress must not reopen a finished row or undo a stop
+          // (bw-7ks.22.30).
+          if (isOver(row.state)) {
+            row.model = row.model || e.model || null;
+            break;
+          }
           row.seconds = e.seconds;
           row.tokens = e.tokens;
           row.calls = e.calls;
@@ -800,7 +841,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       }
 
       case 'note':
-        items.push({ kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body });
+        items.push({ kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body, audience: e.audience });
         break;
 
       case 'todo':
@@ -848,13 +889,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
 
       case 'session.menu':
-        view.menu = {
-          commands: e.commands,
-          skills: e.skills,
-          models: e.models,
-          permissionModes: e.permissionModes,
-          agentControls: e.agentControls,
-        };
+        view.menu = menuOf(e);
         break;
 
       case 'session.pinned':

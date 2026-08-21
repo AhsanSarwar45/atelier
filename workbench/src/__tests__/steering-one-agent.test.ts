@@ -283,3 +283,44 @@ describe('and the row is told at once, not when the kit gets round to it', () =>
     expect(rowOf(events)).toMatchObject({ state: 'done' });
   });
 });
+
+/** A routine status ping about that work, of the kind the kit keeps sending. */
+const status = (state: string, backgrounded?: boolean) => ({
+  type: 'system',
+  subtype: 'task_updated',
+  task_id: 'afa98b872c4df37bc',
+  patch: { status: state, ...(backgrounded === undefined ? {} : { is_backgrounded: backgrounded }) },
+});
+
+describe('and nothing that arrives afterwards reopens it', () => {
+  it('a status saying it is running does not undo the stop', () => {
+    // The kit goes on talking about a piece of work for a moment after it is
+    // over. Everything that ENDS a row already refuses to be overruled; the
+    // routine status pings did not, so one landing a beat after the stop put
+    // the row back to running (bw-7ks.22.30).
+    const { events } = reading([SENT_OFF, ended('killed', 'Stopped by you'), status('in_progress')]);
+
+    expect(states(events), 'the row was told to read as running again').toEqual([]);
+    expect(rowOf(events)).toMatchObject({ state: 'stopped', result: 'Stopped by you' });
+  });
+
+  it('nor does one saying it is running after it finished', () => {
+    const { events } = reading([SENT_OFF, ended('completed', 'Counted them'), status('in_progress')]);
+
+    expect(states(events), 'the row was told to read as running again').toEqual([]);
+    expect(rowOf(events)).toMatchObject({ state: 'done', result: 'Counted them' });
+  });
+
+  it('and a row left in the background after it ended is not drawn as parked', () => {
+    const { events } = reading([SENT_OFF, ended('completed', 'Counted them'), status('in_progress', true)]);
+
+    expect(states(events), 'the row was told to read as parked after it ended').toEqual([]);
+    expect(rowOf(events)).toMatchObject({ state: 'done' });
+  });
+
+  it('but a status about work still going on is drawn as it always was', () => {
+    const { events } = reading([SENT_OFF, status('in_progress', true)]);
+
+    expect(rowOf(events)).toMatchObject({ state: 'parked' });
+  });
+});

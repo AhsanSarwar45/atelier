@@ -28,6 +28,7 @@ import {
   type MachineFamily,
 } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
+import { SAID_NOTHING } from '@/workbench/machine-words';
 import type { NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -76,7 +77,11 @@ function kindsTheDriverEmits(): string[] {
   const sorter = source.slice(source.indexOf('function noteBody('));
   const cases = Array.from(sorter.slice(0, sorter.indexOf('\n}\n')).matchAll(/case '([\w/_]+)':/g)).map((m) => m[1]!);
   const byHand = Array.from(source.matchAll(/this\.note\(\{[^}]*\bkind: '([\w/_]+)'/g)).map((m) => m[1]!);
-  return Array.from(new Set([...cases, ...byHand]));
+  // A kind the driver deliberately draws nothing for needs no family and no
+  // reader: the silence is itself a ruling, written down beside the words
+  // (src/workbench/machine-words.ts, bw-iiv6).
+  const silent = Object.keys(SAID_NOTHING);
+  return Array.from(new Set([...cases, ...byHand])).filter((kind) => !silent.includes(kind));
 }
 
 describe('every kind has a family', () => {

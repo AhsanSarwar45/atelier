@@ -7,11 +7,12 @@
  */
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
+  ArrowDown,
   ArrowUp,
   Bot,
   Coins,
@@ -42,22 +43,27 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
+import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
+import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
-import { openableIn } from '@/workbench/mentions';
+import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
+import { addressedBy, openableIn } from '@/workbench/mentions';
 import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
-import { useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
+import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -255,6 +261,41 @@ function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () =>
   );
 }
 
+/**
+ * The one click back to the newest words.
+ *
+ * A chat that quietly stops following its own end has to say so, or a reader
+ * who scrolled up has no way of knowing anything more was said and no way back
+ * but scrolling for it (bw-n6yh). Mounted either way and faded, so it arrives
+ * and leaves with the reader rather than appearing under his cursor.
+ */
+function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="back-to-now"
+      data-shown={shown ? 'yes' : 'no'}
+      data-missed={missed}
+      aria-hidden={!shown}
+      tabIndex={shown ? 0 : -1}
+      onClick={onClick}
+      title={missed > 0 ? `${missed} more since you scrolled up — back to now` : 'Back to the newest message'}
+      className={cn(
+        'absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-border',
+        'bg-surface-raised px-3 py-1.5 text-muted-foreground shadow-lg transition-all hover:text-foreground',
+        shown ? 'pointer-events-auto opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
+      )}
+    >
+      <ArrowDown className="h-4 w-4" />
+      {missed > 0 && (
+        <span data-testid="back-to-now-count" className="text-xs font-medium tabular-nums">
+          {missed}
+        </span>
+      )}
+    </button>
+  );
+}
+
 /** The agent's checklist, as it stands right now. */
 function TodoPanel({ items }: { items: TodoItem[] }) {
   if (!items.length) return null;
@@ -367,8 +408,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (asking.size > 0) disk.ask(Array.from(asking));
   }, [view.items, where, disk]);
 
-  const mentions = useMemo<Mentions>(
-    () => ({
+  const mentions = useMemo<Mentions>(() => {
+    const card = (id: string) => (
+      <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />
+    );
+    const report = (slug: string) => {
+      const found = byName.get(slug);
+      if (!found) return slug;
+      return <ReportChip project={found.project} slug={found.slug} title={found.title} className="mx-0.5" />;
+    };
+    return {
       split: (text) =>
         openableIn(
           text,
@@ -377,21 +426,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           disk,
         ),
       path: (absolute, raw, line) => <PathChip absolute={absolute} raw={raw} line={line} />,
-      card: (id) => (
-        <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5 align-baseline" />
-      ),
-      report: (slug) => {
-        const found = byName.get(slug);
-        if (!found) return slug;
-        return (
-          <span className="mx-0.5 inline-flex align-baseline">
-            <ReportChip project={found.project} slug={found.slug} title={found.title} />
-          </span>
-        );
+      card,
+      report,
+      // The very same two chips, from an address written out in full. It is how
+      // an agent hands over a report it has just written, and it was the one
+      // thing in a message that stayed raw blue text (bw-8fh2.2). Only ours,
+      // and only when the thing it names really is on this project — anything
+      // else stays the link it was.
+      //
+      // An address that asks for a DIFFERENT project stays a link too, however
+      // familiar its id looks: card ids repeat across boards, and a chip drawn
+      // here would open this project's card of the same id and say nothing
+      // about having gone somewhere else (bw-8fh2.8).
+      link: (href) => {
+        const named = addressedBy(href);
+        if (!named) return null;
+        if (named.project && named.project !== projectId) return null;
+        if (named.kind === 'card') return knownCards.has(named.id) ? card(named.id) : null;
+        return byName.has(named.slug) ? report(named.slug) : null;
       },
-    }),
-    [knownCards, byName, projectId, projectPath, where, disk],
-  );
+    };
+  }, [knownCards, byName, projectId, projectPath, where, disk]);
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** The picture being looked at, from the tray or from a message. */
@@ -466,15 +521,39 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    */
   const drawn = useMemo(() => drawnRows(rows), [rows]);
 
-  const endRef = useRef<HTMLDivElement>(null);
   /** The pane the conversation scrolls in, which the window keeps the place of. */
   const pane = useRef<HTMLDivElement>(null);
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
 
+  /**
+   * Where the reader is in the conversation, and whether the newest words are
+   * what he is looking at. Everything that follows the end goes through this:
+   * the chat used to put its end back in view on every change to the
+   * transcript, which is once per word while an answer arrives, so reading
+   * history meant being dragged back down over and over (bw-n6yh).
+   */
+  const { held: atTheEnd, toTheEnd, paneRef, contentRef } = useHeldAtTheEnd(pane);
+
+  // Another conversation opens at its own end, not at the place this one was
+  // read to, and before the first frame is drawn.
+  useLayoutEffect(() => {
+    toTheEnd();
+  }, [sessionId, toTheEnd]);
+
+  /** How much of the conversation had arrived when he last left the end. */
+  const marked = useRef(0);
+  /** What has been said since — the number on the way back to now. */
+  const [missed, setMissed] = useState(0);
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
-  }, [view.items]);
+    if (atTheEnd) {
+      marked.current = drawn.length;
+      setMissed(0);
+    } else {
+      setMissed(Math.max(0, drawn.length - marked.current));
+    }
+  }, [atTheEnd, drawn.length]);
 
   // One line at rest, growing to what is written. Measured from the content,
   // because a textarea cannot shrink itself back down once it has been sized.
@@ -499,7 +578,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // chat's own facts are a board query away and the box must refuse from the
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
-  const held = heldElsewhere(view.state, live?.externalId ?? facts?.externalId, elsewhere, facts?.runningElsewhere);
+  const externalId = live?.externalId ?? facts?.externalId ?? null;
+  const held = heldElsewhere(view.state, externalId, elsewhere, facts?.runningElsewhere);
+  // What that program is doing, from the stream while it is connected and from
+  // the chat's own facts until it has spoken (bw-96is).
+  const holds = useHolds();
+  // Those facts were fetched when this chat was opened and are never fetched
+  // again, so they answer for the moment before the stream speaks and for no
+  // other. Once it has spoken and gone away they are the oldest thing on the
+  // screen, and drawing them would restart the mark and count its seconds from
+  // whenever the pane happened to be opened (bw-96is.22).
+  const heldFactsAreOld = useHeldFactsAreOld();
+  const said = holds?.get(externalId ?? '') ?? (holds ? null : facts?.held) ?? null;
+  const holder = !held || !externalId ? null : heldFactsAreOld ? holderOnly(said) : said;
 
   /**
    * When the agent started owing an answer. The counting itself is the working
@@ -513,6 +604,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // reads in a row are both `running_tool`, and counting from the first would
     // show a one-second read as forty (bw-f1q.17).
   }, [busy, view.state, view.stateLabel]);
+  /**
+   * The one reading every screen draws (chat-state.ts). A held chat is read
+   * from what the holder says about itself; ours from our own driver's word.
+   */
+  const state = chatState({
+    state: view.state,
+    label: view.stateLabel,
+    since: busySince,
+    held: held ? (holder ?? { id: externalId ?? '', holder: 'program', doing: 'unknown', since: null }) : null,
+  });
+
   const running = view.items.find((it) => it.kind === 'tool' && it.status === 'running');
   const reported = running && running.kind === 'tool' ? running.seconds : 0;
 
@@ -719,20 +821,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       >
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
-            at: the messages arrive as that program works. It says the same word
-            its row in the list says, and it clears itself when that program
-            stops, because the stream it is read from does (bw-dmxj.10). */}
-        <Badge
-          variant={held ? 'success' : busy ? 'warning' : 'secondary'}
-          appearance={held ? 'default' : 'light'}
-          size="sm"
-          shape="circle"
+            at: the messages arrive as that program works. So the line says what
+            the holder says it is doing, and wears the badge beside it — the two
+            are separate facts and the badge never stands in for the first
+            (bw-96is). Both clear themselves when that program stops, because
+            the stream they are read from does (bw-dmxj.10). */}
+        <span
           data-testid="session-state"
-          data-state={held ? 'working' : view.state}
-          className="shrink-0"
+          data-state={held ? 'held' : view.state}
+          className="flex shrink-0 items-center gap-2"
         >
-          {held ? 'working' : view.stateLabel}
-        </Badge>
+          <ChatStateChip state={state} size="line" testId="session-state-chip" />
+          {state.external && <ExternalBadge holder={state.external.holder} size="line" />}
+        </span>
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
             are both named again on the writing box below, while every chip
@@ -808,9 +909,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       )}
 
       <SplitPaths.Provider value={splitPaths}>
+      {/* The conversation and the one way back to it, which floats over its
+          bottom corner rather than taking a line of its own. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div
-        ref={pane}
-        className="mx-auto flex w-full max-w-[110ch] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+        ref={paneRef}
+        // The browser keeps a pane's place for it by moving the pane when
+        // something above changes size, which is a scroll nobody made and which
+        // this chat reads as the reader taking it over. It holds its own place —
+        // at the end while that is what he is watching, and on his own row when
+        // older messages arrive above him — so the browser's guess is turned off.
+        className="mx-auto w-full max-w-[110ch] flex-1 overflow-y-auto px-4 py-4 [overflow-anchor:none]"
         data-testid="transcript"
         // One listener for every file chip in the conversation, wherever it was
         // drawn: in a message, in a command, or on a tool row's own line. A
@@ -824,6 +933,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         // it, which the browser check proves.
         onClickCapture={(e) => openPathClicked(e)}
       >
+        {/* One box around the whole conversation, whose height is what says the
+            conversation grew — a picture arriving late or a line still being
+            typed moves it without a row being added, and the reader watching
+            the end must stay at the end through both. */}
+        <div ref={contentRef} data-testid="transcript-rows" className="flex flex-col gap-3">
         {rows.length === 0 && view.items.length > 0 && (
           <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
@@ -833,6 +947,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           mentions={mentions}
           onLook={setLooking}
           pane={pane}
+          held={atTheEnd}
         />
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes
@@ -846,13 +961,36 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             thought={view.thinkingTokens}
           />
         )}
-        <div ref={endRef} />
+        </div>
+      </div>
+      {/* The way back floats over the conversation's own bottom corner, the way
+          every chat draws it. It was given a strip of its own for a while, to
+          keep it off the last line of text (bw-n6yh.9); a whole row of empty
+          screen between the conversation and the box you type in costs more
+          than the corner of one line it sits over, and the manager asked for it
+          floating (bw-n6yh.13). The frame is the width of the conversation
+          rather than the window, so the button sits at the text's own right
+          edge on a wide screen, and passes clicks through everywhere else. */}
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-full max-w-[110ch] -translate-x-1/2">
+        <BackToNow missed={missed} shown={!atTheEnd} onClick={() => toTheEnd('smooth')} />
+      </div>
       </div>
       </SplitPaths.Provider>
 
       <div className="border-t border-border/60 px-4 py-3">
-        {/* One frame holds the typing, the pictures waiting to go and the button
-            that sends them, so the whole thing reads as the place you write. */}
+        {/* Nothing to write in while another program holds the conversation.
+            The box used to be drawn in full and refuse every keystroke, which
+            is a door with a lock on it where there is no door: typing here
+            would wake a SECOND agent on the same record (§6.3.3), so what
+            stands in its place is the one line that says who is in there. It
+            comes back by itself when they let go, because the stream this is
+            read from does (bw-96is). The line's words are the reading's, so it
+            cannot contradict the mark at the top of the pane (bw-96is.9). */}
+        {held ? (
+          <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-1 text-xs text-muted-foreground">
+            {heldLine(state)}
+          </p>
+        ) : (
         <div
           data-testid="composer-frame"
           className={cn(
@@ -896,11 +1034,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {sendError && (
             <p data-testid="send-error" className="mb-2 text-xs text-red-500">
               {sendError}
-            </p>
-          )}
-          {held && (
-            <p data-testid="held-elsewhere" className="mb-2 text-xs text-muted-foreground">
-              Another program is working in this chat. It draws here as it goes; you can type when it stops.
             </p>
           )}
           <input
@@ -954,8 +1087,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 void submit();
               }
             }}
-            disabled={held}
-            placeholder={held ? 'Another program is working in this chat.' : 'Ask the agent to do something…'}
+            // No held case here: a held chat draws no box at all, so a disabled
+            // one with a sentence in it is unreachable — and the sentence it
+            // still carried claimed the holder was working, which is the whole
+            // thing this job took out of the screens (bw-96is.13).
+            placeholder="Ask the agent to do something…"
             // The frame is the box; the typing area inside it carries no second
             // edge, no shadow and no colour of its own, and it grows with what
             // is written until it would take the conversation's room.
@@ -976,14 +1112,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             >
               <Paperclip className="h-4 w-4" />
             </Button>
-            {/* Both act on THIS chat, not the next one (§8.2.3). */}
+            {/* Both act on THIS chat, and are kept in his own settings so the
+                next one opens on them too (§8.2.3). */}
             <Picker
               icon={<ShieldCheck className="h-3.5 w-3.5" />}
               label="Permission mode"
               testid="mode-picker"
               current={view.permissionMode}
               asleep={asleep}
-              options={view.menu.permissionModes.map((m) => ({ value: m, label: m }))}
+              // The setting's own spelling is not a label: `bypassPermissions`
+              // is what he has to read to know whether this chat still asks
+              // (src/workbench/machine-words.ts, bw-iiv6).
+              options={view.menu.permissionModes.map((m) => ({
+                value: m,
+                label: PERMISSION_MODE[m]?.label ?? inWords(m),
+              }))}
               onPick={(mode) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.mode', sessionId, mode }).catch((e: unknown) =>
@@ -997,7 +1140,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               testid="model-picker"
               // A session that has not been given a model is on the brand's own
               // default, and the list has a row for exactly that.
-              current={view.model ?? 'default'}
+              current={view.model ?? BRAND_DEFAULT_MODEL}
               asleep={asleep}
               options={view.menu.models.map((m) => ({
                 value: m.value,
@@ -1033,13 +1176,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 data-testid="send-button"
                 className="rounded-full"
                 onClick={() => void submit()}
-                disabled={!draft.trim() || held}
+                // Nothing about who holds the chat here: a held one draws no
+                // box at all a few lines up, so a second half to this test
+                // could never come out true. What stops a send while someone
+                // else is in there is the composer not being drawn at all,
+                // which is what the browser checks measure (bw-96is.23).
+                disabled={!draft.trim()}
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>
             )}
           </div>
         </div>
+        )}
       </div>
 
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}

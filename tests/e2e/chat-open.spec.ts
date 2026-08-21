@@ -73,7 +73,7 @@ async function openChat(page: Page, key: string): Promise<void> {
  */
 async function paneSettles(page: Page, still = 600, most = 30_000): Promise<void> {
   const count = () =>
-    page.evaluate(() => document.querySelectorAll('[data-testid="transcript"] > *').length);
+    page.evaluate(() => document.querySelectorAll('[data-testid="transcript-rows"] > *').length);
   const until = Date.now() + most;
   let was = await count();
   while (Date.now() < until) {

@@ -650,11 +650,18 @@ const MessageRow = memo(function MessageRow({
       // at a scroll's speed (bw-jkh2.16, bw-jkh2.18). The violet rail is not
       // used here: it means a HELPER wrote the row, and it wins over the
       // speaker's own edge when both are true.
+      //
+      // The agent's side takes the column by being left to fill it, never by
+      // being told to be the whole of it: a width of 100% is measured from the
+      // frame, not from where the message actually starts, so a helper's
+      // message — which is indented under the call that sent it — reached past
+      // the right edge by exactly that indent and gave the whole conversation a
+      // sideways scrollbar (bw-n6yh.14).
       className={cn(
         'rounded-lg px-3 py-2 text-sm leading-relaxed',
         item.role === 'user'
           ? 'ml-auto max-w-[75ch] border-l-2 border-primary/70 bg-primary/15 text-foreground'
-          : 'w-full border-r-2 border-muted-foreground/40 bg-muted/40 text-foreground',
+          : 'border-r-2 border-muted-foreground/40 bg-muted/40 text-foreground',
         sentOff(sentBy) && SENT_OFF,
       )}
     >

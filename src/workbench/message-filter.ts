@@ -140,6 +140,10 @@ const FAMILY_LABELS: Record<MachineFamily, string> = {
  */
 const KIND_LABELS: Record<string, string> = {
   'user/synthetic': 'Interrupts',
+  'user/pasted_image': 'Pictures you pasted',
+  'user/command_output': 'What a command printed',
+  'user/fork_brief': 'Chats handed to a worker',
+  'user/note': 'The chat’s own notes',
   'system/worker_shutting_down': 'An agent shutting down',
   conversation_reset: 'A chat started over',
   result: 'How a turn ended',

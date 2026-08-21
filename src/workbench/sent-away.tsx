@@ -33,7 +33,10 @@ import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import type { SentAway } from '@/workbench/fold';
 import type { AgentControl, AgentKind, AgentState } from '@/workbench/protocol';
+import { isOver } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
+
+export { isOver };
 
 /** How often a running row re-reads the clock. */
 const TICK_MS = 1000;
@@ -61,12 +64,6 @@ export const STATES: Record<AgentState, { label: string; variant: 'secondary' | 
   stopped: { label: 'stopped', variant: 'secondary' },
 };
 
-/** The states that are over: the row stops counting and starts keeping. */
-const OVER: AgentState[] = ['done', 'failed', 'stopped'];
-
-export function isOver(state: AgentState): boolean {
-  return OVER.includes(state);
-}
 
 /**
  * Seconds, rounded to the unit a glance needs.
@@ -177,6 +174,11 @@ export function useNow(live: boolean): number {
  *
  * Nothing is drawn once the work is over, and park goes once it is parked:
  * there is no parking a thing that is already in the background.
+ *
+ * A click that does not land says so. The button coming back to life is what
+ * success looks like, so a refused stop that only re-enabled the button would
+ * be indistinguishable from a stop that worked — and the reader would walk away
+ * believing an agent had been stopped that is still running (bw-7ks.22.34).
  */
 export function AgentSteering({
   row,
@@ -188,47 +190,58 @@ export function AgentSteering({
   controls: AgentControl[];
 }) {
   const [busy, setBusy] = useState<AgentControl | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
   const canStop = controls.includes('stop');
   const canPark = controls.includes('park') && row.state !== 'parked';
   if (isOver(row.state) || (!canStop && !canPark)) return null;
 
   const act = (what: 'stop' | 'park'): void => {
     setBusy(what);
+    setRefused(null);
     // Released as soon as the ask is answered, not held until the row changes
     // under it: what happened is the kit's word, carried on the row's own
     // state, and a button waiting for it would never come back from a refusal.
     void sendCommand({ type: what === 'stop' ? 'agent.stop' : 'agent.park', sessionId, agentId: row.id })
-      .catch(() => {})
+      .catch((e: unknown) =>
+        setRefused(`${what === 'stop' ? 'Not stopped' : 'Not parked'}. ${e instanceof Error ? e.message : String(e)}`),
+      )
       .finally(() => setBusy(null));
   };
 
   return (
-    <div data-testid="sent-away-steer" className="flex items-center gap-1 border-t border-border/60 px-2 py-1">
-      {canPark && (
-        <Button
-          size="xs"
-          variant="ghost"
-          data-testid="sent-away-park"
-          disabled={busy !== null}
-          title="Let it run on in the background and take the turn back"
-          onClick={() => act('park')}
-        >
-          <Pause className="h-3 w-3" aria-hidden="true" />
-          Park
-        </Button>
-      )}
-      {canStop && (
-        <Button
-          size="xs"
-          variant="ghost"
-          data-testid="sent-away-stop"
-          disabled={busy !== null}
-          title="End this one. The chat and everything else it sent away carry on"
-          onClick={() => act('stop')}
-        >
-          <Square className="h-3 w-3" aria-hidden="true" />
-          Stop
-        </Button>
+    <div className="border-t border-border/60">
+      <div data-testid="sent-away-steer" className="flex items-center gap-1 px-2 py-1">
+        {canPark && (
+          <Button
+            size="xs"
+            variant="ghost"
+            data-testid="sent-away-park"
+            disabled={busy !== null}
+            title="Let it run on in the background and take the turn back"
+            onClick={() => act('park')}
+          >
+            <Pause className="h-3 w-3" aria-hidden="true" />
+            Park
+          </Button>
+        )}
+        {canStop && (
+          <Button
+            size="xs"
+            variant="ghost"
+            data-testid="sent-away-stop"
+            disabled={busy !== null}
+            title="End this one. The chat and everything else it sent away carry on"
+            onClick={() => act('stop')}
+          >
+            <Square className="h-3 w-3" aria-hidden="true" />
+            Stop
+          </Button>
+        )}
+      </div>
+      {refused && (
+        <p data-testid="sent-away-steer-error" className="px-2 pb-1 text-[11px] text-red-500">
+          {refused}
+        </p>
       )}
     </div>
   );

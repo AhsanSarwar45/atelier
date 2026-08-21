@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { mentionsIn, rehypeMentions, type Existing } from '@/workbench/mentions';
+import { addressedBy, mentionsIn, rehypeMentions, type Existing } from '@/workbench/mentions';
 
 const BOARD: Existing = {
   card: (id) => ['bw-4wcd', 'bw-4wcd.3', 'bw-1u1'].includes(id),
@@ -91,6 +91,8 @@ describe('the rewriting step', () => {
     expect(pre.children[0]!.children[0]!.type).toBe('text');
   });
 
+  // The words inside a link stay words here; what the link ITSELF names is a
+  // separate question, answered by `addressedBy` when the page draws it.
   it('leaves a link alone, because it already goes somewhere', () => {
     const tree = {
       type: 'root',
@@ -102,5 +104,75 @@ describe('the rewriting step', () => {
     const link = tree.children[0] as { children: { type: string }[] };
     expect(link.children).toHaveLength(1);
     expect(link.children[0]!.type).toBe('text');
+  });
+});
+
+/**
+ * An agent hands a report over as the whole address, port and all — the way it
+ * would hand it to somebody outside the app. That is a link long before any of
+ * the rewriting above is asked anything, so the address itself has to say what
+ * it names (bw-8fh2.2).
+ */
+describe('an address written out in full', () => {
+  /** What an address that names no project at all comes back as. */
+  const HERE_CARD = { kind: 'card', id: 'bw-1u1', project: null };
+
+  it('names the report it carries', () => {
+    const written =
+      'http://127.0.0.1:3008/project?id=7ec315b6-f66e-421e-84ae-a28088bdf16b&tab=reports&report=agents-you-cannot-see';
+    expect(addressedBy(written)).toEqual({
+      kind: 'report',
+      slug: 'agents-you-cannot-see',
+      project: '7ec315b6-f66e-421e-84ae-a28088bdf16b',
+    });
+  });
+
+  it('names the card it carries, however the address spells it', () => {
+    expect(addressedBy('http://localhost:3008/project?id=p&card=bw-1u1')).toEqual({
+      kind: 'card',
+      id: 'bw-1u1',
+      project: 'p',
+    });
+    expect(addressedBy('/project?id=p&bead=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1', project: 'p' });
+  });
+
+  it('gives the card when an address carries both, because its panel is what opens', () => {
+    expect(addressedBy('/project?tab=reports&report=a-report&card=bw-1u1')).toEqual({
+      kind: 'card',
+      id: 'bw-1u1',
+      project: null,
+    });
+  });
+
+  it('names nothing in an address that is not one of ours', () => {
+    expect(addressedBy('https://github.com/gastownhall/beads/issues/1')).toBeNull();
+    expect(addressedBy('http://127.0.0.1:3008/project?id=p&tab=board')).toBeNull();
+    expect(addressedBy('not an address at all')).toBeNull();
+  });
+
+  // This app is served from the reader's own computer and nowhere else, so a
+  // link leaving for another machine is somebody else's however much its shape
+  // matches — and swallowing it would navigate inside this window to a card
+  // that merely shares an id (bw-8fh2.4).
+  it('names nothing on another machine, whatever the shape of it', () => {
+    expect(addressedBy('https://example.com/project?id=p&card=bw-1u1')).toBeNull();
+    expect(addressedBy('https://beads-web.example.org/project?tab=reports&report=a-report')).toBeNull();
+    expect(addressedBy('ftp://localhost/project?card=bw-1u1')).toBeNull();
+  });
+
+  // Card ids repeat across boards, so which board an address asks for is the
+  // difference between the right card and a silent wrong one (bw-8fh2.8).
+  it('carries the project it asks for, so a chat can refuse another one', () => {
+    expect(addressedBy('http://127.0.0.1:3008/project?id=other-board&card=bw-3')).toEqual({
+      kind: 'card',
+      id: 'bw-3',
+      project: 'other-board',
+    });
+  });
+
+  it('reads the reader’s own machine by any of its names, on any port', () => {
+    expect(addressedBy('http://localhost:3008/project?card=bw-1u1')).toEqual(HERE_CARD);
+    expect(addressedBy('http://127.0.0.1:3027/project?card=bw-1u1')).toEqual(HERE_CARD);
+    expect(addressedBy('http://[::1]:3008/project?card=bw-1u1')).toEqual(HERE_CARD);
   });
 });

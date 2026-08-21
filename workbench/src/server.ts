@@ -17,7 +17,8 @@ import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { watchOutside } from './outside.ts';
 import { planUsage, watchUsage } from './plan-usage.ts';
 import { knownSessions, restoreList } from './registry.ts';
-import { runningNow } from './running.ts';
+import type { HeldChat } from '../../src/workbench/chat-state.ts';
+import { holdsNow, runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 
@@ -110,21 +111,27 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: stri
  */
 const RUNNING_BEAT_MS = 2_000;
 
-const runningWatchers = new Set<(conversations: string[]) => void>();
+const runningWatchers = new Set<(holds: HeldChat[]) => void>();
 let runningBeat: ReturnType<typeof setInterval> | null = null;
-/** The last set announced, joined, purely to tell a change from a repeat. */
+/** The last answer announced, flattened, purely to tell a change from a repeat. */
 let announced = '';
 
-function whatIsRunning(): string[] {
-  return [...runningNow().keys()].sort();
+/**
+ * What is announced, and what a repeat is measured on: who is held and what
+ * each of them is doing. Not the stamp beside it — that moves only when the
+ * doing does, and keying on it would put a frame on the wire every beat for a
+ * chat that has been answering all along.
+ */
+function heldKey(holds: HeldChat[]): string {
+  return holds.map((h) => `${h.id}:${h.holder}:${h.doing}`).join(',');
 }
 
 function lookAtRunning(): void {
-  const conversations = whatIsRunning();
-  const key = conversations.join(',');
+  const holds = holdsNow();
+  const key = heldKey(holds);
   if (key === announced) return;
   announced = key;
-  runningWatchers.forEach((tell) => tell(conversations));
+  runningWatchers.forEach((tell) => tell(holds));
 }
 
 /**
@@ -132,7 +139,7 @@ function lookAtRunning(): void {
  * whenever that changes. One timer for every browser watching rather than one
  * each, and none at all when nobody is.
  */
-function watchRunning(tell: (conversations: string[]) => void): () => void {
+function watchRunning(tell: (holds: HeldChat[]) => void): () => void {
   runningWatchers.add(tell);
   if (!runningBeat) runningBeat = setInterval(lookAtRunning, RUNNING_BEAT_MS);
   return () => {
@@ -170,7 +177,7 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   });
   // Straight after the snapshot, because a chat somebody is working in has no
   // row in our store to appear in one, and the rail marks its rows off this.
-  write({ kind: 'running', conversations: whatIsRunning() });
+  write({ kind: 'running', holds: holdsNow() });
   // The account's own allowance, whether or not this browser has a chat open
   // and however long that chat has been silent: this server reads it on a beat
   // of its own and every page hears the same figure at the same moment
@@ -182,7 +189,7 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   const unwatchUsage = watchUsage((usage) => write({ kind: 'usage', usage }));
   const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
   const unopen = sessions.watchOpen((s) => write({ kind: 'opened', session: { ...s, activity: '', beads: [] } }));
-  const unwatchRunning = watchRunning((conversations) => write({ kind: 'running', conversations }));
+  const unwatchRunning = watchRunning((holds) => write({ kind: 'running', holds }));
   // A chat begun in an editor or a terminal has no event of ours to arrive on
   // and no row here to carry one; the only sign of it is the tool writing its
   // record. Hearing that folder move is the whole of what tells this browser
@@ -334,6 +341,9 @@ const server = createServer((req, res) => {
           // Said here as well as on the stream, because the writing box must
           // refuse from the first frame it draws (protocol.ts, SessionFacts).
           runningElsewhere: s.externalId !== null && runningNow(true).has(s.externalId),
+          // And what that program is doing, so the chat draws a moving mark
+          // from its first frame rather than a beat later (bw-96is).
+          held: s.externalId === null ? null : (holdsNow(true).find((h) => h.id === s.externalId) ?? null),
           title: seen?.name ?? s.title,
           cwd,
           folder: folderOf(cwd),

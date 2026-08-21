@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "../src/workbench/protocol.ts"]
+  "include": ["src/**/*.ts", "../src/workbench/protocol.ts", "../src/workbench/machine-words.ts"]
 }

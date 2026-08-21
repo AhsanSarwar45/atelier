@@ -14,6 +14,7 @@
  */
 
 /** Brands we can drive. One string per driver. */
+import type { HeldChat } from './chat-state';
 import type { PlanUsage } from './plan-usage';
 
 export type Brand = 'claude' | 'codex';
@@ -307,7 +308,25 @@ export type WbpEvent = EventBase &
      * on the page, `detail` is hidden until the reader asks for everything. Both
      * are stored, because the log IS the transcript (§4).
      */
-    | { type: 'note'; noteId: string; rank: NoteRank; kind: string; text: string; body: string | null }
+    | {
+        type: 'note';
+        noteId: string;
+        rank: NoteRank;
+        kind: string;
+        text: string;
+        body: string | null;
+        /**
+         * Who this exact line is for, when the STATE decided it.
+         *
+         * `rank` cannot carry the answer: it has two values, and an allowance
+         * filling up and an allowance that has stopped his work are two states
+         * of one kind that must land on different sides. The driver has the
+         * state and settles it there; a note without this is one whose whole
+         * kind has a single reader, and `machine-lines.ts` says which
+         * (bw-iiv6, docs/agent-workbench.md §8.2.4).
+         */
+        audience?: Audience;
+      }
     /**
      * Drop everything drawn so far; what follows replaces it.
      *
@@ -339,6 +358,21 @@ export type AgentKind = 'helper' | 'command' | 'watch' | 'run';
  * not a row that is working.
  */
 export type AgentState = 'running' | 'waiting' | 'parked' | 'done' | 'failed' | 'stopped';
+
+/**
+ * The states a row never leaves: the work is over, however it went.
+ *
+ * Said once, here beside the states themselves, because three places have to
+ * agree about it — the panel, which stops counting and starts keeping; and both
+ * ways the conversation is folded, which refuse to let anything arriving
+ * afterwards reopen a row that is over (bw-7ks.22.30).
+ */
+export const OVER: readonly AgentState[] = ['done', 'failed', 'stopped'];
+
+/** Whether this row is over: it says what it ended with, and nothing moves it. */
+export function isOver(state: AgentState): boolean {
+  return OVER.includes(state);
+}
 
 /**
  * A way of steering one running piece of sent-off work
@@ -497,6 +531,13 @@ export interface RestoreRow {
    * sessions this app is driving, which it already knows everything about.
    */
   runningElsewhere?: boolean;
+  /**
+   * What that program says it is doing, when one holds it: the row draws the
+   * same moving mark as a chat of our own, in the same place, rather than a
+   * word that means only "occupied" (bw-96is). Absent for the same reasons
+   * `runningElsewhere` is.
+   */
+  held?: HeldChat | null;
 }
 
 /**
@@ -524,6 +565,13 @@ export interface SessionFacts {
    * this says only what was true at open.
    */
   runningElsewhere: boolean;
+  /**
+   * What the program holding it says it is doing, when one is — the same
+   * reading the app-wide stream carries, said here so a chat opened by its own
+   * address draws a moving mark from its first frame instead of a beat later
+   * (bw-96is).
+   */
+  held: HeldChat | null;
   title: string | null;
   cwd: string | null;
   folder: string | null;
@@ -545,7 +593,8 @@ export type WatchFrame =
   | { kind: 'opened'; session: SessionSummary & { activity: string; beads: string[] } }
   /**
    * Every conversation a live process is holding right now, by the tool's own
-   * id for it — sent once when the stream opens and again whenever the set
+   * id for it, each with what that process says it is doing — sent once when
+   * the stream opens and again whenever the set or what any of them is doing
    * changes. Unlike the other frames this is not about sessions this app
    * drives: a chat being typed at in a terminal has no row in our store to
    * carry an event, and it is exactly the chat the reader is looking for
@@ -553,7 +602,7 @@ export type WatchFrame =
    * running chat on the machine — and a set is unambiguous where a
    * started/stopped pair after a missed frame is not.
    */
-  | { kind: 'running'; conversations: string[] }
+  | { kind: 'running'; holds: HeldChat[] }
   /**
    * The tools' own session folders have changed — a conversation written that
    * this app did not write, or one of them added to. A bare word, said no more
@@ -630,8 +679,24 @@ export const CLAUDE_PERMISSION_MODES = [
   'bypassPermissions',
 ] as const;
 
-/** The mode a workbench session is pinned to unless the owner picks another. */
+/**
+ * The mode a chat opens in when NOTHING says otherwise.
+ *
+ * Last, not first: what a chat opens in is what the owner's own settings say
+ * (workbench/src/owner-settings.ts, bw-7ks.23), and this is the answer only
+ * where they say nothing at all. It used to be handed to the kit on every
+ * start, which is why a machine set to skip every permission check still opened
+ * every chat asking about every tool (bw-b1o1).
+ */
 export const DEFAULT_PERMISSION_MODE = 'default';
+
+/**
+ * The model picker's own top row: not a model, but "whatever the brand would
+ * have picked". The kit's model list carries it, the header shows it for a chat
+ * nobody has pinned a model to, and choosing it takes the model key out of the
+ * owner's settings rather than writing this word into them.
+ */
+export const BRAND_DEFAULT_MODEL = 'default';
 
 /**
  * The folder a chat ran in, as a chip: the directory's own name, which for a

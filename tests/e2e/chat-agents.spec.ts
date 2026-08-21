@@ -7,6 +7,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { makeFixtureProject, PARENT_CARD } from './fixture-board';
 import {
   CHAT_SAID,
+  EACH_HELPER,
   HELPER_AGENT,
   HELPER_ANSWERED,
   HELPER_BRIEF,
@@ -72,14 +73,44 @@ const DELEGATED_MS = 300_000;
 const HELPER_WAITS = 45;
 
 /**
- * How long the helper in the panel case is told to wait. Longer than the one
- * above, because the panel is read while it is still working and everything
- * else in that turn has to have happened first.
+ * How long the helper waits before it says anything.
+ *
+ * It says nothing until it has finished something. Asked to write a sentence
+ * and then wait, one run went straight to the command and its only words
+ * arrived a second before the call that sent it ended — so the picture meant to
+ * show a helper's words under a call still running showed a finished block
+ * instead (bw-7ks.22.32). A short wait first puts its words on the screen with
+ * the long wait still ahead of it.
+ */
+const HELPER_SPEAKS_AFTER = 5;
+
+/**
+ * How long a helper that is READ while it works is told to wait. Longer than
+ * the one above, because everything else in that turn has to have happened
+ * first and every poll before the picture eats into what is left of the wait.
+ * At forty-five seconds the helper was already finished by the time the shutter
+ * fell, and the committed picture showed a finished block where it claimed to
+ * show one still going (bw-7ks.22.32).
  */
 const HELPER_WAITS_LONGER = 120;
 
 /** How long the command left in the background is told to run. */
 const LEFT_RUNNING = 240;
+
+/**
+ * What each of the three rows on the panel must say for itself.
+ *
+ * Spelled out here rather than worked out from the fixture: a case that
+ * computes the number it expects with the same arithmetic the screen used
+ * agrees with the screen whatever either of them does. The brief and the answer
+ * come from the fixture because they are its words verbatim; the model, the
+ * clock and the spend are written down (bw-7ks.22.29).
+ */
+const THREE_ROWS = [
+  { agent: HELPER_AGENT, model: 'fable-5', took: '45s', tokens: '4,800' },
+  { agent: `${HELPER_AGENT}-2`, model: 'opus-5', took: '1m 30s', tokens: '9,600' },
+  { agent: `${HELPER_AGENT}-3`, model: 'haiku-4-5', took: '2m 30s', tokens: '14,400' },
+].map((row, n) => ({ ...EACH_HELPER[n]!, ...row }));
 
 /** The states that mean a piece of sent-off work is over. */
 const OVER = ['done', 'failed', 'stopped'];
@@ -218,19 +249,28 @@ test.describe('the agents a chat sends off', () => {
       'First write one short sentence of your own saying you are about to send a helper off. ' +
         'Then use the Task tool exactly once to launch one general-purpose subagent, and do no work yourself. ' +
         'Tell that subagent, in its prompt, to do these four things in order: ' +
-        'first write one sentence saying what it is about to do; ' +
-        `then run the shell command "python3 -c 'import time; time.sleep(${HELPER_WAITS})'" ` +
+        `first run the shell command "python3 -c 'import time; time.sleep(${HELPER_SPEAKS_AFTER})'" ` +
         'in the foreground, waiting for it, and do not put it in the background; ' +
-        'then write one sentence saying whether the wait worked; then reply with the single word DONE. ' +
+        'then write one sentence saying that first wait is done and it is about to start a longer one; ' +
+        `then run the shell command "python3 -c 'import time; time.sleep(${HELPER_WAITS_LONGER})'" ` +
+        'in the foreground, waiting for it, and do not put it in the background; ' +
+        'then reply with the single word DONE. ' +
+        'Run no command of your own, before or after: everything shell is the helper\'s. ' +
         'When it comes back, reply with the single word FINISHED and nothing else.',
     );
 
     // The call that sent it, while it is still going. Everything else is
     // checked against THIS row, so nothing about the nesting is guessed.
-    const sender = page.locator('[data-testid="tool-row"][data-tool-status="running"]').first();
-    await sender.waitFor({ timeout: DELEGATED_MS });
-    const sentBy = await sender.getAttribute('data-tool-id');
+    const running = page.locator('[data-testid="tool-row"][data-tool-status="running"]');
+    await running.first().waitFor({ timeout: DELEGATED_MS });
+    const sentBy = await running.first().getAttribute('data-tool-id');
     expect(sentBy, 'the running call has no id').toBeTruthy();
+
+    // Held by ITS OWN ID from here on. Read as "whichever row is running", the
+    // row stops being that row the moment the call ends — so every later
+    // question about it quietly becomes a question about nothing, which is not
+    // the same as an answer (bw-7ks.22.32).
+    const sender = page.locator(`[data-tool-id="${sentBy}"]`);
 
     // A line on that row saying what the helper is doing NOW, which is the only
     // thing on the screen while it waits. Read first, because it belongs to a
@@ -264,10 +304,39 @@ test.describe('the agents a chat sends off', () => {
     // that was never coming (measured 2026-08-20).
     await expect(page.locator('[data-testid="assistant-message"]:not([data-sent-by])').first()).toBeVisible();
 
+    /**
+     * That the helper is STILL WORKING is the whole claim of the picture, so it
+     * is read on both sides of the shutter rather than assumed from the polls
+     * above. A single check before would leave the window the shot falls in
+     * unguarded — and unguarded is exactly how the committed picture came to
+     * show the call already OK, the row already done, and a second command
+     * running loose below it that belonged to nobody on the screen
+     * (bw-7ks.22.32).
+     */
+    const stillWorking = async (when: string): Promise<void> => {
+      await expect(sender, `the call that sent the helper was over ${when} the picture`).toHaveAttribute(
+        'data-tool-status',
+        'running',
+      );
+      // One running call, and it is that one. A second top-level row with a
+      // spinner is either work the chat did itself after being told not to, or
+      // a helper's own command drawn outside the row that sent it — and the
+      // picture would be saying something it does not mean either way.
+      expect(await running.count(), `a second call was running ${when} the picture`).toBe(1);
+    };
+
     // Taken while the helper is still working, because that is the picture
     // this case is about: a call still running, the helper's own sentences
     // under it, and a line saying what it is doing now.
+    //
+    // The spinning line at the foot of the picture is not a fourth row and not
+    // a loose call: it is the chat's own working line, which names whatever the
+    // chat is doing this second and carries the same words as the chip in the
+    // bar above. It is checked by its own case; the count above is what keeps a
+    // stray CALL out of the shot.
+    await stillWorking('before');
     await page.screenshot({ path: `${SHOTS}/chat-agent-own-words.png`, fullPage: false });
+    await stillWorking('after');
 
     // Stopped when the case is over, so a run leaves no agent behind.
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
@@ -795,7 +864,8 @@ test.describe('the agents a chat sends off', () => {
   });
 
   /**
-   * What a chat spent, on a chat that delegated most of its work.
+   * Three agents on one panel, each of them its own row — and what the turn
+   * that sent them cost.
    *
    * Written rather than run, and that is the point of it. What a delegated turn
    * costs cannot be checked against a live run: the figures come back different
@@ -811,8 +881,17 @@ test.describe('the agents a chat sends off', () => {
    * kit's own per-model totals name the helper's model separately. The gap this
    * closes is the other one — a chat nobody is driving, which had no spend at
    * all.
+   *
+   * The three agents are three different agents, and that is the other half of
+   * this case. A panel of rows written from one template proves nothing about
+   * the drawing: three identical rows are exactly what a screen drawing the
+   * first row three times would look like, and so is a static picture repeated.
+   * So each one here was asked something else, ran on another model, took its
+   * own time and cost its own money — and every row is held to its own line,
+   * with one of them opened into its own conversation to prove the row leads
+   * where it says it does (bw-7ks.22.29).
    */
-  test('the spend on a turn counts the three agents it sent away', async ({ page, request }) => {
+  test('three agents it sent away, each its own row, and the turn counting all three', async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     rmSync(SPEND_RUN, { recursive: true, force: true });
     mkdirSync(SPEND_RUN, { recursive: true });
@@ -851,7 +930,38 @@ test.describe('the agents a chat sends off', () => {
       // And the chat's own turns alone are not what is on the line.
       expect(Number(await chip.getAttribute('data-total'))).toBeGreaterThan(written.spend.own);
 
+      // ---- and each of the three is its own row ----------------------------
+      for (const mine of THREE_ROWS) {
+        const row = page.locator(`[data-testid="sent-away-row"][data-agent="${mine.agent}"]`);
+        await expect(row, `no row for ${mine.agent}`).toHaveCount(1);
+        await expect(row.getByTestId('sent-away-what')).toHaveText(mine.brief);
+        await expect(row.getByTestId('sent-away-model')).toHaveText(mine.model);
+        await expect(row.getByTestId('sent-away-for')).toHaveText(mine.took);
+        // The exact figure, which the row carries for the reader who hovers it:
+        // the short one beside the clock is rounded, and two rows apart by a
+        // third can round to the same word.
+        await expect(row.getByTestId('sent-away-spend')).toHaveAttribute(
+          'title',
+          `${mine.tokens} tokens over 1 call`,
+        );
+        await expect(row.getByTestId('sent-away-result')).toContainText(mine.answer);
+      }
+
       await page.screenshot({ path: `${SHOTS}/chat-agents-spend.png`, fullPage: false });
+
+      // ---- and the middle row opens the middle agent ------------------------
+      // Not the first: a pane that always drew the first agent would pass every
+      // case in this file that opens one, because every other case sends one.
+      const middle = THREE_ROWS[1]!;
+      await page.locator(`[data-testid="sent-away-row"][data-agent="${middle.agent}"]`).click();
+      const pane = page.getByTestId('agent-view');
+      await expect(pane).toHaveAttribute('data-agent', middle.agent);
+      await expect(pane.getByTestId('agent-view-what')).toContainText(middle.brief);
+      const said = (await pane.getByTestId('agent-view-said').innerText()).trim();
+      expect(said, 'the pane is not showing this agent’s own words').toContain(middle.said);
+      expect(said, 'the pane is showing another agent’s words').not.toContain(THREE_ROWS[0]!.said);
+      await expect(pane.getByTestId('agent-view-result')).toContainText(middle.answer);
+      await page.screenshot({ path: `${SHOTS}/chat-agents-spend-opened.png`, fullPage: false });
     } finally {
       written.remove();
       await request.delete(`/api/projects/${project.id}`);

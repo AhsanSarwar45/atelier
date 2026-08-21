@@ -16,8 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import * as api from '@/lib/api';
-import { cn } from '@/lib/utils';
-import { isRunning, useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
+import { ChatStateChip } from '@/workbench/chat-state-chip';
+import { isRunning, liveState, useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
 
 /** Project ids to their names, fetched once — the tray names a project, not a path. */
 function useProjectNames(): Map<string, string> {
@@ -37,14 +37,6 @@ function useProjectNames(): Map<string, string> {
     };
   }, []);
   return names;
-}
-
-/** Rounded to the unit a glance needs: seconds, then minutes, then hours. */
-export function elapsed(since: string, now = Date.now()): string {
-  const secs = Math.max(0, Math.round((now - new Date(since).getTime()) / 1000));
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
 }
 
 /** What a row says it is waiting for, in the owner's words rather than a state name. */
@@ -120,13 +112,6 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
 
 function GlanceStrip({ names }: { names: Map<string, string> }) {
   const router = useRouter();
-  // A clock of its own, because elapsed time changes with no event to announce it.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(tick);
-  }, []);
-
   const running = useLiveSessions().filter(isRunning);
   if (!running.length) return null;
 
@@ -143,13 +128,13 @@ function GlanceStrip({ names }: { names: Map<string, string> }) {
           className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground"
           onClick={() => router.push(chatHref(s))}
         >
-          <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400')} />
           <span className="shrink-0 font-medium">{names.get(s.projectId) ?? s.brand}</span>
           <span className="max-w-[24ch] truncate">{s.title ?? 'Untitled chat'}</span>
-          <span data-testid="glance-activity" className="max-w-[28ch] truncate">
-            {s.activity || 'Working'}
-          </span>
-          <span className="shrink-0 font-mono">{elapsed(s.lastActiveAt, now)}</span>
+          {/* The mark carries the spinner, the verb and the seconds, off the
+              page's one clock — the dot, the word and the count this row kept
+              itself were three ways of saying the same thing, and one of them
+              was a beat of its own (bw-96is). */}
+          <ChatStateChip state={liveState(s)} size="inline" testId="glance-activity" className="max-w-[28ch]" />
         </button>
       ))}
     </div>

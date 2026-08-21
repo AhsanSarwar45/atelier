@@ -28,6 +28,12 @@ export interface Mentions {
   report: (slug: string) => ReactNode;
   /** A file named in the words, drawn as the reader wrote it (bw-khe.13). */
   path?: (absolute: string, raw: string, line: number | null) => ReactNode;
+  /**
+   * A whole address, when it names a card or a report of this app's own — drawn
+   * as that chip rather than as raw blue text. Nothing, and the address is left
+   * the link it already was (bw-8fh2.2).
+   */
+  link?: (href: string) => ReactNode | null;
 }
 
 const PROSE_CLASSES =
@@ -40,6 +46,11 @@ const PROSE_CLASSES =
   "prose-pre:bg-zinc-900 prose-pre:text-zinc-100 " +
   "prose-code:text-sm prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 " +
   "prose-code:px-1 prose-code:py-0.5 prose-code:rounded " +
+  // The typography preset draws a backtick of its own before and after every
+  // quoted word — the markdown that was already spent making the chip. So a
+  // command in a message read `like this`, quote marks and all, while a fenced
+  // block (which the preset exempts) read correctly (bw-3ndt.1).
+  "prose-code:before:content-none prose-code:after:content-none " +
   // A pasted path or a long address must not push the column wider than its box.
   "prose-pre:overflow-x-auto break-words";
 
@@ -51,6 +62,20 @@ function textOf(children: ReactNode): string {
   if (typeof children === 'string') return children;
   if (Array.isArray(children)) return children.map(textOf).join('');
   return '';
+}
+
+/**
+ * Whether the words of a link are the address itself.
+ *
+ * That is what a pasted address looks like once the markdown dialect has turned
+ * it into a link: the words and the destination are the same string, give or
+ * take the scheme the dialect fills in for `www.…`. Anything else is a phrase
+ * somebody chose.
+ */
+function wroteItOut(href: string, written: string): boolean {
+  const words = written.trim();
+  if (!words) return true;
+  return words === href || `http://${words}` === href || `https://${words}` === href;
 }
 
 export function MarkdownBody({
@@ -71,10 +96,20 @@ export function MarkdownBody({
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]}
         components={{
-          // A link leaves for its own tab and cannot reach back into this one.
-          a: ({ node, ...props }) => (
-            <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />
-          ),
+          // A link leaves for its own tab and cannot reach back into this one —
+          // unless it names something of ours, in which case it is a chip, and
+          // opens where every other chip opens: inside this window.
+          //
+          // Only when the writer gave it no words of their own. A bare address
+          // is machinery the reader never wanted to see; `[read it](…)` is a
+          // sentence somebody wrote, and swapping it for the report's title
+          // threw those words away (bw-8fh2.5).
+          a: ({ node, ...props }) => {
+            const href = String(props.href ?? '');
+            const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
+            if (ours) return <>{ours}</>;
+            return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
+          },
           // A name the rewriting step marked. Everything else drawn as a span
           // stays a span, so nothing about ordinary text changes.
           span: ({ node, ...props }) => {

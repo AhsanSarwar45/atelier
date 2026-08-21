@@ -70,7 +70,10 @@ describe('what a chat says about its own settings', () => {
       d.draw(status('bypassPermissions'));
     });
 
-    expect(said).toEqual(['Permission mode is now bypassPermissions.']);
+    // The setting's own spelling was the sentence, and this is the one line on
+    // the screen that MUST be read: a chat that has stopped asking before it
+    // runs things (bw-iiv6).
+    expect(said).toEqual(['This chat will now skip every permission check.']);
   });
 
   // A chat that comes up already in plan mode is still a chat nobody switched:
@@ -93,7 +96,7 @@ describe('what a chat says about its own settings', () => {
 
     await driver.setMode('acceptEdits');
 
-    expect(said).toEqual(['Permission mode is now acceptEdits.']);
+    expect(said).toEqual(['This chat will now change files without asking.']);
   });
 
   // The header and the picker read this, not the conversation: they have to be

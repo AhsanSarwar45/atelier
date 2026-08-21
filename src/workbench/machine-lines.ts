@@ -30,6 +30,17 @@
  * the real sorting instead of keeping a copy of it that goes stale
  * (scripts/chat-shows-what-is-yours.mjs, bw-6jq5.4).
  */
+import {
+  inWords,
+  kitSpoke,
+  notHisWords,
+  PERMISSION_MODE,
+  ruleFinished,
+  ruleIsRunning,
+  saidOf,
+  whenItComesBack,
+  whoFor,
+} from '@/workbench/machine-words';
 import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -70,7 +81,21 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // The owner reached for Stop, the agent is going down, the chat begins again.
   'user/synthetic': 'stopped',
   'system/worker_shutting_down': 'stopped',
+  // The rest of what the kit writes in his own name (machine-words.ts,
+  // IN_HIS_NAME). None of it is a thing he did: a picture's measurements, a
+  // slash command's output, the briefing handed to a worker, and any wrapper a
+  // later kit invents. It is the chat's own paperwork, and it reads as that.
+  'user/pasted_image': 'breathing',
+  'user/command_output': 'breathing',
+  'user/fork_brief': 'background',
+  'user/note': 'breathing',
   conversation_reset: 'stopped',
+  // The kit speaking in the chat's own voice, and both of these mean the same
+  // thing: nothing further happens here. An allowance can be waited out and a
+  // rule of his organisation cannot, which is why they are two kinds and not
+  // one (bw-iiv6.12).
+  'kit/limit_reached': 'stopped',
+  'kit/org_blocked': 'stopped',
 
   // Something did not happen that was meant to.
   result: 'failed',
@@ -78,6 +103,9 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   'system/model_refusal_no_fallback': 'failed',
   'system/model_refusal_fallback': 'failed',
   'system/mirror_error': 'failed',
+  // A turn that died on the service, written into the conversation as if the
+  // chat had said it.
+  'kit/service_failed': 'failed',
   'system/hook_response': { note: 'failed', detail: 'breathing' },
   auth_status: { note: 'failed', detail: 'breathing' },
   'system/plugin_install': { note: 'failed', detail: 'breathing' },
@@ -88,6 +116,9 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // What the reader's allowance is doing. Not the machine's own breathing: it
   // is about HIM, and it starts on (bw-jkh2.19).
   rate_limit_event: 'background',
+  // The same news in the chat's own voice: the allowance is spent and the work
+  // is being paid for by the token from here on.
+  'kit/paying_differently': 'background',
 
   // The chat's own memory: folding itself up, and what it carries.
   'system/compact_boundary': 'memory',
@@ -126,6 +157,17 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   'system/hook_started': 'breathing',
   'system/hook_progress': 'breathing',
   tool_use_summary: 'breathing',
+  'system/control_request_progress': 'breathing',
+  'system/elicitation_complete': 'breathing',
+  // A window filling up, and a turn nobody wanted an answer to.
+  'kit/limit_near': 'breathing',
+  'kit/no_answer_wanted': 'breathing',
+  // A chat waiting on him is the one state here he can act on; the others are
+  // it going quiet and picking up again (bw-iiv6).
+  'system/session_state_changed': { note: 'waiting', detail: 'breathing' },
+  // Files he attached, put away. A file that did not arrive is one the agent
+  // will never see, and he is the one who can send it again.
+  'system/files_persisted': { note: 'failed', detail: 'breathing' },
 
   // The app's own asides to the reader, when the record predates families.
   'app/notice': 'background',
@@ -170,7 +212,15 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   // He stopped it, or it stopped.
   'user/synthetic': 'you',
   'system/worker_shutting_down': 'you',
+  'user/pasted_image': 'machine',
+  'user/command_output': 'machine',
+  'user/fork_brief': 'machine',
+  'user/note': 'machine',
   conversation_reset: 'you',
+  // The two that mean the work has stopped dead. Nothing else on the screen
+  // says so, and one of them carries the time it comes back.
+  'kit/limit_reached': 'you',
+  'kit/org_blocked': 'you',
 
   // The turn did not do what he asked.
   result: 'you',
@@ -182,6 +232,11 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
 
   // Why the chat is sitting there.
   'system/api_retry': 'you',
+  'kit/service_failed': 'you',
+  // Money: the allowance is gone and the work is being paid for by the token.
+  // Nothing has stopped, so this is not a stop — but what it costs him has
+  // changed, and stopping or switching models is his to do (bw-iiv6.12).
+  'kit/paying_differently': 'you',
 
   // The allowance: nothing to do while the window is open, and the reason the
   // work stopped once it is not. The driver ranks the closed one `note`.
@@ -217,6 +272,19 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   'system/informational': 'machine',
   'system/notification': 'machine',
   tool_use_summary: 'machine',
+  'system/control_request_progress': 'machine',
+  // A window with room left in it changes nothing he would do — the same
+  // ruling the allowance messages already carry — and a turn nobody wanted an
+  // answer to is the app's own plumbing talking to itself.
+  'kit/limit_near': 'machine',
+  'kit/no_answer_wanted': 'machine',
+  'system/elicitation_complete': 'machine',
+
+  // A chat that has stopped and is waiting on him is his; a chat going quiet or
+  // picking up again is not. An attachment that failed to store is his, because
+  // only he can send the file again (bw-iiv6).
+  'system/session_state_changed': { note: 'you', detail: 'machine' },
+  'system/files_persisted': { note: 'you', detail: 'machine' },
 };
 
 /**
@@ -241,6 +309,100 @@ export function forWhom(kind: string, rank: NoteRank): Audience {
   const found = FOR[kind];
   if (found === undefined) return 'machine';
   return typeof found === 'string' ? found : found[rank];
+}
+
+/**
+ * Who a line written before the driver carried an audience is for, read off the
+ * wording it was frozen with.
+ *
+ * One kind needs this and one only. An allowance line's whole meaning is its
+ * state, and the state used to reach the page as the kit's own word inside the
+ * sentence — "the seven-day window is allowed_warning" — while the only thing
+ * this file was given to sort on was how loud the line was. Loud meant "not
+ * simply open", so a window merely filling up and a window that had actually
+ * stopped his work were one thing to it, and both landed in front of him. That
+ * is the manager's complaint of 2026-08-21, and thirty-four of these are
+ * already in his record with their wording frozen (bw-x6hb).
+ *
+ * So the old sentence is READ rather than rewritten: only one that says the
+ * work was turned away is his. Nothing else is inspected this way — every other
+ * kind either has one reader whatever its state, or already told the two apart
+ * by loudness. New lines never come here at all: the driver settles them at the
+ * state and says so on the note (bw-iiv6).
+ */
+function heldOver(kind: string, text: string): Audience | null {
+  if (kind !== 'rate_limit_event') return null;
+  return /\brejected\b/.test(text) ? 'you' : 'machine';
+}
+
+/**
+ * A frozen sentence said again in English, for the one line that must be read.
+ *
+ * The same freezing (bw-x6hb) left thirty-seven "Permission mode is now
+ * bypassPermissions." lines in the record, and this is not a line he can skip:
+ * it is the announcement that a chat has stopped asking before it runs things.
+ * The driver writes the English one now; these are the ones already written, and
+ * they are restated on the way to the screen rather than left in the setting's
+ * own spelling. Only the mode word is looked at, so a sentence that has been
+ * reworded since simply passes through untouched.
+ */
+const SAID_INSTEAD: Record<string, string> = {
+  rate_limit_event: 'Your usage allowance changed.',
+  'system/background_tasks_changed': 'The list of background jobs changed.',
+  'system/task_updated': 'Something changed about an agent you sent off.',
+};
+
+/** What the old allowance sentence called each window, in today's words. */
+const WINDOW_WAS: Record<string, string> = { 'seven-day': 'weekly', 'five-hour': 'five-hour' };
+
+function saidAgain(kind: string, text: string): string {
+  // A line with no sentence at all: the driver used to fall back to printing
+  // the kind, so thirty-seven rows in the record read `rate_limit_event`.
+  if (text === kind) return SAID_INSTEAD[kind] ?? text;
+
+  if (kind === 'mode') {
+    const was = /^Permission mode is now (\w+)\.$/.exec(text);
+    return was
+      ? `This chat will now ${PERMISSION_MODE[was[1]]?.said ?? inWords(was[1]).toLowerCase()}.`
+      : text;
+  }
+
+  if (kind === 'rate_limit_event') {
+    // "Allowance: the seven-day window is allowed_warning until 12:00 PM" — the
+    // line from the manager's screenshot of 2026-08-21, and the reason all this
+    // exists. `open` was our own word for a window with room left in it.
+    const was = /^Allowance: the ([\w-]+) window is (\w+)(?: until (.+))?$/.exec(text);
+    if (!was) return text;
+    const window = WINDOW_WAS[was[1]] ?? was[1];
+    const state = was[2] === 'open' ? 'allowed' : was[2]!;
+    const said = saidOf(kind, state);
+    if (!said) return text;
+    // The tone is the point of the sentence: a window that turned work away
+    // says when the work starts again, and one merely keeping its books says
+    // when the counter turns over. Restating them all in the softer half was
+    // the look-alike coming back for old records (bw-iiv6.11).
+    return `Your ${window} allowance ${said}${whenItComesBack(whoFor(kind, state) ?? 'machine', was[3] ?? null)}`;
+  }
+
+  if (kind === 'system/hook_started' || kind === 'system/hook_progress') {
+    // "Hook SessionStart:startup (SessionStart)" — six hundred of these in the
+    // record, and every word of them the wire's: the kit's name for the hook,
+    // the kit's name for the moment, and the kit's own bracket telling him
+    // which is which.
+    const was = /^Hook (\S+) \((\w+)\)$/.exec(text);
+    return was ? ruleIsRunning(was[1]!, was[2]!) : text;
+  }
+
+  if (kind === 'system/hook_response') {
+    // "Hook SessionStart:startup ran", and the one that did not.
+    const ran = /^Hook (\S+) ran$/.exec(text);
+    if (ran) return ruleFinished(ran[1]!, saidOf(kind, 'success') ?? 'ran', '');
+    const broke = /^Hook (\S+) error: ([\s\S]+)$/.exec(text);
+    if (broke) return ruleFinished(broke[1]!, saidOf(kind, 'error') ?? 'could not run', broke[2]!);
+    return text;
+  }
+
+  return text;
 }
 
 /**
@@ -323,7 +485,7 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
   for (const item of items) {
     const line = machineLine(item);
     if (!line) {
-      rows.push({ row: 'other', item });
+      rows.push({ row: 'other', item: hisOwnWords(item) });
       continue;
     }
     const last = rows[rows.length - 1];
@@ -351,23 +513,27 @@ export function drawnRows(items: TranscriptItem[]): DrawnRow[] {
 }
 
 /**
- * A line the kit wrote in the reader's name rather than one he typed.
+ * A message standing in the reader's name that he did not type, drawn as what
+ * it really is — or, where the kit only wrapped his own words, unwrapped.
  *
  * Stopping a turn puts "[Request interrupted by user]" into the conversation as
- * a message FROM him, and every such marker the kit writes has the same shape:
- * one line, wrapped in square brackets, standing alone. Drawn as a message it
- * wore his own colour and his own side of the page, so the thing that stopped
- * the work read as the thing he said — which is the complaint this whole job
- * began with (bw-jkh2.12).
+ * a message FROM him, and that one shape was the whole of what this recognised.
+ * It is not the whole of what the kit writes there: an automated background
+ * event, a worker fork's briefing, a slash command, that command's output and
+ * the note about a picture he pasted all arrive the same way, and all of them
+ * were drawn in his colour, on his side of the page, as things he had said
+ * (bw-iiv6.18). The shapes and what each one means are settled once, beside
+ * every other sentence the app writes (`machine-words.ts`).
  *
- * Recognised by shape rather than by wording, because the wordings are the
- * kit's and change without us. The live driver already flags these as they
- * arrive; this is what catches the ones read back from a chat's own record,
- * where the flag was never written down. A message he really did type that is
- * nothing but one bracketed line costs him a grey chip, which is the whole
- * price of it.
+ * The live driver already flags the markers as they arrive; this is what
+ * catches every one of them read back from a chat's own record, where nothing
+ * was written down beyond the text itself.
  */
-export const writtenInHisName = (text: string): boolean => /^\[[^\n\]]+\]$/.test(text.trim());
+export function hisOwnWords(item: TranscriptItem): TranscriptItem {
+  if (item.kind !== 'message' || item.role !== 'user') return item;
+  const read = notHisWords(item.text);
+  return read === null || read.kind !== null ? item : { ...item, text: read.text };
+}
 
 /**
  * A note, or one of the app's own asides, as the same kind of row.
@@ -387,25 +553,55 @@ function machineLine(item: TranscriptItem): {
   text: string;
   body: string | null;
 } | null {
-  if (item.kind === 'message' && item.role === 'user' && writtenInHisName(item.text)) {
-    return {
-      id: item.id,
-      family: familyOf('user/synthetic', 'note'),
-      audience: forWhom('user/synthetic', 'note'),
-      kind: 'user/synthetic',
-      rank: 'note',
-      text: item.text.trim(),
-      body: null,
-    };
+  // The kit talking in the chat's own voice: an answer-shaped message whose
+  // whole content is one of the sentences the kit writes itself. Filed by what
+  // it means and quoted as it stands, because it is already written for a
+  // person and carries a time or a number this app cannot regenerate
+  // (`machine-words.ts`, bw-iiv6.12).
+  if (item.kind === 'message' && item.role === 'assistant') {
+    const spoken = kitSpoke(item.text);
+    if (spoken !== null) {
+      return {
+        id: item.id,
+        family: familyOf(spoken, 'note'),
+        audience: forWhom(spoken, 'note'),
+        kind: spoken,
+        rank: 'note',
+        text: item.text.trim(),
+        body: null,
+      };
+    }
+  }
+  // The kit writing in HIS name. A shape with no kind is one where it only
+  // wrapped words he really typed, and that is his message, not a line about
+  // the machine — `hisOwnWords` takes the wrapper off on the way past.
+  if (item.kind === 'message' && item.role === 'user') {
+    const read = notHisWords(item.text);
+    if (read !== null && read.kind !== null) {
+      return {
+        id: item.id,
+        family: familyOf(read.kind, read.rank),
+        audience: read.audience ?? forWhom(read.kind, read.rank),
+        kind: read.kind,
+        rank: read.rank,
+        text: read.text,
+        body: read.body,
+      };
+    }
   }
   if (item.kind === 'note') {
     return {
       id: item.id,
       family: familyOf(item.noteKind, item.rank),
-      audience: forWhom(item.noteKind, item.rank),
+      // What the driver settled from the message's own state wins: it read the
+      // state, and this file only has the kind and how loud the line is. A note
+      // without one — a kind with a single reader, or a line written before
+      // there were audiences — falls back to the wording it was frozen with,
+      // and then to the ruling for the kind (bw-iiv6).
+      audience: item.audience ?? heldOver(item.noteKind, item.text) ?? forWhom(item.noteKind, item.rank),
       kind: item.noteKind,
       rank: item.rank,
-      text: item.text,
+      text: saidAgain(item.noteKind, item.text),
       body: item.body,
     };
   }
