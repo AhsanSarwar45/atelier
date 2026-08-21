@@ -14,7 +14,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { Hand, Loader2 } from 'lucide-react';
+import { Bot, Hand, Loader2, SquareTerminal } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -30,6 +30,19 @@ import type { ChatState, Holder } from '@/workbench/chat-state';
 const HOLDER_WORD: Record<Holder, string> = {
   terminal: 'Somebody has this chat open in a terminal.',
   program: 'Another program has this chat open.',
+};
+
+/**
+ * The mark on the badge, one per kind of holder.
+ *
+ * It carries the tooltip's fact without the tooltip: a window somebody types
+ * in, or a program driving the kit. It is also half of what tells the badge
+ * from the chip beside it at a glance — the other half being the colour and
+ * the corners (bw-96is.10).
+ */
+const HOLDER_ICON: Record<Holder, typeof Bot> = {
+  terminal: SquareTerminal,
+  program: Bot,
 };
 
 const listeners = new Set<() => void>();
@@ -135,6 +148,16 @@ export function ChatStateChip({
  * Never in place of the chip: a held chat that is answering says both, which is
  * the whole correction — the word it replaced said "occupied" and was read as
  * "working" (bw-96is).
+ *
+ * Three things keep it apart from the chip it stands next to, none of which is
+ * reading it: its own colour, square corners against the chip's round ones, and
+ * a mark for the kind of holder. It was drawn `secondary`/`outline`, for which
+ * the badge has no rule of its own, so it fell back to the same flat grey as an
+ * idle chip — and on a selected row, whose background is that same grey, it
+ * lost its shape entirely and read as loose text (bw-96is.10).
+ *
+ * Quieter than the chip on purpose: an outline against the chip's fill. What
+ * the chat is doing is the thing being read; who holds it is the footnote.
  */
 export function ExternalBadge({
   holder,
@@ -145,17 +168,24 @@ export function ExternalBadge({
   size?: 'row' | 'line';
   className?: string;
 }) {
+  const Mark = HOLDER_ICON[holder];
   return (
     <Badge
-      variant="secondary"
+      variant="info"
       appearance="outline"
       size={size === 'line' ? 'sm' : 'xs'}
-      shape="circle"
+      shape="default"
       data-testid="chat-external"
       data-holder={holder}
       title={HOLDER_WORD[holder]}
-      className={cn('shrink-0', className)}
+      // Outline, not fill. A filled badge in its own colour beat the chip
+      // beside it, so the eye landed on who holds the chat before what the
+      // chat is doing, which is the wrong way round. The border is named
+      // rather than left transparent, because transparent is exactly how it
+      // used to disappear into a selected row (bw-96is.10).
+      className={cn('shrink-0 gap-1 border-[var(--color-info-accent)]/45 bg-transparent', className)}
     >
+      <Mark aria-hidden="true" />
       external
     </Badge>
   );

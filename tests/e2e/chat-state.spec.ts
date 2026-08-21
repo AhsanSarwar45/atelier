@@ -196,6 +196,80 @@ test.describe('a chat another program is in', () => {
     chat.forget();
   });
 
+  test('keeps its badge whole on the row the reader has open, and apart from the mark beside it', async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    const project = await aFixtureProject(request);
+    const chat = aChatSomebodyElseIsIn(project.path, 'Read the badge on the open row');
+    const release = claimConversation(chat.id, { status: 'busy' });
+
+    try {
+      await openChatTab(page, project);
+      const row = rowFor(page, chat.id);
+      await expect(row.getByTestId('row-pill')).toHaveAttribute('data-working', 'yes', { timeout: 30_000 });
+      const badge = row.getByTestId('chat-external');
+      await expect(badge).toBeVisible();
+
+      // What it measures is the drawn box, not a class name: the badge was
+      // asked for a look the badge component has no rule for, fell back to a
+      // flat grey with a transparent border, and on the selected row — whose
+      // background is that same grey — there was nothing left of it to see
+      // (bw-96is.10).
+      const alone = await badge.boundingBox();
+      expect(alone, 'the badge drew no box at all').not.toBeNull();
+      expect(alone!.width, 'the badge drew nothing wide').toBeGreaterThan(0);
+      expect(alone!.height, 'the badge drew nothing tall').toBeGreaterThan(0);
+
+      await row.getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript')).toBeVisible({ timeout: 30_000 });
+      await expect(row, 'the row left the rail when it was opened').toBeVisible();
+      const opened = await badge.boundingBox();
+      expect(opened, 'the badge vanished on the row the reader has open').not.toBeNull();
+      expect(opened!.width, 'the badge changed width when its row was selected').toBeCloseTo(alone!.width, 0);
+      expect(opened!.height, 'the badge changed height when its row was selected').toBeCloseTo(alone!.height, 0);
+
+      // And it is not the mark: a reader who does not stop to read the words
+      // still has the colour and the corners to go on.
+      const apart = await page.evaluate(() => {
+        const seen = document.querySelector('[data-testid="session-state"]');
+        const one = seen?.querySelector('[data-testid="chat-external"]');
+        const two = seen?.querySelector('[data-testid="session-state-chip"]');
+        if (!one || !two) return null;
+        const a = getComputedStyle(one);
+        const b = getComputedStyle(two);
+        return {
+          colour: a.backgroundColor !== b.backgroundColor,
+          corners: a.borderTopLeftRadius !== b.borderTopLeftRadius,
+          // Its own two: nothing behind it, and a border that is really there.
+          fill: a.backgroundColor,
+          edge: a.borderTopColor,
+          edgeWidth: parseFloat(a.borderTopWidth),
+        };
+      });
+      expect(apart, 'the open chat drew no badge beside its mark').not.toBeNull();
+      expect(apart!.colour, 'the badge is the same colour as the mark beside it').toBe(true);
+      expect(apart!.corners, 'the badge is the same shape as the mark beside it').toBe(true);
+
+      // And quieter than it: an outline where the mark has a fill, so the eye
+      // lands on what the chat is doing before who is holding it. A filled
+      // badge in its own colour beat the mark it is a footnote to, and a
+      // transparent BORDER is how it vanished into the selected row in the
+      // first place — so both halves are held here (bw-96is.10).
+      expect(apart!.fill, 'the badge is filled, so it shouts over the mark beside it').toMatch(
+        /rgba\(0, 0, 0, 0\)|transparent/,
+      );
+      expect(apart!.edgeWidth, 'the badge drew no border to hold its shape').toBeGreaterThan(0);
+      expect(apart!.edge, 'the badge border is invisible, which is how it vanished before').not.toMatch(
+        /rgba\(0, 0, 0, 0\)|transparent/,
+      );
+    } finally {
+      release();
+    }
+    chat.forget();
+  });
+
   test('has no writing box at all, and gets an ordinary one back when they stop', async ({ page, request }) => {
     test.setTimeout(180_000);
     const project = await aFixtureProject(request);

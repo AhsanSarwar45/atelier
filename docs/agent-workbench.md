@@ -1586,7 +1586,12 @@ conversation is a third fact, drawn as an `external` badge beside the mark, with
 the kind of holder in its tooltip — a terminal, or a program driving through the
 kit. It is drawn only on chats somebody else holds, so it means something by
 being there; the word it replaced meant "occupied" and was read as "working",
-which is the whole of what went wrong.
+which is the whole of what went wrong. Three cues keep it apart from the mark
+it stands beside without anyone reading either — its own colour, square corners
+against the mark's round ones, and a glyph for the kind of holder. It first
+shipped as `secondary`/`outline`, a pair `Badge` has no compound rule for, so
+it fell back to the same flat grey as an idle mark and disappeared altogether
+into the background of the selected row (bw-96is.10).
 
 **A held chat has no writing box, and the line in its place agrees with the
 mark.** The box used to be drawn in full and refuse every keystroke — a locked
