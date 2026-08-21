@@ -1307,7 +1307,7 @@ both answers together: **the English sentence it draws, and who it is for.**
 | what the table holds | how many | example |
 |---|---|---|
 | kinds the kit sends, all named | 42 | `rate_limit_event`, `system/hook_response` |
-| of those, kinds the union its iterator reads leaves out | 4 (3 written down nowhere) | `active_goal`, `system/post_turn_summary` |
+| of those, kinds the union its iterator reads leaves out | 4 (3 written down nowhere) | `active_goal`, `system/post_turn_summary` (§8.2.4.4) |
 | states over 18 of those kinds | 59 | `allowed_warning`, `error_max_budget_usd` |
 | kinds deliberately silent, each with its reason | 4 | a guess at what he might type next belongs in the writing box |
 | sentences the kit writes in the chat's own voice | 6 | "You've hit your session limit" (§8.2.4.2) |
@@ -1573,6 +1573,76 @@ colour codes, and prose that writes about him in the third person while standing
 in his name. Anything a tell catches must come back either as a machine line or
 as his own words with the wrapper off — never as text he typed. A person sending
 one of these as an entire message costs himself one grey chip; the kit sends 63.
+
+##### 8.2.4.4 The kit sends more than it declares (bw-cx70)
+
+"maybe other messages that you missed. are you checking their sdk and dcos?" —
+the manager, 2026-08-21, on the sweep above. The honest answer was **half of
+them**. Everything §8.2.4.1 knows came from one union in the kit's type file,
+`SDKMessage`, read as text so a kind added to it is caught the day it lands. But
+the kit ships a program as well as a type file, and its read loop is the thing
+that actually decides what a chat receives: it eats five kinds where they
+arrive — the control channel, a keep-alive, the transcript mirror — and hands
+everything else to whoever is iterating the run. **Four of the kinds it hands on
+are in that union nowhere**, so no amount of reading it would ever have found
+them.
+
+Outside that union is not the same as written down nowhere, and the check now
+says which is which rather than being told (bw-cx70.7). `active_goal` is
+declared in full, with a doc comment of its own that supplies its
+null-means-cleared rule; it is simply reachable through `StdoutMessage`, the
+transport's own union, and never through the one the iterator is typed with.
+The other three are named in the type file nowhere at all. The run reports both
+numbers, and it works them out by reading: hide the declaration and the count of
+kinds written down nowhere moves from three to four.
+
+| what the kit sends | what it means | the line it draws | for |
+|---|---|---|---|
+| `active_goal` | a standing goal of his, checked every time the run tries to stop | "Still working towards the goal you set: …", and "The goal you set is no longer running." | machine while it is chased, his once it is gone |
+| `autocompact_state` | whether this chat folds its own history up as the window fills | "This chat folds its own history up as the window fills." | machine |
+| `system/post_turn_summary` | the kit's own reading of where the turn ended | "This turn is stopped, waiting on you — waiting on your answer." | his when it is stopped or failed |
+| `system/task_summary` | what this chat is doing right now, in one line | "Working on: reading the settings." | machine |
+
+Fed through the driver before this, the first two drew `The machine said
+something this build has no words for (active_goal)` — the wire's own word, in
+brackets, in the middle of his conversation — and the other two drew whatever
+text they carried with nobody having ruled who they were for. None had reached
+his record yet: the first standing goal set in any chat produces one.
+
+**So the check reads the kit's program as well as its types.** It finds the read
+loop, walks its branches, and takes every kind handed on rather than eaten there;
+a bundle whose loop it cannot find is a failure and not an empty answer, because
+the alternative is falling silently back to the file it was already reading.
+
+Three gates behind that, each of which a driver case alone used to satisfy:
+
+- **A case is not a ruling.** The family a line lands in is read off `BY_KIND` as
+  it is drawn and its reader off `FOR`, so a kind with a sentence and neither
+  entry draws into whichever heap the default happens to be. Every kind that
+  reaches a line must now be filed in both.
+- **A sentence asked for must exist.** A driver case that reaches for the words
+  table and finds nothing there draws its fallback at every reader, forever, and
+  the states sweep cannot see it — a kind missing from the table is a kind that
+  sweep never reaches.
+- **An empty record is not a pass.** Every verdict is counted over his real
+  chats, so a store that will not open makes all of them true. It had been doing
+  exactly that on this machine, whose record is under an earlier name.
+- **A field name cannot be invented.** The kit is the pipe, not the author:
+  these four are written by Claude Code, which ships its own schema for each one
+  with a sentence beside every field. That is where the names in the table came
+  from — and until this gate, nothing in the repo said so twice. A fixture and
+  the case it exercises agree on an invented name as readily as on a real one,
+  so a name read wrong would pass every test, pass this check, and send every
+  real message of that kind to the fallback line for good. The check now reads
+  those schemas out of the very program the app drives, found the way the app
+  finds it, and fails on a field the table reads that no schema declares — and
+  on a machine with no Claude Code at all, rather than reporting green over
+  nothing it could not read (bw-cx70.8).
+
+And the last-resort line for a kind nobody has ever met no longer ends in the
+kind's own name in brackets — the same wire word one punctuation mark further
+from the reader. The name is still on the note's body and on the kind the record
+keeps, where anyone opening the line can read it.
 
 #### 8.2.5 What this costs the log
 
@@ -2246,6 +2316,19 @@ search, spend, plan usage, the token picture, report viewer), `tests/e2e/workben
 
 ### 9.3 Declared shortcuts
 
+- The kit's read loop is found in its shipped program by the name of the method
+  that runs it. A bundle that renames or restructures it fails the run outright
+  rather than falling back to the type file, which is the point: half an answer
+  read silently is the fault §8.2.4.4 exists for.
+- Three of the four kinds that loop hands on are written by Claude Code, which
+  ships no readable source — their shapes are read out of the schemas embedded
+  in the program itself, whichever one this machine drives. That follows an
+  update by construction; a build that stopped embedding them would leave the
+  check unable to read a shape, and it fails saying so.
+- None of those four can be put in front of a browser check. They exist only on
+  the live stream and are never written into a chat's record, so no record
+  fixture can produce one; proving them on a real screen needs a stand-in
+  program speaking the stream protocol, which this repo does not have.
 - `bead_link` and `report_link` duplicate what the board holds. They are a
   read cache for speed; the board is the record, and a rebuild from
   `bd provenance` must always be possible.
@@ -2342,6 +2425,17 @@ search, spend, plan usage, the token picture, report viewer), `tests/e2e/workben
   rather than as his words. The cost of being wrong is one grey chip on a
   message nobody was going to re-read; the alternative, matching the kit's
   wordings, is wrong the day the kit rewords one of the sixty-three.
+- Three of the four kinds in §8.2.4.4 are written down in no type file
+  anywhere: their shapes are read out of the strings the kit's shipped program
+  is caught writing. So their lines read only the fields that program is caught
+  writing, and the four fields beside the compaction setting — how big the
+  window is, the point it folds at, whether the setting was imposed and where it
+  came from — are drawn nowhere, however useful they look. The day the kit
+  declares them, they can be read.
+- The kit's read loop is found by the name of the method that holds it. A bundle
+  that renames it fails the check loudly rather than passing over a vocabulary
+  it could not read — which is the right way round, but it does mean a kit
+  upgrade that moves the loop stops the check until somebody looks.
 - The gate that catches a code word pasted into a line reads the kit's own doc
   comments, and only sees a field whose comment carries an example of the word
   ("a short snake_case reason set by the host CLI", `host_exit`). Two fields
