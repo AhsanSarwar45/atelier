@@ -49,6 +49,8 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
+import { chatState } from '@/workbench/chat-state';
+import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
@@ -58,7 +60,7 @@ import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
-import { useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
+import { useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
@@ -561,7 +563,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // chat's own facts are a board query away and the box must refuse from the
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
-  const held = heldElsewhere(view.state, live?.externalId ?? facts?.externalId, elsewhere, facts?.runningElsewhere);
+  const externalId = live?.externalId ?? facts?.externalId ?? null;
+  const held = heldElsewhere(view.state, externalId, elsewhere, facts?.runningElsewhere);
+  // What that program is doing, from the stream while it is connected and from
+  // the chat's own facts until it has spoken (bw-96is).
+  const holds = useHolds();
+  const holder = !held || !externalId ? null : (holds?.get(externalId) ?? (holds ? null : facts?.held) ?? null);
 
   /**
    * When the agent started owing an answer. The counting itself is the working
@@ -575,6 +582,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // reads in a row are both `running_tool`, and counting from the first would
     // show a one-second read as forty (bw-f1q.17).
   }, [busy, view.state, view.stateLabel]);
+  /**
+   * The one reading every screen draws (chat-state.ts). A held chat is read
+   * from what the holder says about itself; ours from our own driver's word.
+   */
+  const state = chatState({
+    state: view.state,
+    label: view.stateLabel,
+    since: busySince,
+    held: held ? (holder ?? { id: externalId ?? '', holder: 'program', doing: 'unknown', since: null }) : null,
+  });
+
   const running = view.items.find((it) => it.kind === 'tool' && it.status === 'running');
   const reported = running && running.kind === 'tool' ? running.seconds : 0;
 
@@ -781,20 +799,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       >
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
-            at: the messages arrive as that program works. It says the same word
-            its row in the list says, and it clears itself when that program
-            stops, because the stream it is read from does (bw-dmxj.10). */}
-        <Badge
-          variant={held ? 'success' : busy ? 'warning' : 'secondary'}
-          appearance={held ? 'default' : 'light'}
-          size="sm"
-          shape="circle"
+            at: the messages arrive as that program works. So the line says what
+            the holder says it is doing, and wears the badge beside it — the two
+            are separate facts and the badge never stands in for the first
+            (bw-96is). Both clear themselves when that program stops, because
+            the stream they are read from does (bw-dmxj.10). */}
+        <span
           data-testid="session-state"
-          data-state={held ? 'working' : view.state}
-          className="shrink-0"
+          data-state={held ? 'held' : view.state}
+          className="flex shrink-0 items-center gap-2"
         >
-          {held ? 'working' : view.stateLabel}
-        </Badge>
+          <ChatStateChip state={state} size="line" testId="session-state-chip" />
+          {state.external && <ExternalBadge holder={state.external.holder} size="line" />}
+        </span>
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
             are both named again on the writing box below, while every chip
@@ -941,8 +958,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </SplitPaths.Provider>
 
       <div className="border-t border-border/60 px-4 py-3">
-        {/* One frame holds the typing, the pictures waiting to go and the button
-            that sends them, so the whole thing reads as the place you write. */}
+        {/* Nothing to write in while another program holds the conversation.
+            The box used to be drawn in full and refuse every keystroke, which
+            is a door with a lock on it where there is no door: typing here
+            would wake a SECOND agent on the same record (§6.3.3), so what
+            stands in its place is the one line that says who is in there. It
+            comes back by itself when they stop, because the stream this is read
+            from does (bw-96is). */}
+        {held ? (
+          <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-1 text-xs text-muted-foreground">
+            {state.external?.holder === 'terminal'
+              ? 'Somebody is working in this chat in a terminal.'
+              : 'Another program is working in this chat.'}{' '}
+            It draws here as it goes; the writing box comes back when they stop.
+          </p>
+        ) : (
         <div
           data-testid="composer-frame"
           className={cn(
@@ -986,11 +1016,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           {sendError && (
             <p data-testid="send-error" className="mb-2 text-xs text-red-500">
               {sendError}
-            </p>
-          )}
-          {held && (
-            <p data-testid="held-elsewhere" className="mb-2 text-xs text-muted-foreground">
-              Another program is working in this chat. It draws here as it goes; you can type when it stops.
             </p>
           )}
           <input
@@ -1136,6 +1161,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             )}
           </div>
         </div>
+        )}
       </div>
 
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}

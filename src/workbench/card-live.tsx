@@ -8,7 +8,8 @@
  */
 'use client';
 
-import { isLive, useLiveSessions } from '@/workbench/live';
+import { ChatStateChip } from '@/workbench/chat-state-chip';
+import { isLive, liveState, useLiveSessions } from '@/workbench/live';
 
 export function CardLiveChat({ beadId }: { beadId: string }) {
   const live = useLiveSessions().find((s) => isLive(s) && s.beads.includes(beadId));
@@ -27,13 +28,11 @@ export function CardLiveChat({ beadId }: { beadId: string }) {
       onClick={(e) => e.stopPropagation()}
       className="mt-1.5 flex w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-[11px] text-muted-foreground hover:bg-accent"
     >
-      <span className="relative flex size-1.5 shrink-0">
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-        <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
-      </span>
-      <span data-testid="card-live-activity" className="truncate">
-        {live.activity || 'Working'}
-      </span>
+      {/* The same mark the chat's own line and its row in the list draw, so a
+          card says what a chat is doing in the words the reader already knows
+          — and stops claiming work when the chat is merely attached and idle,
+          which a pulsing dot did for as long as it stayed open (bw-96is). */}
+      <ChatStateChip state={liveState(live)} size="inline" testId="card-live-activity" />
     </a>
   );
 }

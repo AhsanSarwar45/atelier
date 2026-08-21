@@ -33,9 +33,10 @@ class FakeStream {
     this.closed = true;
   }
 
-  /** The sidecar says which conversations a live process is holding. */
+  /** The sidecar says which conversations a live process is holding, and what each is doing. */
   says(conversations: string[]): void {
-    this.onmessage?.({ data: JSON.stringify({ kind: 'running', conversations }) });
+    const holds = conversations.map((id) => ({ id, holder: 'terminal', doing: 'unknown', since: null }));
+    this.onmessage?.({ data: JSON.stringify({ kind: 'running', holds }) });
   }
 
   /** The connection dies the way it died on the manager's machine. */

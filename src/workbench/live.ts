@@ -12,6 +12,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
+import { chatState, counting, type ChatState, type HeldChat } from '@/workbench/chat-state';
 import { NOTHING_KNOWN, type PlanUsage } from '@/workbench/plan-usage';
 import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
 
@@ -36,6 +37,17 @@ export interface LiveSession {
   waitingFor: string | null;
   lastActiveAt: string;
   /**
+   * When it started doing what it is doing, or `null` when it is doing nothing
+   * that takes time.
+   *
+   * Its own clock, separate from `lastActiveAt`: that one moves on every line
+   * of an answer, and counting from it would show a two-minute read as one
+   * second. Restarted when the WORDS change and not merely the kind of work,
+   * which is the same rule the open chat's own line follows (bw-f1q.17,
+   * bw-96is).
+   */
+  busySince: string | null;
+  /**
    * When the person himself last spoke in this chat, or `null` if nothing here
    * has ever heard him.
    *
@@ -47,6 +59,21 @@ export interface LiveSession {
   startedAt: string;
   /** Cards this chat has touched, as the machine recorded them. */
   beads: string[];
+}
+
+/**
+ * The one reading (chat-state.ts) for a chat in this store.
+ *
+ * No holder is passed: every view over this store lists chats an agent of ours
+ * is attached to, and a held chat is by definition one where ours is not
+ * (heldElsewhere). The chat's own screen is where the two meet.
+ */
+export function liveState(s: LiveSession): ChatState {
+  return chatState({
+    state: s.state,
+    label: s.activity,
+    since: s.busySince === null ? null : Date.parse(s.busySince),
+  });
 }
 
 /**
@@ -85,6 +112,16 @@ let snapshot: LiveSession[] = sessions;
  * empty set would rub those marks out before the stream had spoken.
  */
 let running: Set<string> | null = null;
+/**
+ * What each of those conversations is doing, by the same id, `null` until the
+ * stream has said for the same reason as above.
+ *
+ * Held apart from the set because the set is what the writing box turns on —
+ * one question, answered the same way it always was — while this is what the
+ * screen draws, and a screen that cannot say what a chat is doing must still
+ * be able to say that somebody is in there (bw-96is).
+ */
+let holds: Map<string, HeldChat> | null = null;
 /**
  * How many times the stream has said the tools' own session folders moved, for
  * each project anybody is watching.
@@ -161,6 +198,10 @@ function fromSummary(s: SessionSummary & { activity: string; beads: string[] }):
     activity: s.activity,
     waitingFor: null,
     lastActiveAt: s.lastActiveAt,
+    // Nothing in the list says when the turn began, so a chat found already
+    // working counts from the last thing it was seen to do. That is the moment
+    // its state was last published, which is what the count means anyway.
+    busySince: counting(s.state) ? s.lastActiveAt : null,
     lastSpokeAt: s.lastSpokeAt ?? null,
     startedAt: s.createdAt,
     beads: s.beads,
@@ -199,7 +240,8 @@ function absorb(frame: WatchFrame): void {
     return;
   }
   if (frame.kind === 'running') {
-    running = new Set(frame.conversations);
+    running = new Set(frame.holds.map((h) => h.id));
+    holds = new Map(frame.holds.map((h) => [h.id, h]));
     announce();
     return;
   }
@@ -251,6 +293,7 @@ function absorb(frame: WatchFrame): void {
         state: 'starting',
         activity: '',
         waitingFor: null,
+        busySince: e.at,
         // A chat that has just come into being has not been spoken in yet; the
         // message he sends it arrives on its own event, below.
         lastSpokeAt: null,
@@ -274,13 +317,20 @@ function absorb(frame: WatchFrame): void {
       if (!moves(e.sessionId)) return;
       patch(e.sessionId, { lastSpokeAt: e.at, lastActiveAt: e.at });
       break;
-    case 'session.state':
+    case 'session.state': {
+      const had = sessions.find((s) => s.id === e.sessionId);
+      // Two reads in a row are both `running_tool`, and counting from the first
+      // would show a one-second read as forty; the same words carrying on are
+      // the same piece of work (bw-f1q.17).
+      const fresh = !had || had.state !== e.state || had.activity !== e.label;
       patch(e.sessionId, {
         state: e.state,
         activity: e.label,
+        busySince: counting(e.state) ? (fresh ? e.at : (had?.busySince ?? e.at)) : null,
         ...(moves(e.sessionId, e.state) ? { lastActiveAt: e.at } : {}),
       });
       break;
+    }
     case 'ask.permission':
       patch(e.sessionId, { waitingFor: e.title, lastActiveAt: e.at });
       break;
@@ -427,6 +477,22 @@ export function useRunningElsewhere(): Set<string> | null {
   return useSyncExternalStore(
     subscribe,
     () => running,
+    () => null,
+  );
+}
+
+/**
+ * What each of those conversations is doing, by the tool's own id, or `null`
+ * while the stream has not yet said.
+ *
+ * The stream is the only place this can come from for a chat nothing of ours
+ * drives: it has no session of ours to carry an event and no driver to publish
+ * a state (§6.3.4).
+ */
+export function useHolds(): Map<string, HeldChat> | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => holds,
     () => null,
   );
 }

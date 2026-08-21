@@ -18,7 +18,15 @@ import { Badge } from '@/components/ui/badge';
 import { apiUrl } from '@/lib/api-base';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { useHeardFromOutside, useLiveSessions, useRunningElsewhere, type LiveSession } from '@/workbench/live';
+import { chatState, type HeldChat } from '@/workbench/chat-state';
+import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
+import {
+  useHeardFromOutside,
+  useHolds,
+  useLiveSessions,
+  useRunningElsewhere,
+  type LiveSession,
+} from '@/workbench/live';
 import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -144,6 +152,13 @@ export function withLive(
    * would rub those marks out before the stream had spoken.
    */
   running: ReadonlySet<string> | null = null,
+  /**
+   * What each of those conversations is doing, by the same id, or `null` while
+   * the stream has not said. Kept beside the set rather than replacing it: the
+   * set is what the writing box turns on, and this is what the row draws
+   * (bw-96is).
+   */
+  holds: ReadonlyMap<string, HeldChat> | null = null,
 ): RestoreRow[] {
   const byId = new Map(rows.filter((r) => r.sessionId).map((r) => [r.sessionId!, r]));
   const merged = [...rows];
@@ -193,7 +208,15 @@ export function withLive(
   // The mark last, and over everything: a chat that starts or stops being worked
   // in changes nothing else about its row, and the reader is not reloading.
   const marked = running
-    ? merged.map((r) => (r.externalId ? { ...r, runningElsewhere: running.has(r.externalId) } : r))
+    ? merged.map((r) =>
+        r.externalId
+          ? {
+              ...r,
+              runningElsewhere: running.has(r.externalId),
+              held: holds ? (holds.get(r.externalId) ?? null) : r.held,
+            }
+          : r,
+      )
     : merged;
 
   return marked.sort(byWhatIsWorking);
@@ -212,12 +235,13 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
   const running = useRunningElsewhere();
+  const holds = useHolds();
   // The order as it was last drawn. Read while rendering and written after, so
   // what he is pointing at is what decides where the rows go (holdStill).
   const settled = useRef<string[]>([]);
   const rows = useMemo(
-    () => holdStill(withLive(fetched, live, projectId, running), settled.current),
-    [fetched, live, projectId, running],
+    () => holdStill(withLive(fetched, live, projectId, running, holds), settled.current),
+    [fetched, live, projectId, running, holds],
   );
   useEffect(() => {
     settled.current = rows.map(rowKey);
@@ -358,6 +382,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
             {group.rows.map((row) => {
               const key = rowKey(row);
               const live = row.state !== 'dormant' && row.state !== 'ended';
+              const state = chatState({ state: row.state, held: row.held ?? null });
               return (
                 <div
                   key={key}
@@ -429,34 +454,18 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       >
                         opening
                       </Badge>
-                    ) : row.runningElsewhere ? (
-                      // The strongest thing a row can say, so it says it in
-                      // place of "ready" rather than beside it: one pill's
-                      // worth of room, and two would read as two facts.
-                      <Badge
-                        variant="success"
-                        appearance="default"
-                        size="xs"
-                        shape="circle"
-                        data-testid="row-pill"
-                        data-pill="working"
-                        className="ml-auto shrink-0"
-                      >
-                        working
-                      </Badge>
                     ) : (
-                      live && (
-                        <Badge
-                          variant="success"
-                          appearance="light"
-                          size="xs"
-                          shape="circle"
-                          data-testid="row-pill"
-                          data-pill="ready"
-                          className="ml-auto shrink-0"
-                        >
-                          ready
-                        </Badge>
+                      // The same reading the chat's own line draws, in the same
+                      // words (chat-state.ts): what it is doing, and beside it
+                      // — never in place of it — the badge that says somebody
+                      // else is in there. A row that is asleep says nothing at
+                      // all, because most of the list is asleep and a pill on
+                      // every one of them is a pill on none (bw-96is).
+                      (state.working || state.waiting || live || state.external) && (
+                        <span className="ml-auto flex shrink-0 items-center gap-1">
+                          <ChatStateChip state={state} testId="row-pill" />
+                          {state.external && <ExternalBadge holder={state.external.holder} />}
+                        </span>
                       )
                     )}
                   </div>

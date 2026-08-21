@@ -42,6 +42,7 @@ function session(over: Partial<LiveSession> = {}): LiveSession {
     state: 'starting',
     activity: 'Starting',
     waitingFor: null,
+    busySince: null,
     lastActiveAt: '2026-08-16T11:00:00.000Z',
     lastSpokeAt: null,
     startedAt: '2026-08-16T11:00:00.000Z',
