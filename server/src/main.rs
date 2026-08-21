@@ -11,6 +11,7 @@ mod identity;
 mod laid_down;
 mod report_tools;
 mod routes;
+mod serving;
 mod service;
 
 use axum::{
@@ -21,7 +22,7 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Router,
 };
-use rust_embed::Embed;
+use rust_embed::{Embed, EmbeddedFile};
 use std::env;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
@@ -40,27 +41,29 @@ fn env_flag(name: &str) -> bool {
 }
 
 /// Serves embedded static files, with fallback to index.html for SPA routing.
+///
+/// Every answer says how long it may be kept and what it is, so a browser
+/// holding the previous build is told to come and get the new one rather than
+/// drawing what it already has (bw-8um.3.11).
 async fn serve_static(req: Request<Body>) -> impl IntoResponse {
-    let path = req.uri().path().trim_start_matches('/');
+    let path = req.uri().path().trim_start_matches('/').to_string();
+    let held = req
+        .headers()
+        .get(header::IF_NONE_MATCH)
+        .and_then(|offered| offered.to_str().ok())
+        .map(str::to_owned);
+    let held = held.as_deref();
 
     // Try the exact path first
-    if let Some(content) = Assets::get(path) {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, mime.as_ref())
-            .body(Body::from(content.data.into_owned()))
-            .unwrap();
+    if let Some(content) = Assets::get(&path) {
+        let mime = mime_guess::from_path(&path).first_or_octet_stream();
+        return served(&path, content, mime.as_ref(), held);
     }
 
     // Try with .html extension (for Next.js static export)
     let html_path = format!("{}.html", path);
     if let Some(content) = Assets::get(&html_path) {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "text/html")
-            .body(Body::from(content.data.into_owned()))
-            .unwrap();
+        return served(&html_path, content, "text/html", held);
     }
 
     // Try index.html in subdirectory
@@ -70,26 +73,45 @@ async fn serve_static(req: Request<Body>) -> impl IntoResponse {
         format!("{}/index.html", path)
     };
     if let Some(content) = Assets::get(&index_path) {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "text/html")
-            .body(Body::from(content.data.into_owned()))
-            .unwrap();
+        return served(&index_path, content, "text/html", held);
     }
 
     // Fallback to root index.html for SPA client-side routing
     if let Some(content) = Assets::get("index.html") {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "text/html")
-            .body(Body::from(content.data.into_owned()))
-            .unwrap();
+        return served("index.html", content, "text/html", held);
     }
 
     // 404 if nothing found
     Response::builder()
         .status(StatusCode::NOT_FOUND)
+        .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from("Not Found"))
+        .unwrap()
+}
+
+/// One embedded file, answered the same way whichever of the four routes above
+/// found it — which is what stops a rule being added to three of them.
+fn served(path: &str, file: EmbeddedFile, mime: &str, held: Option<&str>) -> Response<Body> {
+    let tag = serving::tag_for(&file.metadata.sha256_hash());
+    let kept_for = serving::kept_for(path);
+
+    // The browser already has this exact file. Saying so costs a few bytes
+    // instead of the whole file, which is what makes asking every time cheap.
+    if serving::already_held(held, &tag) {
+        return Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::CACHE_CONTROL, kept_for)
+            .header(header::ETAG, &tag)
+            .body(Body::empty())
+            .unwrap();
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime)
+        .header(header::CACHE_CONTROL, kept_for)
+        .header(header::ETAG, &tag)
+        .body(Body::from(file.data.into_owned()))
         .unwrap()
 }
 

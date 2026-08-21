@@ -8,3 +8,4 @@ pub mod laid_down;
 pub mod report_tools;
 pub mod routes;
 pub mod service;
+pub mod serving;
