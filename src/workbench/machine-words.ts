@@ -487,6 +487,54 @@ export const SAID_NOTHING: Record<string, string> = {
   prompt_suggestion: 'a guess at what he might type next; it belongs in the writing box, never in the record',
 };
 
+/**
+ * What to call one of his own rules, with the kit's naming taken off it.
+ *
+ * The kit names a rule by the moment it runs at and what it matches —
+ * `PreToolUse:Bash`, `SessionStart:startup`, or just `Stop` — so "Your
+ * PreToolUse:Bash rule is running" hands him the wire's word for the moment
+ * twice: once inside the name and once again in the English after it. The
+ * moment is already said in English at the end of the line, so what is worth
+ * keeping is only the half that says WHICH rule (bw-iiv6.9).
+ */
+export function ruleCalled(name: string): string | null {
+  const [moment, matches] = name.split(':');
+  const left = moment !== undefined && moment in HOOK_MOMENT ? matches : name;
+  return left === undefined || left.length === 0 ? null : left;
+}
+
+/**
+ * The whole of "Your Bash rule is running, before a tool runs."
+ *
+ * Both the live line and the restatement of an old one are made here, for the
+ * same reason the allowance line's ending is: two makers drift, and the drift
+ * is a wire word coming back on the older half (bw-iiv6.9).
+ */
+export function ruleIsRunning(name: string, moment: string): string {
+  const when = HOOK_MOMENT[moment];
+  return `Your ${ruleCalled(name) ?? 'own'} rule is running${when ? `, ${when}` : ''}.`;
+}
+
+/** The same, for a rule that has finished: "Your startup rule ran." */
+export function ruleFinished(name: string, said: string, trouble: string): string {
+  return `Your ${ruleCalled(name) ?? 'own'} rule ${said}${trouble ? `: ${trouble}` : ''}.`;
+}
+
+/**
+ * How an allowance line ends, which is the whole of its tone.
+ *
+ * The time means two different things on the two sides: to him it is when his
+ * work starts again, to the machine's own books it is when a counter turns
+ * over. The live driver had this rule and the restatement of an old line did
+ * not, so a frozen line saying the work had been turned away came back reading
+ * like routine bookkeeping — the same look-alike the job exists to remove
+ * (bw-iiv6.11). One rule, in one place, used by both.
+ */
+export function whenItComesBack(who: Audience, back: string | null): string {
+  if (back === null) return '.';
+  return who === 'you' ? ` — nothing more runs until ${back}.` : ` (it renews at ${back}).`;
+}
+
 /** What one state of one kind reads as, or null when the message brings its own words. */
 export function saidOf(kind: string, state: string): string | null {
   return WORDS[kind]?.states[state]?.said ?? null;
@@ -503,3 +551,139 @@ export function saidOf(kind: string, state: string): string | null {
 export function whoFor(kind: string, state: string): Audience | null {
   return WORDS[kind]?.states[state]?.who ?? null;
 }
+
+/**
+ * What the kit says in the CHAT'S OWN VOICE, rather than as a message about it.
+ *
+ * The manager, 2026-08-21, on "You've hit your session limit · resets 3:50pm
+ * (Asia/Karachi)" drawn as an ordinary grey paragraph: "this you hit your
+ * session limit, which is the actual status that matters, shows as regular
+ * message". He is right, and it is a different fault from the one above.
+ *
+ * Everything in `WORDS` arrives as a message ABOUT the run — a kind, a state,
+ * a shape the driver can read. These arrive as the run's own answer: the kit
+ * opens an assistant message, writes one sentence, and closes it. There is no
+ * kind on it and no state beside it, so every rule this file makes is looking
+ * at the other door, and the one line in the whole app that means nothing more
+ * will happen until 3:50pm draws exactly like a sentence about code.
+ *
+ * The sentence itself is the only reliable signal. The status that ought to
+ * carry it appears once in the manager's entire record against forty of these,
+ * so waiting for the tidy one means the fault stays on his screen.
+ *
+ * Not guessed at: the kit declares four lists of these openings in `sdk.d.ts`
+ * — under `USAGE_LIMIT_ERROR_PREFIXES` and its three neighbours — for exactly
+ * this, telling a consumer to "route these to org-disabled presentation, never
+ * the usage-limit card". This app is a consumer and routed none of them. The
+ * check re-reads those lists on every run, so an opening a new kit version
+ * adds fails here rather than landing in front of him unsorted.
+ *
+ * The kit's own sentences are QUOTED, never rewritten. They are already
+ * written for a person, and they carry a time, a number or a link this app
+ * cannot regenerate — and a rewrite would drift a little further from the
+ * truth with every kit release. What this table decides is not the words, it
+ * is what the line MEANS and who it is for.
+ */
+export interface SpokenWords {
+  /** What this app files the sentence under once it is recognised. */
+  kind: string;
+  /**
+   * The list in `sdk.d.ts` these openings are copied from, so the check holds
+   * the table to the kit's own file. `null` where the kit declares no list and
+   * the opening below is this app's own reading of the manager's record.
+   */
+  kit: string | null;
+  /** What a line opening this way means. Prose, for whoever reads this next. */
+  means: string;
+  /**
+   * How the line opens. Only the opening: the rest is the time it comes back,
+   * the number it stands at, or the place to add funds — all of which move.
+   */
+  opens: string[];
+}
+
+export const KIT_SPEAKS: SpokenWords[] = [
+  {
+    kind: 'kit/limit_reached',
+    kit: 'USAGE_LIMIT_ERROR_PREFIXES',
+    means: 'nothing more runs on this chat until the window comes back, or until it is paid for',
+    opens: [
+      "You've hit your",
+      "You've reached your",
+      "You're out of usage credits",
+      'Your org is out of usage · add funds to continue',
+      'Your org is out of usage · contact your admin',
+      "Your seat type doesn't include usage credits",
+      "Your seat type doesn't include usage",
+      'Your usage allocation has been disabled by your admin',
+      "Your group's usage limit is set to $0",
+      'Fable 5 requires usage credits',
+      "You're out of extra usage",
+      "Your seat type doesn't include extra usage",
+    ],
+  },
+  {
+    kind: 'kit/org_blocked',
+    kit: 'ORG_POLICY_LIMIT_PREFIXES',
+    means: 'the same standstill, but it is a rule rather than a spent allowance, so waiting will not clear it',
+    opens: ['This service is disabled for your org'],
+  },
+  {
+    kind: 'kit/limit_near',
+    kit: 'USAGE_WARNING_PREFIXES',
+    means: 'a window filling up. Nothing has stopped, so it is the machine keeping its books — the same ruling the allowance messages get',
+    opens: ["You've used", "You're close to"],
+  },
+  {
+    kind: 'kit/paying_differently',
+    kit: 'USAGE_TRANSITION_PREFIXES',
+    means: 'the allowance is spent and the work is now being paid for by the token. Nothing stops, but what it costs him changes, and he can stop it or switch models',
+    opens: [
+      "You're now using usage credits",
+      "You're now using your usage allocation",
+      'Now using your usage allocation',
+      'Now using usage credits',
+      "You're now using extra usage",
+      'Now using extra usage',
+    ],
+  },
+  {
+    kind: 'kit/service_failed',
+    kit: null,
+    means: 'the turn died on the service rather than on anything he asked for. Six of these in his record, all of them drawn as ordinary answers',
+    opens: ['API Error'],
+  },
+  {
+    kind: 'kit/no_answer_wanted',
+    kit: null,
+    means: 'the chat was handed something nobody wanted a reply to. Eleven in his record, and none of them worth a line of his attention',
+    opens: ['No response requested.'],
+  },
+];
+
+/**
+ * The longest one of the kit's own lines runs, and the guard against mistaking
+ * a real answer for one.
+ *
+ * Every one of the 91 in the manager's record is a single line, and the longest
+ * is 147 characters. An answer that opens the same way — a paragraph about what
+ * a limit is — runs on, wraps, or is one of several; requiring one short line
+ * costs a false positive nothing and a real answer nothing at all.
+ */
+const SPOKEN_AT_MOST = 240;
+
+/**
+ * The kind a line of the chat's own text belongs to, or null when it is the
+ * chat actually answering him.
+ */
+export function kitSpoke(text: string): string | null {
+  const line = text.trim();
+  if (line.length === 0 || line.length > SPOKEN_AT_MOST || line.includes('\n')) return null;
+  for (const spoken of KIT_SPEAKS) {
+    if (spoken.opens.some((opening) => line.startsWith(opening))) return spoken.kind;
+  }
+  return null;
+}
+
+/** Every kind the kit speaks in its own voice, for the check and the tests. */
+export const SPOKEN_KINDS: string[] = KIT_SPEAKS.map((spoken) => spoken.kind);

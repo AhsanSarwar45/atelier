@@ -43,8 +43,8 @@ import { fileURLToPath } from 'node:url';
 // and they are pulled in on the line after, by hand (bw-iiv6).
 import './at-alias.mjs';
 
-const { drawnRows, forWhom, OFF_BY_DEFAULT } = await import('../src/workbench/machine-lines.ts');
-const { SAID_NOTHING, WORDS } = await import('../src/workbench/machine-words.ts');
+const { drawnRows, FAMILIES, forWhom, OFF_BY_DEFAULT } = await import('../src/workbench/machine-lines.ts');
+const { KIT_SPEAKS, kitSpoke, SAID_NOTHING, WORDS } = await import('../src/workbench/machine-words.ts');
 const { ClaudeDriver } = await import('../workbench/src/drivers/claude.ts');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -428,13 +428,134 @@ const misfiled = spoke.filter(
   ({ note, want }) => note && (note.audience ?? forWhom(note.kind, note.rank)) !== want.who,
 );
 
-/** And the same question of the record: what he is shown, in whose words. */
-let drawnWired = 0;
-for (const items of chats.values()) {
+/**
+ * And the same question of the record: every row it draws, in whose words.
+ *
+ * Every row, not only the ones switched on, because the switch is his and the
+ * English is not conditional on it. A sentence is written down when the line is
+ * written, so a fixed wording never reaches a chat that already holds one
+ * (bw-x6hb) — which is why old lines are restated as they are drawn, and why
+ * this counts what comes out of the drawing rather than what went in.
+ */
+const drawnWired = [];
+for (const [session, items] of chats.entries()) {
   for (const row of drawnRows(items)) {
-    if (row.row !== 'machine' || hidden.has(row.audience)) continue;
-    for (const line of row.lines) if (OFF_THE_WIRE.test(line.text)) drawnWired += 1;
+    if (row.row !== 'machine') continue;
+    for (const line of row.lines) {
+      const wire = OFF_THE_WIRE.exec(line.text);
+      if (wire) drawnWired.push({ session, kind: row.kind, word: wire[0], text: line.text });
+    }
   }
+}
+/** Which kinds they are, since one bad sentence is usually hundreds of rows. */
+const wiredKinds = [...new Set(drawnWired.map((d) => `${d.kind} (${d.word})`))];
+
+
+/* ------------------------------------------------------------------ *
+ * 6. The kit talking in the chat's own voice.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The openings the kit declares for its own sentences, read out of the same
+ * file and for the same reason: these are the lines it writes INTO a
+ * conversation rather than about one, so nothing about them has a kind on it
+ * and the sentence is the only thing to go on. The kit publishes four lists of
+ * them and tells a consumer to route each list somewhere different; this app
+ * is that consumer (bw-iiv6.12).
+ */
+function openingsTheKitDeclares(name) {
+  const opens = `export declare const ${name}: readonly [`;
+  const at = KIT.indexOf(opens);
+  if (at < 0) return null;
+  const ends = KIT.indexOf('];', at);
+  const body = KIT.slice(at + opens.length, ends);
+  return Array.from(body.matchAll(/'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g)).map((m) =>
+    (m[1] ?? m[2]).replace(/\\(.)/g, '$1'),
+  );
+}
+
+/** An opening the kit declares that no sentence here recognises. */
+const unspoken = [];
+/** An opening this app watches for that the kit has stopped declaring. */
+const dropped = [];
+/** A sentence of the kit's own that draws without a family or without a reader. */
+const unfiled = [];
+
+for (const spoken of KIT_SPEAKS) {
+  const theirs = spoken.kit === null ? null : openingsTheKitDeclares(spoken.kit);
+  if (spoken.kit !== null && theirs === null) {
+    dropped.push(`${spoken.kind}: the kit no longer declares ${spoken.kit}`);
+    continue;
+  }
+  for (const opening of theirs ?? []) {
+    if (kitSpoke(`${opening} — and the rest of the line`) !== spoken.kind) unspoken.push(`${spoken.kit}: ${opening}`);
+  }
+  for (const opening of spoken.opens) {
+    if (theirs !== null && !theirs.includes(opening)) dropped.push(`${spoken.kind}: ${opening}`);
+  }
+  // And the whole way through, as a chat draws it: the sentence must come back
+  // as the machine talking, with a family and a reader of its own.
+  for (const opening of spoken.opens) {
+    const rows = drawnRows([
+      { kind: 'message', id: `spoken-${opening}`, role: 'assistant', text: `${opening} · at 3:50pm`, images: [], done: true, parentId: null },
+    ]);
+    const row = rows[0];
+    if (row?.row !== 'machine' || row.kind !== spoken.kind) unfiled.push(`${spoken.kind}: ${opening} draws as an ordinary answer`);
+    else if (!FAMILIES.includes(row.family)) unfiled.push(`${spoken.kind}: ${opening} has no family`);
+  }
+}
+
+/**
+ * The same question of his own record: how many of these he has been sent, and
+ * how many of them a chat now draws as what they are.
+ *
+ * Read from the chat's own messages rather than from the machine's, because
+ * that is the whole of the fault — they arrive on the side of the record that
+ * holds his answers.
+ */
+function spokenInTheRecord() {
+  const db = new DatabaseSync(STORE, { readOnly: true });
+  const rows = db.prepare('select session_id, role, text, at from message order by session_id, at').all();
+  db.close();
+  const chats = new Map();
+  for (const row of rows) {
+    const held = chats.get(row.session_id) ?? [];
+    held.push({
+      kind: 'message',
+      id: `${row.session_id}:${held.length}`,
+      role: row.role,
+      text: row.text ?? '',
+      images: [],
+      done: true,
+      parentId: null,
+    });
+    chats.set(row.session_id, held);
+  }
+  let lines = 0;
+  let rows_ = 0;
+  let his = 0;
+  const chatsHolding = new Set();
+  const byKind = new Map();
+  for (const [id, items] of chats) {
+    for (const row of drawnRows(items)) {
+      if (row.row !== 'machine' || !row.kind.startsWith('kit/')) continue;
+      lines += row.lines.length;
+      rows_ += 1;
+      chatsHolding.add(id);
+      if (!hidden.has(row.audience)) his += 1;
+      byKind.set(row.kind, (byKind.get(row.kind) ?? 0) + row.lines.length);
+    }
+  }
+  return { lines, rows: rows_, his, chats: chatsHolding.size, byKind };
+}
+
+const spokenHere = spokenInTheRecord();
+
+console.log(
+  `\n  The kit talking in a chat's own voice: ${spokenHere.lines} sentences in ${spokenHere.chats} chats, folded to ${spokenHere.rows} rows, ${spokenHere.his} of them his.`,
+);
+for (const [kind, count] of [...spokenHere.byKind.entries()].sort((a, b) => b[1] - a[1])) {
+  console.log(`  ${wide(kind, 34)}${wide(forWhom(kind, 'note'), 9)}${num(count, 6)}`);
 }
 
 /* ------------------------------------------------------------------ *
@@ -453,6 +574,13 @@ if (invented.length > 0) faults.push(`${invented.length} states are named here t
 if (wired.length > 0) faults.push(`${wired.length} states draw a word off the wire`);
 if (silent.length > 0) faults.push(`${silent.length} states draw no line at all`);
 if (misfiled.length > 0) faults.push(`${misfiled.length} states land in front of the wrong reader`);
+if (unspoken.length > 0) faults.push(`${unspoken.length} sentences the kit speaks are unrecognised here`);
+if (dropped.length > 0) faults.push(`${dropped.length} sentences are watched for that the kit no longer speaks`);
+if (unfiled.length > 0) faults.push(`${unfiled.length} of the kit's own sentences draw as ordinary answers`);
+if (drawnWired.length > 0) faults.push(`${drawnWired.length} rows of the record draw a word off the wire`);
+if (wireNamed.size > 0) {
+  faults.push(`${[...wireNamed.values()].reduce((n, c) => n + c, 0)} rows of the record draw their own wire name`);
+}
 if (onOpening !== 0) faults.push(`a chat that just opened announced its mode ${onOpening} times`);
 if (afterSwitch !== 1) faults.push(`switching the mode said so ${afterSwitch} times, not once`);
 
@@ -485,24 +613,19 @@ console.log(
 console.log(
   `  ${mark(onOpening === 0 && afterSwitch === 1)} A chat that just opened announces no mode; switching it says so once. — opened ${onOpening}, switched ${afterSwitch}`,
 );
+console.log(
+  `  ${mark(unspoken.length === 0 && dropped.length === 0 && unfiled.length === 0)} Every sentence the kit speaks in the chat's own voice is filed by what it means.${
+    [...unspoken, ...dropped, ...unfiled].length === 0 ? '' : ` — ${[...unspoken, ...dropped, ...unfiled].join(', ')}`
+  }`,
+);
+console.log(
+  `  ${mark(drawnWired.length === 0 && wireNamed.size === 0)} No row of his real record draws a wire word, however old the line is — all ${rowsAll} of them.${
+    drawnWired.length === 0 && wireNamed.size === 0
+      ? ''
+      : ` — ${[...wiredKinds, ...wireNamed.keys()].join(', ')}`
+  }`,
+);
 if (broke.length > 0) console.log(`  ${mark(false)} The driver threw on: ${broke.join('; ')}`);
-
-// Sentences frozen into old records are a different fault with its own card:
-// the wording is written down when the line is written, so fixing a sentence
-// never reaches a chat that already holds it (bw-x6hb). Said, never counted.
-if (drawnWired > 0) {
-  console.log(
-    `\n  Note: ${drawnWired} of the ${rowsDrawn} rows he is shown still carry a word off the wire, frozen into the record` +
-      ' when they were written and beyond this build to reword (bw-x6hb).',
-  );
-}
-if (wireNamed.size > 0) {
-  const total = [...wireNamed.values()].reduce((n, c) => n + c, 0);
-  console.log(
-    `\n  Note: ${total} lines already in the record still hold a wire name, written before the sentence was fixed` +
-      ` — ${[...wireNamed.keys()].join(', ')}. Their wording is frozen at write time (bw-x6hb), not this build's.`,
-  );
-}
 
 console.log(`\n${faults.length === 0 ? 'PASS' : `FAIL — ${faults.join('; ')}`}`);
 process.exit(faults.length === 0 ? 0 : 1);

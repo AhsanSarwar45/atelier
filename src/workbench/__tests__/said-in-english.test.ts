@@ -109,6 +109,17 @@ describe('lines already in the record', () => {
       .toBe('Your five-hour allowance is fine (it renews at 12:10 AM).');
   });
 
+  it('keeps an old line that turned work away sounding like one', () => {
+    // The tone IS the message: a window that stopped the work says when the
+    // work starts again, and one keeping its books says when the counter turns
+    // over. Restating both in the softer half put the look-alike back for every
+    // record already written (bw-iiv6.11).
+    expect(drawn(note('rate_limit_event', 'Allowance: the five-hour window is rejected until 03:20 AM'))?.lines[0].text)
+      .toBe('Your five-hour allowance has run out — nothing more runs until 03:20 AM.');
+    expect(drawn(note('rate_limit_event', 'Allowance: the seven-day window is credits_required until 12:00 PM'))?.lines[0].text)
+      .toMatch(/ — nothing more runs until 12:00 PM\.$/);
+  });
+
   it('says the one line he MUST read in English, however it was written', () => {
     // Thirty-seven of these are in his record, every one drawn to him, every
     // one announcing that a chat has stopped asking before it runs things.
@@ -119,6 +130,24 @@ describe('lines already in the record', () => {
     // A mode this build has never met still arrives readable.
     expect(drawn(note('mode', 'Permission mode is now someNewMode.'))?.lines[0].text)
       .toBe('This chat will now some new mode.');
+  });
+
+  it('says an old rule line without the kit\u2019s name for the rule in it', () => {
+    // Six hundred of these are in his record and every word of them was the
+    // wire's: the kit names a rule by the moment it runs at and what it
+    // matches, so `SessionStart:startup` handed him the moment twice \u2014 once
+    // inside the name and once in the English after it (bw-iiv6.9).
+    expect(drawn(note('system/hook_started', 'Hook SessionStart:startup (SessionStart)'))?.lines[0].text)
+      .toBe('Your startup rule is running, when the chat opens.');
+    expect(drawn(note('system/hook_started', 'Hook PreToolUse:Bash (PreToolUse)'))?.lines[0].text)
+      .toBe('Your Bash rule is running, before a tool runs.');
+    // A rule with nothing but a moment for a name has no name to give.
+    expect(drawn(note('system/hook_started', 'Hook Stop (Stop)'))?.lines[0].text)
+      .toBe('Your own rule is running, when the turn ends.');
+    expect(drawn(note('system/hook_response', 'Hook SessionStart:startup ran'))?.lines[0].text)
+      .toBe('Your startup rule ran.');
+    expect(drawn(note('system/hook_response', 'Hook PreToolUse:Bash error: no such file'))?.lines[0].text)
+      .toBe('Your Bash rule could not run: no such file.');
   });
 
   it('replaces a line that was never a sentence at all', () => {

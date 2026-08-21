@@ -12,7 +12,17 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
-import { ALLOWANCE_WINDOW, HOOK_MOMENT, inWords, PERMISSION_MODE, saidOf, TURN_ENDED, whoFor } from '../../../src/workbench/machine-words.ts';
+import {
+  ALLOWANCE_WINDOW,
+  inWords,
+  PERMISSION_MODE,
+  ruleFinished,
+  ruleIsRunning,
+  saidOf,
+  TURN_ENDED,
+  whenItComesBack,
+  whoFor,
+} from '../../../src/workbench/machine-words.ts';
 import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
@@ -343,13 +353,14 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     case 'system/hook_started':
     case 'system/hook_progress': {
       // The moment a rule runs at is the kit's own word — `PreToolUse` — and it
-      // went straight into the sentence. A moment this build has no English for
-      // is left unsaid rather than spelled out in the wire's spelling (bw-iiv6).
-      const when = HOOK_MOMENT[String(m.hook_event ?? '')];
+      // went straight into the sentence twice over: once as the moment, and
+      // again inside the rule's own name, which the kit writes as
+      // `PreToolUse:Bash`. A moment this build has no English for is left
+      // unsaid rather than spelled out in the wire's spelling (bw-iiv6).
       return {
         rank: 'detail',
         kind,
-        text: `Your ${oneLine(m.hook_name ?? 'own')} rule is running${when ? `, ${when}` : ''}.`,
+        text: ruleIsRunning(oneLine(m.hook_name ?? ''), String(m.hook_event ?? '')),
       };
     }
 
@@ -363,7 +374,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         rank: ok ? 'detail' : 'note',
         kind,
         audience: whoFor(kind, state) ?? 'machine',
-        text: `Your ${oneLine(m.hook_name ?? 'own')} rule ${said}${!ok && trouble ? `: ${trouble}` : ''}.`,
+        text: ruleFinished(oneLine(m.hook_name ?? ''), said, ok ? '' : trouble),
         // What it printed, when it printed anything. A rule that succeeded in
         // silence has nothing behind its line, and says so by not opening.
         body: printed || (ok ? undefined : whole()),
@@ -457,10 +468,9 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
       const back = typeof info.resetsAt === 'number' ? clockOf(info.resetsAt) : null;
       // The time matters differently on the two sides. To him it is when his
       // work starts again; to the machine's own books it is only when the
-      // counter turns over.
-      const tail = who === 'you'
-        ? back ? ` — nothing more runs until ${back}.` : '.'
-        : back ? ` (it renews at ${back}).` : '.';
+      // counter turns over. The rule lives beside the words, because a line
+      // restated from an old record has to end the same way (bw-iiv6.11).
+      const tail = whenItComesBack(who, back);
       return {
         rank: who === 'you' ? 'note' : 'detail',
         kind,

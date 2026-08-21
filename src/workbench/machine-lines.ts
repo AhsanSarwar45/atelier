@@ -30,7 +30,16 @@
  * the real sorting instead of keeping a copy of it that goes stale
  * (scripts/chat-shows-what-is-yours.mjs, bw-6jq5.4).
  */
-import { inWords, PERMISSION_MODE, saidOf } from '@/workbench/machine-words';
+import {
+  inWords,
+  kitSpoke,
+  PERMISSION_MODE,
+  ruleFinished,
+  ruleIsRunning,
+  saidOf,
+  whenItComesBack,
+  whoFor,
+} from '@/workbench/machine-words';
 import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -72,6 +81,12 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   'user/synthetic': 'stopped',
   'system/worker_shutting_down': 'stopped',
   conversation_reset: 'stopped',
+  // The kit speaking in the chat's own voice, and both of these mean the same
+  // thing: nothing further happens here. An allowance can be waited out and a
+  // rule of his organisation cannot, which is why they are two kinds and not
+  // one (bw-iiv6.12).
+  'kit/limit_reached': 'stopped',
+  'kit/org_blocked': 'stopped',
 
   // Something did not happen that was meant to.
   result: 'failed',
@@ -79,6 +94,9 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   'system/model_refusal_no_fallback': 'failed',
   'system/model_refusal_fallback': 'failed',
   'system/mirror_error': 'failed',
+  // A turn that died on the service, written into the conversation as if the
+  // chat had said it.
+  'kit/service_failed': 'failed',
   'system/hook_response': { note: 'failed', detail: 'breathing' },
   auth_status: { note: 'failed', detail: 'breathing' },
   'system/plugin_install': { note: 'failed', detail: 'breathing' },
@@ -89,6 +107,9 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // What the reader's allowance is doing. Not the machine's own breathing: it
   // is about HIM, and it starts on (bw-jkh2.19).
   rate_limit_event: 'background',
+  // The same news in the chat's own voice: the allowance is spent and the work
+  // is being paid for by the token from here on.
+  'kit/paying_differently': 'background',
 
   // The chat's own memory: folding itself up, and what it carries.
   'system/compact_boundary': 'memory',
@@ -129,6 +150,9 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   tool_use_summary: 'breathing',
   'system/control_request_progress': 'breathing',
   'system/elicitation_complete': 'breathing',
+  // A window filling up, and a turn nobody wanted an answer to.
+  'kit/limit_near': 'breathing',
+  'kit/no_answer_wanted': 'breathing',
   // A chat waiting on him is the one state here he can act on; the others are
   // it going quiet and picking up again (bw-iiv6).
   'system/session_state_changed': { note: 'waiting', detail: 'breathing' },
@@ -180,6 +204,10 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   'user/synthetic': 'you',
   'system/worker_shutting_down': 'you',
   conversation_reset: 'you',
+  // The two that mean the work has stopped dead. Nothing else on the screen
+  // says so, and one of them carries the time it comes back.
+  'kit/limit_reached': 'you',
+  'kit/org_blocked': 'you',
 
   // The turn did not do what he asked.
   result: 'you',
@@ -191,6 +219,11 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
 
   // Why the chat is sitting there.
   'system/api_retry': 'you',
+  'kit/service_failed': 'you',
+  // Money: the allowance is gone and the work is being paid for by the token.
+  // Nothing has stopped, so this is not a stop — but what it costs him has
+  // changed, and stopping or switching models is his to do (bw-iiv6.12).
+  'kit/paying_differently': 'you',
 
   // The allowance: nothing to do while the window is open, and the reason the
   // work stopped once it is not. The driver ranks the closed one `note`.
@@ -227,6 +260,11 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   'system/notification': 'machine',
   tool_use_summary: 'machine',
   'system/control_request_progress': 'machine',
+  // A window with room left in it changes nothing he would do — the same
+  // ruling the allowance messages already carry — and a turn nobody wanted an
+  // answer to is the app's own plumbing talking to itself.
+  'kit/limit_near': 'machine',
+  'kit/no_answer_wanted': 'machine',
   'system/elicitation_complete': 'machine',
 
   // A chat that has stopped and is waiting on him is his; a chat going quiet or
@@ -323,9 +361,32 @@ function saidAgain(kind: string, text: string): string {
     const was = /^Allowance: the ([\w-]+) window is (\w+)(?: until (.+))?$/.exec(text);
     if (!was) return text;
     const window = WINDOW_WAS[was[1]] ?? was[1];
-    const said = saidOf(kind, was[2] === 'open' ? 'allowed' : was[2]);
+    const state = was[2] === 'open' ? 'allowed' : was[2]!;
+    const said = saidOf(kind, state);
     if (!said) return text;
-    return `Your ${window} allowance ${said}${was[3] ? ` (it renews at ${was[3]}).` : '.'}`;
+    // The tone is the point of the sentence: a window that turned work away
+    // says when the work starts again, and one merely keeping its books says
+    // when the counter turns over. Restating them all in the softer half was
+    // the look-alike coming back for old records (bw-iiv6.11).
+    return `Your ${window} allowance ${said}${whenItComesBack(whoFor(kind, state) ?? 'machine', was[3] ?? null)}`;
+  }
+
+  if (kind === 'system/hook_started' || kind === 'system/hook_progress') {
+    // "Hook SessionStart:startup (SessionStart)" — six hundred of these in the
+    // record, and every word of them the wire's: the kit's name for the hook,
+    // the kit's name for the moment, and the kit's own bracket telling him
+    // which is which.
+    const was = /^Hook (\S+) \((\w+)\)$/.exec(text);
+    return was ? ruleIsRunning(was[1]!, was[2]!) : text;
+  }
+
+  if (kind === 'system/hook_response') {
+    // "Hook SessionStart:startup ran", and the one that did not.
+    const ran = /^Hook (\S+) ran$/.exec(text);
+    if (ran) return ruleFinished(ran[1]!, saidOf(kind, 'success') ?? 'ran', '');
+    const broke = /^Hook (\S+) error: ([\s\S]+)$/.exec(text);
+    if (broke) return ruleFinished(broke[1]!, saidOf(kind, 'error') ?? 'could not run', broke[2]!);
+    return text;
   }
 
   return text;
@@ -475,6 +536,25 @@ function machineLine(item: TranscriptItem): {
   text: string;
   body: string | null;
 } | null {
+  // The kit talking in the chat's own voice: an answer-shaped message whose
+  // whole content is one of the sentences the kit writes itself. Filed by what
+  // it means and quoted as it stands, because it is already written for a
+  // person and carries a time or a number this app cannot regenerate
+  // (`machine-words.ts`, bw-iiv6.12).
+  if (item.kind === 'message' && item.role === 'assistant') {
+    const spoken = kitSpoke(item.text);
+    if (spoken !== null) {
+      return {
+        id: item.id,
+        family: familyOf(spoken, 'note'),
+        audience: forWhom(spoken, 'note'),
+        kind: spoken,
+        rank: 'note',
+        text: item.text.trim(),
+        body: null,
+      };
+    }
+  }
   if (item.kind === 'message' && item.role === 'user' && writtenInHisName(item.text)) {
     return {
       id: item.id,
