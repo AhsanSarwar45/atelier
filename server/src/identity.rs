@@ -116,7 +116,16 @@ pub fn tools_dir() -> Option<PathBuf> {
     resolve_dir(std::env::var("REPORT_TOOLS_DIR").ok(), data_dir(), "tools")
 }
 
-/// The rule behind both, kept apart from the environment so it can be tested
+/// Where the chat helper lives.
+///
+/// The product carries it and lays it down here, so a copy installed on a
+/// computer that has never held the source still has something to start.
+/// `HELPER_DIR` overrides it, for tests.
+pub fn helper_dir() -> Option<PathBuf> {
+    resolve_dir(std::env::var("HELPER_DIR").ok(), data_dir(), "helper")
+}
+
+/// The rule behind them, kept apart from the environment so it can be tested
 /// for the case where the computer names no home.
 fn resolve_dir(override_dir: Option<String>, data: Option<PathBuf>, leaf: &str) -> Option<PathBuf> {
     match override_dir.filter(|d| !d.trim().is_empty()) {

@@ -12,6 +12,8 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
+import { claudeProgram } from '../claude-program.ts';
+
 import {
   ALLOWANCE_WINDOW,
   extraUsage,
@@ -1222,6 +1224,12 @@ export class ClaudeDriver implements Driver {
       options: {
         cwd: opts.cwd,
         model: opts.model,
+        // The reader's own Claude Code, not the copy the kit ships: this
+        // helper travels inside a single binary and that copy is a third of a
+        // gigabyte, and theirs is the one they signed into and update.
+        // `undefined` here is how the kit is asked to find its own, which is
+        // what a machine that installed the helper from source wants.
+        pathToClaudeCodeExecutable: claudeProgram(),
         // Resuming by id works from any directory, for sessions started
         // anywhere — including ones the owner began in a terminal.
         resume: opts.resume,

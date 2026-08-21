@@ -13,6 +13,7 @@ use axum::{
     Router,
 };
 use std::env;
+use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -110,23 +111,53 @@ async fn proxy(req: Request) -> Response {
         .unwrap_or_else(|e| (StatusCode::BAD_GATEWAY, format!("stream: {e}")).into_response())
 }
 
-const DEFAULT_ENTRY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../workbench/src/server.ts");
-
 /// Starts the sidecar beside the server and restarts it if it dies.
 ///
+/// `laid_down` is the copy of the helper the product carried and wrote out
+/// beside the data; `None` when that could not be done. This used to be a path
+/// baked in at compile time — the build machine's own checkout — so every copy
+/// but the maintainer's started nothing at all (bw-8um.3.9).
+///
 /// `BEADS_WORKBENCH_URL` suppresses the spawn and proxies to that URL instead.
-pub fn spawn_sidecar() {
+/// `BEADS_WORKBENCH_ENTRY` names a helper to start instead of the carried one,
+/// which is how somebody working on the helper runs their own edits.
+pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
     if env::var("BEADS_WORKBENCH_URL").is_ok() {
         info!("workbench: BEADS_WORKBENCH_URL set — not spawning a sidecar");
         return;
     }
-    let entry = env::var("BEADS_WORKBENCH_ENTRY").unwrap_or_else(|_| DEFAULT_ENTRY.to_string());
-    if !std::path::Path::new(&entry).exists() {
-        warn!("workbench: sidecar entry not found at {entry} — the Chat tab will be offline");
+    // A helper named by hand is somebody's own checkout, and its packages are
+    // their business; the carried one is fetched for.
+    let (entry, package): (PathBuf, Option<PathBuf>) = match env::var("BEADS_WORKBENCH_ENTRY") {
+        Ok(said) if !said.trim().is_empty() => (PathBuf::from(said), None),
+        _ => match laid {
+            Some(laid) => (laid.entry, Some(laid.package)),
+            None => {
+                warn!("workbench: the chat helper was not laid down — the Chat tab will not answer");
+                return;
+            }
+        },
+    };
+    if !entry.exists() {
+        warn!(
+            "workbench: no chat helper at {} — the Chat tab will not answer",
+            entry.display()
+        );
         return;
     }
+    let entry = entry.display().to_string();
 
     tokio::spawn(async move {
+        // The kit the helper talks to Claude with is fetched here rather than
+        // before the server binds, so a first run serves the board while it
+        // happens and only the Chat tab waits.
+        if let Some(package) = package {
+            if let Err(e) = crate::helper::fetch_kit(&package).await {
+                warn!("workbench: {e}");
+                return;
+            }
+        }
+
         let mut backoff = Duration::from_secs(1);
         loop {
             info!("workbench: starting sidecar ({entry})");
