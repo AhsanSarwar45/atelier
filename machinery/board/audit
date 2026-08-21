@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Every card still standing, held to the bars the pour holds a new one to.
+
+The pour keeps a bad card off the board; this says whether the cards already on
+it would be accepted today. It is what says the sweep (cor-dlby) is finished,
+and it stays afterwards as the board's own health check — run it any day.
+
+Reads the board and writes nothing to it.
+
+    python3 board/audit                 what is below the bar, and why
+    python3 board/audit --only done     one section
+    python3 board/audit --quiet         the counts alone
+    python3 board/audit --json FILE     the same, for the sweep to read
+
+Exits non-zero while any card is below the bar, so it can stand in a check.
+See docs/board.md#4e-what-a-section-has-to-carry.
+"""
+import argparse
+import collections
+import json
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import plain  # noqa: E402
+import project  # noqa: E402
+import sections  # noqa: E402
+
+# The board of the checkout this is run from. Every bar below is that project's
+# own, read off its declaration.
+ROOT = project.root(os.getcwd())
+sections.use(ROOT)
+
+# What a card's section is called when it is spoken about rather than parsed.
+SAID = {"title": "the words it is written in", "what": "what is wrong",
+        "evidence": "evidence it is real", "done": "the finish line",
+        "not_in": "what it leaves out", "where": "where it is"}
+
+
+def board():
+    """Every card, from the board this tree belongs to.
+
+    Asked of the checkout that ran this, never of a folder worked out from where
+    this file sits: the tool is shared and lives in none of the projects it reads.
+    """
+    out = subprocess.run(["bd", "list", "--status", "all", "--json"],
+                         capture_output=True, text=True, cwd=ROOT)
+    if out.returncode != 0:
+        sys.exit("the board would not answer, so nothing has been measured: %s"
+                 % (out.stderr or out.stdout).strip())
+    return json.loads(out.stdout or "[]")
+
+
+def words():
+    """The word list a title answers to, or nothing if it will not load.
+
+    A missing list is said out loud rather than counted as a pass — a check that
+    could not run is not a check that passed.
+    """
+    try:
+        plain.problems("a line to try it on")
+    except plain.Unreadable as exc:
+        print("titles are NOT being checked: the shared word list would not load "
+              "(%s)" % exc, file=sys.stderr)
+        return None
+    return plain.problems
+
+
+# What a cancel writes onto a card besides shutting it. Reopening one puts the
+# status back and leaves these, and the screen draws its Cancelled column from
+# them — so the card is live to every tool and dead to the only reader who matters.
+DROPPED = ("cancelled", "resolution:cancelled", "dropped", "wontfix")
+
+
+def contradicting(cards):
+    """Cards the board calls live and their own tags call cancelled."""
+    return sorted(c["id"] for c in cards
+                  if c.get("status") in sections.LIVE
+                  and set(DROPPED) & set(c.get("labels") or []))
+
+
+def measure(cards, only=None):
+    """Every standing card that is below a bar, with what each one earns."""
+    check = words()
+    below, standing = {}, collections.Counter()
+    for card in cards:
+        kind = sections.kind_of(card)
+        if card.get("status") not in sections.LIVE or kind == "step":
+            continue
+        standing[kind] += 1
+        found = sections.faults(card, check)
+        if only:
+            found = {k: v for k, v in found.items() if k in only}
+        if found:
+            below[card["id"]] = {"kind": kind, "title": card.get("title") or "",
+                                 "faults": found}
+    return standing, below
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--only", nargs="+", metavar="SECTION", choices=sorted(SAID),
+                    help="hold cards to these sections alone: " + ", ".join(sorted(SAID)))
+    ap.add_argument("--quiet", action="store_true", help="the counts alone")
+    ap.add_argument("--json", metavar="FILE", help="write what was found, for a tool")
+    a = ap.parse_args()
+
+    cards = board()
+    standing, below = measure(cards, a.only)
+    both_ways = contradicting(cards)
+    if a.json:
+        with open(a.json, "w") as fh:
+            json.dump(below, fh, indent=1)
+    if not a.quiet:
+        for cid, row in sorted(below.items(), key=lambda kv: (kv[1]["kind"], kv[0])):
+            print("%-12s %-5s %s" % (cid, row["kind"], row["title"][:64]))
+            for name, said in row["faults"].items():
+                print("    %-26s %s" % (SAID[name], said.splitlines()[0]))
+    by_section = collections.Counter(n for row in below.values() for n in row["faults"])
+    for kind in ("job", "find", "item"):
+        hit = sum(1 for row in below.values() if row["kind"] == kind)
+        print("%-5s %3d of %3d below the bar" % (kind, hit, standing[kind]))
+    for name, count in sorted(by_section.items(), key=lambda kv: -kv[1]):
+        print("    %-26s %d" % (SAID[name], count))
+    print("%d of %d cards still standing are below the bar"
+          % (len(below), sum(standing.values())))
+    if both_ways:
+        print("\n%d card(s) the board calls live and their own tags call cancelled, "
+              "so your screen files open work as dropped:" % len(both_ways))
+        for cid in both_ways:
+            print("    %s" % cid)
+    sys.exit(1 if below or both_ways else 0)
+
+
+if __name__ == "__main__":
+    main()

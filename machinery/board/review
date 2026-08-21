@@ -1,0 +1,581 @@
+#!/usr/bin/env python3
+"""The outside reader of a job, run by the board rather than by the session.
+
+A review is only a review if whoever did it did not write the change, so this
+runs as its own process under its own board identity: a headless `claude` that
+never saw the work being done, reading the diff and the job's own definition of
+done. What it found becomes the job's own pieces, it signs the goal with the
+commits it was shown, and it opens the gate holding the job shut — see
+docs/board.md#4b-review-is-done-by-someone-who-did-not-write-the-change.
+
+Read-only by construction: the edit tools are refused to it, so a review can
+never touch the shared working tree. It is fired detached by
+board/run.py the moment a job's last piece closes.
+
+Detached whoever asks for it. A reading is a whole session and takes minutes, so
+a run started by hand does the quick part — is this a job, is a reading already
+going, is one owed at all — hands the reading itself to a copy of this script
+running on its own, says where that copy's console is, and ends. The agent that
+asked keeps working, and the verdict arrives on the goal (bw-k0w).
+
+One reading per finish, and the work is what decides: a job with a reader out is
+left to that reader, and a job read clean is not read again until something is
+written under it (bw-5e8).
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
+import board_common as bc  # noqa: E402
+import inflight  # noqa: E402
+import project  # noqa: E402
+import plain  # noqa: E402
+import reading  # noqa: E402
+import run as running  # noqa: E402
+import sections  # noqa: E402
+
+# The project whose job is being read. The reader is fired from that project's own
+# checkout (`run.fire`), so the checkout is what says which one.
+ROOT = project.root(os.getcwd())
+DECL = sections.use(ROOT)
+LOG_DIR = inflight.home()
+# The job this run holds the claim on, whether it got as far as signing, and
+# whether it handed the reading to a detached copy instead of doing it. All three
+# are read by `release`, which has to run whichever of main's many exits is taken.
+READING = None
+SIGNED = False
+HANDED = False
+# A diff past this goes to the reviewer as a file list; it has Read and Grep and
+# reads what it needs, rather than being handed a prompt nothing can attend to.
+DIFF_LIMIT = 300_000
+FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+
+
+def bd(args, actor=None, must=True):
+    env = dict(os.environ)
+    if actor:
+        env["BEADS_ACTOR"] = actor
+    run = subprocess.run(["bd"] + args, cwd=ROOT, capture_output=True, text=True,
+                         env=env, timeout=60)
+    if must and run.returncode != 0:
+        sys.exit("bd %s failed: %s%s" % (args[0], run.stdout or "", run.stderr or ""))
+    return run.stdout or ""
+
+
+def card(cid, must=True):
+    out = bd(["show", cid, "--json"], must=must)
+    try:
+        got = json.loads(out or "{}")
+        return got[0] if isinstance(got, list) else got
+    except Exception:
+        if must:
+            sys.exit("no card %s" % cid)
+        return {}
+
+
+def git(args, where=None):
+    run = subprocess.run(["git"] + args, cwd=where or ROOT, capture_output=True,
+                         text=True, timeout=120)
+    return run.stdout if run.returncode == 0 else ""
+
+
+def label(c, prefix):
+    return next((l[len(prefix):] for l in c.get("labels") or []
+                 if l.startswith(prefix)), None)
+
+
+def whose(sha, goal_id):
+    """The checkout a commit is in. The reader stands in this one, where a foreign
+    hash resolves to nothing and a foreign path resolves to nothing or to a
+    same-named file that is not the change.
+
+    Searched exactly where the commits were found (board/reading.py), or a commit
+    from a checkout this one cannot resolve would be quoted as if it were here and
+    the reader shown an empty diff for it.
+    """
+    for where, _ in bc.searched(ROOT):
+        if git(["cat-file", "-t", sha], where).strip() == "commit":
+            return where
+    return ROOT
+
+
+def changes(shas, goal_id):
+    """The diff these commits add up to, oldest first.
+
+    Pinned to hashes: the tree is shared, and a diff taken against a moving branch
+    would show a colleague's work as this job's.
+    """
+    if not shas:
+        return [], ""
+    dated = [(whose(sha, goal_id), sha) for sha in shas]
+    body = "".join("in %s\n" % where + git(["show", "--format=commit %H%n%s%n", sha], where)
+                   for where, sha in dated)
+    if len(body) > DIFF_LIMIT:
+        files = sorted({os.path.join(where, f) for where, sha in dated for f in
+                        git(["show", "--name-only", "--format=", sha], where).split()})
+        body = ("The change is too large to quote here. Read these files yourself:\n"
+                + "\n".join(files))
+    return ["%s in %s" % (sha, where) for where, sha in dated], body
+
+
+# What the reader is told about where in the job's two readings it stands. A
+# reader that does not know is a reader that leaves a point for the round after
+# it, and on the last reading there is no round after it (board/reading.py
+# ROUNDS).
+FIRST = ("This job is read at most twice and this is the first reading. What you "
+         "raise here comes back to you once, answered.")
+LAST = ("This is the second and last reading this job will ever get, and you are "
+        "shown only what the first reading was not shown. Nobody reads this job "
+        "after you: what you file here is answered and the job goes on, so raise "
+        "what is actually wrong and leave nothing for a round that will not come.")
+
+
+def ask(goal, shas, diff, final=False):
+    return """You are reviewing a change you did not write, for %(persona)s.
+You know nothing about who wrote it and it does not matter. %(round)s
+
+Read %(root)s/CLAUDE.md and any rules it points at first: this project's own
+rules are as much a source of findings as correctness is. A change here proves
+itself by: %(proves)s.
+
+You are READ-ONLY. Do not edit any file. Do not run any build or any test —
+other sessions share this working tree and a build here would stall them.
+
+# The job under review
+%(what)s
+
+## Why it was opened
+%(desc)s
+
+## How the job says it is done
+%(done)s
+
+## The commits it wrote
+A job may land in more than one repository, so each line names the checkout that
+holds the commit; read one with `git -C <checkout> show <hash>`. Any file path
+below is absolute for the same reason.
+%(shas)s
+
+## The change
+%(diff)s
+
+# What to report
+Findings only. Something is a finding when it is wrong, unsafe, dead, duplicated,
+or breaks a rule this project states — not when you would have written it
+differently. For each one say where it is and what would prove it fixed.
+Say plainly if you found nothing.
+
+Each finding becomes a card the manager reads, and the board holds it to the same
+bars as any other (docs/board.md#4e-what-a-section-has-to-carry). A finding the
+board turns away leaves the job shut and has to be filed by hand, so write the
+title as one plain sentence saying what is wrong — no file names, no symbols, no
+instruction to do something; those belong in `where` and `why`. Write `fixed_when`
+as something anyone can run and what it must produce, never "it works".
+
+Answer with one fenced json block and nothing after it:
+
+```json
+{"verdict": "<one sentence: what you read and what you conclude>",
+ "checked": ["<a thing you checked and found correct>", "..."],
+ "findings": [{"title": "<one plain line: what is wrong, not what to do>",
+               "where": "<file, and the symbol or heading>",
+               "why": "<why it is wrong, in one or two sentences>",
+               "fixed_when": "<a command and what it must produce>"}]}
+```
+""" % {"root": ROOT, "what": goal.get("title", ""), "desc": goal.get("description", ""),
+       "done": goal.get("acceptance_criteria") or goal.get("acceptance") or "",
+       "persona": DECL.persona, "proves": sections.PROVES,
+       "round": LAST if final else FIRST,
+       "shas": "\n".join(shas) or "none found", "diff": diff or "no diff found"}
+
+
+def run_reviewer(prompt, actor, goal_id):
+    """A separate claude, with the edit tools withheld and this project's hooks
+    told to stand aside for it (hooks/board_common.py reads the same
+    variable, under every name it answers to).
+
+    The model is named here rather than inherited. A reader that names none takes
+    whatever the person running the board happens to have saved as their default,
+    so the same reading costs the top model's price on one machine and a fraction
+    of it on the next; naming it makes the reading cost the same wherever it runs.
+    """
+    env = dict(os.environ, BEADS_ACTOR=actor)
+    for name in project.env(DECL, "REVIEWER"):
+        env[name] = goal_id
+    cmd = ["claude", "-p", "--model", "claude-sonnet-5",
+           "--allowedTools", "Read", "Grep", "Glob", "Bash(git:*)", "Bash(rg:*)",
+           "--disallowedTools", "Edit", "Write", "MultiEdit", "NotebookEdit",
+           "Bash(cargo:*)", "Bash(bd:*)"]
+    run = subprocess.run(cmd, input=prompt, cwd=ROOT, env=env, text=True,
+                         capture_output=True, timeout=inflight.ATTEMPT_TIMEOUT)
+    return run.stdout or "", run.stderr or ""
+
+
+def run_log(goal_id):
+    """A directory of this run's own, so two readers of one job are both readable.
+
+    The board fires a reader whenever a job's last piece closes, and a job answered
+    and finished twice is fired at twice; both wrote to one path named after the
+    goal, and the second truncated the first before anybody read it (cor-987e).
+    `mkdtemp` is the allocation and the claim in one call, so there is no window
+    between choosing a name and holding it.
+
+    A run that was handed off is told which directory its parent already
+    allocated, and writes there. Allocating a second one would leave the first
+    empty and put the attempts somewhere nobody was told to look — the parent has
+    already printed the path to whoever asked for the reading.
+    """
+    said = os.environ.get(inflight.RUN_DIR)
+    if said:
+        return said
+    os.makedirs(LOG_DIR, exist_ok=True)
+    return tempfile.mkdtemp(prefix=goal_id + ".", suffix=".run", dir=LOG_DIR)
+
+
+def hand_off(goal_id, rerun):
+    """Give the shell back, and let a copy of this script do the reading.
+
+    A reading is a whole `claude` session and takes minutes. Run by hand it held
+    the agent's own shell for every one of them, so the agent that asked for the
+    reading could answer nothing until it finished — and one killed part way
+    through left its claim standing with a pid behind it that was already gone
+    (bw-k0w.5).
+
+    The copy is spawned the way run.fire spawns one — its own session, its
+    console in a file — and is told two things: that it is the detached copy, so
+    it reads rather than handing off again, and which directory its parent
+    already allocated. The claim goes on being held: it is named after the copy
+    the moment there is one to name, and this run lets go of nothing (bw-k0w.6).
+    """
+    here = run_log(goal_id)
+    log = os.path.join(here, "run.log")
+    env = dict(os.environ, **{inflight.DETACHED: "1", inflight.RUN_DIR: here,
+                              inflight.CONSOLE: log})
+    args = [os.path.realpath(__file__), goal_id] + (["--rerun"] if rerun else [])
+    with open(log, "w") as fh:
+        reader = subprocess.Popen(args, cwd=ROOT, stdout=fh, stderr=fh,
+                                  stdin=subprocess.DEVNULL, env=env,
+                                  start_new_session=True)
+    # The claim is this run's — a run that found somebody else's reader out stood
+    # down before it got here — so the copy's name goes straight over this one's,
+    # and the console with it, for whoever fires at the job next.
+    inflight.name(goal_id, reader.pid, log)
+    print("%s is being read by a detached run; its console is %s, and the verdict "
+          "goes onto the goal itself" % (goal_id, log))
+
+
+def parse(text):
+    blocks = FENCE.findall(text or "")
+    if not blocks:
+        blocks = re.findall(r"(\{[^{}]*\"findings\".*\})", text or "", re.S)
+    for block in reversed(blocks):
+        try:
+            got = json.loads(block)
+        except Exception:
+            continue
+        if isinstance(got, dict) and "findings" in got:
+            return got
+    return None
+
+
+# A title that survived the repair below with nothing left of it. The substance is
+# on the card either way — `where` and `why` are written into its notes — so a
+# finding is never lost to a sentence the word list would not take.
+NAMELESS = "the reading found something wrong that it could not say in plain words"
+# How many times the repair is applied before it is called a fixed point. A plain
+# word can itself carry a banned term; more than a few passes means it cycles.
+REPAIRS = 4
+
+
+def plainly(title, moved):
+    """The same sentence in the words the board takes, by construction.
+
+    The word list is not a wall the reader guesses at — it is a table of what to
+    say instead, so the repair is the list applied rather than the list consulted.
+    A term it can rename is renamed; a token it can only refuse — a file name, a
+    run-together name, call syntax — is not a word at all, and moves out of the
+    title into `moved`, which the card carries in its notes.
+
+    The rule itself is untouched: what changes is that the reader composes through
+    it instead of being judged by it afterwards (cor-987e's sibling — every finding
+    of two live readings was refused here, so the job could never open its gate).
+    """
+    BANNED, SHAPES, SHAPE_EXEMPT = plain.words()
+    for _ in range(REPAIRS):
+        before = title
+        for term, said in BANNED.items():
+            title = re.sub(r"\b%s\b" % re.escape(term), said, title, flags=re.I)
+        for rx, _label in SHAPES:
+            def lift(m):
+                word = m.group(0)
+                if word in SHAPE_EXEMPT:
+                    return word
+                if word not in moved:
+                    moved.append(word)
+                return " "
+            title = rx.sub(lift, title)
+        title = re.sub(r"\s+", " ", title).strip(" -–—,;:.")
+        if title == before:
+            break
+    return title if len(title.split()) >= 3 else NAMELESS
+
+
+def composed(goal_id, f):
+    """One finding as the two halves a work item is poured with, plus its notes.
+
+    `where` never goes into the title: it is a path by construction, and a path in
+    a manager-facing line is the one thing the word list cannot let through. It
+    goes on the card instead, where the person fixing it reads it.
+    """
+    moved = []
+    title = plainly((f.get("title") or "").strip(), moved)
+    proof = (f.get("fixed_when") or "").strip()
+    # An objection answered rather than fixed is proved by the answer being
+    # readable on the card, which is a run like any other.
+    if sections.finish_line(proof, "An objection's second half"):
+        proof = ("`bd show %s` prints the answer to this objection, or a commit "
+                 "on main names this card" % goal_id)
+    where = " ".join(x for x in [(f.get("where") or "").strip()] + moved if x)
+    note = "\n\n".join(x for x in ["Where: " + where if where else "",
+                                   (f.get("why") or "").strip()] if x)
+    return title, proof, note
+
+
+def file_findings(goal_id, findings):
+    """What the reader sent back becomes the job's own work, not cards beside it.
+
+    Filed under the goal, so the job's pieces are the whole of what is left to do
+    and a reader's objection cannot be walked past by finishing around it. The job
+    goes back to the first column until someone picks one up — manager's ruling,
+    2026-08-13: docs/board.md#3a1.
+
+    Returns what was filed and what the pour turned away. A reader's objection is
+    held to the same bars as any other work item (docs/board.md#4e-what-a-section-
+    has-to-carry) and is composed through them, so a refusal here now means the
+    bars and the composer have come apart — the caller leaves the job shut and
+    says so, because losing a finding is worse than anything.
+    """
+    made, turned = [], []
+    for f in findings:
+        if not (f.get("title") or "").strip():
+            continue
+        title, proof, note = composed(goal_id, f)
+        out = subprocess.run([os.path.join(HERE, "job"), "under", goal_id,
+                              "--do", "%s|%s" % (title, proof)],
+                             cwd=ROOT, capture_output=True, text=True)
+        cid = (out.stdout or "").strip().splitlines()[-1] if out.stdout.strip() else ""
+        if out.returncode != 0 or not cid:
+            turned.append((f, ((out.stderr or "") + (out.stdout or "")).strip()))
+            continue
+        if note:
+            bd(["update", cid, "--append-notes", note], must=False)
+        made.append(cid)
+    if made:
+        bd(["update", goal_id, "-s", "open"], must=False)
+    return made, turned
+
+
+def gates_on(cid):
+    out = bd(["gate", "list", cid, "--json"], must=False)
+    try:
+        rows = json.loads(out or "[]")
+    except Exception:
+        return []
+    return [r["id"] for r in rows if r.get("status") != "closed"]
+
+
+def retire_legacy(goal_id, actor):
+    """Close a review card a job was poured with before the reading had no card.
+
+    Their jobs are stuck exactly where the fault was: the one piece that is open is
+    the reading itself, so the job can never show every piece closed. Each clears
+    itself the first time it is read, which is why no migration script exists.
+    """
+    out = bd(["list", "--parent", goal_id, "--status", "all", "--json"], must=False)
+    try:
+        rows = json.loads(out or "[]")
+    except Exception:
+        return []
+    gone = []
+    for r in rows:
+        if "step:review" not in (r.get("labels") or []) or r.get("status") == "closed":
+            continue
+        for gate in gates_on(r["id"]):
+            bd(["gate", "resolve", gate], actor=actor, must=False)
+        bd(["update", r["id"], "--assignee", actor, "--force"], actor=actor, must=False)
+        bd(["update", r["id"], "--append-notes",
+            "The reading is no longer a piece of the job: the goal carries the "
+            "signature and this card cannot be closed by anyone. Closed by the "
+            "reader that read %s." % goal_id], actor=actor, must=False)
+        bd(["close", r["id"], "--reason",
+            "the reading moved onto the goal; this card is what kept the job from "
+            "ever showing every piece closed"], actor=actor, must=False)
+        gone.append(r["id"])
+    return gone
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("job", help="the goal to read; a job's old review card also names it")
+    ap.add_argument("--rerun", action="store_true",
+                    help="kept for the advice the gates print; a job a dead reader "
+                         "left shut carries no signature and is read without it")
+    a = ap.parse_args()
+
+    asked = card(a.job)
+    # A job poured before the reading stopped being a piece still has its review
+    # card, and that is the id anyone reruns by hand.
+    goal_id = label(asked, "of:") if "step:review" in (asked.get("labels") or []) else a.job
+    goal = card(goal_id)
+    if "job" not in (goal.get("labels") or []):
+        sys.exit("%s is not a job: only a job is read (docs/board.md#3a1)" % goal_id)
+    actor = "review-" + goal_id
+    global READING
+    READING = goal_id
+    # A reader started by hand is still a reader out on this job, so it claims
+    # the job like any other — otherwise the board sends a second one at it while
+    # this one works (mch-m1t.15). A run that does not get the claim stands down
+    # and says where the reading already going is writing: two readers on one job
+    # are one reading done twice, at the account's expense, and the verdict of the
+    # one already out lands on the goal either way (bw-5e8.4). The copy this run
+    # hands off to is the exception — the claim it finds held is its own parent's.
+    mine = inflight.take(goal_id)
+    if not mine and not os.environ.get(inflight.DETACHED):
+        where = inflight.console(goal_id)
+        print("%s already has a reader out%s; the verdict goes onto the goal itself"
+              % (goal_id, (", writing to " + where) if where else ""))
+        return
+
+    shas = reading.commits(goal_id, ROOT)
+    # What a reading covers is the job's own commits, and it says so on the goal.
+    # So the answer to whether one is owed comes from the work and not from how
+    # the run was asked for: a goal read clean is read again when something has
+    # been written under it and not before, however many times it is fired at.
+    # Forcing past this bought nothing — the same commits read a second time by
+    # a fresh full-price session — and one goal was read twenty-four times over
+    # (bw-5e8.5). A job a dead reader left shut is read without any forcing: it
+    # carries no signature, so what stands on it has been read by nobody.
+    if not reading.wanted(goal, shas, reading.wrote(goal_id, ROOT)):
+        print("%s has been read and nothing has been written under it since; the "
+              "reading on it is current" % goal_id)
+        return
+    # Everything above is quick, and answering here is what makes a reading asked
+    # for by hand worth asking for: whoever asked hears at once that this job is
+    # not one to read, rather than hearing it from a run they cannot see. The
+    # reading itself is minutes long, so it happens in a copy of this script and
+    # this run ends.
+    if not os.environ.get(inflight.DETACHED):
+        hand_off(goal_id, a.rerun)
+        global HANDED
+        HANDED = True
+        return
+    if mine:
+        # Reached only where the claim taken for this copy has gone — the whole
+        # point of claiming before spawning is that the copy finds it already
+        # there — but it names the claim, and every other place that names one
+        # says where the reader writes. Left saying nothing, this one would put
+        # the job back to answering a later firing with "already has a reader
+        # out" and nowhere to point (bw-5e8.10). The console is whatever the run
+        # that spawned this copy redirected it to; it is the only one that knows.
+        inflight.name(goal_id, os.getpid(), os.environ.get(inflight.CONSOLE))
+    named, diff = changes(shas, goal_id)
+    # Asked of the goal as it stands before this reading signs, so the count is of
+    # the readings that have already happened and not of this one.
+    prompt = ask(goal, named, diff, reading.final(goal))
+    here = run_log(goal_id)
+    verdict = None
+    for attempt in range(1, inflight.ATTEMPTS + 1):
+        out, err = run_reviewer(prompt, actor, goal_id)
+        with open(os.path.join(here, "%d.log" % attempt), "w") as fh:
+            fh.write(out + "\n--- stderr ---\n" + err)
+        verdict = parse(out)
+        if verdict:
+            break
+        prompt += ("\n\nYour last answer carried no json block. Answer with the "
+                   "fenced json block described above and nothing else.\n")
+    if not verdict:
+        bd(["update", goal_id, "--append-notes",
+            "A reader was fired at this job twice and neither run answered in the "
+            "shape the board can read; the job stays shut. The runs are in %s. "
+            "Fire another with `%s %s --rerun`."
+            % (here, project.tool(DECL, "review"), goal_id)], actor=actor, must=False)
+        sys.exit("reader produced nothing readable; %s stays gated" % goal_id)
+
+    made, turned = file_findings(goal_id, verdict.get("findings") or [])
+    checked = verdict.get("checked") or []
+    # The commits go on with the name: a signature that does not say what it covers
+    # cannot expire, which is how a job answered its reader and closed on the
+    # reading that had turned it down (cor-dqth).
+    note = ("%s\n%s\n\nChecked and found correct: %s\n\nFindings filed: %s"
+            % (reading.SIGNATURE % (actor, " ".join(shas)),
+               verdict.get("verdict", "").strip(),
+               "; ".join(str(c) for c in checked) or "nothing listed",
+               ", ".join(made) or "none — nothing to answer"))
+    bd(["update", goal_id, "--append-notes", note], actor=actor)
+    global SIGNED
+    SIGNED = True
+    gone = retire_legacy(goal_id, actor)
+    if turned:
+        bd(["update", goal_id, "--append-notes",
+            "The board would not take %d of this reading's findings, so they are "
+            "written here whole and the job stays shut:\n\n%s\n\nFile each one by "
+            "hand with `%s under %s --do \"<what is wrong>|<how we "
+            "know it is fixed>\"`."
+            % (len(turned), "\n\n".join("%s (%s)\n  %s\n  refused: %s"
+                                        % (f.get("title", ""), f.get("where", ""),
+                                           f.get("why", ""), msg)
+                                        for f, msg in turned),
+                 project.tool(DECL, "job"), goal_id)], actor=actor)
+        sys.exit("%s: %d finding(s) the board refused; they are on the goal and it "
+                 "stays gated" % (goal_id, len(turned)))
+    # A job turned down stays shut. Its answers are its own pieces, and closing the
+    # last of them brings it back here rather than past here.
+    if not made:
+        for gate in gates_on(goal_id):
+            bd(["gate", "resolve", gate], actor=actor, must=False)
+        running.after_reading(goal_id, ROOT)
+    print("%s read by %s: %d finding(s) %s%s"
+          % (goal_id, actor, len(made), ", ".join(made),
+             ("; retired " + ", ".join(gone)) if gone else ""))
+
+
+def release():
+    """Let the job go, and send one more reader if what stands is still unread.
+
+    Every sending while this reader was out did nothing, so a change that landed
+    under it would otherwise go unread until something else closed. What may
+    follow it is decided by `run.due_again`, which is narrower than the test that
+    sends a reader in the first place, precisely because this one can send its own
+    successor.
+
+    A reader that never signed sends nobody — that is the run that dies on the
+    account's allowance, and refiring it is the storm this claim exists to stop.
+    A reader run by hand holds no claim and so reaches neither branch.
+
+    A run that handed the reading to a detached copy lets go of nothing. The
+    claim is the copy's now — named after it — and dropping it here would leave
+    the job unguarded for the whole reading, seconds after taking it (bw-k0w.6).
+    """
+    if HANDED:
+        return
+    if not READING or not inflight.drop(READING):
+        return
+    if not SIGNED:
+        return
+    if running.due_again(READING, ROOT):
+        running.fire(READING, ROOT)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        release()

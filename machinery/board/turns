@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""How many of a session's turns went on the board rather than on the work.
+
+    python3 board/turns <session log>...     count one or more sessions
+    python3 board/turns --dir <directory>    count the biggest logs in it
+
+The number this answers is the one mch-aa9 is judged by: board turns against
+file edits. Two sessions measured on 15 Aug spent 300 board writes against 69
+file edits, and 196 against 248 — the paperwork setting the pace rather than
+the building.
+
+It also says what the same session would cost now, by collapsing the two
+rituals that were four turns and two: a landing (catch up, take the slot,
+merge, give it back) and a note followed by a close of the same card. Nothing
+is estimated — both are counted from the commands the session actually issued.
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import sys
+
+BOARD = re.compile(r"\bbd\b|board/(?:job|review|move|land|sweep|turns)\b")
+SLOT = re.compile(r"\bmerge-slot\s+(acquire|release)\b")
+MERGE = re.compile(r"\bgit\b[^|;&]*\bmerge\b")
+REBASE = re.compile(r"\bgit\b[^|;&]*\brebase\b")
+NOTE = re.compile(r"\bbd\s+update\s+(\S+)[^|;&]*--append-notes")
+CLOSE = re.compile(r"\bbd\s+close\s+(\S+)")
+EDIT = ("Edit", "Write", "NotebookEdit")
+# A note counts as that close's own only if it is the same card and nothing much
+# happened between: further apart they are two separate things to say.
+PAIR_WITHIN = 3
+# How far from taking or giving back the slot a catch-up or a merge still belongs
+# to that landing. Wide enough for the rebase before the slot and the merge after
+# it, narrow enough that a session's own merging is not counted as a landing.
+LANDING_WITHIN = 3
+
+
+def commands(path):
+    """Every shell command and every file edit the session issued, in order."""
+    out = []
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            if not line.lstrip().startswith("{"):
+                continue
+            try:
+                got = json.loads(line)
+            except ValueError:
+                continue
+            if got.get("type") != "assistant":
+                continue
+            for part in (got.get("message") or {}).get("content") or []:
+                if not (isinstance(part, dict) and part.get("type") == "tool_use"):
+                    continue
+                if part.get("name") == "Bash":
+                    out.append(("bash", str((part.get("input") or {}).get("command") or "")))
+                elif part.get("name") in EDIT:
+                    out.append(("edit", ""))
+    return out
+
+
+def count(path):
+    issued = commands(path)
+    board = sum(1 for kind, cmd in issued if kind == "bash" and BOARD.search(cmd))
+    edits = sum(1 for kind, _ in issued if kind == "edit")
+    slot = sum(1 for kind, cmd in issued if kind == "bash" and SLOT.search(cmd))
+
+    # Only a catch-up or a merge that belongs to a landing is a turn the one
+    # command removes. A session rebases and merges for its own reasons all day,
+    # and counting those was what overstated the saving (mch-aa9.17): a landing
+    # is what happens around the slot, so the slot is what bounds it.
+    slot_at = [i for i, (kind, cmd) in enumerate(issued)
+               if kind == "bash" and SLOT.search(cmd)]
+    landing_git = sum(1 for i, (kind, cmd) in enumerate(issued)
+                      if kind == "bash" and (MERGE.search(cmd) or REBASE.search(cmd))
+                      and any(abs(i - at) <= LANDING_WITHIN for at in slot_at))
+    other_git = sum(1 for kind, cmd in issued
+                    if kind == "bash" and (MERGE.search(cmd) or REBASE.search(cmd))) \
+        - landing_git
+
+    # A note that is answered by a close of the same card is one turn now.
+    seen, pairs = {}, 0
+    for i, (kind, cmd) in enumerate(issued):
+        if kind != "bash":
+            continue
+        hit = NOTE.search(cmd)
+        if hit:
+            seen[hit.group(1)] = i
+        hit = CLOSE.search(cmd)
+        if hit and hit.group(1) in seen and i - seen[hit.group(1)] <= PAIR_WITHIN:
+            pairs += 1
+
+    # Landing is one command where it was the slot pair plus the git around it.
+    landings = slot // 2
+    saved = (slot + landing_git) - landings + pairs if landings else pairs
+    was = board + landing_git + other_git
+    return {"board": board, "edits": edits, "slot": slot, "git": landing_git,
+            "landings": landings, "pairs": pairs,
+            "was": was, "now": was - saved}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("logs", nargs="*")
+    ap.add_argument("--dir", help="take the biggest logs in this directory")
+    ap.add_argument("--top", type=int, default=2)
+    a = ap.parse_args()
+
+    logs = list(a.logs)
+    if a.dir:
+        found = sorted(glob.glob(os.path.join(a.dir, "*.jsonl")),
+                       key=os.path.getsize, reverse=True)
+        logs += found[:a.top]
+    if not logs:
+        sys.exit("name a session log, or a directory with --dir")
+
+    print("%-12s %7s %7s %7s %7s %7s %7s" % ("session", "board", "edits", "slot",
+                                             "landings", "pairs", "now"))
+    for path in logs:
+        c = count(path)
+        print("%-12s %7d %7d %7d %7d %7d %7d"
+              % (os.path.basename(path)[:8], c["was"], c["edits"], c["slot"],
+                 c["landings"], c["pairs"], c["now"]))
+
+
+if __name__ == "__main__":
+    main()

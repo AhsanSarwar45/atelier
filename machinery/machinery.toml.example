@@ -1,0 +1,48 @@
+# The declaration every project that runs this machinery keeps at its own root,
+# as `machinery.toml`. It carries exactly what differs by project and nothing
+# else — the shared code holds no project's name, prefix, systems or branch.
+
+# What the manager and the outside reader call this project.
+name = "example"
+# The card ids this project's board issues, without the dash.
+prefix = "ex"
+# The branch finished work lands on here.
+lands_on = "main"
+# Whether an agent puts work onto the lines this project ships from. Left out, it
+# does not: a checkout that has said nothing is protected. A project running a
+# board has to answer, because a card here closes only once a commit naming it
+# reaches `lands_on` — say `true` if agents land their own work, or name a line
+# they may land on in `lands_on` and list only what they may not in `protected`.
+agent_merges = false
+# The lines an agent may never write to. Left out, it is main, master, staging,
+# production, release and whatever `lands_on` is called.
+# protected = ["main", "staging"]
+# The systems a card may belong to. `--area` accepts these and nothing else, and
+# the first is the one a refusal shows as an example.
+areas = ["interface", "tests", "tooling", "docs", "board"]
+# The name this project's own environment switches open with, so a switch keeps
+# answering to the spelling written into its docs. The machinery's own spelling
+# (MACHINERY_…) always works as well.
+brand = "EXAMPLE"
+# Other registered projects a job here may say its change lands in
+# (`lands:<name>` on the goal).
+lands_elsewhere = []
+# Where this project's own quality-rule modules live, relative to its root.
+# Empty runs `quality.py` with the shared measures only.
+rules = ""
+# The one command this project's checks step runs — its tests, its compile gate,
+# whatever it holds a change to. A job runs it once, in front of the reader,
+# against everything the job built; nothing here belongs in a commit hook. Left
+# out, the step still runs and its note names what was run by hand instead.
+checks = "./check"
+
+[review]
+# What the outside reader is told it is reading for.
+persona = "the Example project — what it is, in one line"
+# What a change here has to do before it counts as proved. Written into the
+# Verify step of every job poured here and told to the reader.
+proves = "run the thing and read what it produced"
+
+# Ways this project names somewhere anyone can go and look that are not a file
+# path — a debug view in a renderer, a screen in an app. Python patterns.
+places = []

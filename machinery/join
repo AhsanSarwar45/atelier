@@ -1,0 +1,1215 @@
+#!/usr/bin/env python3
+"""Put a project on this machinery, and say whether one already is.
+
+One command, run once in a project, and that project is on the machinery whole.
+Nothing is ever copied into it: it runs the tools and the gates in place, out of
+this one home. Joining is these things, and each of them is fixed rather than
+merely reported —
+
+  the declaration      `machinery.toml` at the project root. A project that has
+                       none is written one from the example kept here, with what
+                       a directory can answer for itself already answered; it
+                       stops on the prefix, which nothing can guess, because that
+                       goes into every card id the board will ever issue
+  the register         one line in `projects.toml` here, so `lands:<name>` on a
+                       goal means something and a commit in one checkout may name
+                       the ids of a project whose work lands there
+  the board            on a database server, never one beads runs in its own
+                       process: the board screen reads a served board straight
+                       over SQL and otherwise falls back to spawning `bd` once
+                       per read, and `bd doctor` refuses its deep checks on an
+                       unserved one. A board already here is MOVED, and the move
+                       counts its cards on both sides and puts itself back if the
+                       count changes
+  the session gates    the project's own `.claude/settings.json`, merged never
+                       overwritten, from the one table below that also feeds
+                       `--check` — plus the history ceiling and the house voice
+  the board screen     one row in the screen's own list of projects, found by
+                       where the project lives, so its cards are on the screen
+                       without anybody typing a path into it
+  the shared .claude   Claude Code reads agents, skills and output styles out
+                       of the machine-wide `~/.claude/`, so the canonical copies
+                       are versioned here and that home holds symlinks at them —
+                       a link, never a copy. One install serves every project; a
+                       project that wants a subject-flavoured variant keeps its
+                       own beside it, which overrides the shared one by name.
+  the board's role    a fork infers a contributor and routes `bd list` at a
+                       planning store; a project that pours work is a maintainer
+  the landing guard    git only runs a hook it finds in the checkout itself, so
+                       a one-line pointer at the guard kept here goes wherever
+                       this project's git looks for its ref-transaction hook —
+                       still not a copy, and a re-join puts it back if the board
+                       tooling rewrote that directory
+
+Forwarders are the last of them and are optional (`--forward`): a project
+that already had the tools under `scripts/` keeps those paths working, so
+settings and running sessions are not disturbed. They are one line of
+pointing and no logic.
+
+    machinery/join <project>              join it, or say what is missing
+    machinery/join <project> --forward    and leave forwarders at the old paths
+    machinery/join --check                say where every registered project stands
+"""
+import argparse
+import datetime
+import filecmp
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import uuid
+
+HOME = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HOME)
+import project  # noqa: E402
+
+# Where a project that carried the tools itself kept them, and what belongs at
+# each path. The machinery's own layout is the other half of the pair.
+FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
+# Claude Code reads these out of a project's own `.claude/`, so a project shares
+# them by pointing at this home rather than by holding a copy.
+SHARED = ("agents", "skills", "output-styles", "commands")
+# The shape of a declaration, kept beside this file. A project that declares
+# nothing is given a copy of it rather than a sentence about where to find one.
+EXAMPLE = "machinery.toml.example"
+# The board screen's own list of projects. A project whose board runs perfectly
+# is still not on the screen until a row here names where it lives, and typing
+# that path into the screen by hand is the last piece of joining anybody was
+# still doing themselves.
+#
+# The app names itself once, in the product's `identity.rs`, and asks the
+# operating system where a program of that name keeps its data. These two lines
+# are that answer written out for the systems this machinery runs on.
+APP = "kanban-ui"
+LIST = "settings.db"
+# How long to wait for the screen's own writer to let go of the list. The screen
+# may be running while a project joins, and sqlite lets one writer in at a time.
+LIST_WAIT = 10
+
+FORWARDER = '''#!/usr/bin/env python3
+"""A forwarder, not the tool (cor-up1g).
+
+The board tooling and the session gates live in a home of their own, so every
+project runs the same ones in place rather than carrying a copy that drifts:
+%(home)s. This file only points at `%(rel)s` there, and editing it
+changes nothing at all.
+"""
+import importlib.machinery
+import importlib.util
+import os
+import sys
+
+REAL = os.path.join(os.environ.get("MACHINERY_HOME") or %(home)r, %(rel)r)
+_spec = importlib.util.spec_from_loader(
+    __name__, importlib.machinery.SourceFileLoader(__name__, REAL))
+_mod = importlib.util.module_from_spec(_spec)
+sys.modules[__name__] = _mod
+_spec.loader.exec_module(_mod)
+'''
+# The first line of a forwarder's own docstring. What tells one from a copy, and
+# what the copies check reads (`machinery/copies`).
+MARK = "A forwarder, not the tool"
+
+# The one thing that IS put inside a project's checkout, because git will only
+# run a hook it finds there: a shim at the ref-transaction hook, pointing at the
+# guard kept here. The session gates read a command before it runs and see only
+# what a session types; this reads the ref write itself, so a landing line moved
+# by something nobody read is still refused (bw-7e8.5).
+GUARD = "reference-transaction"
+GUARD_MARK = "A pointer, not the guard"
+GUARD_SHIM = '''#!/usr/bin/env sh
+# %(mark)s (machinery/join writes this file).
+#
+# The guard is %(guard)s. It reads the ref write on
+# its standard input and refuses a move of this project's landing line that no
+# landing explains; every other ref goes straight through, `refs/dolt/data` above
+# all — the board syncs that one, and breaking it breaks the board.
+#
+# A missing python, or a machinery that has moved, stands the guard down instead
+# of wedging the repository: a hook that cannot run must not be a hook that
+# refuses everything.
+#
+# Git calls this three times a transaction and only the first can refuse, so the
+# other two are turned round here rather than in python: this runs on every ref
+# write in the repository, and the board's own sync is most of them.
+[ "$1" = prepared ] || exit 0
+GUARD="${MACHINERY_HOME:-%(home)s}/%(rel)s"
+[ -r "$GUARD" ] || exit 0
+command -v python3 >/dev/null 2>&1 || exit 0
+exec python3 "$GUARD" "$@"
+'''
+GUARD_REL = os.path.join("hooks", "landing-gate.py")
+
+
+# --- the board ---------------------------------------------------------------
+#
+# A board beads runs in its own process is a board only a command line can open.
+# The app reads a project's cards straight out of a database server when one
+# holds them, and otherwise falls back to spawning `bd` once per read; `bd
+# doctor` refuses its deep checks on one outright. So a joined project's board
+# is on a server, and the two arrangements differ by one directory name and one
+# word in the board's own record — which is what makes moving between them a
+# thing this can do rather than an export and a re-import.
+KEPT = "embeddeddolt"    # where beads keeps the database when it runs it itself
+SERVED = "dolt"          # where it looks for one a server holds
+MODE = "dolt_mode"       # the word in the board's record saying which of the two
+SERVER = "server"
+# What the cards looked like just before the move, kept beside the board. Not a
+# backup of the database — the move never rewrites one — but the one thing that
+# would let a person put the cards back by hand if the undo below ever failed.
+BEFORE = "before-the-server.jsonl"
+CONFIG = "dolt-server-config.yaml"
+
+
+def board(args, root):
+    """Ask this project's own board something. Whether it answered, and what it said."""
+    try:
+        run = subprocess.run(["bd"] + args, cwd=root, capture_output=True,
+                             text=True, timeout=30)
+        return run.returncode == 0, (run.stdout or run.stderr).strip()
+    except Exception as why:
+        return False, str(why)
+
+
+def record(root):
+    """What this board says about itself, and the file it says it in."""
+    where = os.path.join(root, ".beads", "metadata.json")
+    try:
+        with open(where) as fh:
+            return json.load(fh), where
+    except (OSError, ValueError):
+        return {}, where
+
+
+def cards(root):
+    """How many cards this board holds, or None if it would not say.
+
+    The number is the whole safety of the move below: a board that will not
+    answer is a board whose move nobody could check afterwards, so it is not
+    moved at all.
+    """
+    ok, said = board(["count"], root)
+    if not ok:
+        return None
+    try:
+        return int(said.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def rewrite(where, held, mode):
+    held[MODE] = mode
+    with open(where, "w") as fh:
+        json.dump(held, fh, indent=2)
+
+
+def keepsake(path):
+    """What a file holds right now, or None where there is no such file."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def putback(path, was):
+    """Put a file back to what `keepsake` found, taking it away if it found none."""
+    try:
+        if was is None:
+            if os.path.exists(path):
+                os.remove(path)
+        elif keepsake(path) != was:
+            with open(path, "wb") as fh:
+                fh.write(was)
+    except OSError:
+        # An undo that cannot write is still an undo of the board itself, which
+        # is the part that holds the cards.
+        pass
+
+
+def serve(root, decl, say):
+    """Bring this project's board up on a database server.
+
+    Three cases. No board at all: make one, already on a server. A board already
+    on one: nothing to do. A board beads runs itself: move it, counting the cards
+    on both sides of the move and undoing the whole of it if the number changes.
+
+    The undo matters more than the move. Nothing here rewrites the database — the
+    move is a rename and one word in a JSON file — so putting both back is the
+    same two operations in reverse, and a board that came up wrong is a board
+    that is handed back exactly as it was. Exactly, including the settings file
+    the server writes for itself on its way up: a board handed back with that
+    sitting beside it was not handed back as it was (bw-aisw.10).
+    """
+    beads = os.path.join(root, ".beads")
+    if not os.path.isdir(beads):
+        if not decl.prefix:
+            return          # standing() already says this, and says it better
+        ok, said = board(["init", "--server", "--prefix", decl.prefix,
+                          "--non-interactive"], root)
+        say("board  %s has one now, on a server" % root if ok else
+            "board  %s would not take a new board: %s" % (root, said))
+        return
+    held, where = record(root)
+    if held.get(MODE) == SERVER:
+        return
+    was = held.get(MODE)
+    kept, served = os.path.join(beads, KEPT), os.path.join(beads, SERVED)
+    if not os.path.isdir(kept):
+        say("board  %s is not on a server and keeps no database at %s either, so "
+            "there is nothing to move — look at it by hand" % (root, kept))
+        return
+    if os.path.exists(served):
+        say("board  %s already holds %s beside the database it runs itself, and "
+            "the move would write over it; left exactly as it is" % (root, served))
+        return
+    before = cards(root)
+    if before is None:
+        say("board  %s would not say how many cards it holds, so it was left "
+            "alone: a move nobody can check afterwards is one nobody should make"
+            % root)
+        return
+    ok, said = board(["export", "--all", "-o", os.path.join(beads, BEFORE)], root)
+    if not ok:
+        say("board  %s would not write out its cards before the move (%s), so it "
+            "was left alone" % (root, said))
+        return
+    os.rename(kept, served)
+    rewrite(where, held, SERVER)
+    # What the server settings said before the server was asked to start, so the
+    # undo can put that back too: starting one writes the file afresh, and on a
+    # board that never had one it writes the first copy there has ever been.
+    settled = keepsake(os.path.join(beads, CONFIG))
+    ok, said = board(["dolt", "start"], root)
+    after = cards(root) if ok else None
+    if after == before:
+        say("board  %s is on a server now, holding the same %d cards; what they "
+            "said first is in %s" % (root, before, os.path.join(beads, BEFORE)))
+        return
+    board(["dolt", "stop"], root)
+    for leftover in ("dolt-server.pid", "dolt-server.port", "dolt-server.lock"):
+        try:
+            os.remove(os.path.join(beads, leftover))
+        except OSError:
+            pass
+    putback(os.path.join(beads, CONFIG), settled)
+    os.rename(served, kept)
+    rewrite(where, held, was)
+    went = ("held %d cards" % after) if after is not None \
+        else ("would not start (%s)" % said)
+    say("board  %s was NOT moved: on a server it %s, against %d before — the move "
+        "was undone and the board is exactly as it was" % (root, went, before))
+
+
+def unwatch_tracked(root, rel):
+    """Stop git watching a file this project already commits, in this clone only.
+
+    beads commits the board server's settings itself, so a project joined before
+    this command learned any of it carries that file in its history — and then
+    every server start rewrites the port inside it and `git status` reports the
+    file as changed, forever. An exclude line says nothing about a tracked file;
+    the index is where git keeps the one flag that does.
+
+    Set here and nowhere else, so the project's own history is left alone: the
+    file stays committed exactly as it is, and only this machine's copy of it
+    goes quiet. `git update-index --no-skip-worktree <file>` undoes it.
+    """
+    code, said = git(["ls-files", "-v", "--", rel], root)
+    if code or said[:1] in ("S", "s"):
+        return          # already told, or git will not say — nothing to add
+    git(["update-index", "--skip-worktree", "--", rel], root)
+
+
+def unwatched(root, rel, why):
+    """Keep a file this command wrote out of `git status` in this checkout.
+
+    Everything joining leaves inside the working tree is either a safety net for
+    the machine it was made on or a pointer at a path on it, and no clone wants
+    either. Left untracked and unignored it sits in `git status` forever — where
+    the landing gate sweeps it into a stash on the first landing afterwards.
+
+    Written to this clone's own exclude list rather than to a `.gitignore`: those
+    are tracked files, shared with everyone, and a line about one machine's copy
+    does not belong in a diff anybody else reads.
+
+    A file the project already commits is a different job, and `unwatch_tracked`
+    does it: an exclude line has no say over a tracked file, so that one is told
+    to git a second way (bw-aisw.9).
+    """
+    if not git(["ls-files", "--error-unmatch", rel], root)[0]:
+        return unwatch_tracked(root, rel)
+    if not git(["check-ignore", "-q", rel], root)[0]:
+        return          # somebody's ignore file already covers this one
+    code, common = git(["rev-parse", "--path-format=absolute",
+                        "--git-common-dir"], root)
+    if code or not common:
+        return
+    watched = os.path.join(common, "info", "exclude")
+    try:
+        text = open(watched).read() if os.path.exists(watched) else ""
+        if rel in text:
+            return
+        os.makedirs(os.path.dirname(watched), exist_ok=True)
+        with open(watched, "a") as fh:
+            fh.write(("" if text.endswith("\n") or not text else "\n")
+                     + "\n# " + why + "\n/" + rel + "\n")
+    except OSError:
+        # A checkout that will not take the line still joined, and the line is
+        # tidiness. Nothing here is worth undoing good work over.
+        pass
+
+
+def local(root):
+    """Everything joining leaves inside the working tree that belongs to THIS
+    machine alone, as {path relative to the root: why it is nobody else's}.
+
+    Two files and a shim. The copy of the board taken before it moved; the server
+    settings beads writes when it starts one, which name a port chosen that
+    morning and a directory on this disk; and the guard, wherever this project's
+    git looks for hooks — which is the board's own directory in one project and
+    `scripts/git-hooks` in the next, so it is asked rather than assumed.
+    """
+    out = {os.path.join(".beads", BEFORE):
+           "The board as it read before it moved onto a server, kept by"
+           "\n# `machinery/join` so the move can be undone by hand.",
+           os.path.join(".beads", CONFIG):
+           "The board server's settings, written afresh by beads every time it"
+           "\n# starts one: the port is this morning's and the path is this disk's."}
+    for where in hook_dirs(root):
+        rel = os.path.relpath(os.path.join(where, GUARD), root)
+        if not rel.startswith(os.pardir):
+            out[rel] = ("A pointer at where this machine keeps the landing guard,"
+                        "\n# written by `machinery/join`. The path inside it is"
+                        " this machine's own.")
+    return out
+
+
+def tidy(root, say):
+    """Keep what joining left behind out of this checkout's `git status`."""
+    for rel, why in local(root).items():
+        if os.path.exists(os.path.join(root, rel)):
+            unwatched(root, rel, why)
+
+
+def watched(root, rel):
+    """Whether git will report this file in `git status` here.
+
+    Two ways it can: untracked and covered by nobody's ignore list, or tracked
+    and not yet told to leave this clone's copy alone. Either way it sits in
+    `git status` forever — and the landing gate stashes everything it finds
+    there before a merge, so the next landing carries this machine's own
+    settings off into a stash nobody reads.
+    """
+    if not git(["ls-files", "--error-unmatch", rel], root)[0]:
+        code, said = git(["ls-files", "-v", "--", rel], root)
+        return not code and said[:1] not in ("S", "s")
+    return bool(git(["check-ignore", "-q", rel], root)[0])
+
+
+def untidy(root):
+    """The files joining left that git is still watching, so they will be swept."""
+    loose = [rel for rel in local(root)
+             if os.path.exists(os.path.join(root, rel)) and watched(root, rel)]
+    return ["git still watches %s at %s — it belongs to this machine alone, and "
+            "the landing gate sweeps whatever it finds loose into a stash before "
+            "every merge" % (", ".join(loose), root)] if loose else []
+
+
+def unserved(root):
+    """Whether this project's board is one only a command line can open."""
+    held, _ = record(root)
+    if not held or held.get(MODE) == SERVER:
+        return []
+    return ["this board is not on a database server (it says %r), so the board "
+            "screen cannot read it over SQL and falls back to spawning `bd` once "
+            "per read, and `bd doctor` refuses its deep checks here; "
+            "`machinery/join %s` moves it" % (held.get(MODE) or "nothing", root)]
+
+
+def states(root, say):
+    """Tell this board about the two states the machinery moves cards into.
+
+    Four of the six columns are bd's own words and cost nothing. These two are
+    this machinery's own, and bd refuses a status it was never told about — with
+    the refusal going back to whatever asked for the move and to nobody else. So
+    a board that was never told runs the review half of every job into silence,
+    and it is installed here for the same reason the landing guard is: a project
+    that has to be set up by hand is a project that is set up wrong.
+
+    Merged and never overwritten: a board may carry custom states of its own, and
+    joining is not the moment to take them away.
+    """
+    have = project.custom_states(root)
+    want = [s for s in project.REVIEW_STATES if s not in have]
+    if not want:
+        return
+    ok, out = board(["config", "set", project.CUSTOM_KEY, ",".join(have + want)], root)
+    say("states %s knows %s" % (root, ", ".join(want)) if ok else
+        "states %s would not take %s: %s" % (root, ", ".join(want), out))
+
+
+def stranded(root):
+    """Jobs stamped as waiting on the manager that the board is not showing there.
+
+    A board never told about his column refused every move into it and handed the
+    refusal back to the code that asked, which dropped it — so a job could finish,
+    be stamped with the moment his wait began, have that wait written into its own
+    notes, and go on sitting in the agents' column where he never looks. Telling
+    the board the word does not go back for those: nothing revisits a job once it
+    has been parked, so each one waits for a signature nobody can see is owed.
+
+    The stamp is what identifies them, never the notes: a job whose work reopened
+    keeps the sentence and loses the stamp, and putting that one in his column
+    would ask him to sign something still being built (bw-n5k4).
+    """
+    ok, out = board(["list", "--status", "all", "--json"], root)
+    if not ok:
+        return []
+    try:
+        cards = json.loads(out or "[]")
+    except ValueError:
+        return []
+    held = []
+    for card in cards:
+        meta = card.get("metadata") or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except ValueError:
+                continue
+        if not meta.get("waiting_since") or meta.get("judge") != "manager":
+            continue
+        if card.get("status") in ("closed", project.MANAGER_REVIEW):
+            continue
+        held.append(card["id"])
+    return held
+
+
+def replace(root, say):
+    """Put the jobs the board refused into the column they were sent to.
+
+    Run at joining and nowhere else: this is the one moment the board has just
+    been told the word it was refusing, so it is also the one moment the cards it
+    refused can be put right. Idempotent by construction — a job it moves is no
+    longer stranded, so a second run finds nothing.
+    """
+    held = stranded(root)
+    if not held:
+        return
+    moved, stuck = [], []
+    for goal in held:
+        ok, out = board(["update", goal, "-s", project.MANAGER_REVIEW], root)
+        (moved if ok else stuck).append(goal if ok else "%s (%s)" % (goal, out))
+    if moved:
+        say("parked %s put %d job(s) back in the manager's column: %s"
+            % (root, len(moved), ", ".join(moved)))
+    if stuck:
+        say("parked %s could not put back: %s" % (root, ", ".join(stuck)))
+
+
+def unstated(root):
+    """The review states this board was never told about, so a project running
+    without them is told rather than finding out one refused card at a time."""
+    gone = project.untold(root)
+    return ["this board has never been told about %s, so every move into it is "
+            "refused and nobody sees the refusal — the review half of a job here "
+            "does nothing at all; `machinery/join %s` tells it"
+            % (" or ".join(gone), root)] if gone else []
+
+
+def unsigned(root):
+    """Jobs finished and waiting on the manager that his own column is not showing,
+    so the signature they are waiting for is owed and nothing anywhere says so."""
+    held = stranded(root)
+    return ["%d job(s) finished and waiting on the manager sit outside his column, "
+            "so each waits for a signature nobody can see is owed: %s; "
+            "`machinery/join %s` puts them back"
+            % (len(held), ", ".join(held), root)] if held else []
+
+
+def git(args, cwd):
+    run = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+    return run.returncode, run.stdout.strip()
+
+
+def forwarders(root, say):
+    """Leave a pointer at every path this project used to keep a tool at.
+
+    Only where the project already has the directory: a project that never
+    carried the tools has no old path to keep working, and inventing one would
+    put the machinery's names inside it for no reason.
+    """
+    for near, mine in FORWARD.items():
+        where = os.path.join(root, near)
+        if not os.path.isdir(where):
+            continue
+        for name in sorted(os.listdir(os.path.join(HOME, mine))):
+            full = os.path.join(HOME, mine, name)
+            if name.startswith(".") or name == "__pycache__" or os.path.isdir(full):
+                continue
+            out = os.path.join(where, name)
+            if os.path.exists(out) and MARK not in open(out, errors="replace").read(600):
+                say("kept   %s — this project's own, not the machinery's" % out)
+                continue
+            with open(out, "w") as fh:
+                fh.write(FORWARDER % {"home": HOME, "rel": os.path.join(mine, name)})
+            os.chmod(out, 0o755)
+            say("point  %s -> %s" % (out, os.path.join(mine, name)))
+
+
+def hook_dirs(root):
+    """Every directory this project's git looks in for a hook.
+
+    One, normally. Two where `core.hooksPath` holds a RELATIVE path, which is
+    what `bd hooks install` writes: git resolves it against the directory it runs
+    the hook from, and that is the top of the working tree for an ordinary
+    command but the git directory itself for anything arriving over a push
+    (githooks(5), and watched happening — bw-7e8.5). A guard left in only the
+    first of the two is a guard a push walks straight past.
+    """
+    gitdir = git(["rev-parse", "--absolute-git-dir"], root)[1]
+    if not gitdir:
+        return []
+    said = git(["config", "--get", "core.hooksPath"], root)[1]
+    if not said:
+        return [os.path.join(gitdir, "hooks")]
+    if os.path.isabs(said):
+        return [said]
+    return [os.path.join(root, said), os.path.join(gitdir, said)]
+
+
+def guard(root, say):
+    """Leave the landing guard wherever this project's git will run it.
+
+    Rewritten every join rather than only when absent: the directory it goes in
+    is the board's own, and a project whose board tooling rebuilt that directory
+    gets the guard back by joining again.
+
+    Run after the board is made, never before: which directory this is is the
+    board's answer as much as git's, and asking before there is a board answers
+    with the one git ships and leaves the shim somewhere nothing reads.
+    """
+    body = GUARD_SHIM % {"mark": GUARD_MARK, "home": HOME, "rel": GUARD_REL,
+                         "guard": os.path.join(HOME, GUARD_REL)}
+    for where in hook_dirs(root):
+        out = os.path.join(where, GUARD)
+        if os.path.exists(out):
+            held = open(out, errors="replace").read()
+            if GUARD_MARK not in held:
+                say("kept   %s — this project's own, not the machinery's" % out)
+                continue
+            if held == body:
+                continue
+        os.makedirs(where, exist_ok=True)
+        with open(out, "w") as fh:
+            fh.write(body)
+        os.chmod(out, 0o755)
+        say("guard  %s -> %s" % (out, GUARD_REL))
+
+
+def unguarded(root):
+    """Where the landing guard is not, so a project running without it is told.
+
+    The gate that reads a command answers for the sessions on this machine; this
+    one answers for the checkout, and a checkout whose board tooling wrote its
+    hooks directory afresh has silently lost it.
+    """
+    gone = [os.path.join(w, GUARD) for w in hook_dirs(root)
+            if not there(os.path.join(w, GUARD))]
+    return ["nothing guards the landing line inside the checkout: %s — "
+            "`machinery/join %s` writes it" % (", ".join(gone), root)] if gone else []
+
+
+def there(path):
+    """Whether the guard's own pointer is at this path, pointing at THIS home.
+
+    Both halves matter. A file of that name somebody else wrote is not the guard;
+    and a pointer left by a machinery that has since moved is a guard that
+    quietly does nothing, because a shim whose target is gone stands down rather
+    than refusing. Read as missing, so a re-join writes it afresh.
+    """
+    try:
+        said = open(path, errors="replace").read(2000)
+    except OSError:
+        return False
+    return GUARD_MARK in said and HOME in said
+
+
+MACHINE = os.path.expanduser("~/.claude")
+
+
+def same(here, there):
+    """Whether two definitions are the same thing, file or folder.
+
+    A skill is a folder and an agent is a file, and both arrive in the machine
+    home the same way — written there first, taken in here after — so both have
+    to be recognised as already-identical before a link may replace one.
+    """
+    if os.path.isdir(here) != os.path.isdir(there):
+        return False
+    if os.path.isdir(here):
+        left = filecmp.dircmp(here, there)
+        return not (left.left_only or left.right_only or left.diff_files
+                    or left.funny_files or left.subdirs)
+    return open(here, errors="replace").read() == open(there, errors="replace").read()
+
+
+def install(say):
+    """Point the machine-wide Claude home at the definitions kept here.
+
+    One link per item rather than one for the whole directory, so a project keeps
+    its own beside them — a subject-flavoured locator or researcher overrides the
+    shared one by name, and the craft definitions stay one file for everybody.
+
+    A link and not a copy, because a copy is the thing this whole home exists to
+    stop: `machinery/copies` reads exactly this and refuses a home that has
+    stopped pointing.
+    """
+    for kind in SHARED:
+        mine = os.path.join(HOME, "claude", kind)
+        if not os.path.isdir(mine):
+            continue
+        where = os.path.join(MACHINE, kind)
+        os.makedirs(where, exist_ok=True)
+        for name in sorted(os.listdir(mine)):
+            link, target = os.path.join(where, name), os.path.join(mine, name)
+            if os.path.islink(link):
+                if os.path.realpath(link) == target:
+                    continue
+                os.remove(link)
+            elif os.path.exists(link):
+                # Identical content is the ordinary case: a definition written
+                # into the machine home first and taken in here afterwards. One
+                # that differs is somebody's own and is left exactly where it is.
+                if not same(link, target):
+                    say("kept   %s — it is not what this home keeps; compare them" % link)
+                    continue
+                shutil.rmtree(link) if os.path.isdir(link) else os.remove(link)
+            os.symlink(target, link)
+            say("link   %s -> %s" % (link, target))
+
+
+BARE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def quoted(text):
+    """`text` as a line of TOML can hold it.
+
+    A project's own directory name and its own path are written into files this
+    then reads straight back, and neither is ours to choose: a name holding a
+    quote or a backslash writes a file that will not parse, and the very next
+    thing that happens is something reading it (bw-aisw.12).
+    """
+    out = []
+    for ch in text:
+        if ch in '"\\':
+            out.append("\\" + ch)
+        elif ch < " " or ch == "\x7f":
+            out.append("\\u%04X" % ord(ch))
+        else:
+            out.append(ch)
+    return '"%s"' % "".join(out)
+
+
+def named_as(name):
+    """A project's name as the left-hand side of a line in the register."""
+    return name if BARE.match(name) else quoted(name)
+
+
+def register(root, decl, say):
+    """One line in the register, written by hand-editing nothing.
+
+    The file is small and read by every tool call, so it is rewritten whole
+    rather than appended to — a torn append would be read as a project that no
+    longer exists.
+    """
+    text = open(project.REGISTRY).read() if os.path.exists(project.REGISTRY) else ""
+    if re.search(r"^\s*(?:%s|%s)\s*=" % (re.escape(decl.name),
+                                            re.escape(quoted(decl.name))), text, re.M):
+        return
+    if not re.search(r"^\[projects\]\s*$", text, re.M):
+        # A register holding something else — the line saying where the report
+        # tools live, and nothing more, on a machine that has joined nothing yet.
+        # Without this the line below matches nothing, the file is rewritten
+        # exactly as it was, and every project joins while saying it was listed.
+        text = "[projects]\n" + ("\n" + text if text.strip() else "")
+    line = '[projects]\n%s = %s' % (named_as(decl.name), quoted(root))
+    # Written by a function rather than as a string: a path holding a backslash
+    # is read as a group reference in a replacement and the whole write dies.
+    text = re.sub(r"^\[projects\]\s*$", lambda _: line, text, count=1, flags=re.M)
+    with open(project.REGISTRY, "w") as fh:
+        fh.write(text)
+    say("listed %s as %s" % (root, decl.name))
+
+
+def declaring(root):
+    """Give a project that declares nothing the shape of one, and say so.
+
+    The example beside this file is the shape; what a directory can answer for
+    itself is answered in the copy, and the one line it cannot is left empty.
+
+    A prefix is not guessable. It goes into every card id this board will ever
+    issue, so a wrong one is undone by rewriting all of them — which is why this
+    writes the file and stops rather than picking something and carrying on.
+    """
+    base = os.path.basename(root.rstrip("/")) or "project"
+    brand = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_").upper()
+    text = open(os.path.join(HOME, EXAMPLE)).read()
+    for was, now in ((r'^name = "example"$', 'name = ' + quoted(base)),
+                     (r'^prefix = "ex"$', 'prefix = ""'),
+                     (r'^brand = "EXAMPLE"$', 'brand = ' + quoted(brand)),
+                     (r'^checks = ".*"$', 'checks = ""'),
+                     (r'^persona = ".*"$', 'persona = ' + quoted(
+                         "the %s project — what it is, in one line" % base))):
+        text = re.sub(was, lambda _, now=now: now, text, count=1, flags=re.M)
+    where = os.path.join(root, project.DECLARATION)
+    with open(where, "w") as fh:
+        fh.write(text)
+    return where
+
+
+def project_list():
+    """Where the board screen keeps this machine's list of projects."""
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Application Support/com.beads.%s/%s"
+                                  % (APP, LIST))
+    room = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(room, APP, LIST)
+
+
+def called(decl):
+    """The name the screen shows a project it has never seen before.
+
+    Only ever used for a row that does not exist yet: a project already on the
+    screen is called whatever the person who put it there called it, and joining
+    is not the moment to rename somebody's project under them.
+    """
+    return " ".join(word.capitalize()
+                    for word in re.split(r"[-_\s]+", decl.name) if word) or decl.name
+
+
+def opened():
+    """The screen's project list, or None when there is none to open.
+
+    Never created here. The list's shape belongs to the product, which builds it
+    and migrates it on the way up; a second maker of the same tables is a second
+    thing to keep in step, and it would be wrong the first time the product adds
+    a column.
+    """
+    where = project_list()
+    if not os.path.exists(where):
+        return None
+    try:
+        return sqlite3.connect(where, timeout=LIST_WAIT)
+    except sqlite3.Error:
+        return None
+
+
+def listing(root, decl, say):
+    """Keep this project's row in the board screen's list, matched on where the
+    project lives.
+
+    The path is what the row is about, so it is what the row is found by: a
+    project renamed in its own declaration is the same project, and a second row
+    for the same directory is a duplicate the screen would show twice.
+    """
+    where = project_list()
+    db = opened()
+    if db is None:
+        say("unseen %s is not on the board screen: this machine has no %s, so the "
+            "screen has never been run here. Everything else about this project "
+            "is joined; run the app once and re-join to put it on the list."
+            % (root, where))
+        return
+    try:
+        row = db.execute("SELECT name, archived_at, is_test FROM projects "
+                         "WHERE path = ?", (root,)).fetchone()
+        if row is None:
+            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            db.execute("INSERT INTO projects (id, name, path, local_path, "
+                       "last_opened, created_at, is_test) VALUES (?,?,?,?,?,?,0)",
+                       (str(uuid.uuid4()), called(decl), root, None, now, now))
+            db.commit()
+            say("shown  %s is on the board screen's list as %s" % (root, called(decl)))
+            return
+        held, archived, test = row
+        if not archived and not test:
+            return
+        db.execute("UPDATE projects SET archived_at = NULL, is_test = 0 "
+                   "WHERE path = ?", (root,))
+        db.commit()
+        say("shown  %s was %s on the board screen's list and is back on it as %s"
+            % (root, "archived" if archived else "marked a test project", held))
+    except sqlite3.Error as why:
+        # A list that will not answer is worth one line and no more: every other
+        # part of joining has already happened, and the screen is not the board.
+        say("unseen %s could not be written into %s (%s), so this project is not "
+            "on the board screen" % (root, where, why))
+    finally:
+        db.close()
+
+
+def unlisted(root):
+    """Said when the board screen would not show this project."""
+    where = project_list()
+    db = opened()
+    if db is None:
+        return ["the board screen has never run on this machine (no %s), so there "
+                "is no list for %s to be on" % (where, root)]
+    try:
+        row = db.execute("SELECT archived_at, is_test FROM projects WHERE path = ?",
+                         (root,)).fetchone()
+    except sqlite3.Error as why:
+        return ["the board screen's list at %s could not be read (%s)" % (where, why)]
+    finally:
+        db.close()
+    if row is None:
+        return ["%s is on no row of the board screen's list, so its cards are not "
+                "on the screen however well its board runs; `machinery/join %s` "
+                "puts it there" % (root, root)]
+    if row[0]:
+        return ["%s is archived on the board screen's list, so the screen does not "
+                "show it; `machinery/join %s` brings it back" % (root, root)]
+    if row[1]:
+        return ["%s is marked a test project on the board screen's list, so the "
+                "screen hides it; `machinery/join %s` unmarks it" % (root, root)]
+    return []
+
+
+def unowned(decl):
+    """The one question about this project that only its owner can answer.
+
+    Nothing here can answer it: whether an agent may put work onto the lines this
+    project ships from is a permission, and a checkout that has said nothing is
+    protected. Said in its own function because joining asks it twice — once of a
+    project already running, and once, up front, of a project that has just been
+    written its first declaration and is about to be filled in by hand.
+    """
+    if decl.lands_on not in decl.protected:
+        return []
+    return ["machinery.toml does not say who lands work here, so %s is protected "
+            "— and a card here closes only once a commit naming it reaches %s. "
+            "Nothing can finish until this project answers: `agent_merges = true` "
+            "if agents land their own work, or a line they may land on in "
+            "`lands_on` with only what they may not in `protected`"
+            % (decl.lands_on, decl.lands_on)]
+
+
+def standing(root):
+    """Every reason this project is not yet running the machinery."""
+    said = []
+    decl = project.of(root)
+    if not decl.declared:
+        said.append("no machinery.toml at %s — a project declares its own prefix, "
+                    "systems and branch before anything here can answer for it" % root)
+        return said, decl
+    for field, what in (("prefix", "the card ids its board issues"),
+                        ("areas", "the systems a card may belong to"),
+                        ("lands_on", "the branch finished work lands on")):
+        if not getattr(decl, field):
+            said.append("machinery.toml names no %s (%s)" % (field, what))
+    if not os.path.isdir(os.path.join(root, ".beads")):
+        said.append("no board at %s/.beads — `bd init --prefix %s`" % (root, decl.prefix))
+    else:
+        said += unserved(root)
+        said += unstated(root)
+        said += unsigned(root)
+        said += unowned(decl)
+    if decl.name not in project.registry():
+        said.append("not in the register (%s)" % project.REGISTRY)
+    said += unlisted(root)
+    code, role = git(["config", "--get", "beads.role"], root)
+    if role != "maintainer":
+        said.append("git config beads.role is %r — a fork infers a contributor and "
+                    "routes `bd list` at a planning store rather than at this board; "
+                    "`git -C %s config beads.role maintainer`" % (role or "unset", root))
+    said += unwired(root)
+    said += unguarded(root)
+    said += untidy(root)
+    return said, decl
+
+
+# Every event a joined project wires, the tools each one listens to, and the
+# gates that answer. One table: writing a project's settings and reading them
+# back both work off it, so a gate added here reaches every project by joining
+# and is named out loud everywhere it has not.
+#
+# An empty matcher means every use of the event.
+#
+# The long list against PostToolUse is every tool whose use is work: the board
+# refreshes a claim off it, and a session that only edits would otherwise have
+# its cards handed back under it.
+TOUCHING = ("Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|"
+            "Agent|Task|Monitor|TaskCreate|SendMessage")
+WIRING = (
+    ("PreToolUse", "Agent|Skill", ("agent-fence.py",)),
+    ("PreToolUse", "Artifact", ("publish-gate.py",)),
+    ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
+                            "board-status-gate.py")),
+    ("PreToolUse", "AskUserQuestion", ("report-gate.py",)),
+    ("PreToolUse", "Edit|Write|MultiEdit", ("plan-doc-lint.py",)),
+    ("PostToolUse", TOUCHING, ("board-touch.py",)),
+    ("SubagentStop", "", ("board-touch.py", "helper-proof.py")),
+    ("UserPromptSubmit", "", ("habit-reading.py",)),
+    ("SessionStart", "", ("board-prime.py",)),
+    ("SessionEnd", "", ("board-push.py",)),
+    ("Stop", "", ("completion-gate.py", "board-gate.py")),
+)
+# The one gate that is not the machinery's own: it reads a report before it is
+# published, and the report tools are shared out of a home of their own.
+PUBLISH = "publish-gate.py"
+# The house voice. Set where a project says nothing, never over a project that
+# has chosen its own.
+VOICE = "outputStyle"
+SPOKEN = "manager"
+CEILING = "autoCompactWindow"
+# The highest number that is still a ceiling. The 2026-08-18 audit found worker
+# sessions at 599k tokens a request on a million-token window, and the card's bar
+# is per-request load under this — so a ceiling set above it never fires first.
+CEILING_MAX = 200000
+
+
+# A gate is only wired to the tools it was told to listen for, and the fence
+# guards two of them: a lead can be started by naming the agent or by naming its
+# skill, and a project that wired the fence to the Agent tool alone leaves the
+# second route open while reading as wired (mch-1p2.3). The hook's name in the
+# file says nothing about that, so the tools beside it are read too.
+FENCE = "agent-fence.py"
+FENCE_TOOLS = ("Agent", "Skill")
+
+
+def half_heard(text):
+    """The tools the fence is wired to hear, when they are not all of them."""
+    try:
+        events = (json.loads(text).get("hooks") or {}).get("PreToolUse") or []
+    except (ValueError, AttributeError):
+        return []
+    for block in events:
+        if not any(FENCE in (h.get("command") or "")
+                   for h in (block.get("hooks") or [])):
+            continue
+        heard = str(block.get("matcher") or "")
+        deaf = [tool for tool in FENCE_TOOLS
+                if not re.search(r"\b%s\b" % tool, heard)]
+        if deaf:
+            return ["%s is wired to %r in .claude/settings.json, which never hears "
+                    "%s — a lead started that way is refused nothing" %
+                    (FENCE, heard, " or ".join(deaf))]
+    return []
+
+
+def gate(root, name):
+    """Where this project types the gate of this name, or "" if nowhere.
+
+    A project that kept forwarders at its old paths is written its own spelling,
+    so joining does not move a path a running session is already using; every
+    other project is written the tool's own. The one gate that is not the
+    machinery's belongs to the shared report tools, and a machine that has not
+    said where those live cannot wire it at all.
+    """
+    if name == PUBLISH:
+        room = project.reports_dir()
+        return os.path.join(room, "tools", name) if room else ""
+    near = os.path.join("scripts", "hooks", name)
+    return os.path.join("$CLAUDE_PROJECT_DIR", near) \
+        if os.path.exists(os.path.join(root, near)) \
+        else os.path.join(HOME, "hooks", name)
+
+
+def wire(root, say):
+    """Write the machinery's gates into this project's own Claude settings.
+
+    Merged and never overwritten. A project's settings are its own — corsetta
+    carries five gates of its own there — so nothing is removed that this table
+    does not name, no setting outside the gates is touched, and a gate already
+    wired is left where it is unless its path has gone stale or it sits under a
+    matcher that would never hear it.
+
+    A file that will not parse is left completely alone and said out loud: it is
+    somebody's own work, and rewriting it whole would lose it.
+    """
+    where = os.path.join(root, ".claude", "settings.json")
+    held = {}
+    if os.path.exists(where):
+        try:
+            with open(where) as fh:
+                held = json.load(fh)
+        except ValueError as why:
+            say("kept   %s — it does not parse (%s), so nothing was written into "
+                "it; the gates below are not running here" % (where, why))
+            return
+        if not isinstance(held, dict):
+            say("kept   %s — it is not a settings object, so nothing was written "
+                "into it" % where)
+            return
+    was = json.dumps(held, sort_keys=True)
+    hooks = held.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        say("kept   %s — its hooks are not a set of events, so nothing was "
+            "written into it" % where)
+        return
+    wired, missing = [], []
+    for event, matcher, names in WIRING:
+        blocks = hooks.setdefault(event, [])
+        if not isinstance(blocks, list):
+            continue
+        # Every place this gate could already be under this event, so one wired
+        # under a matcher that never hears it is moved rather than duplicated.
+        for name in names:
+            want = gate(root, name)
+            if not want:
+                missing.append(name)
+                continue
+            for block in blocks:
+                kept = [h for h in (block.get("hooks") or [])
+                        if os.path.basename((h.get("command") or "")) != name]
+                if len(kept) != len(block.get("hooks") or []):
+                    block["hooks"] = kept
+            home = next((b for b in blocks
+                         if (b.get("matcher") or "") == matcher), None)
+            if home is None:
+                home = {"matcher": matcher, "hooks": []} if matcher else {"hooks": []}
+                blocks.append(home)
+            home.setdefault("hooks", []).append({"type": "command", "command": want})
+            wired.append(name)
+        # A block left holding nothing held only gates this table names, and is
+        # now not a block at all.
+        hooks[event] = [b for b in blocks if b.get("hooks")]
+    found = held.get(CEILING)
+    if isinstance(found, bool) or not isinstance(found, (int, float)) \
+            or found > CEILING_MAX:
+        held[CEILING] = CEILING_MAX
+    held.setdefault(VOICE, SPOKEN)
+    if json.dumps(held, sort_keys=True) == was:
+        return
+    os.makedirs(os.path.dirname(where), exist_ok=True)
+    with open(where, "w") as fh:
+        json.dump(held, fh, indent=2)
+        fh.write("\n")
+    say("wired  %s runs %d gate(s) of this machinery's" % (where, len(wired)))
+    if missing:
+        say("unwired %s: this machine says nowhere the shared report tools live, "
+            "so `%s` is wired nowhere — one line under [home] in %s"
+            % (root, ", ".join(missing), project.REGISTRY))
+
+
+def unwired(root):
+    """Hooks this project's settings do not run, and the ceiling they do not set.
+    A gate nobody wired is a gate that is not there, and it fails silently —
+    which is the whole reason to say it out loud rather than to trust the file.
+
+    The ceiling is read for its number and not for its name, because a number
+    high enough is the same as no ceiling at all and would otherwise pass."""
+    where = os.path.join(root, ".claude", "settings.json")
+    try:
+        text = open(where).read()
+    except OSError:
+        return ["no .claude/settings.json at %s — nothing is wired" % root]
+    missing = [name for _, _, names in WIRING for name in names if name not in text]
+    said = ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
+        if missing else []
+    said += half_heard(text)
+    try:
+        found = json.loads(text).get(CEILING)
+    except (ValueError, AttributeError):
+        # Not readable as an object: the hooks above are still worth saying, and
+        # a ceiling nobody can read is one nobody is running under.
+        found = None
+    if isinstance(found, bool) or not isinstance(found, (int, float)):
+        said.append("no %s in .claude/settings.json — a session here runs unbounded, "
+                    "carrying every turn of the day into every request instead of "
+                    "shedding the history it no longer needs" % CEILING)
+    elif found > CEILING_MAX:
+        said.append("%s is %s in .claude/settings.json, above the %s a session here "
+                    "was measured surviving on — a ceiling that high is never reached "
+                    "before the day is read back into the next request, so it bounds "
+                    "nothing" % (CEILING, found, CEILING_MAX))
+    return said
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("path", nargs="?", help="the project to join")
+    ap.add_argument("--forward", action="store_true",
+                    help="leave forwarders where this project used to keep the tools")
+    ap.add_argument("--check", action="store_true",
+                    help="say where every registered project stands, and change nothing")
+    a = ap.parse_args()
+
+    if a.check or not a.path:
+        bad = 0
+        for name, root in sorted(project.registry().items()):
+            said, _ = standing(root)
+            print("%-12s %s" % (name, root))
+            for line in said:
+                print("    " + line)
+            bad += bool(said)
+        sys.exit(1 if bad else 0)
+
+    root = os.path.abspath(os.path.expanduser(a.path))
+    decl = project.of(root)
+    said = []
+    if not decl.declared:
+        said.append("wrote  %s — a declaration of this project's own, from the "
+                    "shape kept beside these tools" % declaring(root))
+        project._DECLS.clear()
+        project._ROOTS.clear()
+        decl = project.of(root)
+    if not decl.prefix:
+        print("\n".join(said))
+        # Every line a person has to fill, in one refusal. Answered one at a
+        # time this is two edits and two runs, and the second refusal arrives
+        # after the board, the gates and the screen's list are already made —
+        # which reads as a join that half worked rather than as a question.
+        asked = ["%s/%s says nothing on the `prefix` line, and nothing here can "
+                 "answer it for you: it is written into every card id this board "
+                 "will ever issue, so a guess is undone by rewriting all of them. "
+                 "Fill it in — two or three letters, no dash."
+                 % (root, project.DECLARATION)]
+        asked += ["While that file is open, the other line only you can answer: "
+                  + line for line in unowned(decl)]
+        asked.append("Answer them and run this again; joining does the rest.")
+        sys.exit("\n\n".join(asked))
+    register(root, decl, said.append)
+    project._DECLS.clear()
+    project._ROOTS.clear()
+    install(said.append)
+    if a.forward:
+        forwarders(root, said.append)
+    code, role = git(["config", "--get", "beads.role"], root)
+    if role != "maintainer":
+        git(["config", "beads.role", "maintainer"], root)
+        said.append("role   %s is a maintainer of its own board" % root)
+    # After the role, never before it: a checkout still inferring a contributor
+    # routes bd at a planning store, and the states would be told to that.
+    serve(root, decl, said.append)
+    # After the board and never before it: a project with no board yet keeps its
+    # hooks where git leaves them, and making the board points `core.hooksPath`
+    # at the board's own directory instead — so a guard written first is written
+    # to the one directory git has just stopped reading, and a brand-new project
+    # ends its own join being told the landing line is unguarded (bw-aisw.11).
+    guard(root, said.append)
+    # After the board is where it is going to be, never before: everything below
+    # asks the board something, and asking one that is mid-move answers for the
+    # copy that is about to stop existing.
+    wire(root, said.append)
+    tidy(root, said.append)
+    listing(root, decl, said.append)
+    states(root, said.append)
+    # After the states and never before them: these are the cards the board
+    # refused for want of the word it has just been told.
+    replace(root, said.append)
+    print("\n".join(said) or "nothing to do — %s was already joined" % decl.name)
+    left, _ = standing(root)
+    if left:
+        print("\nstill missing:")
+        for line in left:
+            print("    " + line)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# The machinery's own gate: its refusals, and whether they would notice their
+# own faults coming back.
+#
+# Every project that runs this board is held to `board/selftest.py` by its own
+# compile gate. Nothing held the machinery to the other half — putting each
+# fault back and watching a case go red — so thirty-odd faults stood only while
+# somebody remembered to type the command (mch-mkp.55). This is that command.
+#
+# It is what the checks step of a job runs here — `machinery.toml` names it, and
+# the step is the one place a job pays for it: once, in front of the reader,
+# against everything the job built. No commit hook runs it. Held back per commit
+# it was the same minutes over and over for a change nobody had finished making
+# (bw-a6o.2).
+set -euo pipefail
+
+cd "$(dirname "$(readlink -f "$0")")"
+
+# What is being judged is what a commit would contain — which, in front of a
+# commit, is what is staged and not the commit behind it. `git write-tree` names
+# that tree without touching the working tree or moving any ref.
+#
+# Asked FIRST, while the hook's own settings still stand: git tells a pre-commit
+# hook which index the commit is being built from, and for `commit -a` or one
+# naming paths that is a temporary index of its own. Clearing the pointer first
+# asks the wrong index — whose lock the commit in progress is already holding, so
+# the question fails outright (mch-mkp.64). Assigned on its own line rather than
+# through `export`, so a failure stops the run instead of leaving no tree named.
+if [ -z "${TREE:-}" ]; then
+  TREE=$(git write-tree)
+fi
+export TREE
+
+# And now they go. A commit here is made from a worktree, so these point INTO
+# one, and every git command below would inherit them: the throwaway checkouts
+# the cases build would never be built, and their commits and branches would land
+# on the real repository instead (mch-mkp.56). The suite clears them for itself
+# too; this is the same answer given at the door, for everything else run here.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_PREFIX
+
+python3 board/selftest.py
+
+# Each fault is a whole suite run in a copy of its own, so this is tens of
+# seconds rather than one. That is why the hook asks for it only when the gates
+# themselves are changing, and why another project's push runs the cheap half
+# (`--anchors`) instead.
+python3 board/inject.py
