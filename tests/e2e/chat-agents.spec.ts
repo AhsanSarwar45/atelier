@@ -73,9 +73,24 @@ const DELEGATED_MS = 300_000;
 const HELPER_WAITS = 45;
 
 /**
- * How long the helper in the panel case is told to wait. Longer than the one
- * above, because the panel is read while it is still working and everything
- * else in that turn has to have happened first.
+ * How long the helper waits before it says anything.
+ *
+ * It says nothing until it has finished something. Asked to write a sentence
+ * and then wait, one run went straight to the command and its only words
+ * arrived a second before the call that sent it ended — so the picture meant to
+ * show a helper's words under a call still running showed a finished block
+ * instead (bw-7ks.22.32). A short wait first puts its words on the screen with
+ * the long wait still ahead of it.
+ */
+const HELPER_SPEAKS_AFTER = 5;
+
+/**
+ * How long a helper that is READ while it works is told to wait. Longer than
+ * the one above, because everything else in that turn has to have happened
+ * first and every poll before the picture eats into what is left of the wait.
+ * At forty-five seconds the helper was already finished by the time the shutter
+ * fell, and the committed picture showed a finished block where it claimed to
+ * show one still going (bw-7ks.22.32).
  */
 const HELPER_WAITS_LONGER = 120;
 
@@ -234,19 +249,28 @@ test.describe('the agents a chat sends off', () => {
       'First write one short sentence of your own saying you are about to send a helper off. ' +
         'Then use the Task tool exactly once to launch one general-purpose subagent, and do no work yourself. ' +
         'Tell that subagent, in its prompt, to do these four things in order: ' +
-        'first write one sentence saying what it is about to do; ' +
-        `then run the shell command "python3 -c 'import time; time.sleep(${HELPER_WAITS})'" ` +
+        `first run the shell command "python3 -c 'import time; time.sleep(${HELPER_SPEAKS_AFTER})'" ` +
         'in the foreground, waiting for it, and do not put it in the background; ' +
-        'then write one sentence saying whether the wait worked; then reply with the single word DONE. ' +
+        'then write one sentence saying that first wait is done and it is about to start a longer one; ' +
+        `then run the shell command "python3 -c 'import time; time.sleep(${HELPER_WAITS_LONGER})'" ` +
+        'in the foreground, waiting for it, and do not put it in the background; ' +
+        'then reply with the single word DONE. ' +
+        'Run no command of your own, before or after: everything shell is the helper\'s. ' +
         'When it comes back, reply with the single word FINISHED and nothing else.',
     );
 
     // The call that sent it, while it is still going. Everything else is
     // checked against THIS row, so nothing about the nesting is guessed.
-    const sender = page.locator('[data-testid="tool-row"][data-tool-status="running"]').first();
-    await sender.waitFor({ timeout: DELEGATED_MS });
-    const sentBy = await sender.getAttribute('data-tool-id');
+    const running = page.locator('[data-testid="tool-row"][data-tool-status="running"]');
+    await running.first().waitFor({ timeout: DELEGATED_MS });
+    const sentBy = await running.first().getAttribute('data-tool-id');
     expect(sentBy, 'the running call has no id').toBeTruthy();
+
+    // Held by ITS OWN ID from here on. Read as "whichever row is running", the
+    // row stops being that row the moment the call ends — so every later
+    // question about it quietly becomes a question about nothing, which is not
+    // the same as an answer (bw-7ks.22.32).
+    const sender = page.locator(`[data-tool-id="${sentBy}"]`);
 
     // A line on that row saying what the helper is doing NOW, which is the only
     // thing on the screen while it waits. Read first, because it belongs to a
@@ -280,10 +304,39 @@ test.describe('the agents a chat sends off', () => {
     // that was never coming (measured 2026-08-20).
     await expect(page.locator('[data-testid="assistant-message"]:not([data-sent-by])').first()).toBeVisible();
 
+    /**
+     * That the helper is STILL WORKING is the whole claim of the picture, so it
+     * is read on both sides of the shutter rather than assumed from the polls
+     * above. A single check before would leave the window the shot falls in
+     * unguarded — and unguarded is exactly how the committed picture came to
+     * show the call already OK, the row already done, and a second command
+     * running loose below it that belonged to nobody on the screen
+     * (bw-7ks.22.32).
+     */
+    const stillWorking = async (when: string): Promise<void> => {
+      await expect(sender, `the call that sent the helper was over ${when} the picture`).toHaveAttribute(
+        'data-tool-status',
+        'running',
+      );
+      // One running call, and it is that one. A second top-level row with a
+      // spinner is either work the chat did itself after being told not to, or
+      // a helper's own command drawn outside the row that sent it — and the
+      // picture would be saying something it does not mean either way.
+      expect(await running.count(), `a second call was running ${when} the picture`).toBe(1);
+    };
+
     // Taken while the helper is still working, because that is the picture
     // this case is about: a call still running, the helper's own sentences
     // under it, and a line saying what it is doing now.
+    //
+    // The spinning line at the foot of the picture is not a fourth row and not
+    // a loose call: it is the chat's own working line, which names whatever the
+    // chat is doing this second and carries the same words as the chip in the
+    // bar above. It is checked by its own case; the count above is what keeps a
+    // stray CALL out of the shot.
+    await stillWorking('before');
     await page.screenshot({ path: `${SHOTS}/chat-agent-own-words.png`, fullPage: false });
+    await stillWorking('after');
 
     // Stopped when the case is over, so a run leaves no agent behind.
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: chat } });
