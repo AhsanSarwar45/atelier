@@ -1,9 +1,14 @@
-import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+
+import {
+  aChatSomebodyElseIsIn,
+  aProject,
+  backend,
+  claimConversation,
+  command,
+  openChatTab,
+  type Project,
+} from './fixture-held';
 
 /**
  * A chat somebody is working in, seen from the list.
@@ -17,42 +22,21 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * terminal open in the project is enough. With nothing running there is nothing
  * to mark, and the run says so rather than passing on an empty list.
  *
- * The second case has to make a chat start and stop being worked in, which it
- * cannot do to a real one. So the stack under test runs its sidecar with
- * CLAUDE_CONFIG_DIR pointed at a COPY of the tool's own config — its
- * `sessions/*.json` markers, never the `.key` files beside them — and the run
- * is told where that copy's `sessions` directory is:
- *
- *   BEADS_E2E_MARKERS=/some/scratch/claude/sessions
- *
- * The copied markers name the same live processes, so the first case reads the
- * same truth either way. The second writes one marker of its own, naming the
- * test runner's own process, and deletes it again.
- *
- * The third writes a whole chat: a record under that copy's own `projects`
- * directory, and a marker saying a live process is in it. That is the only way
- * to make a chat say something on cue — a real one answers to its own terminal,
- * not to us — and the sidecar reads it by the same kit call it uses for every
- * other chat.
+ * The harness that makes a chat start and stop being worked in — the marker
+ * directory, the record on disk — is shared with the other runs that need one
+ * and lives in `fixture-held.ts`, which says what BEADS_E2E_MARKERS must be set
+ * to and why it may never be the tool's own directory.
  *
  * Run: BEADS_E2E_URL=http://127.0.0.1:3017 BEADS_E2E_BACKEND=http://127.0.0.1:3008 \
  *      BEADS_E2E_MARKERS=/some/scratch/claude/sessions \
  *      npx playwright test tests/e2e/chat-live.spec.ts
  */
 
-/** The list is a read of every conversation the kit knows about. */
-const LISTED_MS = 120_000;
-
 /**
  * What the rail draws before the reader scrolls — the number that turned "low
  * down" into "absent" (src/workbench/chat-sidebar.tsx, SCREENFUL).
  */
 const SCREENFUL = 40;
-
-interface Project {
-  id: string;
-  path: string;
-}
 
 interface RestoreRow {
   sessionId: string | null;
@@ -61,10 +45,6 @@ interface RestoreRow {
   state: string;
   lastActiveAt: string;
   runningElsewhere?: boolean;
-}
-
-function backend(): string {
-  return process.env.BEADS_E2E_BACKEND ?? '';
 }
 
 /** The row's own key, as the screen writes it on the row. */
@@ -86,84 +66,57 @@ async function withAWorkingChat(request: APIRequestContext): Promise<{ project: 
   throw new Error('no chat is running on this machine: open one in a terminal, then run this again');
 }
 
-async function openChatTab(page: Page, project: Project): Promise<void> {
-  // Waiting for the LIST, not merely for a row: chats already running are drawn
-  // from the live stream at once, while the list itself lands seconds later.
-  const listed = page.waitForResponse((r) => r.url().includes('/api/workbench/restore') && r.ok(), {
-    timeout: LISTED_MS,
-  });
-  await page.goto(`/project?id=${project.id}&tab=chat`);
-  await listed;
-  await page.getByTestId('restore-row').first().waitFor({ timeout: 60_000 });
-}
-
-/** Every row the rail has drawn, in the order it drew them. */
-async function drawnRows(page: Page): Promise<{ key: string; running: boolean; pill: string | null }[]> {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-testid="restore-row"]')).map((el) => ({
-      key: el.getAttribute('data-row-key') ?? '',
-      running: el.getAttribute('data-running') === 'yes',
-      pill: el.querySelector('[data-testid="row-pill"]')?.getAttribute('data-pill') ?? null,
-    })),
-  );
-}
-
 /**
- * The directory the sidecar under test reads its markers from — a copy, so a
- * case may add one and take it away.
+ * What a row says about its chat.
  *
- * Never the real one: writing a marker there puts a chat that does not exist in
- * front of the tool itself.
+ * Three separate things, which is the correction this run stands on: the mark
+ * that moves while something is happening, the word beside it, and the badge
+ * that says somebody else is in there. The badge used to BE the word — a green
+ * "working" pill drawn from the marker directory alone — so a terminal left at
+ * an empty prompt overnight read as working (bw-96is).
  */
-function markerDir(): string {
-  const dir = process.env.BEADS_E2E_MARKERS;
-  if (!dir) throw new Error('set BEADS_E2E_MARKERS to the sessions directory the stack under test reads');
-  const real = join(homedir(), '.claude', 'sessions');
-  if (resolve(dir) === real) throw new Error(`BEADS_E2E_MARKERS is the tool's own directory: ${real}`);
-  return resolve(dir);
+interface RowMark {
+  key: string;
+  running: boolean;
+  working: boolean;
+  word: string | null;
+  external: boolean;
 }
 
 /**
- * The process start time the kernel holds for us — field 22 of our own stat
- * line, which is what tells a live marker from one whose process number has
- * been handed on. Split on the LAST parenthesis: field 2 is the executable's
- * name and the kernel does not escape it.
+ * Every row the rail has drawn, in the order it drew them.
+ *
+ * The reading is spelled out inside the browser rather than shared with
+ * {@link rowNow}: what runs in there is a function of its own, and a helper
+ * from out here is not in scope when it runs.
  */
-function ourProcStart(): string {
-  try {
-    const line = readFileSync('/proc/self/stat', 'utf8');
-    return line.slice(line.lastIndexOf(')') + 1).trim().split(/\s+/)[19] ?? '0';
-  } catch {
-    return '0';
-  }
-}
-
-/** Says a live process is holding this conversation, until it is taken away. */
-function claimConversation(conversation: string): () => void {
-  const file = join(markerDir(), `${process.pid}.json`);
-  writeFileSync(
-    file,
-    JSON.stringify({
-      pid: process.pid,
-      sessionId: conversation,
-      cwd: process.cwd(),
-      startedAt: Date.now(),
-      procStart: ourProcStart(),
-      kind: 'interactive',
-      entrypoint: 'cli',
+async function drawnRows(page: Page): Promise<RowMark[]> {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll('[data-testid="restore-row"]')).map((el) => {
+      const chip = el.querySelector('[data-testid="row-pill"]');
+      return {
+        key: el.getAttribute('data-row-key') ?? '',
+        running: el.getAttribute('data-running') === 'yes',
+        working: chip?.getAttribute('data-working') === 'yes',
+        word: chip?.getAttribute('data-word') ?? null,
+        external: el.querySelector('[data-testid="chat-external"]') !== null,
+      };
     }),
   );
-  return () => rmSync(file, { force: true });
 }
 
 /** What the rail says about one row right now. */
-async function rowNow(page: Page, key: string): Promise<{ running: boolean; pill: string | null } | null> {
+async function rowNow(page: Page, key: string): Promise<RowMark | null> {
   return page.evaluate((wanted) => {
     const el = document.querySelector(`[data-testid="restore-row"][data-row-key="${wanted}"]`);
     if (!el) return null;
+    const chip = el.querySelector('[data-testid="row-pill"]');
     return {
+      key: el.getAttribute('data-row-key') ?? '',
       running: el.getAttribute('data-running') === 'yes',
-      pill: el.querySelector('[data-testid="row-pill"]')?.getAttribute('data-pill') ?? null,
+      working: chip?.getAttribute('data-working') === 'yes',
+      word: chip?.getAttribute('data-word') ?? null,
+      external: el.querySelector('[data-testid="chat-external"]') !== null,
     };
   }, key);
 }
@@ -196,10 +149,12 @@ test.describe('a chat that is working', () => {
       firstIdle < 0 ? drawn.length : firstIdle,
     );
 
-    // The mark itself, on those rows and on no others.
+    // The mark itself, on those rows and on no others. Held, not working:
+    // a terminal sitting at an empty prompt holds its conversation all night
+    // and is doing nothing, so what every one of these rows must carry is the
+    // badge — and what none of the others may carry is the badge (bw-96is).
     for (const row of drawn) {
-      if (row.running) expect(row.pill, `${row.key} is working and says ${row.pill ?? 'nothing'}`).toBe('working');
-      else expect(row.pill, `${row.key} is not working and says it is`).not.toBe('working');
+      expect(row.external, `${row.key} is held by another program and does not say so`).toBe(row.running);
     }
   });
 
@@ -224,13 +179,19 @@ test.describe('a chat that is working', () => {
     await page.waitForTimeout(1500);
     const settled = fetches;
     expect(await rowNow(page, key), 'the row to watch was not drawn').toBeTruthy();
-    expect((await rowNow(page, key))!.running, 'the row was already marked as working').toBe(false);
+    expect((await rowNow(page, key))!.external, 'the row was already held by somebody').toBe(false);
 
-    const release = claimConversation(idle!.externalId!);
+    // Held AND working: the marker carries the word a terminal writes into its
+    // own while it owes an answer, so the row has to draw both — the moving
+    // mark and, beside it, the badge (bw-96is).
+    const release = claimConversation(idle!.externalId!, { status: 'busy' });
     try {
       await expect
-        .poll(async () => (await rowNow(page, key))?.pill ?? null, { timeout: 20_000 })
-        .toBe('working');
+        .poll(async () => (await rowNow(page, key))?.external ?? null, { timeout: 20_000 })
+        .toBe(true);
+      const marked = (await rowNow(page, key))!;
+      expect(marked.working, 'a chat whose holder says it is busy drew no moving mark').toBe(true);
+      expect(marked.word, 'the moving mark came with no word').toBeTruthy();
       // And it climbed while it was at it: above every chat nobody is working
       // in, without anybody asking for the list again. Not to the very top —
       // the chats already running have today's dates and it does not.
@@ -248,141 +209,10 @@ test.describe('a chat that is working', () => {
     await expect
       .poll(async () => (await rowNow(page, key))?.running ?? null, { timeout: 20_000 })
       .toBe(false);
+    expect((await rowNow(page, key))!.external, 'the badge outlived the program it stood for').toBe(false);
     expect(fetches - settled, 'the rail asked for the list again instead of listening').toBe(0);
   });
 });
-
-/** Where the sidecar under test keeps everything, markers and records alike. */
-function configDir(): string {
-  return dirname(markerDir());
-}
-
-/**
- * Where a project's records live, named the way the tool names them: the path
- * with everything that is not a letter or a digit turned into a dash.
- */
-function recordDir(projectPath: string): string {
-  return join(configDir(), 'projects', projectPath.replace(/[^a-zA-Z0-9]/g, '-'));
-}
-
-/** One line of a record, in the shape the tool writes and the kit reads back. */
-function line(chat: { id: string; cwd: string }, parent: string | null, role: 'user' | 'assistant', text: string) {
-  const uuid = randomUUID();
-  return {
-    uuid,
-    row: JSON.stringify({
-      parentUuid: parent,
-      isSidechain: false,
-      type: role,
-      message:
-        role === 'user'
-          ? { role: 'user', content: text }
-          : { role: 'assistant', content: [{ type: 'text', text }] },
-      uuid,
-      timestamp: new Date().toISOString(),
-      userType: 'external',
-      entrypoint: 'cli',
-      cwd: chat.cwd,
-      sessionId: chat.id,
-      version: '2.1.232',
-    }),
-  };
-}
-
-/** One line of a record carrying blocks — a command, or what it printed. */
-function blocks(chat: { id: string; cwd: string }, parent: string | null, role: 'user' | 'assistant', content: unknown[]) {
-  const uuid = randomUUID();
-  return {
-    uuid,
-    row: JSON.stringify({
-      parentUuid: parent,
-      isSidechain: false,
-      type: role,
-      message: { role, content },
-      uuid,
-      timestamp: new Date().toISOString(),
-      userType: 'external',
-      entrypoint: 'cli',
-      cwd: chat.cwd,
-      sessionId: chat.id,
-      version: '2.1.232',
-    }),
-  };
-}
-
-/**
- * A chat that another program is in the middle of, made rather than waited for.
- *
- * A real one cannot be told to say something on cue, and driving a second agent
- * from a test to make it happen would be a test of that agent. What this stands
- * on instead is the only thing the two programs share: the record on disk. The
- * stack under test reads a scratch config directory, so the record written here
- * is one the sidecar genuinely reads, by the same kit call it uses for every
- * other chat.
- */
-function aChatSomebodyElseIsIn(projectPath: string, opening: string) {
-  const chat = { id: randomUUID(), cwd: projectPath };
-  const dir = recordDir(projectPath);
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${chat.id}.jsonl`);
-  const first = line(chat, null, 'user', opening);
-  writeFileSync(file, `${first.row}\n`);
-  let last = first.uuid;
-  return {
-    ...chat,
-    file,
-    /** The other program says something more, as it would while somebody watched. */
-    says(text: string): void {
-      const next = line(chat, last, 'assistant', text);
-      appendFileSync(file, `${next.row}\n`);
-      last = next.uuid;
-    },
-    /**
-     * It starts a command and has not got the answer yet — the shape a record
-     * being written to right now ends in, and the shape the app holds back
-     * rather than drawing a finished, empty row.
-     */
-    runs(name: string, input: Record<string, unknown>): string {
-      const id = `toolu_${randomUUID().replace(/-/g, '')}`;
-      const next = blocks(chat, last, 'assistant', [{ type: 'tool_use', id, name, input }]);
-      appendFileSync(file, `${next.row}\n`);
-      last = next.uuid;
-      return id;
-    },
-    /** And what it printed, which is what settles that tail. */
-    printed(id: string, output: string): void {
-      const next = blocks(chat, last, 'user', [{ type: 'tool_result', tool_use_id: id, content: output }]);
-      appendFileSync(file, `${next.row}\n`);
-      last = next.uuid;
-    },
-    forget(): void {
-      rmSync(file, { force: true });
-    },
-  };
-}
-
-/** The project the run is pointed at, or the first the instance lists. */
-async function aProject(request: APIRequestContext): Promise<Project> {
-  const projects = (await (await request.get(`${backend()}/api/projects`)).json()) as Project[];
-  expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
-  const wanted = process.env.BEADS_E2E_PROJECT;
-  const project = wanted ? projects.find((p) => p.id === wanted) : projects[0];
-  expect(project, `no project ${wanted ?? ''}`).toBeTruthy();
-  return project!;
-}
-
-/** One command to the sidecar, and what it said back. */
-async function command(request: APIRequestContext, cmd: Record<string, unknown>) {
-  const res = await request.post(`${backend()}/api/workbench/command`, { data: cmd });
-  const body = await res.text();
-  let said: { error?: string; id?: string } = {};
-  try {
-    said = JSON.parse(body) as { error?: string; id?: string };
-  } catch {
-    said = {};
-  }
-  return { ok: res.ok(), status: res.status(), body, said };
-}
 
 test.describe('the door into a conversation somebody else is in', () => {
   /**
@@ -480,17 +310,19 @@ test.describe('a chat another program is running', () => {
       // Opening it is opening THAT conversation: what was already said is here.
       await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
 
-      // And the box says why it cannot be typed into, rather than looking
-      // ordinary and waking a second agent on the same conversation.
+      // And there is no box at all: one line saying who is in there stands
+      // where it was. A box drawn in full and refusing every keystroke is a
+      // door with a lock on it where there is no door, and typing into it
+      // would wake a second agent on the same record (bw-96is).
       await expect(page.getByTestId('held-elsewhere')).toBeVisible();
-      await expect(page.getByTestId('composer')).toBeDisabled();
-      await expect(page.getByTestId('send-button')).toBeDisabled();
+      await expect(page.getByTestId('composer')).toHaveCount(0);
+      await expect(page.getByTestId('send-button')).toHaveCount(0);
 
       // And the top of the chat says what its row in the list says. "Asleep" is
       // true of our own agent and false of what is on the screen, which is a
       // conversation being worked in as the reader watches (bw-dmxj.10).
-      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'working');
-      await expect(page.getByTestId('session-state')).toHaveText('working');
+      await expect(page.getByTestId('session-state')).toHaveAttribute('data-state', 'held');
+      await expect(page.getByTestId('chat-external')).toBeVisible();
 
       // The whole of it: something said over there turns up here, with nobody
       // reloading anything.
@@ -506,10 +338,12 @@ test.describe('a chat another program is running', () => {
       release();
     }
 
-    // That program has stopped: the chat is the reader's to take up.
+    // That program has stopped: the chat is the reader's to take up, and the
+    // box is back by itself because the stream it went away on says so.
     await expect(page.getByTestId('composer')).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId('held-elsewhere')).toHaveCount(0);
-    await expect(page.getByTestId('session-state')).not.toHaveText('working');
+    await expect(page.getByTestId('chat-external')).toHaveCount(0);
+    await expect(page.getByTestId('session-state')).not.toHaveAttribute('data-state', 'held');
     chat.forget();
   });
 
