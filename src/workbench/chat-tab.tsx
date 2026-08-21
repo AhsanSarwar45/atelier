@@ -73,6 +73,7 @@ import { DrawnTranscript } from '@/workbench/drawn-transcript';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
+import { WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 
 /** Where the "show me everything" switch is remembered between visits. */
@@ -840,15 +841,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             beside it is a number or a name that means nothing half-drawn. Left
             to itself it kept its full width and the chips shrank under their
             own words, so what the chat was running printed straight across the
-            folder chip (bw-7ks.22.15). */}
-        <span
-          data-testid="session-meta"
-          className="min-w-0 shrink truncate whitespace-nowrap text-xs text-muted-foreground"
-        >
-          claude
-          {view.model ? ` · ${view.model}` : ''}
-          {view.permissionMode ? ` · permission mode: ${view.permissionMode}` : ''}
-        </span>
+            folder chip (bw-7ks.22.15). It used to print the tool's own spelling
+            as grey text — `claude · claude-opus-5 · permission mode:
+            bypassPermissions` — an inch from a picker calling that same setting
+            "Skip all checks" (bw-ja9l.1). */}
+        <WhatItRuns model={view.model} permissionMode={view.permissionMode} models={view.menu.models} />
         {facts?.folder && (
           <Badge
             hue={hueFor(facts.folder)}

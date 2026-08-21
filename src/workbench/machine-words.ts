@@ -212,6 +212,15 @@ export const TURN_ENDED: Record<string, string> = {
 };
 
 /**
+ * The colour a mode is drawn in, which is a reading of how much it still asks.
+ *
+ * The chip's variants, named here rather than in the screen: a mode gets its
+ * word and its colour from the same row, so the two cannot drift apart when the
+ * kit adds a mode and only one of the tables is remembered.
+ */
+export type ModeTone = 'secondary' | 'info' | 'warning' | 'destructive';
+
+/**
  * How much a chat asks before it does things, in words rather than in settings.
  *
  * The line announcing a change said `bypassPermissions` — the setting's own
@@ -219,16 +228,30 @@ export const TURN_ENDED: Record<string, string> = {
  * those lines are in the manager's record, all of them drawn to him, and it is
  * the one line here that MUST be read: a chat that has quietly stopped asking
  * before it runs things is a trap (§8.2.4). `said` finishes "This chat will
- * now…"; `label` names the setting on the picker.
+ * now…"; `label` names the setting on the picker; `tone` is how loudly the chip
+ * on the chat's own line says it (bw-ja9l.1).
  */
-export const PERMISSION_MODE: Record<string, { label: string; said: string }> = {
-  default: { label: 'Ask first', said: 'ask before anything risky' },
-  acceptEdits: { label: 'Edit freely', said: 'change files without asking' },
-  plan: { label: 'Plan only', said: 'plan only, and change nothing' },
-  dontAsk: { label: 'Do not ask', said: 'stop asking about tools' },
-  auto: { label: 'Automatic', said: 'decide for itself' },
-  bypassPermissions: { label: 'Skip all checks', said: 'skip every permission check' },
+export const PERMISSION_MODE: Record<string, { label: string; said: string; tone: ModeTone }> = {
+  default: { label: 'Ask first', said: 'ask before anything risky', tone: 'secondary' },
+  acceptEdits: { label: 'Edit freely', said: 'change files without asking', tone: 'warning' },
+  plan: { label: 'Plan only', said: 'plan only, and change nothing', tone: 'info' },
+  dontAsk: { label: 'Do not ask', said: 'stop asking about tools', tone: 'warning' },
+  auto: { label: 'Automatic', said: 'decide for itself', tone: 'warning' },
+  bypassPermissions: {
+    label: 'Skip all checks',
+    said: 'skip every permission check',
+    tone: 'destructive',
+  },
 };
+
+/**
+ * A mode nobody here has written a row for.
+ *
+ * Quiet on purpose. The kit invents modes between our releases and this one's
+ * name is all that is known about it: painting it as a warning would be a claim
+ * about a setting nothing has read, and painting it as safe would be worse.
+ */
+export const UNKNOWN_MODE_TONE: ModeTone = 'secondary';
 
 /**
  * A word off the wire, made readable, for the one case nothing better exists.

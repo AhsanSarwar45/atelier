@@ -1,0 +1,143 @@
+/**
+ * What the line above a conversation says the chat is running (bw-ja9l.1).
+ *
+ * It said it in the tool's own spelling — `claude · claude-opus-5 · permission
+ * mode: bypassPermissions`, as one run of grey text — an inch from a picker
+ * that calls that same setting "Skip all checks". A reader cannot be asked to
+ * hold two names for one thing, and the one name here that MUST be read is the
+ * mode: a chat that has quietly stopped asking before it runs things is a trap
+ * and grey text an inch long is how it hid (docs/agent-workbench.md §8.2.4).
+ *
+ * So: the words come off the same table the picker reads, a mode the kit
+ * invents after this release still arrives in English, the mode that stops
+ * asking is loud, and a chat whose record says nothing draws nothing rather
+ * than a badge guessing on its behalf.
+ *
+ * The last case is about width and not about words. This group is the one thing
+ * on that line allowed to give way, and the folder chip beside it is the one
+ * thing that must not: left to itself the group kept its full width and the
+ * chips inside shrank under their own words, so what the chat was running
+ * printed straight across the folder's name (bw-7ks.22.15).
+ */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+
+import type { ModelChoice } from '@/workbench/protocol';
+import { WhatItRuns } from '@/workbench/what-it-runs';
+
+/** The picker's own list, as a chat this app drives announces it. */
+const MENU: ModelChoice[] = [
+  { value: 'default', displayName: 'Default (recommended)' },
+  { value: 'opus', displayName: 'Opus 5', description: 'The heavy one' },
+  { value: 'sonnet', displayName: 'Sonnet 5' },
+];
+
+/** A chat nothing here is driving announces no list at all. */
+const NO_MENU: ModelChoice[] = [];
+
+const draw = (model: string | null, mode: string | null, models = MENU) =>
+  render(<WhatItRuns model={model} permissionMode={mode} models={models} />);
+
+const modeChip = () => screen.queryByTestId('chat-mode-chip');
+const modelChip = () => screen.queryByTestId('chat-model-chip');
+
+/**
+ * Everything a reader can actually see: the words on the line and the words a
+ * hover produces. The `data-` attributes are how the screen tests name a mode
+ * without reading English at it, and nobody sees them.
+ */
+function readable(): string {
+  const group = screen.getByTestId('session-meta');
+  const titles = Array.from(group.querySelectorAll('[title]'), (el) => el.getAttribute('title') ?? '');
+  return [group.textContent ?? '', ...titles].join(' | ');
+}
+
+describe('what the chat is running, on its own line', () => {
+  it('names the mode in the picker’s words and never in the setting’s', () => {
+    draw('opus', 'bypassPermissions');
+
+    expect(modeChip()?.textContent).toBe('Skip all checks');
+    // The whole point: the wire word is nowhere a reader can see it.
+    expect(readable()).not.toContain('bypassPermissions');
+  });
+
+  it('draws every mode the kit ships today in words', () => {
+    for (const [wire, said] of [
+      ['default', 'Ask first'],
+      ['acceptEdits', 'Edit freely'],
+      ['plan', 'Plan only'],
+      ['dontAsk', 'Do not ask'],
+      ['auto', 'Automatic'],
+      ['bypassPermissions', 'Skip all checks'],
+    ] as const) {
+      const { unmount } = draw('opus', wire);
+      expect(modeChip()?.textContent, `${wire} is drawn as itself`).toBe(said);
+      unmount();
+    }
+  });
+
+  it('draws a mode invented after this release in English rather than in camel case', () => {
+    // The kit adds modes between our releases. The choice is the wire word, or
+    // nothing, or the same word with its seams opened up (machine-words.ts).
+    draw('opus', 'askAboutEverythingTwice');
+
+    expect(modeChip()?.textContent).toBe('Ask about everything twice');
+    expect(readable()).not.toContain('askAboutEverythingTwice');
+  });
+
+  it('says loudly that a chat has stopped asking, and quietly that it still does', () => {
+    const { unmount } = draw('opus', 'bypassPermissions');
+    expect(modeChip()?.getAttribute('data-tone')).toBe('destructive');
+    unmount();
+
+    draw('opus', 'default');
+    expect(modeChip()?.getAttribute('data-tone')).toBe('secondary');
+  });
+
+  it('names the model the way the picker beside it names it', () => {
+    draw('opus', 'default');
+
+    expect(modelChip()?.textContent).toBe('Opus 5');
+  });
+
+  it('still names the model of a chat that announced no picker list', () => {
+    // A chat begun in a terminal has nothing driving it, so nothing published a
+    // list of models; its own record answers with the wire id (bw-ja9l.2).
+    draw('claude-opus-5', 'bypassPermissions', NO_MENU);
+
+    expect(modelChip()?.textContent).toBe('Claude opus 5');
+    expect(modeChip()?.textContent).toBe('Skip all checks');
+  });
+
+  it('says the brand’s default only where there is a picker to mean it', () => {
+    const { unmount } = draw(null, 'default');
+    expect(modelChip()?.textContent).toBe('Default model');
+    unmount();
+
+    // Nothing is driving this one and its record has not answered yet: an
+    // empty line, because the only guess available is about this machine's
+    // settings and not about the terminal that chat is running in.
+    draw(null, null, NO_MENU);
+    expect(modelChip()).toBeNull();
+    expect(modeChip()).toBeNull();
+  });
+
+  it('gives way before the folder chip does', () => {
+    draw('opus', 'bypassPermissions');
+    const group = screen.getByTestId('session-meta');
+
+    expect(group.className).toContain('min-w-0');
+    expect(group.className).toContain('shrink');
+    expect(group.className.split(/\s+/)).not.toContain('shrink-0');
+
+    // And the chip it must give way to holds its width whatever happens: the
+    // header draws it a few lines further down the same row.
+    const header = readFileSync(resolve(__dirname, '../chat-tab.tsx'), 'utf8');
+    const folder = header.slice(header.indexOf('data-testid="chat-folder-chip"'));
+    const className = /className="([^"]*)"/.exec(folder)?.[1] ?? '';
+    expect(className.split(/\s+/), 'the folder chip must never give way').toContain('shrink-0');
+  });
+});
