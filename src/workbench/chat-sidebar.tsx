@@ -211,6 +211,10 @@ export function withLive(
         // place a message he typed in a terminal is written down.
         lastSpokeAt: laterSpoke(known.lastSpokeAt, session.lastSpokeAt),
         beads: session.beads.length ? session.beads : known.beads,
+        // The mark's own two halves, so the row says what the bar above it says
+        // (protocol.ts, RestoreRow.activity; bw-96is.31).
+        activity: session.activity,
+        busySince: session.busySince,
       };
       continue;
     }
@@ -228,6 +232,8 @@ export function withLive(
       folder: folderOf(session.projectPath),
       branch: null,
       beads: session.beads,
+      activity: session.activity,
+      busySince: session.busySince,
     });
   }
 
@@ -430,7 +436,12 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
             {group.rows.map((row) => {
               const key = rowKey(row);
               const live = row.state !== 'dormant' && row.state !== 'ended';
-              const state = chatState({ state: row.state, held: row.held ?? null });
+              const state = chatState({
+                state: row.state,
+                label: row.activity,
+                since: row.busySince ? Date.parse(row.busySince) : null,
+                held: row.held ?? null,
+              });
               return (
                 <div
                   key={key}

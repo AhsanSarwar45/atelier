@@ -230,21 +230,114 @@ export function heldDoing(args: {
  * on it went out and came back with every command it ran: the manager's "the
  * working chip only shows when its running some commands" (bw-jaoz.4).
  *
- * The last thing written says it outright. A line of the person's own, or a
- * command's output coming back, both leave the agent owing the next word. An
- * assistant line owes one only when it asked for a tool. And an assistant line
- * that just said its piece owes nothing — that is the turn over.
+ * The last thing written says it — but only once the kit's own lines are told
+ * from the person's. The kit writes into the person's half of a record: the
+ * marker it leaves when a turn is stopped, and the echo of every slash command
+ * typed. Read as prompts, those left a chat drawing Working for ever, because
+ * no answer is ever coming for them. Measured over every record on this machine
+ * (2,775 of them, 2026-08-21): 182 that nothing had touched for an hour still
+ * read as a turn in flight, and 152 of those were one of those two lines.
  *
- * Null, not false, when nothing could be read: a record that is not there
- * cannot say the chat is idle.
+ * So the rules, each one measured and each one the kit's own where it has one
+ * (docs/agent-workbench.md §6.3.5):
+ *
+ * - The person's own words leave an answer owed. So does a tool's result coming
+ *   back, and so does an assistant line that asked for a tool.
+ * - An assistant line that only thought leaves the turn in flight: nothing ends
+ *   on a thought. No record on this machine ends on one, so this costs nothing
+ *   and it is the whole of what a long think looks like from outside.
+ * - The line the kit writes when the person stops a turn owes nothing, and
+ *   neither does the echo of a slash command. Both are matched with the kit's
+ *   own patterns, lifted from its reader rather than guessed at.
+ * - A compaction's summary owes nothing by itself; the kit does not count it as
+ *   something the person said either.
+ *
+ * False, not true, when nothing could be read: a record that is not there
+ * cannot say a turn is in flight. What it cannot say is left to the quiet timer
+ * above.
  */
-export function answerOwed(said: { type?: string; message?: unknown } | null): boolean {
+export function answerOwed(
+  // Open, because the kit's own declaration of a stored line is open: three
+  // named keys and `[k: string]: unknown` for everything else it writes there.
+  said: { type?: string; message?: unknown; isCompactSummary?: boolean; [k: string]: unknown } | null,
+): boolean {
   if (!said) return false;
-  if (said.type === 'user') return true;
-  if (said.type !== 'assistant') return false;
+  if (said.type === 'assistant') return assistantOwes(said.message);
+  if (said.type !== 'user') return false;
+  // Not the person talking, per the kit's own reader, which skips it when it
+  // looks for the last thing he said.
+  if (said.isCompactSummary === true) return false;
+
   const content = (said.message as { content?: unknown } | null | undefined)?.content;
+  const spoken: string[] = [];
+  if (typeof content === 'string') {
+    spoken.push(content);
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      const part = block as { type?: string; text?: unknown } | null;
+      if (!part) continue;
+      // A tool answering back is the middle of a turn, whatever else is on the
+      // line — the kit stops reading a line the moment it sees one, for the
+      // same reason: it is not the person.
+      if (part.type === 'tool_result') return true;
+      if (part.type === 'text' && typeof part.text === 'string') spoken.push(part.text);
+    }
+  }
+  // A line with nothing readable on it — an image, a shape nothing here knows —
+  // is the person putting something there.
+  if (spoken.length === 0) return true;
+  return spoken.some((line) => {
+    const words = line.replaceAll('\n', ' ').trim();
+    if (!words) return false;
+    return !STOPPED_BY_HAND.test(words) && !KIT_WROTE_IT.test(words);
+  });
+}
+
+/**
+ * The kit's own marker for a turn the person stopped.
+ *
+ * Its literal, from the kit's reader (`sdk.mjs`, the pattern it tests a user
+ * line against before calling it something he said): a stopped turn and a
+ * stopped tool call both write it, differing only inside the brackets.
+ */
+const STOPPED_BY_HAND = /^\[Request interrupted by user[^\]]*\]/;
+
+/**
+ * A slash command's own echo, and the output it printed.
+ *
+ * The kit writes both into the person's half of the record. Its own reader
+ * skips any line opening with a tag of this shape; this list is the narrower
+ * one — the tags that are the kit talking to itself — because two others of
+ * that shape, a helper's finish notice and a reminder pushed into a turn, ARE
+ * things an agent is expected to answer, and calling those settled would put a
+ * chat back to sleep in the middle of the turn they started.
+ */
+const KIT_WROTE_IT =
+  /^<(?:command-name|command-message|command-args|local-command-stdout|local-command-stderr)[\s>]/;
+
+/**
+ * Whether an assistant's last line leaves its own turn unfinished.
+ *
+ * Asking for a tool does. Thinking with nothing said does — a turn never ends
+ * on a thought, and the kit writes a thought as its own line, so this is what
+ * the middle of a long think looks like from outside (43,814 such lines on this
+ * machine, and not one record that ends on one). Anything it actually said is
+ * the turn over.
+ */
+function assistantOwes(message: unknown): boolean {
+  const content = (message as { content?: unknown } | null | undefined)?.content;
   if (!Array.isArray(content)) return false;
-  return content.some((block) => (block as { type?: string } | null)?.type === 'tool_use');
+  let thought = false;
+  let spoke = false;
+  for (const block of content) {
+    const kind = (block as { type?: string } | null)?.type;
+    // Every block, not the first that says something: a line can say a word and
+    // then call a tool, and it is the call that decides.
+    if (kind === 'tool_use') return true;
+    if (kind === 'text') spoke = true;
+    if (kind === 'thinking') thought = true;
+  }
+  return thought && !spoke;
 }
 
 /**

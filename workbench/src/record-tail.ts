@@ -37,6 +37,12 @@ export interface RecordLine {
   isSidechain?: boolean;
   isMeta?: boolean;
   /**
+   * Set on the line a compaction leaves behind in place of what it summarised.
+   * The kit does not count it as something the person said, and neither does
+   * the reading of a record's end (chat-state.ts, answerOwed).
+   */
+  isCompactSummary?: boolean;
+  /**
    * The mode the chat was in when this line was written. The kit stamps it onto
    * a line of its own every time the mode changes, and onto the prompts a
    * person types (bw-ja9l.2).

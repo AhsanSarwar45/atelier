@@ -555,6 +555,22 @@ export interface RestoreRow {
    * `runningElsewhere` is.
    */
   held?: HeldChat | null;
+  /**
+   * Our own driver's word for what this chat is doing, and when it started —
+   * the two halves of the mark the chat's own bar draws.
+   *
+   * On the row for the same reason the holder's are: the list draws the one
+   * reading (chat-state.ts) and it cannot draw it from half the facts. Without
+   * these a chat of ours read "Thinking" with no clock on the list and
+   * "Pulling the branch apart 2m 14s" in the bar above it, which is two screens
+   * disagreeing about a chat the reader is looking at in one glance
+   * (bw-96is.31). Absent for the same reasons `runningElsewhere` is — and
+   * absent too on a row nothing of ours is attached to, which is what a held
+   * chat is.
+   */
+  activity?: string | null;
+  /** When that began, ISO, for the count beside the word. */
+  busySince?: string | null;
 }
 
 /**

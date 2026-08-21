@@ -780,6 +780,76 @@ and nothing else. Every chat being read that this app is not driving is watched,
 whether or not a terminal held it at the moment it was opened, because the owner
 opens a conversation and types into it in a terminal afterwards (bw-4wcd.20).
 
+#### 6.3.5 What a record line can be, and how its end is read
+
+Ground for the reading above, because that reading decides whether a chat
+somebody else holds draws Working or Idle, and it decides it from one line.
+
+**The kit does not declare what a record line is.** The SDK's own type for a
+stored line is `SessionStoreEntry = { type: string; uuid?: string; timestamp?:
+string; [k: string]: unknown }`, and of the summary folded beside it: "Opaque
+SDK-owned state. Stores MUST persist verbatim and MUST NOT interpret." So `type`
+is an open string, everything else is `unknown`, and there is no contract to
+read against — a reading built from what a line *ought* to look like would be
+built on nothing. The shapes below were therefore counted rather than
+remembered: every record on this machine, 2,777 of them, 754,615 lines,
+2026-08-21. The counts are of lines this reading can reach, so the 203,428 that
+belong to agents a chat sent off are excluded from every row but their own.
+
+**Where the kit does rule, its rule is lifted rather than guessed.** Its own
+reader decides whether a `user` line is the person talking before it will use it
+as a chat's last prompt, and it does so with two patterns —
+`/^\[Request interrupted by user[^\]]*\]/` and a test for a line opening with an
+XML-ish tag — plus a rule that a line carrying a `tool_result` is never his.
+Those are taken as written. The tag test is applied narrower here, to the tags
+that are the kit talking to itself: a helper's finish notice has the same shape
+and *is* something an agent is expected to answer, and calling it settled would
+put a chat to sleep in the middle of the turn it started.
+
+**What it is for.** A held chat has no stream to ask. Its holder's marker
+answers when it writes one — a terminal does, a host-driven process does not —
+and where it does not, the end of the record is the only evidence on the
+machine. `answerOwed` (`src/workbench/chat-state.ts`) reads it; `lastSaidSync`
+(`workbench/src/record-tail.ts`) finds the line, scanning backwards in doubling
+windows because the physical last line of a record is usually not conversation
+at all: of 2,777 records, 1,455 end on a line belonging to an agent the chat
+sent off and 872 on the kit's own note of the last prompt.
+
+| Line, as the kit writes it | Seen | How the end of a record reads it | Verdict |
+| --- | --- | --- | --- |
+| `user`, string content — the person typed it | 3,553 | An answer is owed | Drawn: the chat is working |
+| `user`, `text` blocks — the person typed it | 11 | An answer is owed | Drawn: the chat is working |
+| `user`, `image` — he pasted a picture and said nothing | 122 | An answer is owed: a line with nothing readable on it is still him putting something there | Drawn |
+| `user`, `tool_result` — a tool answered back | 89,599 | An answer is owed, whatever else is on the line — the kit stops reading a line at the first one, for the same reason | Drawn: mid-turn |
+| `user`, `tool_result` with `is_error` — a command refused or failed | within the above | An answer is owed: the agent still has to say what it does about it | Drawn: mid-turn |
+| `user`, `[Request interrupted by user]` / `…for tool use` — the person stopped the turn | 594, and the last word in 93 records | **Nothing is owed.** Matched with the kit's own pattern | Fault filed and fixed (bw-96is.30): it read as working for ever |
+| `user`, `<command-name>…` and `<local-command-stdout>…` — a slash command's echo and what it printed | 655, and the last word in 59 records | Nothing is owed; the kit's own reader skips these too | Fault filed and fixed (bw-96is.30) |
+| `user`, `<task-notification>…` — a helper the agent sent off has finished | 1,303 | An answer **is** owed: this is what wakes a turn | Drawn; deliberately kept out of the rule above |
+| `user` with `isCompactSummary` — what a compaction left in place of the history | 409 | Nothing is owed by itself, and the kit does not count it as something he said either | Drawn: the prompt after it reads as any other |
+| `user` or `assistant` with `isMeta` — the kit's own aside | 1,085 | Not conversation; skipped before the end is read | Deliberately not drawn |
+| anything with `isSidechain` — a turn belonging to an agent this chat sent off | 203,428 | Not this conversation; skipped | Deliberately not drawn (§6.3.2) |
+| `assistant`, `tool_use` — it asked for a tool | 89,631 | An answer is owed | Drawn, and the command is drawn while it runs |
+| `assistant`, `text`+`tool_use` — it said a word and then asked | 1 | An answer is owed: every block is read, not the first that says something | Drawn |
+| `assistant`, `thinking` alone — the middle of a think | 43,901, and the last word in 0 records | **An answer is owed:** a turn never ends on a thought | Fault filed and fixed (bw-96is.30): a long think fell to Idle after ten seconds |
+| `assistant`, `text` — it said its piece | 13,745 | Nothing is owed: the turn is over | Drawn |
+| `assistant`, `text` with `isApiErrorMessage` — the turn failed | 241 | Nothing is owed: the turn is over | Drawn as the answer, which is what the kit did with it |
+| `assistant`, a block shape nothing here knows (`fallback`) | 5 | Nothing is owed; the quiet timer decides instead | Deliberately not drawn |
+| `system`/`turn_duration` — the kit's own note that a turn ended | 3,043 | Not read. Measured useless for this: it stands after the last thing said in only 191 records of 2,777, and rescues none of the 182 below | Deliberately not read |
+| `system`/`stop_hook_summary`, `away_summary`, `compact_boundary`, `local_command`, `informational`, `agents_killed`, `api_error`, `model_refusal_fallback`, `scheduled_task_fire`, `model_consent_fallback` | 2,384 | Not conversation; skipped | Deliberately not drawn |
+| `result` — the SDK's own end-of-run line, in host-driven records only | 42 | Not conversation; skipped | Deliberately not drawn |
+| bookkeeping: `attachment`, `last-prompt`, `mode`, `permission-mode`, `ai-title`, `queue-operation`, `atis-latch`, `relocated`, `worktree-state`, `file-history-*`, `bridge-session`, `pr-link`, `frame-link`, `agent-name`, `started`, `tag`, `history-suppression`, `fork-context-ref` | 302,862 | Not conversation; skipped — except the mode and the model, which are read off any line at all for the chat's own header (bw-ja9l.2) | Deliberately not drawn |
+| a record whose last conversation line lies more than 1 MB above its end | none seen | The scan gives up and claims nothing; the quiet timer decides | Deliberately capped |
+
+**Measured, before and after.** A record nothing has written to for an hour is
+over; if the reading still calls it a turn in flight, that chat draws Working
+for ever wherever its holder writes no status of its own. Run over every record
+on this machine with the app's own functions rather than a copy of them:
+**182 such records before, 30 after.** The 30 that remain are all genuine — 8
+processes killed mid-tool-call, 11 helper notices a dead agent never answered,
+11 prompts nobody came back to — and none of them draws anything, because a dead
+holder is not in the running set and a chat nothing holds is read from our own
+side instead.
+
 ---
 
 ## 7. Typed-command menus
