@@ -35,8 +35,17 @@ describe('a message says who said it', () => {
   it('holds his own words to the right and gives the answer the column', () => {
     draw(said('user', 'do the thing'));
     draw(said('assistant', 'done'));
-    expect(screen.getByTestId('user-message').className).toContain('ml-auto');
-    expect(screen.getByTestId('assistant-message').className).toContain('w-full');
+    const mine = screen.getByTestId('user-message').className;
+    const its = screen.getByTestId('assistant-message').className;
+    expect(mine).toContain('ml-auto');
+    expect(mine).toContain('max-w-');
+    // The answer takes the column by being left to fill it, and never by being
+    // told to be the whole of it: a width of 100% is measured from the frame
+    // rather than from where the message starts, so an indented one reached
+    // past the right edge and gave the chat a sideways scrollbar (bw-n6yh.14).
+    expect(its).not.toContain('w-full');
+    expect(its).not.toContain('max-w-');
+    expect(its).not.toContain('ml-auto');
   });
 
   it('marks the two differently, so a sentence is findable among the commands', () => {

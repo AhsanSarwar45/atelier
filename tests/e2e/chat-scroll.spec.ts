@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { makeFixtureProject } from './fixture-board';
-import { longChatSaid, writeLongChat, type LongChat } from './fixture-record';
+import { makeFixtureProject, PARENT_CARD } from './fixture-board';
+import { HELPER_SAID, longChatSaid, writeChatWithHelper, writeLongChat, type LongChat } from './fixture-record';
 
 /**
  * How a chat scrolls.
@@ -63,6 +63,8 @@ async function projectAt(request: APIRequestContext, name: string, path: string)
 
 interface Ground {
   projectId: string;
+  /** Where the project itself is, for a fixture that writes its own record. */
+  cwd: string;
   /** Writes one more long conversation into this project. */
   longChat: (held?: number) => LongChat;
   away: () => Promise<void>;
@@ -79,6 +81,7 @@ async function makeGround(request: APIRequestContext, name: string): Promise<Gro
   const written: LongChat[] = [];
   return {
     projectId: listed.id,
+    cwd: project,
     longChat: (held = 120) => {
       const chat = writeLongChat({ cwd: project, sessionId: randomUUID(), held });
       written.push(chat);
@@ -209,6 +212,37 @@ async function floats(page: Page): Promise<{ below: number; above: number; margi
       above: pane.top - pill.top,
       margin: pane.right - pill.right,
     };
+  });
+}
+
+/**
+ * How far the conversation can be pushed sideways, and by what.
+ *
+ * A pane that scrolls up and down scrolls sideways too the moment anything in
+ * it reaches past its own right edge, and the reader gets a page that slides
+ * under him while he reads.
+ */
+async function sideways(page: Page): Promise<{ by: number; widest: string }> {
+  return page.evaluate(() => {
+    const pane = document.querySelector('[data-testid="transcript"]') as HTMLElement;
+    const edge = pane.getBoundingClientRect().left + pane.clientWidth - parseFloat(getComputedStyle(pane).paddingRight);
+    let worst = { past: 0, what: 'nothing' };
+    const look = (el: Element) => {
+      const box = el.getBoundingClientRect();
+      const past = box.right - edge;
+      // Only what is laid out wide, not what scrolls inside its own frame: a
+      // block of code is meant to have its own bar.
+      if (box.width > 0 && past > worst.past && getComputedStyle(el).overflowX === 'visible') {
+        worst = {
+          past,
+          what: `${el.tagName.toLowerCase()}[${el.getAttribute('data-testid') ?? '-'}] ${(el.className?.toString?.() ?? '').slice(0, 90)}`,
+        };
+      }
+      for (const child of el.children) look(child);
+    };
+    const rows = pane.querySelector('[data-testid="transcript-rows"]');
+    if (rows) look(rows);
+    return { by: pane.scrollWidth - pane.clientWidth, widest: `${worst.what} (${worst.past.toFixed(0)}px past)` };
   });
 }
 
@@ -515,6 +549,36 @@ test.describe('how a chat scrolls', () => {
       ).toBeLessThanOrEqual(STAYED);
       await page.screenshot({ path: `${SHOTS}/chat-scroll-older-messages.png` });
     } finally {
+      await kept.away();
+    }
+  });
+
+  /**
+   * A conversation only scrolls one way. A helper's words are indented under
+   * the call that sent them, and a message drawn the full width of the pane as
+   * well as indented reaches past the right edge by exactly that indent — which
+   * gives the whole chat a sideways bar, and the reader a page that slides
+   * under him while he reads (bw-n6yh.14).
+   */
+  test('never scrolls sideways, whoever said the message', async ({ page, request }) => {
+    const kept = await makeGround(request, 'wide');
+    const written = writeChatWithHelper({ cwd: kept.cwd, sessionId: randomUUID(), card: PARENT_CARD });
+    try {
+      await openChatList(page, kept.projectId);
+      const listed = page.locator(`[data-testid="restore-row"][data-external-id="${written.sessionId}"]`);
+      await listed.waitFor({ timeout: HELLO_MS });
+      await listed.getByTestId('row-name').click();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+      // A helper's own conversation is folded away until it is asked for, and
+      // its words are the indented ones — the only ones that can stick out.
+      await page.getByTestId('toggle-everything').click();
+      await expect(page.getByTestId('transcript')).toContainText(HELPER_SAID, { timeout: HELLO_MS });
+      await settled(page);
+
+      const off = await sideways(page);
+      expect(off.by, `the conversation scrolls ${off.by}px sideways; widest is ${off.widest}`).toBe(0);
+    } finally {
+      written.remove();
       await kept.away();
     }
   });
