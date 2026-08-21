@@ -252,14 +252,22 @@ export class Sessions {
       // conversation the reader is being shown.
       const live = this.heldElsewhere(existing);
       const read = await this.importPast(existing, live);
-      // What the row already says, in the transcript's own words: the log's last
-      // state may be `streaming` from a session this process never inherited,
-      // and the writing box reads that to decide whether to offer Stop.
-      if (existing.state === 'dormant' || existing.state === 'ended') {
-        this.publish(existing.id, { type: 'session.state', state: existing.state, label: 'Asleep' });
-      }
+      // Nothing of ours is driving this chat — the branch above returned if
+      // one were — so a stored state that means an agent owes an answer is a
+      // leftover from a process that has since gone. Such a chat drew "Coming
+      // back" for as long as the app ran, with no event on its way to correct
+      // it, because this only ever spoke for the two states it was already
+      // sure of (bw-m8o.17). It says what is true instead, and writes it down,
+      // so the list says the same thing without the chat being opened.
+      const truth: SessionState = existing.state === 'ended' ? 'ended' : 'dormant';
+      if (truth !== existing.state) this.store.updateSession(existing.id, { state: truth }, false);
+      this.publish(existing.id, {
+        type: 'session.state',
+        state: truth,
+        label: truth === 'ended' ? 'Ended' : 'Asleep',
+      });
       this.follow(existing, read);
-      return { ...existing };
+      return { ...existing, state: truth };
     }
 
     // A conversation begun in a terminal, seen for the first time. It keeps the
