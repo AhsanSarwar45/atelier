@@ -29,8 +29,16 @@ export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
 # directory is where the manager's REAL chats live — a run that wrote into it
 # would be handing markers to the agent he is talking to, and the `.key` files
 # beside them are the credentials of his own messaging socket.
-export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$RUN/claude}"
-export BEADS_E2E_MARKERS="${BEADS_E2E_MARKERS:-$CLAUDE_CONFIG_DIR/sessions}"
+#
+# Set outright, never defaulted. The app reads CLAUDE_CONFIG_DIR when it is set
+# and only falls back to ~/.claude, so on a machine that has moved its config
+# a `${CLAUDE_CONFIG_DIR:-…}` here would inherit the REAL directory and hand
+# the whole run to it — the one outcome the paragraph above exists to prevent.
+# Where the real one is is remembered first, so the fixture can refuse it by
+# name wherever it has been moved to (bw-jaoz.11).
+export BEADS_E2E_REAL_CONFIG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+export CLAUDE_CONFIG_DIR="$RUN/claude"
+export BEADS_E2E_MARKERS="$CLAUDE_CONFIG_DIR/sessions"
 
 # A run starts from nothing: sessions left in the store by the last one are
 # offered again by the restore list, and a test that resumes one of those is

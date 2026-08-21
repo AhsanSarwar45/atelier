@@ -33,13 +33,31 @@ export function backend(): string {
   return process.env.BEADS_E2E_BACKEND ?? '';
 }
 
-/** The directory the sidecar under test reads its markers from — a copy. */
+/**
+ * The directory the sidecar under test reads its markers from — a copy.
+ *
+ * The refusal is against the tool's real directory WHEREVER IT IS. The app
+ * itself reads CLAUDE_CONFIG_DIR when it is set and only falls back to
+ * `~/.claude` (workbench/src/running.ts, claudeConfigDir), so a machine that
+ * has moved its config keeps its live chats somewhere this used to wave
+ * through — a run there would write markers naming chats that do not exist
+ * into the directory of the agent the manager is talking to (bw-jaoz.11). The
+ * runner remembers the real one before it points the stack at a scratch copy;
+ * with no runner, whatever the environment says is the real one is refused.
+ */
 export function markerDir(): string {
   const dir = process.env.BEADS_E2E_MARKERS;
   if (!dir) throw new Error('set BEADS_E2E_MARKERS to the sessions directory the stack under test reads');
-  const real = join(homedir(), '.claude', 'sessions');
-  if (resolve(dir) === real) throw new Error(`BEADS_E2E_MARKERS is the tool's own directory: ${real}`);
-  return resolve(dir);
+  const real = [
+    process.env.BEADS_E2E_REAL_CONFIG,
+    process.env.BEADS_E2E_REAL_CONFIG ? undefined : process.env.CLAUDE_CONFIG_DIR,
+    join(homedir(), '.claude'),
+  ]
+    .filter((c): c is string => !!c)
+    .map((c) => resolve(c, 'sessions'));
+  const asked = resolve(dir);
+  if (real.includes(asked)) throw new Error(`BEADS_E2E_MARKERS is the tool's own directory: ${asked}`);
+  return asked;
 }
 
 /** Where the sidecar under test keeps everything, markers and records alike. */
