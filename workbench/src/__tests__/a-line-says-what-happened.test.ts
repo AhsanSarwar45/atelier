@@ -111,7 +111,10 @@ describe('a line about a kind this build has never seen', () => {
   it('says in words that it has no words, when the message carries none', () => {
     const said = linesFrom([{ type: 'brand_new_thing', count: 4 }]);
 
-    expect(said).toEqual(['The machine said something this build has no words for (brand_new_thing)']);
-    expect(said[0]).not.toEqual('brand_new_thing');
+    expect(said).toEqual(['The machine said something this build has no words for.']);
+    // Not merely "is not the name": the name is not IN it. It used to ride in
+    // brackets at the end, which is the same wire word one punctuation mark
+    // further from the reader (bw-cx70.3).
+    expect(said[0]).not.toContain('brand_new_thing');
   });
 });

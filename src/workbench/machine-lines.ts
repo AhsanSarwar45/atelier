@@ -169,6 +169,16 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   // will never see, and he is the one who can send it again.
   'system/files_persisted': { note: 'failed', detail: 'breathing' },
 
+  // Four the kit's type file never declares and its own program hands on all
+  // the same (bw-cx70). A goal of his going away ends a loop nobody but him
+  // started; a turn stopped waiting on him is why nothing is moving. The
+  // history setting is the chat's memory, and the commentary on what it is
+  // doing now is drawn on the chip and the panel already.
+  active_goal: { note: 'stopped', detail: 'breathing' },
+  autocompact_state: 'memory',
+  'system/post_turn_summary': { note: 'waiting', detail: 'breathing' },
+  'system/task_summary': 'breathing',
+
   // The app's own asides to the reader, when the record predates families.
   'app/notice': 'background',
 };
@@ -285,6 +295,15 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   // only he can send the file again (bw-iiv6).
   'system/session_state_changed': { note: 'you', detail: 'machine' },
   'system/files_persisted': { note: 'you', detail: 'machine' },
+
+  // The four the kit sends without declaring (bw-cx70), by the same question.
+  // A goal of his that has ended and a turn that is stopped waiting on him are
+  // both his; the goal still being chased, the history setting and the running
+  // commentary are the chat keeping its books.
+  active_goal: { note: 'you', detail: 'machine' },
+  autocompact_state: 'machine',
+  'system/post_turn_summary': { note: 'you', detail: 'machine' },
+  'system/task_summary': 'machine',
 };
 
 /**

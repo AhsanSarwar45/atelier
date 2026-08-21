@@ -31,7 +31,7 @@
 // way in. Both warnings are noise in front of a table.
 process.removeAllListeners('warning');
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -43,7 +43,8 @@ import { fileURLToPath } from 'node:url';
 // and they are pulled in on the line after, by hand (bw-iiv6).
 import './at-alias.mjs';
 
-const { drawnRows, FAMILIES, forWhom, OFF_BY_DEFAULT } = await import('../src/workbench/machine-lines.ts');
+const { drawnRows, FAMILIES, forWhom, KINDS_WITH_AN_AUDIENCE, KNOWN_KINDS, OFF_BY_DEFAULT } =
+  await import('../src/workbench/machine-lines.ts');
 const { KIT_SPEAKS, kitSpoke, SAID_NOTHING, WORDS } = await import('../src/workbench/machine-words.ts');
 const { ClaudeDriver } = await import('../workbench/src/drivers/claude.ts');
 
@@ -73,6 +74,15 @@ if (printing) console.log = () => {};
  * that differ are renamed here and nothing else is invented.
  */
 function linesInTheRecord() {
+  // A record that is not there is not a pass. Every verdict below is counted
+  // over his real chats, so an empty store makes all eleven of them true and
+  // the run comes back green having looked at nothing — which is what it did
+  // on this machine for as long as its default path was wrong (bw-cx70.4).
+  if (!existsSync(STORE)) {
+    console.error(`There is no record at ${STORE}.`);
+    console.error('Point STORE= at the chat store this app writes, and run it again.');
+    process.exit(2);
+  }
   const db = new DatabaseSync(STORE, { readOnly: true });
   const rows = db
     .prepare(`select session_id, seq, json from event where type in ('note', 'notice') order by session_id, seq`)
@@ -107,6 +117,12 @@ function linesInTheRecord() {
 }
 
 const chats = linesInTheRecord();
+// Opened, and empty. The same fault one step further in: a store with no chats
+// in it grades nothing, so it says so rather than printing ten green ticks.
+if (chats.size === 0) {
+  console.error(`The record at ${STORE} holds no chats, so there is nothing here to grade.`);
+  process.exit(2);
+}
 
 /**
  * One entry per kind AND audience, because several kinds are split by outcome:
@@ -356,6 +372,70 @@ function kindsTheKitDeclares() {
 }
 
 /**
+ * The kit's shipped program, read as text as well.
+ *
+ * The union above is what the kit SAYS it can send; this is what it does. Its
+ * read loop eats some kinds where they arrive and hands the rest on to
+ * whoever is iterating the run — including kinds its own type file never
+ * declares anywhere (bw-cx70). Neither file stands in for the other, so both
+ * are read.
+ */
+const KIT_PROGRAM = readFileSync(
+  join(REPO, 'workbench', 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'sdk.mjs'),
+  'utf8',
+);
+
+/** From an opening bracket, the run of text up to the one that closes it. */
+function balanced(text, at, open, shut) {
+  let depth = 0;
+  for (let i = at; i < text.length; i += 1) {
+    if (text[i] === open) depth += 1;
+    else if (text[i] === shut) {
+      depth -= 1;
+      if (depth === 0) return { body: text.slice(at + 1, i), end: i + 1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * Every kind the kit's own read loop hands on to whoever is reading it.
+ *
+ * The loop is a chain of tests on the message's type. A few end the round
+ * themselves — a keep-alive, the control channel, the transcript mirror — and
+ * everything else falls through to the queue this app iterates. So a kind
+ * counts as handed on unless its own branch drops it, which is why this reads
+ * the branch bodies rather than a list of names copied out by hand.
+ *
+ * A loop it cannot find is a fault and not an empty answer: the day the kit
+ * ships a differently built program, this check has to say so rather than
+ * quietly fall back to the type file it was already reading.
+ */
+function kindsTheKitHandsOn() {
+  const at = KIT_PROGRAM.indexOf('async readMessages(){');
+  const loop = at < 0 ? null : balanced(KIT_PROGRAM, KIT_PROGRAM.indexOf('{', at), '{', '}');
+  if (loop === null) return { handedOn: [], loopFound: false };
+  const handedOn = new Set();
+  for (const test of loop.body.matchAll(/if\(/g)) {
+    const cond = balanced(loop.body, test.index + 2, '(', ')');
+    if (cond === null || !cond.body.includes('e.type===')) continue;
+    const after = loop.body.slice(cond.end);
+    const body =
+      after[0] === '{' ? (balanced(after, 0, '{', '}')?.body ?? '') : after.slice(0, after.indexOf(';'));
+    // Eaten where it arrives: the branch ends the round itself and hands the
+    // message to nobody. The transcript mirror's own batcher is not the queue.
+    if (body.includes('continue') && !body.includes('inputStream.enqueue(')) continue;
+    const types = Array.from(cond.body.matchAll(/e\.type==="([^"]+)"/g)).map((m) => m[1]);
+    const subtypes = Array.from(cond.body.matchAll(/e\.subtype==="([^"]+)"/g)).map((m) => m[1]);
+    for (const type of types) {
+      if (type === 'system' && subtypes.length > 0) for (const sub of subtypes) handedOn.add(`system/${sub}`);
+      else handedOn.add(type);
+    }
+  }
+  return { handedOn: [...handedOn], loopFound: true };
+}
+
+/**
  * Kinds that never become a machine line, because the chat draws them as
  * something better. Each one is answered somewhere else on the screen, and the
  * reason is written beside it so that "it does not appear" can be told from
@@ -371,11 +451,59 @@ const DRAWN_ELSEWHERE = {
   'system/task_progress': "what a sent-off agent is doing, drawn on that agent's own row",
 };
 
-const kitKinds = kindsTheKitDeclares();
+const kitDeclared = kindsTheKitDeclares();
+const { handedOn, loopFound } = kindsTheKitHandsOn();
+/** What the kit says it sends, and what its program is caught sending. */
+const kitKinds = [...new Set([...kitDeclared, ...handedOn])];
+/** Kinds only the program admits to: really sent, declared in no type at all. */
+const undeclared = handedOn.filter((kind) => !kitDeclared.includes(kind));
 const cased = new Set(known);
 const undecided = kitKinds.filter(
   (kind) => !cased.has(kind) && !(kind in SAID_NOTHING) && !(kind in DRAWN_ELSEWHERE),
 );
+
+/**
+ * Every kind whose sentence the driver goes to the words table for.
+ *
+ * Read out of the driver's own switch: a case that calls `saidOf` has no
+ * wording of its own worth the name, only a fallback for a state nobody has
+ * met. So a kind that asks the table and is not in it draws that fallback at
+ * every reader, forever, and no other gate here would say so — the states
+ * sweep walks the table, and a kind missing from the table is a kind it never
+ * reaches (bw-cx70).
+ */
+function kindsThatAskTheTable() {
+  const source = readFileSync(join(REPO, 'workbench', 'src', 'drivers', 'claude.ts'), 'utf8');
+  const cases = bodyOf(source, 'function noteBody(', '\n}\n').split(/\n {4}case '/);
+  const asking = [];
+  for (const part of cases.slice(1)) {
+    const kind = part.slice(0, part.indexOf("'"));
+    // A run of cases falling into one body: the sentence belongs to all of them.
+    const body = part.slice(0, part.search(/\n {4}(?:case '|default:)/) + 1 || undefined);
+    if (body.includes('saidOf(kind')) asking.push(kind);
+  }
+  return asking;
+}
+
+/** A kind that asks the words table for its sentence and is not in it. */
+const wordless = kindsThatAskTheTable().filter((kind) => !(kind in WORDS));
+
+/**
+ * A kind that reaches a line and nobody has filed.
+ *
+ * The list above asks the kit what it sends; this asks the app what it draws,
+ * which is the half a driver case can fake. A case is not a ruling: the family
+ * a line lands in is read off `BY_KIND` as it is drawn, and its reader off
+ * `FOR` or off the state's own word — so a kind with a sentence and neither
+ * entry draws into whichever heap the default happens to be, which is how a
+ * line nobody chose ends up in front of him (bw-cx70).
+ */
+const unruled = known.filter((kind) => {
+  if (kind in SAID_NOTHING || kind in DRAWN_ELSEWHERE) return false;
+  const filed = KNOWN_KINDS.includes(kind);
+  const read = KINDS_WITH_AN_AUDIENCE.includes(kind) || kind in WORDS;
+  return !filed || !read;
+});
 
 /** A state the kit spells out that this app has no word and no ruling for. */
 const unnamed = [];
@@ -785,6 +913,11 @@ if (leaked.length > 0) faults.push(`${leaked.length} kinds on the machine's own 
 if (nameless.length > 0) faults.push(`${nameless.length} kinds draw their own wire name`);
 if (broke.length > 0) faults.push(`${broke.length} kinds crashed the driver`);
 if (undecided.length > 0) faults.push(`${undecided.length} kinds the kit sends, nobody has decided about`);
+if (unruled.length > 0) faults.push(`${unruled.length} kinds reach a line with no family or no reader ruled for them`);
+if (wordless.length > 0) faults.push(`${wordless.length} kinds ask the words table for a sentence it does not hold`);
+if (!loopFound) {
+  faults.push("the kit's own read loop could not be found in its program — the bundle is built differently now");
+}
 if (unnamed.length > 0) faults.push(`${unnamed.length} states the kit declares have no words here`);
 if (invented.length > 0) faults.push(`${invented.length} states are named here that the kit does not declare`);
 if (wired.length > 0) faults.push(`${wired.length} states draw a word off the wire`);
@@ -828,8 +961,15 @@ console.log(
   }`,
 );
 console.log(
-  `  ${mark(undecided.length === 0 && unnamed.length === 0 && invented.length === 0)} Every kind and state the kit declares is named — ${kitKinds.length} kinds, ${everyState.length} states over ${Object.keys(WORDS).length} of them.${
-    [...undecided, ...unnamed, ...invented].length === 0 ? '' : ` — ${[...undecided, ...unnamed, ...invented].join(', ')}`
+  `  ${mark(undecided.length === 0 && unnamed.length === 0 && invented.length === 0 && unruled.length === 0 && wordless.length === 0)} Every kind and state the kit sends is named, and every kind that draws a line is filed — ${kitKinds.length} kinds, ${everyState.length} states over ${Object.keys(WORDS).length} of them.${
+    [...undecided, ...unnamed, ...invented, ...unruled, ...wordless].length === 0
+      ? ''
+      : ` — ${[...undecided, ...unnamed, ...invented, ...unruled, ...wordless].join(', ')}`
+  }`,
+);
+console.log(
+  `  ${mark(loopFound)} The kit's own program is read as well as its types — ${handedOn.length} kinds its read loop hands on, ${undeclared.length} of them declared in no type.${
+    loopFound ? (undeclared.length === 0 ? '' : ` — ${undeclared.join(', ')}`) : ' — its read loop could not be found'
   }`,
 );
 console.log(

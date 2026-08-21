@@ -577,6 +577,138 @@ export const WORDS: Record<string, KindWords> = {
       some_failed: his('Could not store'),
     },
   },
+
+  /*
+   * The four below are the kit's, and its type file admits to none of them.
+   * Its declared union of messages carries neither `active_goal` nor
+   * `autocompact_state` nor either of these two system subtypes, and its
+   * shipped read loop hands all four to whoever is reading the run — which is
+   * this app. So the states are read off the kit's own program rather than off
+   * its types, and the check reads that program too, so the day it hands on a
+   * fifth this table is what fails (bw-cx70).
+   */
+
+  /**
+   * A standing goal he set, checked every time the run tries to stop.
+   *
+   * One still being worked towards is the machine doing what he already asked
+   * for. One that has gone is the end of a loop nobody but him started, and
+   * nothing else on the screen says it ended.
+   */
+  active_goal: {
+    from: 'whether value carries a goal at all',
+    kit: null,
+    ours: {
+      chasing: "the kit declares no state here; a message whose value carries a condition is a goal still being worked towards",
+      cleared: "the same message with value null, which the kit's own note on the type calls the goal being cleared",
+    },
+    sample: (state) => ({
+      type: 'active_goal',
+      value:
+        state === 'chasing'
+          ? { condition: 'the tests pass', iterations: 2, set_at: 0, tokens_at_start: 0 }
+          : null,
+      uuid: 'u',
+      session_id: 's',
+    }),
+    states: {
+      chasing: machine('Still working towards the goal you set'),
+      cleared: his('The goal you set is no longer running.'),
+    },
+  },
+
+  /**
+   * Whether this chat folds its own history up as the window fills.
+   *
+   * A setting and not an event: it arrives when the run starts and again when
+   * somebody changes it, and there is nothing in it for him to do. The fold
+   * actually happening is `system/compact_boundary`, and that one is his.
+   *
+   * The message carries four more fields — how big the window is, the point it
+   * folds at, whether the setting was imposed and where it came from — and the
+   * kit writes none of them down anywhere this app can read, so the line reads
+   * none of them (§9.3).
+   */
+  autocompact_state: {
+    from: 'value.enabled',
+    kit: null,
+    ours: {
+      on: "the kit declares no state here; a message whose value has enabled true, read off the kit's own program",
+      off: 'the same message with enabled false, or with no value at all',
+    },
+    sample: (state) => ({
+      type: 'autocompact_state',
+      value:
+        state === 'on'
+          ? { enabled: true, effective_window: 200000, threshold: 160000, enforced: false, source: 'local' }
+          : null,
+      uuid: 'u',
+      session_id: 's',
+    }),
+    states: {
+      on: machine('This chat folds its own history up as the window fills.'),
+      off: machine('This chat does not fold its own history up.'),
+    },
+  },
+
+  /**
+   * Where the turn ended, in the kit's own reading of it.
+   *
+   * The kit classifies its own turn and says whether it is stopped waiting on
+   * him, ready to be looked at, or failed. The stopped one is why this is
+   * worth a line at all: nothing moves until he answers, and the message
+   * carries the reason in English, which is the part the chat's own chip
+   * cannot say.
+   */
+  'system/post_turn_summary': {
+    from: 'status_category',
+    kit: null,
+    ours: {
+      blocked: "the kit declares none of these; all four are read off its own program, where its classifier writes them",
+      need_input: 'the same state, reworded by the kit before it reaches anything that is not the terminal',
+      review_ready: 'the turn ended with something to look at',
+      failed: 'the turn ended badly',
+    },
+    sample: (state) => ({
+      type: 'system',
+      subtype: 'post_turn_summary',
+      summarizes_uuid: 'u',
+      status_category: state,
+      status_detail: state === 'review_ready' ? 'the change is written' : 'waiting on your answer',
+      needs_action: state === 'review_ready' ? '' : 'answer the question',
+    }),
+    states: {
+      blocked: his('This turn is stopped, waiting on you'),
+      need_input: his('This turn is stopped, waiting on you'),
+      review_ready: machine('This turn is done and there is something to look at'),
+      failed: his('This turn failed'),
+    },
+  },
+
+  /**
+   * The running commentary on what this chat is doing right now.
+   *
+   * The panel and the chip carry what is running; a grey line repeating it in
+   * the conversation is the same thing said twice, which is the manager's own
+   * ruling about sent-off work.
+   */
+  'system/task_summary': {
+    from: 'whether detail carries anything',
+    kit: null,
+    ours: {
+      doing: "the kit declares no state here; a message whose detail carries a line, read off the kit's own program",
+      cleared: 'the same message with detail null, which the kit sends when the chat goes idle',
+    },
+    sample: (state) => ({
+      type: 'system',
+      subtype: 'task_summary',
+      detail: state === 'doing' ? 'reading the settings' : null,
+    }),
+    states: {
+      doing: machine('Working on'),
+      cleared: machine('This chat has nothing on the go.'),
+    },
+  },
 };
 
 /** Every kind this table has states for, for the check that reads the kit. */

@@ -613,6 +613,77 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
       };
     }
 
+    // The four the kit's type file does not declare and its own read loop hands
+    // on regardless (bw-cx70). Their shapes are read off the kit's shipped
+    // program, so each of these reads only the fields that program is caught
+    // writing, and nothing that is merely likely to be there.
+
+    // A standing goal of his. Value gone means the goal is gone: the kit's own
+    // note on the type says so, and that is the end of a loop only he started.
+    case 'active_goal': {
+      const goal = (m.value ?? null) as { condition?: string } | null;
+      const state = goal === null ? 'cleared' : 'chasing';
+      const said = saidOf(kind, state) ?? 'The goal you set changed.';
+      const who = whoFor(kind, state) ?? 'machine';
+      const towards = oneLine(goal?.condition ?? '');
+      return {
+        rank: who === 'you' ? 'note' : 'detail',
+        kind,
+        audience: who,
+        text: goal === null ? said : `${said}${towards ? `: ${towards}` : ''}.`,
+        body: whole(),
+      };
+    }
+
+    // Whether this chat folds its own history up as it fills. A setting, not
+    // the fold — `system/compact_boundary` is the fold, and that one is his.
+    case 'autocompact_state': {
+      const value = (m.value ?? null) as { enabled?: boolean } | null;
+      const state = value?.enabled === true ? 'on' : 'off';
+      return {
+        rank: 'detail',
+        kind,
+        audience: whoFor(kind, state) ?? 'machine',
+        text: saidOf(kind, state) ?? 'This chat changed how it keeps its history.',
+        body: whole(),
+      };
+    }
+
+    // The kit's own reading of where the turn ended. The detail beside it is
+    // the kit's English and it is the whole reason this is worth a line: it
+    // says WHAT the turn is stopped on, which nothing else on the screen does.
+    case 'system/post_turn_summary': {
+      const state = String(m.status_category ?? '');
+      const said = saidOf(kind, state);
+      const who = whoFor(kind, state) ?? 'machine';
+      const detail = oneLine(m.status_detail ?? '');
+      if (!said) {
+        return { rank: 'detail', kind, audience: 'machine', text: 'This turn ended in a way this build has no words for.', body: whole() };
+      }
+      return {
+        rank: who === 'you' ? 'note' : 'detail',
+        kind,
+        audience: who,
+        text: `${said}${detail ? ` — ${detail}` : ''}.`,
+        body: whole(),
+      };
+    }
+
+    // What this chat is doing right now, in one line. The chip and the panel
+    // both draw it already, so in the conversation it is the machine breathing.
+    case 'system/task_summary': {
+      const doing = oneLine(m.detail ?? '');
+      const state = doing ? 'doing' : 'cleared';
+      const said = saidOf(kind, state) ?? 'This chat changed what it is doing.';
+      return {
+        rank: 'detail',
+        kind,
+        audience: whoFor(kind, state) ?? 'machine',
+        text: doing ? `${said}: ${doing}.` : said,
+        body: whole(),
+      };
+    }
+
     case 'system/elicitation_complete':
       return {
         rank: 'detail',
@@ -637,7 +708,18 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
       const spoken = spokenIn(m);
       return spoken
         ? { rank: 'note', kind, text: oneLine(spoken), body: String(spoken) }
-        : { rank: 'detail', kind, text: `The machine said something this build has no words for (${kind})`, body: whole() };
+        : {
+            rank: 'detail',
+            kind,
+            // Its own name went in the sentence here, in brackets, which is the
+            // fault this whole section is about wearing a disguise: a reader
+            // handed `active_goal` learns nothing he did not have. The name is
+            // still on the note — in its body, and on the kind the record
+            // keeps — so anyone who opens the line can see exactly what came
+            // (bw-cx70.3).
+            text: 'The machine said something this build has no words for.',
+            body: whole(),
+          };
     }
   }
 }

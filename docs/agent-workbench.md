@@ -1236,8 +1236,9 @@ both answers together: **the English sentence it draws, and who it is for.**
 
 | what the table holds | how many | example |
 |---|---|---|
-| kinds the kit declares, all named | 38 | `rate_limit_event`, `system/hook_response` |
-| states over 14 of those kinds | 49 | `allowed_warning`, `error_max_budget_usd` |
+| kinds the kit sends, all named | 42 | `rate_limit_event`, `system/hook_response` |
+| of those, kinds its type file never declares | 4 | `active_goal`, `system/post_turn_summary` |
+| states over 18 of those kinds | 59 | `allowed_warning`, `error_max_budget_usd` |
 | kinds deliberately silent, each with its reason | 4 | a guess at what he might type next belongs in the writing box |
 | sentences the kit writes in the chat's own voice | 6 | "You've hit your session limit" (§8.2.4.2) |
 | shapes the kit writes in HIS name | 8 | a background agent's report, a note about a picture he pasted (§8.2.4.3) |
@@ -1253,7 +1254,11 @@ value shown is the sample's.
 <!-- every-line-says -->
 | kind | state | the line it draws | for |
 |---|---|---|---|
+| `active_goal` | `chasing` | Still working towards the goal you set: the tests pass. | machine |
+| `active_goal` | `cleared` | The goal you set is no longer running. | you |
 | `auth_status` | — | Checking sign-in | machine |
+| `autocompact_state` | `off` | This chat does not fold its own history up. | machine |
+| `autocompact_state` | `on` | This chat folds its own history up as the window fills. | machine |
 | `conversation_reset` | — | This chat was started over. | you |
 | `kit/limit_near` | — | *quoted whole* — "You've used…" | machine |
 | `kit/limit_reached` | — | *quoted whole* — "You've hit your…" | you |
@@ -1304,6 +1309,10 @@ value shown is the sample's.
 | `system/plugin_install` | `failed` | Plugin an add-on could not be installed. | machine |
 | `system/plugin_install` | `installed` | Plugin an add-on is installed. | machine |
 | `system/plugin_install` | `started` | Plugin an add-on is being installed. | machine |
+| `system/post_turn_summary` | `blocked` | This turn is stopped, waiting on you — waiting on your answer. | you |
+| `system/post_turn_summary` | `failed` | This turn failed — waiting on your answer. | you |
+| `system/post_turn_summary` | `need_input` | This turn is stopped, waiting on you — waiting on your answer. | you |
+| `system/post_turn_summary` | `review_ready` | This turn is done and there is something to look at — the change is written. | machine |
 | `system/session_state_changed` | `idle` | This chat is idle. | machine |
 | `system/session_state_changed` | `requires_action` | This chat is waiting on you. | you |
 | `system/session_state_changed` | `running` | This chat is working. | machine |
@@ -1317,6 +1326,8 @@ value shown is the sample's.
 | `system/task_notification` | `stopped` | A sent-off agent was stopped: what it did | machine |
 | `system/task_progress` | — | A sent-off agent is still going | machine |
 | `system/task_started` | — | Sent off a piece of work. | machine |
+| `system/task_summary` | `cleared` | This chat has nothing on the go. | machine |
+| `system/task_summary` | `doing` | Working on: reading the settings. | machine |
 | `system/task_updated` | `completed` | A sent-off agent has finished. | machine |
 | `system/task_updated` | `failed` | A sent-off agent failed. | machine |
 | `system/task_updated` | `killed` | A sent-off agent was stopped. | machine |
