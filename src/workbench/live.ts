@@ -233,6 +233,34 @@ function moves(id: string, next?: SessionState): boolean {
   return movesTheClock(next ?? sessions.find((s) => s.id === id)?.state);
 }
 
+/**
+ * Where the seconds on a chip count from, once a state event has landed.
+ *
+ * Three screens draw that number — the row in the list, the glance strip and a
+ * board card — and all three read it from here, so what a chat has been at for
+ * forty seconds says forty on every one of them.
+ *
+ * The rule is the piece of work, not the event: two reads in a row are both
+ * `running_tool` with the same words, and restarting on the second would show a
+ * forty-second turn as one. The same state carrying the same label is the same
+ * piece of work, so the count carries on; anything else is a new one and starts
+ * where it arrived (bw-f1q.17).
+ *
+ * Pulled out of the switch it lives in and made pure, because a mistake in it
+ * is silent — a wrong number is still a number, on three screens at once, and
+ * nothing exercised it (bw-96is.12).
+ */
+export function countingFrom(
+  had: { state: SessionState; activity: string; busySince: string | null } | undefined,
+  now: { state: SessionState; label: string; at: string },
+): string | null {
+  // Not working, so nothing to count; a chat waiting on the reader counts too,
+  // which is what `counting` decides.
+  if (!counting(now.state)) return null;
+  const same = had && had.state === now.state && had.activity === now.label;
+  return same ? (had.busySince ?? now.at) : now.at;
+}
+
 function absorb(frame: WatchFrame): void {
   if (frame.kind === 'usage') {
     usage = frame.usage;
@@ -319,14 +347,10 @@ function absorb(frame: WatchFrame): void {
       break;
     case 'session.state': {
       const had = sessions.find((s) => s.id === e.sessionId);
-      // Two reads in a row are both `running_tool`, and counting from the first
-      // would show a one-second read as forty; the same words carrying on are
-      // the same piece of work (bw-f1q.17).
-      const fresh = !had || had.state !== e.state || had.activity !== e.label;
       patch(e.sessionId, {
         state: e.state,
         activity: e.label,
-        busySince: counting(e.state) ? (fresh ? e.at : (had?.busySince ?? e.at)) : null,
+        busySince: countingFrom(had, { state: e.state, label: e.label, at: e.at }),
         ...(moves(e.sessionId, e.state) ? { lastActiveAt: e.at } : {}),
       });
       break;
