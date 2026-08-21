@@ -75,13 +75,22 @@ the drivers across two runtimes.
 ### 1.2 Sidecar lifecycle
 
 `routes::workbench::spawn_sidecar()` is called once at axum startup. It spawns
-`node workbench/dist/server.js` bound to `127.0.0.1:3009`, restarts it with
-backoff if it exits, and logs its stdout/stderr into the server's log. Two
-environment escapes:
+`node --experimental-strip-types workbench/src/server.ts` bound to
+`127.0.0.1:3009`, restarts it with backoff if it exits, and logs its
+stdout/stderr into the server's log. Three environment escapes:
 
 - `BEADS_WORKBENCH_URL` — if set, do not spawn; proxy to that URL. This is dev
   mode: run `npm run workbench` in your own terminal and get hot reload.
 - `BEADS_WORKBENCH_PORT` — the port the spawned sidecar binds. Default 3009.
+- `BEADS_WORKBENCH_ENTRY` — the file to run. Default is the source above; a
+  missing file is a warning and an offline Chat tab, not a crash.
+
+**There is no build step for the sidecar: node runs the TypeScript as it
+stands**, types stripped in memory. That is what makes a chat's server one
+edit away from running, and it is also the reason for the import rule in §1.3.
+The restart is unconditional, so a sidecar that cannot even load its own
+modules restarts forever, once a second, and the only symptom on the screen is
+that no chat opens at all.
 
 The sidecar binds loopback only, always. It is never reachable from the
 network; the phone reaches it through the axum proxy and nothing else (§8.4).
@@ -108,6 +117,19 @@ workbench/
 The protocol types live at `src/workbench/protocol.ts` — inside the Next.js
 app, imported by the sidecar over a relative path. One definition, both sides,
 and no `tsconfig.json` path alias to add upstream.
+
+**Those shared files are read two ways, and only one of the two readers is
+forgiving.** The browser's build resolves `'./protocol'` and `'./protocol.ts'`
+alike; node, running the source directly (§1.2), resolves the exact filename or
+nothing. So every runtime relative import inside `src/workbench/*.ts` names the
+file with its extension, `import { isOver } from './protocol.ts'`, which the
+app's `tsconfig.json` allows by `allowImportingTsExtensions` (legal beside
+`noEmit`). A type-only import is erased before node ever sees it and is exempt,
+which is why the same file can spell one import both ways. Getting this wrong
+is invisible to the typecheck, the unit suite and the production build — all
+three passed on the commit that broke it — and shows up only as the restart
+loop above (bw-7ks.22.35). `src/workbench/__tests__/node-can-read-it.test.ts`
+pins it, so it is caught by the suite rather than by a chat that will not open.
 
 `node:sqlite` is built into Node 22 (verified on this machine, v22.20.0; it
 prints an experimental warning and works). No native module to compile.
@@ -1737,6 +1759,12 @@ document.
   only chats somebody has open are followed — and the beat does not hold the
   sidecar up.
 
+- The sidecar runs its TypeScript through a flag node still calls experimental
+  (§1.2). It buys a chat server with no build step between an edit and a run,
+  at the price of the import rule in §1.3 and of a flag that could change under
+  us; a node that drops it degrades to a Chat tab that never comes up, which is
+  loud rather than subtle.
+
 Three faults found under this section's work are filed rather than fixed, and
 each is still open: the menu of what a chat can do is republished whole every
 turn and is four fifths of the stored log (`bw-7bj`); a frontend-only change is
@@ -1744,6 +1772,13 @@ never embedded in the installed binary, so the built product keeps serving the
 previous screen unless the frontend is built first by hand (`bw-a4o`); and
 every browser check and screenshot run leaves its chats on whichever list it
 was pointed at (`bw-guo`).
+
+Two more were found while the sent-off-agent panel was built and are filed
+open: a browser that loses its stream and reconnects is subscribed again but
+never re-follows the chat it was reading, so a chat another program is driving
+goes quiet after the first drop (`bw-tous`); and the chat's own working line
+keeps a spinner on a shell command that has already come back, because the line
+is only rewritten when the next call starts (`bw-qxep`).
 
 ---
 
