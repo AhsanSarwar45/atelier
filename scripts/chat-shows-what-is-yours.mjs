@@ -54,6 +54,12 @@ const STORE = process.env.STORE ?? join(DATA, 'kanban-ui', 'workbench.db');
 
 const hidden = new Set(OFF_BY_DEFAULT);
 
+// `TABLE=1` asks for one thing — the table, on stdout, ready to paste into the
+// doc — so everything the run would otherwise say is held back until then.
+const printing = Boolean(process.env.TABLE);
+const say = console.log;
+if (printing) console.log = () => {};
+
 /* ------------------------------------------------------------------ *
  * 1. His own record: every machine line, who it is for, what he sees.
  * ------------------------------------------------------------------ */
@@ -419,8 +425,31 @@ for (const { kind, state, words } of everyState) {
   spoke.push({ kind, state, note, want: words.states[state] });
 }
 
+/**
+ * A field the message never carried, printed at him anyway.
+ *
+ * `Retrying (undefined of undefined)` — the same fault as a wire word by
+ * another road: a sentence built by pasting a field in, and no answer for the
+ * message that does not carry it (bw-iiv6.15).
+ */
+const NOTHING_THERE = /\b(?:undefined|NaN|\[object Object\])\b|""(?!\w)/;
+
 /** A drawn line still carrying a word from the wire. */
 const wired = spoke.filter(({ note }) => note && OFF_THE_WIRE.test(String(note.text)));
+/**
+ * A drawn line printing a field that was never there.
+ *
+ * Both sweeps, because the two halves of this check reach different kinds: the
+ * states sweep only reaches a kind with states, and `Retrying (undefined of
+ * undefined)` came from one without any.
+ */
+const hollow = [
+  ...spoke.filter(({ note }) => note && NOTHING_THERE.test(String(note.text))),
+  ...everyNote
+    .filter((n) => NOTHING_THERE.test(String(n.text ?? '')))
+    .map((n) => ({ kind: n.kind, state: 'no state', note: n })),
+];
+
 /** A state that draws nothing at all, so nobody can read what happened. */
 const silent = spoke.filter(({ note }) => note === null);
 /** A state whose line lands in front of the wrong reader. */
@@ -442,7 +471,7 @@ for (const [session, items] of chats.entries()) {
   for (const row of drawnRows(items)) {
     if (row.row !== 'machine') continue;
     for (const line of row.lines) {
-      const wire = OFF_THE_WIRE.exec(line.text);
+      const wire = OFF_THE_WIRE.exec(line.text) ?? NOTHING_THERE.exec(line.text);
       if (wire) drawnWired.push({ session, kind: row.kind, word: wire[0], text: line.text });
     }
   }
@@ -450,6 +479,56 @@ for (const [session, items] of chats.entries()) {
 /** Which kinds they are, since one bad sentence is usually hundreds of rows. */
 const wiredKinds = [...new Set(drawnWired.map((d) => `${d.kind} (${d.word})`))];
 
+
+/* ------------------------------------------------------------------ *
+ * 7. The written record: does the doc carry the same table the code does?
+ * ------------------------------------------------------------------ */
+
+/**
+ * The table §8.2.4.1 shows a reader, built out of what the driver actually
+ * draws rather than out of what somebody remembered it drew.
+ *
+ * The doc asked for "every kind, what its line says, and who it is for" and
+ * carried three rows of counts instead, because a table transcribed by hand is
+ * a table that goes stale the first time a sentence is reworded (bw-iiv6.10).
+ * This one is printed from the driver's own output — `TABLE=1` prints it fresh
+ * for pasting — and the doc's copy is compared against it, so a state that
+ * gains a sentence and never reaches the page fails the run.
+ */
+function tableOfEveryLine() {
+  const rows = [];
+  for (const { kind, state, note } of spoke) {
+    if (!note) continue;
+    rows.push(`| \`${kind}\` | \`${state}\` | ${String(note.text).replace(/\|/g, '\\|')} | ${note.audience ?? forWhom(kind, note.rank)} |`);
+  }
+  for (const note of everyNote) {
+    if (WORDS[note.kind]) continue;
+    rows.push(`| \`${note.kind}\` | — | ${String(note.text).replace(/\|/g, '\\|')} | ${note.audience ?? forWhom(note.kind, note.rank)} |`);
+  }
+  for (const [kind, why] of Object.entries(SAID_NOTHING)) {
+    rows.push(`| \`${kind}\` | — | *nothing, on purpose: ${why}* | — |`);
+  }
+  for (const spokenWords of KIT_SPEAKS) {
+    const opening = spokenWords.opens[0];
+    rows.push(`| \`${spokenWords.kind}\` | — | *quoted whole* — "${opening}…" | ${forWhom(spokenWords.kind, 'note')} |`);
+  }
+  return [
+    '| kind | state | the line it draws | for |',
+    '|---|---|---|---|',
+    ...rows.sort((a, b) => a.localeCompare(b)),
+  ].join('\n');
+}
+
+const EVERY_LINE_SAYS = tableOfEveryLine();
+if (printing) {
+  console.log = say;
+  say(EVERY_LINE_SAYS);
+  process.exit(0);
+}
+
+const DOC = readFileSync(join(REPO, 'docs', 'agent-workbench.md'), 'utf8');
+const inTheDoc = /<!-- every-line-says -->\n([\s\S]*?)\n<!-- \/every-line-says -->/.exec(DOC);
+const docStale = (inTheDoc?.[1] ?? null) !== EVERY_LINE_SAYS;
 
 /* ------------------------------------------------------------------ *
  * 6. The kit talking in the chat's own voice.
@@ -572,12 +651,24 @@ if (undecided.length > 0) faults.push(`${undecided.length} kinds the kit sends, 
 if (unnamed.length > 0) faults.push(`${unnamed.length} states the kit declares have no words here`);
 if (invented.length > 0) faults.push(`${invented.length} states are named here that the kit does not declare`);
 if (wired.length > 0) faults.push(`${wired.length} states draw a word off the wire`);
+if (hollow.length > 0) {
+  faults.push(
+    `${hollow.length} states print a field their message never carried — ${hollow.map((h) => `${h.kind}: ${h.note.text}`).join('; ')}`,
+  );
+}
 if (silent.length > 0) faults.push(`${silent.length} states draw no line at all`);
 if (misfiled.length > 0) faults.push(`${misfiled.length} states land in front of the wrong reader`);
 if (unspoken.length > 0) faults.push(`${unspoken.length} sentences the kit speaks are unrecognised here`);
 if (dropped.length > 0) faults.push(`${dropped.length} sentences are watched for that the kit no longer speaks`);
 if (unfiled.length > 0) faults.push(`${unfiled.length} of the kit's own sentences draw as ordinary answers`);
 if (drawnWired.length > 0) faults.push(`${drawnWired.length} rows of the record draw a word off the wire`);
+if (docStale) {
+  faults.push(
+    inTheDoc === null
+      ? 'the doc carries no table of what every line says'
+      : "the doc's table of what every line says is not the one the driver draws (TABLE=1 prints it)",
+  );
+}
 if (wireNamed.size > 0) {
   faults.push(`${[...wireNamed.values()].reduce((n, c) => n + c, 0)} rows of the record draw their own wire name`);
 }
@@ -601,8 +692,10 @@ console.log(
   }`,
 );
 console.log(
-  `  ${mark(wired.length === 0 && silent.length === 0)} No state draws a word off the wire, and none draws nothing.${
-    [...wired, ...silent].length === 0 ? '' : ` — ${[...wired, ...silent].map((s) => `${s.kind}.${s.state}`).join(', ')}`
+  `  ${mark(wired.length === 0 && silent.length === 0 && hollow.length === 0)} No state draws a word off the wire, a missing field, or nothing at all.${
+    [...wired, ...silent, ...hollow].length === 0
+      ? ''
+      : ` — ${[...wired, ...silent, ...hollow].map((s) => `${s.kind}.${s.state}`).join(', ')}`
   }`,
 );
 console.log(
@@ -623,6 +716,11 @@ console.log(
     drawnWired.length === 0 && wireNamed.size === 0
       ? ''
       : ` — ${[...wiredKinds, ...wireNamed.keys()].join(', ')}`
+  }`,
+);
+console.log(
+  `  ${mark(!docStale)} The record's own table says what every line says and who it is for — ${EVERY_LINE_SAYS.split('\n').length - 2} of them.${
+    docStale ? ' — run with TABLE=1 and paste it into §8.2.4.1' : ''
   }`,
 );
 if (broke.length > 0) console.log(`  ${mark(false)} The driver threw on: ${broke.join('; ')}`);

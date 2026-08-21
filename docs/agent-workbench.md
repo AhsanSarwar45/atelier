@@ -1201,6 +1201,91 @@ both answers together: **the English sentence it draws, and who it is for.**
 | kinds the kit declares, all named | 38 | `rate_limit_event`, `system/hook_response` |
 | states over 14 of those kinds | 47 | `allowed_warning`, `error_max_budget_usd` |
 | kinds deliberately silent, each with its reason | 4 | a guess at what he might type next belongs in the writing box |
+| sentences the kit writes in the chat's own voice | 6 | "You've hit your session limit" (§8.2.4.2) |
+
+And then the table itself: every kind, every state of it, the line a reader
+actually gets, and whose line it is. It is **printed by the check, not typed** —
+`TABLE=1 node scripts/chat-shows-what-is-yours.mjs` drives the real driver once
+per kind and per state and prints these rows, and the check compares them
+against what is written here, so a sentence that is reworded and never brought
+back to this page fails the run (bw-iiv6.10). Where a line quotes a field, the
+value shown is the sample's.
+
+<!-- every-line-says -->
+| kind | state | the line it draws | for |
+|---|---|---|---|
+| `auth_status` | — | Checking sign-in | machine |
+| `conversation_reset` | — | This chat was started over. | you |
+| `kit/limit_near` | — | *quoted whole* — "You've used…" | machine |
+| `kit/limit_reached` | — | *quoted whole* — "You've hit your…" | you |
+| `kit/no_answer_wanted` | — | *quoted whole* — "No response requested.…" | machine |
+| `kit/org_blocked` | — | *quoted whole* — "This service is disabled for your org…" | you |
+| `kit/paying_differently` | — | *quoted whole* — "You're now using usage credits…" | you |
+| `kit/service_failed` | — | *quoted whole* — "API Error…" | you |
+| `prompt_suggestion` | — | *nothing, on purpose: a guess at what he might type next; it belongs in the writing box, never in the record* | — |
+| `rate_limit_event` | `allowed_warning` | Your weekly allowance is running low (it renews at 03:13 AM). | machine |
+| `rate_limit_event` | `allowed` | Your weekly allowance is fine (it renews at 03:13 AM). | machine |
+| `rate_limit_event` | `credits_required` | Your weekly allowance has run out, and buying credits is the way on. | you |
+| `rate_limit_event` | `rejected` | Your weekly allowance has run out — nothing more runs until 03:13 AM. | you |
+| `system/api_retry` | — | Retrying | you |
+| `system/background_tasks_changed` | — | Nothing is running in the background now | machine |
+| `system/commands_changed` | — | *nothing, on purpose: the list of commands, drawn as the list of commands* | — |
+| `system/compact_boundary` | `auto` | This chat filled up and folded itself up: 120000 → 30000 tokens. | you |
+| `system/compact_boundary` | `manual` | You asked this chat to fold itself up: 120000 → 30000 tokens. | you |
+| `system/control_request_progress` | `api_retry` | The app is asking the agent again after the service was busy. | machine |
+| `system/control_request_progress` | `started` | The app asked the agent to do something. | machine |
+| `system/elicitation_complete` | — | An add-on finished asking. | machine |
+| `system/files_persisted` | `some_failed` | Could not store 1 file: too large. | you |
+| `system/files_persisted` | `stored` | Stored 1 file. | machine |
+| `system/hook_progress` | — | Your own rule is running. | machine |
+| `system/hook_response` | `cancelled` | Your tidy-up rule was called off. | machine |
+| `system/hook_response` | `error` | Your tidy-up rule could not run. | machine |
+| `system/hook_response` | `success` | Your tidy-up rule ran. | machine |
+| `system/hook_started` | — | Your own rule is running. | machine |
+| `system/informational` | `info` | something worth saying | machine |
+| `system/informational` | `notice` | something worth saying | machine |
+| `system/informational` | `suggestion` | something worth saying | machine |
+| `system/informational` | `warning` | something worth saying | machine |
+| `system/local_command_output` | — | *nothing, on purpose: the command answers in the chat itself, as an ordinary reply* | — |
+| `system/memory_recall` | `select` | Recalled 1 memory | machine |
+| `system/memory_recall` | `synthesize` | Recalled 1 memory | machine |
+| `system/mirror_error` | — | Could not mirror this chat:  | machine |
+| `system/model_refusal_fallback` | `retry` | the model you picked would not answer, so the same question went to another model. | you |
+| `system/model_refusal_fallback` | `revert` | the model you picked would not answer, so the chat went back to another model. | you |
+| `system/model_refusal_fallback` | `sticky` | the model you picked would not answer, so the rest of this chat is answered by another model. | you |
+| `system/model_refusal_no_fallback` | — |  | you |
+| `system/notification` | `high` | something to know | machine |
+| `system/notification` | `immediate` | something to know | machine |
+| `system/notification` | `low` | something to know | machine |
+| `system/notification` | `medium` | something to know | machine |
+| `system/permission_denied` | — | A tool was not allowed: no reason given | you |
+| `system/plugin_install` | `completed` | Plugin an add-on finished installing. | machine |
+| `system/plugin_install` | `failed` | Plugin an add-on could not be installed. | machine |
+| `system/plugin_install` | `installed` | Plugin an add-on is installed. | machine |
+| `system/plugin_install` | `started` | Plugin an add-on is being installed. | machine |
+| `system/session_state_changed` | `idle` | This chat is idle. | machine |
+| `system/session_state_changed` | `requires_action` | This chat is waiting on you. | you |
+| `system/session_state_changed` | `running` | This chat is working. | machine |
+| `system/status` | `compact_failed` | Could not compact this chat: the summary would not fit | you |
+| `system/status` | `compacted` | Compacted this chat. | you |
+| `system/status` | `compacting` | Folding this chat up to make room | machine |
+| `system/status` | `idle` | Sitting idle | machine |
+| `system/status` | `requesting` | Asking the model | machine |
+| `system/task_notification` | `completed` | A sent-off agent finished: what it did | machine |
+| `system/task_notification` | `failed` | A sent-off agent failed: what it did | you |
+| `system/task_notification` | `stopped` | A sent-off agent was stopped: what it did | machine |
+| `system/task_progress` | — | A sent-off agent is still going | machine |
+| `system/task_started` | — | Sent off a piece of work. | machine |
+| `system/task_updated` | `completed` | A sent-off agent has finished. | machine |
+| `system/task_updated` | `failed` | A sent-off agent failed. | machine |
+| `system/task_updated` | `killed` | A sent-off agent was stopped. | machine |
+| `system/task_updated` | `paused` | A sent-off agent is parked. | machine |
+| `system/task_updated` | `pending` | A sent-off agent is waiting to start. | machine |
+| `system/task_updated` | `running` | A sent-off agent is running. | machine |
+| `system/thinking_tokens` | — | *nothing, on purpose: an estimate twice a second, drawn as the thinking counter* | — |
+| `system/worker_shutting_down` | — | Shutting down:  | you |
+| `tool_use_summary` | — | A tool call, summarised. | machine |
+<!-- /every-line-says -->
 
 Four rulings hold it:
 
@@ -1216,12 +1301,21 @@ Four rulings hold it:
   machine's side. A wire word that must be shown at all has its seams opened up
   (`inWords`), which is the fallback and never the substitute.
 - **The lines already in the record are restated on the way to the screen.**
-  Wording is frozen at write time (bw-x6hb), and three sets of frozen lines were
-  worth restating rather than leaving: the 37 that announced a chat had stopped
-  asking before it runs things by naming the setting — "Permission mode is now
-  bypassPermissions." — the allowance sentences from his screenshot, and the
-  lines whose whole text was the kind itself. Only wording the app itself wrote
-  is matched, so anything reworded since passes through untouched.
+  Wording is frozen at write time (bw-x6hb), so a reworded sentence never
+  reaches a chat that already holds the old one, and four sets were worth
+  restating rather than leaving: the 37 that announced a chat had stopped asking
+  before it runs things by naming the setting — "Permission mode is now
+  bypassPermissions." — the allowance sentences from his screenshot, the lines
+  whose whole text was the kind itself, and the 600 rules that named themselves
+  the way the kit does. `Hook SessionStart:startup (SessionStart)` handed him the
+  moment twice, once inside the name and once in the English after it; it now
+  reads "Your startup rule is running, when the chat opens." Only wording the app
+  itself wrote is matched, so anything reworded since passes through untouched.
+  A restatement keeps the **tone** as well as the words: an allowance that turned
+  work away says when the work starts again, and one merely keeping its books
+  says when the counter turns over, by the same rule the live line uses —
+  restating both in the softer half put the look-alike back for every record
+  already written (bw-iiv6.11).
 - **The picker says what the setting does**, not what it is spelled: "Skip all
   checks", not `bypassPermissions`. The one line on this screen that MUST be read
   was the one written in the machine's own language.
@@ -1230,8 +1324,59 @@ The check reads `sdk.d.ts` as text rather than as types — a union member the k
 adds is not a type error anywhere, which is exactly how these gaps opened — and
 then drives the real driver once per kind and state. It fails on a kind or state
 the table has never heard of, on a sentence with an identifier-shaped word in it,
-on a state that draws nothing, and on one that lands in front of the wrong
-reader.
+on a state that draws nothing, on one that lands in front of the wrong reader, on
+a sentence that prints a field its message never carried — `Retrying (undefined
+of undefined)`, and `A sent-off agent finished: ""`, which was the two quote
+marks JSON writes for a missing value (bw-iiv6.15) — and on any of the 543 rows
+of the manager's own record drawing a wire word once restated.
+
+##### 8.2.4.2 The kit talking in the chat's own voice (bw-iiv6.12)
+
+A screenshot, 2026-08-21: `You've hit your session limit · resets 3:50pm
+(Asia/Karachi)`, drawn as a plain grey message among the answers. "this you hit
+your session limit which is the actual status that matters, shows as regular
+message" — the manager. And, when it was filed as separate work: "its not its
+own job, fix it as part of this. and there are many other predefined statuses
+like this that aren't treated as such."
+
+He is right twice over. **These sentences never arrive as messages about the
+run.** Everything §8.2.4.1 sorts is a kind and a state the driver reads off a
+message; this family arrives as the run's own answer text — an assistant
+message whose whole content is one sentence the kit wrote — so nothing that
+sorts messages ever saw it. It is not a status that was filed wrongly; it was
+never offered to the filing at all.
+
+**The kit says which sentences these are**, in four exported lists in the same
+`sdk.d.ts` this app already depends on, each with a doc comment telling a
+consumer to present that list differently:
+
+| the kit's list | what it means here | family | for |
+|---|---|---|---|
+| `USAGE_LIMIT_ERROR_PREFIXES` | the work has stopped and will not go on until the allowance comes back | stopped | you |
+| `ORG_POLICY_LIMIT_PREFIXES` | the org has switched this off; nothing he does in the app changes it | stopped | you |
+| `USAGE_WARNING_PREFIXES` | a window filling up, which the token gauge already draws (§8.7) | breathing | machine |
+| `USAGE_TRANSITION_PREFIXES` | the same work now being paid for differently | background | you |
+
+Two more are not on any list and are recognised by their opening all the same:
+the service failing (`API Error: 529 Overloaded`), which is his, and `No response
+requested.`, which is the machine noting that nobody wanted an answer.
+
+**They are quoted, never rewritten.** Each carries a time, a sum or a link this
+build cannot regenerate — `resets 3:50pm (Asia/Karachi)` is the whole use of the
+line — so the second table decides only what a sentence MEANS and who it is for,
+and the sentence itself goes through word for word. That is the opposite rule
+from §8.2.4.1, and for the opposite reason: there the app writes the sentence
+from a state, here the kit has already written it for a person.
+
+In the manager's own record, 61 of these sit in 26 chats — 44 stops, 11 "no
+answer wanted", 6 services failing — every one of them a single line under 150
+characters, which is why a long answer that merely opens with the same words is
+left alone. Two stops in a row fold into one row like any other machine line, so
+the duplicate the kit writes on a retry costs him nothing.
+
+The check reads the four lists on every run: a sentence a new kit version adds
+fails until somebody has given it a family and a reader, and an opening this
+build watches for that the kit has dropped fails too.
 
 #### 8.2.5 What this costs the log
 

@@ -130,7 +130,11 @@ function kindOf(m: Record<string, any>): string {
 
 /** One line, whatever it was given: a long value is cut and the whole of it kept in the body. */
 function oneLine(value: unknown, limit = 200): string {
-  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  // A field that is not there is nothing, not the two quote marks JSON writes
+  // for it — `A sent-off agent finished: ""` was that, on his screen
+  // (bw-iiv6.15). Anything else keeps its JSON, which is how a shape gets read.
+  if (value === null || value === undefined) return '';
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
 }
@@ -291,10 +295,14 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
 
     case 'system/compact_boundary': {
       const meta = m.compact_metadata ?? {};
-      const size = meta.post_tokens ? `${meta.pre_tokens} → ${meta.post_tokens} tokens` : `${meta.pre_tokens} tokens`;
+      const size = meta.post_tokens
+        ? `${meta.pre_tokens} → ${meta.post_tokens} tokens`
+        : meta.pre_tokens
+          ? `${meta.pre_tokens} tokens`
+          : null;
       const state = String(meta.trigger ?? 'manual');
       const said = saidOf(kind, state) ?? 'This chat folded itself up';
-      return { rank: 'note', kind, audience: whoFor(kind, state) ?? 'you', text: `${said}: ${size}.` };
+      return { rank: 'note', kind, audience: whoFor(kind, state) ?? 'you', text: size ? `${said}: ${size}.` : `${said}.` };
     }
 
     case 'system/informational':
@@ -302,7 +310,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         rank: INFORMATIONAL_RANK[String(m.level)] ?? 'note',
         kind,
         audience: whoFor(kind, String(m.level)) ?? 'machine',
-        text: oneLine(m.content),
+        text: oneLine(m.content) || 'Something worth saying, with nothing said.',
         body: String(m.content ?? ''),
       };
 
@@ -319,7 +327,11 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
       return {
         rank: 'note',
         kind,
-        text: `Retrying (${m.attempt} of ${m.max_retries})${m.error_status ? ` after HTTP ${m.error_status}` : ''}`,
+        // Which attempt this is, when the message says. A retry that arrives
+        // without its count still has to read as a sentence: printing the
+        // missing field put the word `undefined` in front of him, which is a
+        // wire word by another road (bw-iiv6.15).
+        text: `Retrying${m.attempt && m.max_retries ? ` (${m.attempt} of ${m.max_retries})` : ''}${m.error_status ? ` after HTTP ${m.error_status}` : ''}`,
         body: whole(),
       };
 
@@ -327,7 +339,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
       return {
         rank: 'note',
         kind,
-        text: `${m.tool_name} was not allowed: ${oneLine(m.decision_reason ?? m.message)}`,
+        text: `${oneLine(m.tool_name ?? 'A tool')} was not allowed: ${oneLine(m.decision_reason ?? m.message ?? 'no reason given')}`,
         body: String(m.message ?? ''),
       };
 
@@ -391,7 +403,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         rank: 'detail',
         kind,
         audience: 'machine',
-        text: `Sent off: ${oneLine(m.description)}`,
+        text: m.description ? `Sent off: ${oneLine(m.description)}` : 'Sent off a piece of work.',
         body: String(m.description ?? ''),
       };
 
@@ -414,7 +426,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         rank: 'detail',
         kind,
         audience: whoFor(kind, String(m.mode)) ?? 'machine',
-        text: `Recalled ${(m.memories ?? []).length} memories`,
+        text: `Recalled ${(m.memories ?? []).length} ${(m.memories ?? []).length === 1 ? 'memory' : 'memories'}`,
         body: (m.memories ?? []).map((mem: { path: string }) => mem.path).join('\n'),
       };
 
@@ -436,7 +448,12 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
       return { rank: 'note', kind, text: `Could not mirror this chat: ${oneLine(m.error)}`, body: whole() };
 
     case 'tool_use_summary':
-      return { rank: 'detail', kind, text: oneLine(m.summary), body: String(m.summary ?? '') };
+      return {
+        rank: 'detail',
+        kind,
+        text: m.summary ? oneLine(m.summary) : 'A tool call, summarised.',
+        body: String(m.summary ?? ''),
+      };
 
     case 'auth_status':
       return {
@@ -567,7 +584,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         rank: 'detail',
         kind,
         audience: 'machine',
-        text: `The ${oneLine(m.mcp_server_name ?? 'add-on')} add-on finished asking.`,
+        text: m.mcp_server_name ? `The ${oneLine(m.mcp_server_name)} add-on finished asking.` : 'An add-on finished asking.',
         body: whole(),
       };
 
