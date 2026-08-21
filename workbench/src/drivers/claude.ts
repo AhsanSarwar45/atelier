@@ -820,6 +820,11 @@ export class ClaudeDriver implements Driver {
         const patch = (m.patch ?? {}) as { status?: string; is_backgrounded?: boolean };
         if (!id || (!patch.status && patch.is_backgrounded === undefined)) return false;
         const was = numbers(id);
+        // Over is over. A routine status landing after the work ended — or
+        // after he stopped it — would reopen a finished row as running, or turn
+        // a stop into a clean finish, with nothing on the screen to say so
+        // (bw-7ks.22.30).
+        if (OVER.has(was.state)) return false;
         // Parked beats the status it is still running under: a helper left to
         // run in the background is exactly a running one nobody is waiting at.
         const state: AgentState = patch.is_backgrounded
@@ -912,6 +917,11 @@ export class ClaudeDriver implements Driver {
     if (!this.sentAway.has(agentId)) return;
     const was = this.rowNumbers(agentId);
     if (was.state === state) return;
+    // The states a row never leaves. Everything that moves a row through this
+    // door — a question raised, a park, the background list saying a command is
+    // running — is about work still going on, and none of it is a reason to
+    // reopen work that is over (bw-7ks.22.30).
+    if (OVER.has(was.state)) return;
     this.sentAway.set(agentId, { ...was, state });
     this.emit({ type: 'agent.progress', agentId, seconds: was.seconds, tokens: was.tokens, calls: was.calls, state });
   }
@@ -1437,7 +1447,7 @@ export class ClaudeDriver implements Driver {
    */
   async stopAgent(agentId: string): Promise<void> {
     await this.q?.stopTask(agentId);
-    if (!OVER.has(this.rowNumbers(agentId).state)) this.agentState(agentId, 'stopped');
+    this.agentState(agentId, 'stopped');
   }
 
   /**

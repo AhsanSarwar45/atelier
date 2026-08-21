@@ -33,7 +33,10 @@ import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import type { SentAway } from '@/workbench/fold';
 import type { AgentControl, AgentKind, AgentState } from '@/workbench/protocol';
+import { isOver } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
+
+export { isOver };
 
 /** How often a running row re-reads the clock. */
 const TICK_MS = 1000;
@@ -61,12 +64,6 @@ export const STATES: Record<AgentState, { label: string; variant: 'secondary' | 
   stopped: { label: 'stopped', variant: 'secondary' },
 };
 
-/** The states that are over: the row stops counting and starts keeping. */
-const OVER: AgentState[] = ['done', 'failed', 'stopped'];
-
-export function isOver(state: AgentState): boolean {
-  return OVER.includes(state);
-}
 
 /**
  * Seconds, rounded to the unit a glance needs.

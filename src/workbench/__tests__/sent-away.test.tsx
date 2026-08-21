@@ -354,3 +354,91 @@ describe('the driver, which is where these rows come from', () => {
     expect(named.filter((state) => !(state in STATES))).toEqual([]);
   });
 });
+
+/**
+ * A row that is over stays as it ended (bw-7ks.22.30).
+ *
+ * Two writers end a row and a third keeps talking about it: the kit's own
+ * notification, the receipt of the call that dispatched it, and the routine
+ * status pings that go on arriving for a moment afterwards. The endings were
+ * already settled between themselves; the pings were not, and a 'still running'
+ * landing a beat after a stop put the row back to running — his stop undone,
+ * with nothing on the screen to say it ever happened.
+ */
+describe.each(bothWays)('a row that is over, down %s', (_name, build) => {
+  /** Sent off, then over, then a routine status ping about it afterwards. */
+  const after = (ending: WbpEvent[], ping: Said<WbpEvent>): SessionView =>
+    build([
+      said({
+        type: 'agent.started',
+        agentId: 'late-1',
+        toolCallId: 'call-late',
+        kind: 'helper',
+        what: 'count the rows',
+        agentType: 'general-purpose',
+        model: null,
+      }),
+      said({ type: 'agent.progress', agentId: 'late-1', seconds: 30, tokens: 9_000, calls: 4 }),
+      ...ending,
+      said(ping),
+    ]);
+
+  const stopped = [
+    said({
+      type: 'agent.finished',
+      agentId: 'late-1',
+      state: 'stopped',
+      seconds: 30,
+      tokens: 9_000,
+      calls: 4,
+      model: 'claude-fable-5',
+      result: null,
+    }),
+  ];
+  const finished = [
+    said({
+      type: 'agent.finished',
+      agentId: 'late-1',
+      state: 'done',
+      seconds: 45,
+      tokens: 12_000,
+      calls: 6,
+      model: 'claude-fable-5',
+      result: 'All 412 rows counted.',
+    }),
+  ];
+
+  it('is not put back to running by a status that arrives after he stopped it', () => {
+    const view = after(stopped, { type: 'agent.progress', agentId: 'late-1', seconds: 31, tokens: 9_400, calls: 5, state: 'running' });
+    expect(view.agents[0]).toMatchObject({ state: 'stopped', seconds: 30, tokens: 9_000, calls: 4 });
+  });
+
+  it('is not reopened by a status that arrives after it finished', () => {
+    const view = after(finished, { type: 'agent.progress', agentId: 'late-1', seconds: 46, tokens: 1, calls: 1, state: 'running' });
+    expect(view.agents[0]).toMatchObject({ state: 'done', result: 'All 412 rows counted.' });
+  });
+
+  it('keeps the numbers it ended with rather than whatever the late word carries', () => {
+    const view = after(finished, { type: 'agent.progress', agentId: 'late-1', seconds: 0, tokens: 0, calls: 0 });
+    expect(view.agents[0]).toMatchObject({ seconds: 45, tokens: 12_000, calls: 6 });
+  });
+
+  it('still learns which model it ran, which is the one fact that arrives late by design', () => {
+    const view = after(
+      [
+        said({
+          type: 'agent.finished',
+          agentId: 'late-1',
+          state: 'done',
+          seconds: 45,
+          tokens: 12_000,
+          calls: 6,
+          model: null,
+          result: 'All 412 rows counted.',
+        }),
+      ],
+      { type: 'agent.progress', agentId: 'late-1', seconds: 45, tokens: 12_000, calls: 6, model: 'claude-fable-5' },
+    );
+    expect(view.agents[0]).toMatchObject({ state: 'done', model: 'claude-fable-5' });
+  });
+});

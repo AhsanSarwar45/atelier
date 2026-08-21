@@ -359,6 +359,21 @@ export type AgentKind = 'helper' | 'command' | 'watch' | 'run';
 export type AgentState = 'running' | 'waiting' | 'parked' | 'done' | 'failed' | 'stopped';
 
 /**
+ * The states a row never leaves: the work is over, however it went.
+ *
+ * Said once, here beside the states themselves, because three places have to
+ * agree about it — the panel, which stops counting and starts keeping; and both
+ * ways the conversation is folded, which refuse to let anything arriving
+ * afterwards reopen a row that is over (bw-7ks.22.30).
+ */
+export const OVER: readonly AgentState[] = ['done', 'failed', 'stopped'];
+
+/** Whether this row is over: it says what it ended with, and nothing moves it. */
+export function isOver(state: AgentState): boolean {
+  return OVER.includes(state);
+}
+
+/**
  * A way of steering one running piece of sent-off work
  * (docs/agent-workbench.md §8.2.7).
  *

@@ -34,6 +34,7 @@ import type {
   TodoItem,
   WbpEvent,
 } from './protocol';
+import { isOver } from './protocol';
 
 export interface TranscriptMessage {
   kind: 'message';
@@ -442,17 +443,26 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'agent.progress':
       next.agents = view.agents.map((a) =>
         a.id === e.agentId
-          ? {
-              ...a,
-              seconds: e.seconds,
-              tokens: e.tokens,
-              calls: e.calls,
-              // Absent means "still whatever it last said", the same bargain
-              // tool.progress makes: a blank line would erase it.
-              doing: e.doing || a.doing,
-              model: e.model || a.model,
-              state: e.state ?? a.state,
-            }
+          ? isOver(a.state)
+            ? // A row that is over says what it ended with. Something still
+              // sending progress about work that has finished — or that he
+              // stopped — must not reopen it as running, nor wind its clock
+              // and its figure back to whatever that message happens to carry
+              // (bw-7ks.22.30). Only the model is taken, and only if the row
+              // never learned one: it is the one fact that arrives late by
+              // design.
+              { ...a, model: a.model || e.model || null }
+            : {
+                ...a,
+                seconds: e.seconds,
+                tokens: e.tokens,
+                calls: e.calls,
+                // Absent means "still whatever it last said", the same bargain
+                // tool.progress makes: a blank line would erase it.
+                doing: e.doing || a.doing,
+                model: e.model || a.model,
+                state: e.state ?? a.state,
+              }
           : a,
       );
       return next;
@@ -766,6 +776,13 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         const at = agentAt.get(e.agentId);
         if (at !== undefined) {
           const row = agents[at]!;
+          // Over is over here too, for the reason the live arm gives above: a
+          // late progress must not reopen a finished row or undo a stop
+          // (bw-7ks.22.30).
+          if (isOver(row.state)) {
+            row.model = row.model || e.model || null;
+            break;
+          }
           row.seconds = e.seconds;
           row.tokens = e.tokens;
           row.calls = e.calls;
