@@ -25,7 +25,9 @@ use axum::{
 };
 use rust_embed::{Embed, EmbeddedFile};
 use std::env;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -138,6 +140,11 @@ async fn main() {
             }
         }
         command_line::Ask::Version => println!("{}", command_line::version()),
+        // A copy the computer started at login printed its addresses into a
+        // log nobody reads. Asking it where it is has to be something a person
+        // can type, and it must not bring a second server up to answer
+        // (bw-sxdg.1).
+        command_line::Ask::Where => print!("{}", whereabouts()),
         // Where this computer keeps this program's data, printed and nothing
         // else. The report command runs from a shell and needs the same answer
         // this program uses; asking the program is what stops it working the
@@ -159,6 +166,52 @@ async fn main() {
     }
 }
 
+/// Who may reach it, as the environment was left.
+fn bind_host() -> String {
+    env::var("ATELIER_HOST")
+        .or_else(|_| env::var("BEADS_WEB_HOST"))
+        .or_else(|_| env::var("HOST"))
+        .unwrap_or_else(|_| "0.0.0.0".to_string())
+}
+
+/// The port it listens on, as the environment was left.
+fn bind_port() -> u16 {
+    env::var("ATELIER_PORT")
+        .or_else(|_| env::var("BEADS_WEB_PORT"))
+        .or_else(|_| env::var("PORT"))
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(command_line::PORT)
+}
+
+/// Where it can be opened, and whether anything is there.
+///
+/// The same lines the running copy prints, worked out the same way from the
+/// same settings — because the copy that printed them may have been started by
+/// the computer itself, hours ago, into a log the reader never sees. Nothing
+/// is started to answer this.
+fn whereabouts() -> String {
+    let port = bind_port();
+    let network = reachable::on_this_network();
+    let name = reachable::name_on_this_network(network);
+    let mut said = format!("{} — where to open it.\n", identity::DISPLAY);
+    for line in reachable::openable_at(&bind_host(), port, network, name.as_deref()) {
+        said.push_str(&format!("  {line}\n"));
+    }
+    said.push_str(if answering(port) {
+        "It is answering there now.\n"
+    } else {
+        "Nothing is answering on that port. Start it with `atelier run`.\n"
+    });
+    said
+}
+
+/// Whether something already holds the port this would use.
+fn answering(port: u16) -> bool {
+    let here = SocketAddr::from(([127, 0, 0, 1], port));
+    std::net::TcpStream::connect_timeout(&here, Duration::from_millis(400)).is_ok()
+}
+
 /// Bring the whole product up.
 ///
 /// The server, the screens it serves and the chat helper behind them, in one
@@ -173,18 +226,9 @@ async fn serve(open_browser: bool) {
     tracing::subscriber::set_global_default(subscriber)
         .expect("Failed to set tracing subscriber");
 
-    // Parse bind host and port from environment variables.
-    let host = env::var("ATELIER_HOST")
-        .or_else(|_| env::var("BEADS_WEB_HOST"))
-        .or_else(|_| env::var("HOST"))
-        .unwrap_or_else(|_| "0.0.0.0".to_string());
-
-    let port: u16 = env::var("ATELIER_PORT")
-        .or_else(|_| env::var("BEADS_WEB_PORT"))
-        .or_else(|_| env::var("PORT"))
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(command_line::PORT);
+    // Where it listens, read the one way `atelier where` reads it too.
+    let host = bind_host();
+    let port = bind_port();
 
     // Configure CORS for development
     let cors = CorsLayer::new()
@@ -326,8 +370,12 @@ async fn serve(open_browser: bool) {
     // number out of a log line and typing it into a browser themselves. Both
     // addresses, because the one a phone needs is not the one this computer
     // needs, and it has always answered on both without saying so (bw-hkai.1).
+    // The name goes ahead of the number, because the number is a lease the
+    // router can take back and the name is not (bw-sxdg.1).
     println!("{} is running.", identity::DISPLAY);
-    for line in reachable::openable_at(&host, port, reachable::on_this_network()) {
+    let network = reachable::on_this_network();
+    let name = reachable::name_on_this_network(network);
+    for line in reachable::openable_at(&host, port, network, name.as_deref()) {
         println!("  {line}");
     }
     println!("The screens and the chat are inside this program; there is nothing else to start.");

@@ -188,19 +188,37 @@ keeps its data.
 ### Open it on your phone
 
 It answers everyone on your network by default, so the board opens on a phone,
-a tablet or another computer. Starting it prints both addresses:
+a tablet or another computer. Starting it prints where to open it:
 
 ```
 Atelier is running.
   On this computer   http://localhost:3008
-  On your network    http://192.168.1.11:3008   — phone, tablet, another computer
+  On your network    http://nobara.local:3008   — phone, tablet, another computer
+  If that name is not found   http://192.168.1.11:3008   — this number changes when the router hands out a new one
 ```
 
-Type the second one on the phone. If nothing answers, your computer's firewall
-is holding the port shut — open 3008, or whichever port you set.
+Type the name on the phone. It is your computer's own name, and it keeps
+working after the router hands out a different number — which is why the number
+sits underneath it rather than on top. macOS, Windows and Linux running avahi
+answer to that name already; nothing extra is installed and nothing is
+published. A phone whose browser cannot find the name — some Android ones
+cannot — types the number instead.
+
+If nothing answers at all, your computer's firewall is holding the port shut —
+open 3008, or whichever port you set.
 
 To keep it to this computer alone, set `ATELIER_HOST=127.0.0.1`; it then says
 so instead of offering an address that will not answer.
+
+### Ask a running copy where it is
+
+```bash
+atelier where
+```
+
+Prints the same addresses and says whether anything is answering on that port.
+Useful once the computer starts it for you, because then nobody sees the lines
+it printed. It starts nothing.
 
 ### Start it with the computer
 

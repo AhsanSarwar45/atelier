@@ -28,6 +28,8 @@ pub enum Ask {
     Run { open_browser: bool },
     /// Have the computer start it, stop having it, or ask which it is.
     Service(Action),
+    /// Print the addresses it can be opened at, and start nothing.
+    Where,
     /// Print where this computer keeps the data, and nothing else.
     DataDir,
     /// Print what the program can do.
@@ -74,6 +76,7 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             Some("uninstall") | Some("remove") => Ask::Service(Action::Uninstall),
             Some(other) => Ask::Unknown(other.to_string()),
         },
+        "where" => Ask::Where,
         "--data-dir" => Ask::DataDir,
         "--help" | "-h" | "help" => Ask::Help,
         "--version" | "-V" | "version" => Ask::Version,
@@ -91,6 +94,7 @@ Usage:
   atelier run                 Start everything and open the board in your browser
   atelier run --no-browser    The same, without opening a browser
   atelier                     The same as `run --no-browser`
+  atelier where               Print the addresses to open it at, and start nothing
   atelier service install     Have this computer start it at login, and keep it up
   atelier service uninstall   Stop having it started, and leave nothing behind
   atelier service status      Say whether this computer starts it
@@ -107,8 +111,10 @@ Where it listens:
                               your network; 127.0.0.1 for this computer alone)
 
 It answers the whole network by default, so the board opens on your phone.
-Starting it prints the address to type there. If it does not answer, your
-computer's firewall is holding the port shut.
+Starting it prints the address to type there, and `atelier where` prints it
+again for a copy this computer started on its own. The name it prints follows
+this computer; the number beside it changes when the router hands out a new
+one. If nothing answers, your computer's firewall is holding the port shut.
 "
     )
 }
@@ -143,6 +149,13 @@ mod tests {
         // passes no arguments at all. Changing what that means would break
         // all of them at once.
         assert_eq!(ask(&[]), Ask::Run { open_browser: false });
+    }
+
+    #[test]
+    fn a_running_copy_can_be_asked_where_it_is() {
+        // The computer starts it at login and prints its lines into a log
+        // nobody reads. Asking has to be a thing a person can type.
+        assert_eq!(ask(&["where"]), Ask::Where);
     }
 
     #[test]
@@ -195,6 +208,7 @@ mod tests {
     fn the_help_screen_names_run_among_the_things_it_can_do() {
         let help = help();
         assert!(help.contains("atelier run"), "run is not offered:\n{help}");
+        assert!(help.contains("atelier where"), "where is not offered:\n{help}");
         assert!(help.contains("--data-dir"), "--data-dir is not offered:\n{help}");
         assert!(help.contains("service install"), "service install is not offered:\n{help}");
         assert!(help.contains("service uninstall"), "service uninstall is not offered:\n{help}");

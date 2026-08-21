@@ -251,7 +251,9 @@ fn install(exe: &str) -> Result<(), String> {
     // the running copy gives (bw-hkai.1).
     let host = std::env::var("ATELIER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     println!("{DISPLAY} will start with this computer.");
-    for line in crate::reachable::openable_at(&host, port, crate::reachable::on_this_network()) {
+    let network = crate::reachable::on_this_network();
+    let name = crate::reachable::name_on_this_network(network);
+    for line in crate::reachable::openable_at(&host, port, network, name.as_deref()) {
         println!("  {line}");
     }
     Ok(())

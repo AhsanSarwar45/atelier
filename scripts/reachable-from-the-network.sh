@@ -7,6 +7,10 @@
 # phone is the phone. Whoever wanted the board in their hand had to go and find
 # this machine's address themselves (bw-hkai.1).
 #
+# The number it printed is a lease the router can take back, so the name this
+# computer answers to goes ahead of it — and asking a copy the computer started
+# by itself where it is has to be one word (bw-sxdg.1).
+#
 # The unit tests hold the rule about what to print. This holds the running
 # program to the only thing that matters: the address it printed is an address
 # that answers, fetched over that address and not over loopback.
@@ -54,6 +58,31 @@ except OSError:
     pass
 PY
 }
+
+# The name this computer answers to on the local network, worked out here so
+# the check has its own answer rather than believing whatever was printed.
+own_local_name() {
+  local said
+  said="$(hostname 2>/dev/null)" || return 0
+  said="${said%%.*}"
+  [ -n "$said" ] && printf '%s.local' "$(printf '%s' "$said" | tr 'A-Z' 'a-z')"
+}
+
+# The addresses a name really resolves to here, loopback dropped — a name that
+# only answers to this machine itself is a name a phone cannot use.
+addresses_of() {
+  python3 - "$1" <<'PY'
+import socket, sys
+try:
+    found = {a[4][0] for a in socket.getaddrinfo(sys.argv[1], None)}
+except OSError:
+    found = set()
+print(" ".join(sorted(f for f in found if not f.startswith("127.") and f != "::1")))
+PY
+}
+
+# Every address a piece of output offers, so two of them can be compared.
+addresses_in() { grep -o "http://[^ ]*:$PORT" "$1" | sort -u; }
 
 # ---------------------------------------------------------------- the binary
 
@@ -182,7 +211,104 @@ else
     fi
   fi
 fi
+
+# ------------------------------------------------- a name that does not move
+
+say "A name that keeps working after the router changes its mind"
+
+OWN_NAME="$(own_local_name)"
+PRINTED_NAME="$(grep -o "http://[A-Za-z0-9_-]*\.local:$PORT" "$SAID" | head -1)"
+
+if [ -n "$PRINTED_NAME" ]; then
+  BARE="$(printf '%s' "$PRINTED_NAME" | sed -e 's|http://||' -e "s|:$PORT||")"
+  if [ -n "$(addresses_of "$BARE")" ]; then
+    pass "it printed $PRINTED_NAME, and that name is found on this network"
+  else
+    fail "it printed $PRINTED_NAME, which resolves to nothing — a phone would wait for a page that never comes"
+  fi
+
+  NAME_LINE="$(grep -n "\.local:$PORT" "$SAID" | head -1 | cut -d: -f1)"
+  NUMBER_LINE="$(grep -n "http://[0-9][0-9.]*:$PORT" "$SAID" | grep -v '127\.0\.0\.1' | head -1 | cut -d: -f1)"
+  if [ -z "$NUMBER_LINE" ]; then
+    skip "there is no number printed beside it to order against"
+  elif [ "$NAME_LINE" -lt "$NUMBER_LINE" ]; then
+    pass "and printed it ahead of the number the router hands out"
+  else
+    fail "the number came first, so that is what somebody writes down — and it moves"
+  fi
+
+  CODE="$(curl -sS -o "$WORK/named.html" -w '%{http_code}' --max-time 10 "$PRINTED_NAME/" 2>/dev/null)"
+  if [ "$CODE" = "200" ] && grep -qi '<!doctype html' "$WORK/named.html"; then
+    pass "the board draws when fetched over that name, not over the number"
+  else
+    fail "the name it printed did not answer with the board (got ${CODE:-nothing})"
+  fi
+  if curl -fsS -o /dev/null --max-time 10 "$PRINTED_NAME/api/health" 2>/dev/null; then
+    pass "and it is the same app answering under that name"
+  else
+    fail "nothing of this app answered at $PRINTED_NAME"
+  fi
+elif [ -n "$OWN_NAME" ] && [ -n "$(addresses_of "$OWN_NAME")" ]; then
+  fail "this computer answers to $OWN_NAME and it was never offered — the reader is left with a number that moves"
+else
+  skip "this computer is not found under a name on its own network"
+  if grep -q '\.local' "$SAID"; then
+    fail "a name was offered that nothing here resolves:"
+    sed 's/^/      /' "$SAID"
+  elif [ -n "$PRINTED" ]; then
+    pass "and it offered the number instead, with no dead name"
+  else
+    skip "and there is no network address either"
+  fi
+fi
+
+# --------------------------------------------- asking where a copy is running
+
+say "Asking a copy that is already running where it is"
+
+ask_where() {
+  env -i PATH="$PATH" HOME="$WORK/home" ATELIER_PORT="$PORT" \
+    ATELIER_DATA_DIR="$WORK/data" "$BINARY" where >"$1" 2>&1
+}
+
+WHERE="$WORK/where.txt"
+if ask_where "$WHERE"; then
+  pass "'atelier where' answers"
+else
+  fail "'atelier where' did not answer:"
+  sed 's/^/      /' "$WHERE"
+fi
+
+if [ -n "$(addresses_in "$WHERE")" ] && [ "$(addresses_in "$SAID")" = "$(addresses_in "$WHERE")" ]; then
+  pass "and names the same addresses the running copy printed"
+else
+  fail "it names different addresses from the ones the running copy printed:"
+  printf '      running: %s\n' "$(addresses_in "$SAID" | tr '\n' ' ')"
+  printf '      asked:   %s\n' "$(addresses_in "$WHERE" | tr '\n' ' ')"
+fi
+
+if grep -q 'It is answering there now' "$WHERE"; then
+  pass "and says the copy on that port is answering"
+else
+  fail "it did not say whether anything is there:"
+  sed 's/^/      /' "$WHERE"
+fi
+
 stop
+
+WHERE_STOPPED="$WORK/where-stopped.txt"
+ask_where "$WHERE_STOPPED"
+if grep -q 'Nothing is answering' "$WHERE_STOPPED"; then
+  pass "with nothing running it says so, rather than an address that would fail"
+else
+  fail "with nothing running it still claimed something was there:"
+  sed 's/^/      /' "$WHERE_STOPPED"
+fi
+if curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$PORT/api/health" 2>/dev/null; then
+  fail "asking where it is started a second server on $PORT"
+else
+  pass "and asking started nothing — the port is free"
+fi
 
 # ------------------------------------------------------ told to keep to itself
 
