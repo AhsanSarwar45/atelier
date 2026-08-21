@@ -109,7 +109,12 @@ export function WhatItRuns({
       {mode && (
         <Badge
           variant={mode.tone}
-          appearance="light"
+          // Ringed, not merely tinted. Every other chip on this line carries a
+          // colour the DATA hashed to, and a hashed chip is forced to `outline`
+          // and drawn with a ring (badge.tsx). A tint alone left this one as a
+          // run of coloured text between two pills — the odd thing out on the
+          // one line whose whole job is that the mode is read.
+          appearance="outline"
           size="sm"
           shape="circle"
           data-testid="chat-mode-chip"
