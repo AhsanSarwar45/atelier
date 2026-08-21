@@ -22,6 +22,7 @@ import { chatState, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import {
   useHeardFromOutside,
+  useHelperMismatch,
   useHolds,
   useLiveSessions,
   useRunningElsewhere,
@@ -251,6 +252,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
   const live = useLiveSessions();
   const running = useRunningElsewhere();
   const holds = useHolds();
+  const outOfStep = useHelperMismatch();
   // The order as it was last drawn. Read while rendering and written after, so
   // what he is pointing at is what decides where the rows go (holdStill).
   const settled = useRef<string[]>([]);
@@ -382,6 +384,20 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
       {failed && (
         <p data-testid="restore-error" className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {failed}
+        </p>
+      )}
+
+      {/*
+        The helper feeding this list is older than the page reading it, so what
+        each chat is doing cannot be known — and the loss is otherwise silent:
+        every row still draws, with its title and its time and its cards, and
+        only the marks are missing. Said here because here is where they are
+        missing from, and said as the thing to do about it rather than as a
+        fault, because there is exactly one thing to do (bw-96is.24, bw-kr4m).
+      */}
+      {outOfStep && (
+        <p data-testid="helper-stale" className="border-b border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+          The helper behind this list is out of date, so no chat here can say what it is doing. Restart the app.
         </p>
       )}
 

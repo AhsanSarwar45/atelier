@@ -1930,6 +1930,34 @@ The workbench follows it — a single module-level store owns the one global
 `EventSource` and the per-session state that the tray, the strip and the board
 cards all read. One connection for the whole app, not one per component.
 
+**A frame the page cannot read is a fact about the sidecar, not a crash.** The
+sidecar is one long-lived process started once by the host, and nothing restarts
+it when its own source changes (bw-kr4m) — so a page served after an update
+routinely talks to a sidecar from before it. When `running` grew from a list of
+bare ids to a list of chats with what each is doing (bw-96is), a browser on the
+new page reading the old frame threw inside `EventSource.onmessage`, and the
+throw was invisible: every other frame went on arriving, the list went on
+drawing rows with their titles and times, and the screen was simply, silently,
+permanently wrong about the one fact the whole job was about — no moving mark
+and no badge on any held chat, until the tab was closed. Measured on the running
+copy 2026-08-21: sidecar up since 10:51, page served 13:48, the wire still
+carrying `conversations` at 14:00.
+
+So `absorb` checks the shape of the one frame that carries structure, the
+message handler catches anything else, and both answer the same way:
+`useHelperMismatch()` goes true, the list draws one line saying the helper is out
+of date, and the rest of the stream keeps working. What is known about who is
+holding a chat goes to `null` — never to an empty set, which would draw every
+held chat as free and open the writing box on a conversation somebody is typing
+in, the exact door `bw-dmxj.12` closed. It clears itself on the first frame that
+does read, so a restarted sidecar heals the open tab without a reload
+(bw-96is.24; `helper-of-another-age.test.tsx`).
+
+**The rule.** A wire word this app owns both ends of is still a wire word across
+time, because the two ends are restarted independently. Changing what one
+carries needs the reader to survive the older cargo and say so — the checks that
+matter are the ones that feed the page the PREVIOUS version's own frame.
+
 ### 8.7 The two token numbers
 
 The gauge on a chat's status line is a way in, not a label. Clicking it opens

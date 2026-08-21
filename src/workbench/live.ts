@@ -123,6 +123,25 @@ let running: Set<string> | null = null;
  */
 let holds: Map<string, HeldChat> | null = null;
 /**
+ * The helper on the other end of the stream is not saying what this page reads.
+ *
+ * It is one process, started once, and nothing restarts it when its own code
+ * changes (bw-kr4m) — so a page served after an update talks to a helper from
+ * before it. The morning this was written the helper had been up since 10:51
+ * and the page since 13:48, and the word for who is holding a chat had changed
+ * cargo in between: the page read a field the old helper does not send, threw
+ * inside its own message handler, and from that moment said NOTHING about any
+ * held chat — no moving mark, no badge — for as long as the tab stayed open.
+ * Every other fact went on arriving, so the screen looked healthy and was
+ * simply, permanently wrong about the one thing this job is about (bw-96is.24).
+ *
+ * So a frame this page cannot read is a fact about the helper rather than a
+ * crash: it is said out loud on the screen, the rest of the stream is left
+ * working, and it clears itself the moment a frame arrives that does read —
+ * which is what a restarted helper sends, so the tab heals without a reload.
+ */
+let mismatched = false;
+/**
  * How many times the stream has said the tools' own session folders moved, for
  * each project anybody is watching.
  *
@@ -261,6 +280,19 @@ export function countingFrom(
   return same ? (had.busySince ?? now.at) : now.at;
 }
 
+/**
+ * Say, or stop saying, that the helper is not speaking this page's words.
+ *
+ * Only on a change, because it is read through the same subscription every
+ * other fact on this stream is and a helper that is out of step is out of step
+ * on every frame it sends.
+ */
+function noteMismatch(now: boolean): void {
+  if (mismatched === now) return;
+  mismatched = now;
+  announce();
+}
+
 function absorb(frame: WatchFrame): void {
   if (frame.kind === 'usage') {
     usage = frame.usage;
@@ -268,6 +300,23 @@ function absorb(frame: WatchFrame): void {
     return;
   }
   if (frame.kind === 'running') {
+    // An older helper sends this same word carrying the old cargo — a list of
+    // bare ids where this reads a list of chats and what each is doing. Read
+    // blind it threw, and a throw here is invisible: the page went on drawing
+    // everything else and never said another word about a held chat.
+    //
+    // What is known is then nothing, and `null` is how this file spells that
+    // everywhere else — the same answer a dropped stream gives, and for the
+    // same reason. Keeping a memory would let the writing box open on a chat
+    // somebody is in (bw-dmxj.12).
+    if (!Array.isArray(frame.holds)) {
+      running = null;
+      holds = null;
+      mismatched = true;
+      announce();
+      return;
+    }
+    noteMismatch(false);
     running = new Set(frame.holds.map((h) => h.id));
     holds = new Map(frame.holds.map((h) => [h.id, h]));
     announce();
@@ -440,7 +489,16 @@ function connect(): void {
   source.onmessage = (msg) => {
     // Speaking again: the next drop starts its own count from the short wait.
     retryIn = RETRY_MS;
-    absorb(JSON.parse(msg.data) as WatchFrame);
+    try {
+      absorb(JSON.parse(msg.data) as WatchFrame);
+    } catch {
+      // Whatever else a helper of another age can send that this cannot read,
+      // it gets the same answer as the frame checked by hand above: the page
+      // says the helper does not match and goes on reading the frames it does
+      // understand, rather than dying inside a handler nobody is watching
+      // (bw-96is.24).
+      noteMismatch(true);
+    }
   };
   source.onerror = dropped;
 }
@@ -486,6 +544,24 @@ export function usePlanUsage(): PlanUsage {
     subscribe,
     () => usage,
     () => NOTHING_KNOWN,
+  );
+}
+
+/**
+ * Whether the helper feeding this stream is out of step with the page reading
+ * it — almost always because it is still running the code it started with while
+ * the page has been served since (bw-kr4m).
+ *
+ * Worth a line on the screen rather than a line in a log, because what it costs
+ * is silent: the page keeps drawing, and the only sign is that no chat anybody
+ * is working in ever says so. A reader with no line to read concludes the
+ * feature does not work (bw-96is.24).
+ */
+export function useHelperMismatch(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => mismatched,
+    () => false,
   );
 }
 
