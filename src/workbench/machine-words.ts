@@ -590,13 +590,18 @@ export const WORDS: Record<string, KindWords> = {
    * `active_goal` IS declared, fully and with a doc comment of its own, as
    * SDKActiveGoalMessage; it is reachable only through StdoutMessage, the
    * transport's own union, and never through the one the kit's iterator is
-   * typed with. Its shape and its null-means-cleared rule are read off that
-   * declaration. The other three are named in the type file nowhere at all,
-   * so their shapes are read off the kit's shipped program instead, and the
-   * lines below say only what that program is caught writing.
+   * typed with. The other three are named in the type file nowhere at all.
    *
-   * The check reads both, and it counts the two cases separately, so the day
-   * the kit hands on a fifth this table is what fails.
+   * Every field named below comes from the program that writes these messages
+   * — Claude Code itself, which ships its own schemas with a sentence beside
+   * each field — and not from the kit, which is only the pipe they arrive
+   * through. The check reads those schemas out of the very program the app
+   * drives and fails on a field name that is in none of them, so a name read
+   * wrong cannot pass by agreeing with the fixture written beside it
+   * (bw-cx70.8).
+   *
+   * The check reads both files, and it counts the two cases separately, so the
+   * day the kit hands on a fifth this table is what fails.
    */
 
   /**
@@ -636,15 +641,16 @@ export const WORDS: Record<string, KindWords> = {
    * actually happening is `system/compact_boundary`, and that one is his.
    *
    * The message carries four more fields — how big the window is, the point it
-   * folds at, whether the setting was imposed and where it came from — and the
-   * kit writes none of them down anywhere this app can read, so the line reads
-   * none of them (§9.3).
+   * folds at, whether the setting was imposed and where it came from. The line
+   * reads none of them because none of them is his business, not because they
+   * are unreadable: the program that writes them declares all four, each with
+   * its own sentence (§9.3).
    */
   autocompact_state: {
     from: 'value.enabled',
     kit: null,
     ours: {
-      on: "the kit declares no state here; a message whose value has enabled true, read off the kit's own program",
+      on: "the kit declares no state here; a message whose value has enabled true, read off the program that writes it",
       off: 'the same message with enabled false, or with no value at all',
     },
     sample: (state) => ({
@@ -675,7 +681,7 @@ export const WORDS: Record<string, KindWords> = {
     from: 'status_category',
     kit: null,
     ours: {
-      blocked: "the kit declares none of these; all four are read off its own program, where its classifier writes them",
+      blocked: "the kit declares none of these; all four are read off the program that writes them, where its own classifier spells them",
       need_input: 'the same state, reworded by the kit before it reaches anything that is not the terminal',
       review_ready: 'the turn ended with something to look at',
       failed: 'the turn ended badly',
@@ -707,7 +713,7 @@ export const WORDS: Record<string, KindWords> = {
     from: 'whether detail carries anything',
     kit: null,
     ours: {
-      doing: "the kit declares no state here; a message whose detail carries a line, read off the kit's own program",
+      doing: "the kit declares no state here; a message whose detail carries a line, read off the program that writes it",
       cleared: 'the same message with detail null, which the kit sends when the chat goes idle',
     },
     sample: (state) => ({

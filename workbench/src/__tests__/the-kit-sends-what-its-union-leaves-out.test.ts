@@ -15,11 +15,15 @@
  *
  * Outside that union is not the same as written down nowhere (bw-cx70.7).
  * `active_goal` is declared in full, with its own doc comment, as
- * SDKActiveGoalMessage — reachable only through the transport's union — and
- * its shape and its null-means-cleared rule come from there. The other three
- * are named in the type file nowhere at all, so their shapes are read off the
- * kit's shipped program and each line reads only fields that program is
- * caught writing.
+ * SDKActiveGoalMessage — reachable only through the transport's union. The
+ * other three are named in the type file nowhere at all.
+ *
+ * Every field the fixtures below carry comes from the program that writes
+ * these messages, Claude Code itself, which ships its own schema for each one.
+ * These cases cannot prove that on their own — a fixture and the code it
+ * exercises agreeing on an invented name proves nothing — so the field names
+ * are checked against those schemas by `scripts/chat-shows-what-is-yours.mjs`,
+ * which reads them out of the very program the app drives (bw-cx70.8).
  */
 import { describe, expect, it } from 'vitest';
 

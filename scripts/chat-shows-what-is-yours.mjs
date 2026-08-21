@@ -31,7 +31,7 @@
 // way in. Both warnings are noise in front of a table.
 process.removeAllListeners('warning');
 
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -47,6 +47,7 @@ const { drawnRows, FAMILIES, forWhom, KINDS_WITH_AN_AUDIENCE, KNOWN_KINDS, OFF_B
   await import('../src/workbench/machine-lines.ts');
 const { KIT_SPEAKS, kitSpoke, SAID_NOTHING, WORDS } = await import('../src/workbench/machine-words.ts');
 const { ClaudeDriver } = await import('../workbench/src/drivers/claude.ts');
+const { claudeProgram, NAMED } = await import('../workbench/src/claude-program.ts');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -460,6 +461,90 @@ function kindsTheKitHandsOn() {
 }
 
 /**
+ * The program that actually writes these messages, and what it declares.
+ *
+ * The kit is a pipe, not the author. Four of the kinds it hands on are written
+ * by Claude Code itself, and three of those the kit's type file never names —
+ * so where do the field names in the table come from? Read out of the program
+ * that produces them: it ships its own schemas, each field beside a sentence
+ * saying what it holds, and this reads them there rather than taking anyone's
+ * word for it (bw-cx70.8).
+ *
+ * Read by shape, never by the minifier's names. A build renames every helper it
+ * has, so the anchor is the kind's own word plus the two fields every message
+ * of every kind carries. What comes back is the declaration's own text.
+ *
+ * The same program the app drives, found the same way the app finds it, so a
+ * check that passes here is a check against the Claude Code this machine will
+ * actually run.
+ */
+const PRODUCER_WINDOW = 6000;
+
+function shapesTheProducerDeclares(kinds) {
+  const named = claudeProgram();
+  if (!named) return { program: null, shapes: new Map() };
+  let program = named;
+  try {
+    program = realpathSync(named);
+  } catch {
+    // Named and not there. Kept as it was so the failure says which path.
+  }
+  const shapes = new Map();
+  let fd;
+  try {
+    fd = openSync(program, 'r');
+  } catch {
+    return { program, shapes };
+  }
+  try {
+    const size = statSync(program).size;
+    const CHUNK = 1 << 23;
+    const OVERLAP = 1 << 13;
+    const buf = Buffer.alloc(CHUNK);
+    const window = Buffer.alloc(PRODUCER_WINDOW);
+    const wanted = new Map(kinds.map((kind) => [kind, `"${kind.split('/').pop()}"`]));
+    for (let at = 0; at < size && shapes.size < wanted.size; at += CHUNK - OVERLAP) {
+      const read = readSync(fd, buf, 0, CHUNK, at);
+      if (read <= 0) break;
+      const text = buf.toString('latin1', 0, read);
+      for (const [kind, needle] of wanted) {
+        if (shapes.has(kind)) continue;
+        for (let found = text.indexOf(needle); found >= 0; found = text.indexOf(needle, found + 1)) {
+          const from = Math.max(0, at + found - 200);
+          const got = readSync(fd, window, 0, PRODUCER_WINDOW, from);
+          const around = window.toString('latin1', 0, got);
+          // A declaration and not a mention: every message of every kind carries
+          // these two, so text holding the kind's word and both of them is the
+          // shape itself rather than a switch arm naming it.
+          if (!around.includes('uuid:') || !around.includes('session_id:')) continue;
+          shapes.set(kind, around.slice(around.indexOf(needle) >= 0 ? around.indexOf(needle) : 0));
+          break;
+        }
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return { program, shapes };
+}
+
+/** Every field a fixture carries, one level into `value`, without the envelope. */
+function fieldsOfSample(sample) {
+  const skip = new Set(['type', 'subtype', 'uuid', 'session_id']);
+  const found = new Set();
+  const walk = (held, depth) => {
+    if (held === null || typeof held !== 'object' || Array.isArray(held) || depth > 1) return;
+    for (const [name, held2] of Object.entries(held)) {
+      if (skip.has(name)) continue;
+      found.add(name);
+      walk(held2, depth + 1);
+    }
+  };
+  walk(sample, 0);
+  return [...found];
+}
+
+/**
  * Kinds that never become a machine line, because the chat draws them as
  * something better. Each one is answered somewhere else on the screen, and the
  * reason is written beside it so that "it does not appear" can be told from
@@ -483,6 +568,43 @@ const kitKinds = [...new Set([...kitDeclared, ...handedOn])];
 const undeclared = handedOn.filter((kind) => !kitDeclared.includes(kind));
 /** Of those, the ones the type file does not name anywhere at all. */
 const unwritten = undeclared.filter((kind) => !kindsTheKitNamesAnywhere().includes(kind));
+
+/*
+ * 4c. A field name nobody can be caught inventing.
+ *
+ * The three kinds the type file never names had their shapes read off the
+ * program that writes them — and until this gate, nothing said so twice. The
+ * fixtures under them use the same names as the code they exercise, so a name
+ * read wrong would pass every test, pass this check, and quietly send every
+ * real message of that kind to the fallback line: the reader would see "the
+ * machine said something this build has no words for" forever and no run would
+ * ever go red (bw-cx70.8).
+ *
+ * So every field the table's own fixture carries has to appear in the shape the
+ * producing program declares for that kind. A kind whose shape cannot be found
+ * fails, and so does a machine with no Claude Code on it: a gate that reports
+ * green because it found nothing to read is the fault this check was built
+ * against.
+ */
+const OUTSIDE_THE_TYPE_FILE = undeclared.filter((kind) => kind in WORDS);
+const { program: producer, shapes: producerShapes } = shapesTheProducerDeclares(OUTSIDE_THE_TYPE_FILE);
+const guessed = [];
+const unreadable = [];
+for (const kind of OUTSIDE_THE_TYPE_FILE) {
+  const shape = producerShapes.get(kind);
+  if (shape === undefined) {
+    unreadable.push(kind);
+    continue;
+  }
+  const fields = new Set();
+  for (const state of Object.keys(WORDS[kind].states)) {
+    for (const field of fieldsOfSample(WORDS[kind].sample(state))) fields.add(field);
+  }
+  for (const field of fields) {
+    if (!new RegExp(`\\b${field}\\s*:`).test(shape)) guessed.push(`${kind}.${field}`);
+  }
+}
+
 const cased = new Set(known);
 const undecided = kitKinds.filter(
   (kind) => !cased.has(kind) && !(kind in SAID_NOTHING) && !(kind in DRAWN_ELSEWHERE),
@@ -972,6 +1094,12 @@ if (hisName.stillDrawnAsHis.length > 0)
   faults.push(`${hisName.stillDrawnAsHis.length} messages the kit wrote in his name are drawn as words he typed`);
 if (pasted.length > 0)
   faults.push(`${pasted.length} lines paste in a field the kit itself spells out as a code word`);
+if (guessed.length > 0)
+  faults.push(`${guessed.length} fields the table reads are in no shape the program that writes them declares`);
+if (producer === null)
+  faults.push(`no Claude Code to read the four undeclared shapes off; set ${NAMED} or put one on the path`);
+else if (unreadable.length > 0)
+  faults.push(`${unreadable.length} kinds whose shape ${producer} does not declare`);
 if (onOpening !== 0) faults.push(`a chat that just opened announced its mode ${onOpening} times`);
 if (afterSwitch !== 1) faults.push(`switching the mode said so ${afterSwitch} times, not once`);
 
@@ -996,6 +1124,15 @@ console.log(
 console.log(
   `  ${mark(loopFound)} The kit's own program is read as well as its types — ${handedOn.length} kinds its read loop hands on, ${undeclared.length} of them outside the union its own iterator declares, ${unwritten.length} named in the type file nowhere at all.${
     loopFound ? (undeclared.length === 0 ? '' : ` — ${undeclared.join(', ')}`) : ' — its read loop could not be found'
+  }`,
+);
+console.log(
+  `  ${mark(producer !== null && unreadable.length === 0 && guessed.length === 0)} Every field the table reads off a kind outside the kit's own union is one the program that writes it declares — ${OUTSIDE_THE_TYPE_FILE.length} kinds, read out of ${producer ?? 'no Claude Code this machine could find'}.${
+    producer === null
+      ? ` — set ${NAMED} or put one on the path`
+      : [...guessed, ...unreadable].length === 0
+        ? ''
+        : ` — ${[...guessed, ...unreadable].join(', ')}`
   }`,
 );
 console.log(
