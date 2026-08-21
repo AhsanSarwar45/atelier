@@ -61,6 +61,52 @@ export const A_CALL = SPENT.input_tokens + SPENT.cache_creation_input_tokens + S
 /** How many turns of its own each helper below is written with. */
 export const HELPER_TURNS = 3;
 
+/**
+ * Each agent a chat sends off, when it sends off more than one — and every one
+ * of them different from its neighbours.
+ *
+ * A panel of three rows written from one template proves nothing: three
+ * identical rows are what a screen drawing the FIRST row three times would look
+ * like, and so are three rows drawn from a static picture. So each helper here
+ * is asked something else, runs on another model, takes its own time and costs
+ * its own money, and a case can hold every row to its own line (bw-7ks.22.29).
+ *
+ * The first is the one every single-helper case already knows.
+ */
+export const EACH_HELPER = [
+  { brief: HELPER_BRIEF, said: HELPER_SAID, answer: HELPER_ANSWERED, model: 'claude-fable-5', seconds: 45, costs: 1 },
+  {
+    brief: 'Read the last report and say when it was written',
+    said: 'Opening the report now.',
+    answer: 'The last report is from Tuesday.',
+    model: 'claude-opus-5',
+    seconds: 90,
+    costs: 2,
+  },
+  {
+    brief: 'List the branches this work left behind',
+    said: 'Listing the branches now.',
+    answer: 'Two branches, both merged.',
+    model: 'claude-haiku-4-5-20251001',
+    seconds: 150,
+    costs: 3,
+  },
+] as const;
+
+/** Which of the above the nth agent a chat sent off is. */
+export const helperNumber = (n: number): (typeof EACH_HELPER)[number] => EACH_HELPER[n % EACH_HELPER.length]!;
+
+/** What that one's turn cost, which is its own and not its neighbour's. */
+const spentBy = (n: number): Record<string, number> => {
+  const times = helperNumber(n).costs;
+  return {
+    input_tokens: SPENT.input_tokens * times,
+    cache_creation_input_tokens: SPENT.cache_creation_input_tokens * times,
+    cache_read_input_tokens: SPENT.cache_read_input_tokens * times,
+    output_tokens: SPENT.output_tokens * times,
+  };
+};
+
 /** Where the kit keeps its records, honouring a config dir set for a run. */
 export function configDir(): string {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
@@ -195,7 +241,11 @@ export function writeChatWithHelper(opts: {
                 type: 'tool_use',
                 id: callOf(n),
                 name: 'Task',
-                input: { subagent_type: 'general-purpose', description: HELPER_BRIEF, prompt: HELPER_BRIEF },
+                input: {
+                  subagent_type: 'general-purpose',
+                  description: helperNumber(n).brief,
+                  prompt: helperNumber(n).brief,
+                },
               },
             ],
           },
@@ -212,7 +262,7 @@ export function writeChatWithHelper(opts: {
             content: [
               n === soured
                 ? { type: 'tool_result', tool_use_id: callOf(n), is_error: true, content: HELPER_FAILED }
-                : { type: 'tool_result', tool_use_id: callOf(n), content: HELPER_ANSWERED },
+                : { type: 'tool_result', tool_use_id: callOf(n), content: helperNumber(n).answer },
             ],
           },
         },
@@ -244,11 +294,12 @@ export function writeChatWithHelper(opts: {
   const asLines = (rows: Record<string, unknown>[]): string => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
   for (let n = 0; n < many; n++) {
     const agentId = agentOf(n);
+    const mine = helperNumber(n);
     const sidechain = (extra: Record<string, unknown>, seconds: number): Record<string, unknown> =>
       stamp({ isSidechain: true, agentId, ...extra }, seconds);
     const helper = [
       sidechain(
-        { parentUuid: null, uuid: 'fixture-h1', type: 'user', message: { role: 'user', content: HELPER_BRIEF } },
+        { parentUuid: null, uuid: 'fixture-h1', type: 'user', message: { role: 'user', content: mine.brief } },
         3 + n,
       ),
       sidechain(
@@ -258,10 +309,10 @@ export function writeChatWithHelper(opts: {
           type: 'assistant',
           message: {
             id: 'msg_fixture_h1',
-            model: 'claude-fable-5',
+            model: mine.model,
             role: 'assistant',
-            usage: SPENT,
-            content: [{ type: 'text', text: HELPER_SAID }],
+            usage: spentBy(n),
+            content: [{ type: 'text', text: mine.said }],
           },
         },
         8 + n,
@@ -273,9 +324,9 @@ export function writeChatWithHelper(opts: {
           type: 'assistant',
           message: {
             id: 'msg_fixture_h2',
-            model: 'claude-fable-5',
+            model: mine.model,
             role: 'assistant',
-            usage: SPENT,
+            usage: spentBy(n),
             content: [
               { type: 'tool_use', id: `toolu_fixtureHelperRan${n}`, name: 'Bash', input: { command: `bd show ${card}` } },
             ],
@@ -302,13 +353,15 @@ export function writeChatWithHelper(opts: {
           type: 'assistant',
           message: {
             id: 'msg_fixture_h3',
-            model: 'claude-fable-5',
+            model: mine.model,
             role: 'assistant',
-            usage: SPENT,
-            content: [{ type: 'text', text: n === soured ? HELPER_FAILED : HELPER_ANSWERED }],
+            usage: spentBy(n),
+            content: [{ type: 'text', text: n === soured ? HELPER_FAILED : mine.answer }],
           },
         },
-        48 + n,
+        // Its own clock: the row says how long THIS one took, and three rows
+        // reading the same number prove nothing about any of them.
+        3 + n + mine.seconds,
       ),
     ];
     writeFileSync(join(helpers, `agent-${agentId}.jsonl`), asLines(helper));
@@ -316,7 +369,7 @@ export function writeChatWithHelper(opts: {
       join(helpers, `agent-${agentId}.meta.json`),
       JSON.stringify({
         agentType: 'general-purpose',
-        description: HELPER_BRIEF,
+        description: mine.brief,
         toolUseId: callOf(n),
         spawnDepth: 1,
       }) + '\n',
@@ -442,7 +495,10 @@ export function writeChatWithHelper(opts: {
   // The chat answered once per helper it sent off and once at the end; each
   // helper answered three times of its own.
   const own = (many + 1) * A_CALL;
-  const sentAway = many * HELPER_TURNS * A_CALL;
+  const sentAway = Array.from({ length: many }, (_, n) => helperNumber(n).costs * HELPER_TURNS * A_CALL).reduce(
+    (sum, one) => sum + one,
+    0,
+  );
   return {
     sessionId,
     path,

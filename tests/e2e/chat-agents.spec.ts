@@ -7,6 +7,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { makeFixtureProject, PARENT_CARD } from './fixture-board';
 import {
   CHAT_SAID,
+  EACH_HELPER,
   HELPER_AGENT,
   HELPER_ANSWERED,
   HELPER_BRIEF,
@@ -80,6 +81,21 @@ const HELPER_WAITS_LONGER = 120;
 
 /** How long the command left in the background is told to run. */
 const LEFT_RUNNING = 240;
+
+/**
+ * What each of the three rows on the panel must say for itself.
+ *
+ * Spelled out here rather than worked out from the fixture: a case that
+ * computes the number it expects with the same arithmetic the screen used
+ * agrees with the screen whatever either of them does. The brief and the answer
+ * come from the fixture because they are its words verbatim; the model, the
+ * clock and the spend are written down (bw-7ks.22.29).
+ */
+const THREE_ROWS = [
+  { agent: HELPER_AGENT, model: 'fable-5', took: '45s', tokens: '4,800' },
+  { agent: `${HELPER_AGENT}-2`, model: 'opus-5', took: '1m 30s', tokens: '9,600' },
+  { agent: `${HELPER_AGENT}-3`, model: 'haiku-4-5', took: '2m 30s', tokens: '14,400' },
+].map((row, n) => ({ ...EACH_HELPER[n]!, ...row }));
 
 /** The states that mean a piece of sent-off work is over. */
 const OVER = ['done', 'failed', 'stopped'];
@@ -795,7 +811,8 @@ test.describe('the agents a chat sends off', () => {
   });
 
   /**
-   * What a chat spent, on a chat that delegated most of its work.
+   * Three agents on one panel, each of them its own row — and what the turn
+   * that sent them cost.
    *
    * Written rather than run, and that is the point of it. What a delegated turn
    * costs cannot be checked against a live run: the figures come back different
@@ -811,8 +828,17 @@ test.describe('the agents a chat sends off', () => {
    * kit's own per-model totals name the helper's model separately. The gap this
    * closes is the other one — a chat nobody is driving, which had no spend at
    * all.
+   *
+   * The three agents are three different agents, and that is the other half of
+   * this case. A panel of rows written from one template proves nothing about
+   * the drawing: three identical rows are exactly what a screen drawing the
+   * first row three times would look like, and so is a static picture repeated.
+   * So each one here was asked something else, ran on another model, took its
+   * own time and cost its own money — and every row is held to its own line,
+   * with one of them opened into its own conversation to prove the row leads
+   * where it says it does (bw-7ks.22.29).
    */
-  test('the spend on a turn counts the three agents it sent away', async ({ page, request }) => {
+  test('three agents it sent away, each its own row, and the turn counting all three', async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     rmSync(SPEND_RUN, { recursive: true, force: true });
     mkdirSync(SPEND_RUN, { recursive: true });
@@ -851,7 +877,38 @@ test.describe('the agents a chat sends off', () => {
       // And the chat's own turns alone are not what is on the line.
       expect(Number(await chip.getAttribute('data-total'))).toBeGreaterThan(written.spend.own);
 
+      // ---- and each of the three is its own row ----------------------------
+      for (const mine of THREE_ROWS) {
+        const row = page.locator(`[data-testid="sent-away-row"][data-agent="${mine.agent}"]`);
+        await expect(row, `no row for ${mine.agent}`).toHaveCount(1);
+        await expect(row.getByTestId('sent-away-what')).toHaveText(mine.brief);
+        await expect(row.getByTestId('sent-away-model')).toHaveText(mine.model);
+        await expect(row.getByTestId('sent-away-for')).toHaveText(mine.took);
+        // The exact figure, which the row carries for the reader who hovers it:
+        // the short one beside the clock is rounded, and two rows apart by a
+        // third can round to the same word.
+        await expect(row.getByTestId('sent-away-spend')).toHaveAttribute(
+          'title',
+          `${mine.tokens} tokens over 1 call`,
+        );
+        await expect(row.getByTestId('sent-away-result')).toContainText(mine.answer);
+      }
+
       await page.screenshot({ path: `${SHOTS}/chat-agents-spend.png`, fullPage: false });
+
+      // ---- and the middle row opens the middle agent ------------------------
+      // Not the first: a pane that always drew the first agent would pass every
+      // case in this file that opens one, because every other case sends one.
+      const middle = THREE_ROWS[1]!;
+      await page.locator(`[data-testid="sent-away-row"][data-agent="${middle.agent}"]`).click();
+      const pane = page.getByTestId('agent-view');
+      await expect(pane).toHaveAttribute('data-agent', middle.agent);
+      await expect(pane.getByTestId('agent-view-what')).toContainText(middle.brief);
+      const said = (await pane.getByTestId('agent-view-said').innerText()).trim();
+      expect(said, 'the pane is not showing this agent’s own words').toContain(middle.said);
+      expect(said, 'the pane is showing another agent’s words').not.toContain(THREE_ROWS[0]!.said);
+      await expect(pane.getByTestId('agent-view-result')).toContainText(middle.answer);
+      await page.screenshot({ path: `${SHOTS}/chat-agents-spend-opened.png`, fullPage: false });
     } finally {
       written.remove();
       await request.delete(`/api/projects/${project.id}`);
