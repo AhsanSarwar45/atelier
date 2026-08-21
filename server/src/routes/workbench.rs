@@ -130,15 +130,21 @@ pub fn spawn_sidecar() {
         let mut backoff = Duration::from_secs(1);
         loop {
             info!("workbench: starting sidecar ({entry})");
-            let child = tokio::process::Command::new("node")
-                .args([
-                    "--experimental-strip-types",
-                    "--disable-warning=ExperimentalWarning",
-                    "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
-                    &entry,
-                ])
-                .kill_on_drop(true)
-                .spawn();
+            let mut node = tokio::process::Command::new("node");
+            node.args([
+                "--experimental-strip-types",
+                "--disable-warning=ExperimentalWarning",
+                "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+                &entry,
+            ]);
+            // Where this machine keeps our data is asked once, here, and told
+            // to the helper. Left to work it out, it knew one kind of machine
+            // and only one, and wrote its chats where nothing reads them
+            // (bw-8um.3.14).
+            if let Some(dir) = crate::identity::data_dir() {
+                node.env("ATELIER_DATA_DIR", dir);
+            }
+            let child = node.kill_on_drop(true).spawn();
 
             match child {
                 Err(e) => {

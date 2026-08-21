@@ -11,19 +11,21 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+
+import { dataHome } from './data-home.ts';
 
 import type { SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 
 /**
- * Beside the server's own settings.db: `directories`' data_dir on Linux is
- * `$XDG_DATA_HOME/atelier`, which is what server/src/db.rs resolves to.
- * Both must move together when XDG_DATA_HOME is redirected.
+ * The helper's own records, beside the board's settings.
+ *
+ * Kept apart from the app's `settings.db` so no upstream Rust touches it, but
+ * in the same folder, so redirecting where data goes moves both together.
+ * Which folder that is, is `data-home.ts` and nothing here.
  */
 function defaultDbPath(): string {
   if (process.env.BEADS_WORKBENCH_DB) return process.env.BEADS_WORKBENCH_DB;
-  const base = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
-  return join(base, 'atelier', 'workbench.db');
+  return join(dataHome(), 'workbench.db');
 }
 
 /** Numbered and applied in order above the recorded version, matching the idiom in server/src/db.rs. */

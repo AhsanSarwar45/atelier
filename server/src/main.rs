@@ -249,7 +249,7 @@ async fn main() {
         .await
         .expect("Failed to bind to address");
 
-    info!("Server starting on http://{}", addr);
+    info!("{} is serving http://{}", identity::DISPLAY, addr);
 
     if env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {
         if let Err(e) = open::that(format!("http://localhost:{}", port)) {
