@@ -34,7 +34,13 @@ import type {
   TodoItem,
   WbpEvent,
 } from './protocol';
-import { isOver } from './protocol';
+// With its extension, which is not a style: this file is read two ways. The
+// browser's build resolves it either way; the sidecar is Node running the
+// TypeScript as it stands, and Node resolves the exact filename or nothing —
+// so a bare `./protocol` here kills the sidecar on launch, forever, and no
+// chat opens at all (bw-7ks.22.35). Type-only imports are erased and never
+// meet Node, which is why the one above can be spelled the short way.
+import { isOver } from './protocol.ts';
 
 export interface TranscriptMessage {
   kind: 'message';
