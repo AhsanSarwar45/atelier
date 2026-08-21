@@ -1157,7 +1157,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 data-testid="send-button"
                 className="rounded-full"
                 onClick={() => void submit()}
-                disabled={!draft.trim() || held}
+                // Nothing about who holds the chat here: a held one draws no
+                // box at all a few lines up, so a second half to this test
+                // could never come out true. What stops a send while someone
+                // else is in there is the composer not being drawn at all,
+                // which is what the browser checks measure (bw-96is.23).
+                disabled={!draft.trim()}
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>
