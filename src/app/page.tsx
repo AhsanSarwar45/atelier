@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/hooks/use-projects";
 import { useToast } from "@/hooks/use-toast";
+import { PRODUCT_NAME } from "@/lib/identity";
 import { WorkbenchStatus } from "@/workbench/globals";
 
 export default function ProjectsPage() {
@@ -94,7 +95,7 @@ export default function ProjectsPage() {
   return (
     // One bar here too, and only the list beneath it scrolls: what is waiting
     // on the owner has to be on the screen he starts from as well.
-    <Shell bar={<><span className="font-heading text-sm font-semibold">Beads</span><WorkbenchStatus /></>}>
+    <Shell bar={<><span className="font-heading text-sm font-semibold">{PRODUCT_NAME}</span><WorkbenchStatus /></>}>
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-base">
       {/* Hero Section - pushed down with padding */}
       <main className="flex flex-col items-center px-6 pt-32">

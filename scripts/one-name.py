@@ -12,7 +12,7 @@ derived and then looked for. A rename is finished when this reports nothing:
 change the one constant, run this, and it names every file still on the old
 name.
 
-Two halves, and both have to hold:
+Three halves, and all of them have to hold:
 
   AGREEMENT   every place that must carry the name carries the derived
               spelling — the cargo package, the binary, the npm package, the
@@ -22,6 +22,12 @@ Two halves, and both have to hold:
   ONE SPELLING  no tracked file carries an older spelling of the product name,
               except where an older spelling is the right answer and the reason
               is written down below.
+
+  THE BUILT SCREEN  the page the program actually serves says the name in its
+              browser tab, and carries no older spelling anywhere a reader can
+              see it. Source that reads right and a build that reads wrong is
+              exactly the failure a person meets first, so the built page is
+              read rather than the file it came from (bw-8um.3.16).
 
 ## What is NOT the product name
 
@@ -53,6 +59,15 @@ def defined_name():
     found = re.search(r'pub const NAME: &str = "([^"]+)";', text)
     if not found:
         sys.exit("%s defines no NAME, so there is nothing to check against" % IDENTITY)
+    return found.group(1)
+
+
+def defined_display():
+    """The same name as a person reads it, in a tab or a sentence."""
+    text = open(os.path.join(HERE, IDENTITY), encoding="utf-8").read()
+    found = re.search(r'pub const DISPLAY: &str = "([^"]+)";', text)
+    if not found:
+        sys.exit("%s defines no DISPLAY, so the screens have no name to carry" % IDENTITY)
     return found.group(1)
 
 
@@ -115,6 +130,8 @@ ALLOWED = [
     (r"for exe in \S+ beads-web", "the earlier binary, still answered to"),
     (r'EARLIER|com\.beads\.kanban-ui|"beads", "kanban-ui"|_app_home\("kanban-ui"'
      r'|earlier = _app_home', "the earlier data folder, migrated from"),
+    (r"not\.toContain\(.kanban-ui.\)",
+     "the earlier data folder, named to prove it is not used"),
     (r"the Beads Web project", "the project's own persona on the board"),
     (r"AvivK5498/Beads-Kanban-UI|\[Beads-Kanban-UI\]",
      "the project this one was forked from"),
@@ -162,8 +179,55 @@ def spellings(name, files):
     return bad
 
 
+# ---------------------------------------------------------- the built screen
+
+# The pages as the program serves them. Not tracked — they are the build's
+# output — so they are read on their own rather than swept with the rest.
+BUILT = "out"
+
+# The pages a reader actually lands on, each of which titles their browser tab.
+# `404.html` is left out: the framework writes its own title into it.
+LANDED_ON = ("index.html", "project.html", "settings.html")
+
+
+def built_screen(display):
+    """What the reader's browser tab says, read off the pages really served."""
+    root = os.path.join(HERE, BUILT)
+    if not os.path.isdir(root):
+        return ["%s/ is not there, so what the browser tab says was never checked"
+                " — run `npm run build` first" % BUILT]
+
+    failures = []
+    for page in LANDED_ON:
+        full = os.path.join(root, page)
+        if not os.path.exists(full):
+            failures.append("%s/%s was not built, so a reader landing there gets"
+                            " no name in the tab" % (BUILT, page))
+            continue
+        text = open(full, encoding="utf-8").read()
+        found = re.search(r"<title[^>]*>(.*?)</title>", text, re.S)
+        if not found:
+            failures.append("%s/%s carries no title, so the browser tab falls back"
+                            " to the address" % (BUILT, page))
+        elif found.group(1).strip() != display:
+            failures.append("%s/%s titles the browser tab %r, not %r"
+                            % (BUILT, page, found.group(1).strip(), display))
+
+    for page in sorted(os.listdir(root)):
+        if not page.endswith(".html"):
+            continue
+        text = open(os.path.join(root, page), encoding="utf-8").read()
+        for number, line in enumerate(text.splitlines(), 1):
+            if EARLIER.search(line) and not exempt(line):
+                failures.append("%s/%s:%d still on an older name: %s"
+                                % (BUILT, page, number, line.strip()[:110]))
+
+    return failures
+
+
 def main():
     name = defined_name()
+    display = defined_display()
     files = tracked()
     failures = []
 
@@ -180,8 +244,11 @@ def main():
     for path, number, line in spellings(name, files):
         failures.append("%s:%d still on an older name: %s" % (path, number, line))
 
-    print("the product is named %r, defined in %s" % (name, IDENTITY))
-    print("%d places must agree, %d tracked files swept" % (len(agreements(name)), len(files)))
+    failures.extend(built_screen(display))
+
+    print("the product is named %r, read as %r, defined in %s" % (name, display, IDENTITY))
+    print("%d places must agree, %d tracked files swept, and %d built pages read as the"
+          " reader meets them" % (len(agreements(name)), len(files), len(LANDED_ON)))
     for line in failures:
         print("  FAIL " + line)
     print("%d failures" % len(failures))

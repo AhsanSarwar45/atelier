@@ -3,12 +3,15 @@ import { ThemeInitScript } from '@/components/theme-init';
 import { Toaster } from '@/components/ui/toaster';
 import { UpdateBanner } from '@/components/update-banner';
 
+import { PRODUCT_NAME } from '@/lib/identity';
+
 import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Beads',
-  description: 'Kanban interface for beads - git-backed distributed issue tracker',
+  // Read from the one place the product's name is written down, never typed.
+  title: PRODUCT_NAME,
+  description: `${PRODUCT_NAME} — a visual board for beads, the git-backed distributed issue tracker`,
   icons: [{ rel: 'icon', url: '/favicon.svg', type: 'image/svg+xml' }],
 };
 
