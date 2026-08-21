@@ -2031,8 +2031,8 @@ change and it gets said out loud, not absorbed.
 
 `workbench/` (the sidecar), `server/src/routes/workbench.rs` (proxy +
 supervisor), `src/workbench/**` (protocol types, store, chat UI, tray, strip,
-search, spend, plan usage, the token picture, report viewer), `tests/e2e/workbench.spec.ts`, this
-document.
+search, spend, plan usage, the token picture, report viewer), `tests/e2e/workbench.spec.ts`,
+`tests/e2e/chat-settings.spec.ts`, this document.
 
 ### 9.3 Declared shortcuts
 
@@ -2100,6 +2100,16 @@ document.
   only chats somebody has open are followed — and the beat does not hold the
   sidecar up.
 
+- The company-wide settings file has never been seen by this code. No machine
+  here has one, so the branch where it overrides a pick — the picker refusing
+  the change and saying which file beat it (§8.2.3) — is reasoned and unit-
+  tested against a stand-in, never watched on a real managed install. It fails
+  towards saying so rather than towards a change the owner thinks he made.
+- The browser proof of a chat opening on his settings drives the PROJECT's own
+  `.claude/settings.json`, one layer above his own file, so a run never reads
+  past or writes into anything in his home. Which layer wins is proved in the
+  unit cases instead, against real files in a temporary directory.
+
 - The sidecar runs its TypeScript through a flag node still calls experimental
   (§1.2). It buys a chat server with no build step between an edit and a run,
   at the price of the import rule in §1.3 and of a flag that could change under
@@ -2153,6 +2163,11 @@ capability matrix or has a stated fallback.
 6. **The raw control-frame shape of stream-json permissions.** Not known — and
    deliberately not needed, because the SDK owns it (§1.1). If we ever leave
    the SDK, this becomes a research task first.
+7. **Where the company-wide settings file sits on macOS and Windows.** The
+   three paths in §8.2.3 come from the tool's own documentation, and only the
+   Linux one could be looked at here — the other two are unvisitable from this
+   machine. A wrong path reads as "no company file", which is what an ordinary
+   install has anyway; it can never invent a setting that is not there.
 
 ---
 
