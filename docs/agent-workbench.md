@@ -637,8 +637,8 @@ start on the first message sent into it, and that is the thing being refused.
 **The refusal lives in the sidecar, at both doors.** A driver of ours is
 attached in exactly two places — resuming a chat, and sending into one that has
 no driver yet — and each asks the marker directory at the moment of the attempt,
-reading it fresh rather than taking the remembered answer. The browser shuts the
-writing box and says why as well, but the browser learns who is working from a
+reading it fresh rather than taking the remembered answer. The browser takes the
+box away as well, but the browser learns who is working from a
 stream, and a stream can drop: one did on the owner's machine, after which the
 screen kept the last thing it had heard as if it were still true, never
 reconnected, and a chat the sidecar itself called running opened with an
@@ -697,6 +697,32 @@ a rule that counted only terminals would have drawn it asleep and offered to
 wake a second agent on it — the whole of what this signal exists to prevent
 (bw-dmxj.13).
 
+**Held is not working, and the marker says which.** Occupancy and activity are
+two facts, and until 2026-08-21 the screens drew the first and called it the
+second: a terminal left at an empty prompt overnight held its conversation, and
+every screen said "working" over it. The tool answers this itself where it can —
+a marker written by a terminal carries `status` (`busy` or `idle`) and
+`statusUpdatedAt`, which is the process saying what it is doing rather than us
+inferring it from a file. Measured on this machine, 2026-08-21: of thirteen
+live markers, the seven written by terminals carried a status and the six a host
+drove carried none.
+
+**Where there is no status, the record's own mtime answers — and only this
+question.** The mtime is measured wrong for liveness, which is why nothing above
+uses it: a working chat was silent for 488 seconds. It is right for the opposite
+question, because a record that grew a moment ago is a chat producing something
+now. A record written inside the last ten seconds reads as working, longer than
+that as idle, and the ten seconds are chosen to cover the gap between two lines
+of one answer while still letting a chat somebody walked away from stop claiming
+to work while the reader watches it. The seconds shown are counted from where
+the burst began, kept across beats, so a record written every second does not
+reset the count to zero every second.
+
+**And where neither will speak, nothing is claimed.** A host-driven process
+writes no status, and if its record cannot be found either then the honest
+answer is that we do not know — not that it is idle. Such a chat draws the badge
+that says somebody is in there and no activity word at all (bw-96is).
+
 **Cost.** A handful of files of a few hundred bytes, read at most once every two
 seconds however many callers ask, so a list of forty rows costs one look at the
 machine. A caller deciding something once must ask fresh instead: whether to
@@ -720,12 +746,18 @@ the screen again after the stream has added to it.
 **It keeps up without a reload.** The set of held conversations is its own frame
 on the watch stream, sent when the stream opens and again whenever it changes,
 the whole set each time: it is one entry per running chat on the machine, and a
-set is unambiguous where a started/stopped pair after a missed frame is not. It
+set is unambiguous where a started/stopped pair after a missed frame is not.
+Each entry carries what that holder is doing and which kind of holder it is, so
+a screen needs nothing else to draw the chat; the frame is sent again when a
+chat starts or stops being held, or when one of them changes between working and
+idle, and **not** on the passing of the seconds, or a long answer would send a
+frame a beat for as long as it ran. It
 cannot ride a session's own events, because a chat being typed at in a terminal
 has no row here to carry one (bw-dmxj.5).
 
-**Inside such a chat, the messages arrive.** The header says working rather than
-asleep and clears itself when that program stops (bw-dmxj.10), and opening one
+**Inside such a chat, the messages arrive.** The line says what the holder is
+doing rather than asleep, and clears itself when that program stops
+(bw-dmxj.10, §8.2.9), and opening one
 is no longer a photograph of the record at the moment of the click (bw-dmxj.6).
 There is no event to subscribe to — the other program answers to its own
 terminal, not to us — so the record is watched: a beat every second and a half
@@ -831,7 +863,8 @@ thing that grows with the work on the axis there is least of. The header line
 now carries **no** cards at all: they move into the right rail (§8.2.6), which
 is a column, so twenty-six of them cost height nobody is competing for instead
 of width everything is. What stays on the line is what names the chat — brand,
-model, mode, state — none of which grows, so the constraint holds by
+model, mode, and the one mark that says what it is doing (§8.2.9) — none of
+which grows, so the constraint holds by
 construction rather than by a count. What it has spent stays here too, beside
 how full the conversation is and how much of the account's own allowance is
 left — three numbers that do not grow, each wearing its own mark so a row of
@@ -866,6 +899,10 @@ agent is processing/thinking/running command, i see nothing."
 
 The line is present exactly while `isBusy` holds, so it disappears the moment the
 turn ends and cannot be left behind by a state event that never arrives.
+
+These same three things — a moving mark, the verb, the seconds — are what every
+other screen draws about a chat as well, from one reading rather than four
+(§8.2.9).
 
 #### 8.2.3 Steering the chat you are in (bw-f1q)
 
@@ -1515,14 +1552,60 @@ bundle. What it does **not** yet do is keep the keyboard inside the panel once
 it is open; that gap is every overlay in this app, not this one, and is filed as
 bw-4dw5.
 
+#### 8.2.9 What a chat says about itself, on every screen (bw-96is)
+
+Constraint: a chat says the same three things wherever it is drawn, and they are
+three separate things — what it is doing this second, where it stands when it is
+doing nothing, and who holds it.
+
+Why: four screens answered this four ways and none of them answered all of it.
+The open chat's line drew one word; a row in the list drew a pill that was
+either "ready" or "working"; a board card drew a pulsing dot and an activity; the
+glance strip drew a dot, a word and a count of its own. The loudest of them, the
+green **working** pill, was derived from the marker directory alone — occupancy,
+not activity — so it sat on a terminal that had been at an empty prompt since
+last night, and a chat that really was answering said nothing different. The
+manager's reading of it, 2026-08-21: "just make sure everything about the state
+of chat is intuitive. currently its awful."
+
+**One reading, four drawings.** `src/workbench/chat-state.ts` is a pure function
+from what the driver last published and what the sidecar says about the holder,
+to the three facts. Every screen draws that and nothing else, so they cannot
+disagree; it is a function rather than a component because the sidebar row, the
+chat's own line, the board card and the glance strip all need the answer and
+only two of them are in the same tree.
+
+**The mark is the same mark, ours or somebody else's.** A spinner, the verb in
+its own words, and the seconds — the picture §8.2.2 defines for our own agent —
+is what a chat a terminal holds draws too, because to a reader those are the
+same fact. A chat waiting on the reader wears a different mark, a hand, since it
+is not working and saying so is the point.
+
+**The badge never stands in place of the doing.** Another program holding the
+conversation is a third fact, drawn as an `external` badge beside the mark, with
+the kind of holder in its tooltip — a terminal, or a program driving through the
+kit. It is drawn only on chats somebody else holds, so it means something by
+being there; the word it replaced meant "occupied" and was read as "working",
+which is the whole of what went wrong.
+
+**A chat that is asleep says nothing at all.** Most of a list is asleep, and a
+pill on every row is a pill on none. The mark appears only when there is
+something to say — working, waiting, reachable, or held.
+
+**One clock for the page.** The seconds come off a single interval shared by
+every chip, so a list of forty rows costs one beat a second rather than forty,
+and the number they are all counting is the same number.
+
 ### 8.3 The board tab
 
 Unchanged, plus one thing: decision 11 — a card being worked on shows its live
 chat. `src/components/bead-card.tsx` gains a single `<CardLiveChat
 beadId={bead.id}/>`, which renders nothing at all unless a running session is
-linked to that card, and otherwise shows a pulsing dot, the session's current
-activity line, and the last line of assistant text, clicking through to the
-chat.
+linked to that card, and otherwise shows the same mark every other screen draws
+(§8.2.9) — spinner, verb and seconds while it works, one word where it stands
+otherwise — clicking through to the chat. The pulsing dot it used to draw said
+"attached" and was read as "working", and it kept pulsing over a chat sitting
+idle for as long as the tab stayed open.
 
 The card detail panel gains a **Chats** list from `GET /links/bead/:id`, and a
 **Start chat** button (decision 16b) which opens a new session pre-briefed with
