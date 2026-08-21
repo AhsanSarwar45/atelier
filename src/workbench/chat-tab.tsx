@@ -7,11 +7,12 @@
  */
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
+  ArrowDown,
   ArrowUp,
   Bot,
   Coins,
@@ -42,6 +43,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
+import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
@@ -256,6 +258,41 @@ function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () =>
   );
 }
 
+/**
+ * The one click back to the newest words.
+ *
+ * A chat that quietly stops following its own end has to say so, or a reader
+ * who scrolled up has no way of knowing anything more was said and no way back
+ * but scrolling for it (bw-n6yh). Mounted either way and faded, so it arrives
+ * and leaves with the reader rather than appearing under his cursor.
+ */
+function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="back-to-now"
+      data-shown={shown ? 'yes' : 'no'}
+      data-missed={missed}
+      aria-hidden={!shown}
+      tabIndex={shown ? 0 : -1}
+      onClick={onClick}
+      title={missed > 0 ? `${missed} more since you scrolled up — back to now` : 'Back to the newest message'}
+      className={cn(
+        'absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-border',
+        'bg-surface-raised px-3 py-1.5 text-muted-foreground shadow-lg transition-all hover:text-foreground',
+        shown ? 'opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
+      )}
+    >
+      <ArrowDown className="h-4 w-4" />
+      {missed > 0 && (
+        <span data-testid="back-to-now-count" className="text-xs font-medium tabular-nums">
+          {missed}
+        </span>
+      )}
+    </button>
+  );
+}
+
 /** The agent's checklist, as it stands right now. */
 function TodoPanel({ items }: { items: TodoItem[] }) {
   if (!items.length) return null;
@@ -467,15 +504,39 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    */
   const drawn = useMemo(() => drawnRows(rows), [rows]);
 
-  const endRef = useRef<HTMLDivElement>(null);
   /** The pane the conversation scrolls in, which the window keeps the place of. */
   const pane = useRef<HTMLDivElement>(null);
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
 
+  /**
+   * Where the reader is in the conversation, and whether the newest words are
+   * what he is looking at. Everything that follows the end goes through this:
+   * the chat used to put its end back in view on every change to the
+   * transcript, which is once per word while an answer arrives, so reading
+   * history meant being dragged back down over and over (bw-n6yh).
+   */
+  const { held: atTheEnd, toTheEnd, paneRef, contentRef } = useHeldAtTheEnd(pane);
+
+  // Another conversation opens at its own end, not at the place this one was
+  // read to, and before the first frame is drawn.
+  useLayoutEffect(() => {
+    toTheEnd();
+  }, [sessionId, toTheEnd]);
+
+  /** How much of the conversation had arrived when he last left the end. */
+  const marked = useRef(0);
+  /** What has been said since — the number on the way back to now. */
+  const [missed, setMissed] = useState(0);
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
-  }, [view.items]);
+    if (atTheEnd) {
+      marked.current = drawn.length;
+      setMissed(0);
+    } else {
+      setMissed(Math.max(0, drawn.length - marked.current));
+    }
+  }, [atTheEnd, drawn.length]);
 
   // One line at rest, growing to what is written. Measured from the content,
   // because a textarea cannot shrink itself back down once it has been sized.
@@ -809,9 +870,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       )}
 
       <SplitPaths.Provider value={splitPaths}>
+      {/* The conversation and the one way back to it, which floats over its
+          bottom corner rather than taking a line of its own. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div
-        ref={pane}
-        className="mx-auto flex w-full max-w-[110ch] flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+        ref={paneRef}
+        // The browser keeps a pane's place for it by moving the pane when
+        // something above changes size, which is a scroll nobody made and which
+        // this chat reads as the reader taking it over. It holds its own place —
+        // at the end while that is what he is watching, and on his own row when
+        // older messages arrive above him — so the browser's guess is turned off.
+        className="mx-auto w-full max-w-[110ch] flex-1 overflow-y-auto px-4 py-4 [overflow-anchor:none]"
         data-testid="transcript"
         // One listener for every file chip in the conversation, wherever it was
         // drawn: in a message, in a command, or on a tool row's own line. A
@@ -825,6 +894,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         // it, which the browser check proves.
         onClickCapture={(e) => openPathClicked(e)}
       >
+        {/* One box around the whole conversation, whose height is what says the
+            conversation grew — a picture arriving late or a line still being
+            typed moves it without a row being added, and the reader watching
+            the end must stay at the end through both. */}
+        <div ref={contentRef} data-testid="transcript-rows" className="flex flex-col gap-3">
         {rows.length === 0 && view.items.length > 0 && (
           <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
@@ -834,6 +908,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           mentions={mentions}
           onLook={setLooking}
           pane={pane}
+          held={atTheEnd}
         />
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes
@@ -847,7 +922,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             thought={view.thinkingTokens}
           />
         )}
-        <div ref={endRef} />
+        </div>
+      </div>
+      <BackToNow missed={missed} shown={!atTheEnd} onClick={() => toTheEnd('smooth')} />
       </div>
       </SplitPaths.Provider>
 

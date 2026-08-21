@@ -18,10 +18,18 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
  * which cannot drift out of step with what is on the screen.
  *
  * The pane is moved by the app as well as by him: to keep the end in view, and
- * to hold his place when older messages arrive above him. Those moves are aimed,
- * and a move that lands where it was aimed is the app's own and says nothing
- * about him — that is `aimed`. Anything he does with a wheel, a finger or a key
- * cancels the aim, because from then on the pane is his.
+ * to hold his place when older messages arrive above him. Those moves are
+ * AIMED, and a move that lands where it was aimed says nothing about him. A
+ * move that lands anywhere else is his, whatever put it there — which is what
+ * makes dragging the scrollbar, where there is no wheel and no key to listen
+ * for, read as the reader taking the pane over.
+ *
+ * The pane arrives late. A chat draws its own 'pick a project' line first and
+ * the scrolling pane only once it knows which conversation it is showing, so
+ * everything here waits on the node itself rather than on the first render:
+ * `paneRef` is what says the pane now exists. Reading a ref in an effect that
+ * runs once left this hook listening to nothing at all, and a reader who
+ * scrolled up was never noticed — the whole point of it, silently dead.
  */
 
 /** How far from the end still counts as watching it. */
@@ -32,8 +40,8 @@ export interface HeldAtTheEnd {
   held: boolean;
   /** Put the end back in view, and follow it again. */
   toTheEnd: (how?: ScrollBehavior) => void;
-  /** Move the pane as the app's own doing, without it counting as the reader's. */
-  quiet: (move: () => void) => void;
+  /** Goes on the pane that scrolls. */
+  paneRef: (node: HTMLElement | null) => void;
   /** Goes on the box holding the rows, so what it does to its own height is noticed. */
   contentRef: (node: HTMLElement | null) => void;
 }
@@ -43,12 +51,17 @@ function end(box: HTMLElement): number {
   return box.scrollHeight - box.clientHeight;
 }
 
-export function useHeldAtTheEnd(pane: React.RefObject<HTMLElement | null>, near = NEAR): HeldAtTheEnd {
+export function useHeldAtTheEnd(pane: React.MutableRefObject<HTMLElement | null>, near = NEAR): HeldAtTheEnd {
   const [held, setHeld] = useState(true);
   /** The same answer, readable from a listener that must not be torn down to see it. */
   const holding = useRef(true);
   /** Where the app last aimed the pane, or nothing while the pane is the reader's. */
   const aimed = useRef<number | null>(null);
+  /** A smooth move still on its way, whose frames are not the reader scrolling. */
+  const gliding = useRef(false);
+  /** Where the pane was left standing, and how far its end was then. */
+  const left = useRef({ top: 0, end: 0 });
+  const [box, setBox] = useState<HTMLElement | null>(null);
   const [content, setContent] = useState<HTMLElement | null>(null);
 
   const hold = useCallback((now: boolean) => {
@@ -57,60 +70,75 @@ export function useHeldAtTheEnd(pane: React.RefObject<HTMLElement | null>, near 
     setHeld(now);
   }, []);
 
-  const read = useCallback(() => {
-    const box = pane.current;
-    if (!box) return;
-    if (aimed.current !== null) {
-      // Landed where the app aimed it: its own move, and not an answer about
-      // the reader. A move still on its way is left aimed, so the frames of a
-      // smooth one do not read as him scrolling away and back again.
-      if (Math.abs(box.scrollTop - aimed.current) <= 1) aimed.current = null;
-      return;
-    }
-    hold(end(box) - box.scrollTop <= near);
-  }, [pane, near, hold]);
-
-  const quiet = useCallback(
-    (move: () => void) => {
-      move();
-      const box = pane.current;
-      if (box) aimed.current = box.scrollTop;
-    },
-    [pane],
-  );
-
   const toTheEnd = useCallback(
     (how: ScrollBehavior = 'auto') => {
-      const box = pane.current;
-      if (!box) return;
+      const there = pane.current;
+      if (!there) return;
       hold(true);
-      const top = end(box);
+      const top = end(there);
       aimed.current = top;
+      left.current = { top, end: top };
       // Smooth is for the one click back to now. Everything else is instant,
       // because it happens between two frames the reader is already watching:
       // an animation there is the words he is reading sliding away from him.
-      if (how === 'smooth' && typeof box.scrollTo === 'function') box.scrollTo({ top, behavior: 'smooth' });
-      else box.scrollTop = top;
+      if (how === 'smooth' && typeof there.scrollTo === 'function') {
+        gliding.current = true;
+        there.scrollTo({ top, behavior: 'smooth' });
+      } else {
+        there.scrollTop = top;
+      }
     },
     [pane, hold],
   );
 
-  // A pane opens at its end, because that is where a chat is read from — and
-  // between the page being laid out and being drawn, so the history is never
-  // seen flying past on the way down.
+  const read = useCallback(() => {
+    if (!box) return;
+    const now = { top: box.scrollTop, end: end(box) };
+    const landed = aimed.current !== null && Math.abs(now.top - aimed.current) <= 1;
+    // A smooth move is a hundred frames of the pane being somewhere it was not
+    // aimed. None of them is the reader, and only the landing ends it.
+    if (gliding.current && !landed) return;
+    aimed.current = null;
+    if (landed) {
+      gliding.current = false;
+      left.current = now;
+      return;
+    }
+    // The pane exactly where it was left, inside a box that is no longer the
+    // same size: the window was resized, or something grew under the
+    // conversation. The distance to the end changed without him doing anything,
+    // and reading that distance as an answer let a resized window quietly stop
+    // a chat following its own end.
+    if (Math.abs(now.top - left.current.top) <= 1 && now.end !== left.current.end) {
+      if (holding.current) {
+        toTheEnd();
+        return;
+      }
+      left.current = now;
+      return;
+    }
+    left.current = now;
+    hold(now.end - now.top <= near);
+  }, [box, near, hold, toTheEnd]);
+
+  // Before every frame the chat draws, while the end is what he is watching.
+  // The conversation arrives a piece at a time and each piece is a render, so
+  // the end has to be put back between the browser laying the page out and
+  // painting it — a pane pinned after the paint is a page seen at the top of a
+  // conversation for one frame, on every open.
   useLayoutEffect(() => {
-    toTheEnd();
-  }, [toTheEnd]);
+    if (box && holding.current && !gliding.current) toTheEnd();
+  });
 
   // Where the reader is, read from the pane. A scroll is announced at most once
   // a frame by the browser itself, so there is nothing here to slow down.
   useEffect(() => {
-    const box = pane.current;
     if (!box) return;
     read();
     /** From here on the pane is his, wherever the app had been aiming it. */
     const his = () => {
       aimed.current = null;
+      gliding.current = false;
     };
     box.addEventListener('scroll', read, { passive: true });
     box.addEventListener('wheel', his, { passive: true });
@@ -122,27 +150,30 @@ export function useHeldAtTheEnd(pane: React.RefObject<HTMLElement | null>, near 
       box.removeEventListener('touchstart', his);
       box.removeEventListener('keydown', his);
     };
-  }, [pane, read]);
+  }, [box, read]);
 
   // Anything that changes how tall the conversation is, or how much of it can be
-  // seen at once, keeps the end in view while the end is what he is watching: a
-  // row arriving, a line still being typed, a picture that loads late, the box
-  // he types in growing under it, the window resized. This is told after the
-  // browser has laid the page out and before it draws it, so the pane is never
-  // seen in the wrong place.
+  // seen at once, without the chat drawing a frame of its own: a picture that
+  // loads late, the box he types in growing under it, the window resized.
   useEffect(() => {
-    const box = pane.current;
     if (!box || typeof ResizeObserver !== 'function') return;
     const grew = () => {
-      if (holding.current) toTheEnd();
+      if (holding.current && !gliding.current) toTheEnd();
     };
     const watch = new ResizeObserver(grew);
     watch.observe(box);
     if (content) watch.observe(content);
     return () => watch.disconnect();
-  }, [pane, content, toTheEnd]);
+  }, [box, content, toTheEnd]);
 
+  const paneRef = useCallback(
+    (node: HTMLElement | null) => {
+      pane.current = node;
+      setBox(node);
+    },
+    [pane],
+  );
   const contentRef = useCallback((node: HTMLElement | null) => setContent(node), []);
 
-  return { held, toTheEnd, quiet, contentRef };
+  return { held, toTheEnd, paneRef, contentRef };
 }

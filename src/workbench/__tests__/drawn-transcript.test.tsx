@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
 import { DrawnTranscript, SCREENFUL } from '@/workbench/drawn-transcript';
-import { drawnRows } from '@/workbench/machine-lines';
+import { drawnRows, type DrawnRow } from '@/workbench/machine-lines';
 import type { ImagePayload, WbpEvent } from '@/workbench/protocol';
 import { EMPTY, reduce, type SessionView } from '@/workbench/use-session';
 
@@ -70,12 +70,28 @@ const HELD = 201;
 function chat(sessionId = 's', held = HELD) {
   const pane = createRef<HTMLDivElement>();
   const rows = drawnRows(conversation(held).items);
-  const drawn = render(
+  const shows = (what: { rows: DrawnRow[]; sessionId: string; watching: boolean }) => (
     <div ref={pane}>
-      <DrawnTranscript rows={rows} sessionId={sessionId} mentions={MENTIONS} onLook={LOOK} pane={pane} />
-    </div>,
+      <DrawnTranscript
+        rows={what.rows}
+        sessionId={what.sessionId}
+        mentions={MENTIONS}
+        onLook={LOOK}
+        pane={pane}
+        held={what.watching}
+      />
+    </div>
   );
-  return { ...drawn, pane, rows };
+  const drawn = render(shows({ rows, sessionId, watching: true }));
+  /** The chat drawn again: another conversation, more of this one, or both. */
+  const again = (what: { rows?: DrawnRow[]; sessionId?: string; watching?: boolean }) =>
+    drawn.rerender(shows({ rows: what.rows ?? rows, sessionId: what.sessionId ?? sessionId, watching: what.watching ?? true }));
+  return { ...drawn, pane, rows, again };
+}
+
+/** The same conversation with more said since. */
+function grownTo(many: number) {
+  return drawnRows(conversation(many).items);
 }
 
 const messages = () => screen.queryAllByTestId(/-message$/);
@@ -113,15 +129,35 @@ describe('what a chat puts on the page', () => {
   });
 
   it('opens another chat at its own end, not where the last one had been read to', () => {
-    const { rerender, pane, rows } = chat();
+    const { again } = chat();
     act(() => heads[heads.length - 1]!.reached());
     expect(messages()).toHaveLength(SCREENFUL * 2);
 
-    rerender(
-      <div ref={pane}>
-        <DrawnTranscript rows={rows} sessionId="another" mentions={MENTIONS} onLook={LOOK} pane={pane} />
-      </div>,
-    );
+    again({ sessionId: 'another' });
     expect(messages()).toHaveLength(SCREENFUL);
+  });
+
+  it('keeps the row the reader is reading when messages arrive behind him', () => {
+    // The window is the last N rows, so every message that joins the bottom
+    // pushes one off the top. Invisible to a reader at the end; to a reader up
+    // in the history it is the paragraph he is reading being deleted, with the
+    // pane never moving to show it (bw-n6yh.7).
+    const { again } = chat();
+    const top = messages()[0]!.textContent;
+    expect(top).toContain(`message ${HELD - SCREENFUL}`);
+
+    again({ rows: grownTo(HELD + 20), watching: false });
+    expect(messages()[0]!.textContent).toBe(top);
+    expect(messages()).toHaveLength(SCREENFUL + 20);
+  });
+
+  it('starts sliding again once he is back at the end', () => {
+    const { again } = chat();
+    again({ rows: grownTo(HELD + 20), watching: false });
+    expect(messages()).toHaveLength(SCREENFUL + 20);
+
+    again({ rows: grownTo(HELD + 40), watching: true });
+    expect(messages()).toHaveLength(SCREENFUL + 20);
+    expect(messages()[messages().length - 1]!.textContent).toContain(`message ${HELD + 39}`);
   });
 });

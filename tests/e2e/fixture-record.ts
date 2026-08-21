@@ -511,3 +511,92 @@ export function writeChatWithHelper(opts: {
     },
   };
 }
+
+/**
+ * A long conversation on disk, and a way to say more into it while it is read.
+ *
+ * What every case about scrolling needs and nothing else here writes: enough
+ * messages that the pane is many screenfuls deep, each one findable by its own
+ * number, and a record another program is still appending to — which is how a
+ * row arrives under a reader who is looking somewhere else (bw-n6yh).
+ */
+export interface LongChat {
+  /** The conversation's own id, which is what a row is found by. */
+  sessionId: string;
+  /** The chat's own file. */
+  path: string;
+  /** How many messages it opens with. */
+  held: number;
+  /** Somebody else says one more into it. Hands back what was said, to find it by. */
+  says(text?: string): string;
+  /** Everything written, so a run can take it away again. */
+  remove: () => void;
+}
+
+/** How the nth message of a long chat reads. Numbered, so its place is readable. */
+export function longChatSaid(n: number): string {
+  return `Message ${n} of a long conversation, said so a scrolling case has something to find.`;
+}
+
+export function writeLongChat(opts: { cwd: string; sessionId: string; held?: number; branch?: string }): LongChat {
+  const { cwd, sessionId } = opts;
+  const held = opts.held ?? 120;
+  const branch = opts.branch ?? 'main';
+  const began = new Date(Date.now() - 60 * 60 * 1000);
+
+  const dir = join(configDir(), 'projects', projectSlug(cwd));
+  const path = join(dir, `${sessionId}.jsonl`);
+  mkdirSync(dir, { recursive: true });
+
+  let last: string | null = null;
+  const line = (n: number, text: string, at: Date): Record<string, unknown> => {
+    const uuid = `long-u${n}`;
+    const parentUuid = last;
+    last = uuid;
+    const said =
+      n % 2 === 0
+        ? { type: 'user', message: { role: 'user', content: text } }
+        : {
+            type: 'assistant',
+            message: {
+              id: `msg_long_${n}`,
+              model: 'claude-opus-5',
+              role: 'assistant',
+              usage: SPENT,
+              content: [{ type: 'text', text }],
+            },
+          };
+    return {
+      sessionId,
+      cwd,
+      gitBranch: branch,
+      version: '2.1.237',
+      userType: 'external',
+      timestamp: at.toISOString(),
+      parentUuid,
+      uuid,
+      ...said,
+    };
+  };
+
+  const rows: Record<string, unknown>[] = [];
+  for (let n = 0; n < held; n += 1) rows.push(line(n, longChatSaid(n), new Date(began.getTime() + n * 1000)));
+  writeFileSync(path, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+  let more = held;
+  return {
+    sessionId,
+    path,
+    held,
+    says: (text?: string): string => {
+      const n = more++;
+      const said = text ?? longChatSaid(n);
+      appendFileSync(path, JSON.stringify(line(n, said, new Date())) + '\n');
+      return said;
+    },
+    remove: () => {
+      rmSync(path, { force: true });
+      rmSync(join(dir, sessionId), { recursive: true, force: true });
+    },
+  };
+}

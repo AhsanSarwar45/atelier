@@ -38,15 +38,30 @@ interface DrawnTranscriptProps {
   onLook: (image: ImagePayload) => void;
   /** The pane these rows scroll inside, whose place must be kept as they grow. */
   pane: React.RefObject<HTMLElement | null>;
+  /** Whether the end of the conversation is what the reader is watching. */
+  held: boolean;
 }
 
-export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane }: DrawnTranscriptProps) {
+export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held }: DrawnTranscriptProps) {
   const [shown, setShown] = useState(SCREENFUL);
   const head = useRef<HTMLDivElement | null>(null);
   /** How tall the pane's contents were when the last batch was asked for. */
   const wasTall = useRef<number | null>(null);
+  /** Which conversation these rows were, and how many of them, on the last frame. */
+  const was = useRef({ sessionId, many: rows.length });
 
-  useEffect(() => setShown(SCREENFUL), [sessionId]);
+  // A window of the last N rows slides forward as messages arrive: every one
+  // that joins the bottom pushes one off the top. For a reader watching the end
+  // that is invisible and is the whole point of it — but a reader who has
+  // scrolled up is reading rows near that top edge, and they were being deleted
+  // out from under him while the pane stayed exactly where it was (bw-n6yh.7).
+  // So while he is away the window's TOP is what is held still, and it takes
+  // back whatever arrived; coming back to the end lets it start sliding again.
+  let count = shown;
+  if (was.current.sessionId !== sessionId) count = SCREENFUL;
+  else if (!held && rows.length > was.current.many) count = shown + (rows.length - was.current.many);
+  was.current = { sessionId, many: rows.length };
+  if (count !== shown) setShown(count);
 
   useEffect(() => {
     const mark = head.current;
@@ -71,11 +86,11 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane }: Dra
     box.scrollTop += box.scrollHeight - before;
   }, [shown, pane]);
 
-  const window = shown >= rows.length ? rows : rows.slice(rows.length - shown);
+  const window = count >= rows.length ? rows : rows.slice(rows.length - count);
 
   return (
     <>
-      {shown < rows.length && <div ref={head} data-testid="older-messages" />}
+      {count < rows.length && <div ref={head} data-testid="older-messages" />}
       {window.map((drawnRow) =>
         // A machine line and one of the app's own asides are the same shape:
         // both are the chat talking about itself rather than someone in it, and
