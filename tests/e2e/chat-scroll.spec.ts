@@ -188,27 +188,38 @@ async function inView(page: Page, text: string): Promise<boolean> {
 }
 
 /**
- * Whether the way back is drawn clear of the conversation. It floated over the
- * pane's bottom corner, which is a message the reader can see and has not read
- * yet — and it is on the screen exactly while he is reading history, the one
- * moment nothing may cover a word (bw-n6yh.9).
+ * Where the way back is drawn.
+ *
+ * It floats over the conversation's own bottom corner, which is where every
+ * chat draws it. For a while it had a strip of its own below the conversation
+ * instead, to keep it off the last line of text (bw-n6yh.9); a whole row of
+ * empty screen between the conversation and the box you type in costs more than
+ * the corner of one line it sits over, and the manager asked for it floating
+ * (bw-n6yh.13). So what is checked is that it floats, and that it floats at the
+ * conversation's own right edge rather than out in the margin of a wide window.
  */
-async function coversNothing(page: Page): Promise<boolean> {
-  return page.evaluate((message: string) => {
+async function floats(page: Page): Promise<{ below: number; above: number; margin: number }> {
+  return page.evaluate(() => {
     const pill = document.querySelector('[data-testid="back-to-now"]')?.getBoundingClientRect();
     const pane = document.querySelector('[data-testid="transcript"]')?.getBoundingClientRect();
-    if (!pill || !pane) return false;
-    return [...document.querySelectorAll(message)].every((row) => {
-      // Only the part of the row that is actually on the screen: a message
-      // scrolled past the bottom of the pane still has a place in the page,
-      // below the pane and behind everything under it, and is drawn nowhere.
-      const mine = row.getBoundingClientRect();
-      const top = Math.max(mine.top, pane.top);
-      const bottom = Math.min(mine.bottom, pane.bottom);
-      if (bottom <= top) return true;
-      return bottom <= pill.top || top >= pill.bottom || mine.right <= pill.left || mine.left >= pill.right;
-    });
-  }, MESSAGE);
+    if (!pill || !pane) return { below: 9999, above: 9999, margin: 9999 };
+    return {
+      // How far past the bottom of the conversation it hangs, and past its top.
+      below: pill.bottom - pane.bottom,
+      above: pane.top - pill.top,
+      margin: pane.right - pill.right,
+    };
+  });
+}
+
+/** How much dead screen sits between the conversation and the box you type in. */
+async function gap(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const pane = document.querySelector('[data-testid="transcript"]')?.getBoundingClientRect();
+    const box = document.querySelector('[data-testid="composer-frame"]')?.getBoundingClientRect();
+    if (!pane || !box) return -1;
+    return box.top - pane.bottom;
+  });
 }
 
 /** Says `many` more things into the record, and waits for them all to be drawn. */
@@ -449,10 +460,17 @@ test.describe('how a chat scrolls', () => {
       await expect(back).toHaveAttribute('data-missed', '7');
       await expect(page.getByTestId('back-to-now-count')).toHaveText('7');
       await page.screenshot({ path: `${SHOTS}/chat-scroll-back-to-now.png` });
+      const drawn = await floats(page);
+      const where = `bottom ${drawn.below.toFixed(0)}, top ${drawn.above.toFixed(0)}, right ${drawn.margin.toFixed(0)}`;
+      expect(drawn.below, `the way back hangs below the conversation (${where})`).toBeLessThanOrEqual(1);
+      expect(drawn.above, `the way back is drawn above the conversation (${where})`).toBeLessThanOrEqual(1);
+      expect(drawn.below, `the way back is not at the conversation's bottom corner (${where})`).toBeGreaterThan(-80);
+      expect(drawn.margin, `the way back floats out in the window margin (${where})`).toBeLessThan(40);
+      expect(drawn.margin, `the way back is drawn off the right of the conversation (${where})`).toBeGreaterThan(-1);
       expect(
-        await coversNothing(page),
-        'the way back was drawn on top of the words he was reading',
-      ).toBe(true);
+        await gap(page),
+        'a row of empty screen sits between the conversation and the box you type in',
+      ).toBeLessThan(40);
 
       await back.click();
       await expect.poll(() => offTheEnd(page), { timeout: 10_000 }).toBeLessThanOrEqual(AT_THE_END);

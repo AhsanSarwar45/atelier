@@ -281,9 +281,9 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
       onClick={onClick}
       title={missed > 0 ? `${missed} more since you scrolled up — back to now` : 'Back to the newest message'}
       className={cn(
-        'absolute bottom-2 right-4 z-10 flex items-center gap-1.5 rounded-full border border-border',
+        'absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-border',
         'bg-surface-raised px-3 py-1.5 text-muted-foreground shadow-lg transition-all hover:text-foreground',
-        shown ? 'opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
+        shown ? 'pointer-events-auto opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
       )}
     >
       <ArrowDown className="h-4 w-4" />
@@ -942,17 +942,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         )}
         </div>
       </div>
-      {/* The way back gets a strip of its own under the conversation rather
-          than floating over its bottom corner, where it sat on the last line
-          the reader could see — and it is shown exactly while he is reading
-          history, which is the one moment this must not cover a word
-          (bw-n6yh.9). The strip is there only while the control is. */}
-      <div
-        className={cn(
-          'relative mx-auto w-full max-w-[110ch] shrink-0',
-          atTheEnd ? 'h-0' : 'h-12',
-        )}
-      >
+      {/* The way back floats over the conversation's own bottom corner, the way
+          every chat draws it. It was given a strip of its own for a while, to
+          keep it off the last line of text (bw-n6yh.9); a whole row of empty
+          screen between the conversation and the box you type in costs more
+          than the corner of one line it sits over, and the manager asked for it
+          floating (bw-n6yh.13). The frame is the width of the conversation
+          rather than the window, so the button sits at the text's own right
+          edge on a wide screen, and passes clicks through everywhere else. */}
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-full max-w-[110ch] -translate-x-1/2">
         <BackToNow missed={missed} shown={!atTheEnd} onClick={() => toTheEnd('smooth')} />
       </div>
       </div>
