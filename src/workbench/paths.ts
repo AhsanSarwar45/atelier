@@ -4,7 +4,7 @@
  * Agents write addresses on disk all day — in their prose ("the fix is in
  * src/workbench/chat-tab.tsx:212"), in the line where a tool says which file it
  * read, and above all inside the commands they run, where nearly every line
- * opens `cd /home/ahsan/dev/machinery/worktrees/mch-1p2 && …`. Every one of
+ * opens `cd /home/dev/beads-web/worktrees/bw-1p2 && …`. Every one of
  * them was dead text: the reader had to select it, leave the app, and find it
  * by hand (bw-khe.13).
  *
@@ -20,7 +20,7 @@
  * ## What the reader wrote is not what gets opened
  *
  * A message says `src/workbench/paths.ts`; the file is at
- * `/home/ahsan/dev/beads-web/src/workbench/paths.ts`. A chip keeps the reader's
+ * `/home/dev/dev/beads-web/src/workbench/paths.ts`. A chip keeps the reader's
  * own words as its text — so copying a command still copies the command — and
  * carries the resolved address separately, worked out against the folder that
  * chat was running in.

@@ -28,9 +28,9 @@ const real: RawWindowNow = {
   percentage: 13,
   model: 'claude-opus-5',
   memoryFiles: [
-    { path: '/home/ahsan/.claude/CLAUDE.md', type: 'User', tokens: 1_185 },
-    { path: '/home/ahsan/dev/beads-web/CLAUDE.md', type: 'Project', tokens: 2_924 },
-    { path: '/home/ahsan/.claude/RTK.md', type: 'User', tokens: 233 },
+    { path: '/home/dev/.claude/CLAUDE.md', type: 'User', tokens: 1_185 },
+    { path: '/home/dev/dev/beads-web/CLAUDE.md', type: 'Project', tokens: 2_924 },
+    { path: '/home/dev/.claude/RTK.md', type: 'User', tokens: 233 },
   ],
   mcpTools: [
     { name: 'mcp__codegraph__codegraph_explore', serverName: 'codegraph', tokens: 367, isLoaded: false },

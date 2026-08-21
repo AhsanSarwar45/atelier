@@ -225,9 +225,16 @@ def registry():
 def reports_dir():
     """Where the shared report tools live, for a machine with no `report` on its
     path. One line in the machinery's own settings rather than in each project's
-    declaration: the report tools are the same ones for every project."""
+    declaration: the report tools are the same ones for every project.
+
+    A machine that has said nothing is answered with the checkout the machinery
+    itself is standing in, which is where they live — so a fresh clone builds a
+    report without anybody writing a path down first."""
     said = (_read(REGISTRY).get("home") or {}).get("reports") or ""
-    return os.path.expanduser(said) if said else ""
+    if said:
+        return os.path.expanduser(said)
+    beside = os.path.join(os.path.dirname(HOME), "reporting")
+    return beside if os.path.isdir(beside) else ""
 
 
 def named(name):

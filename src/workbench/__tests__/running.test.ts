@@ -18,7 +18,7 @@ import type { IsAlive, SessionMarker } from '@/workbench/running';
 const REAL_MARKER = JSON.stringify({
   pid: 1870877,
   sessionId: 'ef56704b-d82d-4c52-aa84-940c056a1006',
-  cwd: '/home/ahsan/dev/beads-web/worktrees/bw-dmxj',
+  cwd: '/home/dev/dev/beads-web/worktrees/bw-dmxj',
   startedAt: 1787137216129,
   procStart: '1558291',
   version: '2.1.235',
@@ -45,7 +45,7 @@ function marker(over: Partial<SessionMarker> = {}): SessionMarker {
   return {
     sessionId: 'ef56704b-d82d-4c52-aa84-940c056a1006',
     pid: 1870877,
-    cwd: '/home/ahsan/dev/beads-web/worktrees/bw-dmxj',
+    cwd: '/home/dev/dev/beads-web/worktrees/bw-dmxj',
     startedAt: 1787137216129,
     procStart: '1558291',
     entrypoint: 'cli',
@@ -69,7 +69,7 @@ describe('reading one marker file', () => {
     expect(parseMarker(REAL_MARKER)).toEqual({
       sessionId: 'ef56704b-d82d-4c52-aa84-940c056a1006',
       pid: 1870877,
-      cwd: '/home/ahsan/dev/beads-web/worktrees/bw-dmxj',
+      cwd: '/home/dev/dev/beads-web/worktrees/bw-dmxj',
       startedAt: 1787137216129,
       procStart: '1558291',
       entrypoint: 'cli',
@@ -127,7 +127,7 @@ describe('which chats somebody is working in', () => {
     expect(running.get('ef56704b-d82d-4c52-aa84-940c056a1006')).toEqual({
       sessionId: 'ef56704b-d82d-4c52-aa84-940c056a1006',
       pid: 1870877,
-      cwd: '/home/ahsan/dev/beads-web/worktrees/bw-dmxj',
+      cwd: '/home/dev/dev/beads-web/worktrees/bw-dmxj',
       startedAt: 1787137216129,
       entrypoint: 'cli',
     });

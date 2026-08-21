@@ -42,8 +42,8 @@ describe('what has the shape of an address', () => {
   });
 
   it('finds every folder a command opens with', () => {
-    expect(raws('cd /home/ahsan/dev/machinery/worktrees/mch-1p2 && grep -rn "x" src/lib/api.ts')).toEqual([
-      '/home/ahsan/dev/machinery/worktrees/mch-1p2',
+    expect(raws('cd /home/dev/beads-web/worktrees/bw-1p2 && grep -rn "x" src/lib/api.ts')).toEqual([
+      '/home/dev/beads-web/worktrees/bw-1p2',
       'src/lib/api.ts',
     ]);
   });

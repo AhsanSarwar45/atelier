@@ -114,13 +114,17 @@ def found(root, by_hash, by_name):
 # nothing saying which.
 MACHINE = os.path.expanduser("~/.claude")
 CLAUDE = ("agents", "skills", "output-styles")
+# Where this home keeps them: the repository the machinery ships inside, in its
+# own `.claude/`, which is the one path Claude Code reads a checkout's craft from
+# (bw-8um.3.7).
+CRAFT = os.path.join(os.path.dirname(HOME), ".claude")
 
 
 def adrift():
     """Every shared definition the machine-wide home is no longer pointing at."""
     said = []
     for kind in CLAUDE:
-        mine = os.path.join(HOME, "claude", kind)
+        mine = os.path.join(CRAFT, kind)
         if not os.path.isdir(mine):
             continue
         for name in sorted(os.listdir(mine)):

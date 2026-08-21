@@ -44,10 +44,10 @@ describe('which reports a project is waiting on', () => {
   });
 
   it('files a report under the folder that holds the board', () => {
-    expect(reportFolder('/home/ahsan/dev/beads-web')).toBe('beads-web');
+    expect(reportFolder('/home/dev/dev/beads-web')).toBe('beads-web');
     expect(reportFolder('C:\\Users\\ahsan\\dev\\beads-web')).toBe('beads-web');
     // A Dolt project's own path is a database address, never a directory.
-    expect(reportFolder('dolt://localhost/racing', '/home/ahsan/dev/racing')).toBe('racing');
+    expect(reportFolder('dolt://localhost/racing', '/home/dev/dev/racing')).toBe('racing');
   });
 
   it('hands back every report the project owns, waiting or not', () => {
@@ -68,7 +68,7 @@ describe('what the badge says', () => {
 
 describe('the list inside the project', () => {
   it('marks the reports waiting on an answer and leaves the rest alone', () => {
-    render(<ReportsList projectPath="/home/ahsan/dev/beads-web" onOpen={() => {}} />);
+    render(<ReportsList projectPath="/home/dev/dev/beads-web" onOpen={() => {}} />);
 
     const rows = screen.getAllByTestId('reports-list-item');
     expect(rows).toHaveLength(3);

@@ -60,8 +60,15 @@ test-*.txt
 .worktrees/
 Vent
 
-# Claude Code project config (user-specific)
-.claude/
+# Claude Code project config. The working rules ship with the clone — the gates,
+# the workers, the skills and the house voice — so a fresh checkout behaves the
+# way the team does. What is one person's own machine does not.
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+!.claude/commands/
+!.claude/output-styles/
+!.claude/skills/
 
 # IDE/tool artifacts
 .history/
@@ -106,3 +113,11 @@ worktrees/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# The machine's own list of which checkouts run this machinery. `machinery/join`
+# writes it and it is never the same on two computers; `machinery/projects.toml.example`
+# is the one that ships.
+/machinery/projects.toml
+
+# The dev server's own log, one machine's running notes.
+/.dev-*.log

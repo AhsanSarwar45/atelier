@@ -13,6 +13,27 @@ machinery/join                            # the project you are standing in
 machinery/join --check                    # say what is missing, change nothing
 ```
 
+## Where this lives
+
+This directory ships inside the beads-web repository, at `machinery/`. It used
+to be a second checkout of its own with no address, so there was no single thing
+to clone and every gate a project wired was found by a path naming one person's
+home folder (bw-8um.3.7). Cloning beads-web now brings the board tools, the
+gates and the workers with it.
+
+Everything here finds itself from its own file, so the clone can sit anywhere,
+and a project's `.claude/settings.json` names its gates through
+`$CLAUDE_PROJECT_DIR` rather than a path off somebody's disk.
+
+Two things are of the machine and not of the clone, so neither is tracked:
+`projects.toml`, the list of which checkouts on this computer run this machinery
+— `join` writes it, and `projects.toml.example` is what ships — and the board
+each project keeps under its own `.beads`.
+
+The shared craft the workers use is not in here: the agents, the skills, the
+commands and the house voice are the repository's own `.claude/`, so a fresh
+clone behaves the way the team does without anything being wired first.
+
 It is safe to run again. A project already joined is looked over and left
 alone; only what is missing is put right.
 

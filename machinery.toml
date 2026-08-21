@@ -1,6 +1,8 @@
-# What this project answers when the shared machinery asks it something.
-# Everything that differs by project lives here and nowhere else; the machinery
-# itself is /home/ahsan/dev/machinery, and its README says how a project joins.
+# What this project answers when the machinery asks it something.
+# Everything that differs by project lives here and nowhere else. The machinery
+# itself is `machinery/` in this checkout — the board tools, the session gates
+# and the run of steps every project of this manager's works to — and
+# `machinery/README.md` says how another project joins it.
 
 name = "beads-web"
 prefix = "bw"
@@ -14,15 +16,16 @@ brand = "BEADSWEB"
 agent_merges = true
 
 # The systems a card may belong to. `--area` accepts these and nothing else.
+# The last four belong to the machinery under `machinery/`, which used to be a
+# repository of its own and brought its own cards with it.
 areas = ["board", "screen", "server", "storage", "reports", "packaging",
-         "interface", "tests", "tooling", "docs"]
+         "interface", "tests", "tooling", "docs",
+         "gates", "steps", "craft", "quality"]
 
-# A job poured here may say its change lands in the shared machinery: the board
-# tools every session here runs live there, and a fault this board's own sessions
-# hit is found here and fixed there (bw-30g was the first). The board's own
-# document lives in corsetta, so a job's record lands there. The reporting tools
-# under reporting/ are this project's own.
-lands_elsewhere = ["machinery", "corsetta"]
+# The board tools every session here runs are this project's own now, under
+# `machinery/`, so a fault a session hits is found and fixed in one checkout. The
+# board's own document still lives in corsetta, so a job's record lands there.
+lands_elsewhere = ["corsetta"]
 
 # A column and a card are places anyone can go and look at as much as a file is:
 # the screen is what this project is.
@@ -32,8 +35,8 @@ places = ["\\b(?:the )?(?:Todo|In Progress|Agent Review|Manager Review|Done|Canc
 # here is as often the server's as the screen's: `npm test` is vitest over the
 # front end, and the server carries its own cases under server/src/routes. Run
 # once a job, in front of the reader — never per edit and never in a commit hook.
-checks = "npm test && (cd server && cargo test)"
+checks = "npm test && (cd server && cargo test) && machinery/check"
 
 [review]
 persona = "the Beads Web project — the manager's own board screen and its server, a Next.js front end over a Rust back end"
-proves = "drive the running screen in a browser and read the result off a screenshot; a passing unit test is not a verified change"
+proves = "drive the running screen in a browser and read the result off a screenshot; a passing unit test is not a verified change. For a change under machinery/ — a gate, a board tool, a step — put the fault back and show the case that goes red without it; a suite that passes before and after proves nothing"

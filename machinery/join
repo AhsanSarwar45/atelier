@@ -72,6 +72,12 @@ FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
 # Claude Code reads these out of a project's own `.claude/`, so a project shares
 # them by pointing at this home rather than by holding a copy.
 SHARED = ("agents", "skills", "output-styles", "commands")
+# And where this home keeps them: the repository the machinery ships inside, in
+# its own `.claude/`. Not under `machinery/`, because Claude Code reads a
+# checkout's craft from that one path and nowhere else — so a fresh clone of the
+# product arrives with the workers, the skills, the commands and the house voice
+# already wired, and nothing has to be pointed at anything first (bw-8um.3.7).
+CRAFT = os.path.join(os.path.dirname(HOME), ".claude")
 # The shape of a declaration, kept beside this file. A project that declares
 # nothing is given a copy of it rather than a sentence about where to find one.
 EXAMPLE = "machinery.toml.example"
@@ -669,7 +675,7 @@ def install(say):
     stopped pointing.
     """
     for kind in SHARED:
-        mine = os.path.join(HOME, "claude", kind)
+        mine = os.path.join(CRAFT, kind)
         if not os.path.isdir(mine):
             continue
         where = os.path.join(MACHINE, kind)
@@ -1014,9 +1020,16 @@ def gate(root, name):
         room = project.reports_dir()
         return os.path.join(room, "tools", name) if room else ""
     near = os.path.join("scripts", "hooks", name)
-    return os.path.join("$CLAUDE_PROJECT_DIR", near) \
-        if os.path.exists(os.path.join(root, near)) \
-        else os.path.join(HOME, "hooks", name)
+    if os.path.exists(os.path.join(root, near)):
+        return os.path.join("$CLAUDE_PROJECT_DIR", near)
+    # The machinery ships inside a project. Where that project is the one being
+    # joined, its gates are named through its own root and not through a path off
+    # this disk — so the settings file that ships in the clone names no home
+    # folder, and the clone runs its own gates wherever it is put (bw-8um.3.7).
+    inside = os.path.relpath(HOME, root)
+    if not os.path.isabs(inside) and not inside.startswith(os.pardir):
+        return os.path.join("$CLAUDE_PROJECT_DIR", inside, "hooks", name)
+    return os.path.join(HOME, "hooks", name)
 
 
 def wire(root, say):

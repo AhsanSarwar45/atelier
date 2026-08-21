@@ -24,7 +24,7 @@
  *
  * A card id inside a command must stay dead text — chipping it would break the
  * command as something to copy. A file named inside a command is the opposite:
- * `cd /home/ahsan/dev/… && grep …` is exactly where addresses live, and it is
+ * `cd /home/dev/dev/… && grep …` is exactly where addresses live, and it is
  * the one the reader most wants to open (bw-khe.13). So code and fenced blocks
  * suppress cards and reports, and let files through; what the chip draws is
  * still the reader's own words, so the command still copies as it was written.

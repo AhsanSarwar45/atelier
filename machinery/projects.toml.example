@@ -1,0 +1,17 @@
+# Every checkout that runs this machinery, by the name its own declaration gives
+# it. `machinery/join <path>` writes a line here and nothing else does.
+#
+# This file is one machine's own answer — copy it to `projects.toml` beside this
+# example, or let `join` write it. The list is what makes a job's `lands:<name>`
+# label mean something: a repository nobody registered is not somewhere a card's
+# commit may hide, and a commit made in one of these may name the ids of any
+# project that declares its work lands here.
+
+[projects]
+beads-web = "~/dev/beads-web"
+
+[home]
+# The shared report tools, for a machine with no `report` on its path. One line
+# here rather than in each project's declaration: they are the same tools for
+# every project.
+reports = "~/dev/beads-web/reporting"

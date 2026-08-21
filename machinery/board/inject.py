@@ -30,6 +30,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HERE)
+import project  # noqa: E402
+
 SRC = os.environ.get("SRC") or HERE
 # What gets exported. The last commit by default; a gate running before one is
 # made says which tree it means, because judging the commit behind the change
@@ -41,7 +44,6 @@ CLOSE = "hooks/board-status-gate.py"
 DECL = "project.py"
 SUITE = "board/selftest.py"
 LANDING = "hooks/landing-gate.py"
-HOOK = ".beads/hooks/pre-commit"
 SPINE = "board/spine.py"
 POUR = "board/job"
 RUN = "board/run.py"
@@ -375,14 +377,11 @@ FAULTS = [
     ("any git command at all is read as a commit", LANDING,
      lambda s: s.replace('            return word == "commit"',
                          "            return True")),
-    # What a commit costs, and where a project says what its checks are (bw-a6o.2).
-    ("the commit hook pays for every fault again on each gate commit", HOOK,
-     lambda s: s.replace(
-         "# Nothing of the machinery's own runs here any more.",
-         "if git diff --cached --name-only | grep -q 'board/'; then\n"
-         '  "$(git rev-parse --show-toplevel)/check" || exit 1\n'
-         "fi\n"
-         "# Nothing of the machinery's own runs here any more.")),
+    # Where a project says what its checks are (bw-a6o.2). The other half of that
+    # cut — the commit hook that used to put every fault back on each gate commit
+    # — has no fault left to put back: the machinery is a directory inside a
+    # project now and ships no git hook of its own, and the hook the project has
+    # is written by bd and rewritten on every upgrade of it (bw-8um.3.7).
     ("a project's own checks command is not read from its declaration", DECL,
      lambda s: s.replace('        self.checks = data.get("checks") or ""',
                          '        self.checks = ""')),
@@ -670,11 +669,31 @@ if "--anchors" in sys.argv:
 
 
 def export():
+    """A copy of the machinery on its own, carrying what it answers for.
+
+    The archive is the machinery directory alone — that is what a fault is put
+    back into. But the suite answers for a project: its systems, its prefix and
+    the branch it lands on all come off that project's declaration, and the
+    report tools come off the machine's own registry. Neither is inside the
+    machinery, so both are laid beside the copy; without them every case that
+    pours a card reads a project with no systems at all.
+    """
     tmp = tempfile.mkdtemp(prefix="inject-")
     tar = subprocess.Popen(["git", "-C", SRC, "archive", TREE],
                            stdout=subprocess.PIPE)
     subprocess.run(["tar", "-x", "-C", tmp], stdin=tar.stdout, check=True)
     tar.wait()
+    # And a board. Every gate here asks whether the checkout it is standing in
+    # has one before it says anything at all, and a copy with none is a copy
+    # every one of them stands aside for.
+    os.makedirs(os.path.join(tmp, ".beads"), exist_ok=True)
+    said = os.path.join(project.root(SRC), project.DECLARATION)
+    if os.path.exists(said):
+        shutil.copyfile(said, os.path.join(tmp, project.DECLARATION))
+    room = project.reports_dir()
+    if room:
+        with open(os.path.join(tmp, "projects.toml"), "w") as fh:
+            fh.write("[home]\nreports = %r\n" % room)
     return tmp
 
 

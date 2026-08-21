@@ -45,7 +45,12 @@ import sections as bars  # noqa: E402
 # the machinery's and are the same everywhere. Named rather than assumed, so the
 # suite can be run against each declaration in turn.
 WHICH = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
-ROOT = project.registry().get(WHICH) or os.path.abspath(WHICH or os.getcwd())
+# Named nothing, the answer is the project this machinery is standing in — asked
+# of git, not of the folder the command was typed in. The machinery is a
+# directory inside the checkout that runs it, so `./check` is typed one level
+# below the root, and a worktree's answer is the checkout it was cut from.
+ROOT = project.registry().get(WHICH) or (os.path.abspath(WHICH) if WHICH
+                                         else project.root(os.getcwd()))
 DECL = bars.use(ROOT)
 AREA = DECL.areas[0] if DECL.areas else "board"
 LAST_AREA = DECL.areas[-1] if DECL.areas else AREA
@@ -6228,20 +6233,14 @@ def main():
     # again on every commit of a change nobody had finished making. The checks
     # step is where that is paid now: once a job, in front of the reader, and
     # the command is the project's own to name (bw-a6o.2).
-    hook_here = os.path.join(HOME, ".beads", "hooks", "pre-commit")
-    runs = [l.strip() for l in open(hook_here).read().splitlines()
-            if not l.lstrip().startswith("#")
-            and re.search(r"/check\b|inject\.py|selftest\.py", l)]
-    assert not runs, \
-        "the machinery's commit hook runs its own suite or its fault put-back " \
-        "again, so every commit to a gate pays minutes for a change nobody has " \
-        "finished making: %s" % runs
-    # The file this tree holds, not whatever `project.of` walks up to: a suite
-    # run from a worktree would otherwise judge the main checkout's declaration.
-    here = project.Declaration(HOME, project._read(os.path.join(HOME,
+    # Only that second half is asked here. The machinery is a directory inside a
+    # project now and ships no git hook of its own; the pre-commit hook the
+    # project has is bd's, rewritten on every upgrade of it, so there is nothing
+    # of ours left for a case to hold still (bw-8um.3.7).
+    here = project.Declaration(ROOT, project._read(os.path.join(ROOT,
                                                                project.DECLARATION)))
     assert here.checks, \
-        "the machinery declares no checks command, so the one step that is meant " \
+        "this project declares no checks command, so the one step that is meant " \
         "to run its suite has nothing to run"
     assert re.search(r"^checks\s*=", open(os.path.join(HOME, "machinery.toml.example"))
                      .read(), re.M), \
@@ -6251,8 +6250,8 @@ def main():
         "a project that declares no checks command cannot be read at all, so the " \
         "step refuses to open rather than saying what was run by hand"
 
-    print("ok: the machinery's commit hook no longer runs its suite or its fault "
-          "put-back, and a project names the command its checks step runs")
+    print("ok: a project names the command its checks step runs, and the "
+          "declaration every joining project copies mentions it")
 
     # THE TWO REVIEW COLUMNS ARE NOT WORDS BD SHIPS WITH. Four of the six are its
     # own and cost nothing; Agent Review and Manager Review are this machinery's,
@@ -6494,9 +6493,9 @@ def main():
     def wired(matcher):
         return joiner.half_heard(json.dumps({"hooks": {"PreToolUse": [
             {"matcher": matcher, "hooks": [{"type": "command", "command":
-             "/home/ahsan/dev/machinery/hooks/agent-fence.py"}]},
+             "$CLAUDE_PROJECT_DIR/machinery/hooks/agent-fence.py"}]},
             {"matcher": "Bash", "hooks": [{"type": "command", "command":
-             "/home/ahsan/dev/machinery/hooks/board-actor.py"}]}]}}))
+             "$CLAUDE_PROJECT_DIR/machinery/hooks/board-actor.py"}]}]}}))
 
     deaf = wired("Agent")
     assert deaf and "Skill" in deaf[0] and "agent-fence.py" in deaf[0], \

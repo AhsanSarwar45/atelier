@@ -682,10 +682,10 @@ mod tests {
     fn the_project_whose_path_ends_in_the_name_is_picked_out_of_several() {
         let db = db_with_projects(&[
             ("Widgets", "/home/dev/widgets", None),
-            ("Beads Web", "/home/ahsan/code/beads-web", None),
+            ("Beads Web", "/home/dev/code/beads-web", None),
             ("Gadgets", "/home/dev/gadgets", None),
         ]);
-        assert_eq!(resolve_project_path(&db, "beads-web"), Some("/home/ahsan/code/beads-web".to_string()));
+        assert_eq!(resolve_project_path(&db, "beads-web"), Some("/home/dev/code/beads-web".to_string()));
     }
 
     #[test]
@@ -717,7 +717,7 @@ mod tests {
     fn an_explicit_path_wins_over_the_lookup_when_it_names_this_projects_own_folder() {
         let here = std::env::temp_dir().join("beads-web");
         std::fs::create_dir_all(&here).expect("a folder to name");
-        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        let db = db_with_projects(&[("Beads Web", "/home/dev/code/beads-web", None)]);
         let named = here.to_string_lossy().to_string();
         assert_eq!(resolve_cwd(Some(&named), &db, "beads-web", &a_spec("beads-web")), named);
     }
@@ -730,12 +730,12 @@ mod tests {
     fn a_folder_belonging_to_another_project_loses_to_the_lookup() {
         let open_board = std::env::temp_dir().to_string_lossy().to_string();
         let db = db_with_projects(&[
-            ("Beads Web", "/home/ahsan/code/beads-web", None),
-            ("Machinery", "/home/ahsan/code/machinery", None),
+            ("Beads Web", "/home/dev/code/beads-web", None),
+            ("Machinery", "/home/dev/code/machinery", None),
         ]);
         assert_eq!(
             resolve_cwd(Some(&open_board), &db, "machinery", &a_spec("machinery")),
-            "/home/ahsan/code/machinery".to_string()
+            "/home/dev/code/machinery".to_string()
         );
     }
 
@@ -743,7 +743,7 @@ mod tests {
     /// been told about, where there is nothing to look up.
     #[test]
     fn a_named_folder_still_opens_a_report_of_a_project_no_row_matches() {
-        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        let db = db_with_projects(&[("Beads Web", "/home/dev/code/beads-web", None)]);
         let anywhere = std::env::temp_dir().to_string_lossy().to_string();
         assert_eq!(resolve_cwd(Some(&anywhere), &db, "keystone", &a_spec("keystone")), anywhere);
     }
@@ -752,15 +752,15 @@ mod tests {
     /// was deleted. It is still about the same report, so it still opens.
     #[test]
     fn an_explicit_path_that_is_gone_falls_through_to_the_lookup() {
-        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        let db = db_with_projects(&[("Beads Web", "/home/dev/code/beads-web", None)]);
         assert_eq!(
             resolve_cwd(
-                Some("/home/ahsan/code/beads-web/worktrees/landed"),
+                Some("/home/dev/code/beads-web/worktrees/landed"),
                 &db,
                 "beads-web",
                 &a_spec("beads-web"),
             ),
-            "/home/ahsan/code/beads-web".to_string()
+            "/home/dev/code/beads-web".to_string()
         );
     }
 
@@ -770,7 +770,7 @@ mod tests {
     /// page would not open at all (bw-pqt.23).
     #[test]
     fn a_report_of_a_project_the_app_never_heard_of_builds_in_its_own_folder() {
-        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        let db = db_with_projects(&[("Beads Web", "/home/dev/code/beads-web", None)]);
         assert_eq!(
             resolve_cwd(None, &db, "keystone", &a_spec("keystone")),
             "/data/reports/keystone".to_string()
@@ -781,7 +781,7 @@ mod tests {
     /// stopping at the folder that is no longer there.
     #[test]
     fn a_dead_path_on_an_unknown_project_still_reaches_the_reports_own_folder() {
-        let db = db_with_projects(&[("Beads Web", "/home/ahsan/code/beads-web", None)]);
+        let db = db_with_projects(&[("Beads Web", "/home/dev/code/beads-web", None)]);
         assert_eq!(
             resolve_cwd(Some("/gone/for/good"), &db, "keystone", &a_spec("keystone")),
             "/data/reports/keystone".to_string()
