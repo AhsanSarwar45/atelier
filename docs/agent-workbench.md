@@ -534,7 +534,7 @@ asked for it gone.
 At startup the sidecar marks every non-`ended` session `dormant`. A dormant
 session has no child process until it is clicked. The sidebar groups by day —
 Today, Yesterday, then dates — under one group that is not a day: the chats
-somebody is working in this minute, which stand above all of them and say so
+another program has open, which stand above all of them and say only that
 (§6.3.4).
 
 A row says three things and no more, because that is what tells two chats apart
@@ -544,7 +544,7 @@ when a project has forty of them:
 |---|---|
 | first | the conversation's own **name** — the brand's title for it, not ours |
 | second | a **chip per card** it worked on, which opens that card, and a **chip naming the folder** it ran in |
-| beside them | **working**, when a live process is holding that conversation right now (§6.3.4) |
+| beside them | the **state chip** — what it is doing this second — and, when another program holds the conversation, the **external badge** beside it (§6.3.4) |
 
 The folder is the whole point of the second chip: a worktree's directory is
 named after the worktree, so two chats on the same project in different trees
@@ -655,7 +655,7 @@ message the sidecar refuses comes back into the box it was typed in with the
 reason under it, because the conversation being taken over between unlocking the
 box and pressing send does not make what was written any less the owner's.
 
-#### 6.3.4 Which chats are being worked in right now
+#### 6.3.4 Which chats another program has open
 
 Constraint: a row that is asleep is an offer to wake it, and the offer is wrong
 when somebody is already in there. Until this, every chat the app had not
@@ -730,10 +730,17 @@ follow the chat being opened is decided at the click and never revisited, and a
 two-second-old answer would leave a chat that started a moment ago drawn as a
 dead record for as long as it stays open.
 
-**What the list does with it.** A working chat says the word, sorts above every
-idle one, and stands under a heading that says so in place of a date — they sort
-above the days, so writing a day over them printed today twice on one list and
-explained nothing about why they were first (bw-dmxj.11). Date alone was the
+**What the list does with it.** A held chat sorts above every chat nobody is in
+and stands under a heading in place of a date — they sort above the days, so
+writing a day over them printed today twice on one list and explained nothing
+about why they were first (bw-dmxj.11). That heading is "Open elsewhere", which
+is the one thing every row under it has in common; it said "Working now" and
+filed a terminal sitting at a prompt as working, the same swap of occupancy for
+activity corrected everywhere else (bw-96is.15). Held-and-working and
+held-and-idle share the block rather than splitting into two: the list's order
+is held still while the reader is looking at it, so a second block would make a
+chat cross the rail under his hand the moment its terminal fell quiet, while
+what each one is doing is on the row itself and changes without moving. Date alone was the
 wrong order for the question the reader is asking, which is where the work is,
 not what happened most recently: a chat running for an hour writes no more often
 than one read a minute ago, and the list draws a screenful, so the running one

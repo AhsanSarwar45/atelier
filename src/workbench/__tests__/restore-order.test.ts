@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { clockTime, groupRows, WORKING_NOW } from '@/workbench/chat-sidebar';
+import { clockTime, groupRows, OPEN_ELSEWHERE } from '@/workbench/chat-sidebar';
 import { byWhatIsWorking, laterOf, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 
 function row(over: Partial<RestoreRow> = {}): RestoreRow {
@@ -86,9 +86,14 @@ describe('what the list puts first', () => {
 });
 
 /**
- * The blocks the list is drawn in follow from that order: the chats being
- * worked in are first whatever their date, so the heading over them says that,
- * and the days start underneath.
+ * The blocks the list is drawn in follow from that order: the chats another
+ * program holds are first whatever their date, so the heading over them says
+ * that, and the days start underneath.
+ *
+ * The heading is what the block has in common and nothing more. It read
+ * "Working now" and the block is filled by who HOLDS a chat, so a terminal left
+ * at a prompt overnight was filed as working (bw-96is.15) — the same swap of
+ * occupancy for activity this job removed from the row, the pane and the badge.
  *
  * Written in local time, because a heading is a day as the reader's own clock
  * counts it and the run may be anywhere.
@@ -97,11 +102,46 @@ describe('the blocks the list is drawn in', () => {
   const now = new Date(2026, 7, 19, 12, 0, 0);
   const at = (day: number, hour: number) => new Date(2026, 7, day, hour, 0, 0).toISOString();
 
+  it('says only that a held chat is open elsewhere, never that it is working', () => {
+    const quiet = row({
+      sessionId: 'quiet',
+      lastActiveAt: at(19, 9),
+      runningElsewhere: true,
+      // A terminal sitting at a prompt: held, and doing nothing at all.
+      held: { id: 'x1', holder: 'terminal', doing: 'idle', since: null },
+    });
+    const [block] = groupRows([quiet], now);
+    expect(block!.heading).toBe(OPEN_ELSEWHERE);
+    expect(block!.heading.toLowerCase(), 'the heading claims work the holder is not doing').not.toContain('working');
+  });
+
+  it('files a held chat that is working and one that is not under the same heading', () => {
+    // Two blocks would read better and behave worse: the list's order is held
+    // still while the reader looks at it, so a chat whose terminal stopped
+    // would cross from one block to the other under his hand. What each is
+    // doing is on the row, which changes in place.
+    const busy = row({
+      sessionId: 'busy',
+      lastActiveAt: at(19, 11),
+      runningElsewhere: true,
+      held: { id: 'x1', holder: 'terminal', doing: 'working', since: 1 },
+    });
+    const quiet = row({
+      sessionId: 'quiet',
+      lastActiveAt: at(19, 9),
+      runningElsewhere: true,
+      held: { id: 'x2', holder: 'terminal', doing: 'idle', since: null },
+    });
+    const groups = groupRows([busy, quiet], now);
+    expect(groups.map((g) => g.heading)).toEqual([OPEN_ELSEWHERE]);
+    expect(groups[0]!.rows.map((r) => r.sessionId)).toEqual(['busy', 'quiet']);
+  });
+
   it('puts a chat being worked in under its own heading, not under a day', () => {
     const working = row({ sessionId: 'busy', lastActiveAt: at(17, 16), runningElsewhere: true });
     const idle = row({ sessionId: 'idle', lastActiveAt: at(19, 10) });
     const groups = groupRows([working, idle], now);
-    expect(groups.map((g) => g.heading)).toEqual([WORKING_NOW, 'Today']);
+    expect(groups.map((g) => g.heading)).toEqual([OPEN_ELSEWHERE, 'Today']);
     expect(groups[0].rows.map((r) => r.sessionId)).toEqual(['busy']);
   });
 
@@ -115,7 +155,7 @@ describe('the blocks the list is drawn in', () => {
     ];
     const headings = groupRows(rows, now).map((g) => g.heading);
     expect(headings, 'a heading was opened twice').toEqual(Array.from(new Set(headings)));
-    expect(headings).toEqual([WORKING_NOW, 'Today', 'Yesterday']);
+    expect(headings).toEqual([OPEN_ELSEWHERE, 'Today', 'Yesterday']);
   });
 
   it('with nobody working it is the days alone, in the order given', () => {

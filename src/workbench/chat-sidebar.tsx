@@ -55,18 +55,33 @@ export function clockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
-/** What stands over the chats somebody is working in, in place of a date. */
-export const WORKING_NOW = 'Working now';
+/**
+ * What stands over the chats another program is holding, in place of a date.
+ *
+ * It said "Working now", which is the swap this whole job removed: the block
+ * is filled by who holds a chat, not by what they are doing, so a terminal
+ * left at a prompt overnight was filed under a heading that said it was
+ * working. What each of those chats is actually doing is on the row itself,
+ * and the heading says only why they are up here (bw-96is.15).
+ */
+export const OPEN_ELSEWHERE = 'Open elsewhere';
 
 /**
  * Rows in the order given, split into the blocks they are drawn under, without
  * reordering them.
  *
- * A chat being worked in sits at the top whatever its date (protocol.ts,
+ * A chat another program holds sits at the top whatever its date (protocol.ts,
  * byWhatIsWorking), so a day over it would be wrong twice over: it explains a
  * row that is up there for another reason, and it leaves today's heading to be
  * drawn a second time over the idle chats below it (bw-dmxj.11). Those rows get
  * a heading that says why they are first, and the days start under them.
+ *
+ * One block, not two — held-and-working over held-and-idle. The list's order is
+ * held still while the reader is looking at it (holdStill), and a heading here
+ * is never opened twice, so a chat whose terminal stopped working would have to
+ * cross from one block to the other while his hand was moving, or else sit
+ * under a heading the block above already used. What each held chat is doing
+ * this second is on the row itself, where it changes without moving anything.
  *
  * A heading is never opened twice: a row joins the block already carrying its
  * heading. With the list in its own order that is the block above it anyway,
@@ -75,7 +90,7 @@ export const WORKING_NOW = 'Working now';
 export function groupRows(rows: RestoreRow[], now = new Date()): { heading: string; rows: RestoreRow[] }[] {
   const groups: { heading: string; rows: RestoreRow[] }[] = [];
   for (const row of rows) {
-    const heading = row.runningElsewhere ? WORKING_NOW : dayHeading(whenHeSpoke(row), now);
+    const heading = row.runningElsewhere ? OPEN_ELSEWHERE : dayHeading(whenHeSpoke(row), now);
     const already = groups.find((g) => g.heading === heading);
     if (already) already.rows.push(row);
     else groups.push({ heading, rows: [row] });
