@@ -1295,7 +1295,7 @@ helper, so we do not pretend to have one:
    no other door either. The row says the message was relayed, so nobody reads
    a delivered word as a private one.
 
-Five things about the built shape that the tiers above do not tell you, each of
+Six things about the built shape that the tiers above do not tell you, each of
 which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
 
 - **The two direct controls take two different ids.** `stopTask` takes the task
@@ -1337,6 +1337,14 @@ which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
   nothing there to steer with — and a tier not declared is not drawn. The relay
   sends the turn to the parent first and marks the row second, so a row never
   claims a relay that never left.
+- **A click that does not land says so.** All three tiers come back to life the
+  moment the ask is answered, a refusal included — so nothing on the screen
+  tells a refused stop from one that worked unless the refusal itself is drawn,
+  and the reader walks away believing an agent is stopped that is still running.
+  It is drawn where it happened: under the two controls on that row, and under
+  the relay box in the pane, in the far end's own words. The relay also keeps
+  the typed words in the box, because emptying the box is how the pane says they
+  went (bw-7ks.22.34).
 
 **Four faults this closes on the way past**, each of which is why the picture is
 missing today rather than merely thin:

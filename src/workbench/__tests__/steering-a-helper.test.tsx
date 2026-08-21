@@ -71,6 +71,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The same screen, with the far end refusing everything it is asked. */
+function refusing(why: string): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: { body?: string }) => {
+      posted.push(JSON.parse(init?.body ?? '{}') as Record<string, unknown>);
+      return { ok: false, status: 500, text: async () => JSON.stringify({ error: why }) } as Response;
+    }),
+  );
+}
+
 describe('the controls on a row', () => {
   it('draws none at all for a brand that has none', () => {
     // Hidden, not faked: a button that cannot do the thing written on it is
@@ -135,6 +146,45 @@ describe('the controls on a row', () => {
     ]);
   });
 
+  it('says so when the stop does not land', async () => {
+    // The one thing that must never look like success. The button comes back to
+    // life either way, so without this line a refused stop reads exactly like a
+    // stop that worked and the reader walks off believing it is over.
+    refusing('the chat is not answering');
+    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sent-away-stop'));
+    });
+
+    const said = screen.getByTestId('sent-away-steer-error').textContent ?? '';
+    expect(said).toContain('Not stopped');
+    expect(said).toContain('the chat is not answering');
+    // And the controls are still there to try again.
+    expect(screen.getByTestId('sent-away-stop')).toBeEnabled();
+  });
+
+  it('says which one did not land, and forgets it on the next try', async () => {
+    refusing('the chat is not answering');
+    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sent-away-park'));
+    });
+    expect(screen.getByTestId('sent-away-steer-error').textContent).toContain('Not parked');
+
+    // A second attempt that works clears it, rather than leaving a complaint
+    // about something that has since happened.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }) as Response),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sent-away-stop'));
+    });
+    expect(screen.queryByTestId('sent-away-steer-error')).not.toBeInTheDocument();
+  });
+
   it('and opening it is still one click, with the controls beside it', async () => {
     // The row is one big button and the controls sit next to it, not inside it:
     // nested, every click on Stop would also open the pane.
@@ -177,6 +227,23 @@ describe('typing something for a running agent', () => {
     pane(aChatWith(), ['say']);
     expect(screen.getByTestId('agent-view-relay-send')).toBeDisabled();
     expect(posted).toEqual([]);
+  });
+
+  it('says so when the words never left, and keeps them in the box', async () => {
+    // Clearing the box is how this pane says the words went. On a refusal it
+    // keeps them, so the reader can send them again without retyping.
+    refusing('the chat is not answering');
+    pane(aChatWith(), ['say']);
+
+    fireEvent.change(screen.getByTestId('agent-view-relay-text'), { target: { value: 'only the first column' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('agent-view-relay-send'));
+    });
+
+    const said = screen.getByTestId('agent-view-relay-error').textContent ?? '';
+    expect(said).toContain('Not sent');
+    expect(said).toContain('the chat is not answering');
+    expect(screen.getByTestId('agent-view-relay-text')).toHaveValue('only the first column');
   });
 
   it('draws what was relayed as relayed, never as said to it', () => {
