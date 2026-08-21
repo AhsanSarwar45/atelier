@@ -1792,7 +1792,10 @@ so the two cannot contradict: they *have this chat open*, and only when the mark
 says working does the sentence add that they are working in it now. It promises
 the box back when they **let go**, not when they stop — a terminal that has gone
 quiet still holds the conversation, and the box does not return until it exits
-(bw-96is.9).
+(bw-96is.9). What refuses a send is that there is no box to send from, and not
+a flag on the button: the send carried a leftover `|| held` that could never
+come out true, since the branch it lives in only exists while nothing else holds
+the chat, and it is gone (bw-96is.23).
 
 **Three screens say who has the chat, and the sentence is written once.** The
 badge's tooltip, the line where the writing box would be, and the sidecar's
@@ -1853,6 +1856,27 @@ something to say — working, waiting, reachable, or held.
 **One clock for the page.** The seconds come off a single interval shared by
 every chip, so a list of forty rows costs one beat a second rather than forty,
 and the number they are all counting is the same number.
+
+**Two silences, and only one of them may be answered from.** The stream that
+says who holds a chat and what each is doing falls quiet for two different
+reasons, and the screens hold the same `null` in both. Before it has ever
+spoken, what each screen fetched for itself — the open chat's facts, read when
+the pane was opened; a row's, read when the list was drawn — is the freshest
+thing there is, and drawing it is right. After it has spoken and the connection
+has dropped, that same fetch is *older than what was just thrown away*: drawing
+it restarts a mark that had stopped and counts its seconds from whenever the
+pane happened to be opened, through up to the thirty-second retry ceiling, and
+nothing on the screen tells it from a chat somebody is really in. So the store
+remembers whether it has ever been told, and `useHeldFactsAreOld` is the one
+word both screens read — spoken before, silent now. On it each keeps the holder
+and forgets the doing (`holderOnly`): the badge stays, because a terminal does
+not walk away because a browser lost its connection, and the mark and its clock
+go, because that is the half that was changing second by second. Whether a chat
+is held at all is never degraded this way — it still falls back to what the
+fetch said, which is what keeps the writing box shut on somebody else's
+conversation (bw-dmxj.12, bw-96is.22). A drop clears both halves of what the
+stream said; the map of what each holder is doing carried a comment claiming it
+already did, and did not.
 
 ### 8.3 The board tab
 
@@ -2137,6 +2161,16 @@ search, spend, plan usage, the token picture, report viewer), `tests/e2e/workben
   `.claude/settings.json`, one layer above his own file, so a run never reads
   past or writes into anything in his home. Which layer wins is proved in the
   unit cases instead, against real files in a temporary directory.
+
+- `tests/e2e/chat-live.spec.ts` carries this job's wording but has never been
+  run against it: its fixture wants the owner's own instance with a chat
+  actually running in it, which the isolated stack a check run builds cannot
+  provide. What it covers is covered there by `chat-state.spec.ts` against a
+  planted marker; the wording itself is unwatched.
+- No browser check kills the stream mid-session, so a held chat's mark stopping
+  when the connection drops (§8.2.9) is proved at both ends in unit cases — the
+  store's word, the reading, the row builder — and by reverting each half, never
+  on a drawn screen.
 
 - The sidecar runs its TypeScript through a flag node still calls experimental
   (§1.2). It buys a chat server with no build step between an edit and a run,
