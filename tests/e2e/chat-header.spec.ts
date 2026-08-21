@@ -49,6 +49,19 @@ const FIXTURE = join(__dirname, '..', '.workbench-run-header');
 const OUTSIDE = join(__dirname, '..', '.workbench-outside');
 
 /**
+ * And a third, for the chat nobody clicks. It has to be a folder of its own for
+ * the same reason: the case reloads the page onto one chat's address, and a
+ * project offering two would let a leftover answer for it.
+ */
+const ADDRESSED = join(__dirname, '..', '.workbench-addressed');
+
+/** The mode that record opens in, before anybody reloads anything. */
+const FIRST_MODE = 'acceptEdits';
+
+/** And the picker's own words for it. */
+const FIRST_SAID = 'Edit freely';
+
+/**
  * The mode that record is left in. It is the loud one on purpose: the whole
  * reason this line is read is that a chat which has quietly stopped asking
  * before it runs things is a trap.
@@ -142,7 +155,7 @@ test.describe('the line above a conversation', () => {
 
   test.beforeAll(() => {
     mkdirSync(SHOTS, { recursive: true });
-    for (const dir of [FIXTURE, OUTSIDE]) {
+    for (const dir of [FIXTURE, OUTSIDE, ADDRESSED]) {
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(dir, { recursive: true });
     }
@@ -355,6 +368,66 @@ test.describe('the line above a conversation', () => {
       );
 
       await page.screenshot({ path: `${SHOTS}/chat-header-outside-cramped.png`, clip: { ...cramped } });
+    } finally {
+      written.remove();
+    }
+  });
+
+  /**
+   * The same line, above a chat nobody clicked.
+   *
+   * Every other way into a chat is its address: a link on a card, a hit in the
+   * search panel, the browser's own reload. Only a click on a sleeping row in
+   * the list ever told the sidecar a chat was being read, and only that started
+   * the reading of its record — so a reloaded page drew a header frozen at
+   * whatever it said when somebody last clicked, above a conversation that
+   * never grew again (bw-ja9l.8).
+   *
+   * The terminal is put into another mode AFTER the reload, with no click
+   * anywhere in between. A line that answers that can only have read the file.
+   */
+  test('reads the record for a chat opened by its address alone', async ({ page, request }) => {
+    const project = await fixtureProject(request, 'workbench-header-addressed', ADDRESSED);
+    const written = writeChatWithHelper({
+      cwd: ADDRESSED,
+      sessionId: randomUUID(),
+      card: 'bw-ja9l',
+    });
+    appendFileSync(
+      written.path,
+      JSON.stringify({ type: 'permission-mode', permissionMode: FIRST_MODE, sessionId: written.sessionId }) + '\n',
+    );
+
+    try {
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: HELLO_MS });
+      const listed = page.locator(`[data-testid="restore-row"][data-external-id="${written.sessionId}"]`);
+      await listed.waitFor({ timeout: HELLO_MS });
+      await listed.getByTestId('row-name').click();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+      await expect(page.getByTestId('chat-mode-chip')).toHaveText(FIRST_SAID, { timeout: HELLO_MS });
+
+      // From here the address is the whole of what the screen is told: the
+      // reload takes the click out of it and nothing puts one back.
+      expect(page.url(), 'the chat is not named in the address').toContain('chat=');
+      await page.reload();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+
+      const mode = page.getByTestId('chat-mode-chip');
+      const model = page.getByTestId('chat-model-chip');
+      await expect(mode).toHaveText(FIRST_SAID, { timeout: HELLO_MS });
+      await expect(model).toHaveText(RUNNING_MODEL_SAID);
+      await expect(model).toHaveAttribute('data-model', RUNNING_MODEL);
+
+      // Read rather than remembered: the mode changes with the page already
+      // standing, and the line has to answer it.
+      appendFileSync(
+        written.path,
+        JSON.stringify({ type: 'permission-mode', permissionMode: RUNNING_MODE, sessionId: written.sessionId }) + '\n',
+      );
+      await expect(mode).toHaveText(RUNNING_SAID, { timeout: HELLO_MS });
+      await expect(mode).toHaveAttribute('data-mode', RUNNING_MODE);
+      await expect(mode).toHaveAttribute('data-tone', 'destructive');
     } finally {
       written.remove();
     }

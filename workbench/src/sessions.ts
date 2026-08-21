@@ -1544,6 +1544,36 @@ export class Sessions {
     for (const sub of this.watchers) sub(full);
   }
 
+  /**
+   * A chat somebody has started reading, however they arrived at it.
+   *
+   * Watching a chat this app does not drive is what puts the chat's own record
+   * on the screen: what it is running, and every line it grows while the reader
+   * is there. That watching was only ever started from one place — the click on
+   * a sleeping row in the list — and the address bar is the other way in. So a
+   * chat opened by its own address, and a click on a chat already working,
+   * which the list hands straight to the screen without asking us, both drew a
+   * header that said nothing and a conversation that never grew (bw-ja9l.8).
+   *
+   * The stream starts it instead, which is the half that was missing:
+   * `subscribe` below already stops the watching when the last reader leaves.
+   * A chat this app is driving needs none of it — its driver is the one writing
+   * the record this would be reading.
+   */
+  async lookedAt(sessionId: string): Promise<void> {
+    const summary = this.store.getSession(sessionId);
+    if (!summary) return;
+    if (this.drivers.has(sessionId) || this.followers.has(sessionId)) return;
+    try {
+      const live = this.heldElsewhere(summary);
+      this.follow(summary, await this.importPast(summary, live));
+    } catch {
+      // A record that has been moved, pruned, or never written. The chat still
+      // has whatever this app stored for it, and that is what the reader is
+      // shown; a click handles the same thing the same way.
+    }
+  }
+
   subscribe(sessionId: string, fn: Subscriber): () => void {
     if (!this.subs.has(sessionId)) this.subs.set(sessionId, new Set());
     this.subs.get(sessionId)!.add(fn);

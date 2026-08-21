@@ -275,6 +275,10 @@ const server = createServer((req, res) => {
         const sessionId = url.searchParams.get('session');
         if (!sessionId) return json(res, 400, { error: 'session is required' });
         const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0);
+        // Reading a chat is what starts the watching of it. Before the frame
+        // below goes out, so a reader who arrived by the address alone is
+        // caught up exactly as far as one who clicked the row (bw-ja9l.8).
+        await sessions.lookedAt(sessionId);
         streamEvents(req, res, sessionId, Number.isFinite(since) ? since : 0);
       } else if (path === '/search' && req.method === 'GET') {
         const q = (url.searchParams.get('q') ?? '').trim();
