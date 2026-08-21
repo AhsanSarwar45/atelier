@@ -3,6 +3,7 @@
 //! An Axum-based HTTP server that serves the screens and answers the API
 //! behind them. The one name the product answers to lives in `identity.rs`.
 
+mod command_line;
 mod db;
 mod dolt;
 mod helper;
@@ -93,10 +94,6 @@ async fn serve_static(req: Request<Body>) -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() {
-    // Where this computer keeps this program's data, printed and nothing else.
-    // The report command runs from a shell and needs the same answer this
-    // program uses; asking the program is what stops it working the three
-    // per-platform paths out a second time in bash (bw-pqt.24).
     // An install made under the earlier name is carried across before anything
     // reads the settings, so a person who upgrades finds their projects where
     // they left them rather than an empty list (bw-8um.3.8).
@@ -104,17 +101,38 @@ async fn main() {
         eprintln!("the earlier install could not be carried over: {e}");
     }
 
-    if env::args().nth(1).as_deref() == Some("--data-dir") {
-        match identity::data_dir() {
+    match command_line::asked(env::args().skip(1)) {
+        command_line::Ask::Run { open_browser } => serve(open_browser).await,
+        command_line::Ask::Help => print!("{}", command_line::help()),
+        command_line::Ask::Version => println!("{}", command_line::version()),
+        // Where this computer keeps this program's data, printed and nothing
+        // else. The report command runs from a shell and needs the same answer
+        // this program uses; asking the program is what stops it working the
+        // three per-platform paths out a second time in bash (bw-pqt.24).
+        command_line::Ask::DataDir => match identity::data_dir() {
             Some(dir) => println!("{}", dir.display()),
             None => {
                 eprintln!("this computer names no folder for a program's data");
                 std::process::exit(1);
             }
+        },
+        // It used to start the server for anything it did not recognise, so a
+        // mistyped flag looked like it had been taken and quietly wasn't.
+        command_line::Ask::Unknown(word) => {
+            eprintln!("{}: `{word}` is not something it does.\n", identity::NAME);
+            eprint!("{}", command_line::help());
+            std::process::exit(2);
         }
-        return;
     }
+}
 
+/// Bring the whole product up.
+///
+/// The server, the screens it serves and the chat helper behind them, in one
+/// process tree. There is no second thing to start: the screens are embedded
+/// in this binary and the helper is a child of this process, which is what
+/// makes `atelier run` the whole of it (bw-8um.3.12).
+async fn serve(open_browser: bool) {
     // Initialize tracing subscriber for logging
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
@@ -133,7 +151,7 @@ async fn main() {
         .or_else(|_| env::var("PORT"))
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(3008);
+        .unwrap_or(command_line::PORT);
 
     // Configure CORS for development
     let cors = CorsLayer::new()
@@ -268,7 +286,12 @@ async fn main() {
 
     info!("{} is serving http://{}", identity::DISPLAY, addr);
 
-    if env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {
+    // One command, and the reader is looking at the board — not reading a port
+    // number out of a log line and typing it into a browser themselves.
+    println!("{} is running. Open http://localhost:{}", identity::DISPLAY, port);
+    println!("The screens and the chat are inside this program; there is nothing else to start.");
+
+    if open_browser || env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {
         if let Err(e) = open::that(format!("http://localhost:{}", port)) {
             tracing::warn!("Failed to open browser: {}", e);
         }

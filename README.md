@@ -154,16 +154,32 @@ winget install weselow.atelier
 
 ### Run
 
+One command brings the whole thing up — the board, the screens and the chat —
+and opens it in your browser:
+
 ```bash
 # macOS/Linux — make executable, then run
 chmod +x atelier-*
-./atelier-darwin-arm64
+./atelier-darwin-arm64 run
 
 # Windows
-atelier-win-x64.exe
+atelier-win-x64.exe run
 ```
 
-Open http://localhost:3008. The frontend is embedded in the binary — no Node.js or Rust needed.
+There is nothing else to start: the screens are embedded in the binary and the
+chat helper is started beside it. No Node.js or Rust needed.
+
+| Command | What it does |
+|---------|--------------|
+| `atelier run` | Start everything and open the board in your browser |
+| `atelier run --no-browser` | The same, without opening a browser |
+| `atelier` | The same as `run --no-browser` |
+| `atelier --data-dir` | Print where this computer keeps Atelier's data |
+| `atelier --version` | Print which build this is |
+| `atelier --help` | List the above |
+
+It serves on http://localhost:3008 unless `ATELIER_PORT` says otherwise;
+`ATELIER_HOST` sets the address it binds.
 
 ## Development
 
