@@ -307,7 +307,25 @@ export type WbpEvent = EventBase &
      * on the page, `detail` is hidden until the reader asks for everything. Both
      * are stored, because the log IS the transcript (§4).
      */
-    | { type: 'note'; noteId: string; rank: NoteRank; kind: string; text: string; body: string | null }
+    | {
+        type: 'note';
+        noteId: string;
+        rank: NoteRank;
+        kind: string;
+        text: string;
+        body: string | null;
+        /**
+         * Who this exact line is for, when the STATE decided it.
+         *
+         * `rank` cannot carry the answer: it has two values, and an allowance
+         * filling up and an allowance that has stopped his work are two states
+         * of one kind that must land on different sides. The driver has the
+         * state and settles it there; a note without this is one whose whole
+         * kind has a single reader, and `machine-lines.ts` says which
+         * (bw-iiv6, docs/agent-workbench.md §8.2.4).
+         */
+        audience?: Audience;
+      }
     /**
      * Drop everything drawn so far; what follows replaces it.
      *

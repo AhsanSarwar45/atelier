@@ -136,9 +136,14 @@ describe('what a chat says about the work it sent away', () => {
     expect(everythingSaid(FIVE)).toEqual([
       'Sent off: Sleep 45 seconds then report',
       'Retrying (2 of 5) after HTTP 529',
-      'Slept and reported (completed)',
-      'Could not read the file (failed)',
-      'Given up on (stopped)',
+      // The line names the agent and then says, in English, what became of it.
+      // It used to end in the kit's own word in brackets — "(completed)" — which
+      // reads as English only for as long as the kit's words happen to be
+      // English (bw-iiv6).
+      'Sleep 45 seconds then report finished: Slept and reported',
+      // These two are other agents, whose going off this chat never heard.
+      'A sent-off agent failed: Could not read the file',
+      'A sent-off agent was stopped: Given up on',
     ]);
   });
 
@@ -148,7 +153,7 @@ describe('what a chat says about the work it sent away', () => {
     // leaving, arriving home fine, or being given up on is the panel's news.
     expect(readerSees(FIVE)).toEqual([
       'Retrying (2 of 5) after HTTP 529',
-      'Could not read the file (failed)',
+      'A sent-off agent failed: Could not read the file',
     ]);
   });
 
@@ -165,7 +170,7 @@ describe('what a chat says about the work it sent away', () => {
     // "DONE (completed)" from the chat, and the panel said finished while the
     // conversation never said it came home.
     const said = everythingSaid([SENT_OFF, ANSWERED, ended('afa98b872c4df37bc', 'completed', 'DONE')]);
-    expect(said).toEqual(['Sent off: Sleep 45 seconds then report', 'DONE (completed)']);
+    expect(said).toEqual(['Sent off: Sleep 45 seconds then report', 'Sleep 45 seconds then report finished: DONE']);
   });
 
   it('and still says the chat’s own, with a helper’s work in among it', () => {
@@ -175,6 +180,9 @@ describe('what a chat says about the work it sent away', () => {
       ended('br1aixx0b', 'completed', 'Slept'),
       ended('afa98b872c4df37bc', 'completed', 'Slept and reported'),
     ]);
-    expect(said).toEqual(['Sent off: Sleep 45 seconds then report', 'Slept and reported (completed)']);
+    expect(said).toEqual([
+      'Sent off: Sleep 45 seconds then report',
+      'Sleep 45 seconds then report finished: Slept and reported',
+    ]);
   });
 });

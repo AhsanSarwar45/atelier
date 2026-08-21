@@ -50,6 +50,7 @@ import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
+import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { openableIn } from '@/workbench/mentions';
 import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
@@ -983,7 +984,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               testid="mode-picker"
               current={view.permissionMode}
               asleep={asleep}
-              options={view.menu.permissionModes.map((m) => ({ value: m, label: m }))}
+              // The setting's own spelling is not a label: `bypassPermissions`
+              // is what he has to read to know whether this chat still asks
+              // (src/workbench/machine-words.ts, bw-iiv6).
+              options={view.menu.permissionModes.map((m) => ({
+                value: m,
+                label: PERMISSION_MODE[m]?.label ?? inWords(m),
+              }))}
               onPick={(mode) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.mode', sessionId, mode }).catch((e: unknown) =>

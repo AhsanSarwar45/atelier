@@ -30,6 +30,7 @@
  * the real sorting instead of keeping a copy of it that goes stale
  * (scripts/chat-shows-what-is-yours.mjs, bw-6jq5.4).
  */
+import { inWords, PERMISSION_MODE, saidOf } from '@/workbench/machine-words';
 import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -126,6 +127,14 @@ const BY_KIND: Record<string, MachineFamily | Record<NoteRank, MachineFamily>> =
   'system/hook_started': 'breathing',
   'system/hook_progress': 'breathing',
   tool_use_summary: 'breathing',
+  'system/control_request_progress': 'breathing',
+  'system/elicitation_complete': 'breathing',
+  // A chat waiting on him is the one state here he can act on; the others are
+  // it going quiet and picking up again (bw-iiv6).
+  'system/session_state_changed': { note: 'waiting', detail: 'breathing' },
+  // Files he attached, put away. A file that did not arrive is one the agent
+  // will never see, and he is the one who can send it again.
+  'system/files_persisted': { note: 'failed', detail: 'breathing' },
 
   // The app's own asides to the reader, when the record predates families.
   'app/notice': 'background',
@@ -217,6 +226,14 @@ const FOR: Record<string, Audience | Record<NoteRank, Audience>> = {
   'system/informational': 'machine',
   'system/notification': 'machine',
   tool_use_summary: 'machine',
+  'system/control_request_progress': 'machine',
+  'system/elicitation_complete': 'machine',
+
+  // A chat that has stopped and is waiting on him is his; a chat going quiet or
+  // picking up again is not. An attachment that failed to store is his, because
+  // only he can send the file again (bw-iiv6).
+  'system/session_state_changed': { note: 'you', detail: 'machine' },
+  'system/files_persisted': { note: 'you', detail: 'machine' },
 };
 
 /**
@@ -241,6 +258,77 @@ export function forWhom(kind: string, rank: NoteRank): Audience {
   const found = FOR[kind];
   if (found === undefined) return 'machine';
   return typeof found === 'string' ? found : found[rank];
+}
+
+/**
+ * Who a line written before the driver carried an audience is for, read off the
+ * wording it was frozen with.
+ *
+ * One kind needs this and one only. An allowance line's whole meaning is its
+ * state, and the state used to reach the page as the kit's own word inside the
+ * sentence — "the seven-day window is allowed_warning" — while the only thing
+ * this file was given to sort on was how loud the line was. Loud meant "not
+ * simply open", so a window merely filling up and a window that had actually
+ * stopped his work were one thing to it, and both landed in front of him. That
+ * is the manager's complaint of 2026-08-21, and thirty-four of these are
+ * already in his record with their wording frozen (bw-x6hb).
+ *
+ * So the old sentence is READ rather than rewritten: only one that says the
+ * work was turned away is his. Nothing else is inspected this way — every other
+ * kind either has one reader whatever its state, or already told the two apart
+ * by loudness. New lines never come here at all: the driver settles them at the
+ * state and says so on the note (bw-iiv6).
+ */
+function heldOver(kind: string, text: string): Audience | null {
+  if (kind !== 'rate_limit_event') return null;
+  return /\brejected\b/.test(text) ? 'you' : 'machine';
+}
+
+/**
+ * A frozen sentence said again in English, for the one line that must be read.
+ *
+ * The same freezing (bw-x6hb) left thirty-seven "Permission mode is now
+ * bypassPermissions." lines in the record, and this is not a line he can skip:
+ * it is the announcement that a chat has stopped asking before it runs things.
+ * The driver writes the English one now; these are the ones already written, and
+ * they are restated on the way to the screen rather than left in the setting's
+ * own spelling. Only the mode word is looked at, so a sentence that has been
+ * reworded since simply passes through untouched.
+ */
+const SAID_INSTEAD: Record<string, string> = {
+  rate_limit_event: 'Your usage allowance changed.',
+  'system/background_tasks_changed': 'The list of background jobs changed.',
+  'system/task_updated': 'Something changed about an agent you sent off.',
+};
+
+/** What the old allowance sentence called each window, in today's words. */
+const WINDOW_WAS: Record<string, string> = { 'seven-day': 'weekly', 'five-hour': 'five-hour' };
+
+function saidAgain(kind: string, text: string): string {
+  // A line with no sentence at all: the driver used to fall back to printing
+  // the kind, so thirty-seven rows in the record read `rate_limit_event`.
+  if (text === kind) return SAID_INSTEAD[kind] ?? text;
+
+  if (kind === 'mode') {
+    const was = /^Permission mode is now (\w+)\.$/.exec(text);
+    return was
+      ? `This chat will now ${PERMISSION_MODE[was[1]]?.said ?? inWords(was[1]).toLowerCase()}.`
+      : text;
+  }
+
+  if (kind === 'rate_limit_event') {
+    // "Allowance: the seven-day window is allowed_warning until 12:00 PM" — the
+    // line from the manager's screenshot of 2026-08-21, and the reason all this
+    // exists. `open` was our own word for a window with room left in it.
+    const was = /^Allowance: the ([\w-]+) window is (\w+)(?: until (.+))?$/.exec(text);
+    if (!was) return text;
+    const window = WINDOW_WAS[was[1]] ?? was[1];
+    const said = saidOf(kind, was[2] === 'open' ? 'allowed' : was[2]);
+    if (!said) return text;
+    return `Your ${window} allowance ${said}${was[3] ? ` (it renews at ${was[3]}).` : '.'}`;
+  }
+
+  return text;
 }
 
 /**
@@ -402,10 +490,15 @@ function machineLine(item: TranscriptItem): {
     return {
       id: item.id,
       family: familyOf(item.noteKind, item.rank),
-      audience: forWhom(item.noteKind, item.rank),
+      // What the driver settled from the message's own state wins: it read the
+      // state, and this file only has the kind and how loud the line is. A note
+      // without one — a kind with a single reader, or a line written before
+      // there were audiences — falls back to the wording it was frozen with,
+      // and then to the ruling for the kind (bw-iiv6).
+      audience: item.audience ?? heldOver(item.noteKind, item.text) ?? forWhom(item.noteKind, item.rank),
       kind: item.noteKind,
       rank: item.rank,
-      text: item.text,
+      text: saidAgain(item.noteKind, item.text),
       body: item.body,
     };
   }

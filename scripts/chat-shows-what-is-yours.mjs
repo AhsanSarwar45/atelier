@@ -37,8 +37,15 @@ import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
-import { drawnRows, forWhom, OFF_BY_DEFAULT } from '../src/workbench/machine-lines.ts';
-import { ClaudeDriver } from '../workbench/src/drivers/claude.ts';
+// The app's files import each other by the `@/` alias, which only the bundler
+// and the typechecker know. Teaching node the same thing has to happen before
+// they are LINKED, not merely before they run — so the alias is registered here
+// and they are pulled in on the line after, by hand (bw-iiv6).
+import './at-alias.mjs';
+
+const { drawnRows, forWhom, OFF_BY_DEFAULT } = await import('../src/workbench/machine-lines.ts');
+const { SAID_NOTHING, WORDS } = await import('../src/workbench/machine-words.ts');
+const { ClaudeDriver } = await import('../workbench/src/drivers/claude.ts');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -270,6 +277,167 @@ const onOpening = modeRows(OPENING);
 const afterSwitch = modeRows(SWITCHED) - onOpening;
 
 /* ------------------------------------------------------------------ *
+ * 4. The kit's own type file: is every kind, and every state, named?
+ * ------------------------------------------------------------------ */
+
+/**
+ * The kit's types, read as text.
+ *
+ * As text on purpose. The point is to catch the day the kit grows a state
+ * nobody here has read — and a check that imported the types would compile
+ * happily against exactly that, because a new member of a union is not a type
+ * error anywhere until something switches on it.
+ */
+const KIT = readFileSync(
+  join(REPO, 'workbench', 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'sdk.d.ts'),
+  'utf8',
+);
+
+/** One type declaration out of the kit's file, whole. */
+function declared(name) {
+  const opens = `declare type ${name} = `;
+  const at = KIT.indexOf(opens);
+  if (at < 0) return null;
+  // A block of fields ends on its own brace; a one-line alias ends on the first
+  // semicolon. Told apart by what follows the equals sign, because a block's
+  // first field also ends in a semicolon and cutting there loses the rest.
+  const body = at + opens.length;
+  const shut = KIT[body] === '{' ? KIT.indexOf('\n};', body) : KIT.indexOf(';', body);
+  return shut < 0 ? KIT.slice(body) : KIT.slice(body, shut);
+}
+
+/** Every string the kit spells out for one property, following one alias. */
+function statesTheKitDeclares(typeName, field) {
+  const block = declared(typeName);
+  if (block === null) return null;
+  const at = block.search(new RegExp(`\\n[ \\t]*${field}\\??:`));
+  if (at < 0) return null;
+  const said = block.slice(at, block.indexOf(';', at));
+  const spelled = Array.from(said.matchAll(/'([^']+)'/g)).map((m) => m[1]);
+  if (spelled.length > 0) return spelled;
+  // `status: SDKStatus` — the literals are one hop away.
+  const alias = said.match(/:\s*([A-Za-z][\w.]*)/);
+  const followed = alias ? declared(alias[1].replace(/^\w+\./, '')) : null;
+  return followed === null ? null : Array.from(followed.matchAll(/'([^']+)'/g)).map((m) => m[1]);
+}
+
+/**
+ * Every kind of message the kit says it can send.
+ *
+ * Read off the SDKMessage union and then out of each member's own declaration,
+ * so a kind the kit adds is a kind this check knows about the day it lands.
+ */
+function kindsTheKitDeclares() {
+  const union = declared('SDKMessage');
+  const members = Array.from(union.matchAll(/\b(SDK\w+)\b/g)).map((m) => m[1]).filter((n) => n !== 'SDKMessage');
+  const kinds = new Set();
+  const follow = (name, depth) => {
+    const block = declared(name);
+    if (block === null || depth > 2) return;
+    const type = block.match(/^\s*type: '([^']+)'/m);
+    if (!type) {
+      // An alias over more members — SDKResultMessage is two.
+      for (const inner of Array.from(block.matchAll(/\b(SDK\w+)\b/g)).map((m) => m[1])) {
+        if (inner !== name) follow(inner, depth + 1);
+      }
+      return;
+    }
+    const subtype = block.match(/^\s*subtype: '([^']+)'/m);
+    kinds.add(type[1] === 'system' && subtype ? `system/${subtype[1]}` : type[1]);
+  };
+  for (const name of members) follow(name, 0);
+  return [...kinds];
+}
+
+/**
+ * Kinds that never become a machine line, because the chat draws them as
+ * something better. Each one is answered somewhere else on the screen, and the
+ * reason is written beside it so that "it does not appear" can be told from
+ * "nobody thought about it" — which is the whole fault this check exists for.
+ */
+const DRAWN_ELSEWHERE = {
+  assistant: "the agent's own words, drawn as the reply",
+  user: 'what he typed, drawn as his own message',
+  result: 'the end of a turn, drawn on the chip that says what the chat is doing',
+  stream_event: 'the reply arriving a word at a time',
+  tool_progress: 'how long a call has been running, drawn on the call',
+  'system/init': 'the chat opening, which is the chat existing',
+  'system/task_progress': "what a sent-off agent is doing, drawn on that agent's own row",
+};
+
+const kitKinds = kindsTheKitDeclares();
+const cased = new Set(known);
+const undecided = kitKinds.filter(
+  (kind) => !cased.has(kind) && !(kind in SAID_NOTHING) && !(kind in DRAWN_ELSEWHERE),
+);
+
+/** A state the kit spells out that this app has no word and no ruling for. */
+const unnamed = [];
+/** A state this app names that the kit no longer declares, and never called its own. */
+const invented = [];
+for (const [kind, words] of Object.entries(WORDS)) {
+  const ours = new Set(Object.keys(words.ours));
+  const theirs = words.kit === null ? null : statesTheKitDeclares(words.kit.type, words.kit.field);
+  if (words.kit !== null && theirs === null) {
+    unnamed.push(`${kind}: the kit no longer declares ${words.kit.type}.${words.kit.field}`);
+    continue;
+  }
+  for (const state of theirs ?? []) {
+    if (state !== 'null' && !(state in words.states)) unnamed.push(`${kind}.${state}`);
+  }
+  for (const state of Object.keys(words.states)) {
+    if (!ours.has(state) && !(theirs ?? []).includes(state)) invented.push(`${kind}.${state}`);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 5. Every kind in every state, through the real driver: whose words?
+ * ------------------------------------------------------------------ */
+
+/**
+ * A word that could only have come off the wire.
+ *
+ * Not a list of the kit's own strings, because half of them are ordinary
+ * English a sentence is entitled to — a helper really did fail, a rule really
+ * did run. What no sentence ever wants is a word SHAPED like an identifier:
+ * one with an underscore inside it, or a capital letter inside it. That is
+ * exactly the class that reached his screen — `allowed_warning`, `PreToolUse`,
+ * `error_max_turns`, `api_retry` — and no English word is ever mistaken for it.
+ */
+const OFF_THE_WIRE = /\b[a-z]+(?:_[a-z]+)+\b|\b[a-z]+[A-Z]\w*\b|\b[A-Z][a-z]+[A-Z]\w*\b/;
+
+/** Every kind and state the table names, one message each, through the driver. */
+const everyState = [];
+for (const [kind, words] of Object.entries(WORDS)) {
+  for (const state of Object.keys(words.states)) everyState.push({ kind, state, words });
+}
+
+const spoke = [];
+for (const { kind, state, words } of everyState) {
+  const { said } = notesFrom([words.sample(state)]);
+  const note = said.find((n) => n.kind === kind) ?? null;
+  spoke.push({ kind, state, note, want: words.states[state] });
+}
+
+/** A drawn line still carrying a word from the wire. */
+const wired = spoke.filter(({ note }) => note && OFF_THE_WIRE.test(String(note.text)));
+/** A state that draws nothing at all, so nobody can read what happened. */
+const silent = spoke.filter(({ note }) => note === null);
+/** A state whose line lands in front of the wrong reader. */
+const misfiled = spoke.filter(
+  ({ note, want }) => note && (note.audience ?? forWhom(note.kind, note.rank)) !== want.who,
+);
+
+/** And the same question of the record: what he is shown, in whose words. */
+let drawnWired = 0;
+for (const items of chats.values()) {
+  for (const row of drawnRows(items)) {
+    if (row.row !== 'machine' || hidden.has(row.audience)) continue;
+    for (const line of row.lines) if (OFF_THE_WIRE.test(line.text)) drawnWired += 1;
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * The verdicts.
  * ------------------------------------------------------------------ */
 
@@ -279,6 +447,12 @@ const faults = [];
 if (leaked.length > 0) faults.push(`${leaked.length} kinds on the machine's own side are drawn unasked`);
 if (nameless.length > 0) faults.push(`${nameless.length} kinds draw their own wire name`);
 if (broke.length > 0) faults.push(`${broke.length} kinds crashed the driver`);
+if (undecided.length > 0) faults.push(`${undecided.length} kinds the kit sends, nobody has decided about`);
+if (unnamed.length > 0) faults.push(`${unnamed.length} states the kit declares have no words here`);
+if (invented.length > 0) faults.push(`${invented.length} states are named here that the kit does not declare`);
+if (wired.length > 0) faults.push(`${wired.length} states draw a word off the wire`);
+if (silent.length > 0) faults.push(`${silent.length} states draw no line at all`);
+if (misfiled.length > 0) faults.push(`${misfiled.length} states land in front of the wrong reader`);
 if (onOpening !== 0) faults.push(`a chat that just opened announced its mode ${onOpening} times`);
 if (afterSwitch !== 1) faults.push(`switching the mode said so ${afterSwitch} times, not once`);
 
@@ -294,6 +468,21 @@ console.log(
   }`,
 );
 console.log(
+  `  ${mark(undecided.length === 0 && unnamed.length === 0 && invented.length === 0)} Every kind and state the kit declares is named — ${kitKinds.length} kinds, ${everyState.length} states over ${Object.keys(WORDS).length} of them.${
+    [...undecided, ...unnamed, ...invented].length === 0 ? '' : ` — ${[...undecided, ...unnamed, ...invented].join(', ')}`
+  }`,
+);
+console.log(
+  `  ${mark(wired.length === 0 && silent.length === 0)} No state draws a word off the wire, and none draws nothing.${
+    [...wired, ...silent].length === 0 ? '' : ` — ${[...wired, ...silent].map((s) => `${s.kind}.${s.state}`).join(', ')}`
+  }`,
+);
+console.log(
+  `  ${mark(misfiled.length === 0)} Every state lands in front of the reader it was ruled for.${
+    misfiled.length === 0 ? '' : ` — ${misfiled.map((s) => `${s.kind}.${s.state}`).join(', ')}`
+  }`,
+);
+console.log(
   `  ${mark(onOpening === 0 && afterSwitch === 1)} A chat that just opened announces no mode; switching it says so once. — opened ${onOpening}, switched ${afterSwitch}`,
 );
 if (broke.length > 0) console.log(`  ${mark(false)} The driver threw on: ${broke.join('; ')}`);
@@ -301,6 +490,12 @@ if (broke.length > 0) console.log(`  ${mark(false)} The driver threw on: ${broke
 // Sentences frozen into old records are a different fault with its own card:
 // the wording is written down when the line is written, so fixing a sentence
 // never reaches a chat that already holds it (bw-x6hb). Said, never counted.
+if (drawnWired > 0) {
+  console.log(
+    `\n  Note: ${drawnWired} of the ${rowsDrawn} rows he is shown still carry a word off the wire, frozen into the record` +
+      ' when they were written and beyond this build to reword (bw-x6hb).',
+  );
+}
 if (wireNamed.size > 0) {
   const total = [...wireNamed.values()].reduce((n, c) => n + c, 0);
   console.log(

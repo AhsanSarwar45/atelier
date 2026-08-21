@@ -92,6 +92,12 @@ export interface TranscriptNote {
   noteKind: string;
   text: string;
   body: string | null;
+  /**
+   * Who this line is for, when the driver settled it from the message's own
+   * state. Absent on a line whose whole kind has one reader, and on every line
+   * written before there were audiences (bw-iiv6).
+   */
+  audience?: Audience;
 }
 
 export interface TranscriptAsk {
@@ -384,7 +390,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'note':
-      next.items = [...items, { kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body }];
+      next.items = [
+        ...items,
+        { kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body, audience: e.audience },
+      ];
       return next;
 
     case 'tool.progress':
@@ -800,7 +809,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       }
 
       case 'note':
-        items.push({ kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body });
+        items.push({ kind: 'note', id: e.noteId, rank: e.rank, noteKind: e.kind, text: e.text, body: e.body, audience: e.audience });
         break;
 
       case 'todo':

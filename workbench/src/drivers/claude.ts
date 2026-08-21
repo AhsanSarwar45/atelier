@@ -12,7 +12,8 @@
 import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
-import type { AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
+import { ALLOWANCE_WINDOW, HOOK_MOMENT, inWords, PERMISSION_MODE, saidOf, TURN_ENDED, whoFor } from '../../../src/workbench/machine-words.ts';
+import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
 import { fullness, WINDOW, windowNamed } from '../../../src/workbench/context-window.ts';
@@ -52,6 +53,17 @@ interface Note {
   kind: string;
   text: string;
   body?: string;
+  /**
+   * Who this exact line is for, when the STATE decides it rather than the kind.
+   *
+   * An allowance filling up and an allowance that has stopped his work are one
+   * kind and two different readers, and the screen cannot tell them apart — it
+   * has the kind and how loud the line is, and that is two values where the kit
+   * declares four states. So the part of the app that HAS the state answers,
+   * and the answer rides on the note. Left off where the whole kind has one
+   * reader: that ruling lives once, in `machine-lines.ts` (bw-iiv6).
+   */
+  audience?: Audience;
   /**
    * Drawn even when the same sentence just went past.
    *
@@ -100,18 +112,6 @@ function spokenIn(m: Record<string, any>): string | null {
   }
   return null;
 }
-
-/** What the kit's own word for a task's state reads as in a sentence. */
-const TASK_SAID: Record<string, string> = {
-  pending: 'is waiting to start',
-  running: 'is running',
-  paused: 'is parked',
-  completed: 'has finished',
-  failed: 'failed',
-  killed: 'was stopped',
-  stopped: 'was stopped',
-};
-
 
 /** The kit's name for one message, as the branches below spell it. */
 function kindOf(m: Record<string, any>): string {
@@ -254,31 +254,56 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
   switch (kind) {
     // The answer to /compact, and the only place the reason lives.
     case 'system/status': {
-      if (m.compact_result === 'failed') {
-        return { rank: 'note', kind, text: `Could not compact: ${oneLine(m.compact_error ?? 'no reason given')}` };
+      const state =
+        m.compact_result === 'failed'
+          ? 'compact_failed'
+          : m.compact_result === 'success'
+            ? 'compacted'
+            : m.status === null || m.status === undefined
+              ? 'idle'
+              : String(m.status);
+      const said = saidOf(kind, state);
+      const who = whoFor(kind, state) ?? 'machine';
+      if (state === 'compact_failed') {
+        return { rank: 'note', kind, audience: who, text: `${said}: ${oneLine(m.compact_error ?? 'no reason given')}` };
       }
-      if (m.compact_result === 'success') return { rank: 'note', kind, text: 'Compacted this chat.' };
-      // 'requesting' on every single request, 'compacting' while it works: the
-      // machine breathing, not something it is telling him.
-      return { rank: 'detail', kind, text: `Status: ${oneLine(m.status ?? 'none')}`, body: String(m.status ?? '') };
+      if (state === 'compacted') return { rank: 'note', kind, audience: who, text: String(said) };
+      // A ping on every single request, and the work of folding up: the machine
+      // breathing, not something it is telling him.
+      return {
+        rank: 'detail',
+        kind,
+        audience: who,
+        text: said ?? 'The chat is in a state this build has no words for.',
+        body: whole(),
+      };
     }
 
     case 'system/compact_boundary': {
       const meta = m.compact_metadata ?? {};
       const size = meta.post_tokens ? `${meta.pre_tokens} → ${meta.post_tokens} tokens` : `${meta.pre_tokens} tokens`;
-      return { rank: 'note', kind, text: `Compacted (${meta.trigger ?? 'manual'}): ${size}` };
+      const state = String(meta.trigger ?? 'manual');
+      const said = saidOf(kind, state) ?? 'This chat folded itself up';
+      return { rank: 'note', kind, audience: whoFor(kind, state) ?? 'you', text: `${said}: ${size}.` };
     }
 
     case 'system/informational':
       return {
         rank: INFORMATIONAL_RANK[String(m.level)] ?? 'note',
         kind,
+        audience: whoFor(kind, String(m.level)) ?? 'machine',
         text: oneLine(m.content),
         body: String(m.content ?? ''),
       };
 
     case 'system/notification':
-      return { rank: m.priority === 'low' ? 'detail' : 'note', kind, text: oneLine(m.text), body: String(m.text ?? '') };
+      return {
+        rank: m.priority === 'low' ? 'detail' : 'note',
+        kind,
+        audience: whoFor(kind, String(m.priority)) ?? 'machine',
+        text: oneLine(m.text),
+        body: String(m.text ?? ''),
+      };
 
     case 'system/api_retry':
       return {
@@ -299,8 +324,16 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     case 'system/model_refusal_no_fallback':
       return { rank: 'note', kind, text: oneLine(m.content), body: String(m.content ?? '') };
 
-    case 'system/model_refusal_fallback':
-      return { rank: 'note', kind, text: `${m.original_model} refused; ${m.direction} to ${m.fallback_model}` };
+    case 'system/model_refusal_fallback': {
+      const state = String(m.direction ?? 'retry');
+      const said = saidOf(kind, state) ?? 'and the chat carried on with';
+      return {
+        rank: 'note',
+        kind,
+        audience: whoFor(kind, state) ?? 'you',
+        text: `${oneLine(m.original_model ?? 'The model')} would not answer, ${said} ${oneLine(m.fallback_model ?? 'another model')}.`,
+      };
+    }
 
     // A hook that worked is the machine breathing; one that did not is his to
     // see. Neither keeps a body it has nothing to put in: a rule starting says
@@ -308,20 +341,32 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     // every hook event now asked for (§3.1), that body was two thirds of what
     // an install with hooks stored (bw-1u1.38, §8.2.5).
     case 'system/hook_started':
-    case 'system/hook_progress':
-      return { rank: 'detail', kind, text: `Hook ${m.hook_name} (${m.hook_event})` };
+    case 'system/hook_progress': {
+      // The moment a rule runs at is the kit's own word — `PreToolUse` — and it
+      // went straight into the sentence. A moment this build has no English for
+      // is left unsaid rather than spelled out in the wire's spelling (bw-iiv6).
+      const when = HOOK_MOMENT[String(m.hook_event ?? '')];
+      return {
+        rank: 'detail',
+        kind,
+        text: `Your ${oneLine(m.hook_name ?? 'own')} rule is running${when ? `, ${when}` : ''}.`,
+      };
+    }
 
     case 'system/hook_response': {
-      const ok = m.outcome === 'success';
+      const state = String(m.outcome ?? 'success');
+      const ok = state === 'success';
+      const said = saidOf(kind, state) ?? 'finished in a way this build has no words for';
       const trouble = oneLine(m.stderr || m.output || '');
-      const said = [m.output, m.stdout, m.stderr].filter(Boolean).join('\n');
+      const printed = [m.output, m.stdout, m.stderr].filter(Boolean).join('\n');
       return {
         rank: ok ? 'detail' : 'note',
         kind,
-        text: ok ? `Hook ${m.hook_name} ran` : `Hook ${m.hook_name} ${m.outcome}${trouble ? `: ${trouble}` : ''}`,
+        audience: whoFor(kind, state) ?? 'machine',
+        text: `Your ${oneLine(m.hook_name ?? 'own')} rule ${said}${!ok && trouble ? `: ${trouble}` : ''}.`,
         // What it printed, when it printed anything. A rule that succeeded in
         // silence has nothing behind its line, and says so by not opening.
-        body: said || (ok ? undefined : whole()),
+        body: printed || (ok ? undefined : whole()),
       };
     }
 
@@ -331,20 +376,33 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     // own ruling of 2026-08-20 and the reason the pair is split by outcome
     // rather than drawn alike (bw-6jq5).
     case 'system/task_started':
-      return { rank: 'detail', kind, text: `Sent off: ${oneLine(m.description)}`, body: String(m.description ?? '') };
-
-    case 'system/task_notification':
       return {
-        rank: m.status === 'failed' ? 'note' : 'detail',
+        rank: 'detail',
         kind,
-        text: `${oneLine(m.summary)} (${m.status})`,
+        audience: 'machine',
+        text: `Sent off: ${oneLine(m.description)}`,
+        body: String(m.description ?? ''),
+      };
+
+    case 'system/task_notification': {
+      const state = String(m.status ?? 'completed');
+      const said = saidOf(kind, state) ?? 'ended in a way this build has no words for';
+      const who = whoFor(kind, state) ?? 'machine';
+      const summary = oneLine(m.summary);
+      return {
+        rank: who === 'you' ? 'note' : 'detail',
+        kind,
+        audience: who,
+        text: summary ? `${agent()} ${said}: ${summary}` : `${agent()} ${said}.`,
         body: whole(),
       };
+    }
 
     case 'system/memory_recall':
       return {
         rank: 'detail',
         kind,
+        audience: whoFor(kind, String(m.mode)) ?? 'machine',
         text: `Recalled ${(m.memories ?? []).length} memories`,
         body: (m.memories ?? []).map((mem: { path: string }) => mem.path).join('\n'),
       };
@@ -352,12 +410,16 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     case 'system/worker_shutting_down':
       return { rank: 'note', kind, text: `Shutting down: ${oneLine(m.reason)}`, body: String(m.reason ?? '') };
 
-    case 'system/plugin_install':
+    case 'system/plugin_install': {
+      const state = String(m.status ?? 'started');
+      const said = saidOf(kind, state) ?? 'is in a state this build has no words for';
       return {
-        rank: m.status === 'failed' ? 'note' : 'detail',
+        rank: state === 'failed' ? 'note' : 'detail',
         kind,
-        text: `Plugin ${m.name ?? ''} ${m.status}${m.error ? `: ${oneLine(m.error)}` : ''}`,
+        audience: whoFor(kind, state) ?? 'machine',
+        text: `Plugin ${oneLine(m.name ?? 'with no name')} ${said}${m.error ? `: ${oneLine(m.error)}` : ''}.`,
       };
+    }
 
     case 'system/mirror_error':
       return { rank: 'note', kind, text: `Could not mirror this chat: ${oneLine(m.error)}`, body: whole() };
@@ -388,15 +450,22 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     // loud, and the pair is what the chat sorts on (bw-6jq5).
     case 'rate_limit_event': {
       const info = m.rate_limit_info ?? {};
-      const window = String(info.rateLimitType ?? 'allowance').replace(/_/g, '-');
-      const allowed = info.status === 'allowed';
-      const resets = typeof info.resetsAt === 'number' ? ` until ${clockOf(info.resetsAt)}` : '';
+      const state = info.errorCode === 'credits_required' ? 'credits_required' : String(info.status ?? 'allowed');
+      const window = ALLOWANCE_WINDOW[String(info.rateLimitType ?? '')] ?? 'usage';
+      const said = saidOf(kind, state) ?? 'is in a state this build has no words for';
+      const who = whoFor(kind, state) ?? 'machine';
+      const back = typeof info.resetsAt === 'number' ? clockOf(info.resetsAt) : null;
+      // The time matters differently on the two sides. To him it is when his
+      // work starts again; to the machine's own books it is only when the
+      // counter turns over.
+      const tail = who === 'you'
+        ? back ? ` — nothing more runs until ${back}.` : '.'
+        : back ? ` (it renews at ${back}).` : '.';
       return {
-        rank: allowed ? 'detail' : 'note',
+        rank: who === 'you' ? 'note' : 'detail',
         kind,
-        text: allowed
-          ? `Allowance: the ${window} window is open${resets}`
-          : `Allowance: the ${window} window is ${oneLine(info.status ?? 'closed')}${resets}`,
+        audience: who,
+        text: `Your ${window} allowance ${said}${tail}`,
         body: whole(),
       };
     }
@@ -408,10 +477,17 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
     // words they carry are a level down (bw-6jq5.3).
     case 'system/task_updated': {
       const patch = (m.patch ?? {}) as { status?: string; is_backgrounded?: boolean };
+      const state = String(patch.status ?? '');
       const said = patch.is_backgrounded
         ? 'was left running in the background'
-        : (patch.status && TASK_SAID[patch.status]) || `is now ${oneLine(patch.status ?? 'in some other state')}`;
-      return { rank: 'detail', kind, text: `${agent()} ${said}`, body: whole() };
+        : (saidOf(kind, state) ?? 'is in a state this build has no words for');
+      return {
+        rank: 'detail',
+        kind,
+        audience: whoFor(kind, state) ?? 'machine',
+        text: `${agent()} ${said}.`,
+        body: whole(),
+      };
     }
 
     case 'system/task_progress': {
@@ -435,6 +511,61 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
         body: whole(),
       };
     }
+
+    // The chat's own state changing under him. Idle and working are the
+    // machine's — the chat's chip says both, continuously, and better. One
+    // WAITING on him is his: nothing moves until he answers, and nothing else
+    // on the screen says so (bw-iiv6).
+    case 'system/session_state_changed': {
+      const state = String(m.state ?? '');
+      const said = saidOf(kind, state);
+      const who = whoFor(kind, state) ?? 'machine';
+      if (!said) {
+        return { rank: 'detail', kind, audience: 'machine', text: 'This chat changed to a state this build has no words for.', body: whole() };
+      }
+      return { rank: who === 'you' ? 'note' : 'detail', kind, audience: who, text: said, body: whole() };
+    }
+
+    // The app's own request to the agent, getting on with itself.
+    case 'system/control_request_progress': {
+      const state = String(m.status ?? '');
+      const said = saidOf(kind, state) ?? 'The app is talking to the agent.';
+      return { rank: 'detail', kind, audience: whoFor(kind, state) ?? 'machine', text: said, body: whole() };
+    }
+
+    // Files he attached being put away. Only a failure is his — a file that did
+    // not arrive is a file the agent will never see, and he is the one who can
+    // send it again.
+    case 'system/files_persisted': {
+      const failed = (m.failed ?? []) as { filename?: string; error?: string }[];
+      const files = (m.files ?? []) as { filename?: string }[];
+      const state = failed.length ? 'some_failed' : 'stored';
+      const said = saidOf(kind, state) ?? 'Handled';
+      const howMany = failed.length || files.length;
+      const why = failed.length ? `: ${oneLine(failed[0].error ?? 'no reason given')}` : '';
+      return {
+        rank: failed.length ? 'note' : 'detail',
+        kind,
+        audience: whoFor(kind, state) ?? 'machine',
+        text: `${said} ${howMany} ${howMany === 1 ? 'file' : 'files'}${why}.`,
+        body: whole(),
+      };
+    }
+
+    case 'system/elicitation_complete':
+      return {
+        rank: 'detail',
+        kind,
+        audience: 'machine',
+        text: `The ${oneLine(m.mcp_server_name ?? 'add-on')} add-on finished asking.`,
+        body: whole(),
+      };
+
+    // A guess at what he might type next. It belongs in the writing box and
+    // nowhere near the record, so it is silent on purpose and says so in the
+    // table (src/workbench/machine-words.ts, SAID_NOTHING).
+    case 'prompt_suggestion':
+      return null;
 
     default: {
       // A kind this build has never seen. If it carries a sentence — at the top
@@ -901,6 +1032,9 @@ export class ClaudeDriver implements Driver {
       rank: note.rank,
       kind: note.kind,
       text: note.text,
+      // Only where the STATE decided it. Left off, the screen falls back to the
+      // ruling for the whole kind, which is where that ruling lives (bw-iiv6).
+      ...(note.audience ? { audience: note.audience } : {}),
       // Cut where a command's output is cut, and for the same reason.
       // Cut where a command's arguments and its output are cut, and for the
       // same reason: the body is there to be read, and the whole of it is
@@ -1233,7 +1367,12 @@ export class ClaudeDriver implements Driver {
     // goes to sleep does not wake up back in the old one (§3.1).
     this.emit({ type: 'session.pinned', permissionMode: mode, model: null });
     if (openedIn) return;
-    this.note({ rank: 'note', kind: 'mode', text: `Permission mode is now ${mode}.`, always: true });
+    // The setting's own spelling used to go straight into the sentence, so the
+    // one line on the screen that MUST be read said `bypassPermissions`
+    // (bw-iiv6). A mode this build has never met has its seams opened up rather
+    // than being printed as the kit spells it.
+    const said = PERMISSION_MODE[mode]?.said ?? inWords(mode).toLowerCase();
+    this.note({ rank: 'note', kind: 'mode', text: `This chat will now ${said}.`, always: true });
   }
 
   async setModel(model: string): Promise<void> {
@@ -1645,10 +1784,13 @@ export class ClaudeDriver implements Driver {
         if (typeof m.total_cost_usd === 'number') {
           this.emit({ type: 'cost', cost: { kind: 'usd', usd: m.total_cost_usd } });
         }
+        // The chip used to wear the kit's own subtype, so `error_max_turns`
+        // sat where "Ready" sits — the one place on the screen a reader looks
+        // to know whether he can type (bw-iiv6).
         this.emit({
           type: 'session.state',
           state: m.subtype === 'success' ? 'idle' : 'errored',
-          label: m.subtype === 'success' ? 'Ready' : String(m.subtype ?? 'error'),
+          label: TURN_ENDED[String(m.subtype ?? '')] ?? 'Failed',
         });
         // An error result carries the sentence saying what went wrong, and
         // the state label alone is one word.
