@@ -59,9 +59,22 @@ describe('an address a message carries', () => {
     expect(screen.queryByTestId('markdown-link')).toBeNull();
   });
 
-  it('keeps its own words when the writer gave the link some', () => {
+  // A bare address is machinery the reader never wanted to see. A phrase
+  // somebody chose is not, and drawing the report's own title over it threw
+  // those words away (bw-8fh2.5).
+  it('keeps the writer’s own words when the link was given some', () => {
     say('[read it](http://127.0.0.1:3008/project?tab=reports&report=agents-you-cannot-see) when you can');
-    expect(screen.getByTestId('chat-report-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-report-chip')).toBeNull();
+    expect(screen.getByTestId('markdown-link')).toHaveTextContent('read it');
+  });
+
+  it('names nothing of ours when the address is on another machine', () => {
+    say('https://example.com/project?tab=reports&report=agents-you-cannot-see');
+    expect(screen.queryByTestId('chat-report-chip')).toBeNull();
+    expect(screen.getByTestId('markdown-link')).toHaveAttribute(
+      'href',
+      'https://example.com/project?tab=reports&report=agents-you-cannot-see',
+    );
   });
 
   it('stays a link when it names nothing of ours', () => {

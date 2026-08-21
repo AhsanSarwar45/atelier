@@ -29,6 +29,7 @@
  * suppress cards and reports, and let files through; what the chip draws is
  * still the reader's own words, so the command still copies as it was written.
  */
+import { OLD_CARD } from '@/lib/address';
 import { pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/paths';
 
 /** One stretch of a message: plain words, or something that opens. */
@@ -106,8 +107,25 @@ export function openableIn(text: string, existing: Existing, where: Rooted, disk
 /** What an address of this app's own names. */
 export type Addressed = { kind: 'card'; id: string } | { kind: 'report'; slug: string };
 
-/** The spelling `card` used to have in an address, still written by older links. */
-const OLD_CARD = 'bead';
+/**
+ * The machine an address has to be on to be one of ours.
+ *
+ * This app is served from the reader's own computer and nowhere else, so an
+ * address on any other machine is somebody else's however much its shape
+ * matches. Without this, `https://example.com/project?card=bw-1u1` was drawn as
+ * a chip and clicking it navigated INSIDE this window to a card that merely
+ * shares an id — an outbound link silently swallowed (bw-8fh2.4).
+ *
+ * The port is deliberately not part of it: a report is written by an agent
+ * against one copy of the app and read against another — the installed one on
+ * 3008, a preview on some other port — and both are the same reader's own
+ * machine. Two copies serving different projects on one machine can therefore
+ * still trade an id, which is a wrong card rather than a stolen click.
+ */
+const HERE = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0']);
+
+/** The base for an address written relative: a link made inside the app is `/project?…`. */
+const NO_HOST = 'http://localhost';
 
 /**
  * The card or report an address names, or nothing.
@@ -118,20 +136,19 @@ const OLD_CARD = 'bead';
  * mention is never looked for — so the thing in a message the reader most wants
  * to open was the one thing drawn as raw blue text (bw-8fh2.2).
  *
- * Only the shape of this app's own screen counts: `/project` carrying a `report`
- * or a `card`. Whether the thing it names exists is the caller's question, the
- * same as it is for a bare name, and that is what keeps somebody else's
- * `/project?card=…` from being drawn as one of ours.
+ * Three things have to hold: the address is on this machine, its screen is
+ * `/project`, and it carries a `report` or a `card`. Whether the thing it names
+ * exists is the caller's question, the same as it is for a bare name.
  */
 export function addressedBy(href: string): Addressed | null {
   let url: URL;
   try {
-    // A base, because the address may be written relative — a link made inside
-    // the app is `/project?…` and carries no host at all.
-    url = new URL(href, 'http://beads.invalid');
+    url = new URL(href, NO_HOST);
   } catch {
     return null;
   }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (!HERE.has(url.hostname)) return null;
   if (!/(^|\/)project\/?$/.test(url.pathname)) return null;
   // A card wins a tie: its panel is drawn OVER whichever tab the address asks
   // for, so it is what the reader would land on.

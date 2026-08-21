@@ -64,6 +64,20 @@ function textOf(children: ReactNode): string {
   return '';
 }
 
+/**
+ * Whether the words of a link are the address itself.
+ *
+ * That is what a pasted address looks like once the markdown dialect has turned
+ * it into a link: the words and the destination are the same string, give or
+ * take the scheme the dialect fills in for `www.…`. Anything else is a phrase
+ * somebody chose.
+ */
+function wroteItOut(href: string, written: string): boolean {
+  const words = written.trim();
+  if (!words) return true;
+  return words === href || `http://${words}` === href || `https://${words}` === href;
+}
+
 export function MarkdownBody({
   children,
   className,
@@ -85,8 +99,14 @@ export function MarkdownBody({
           // A link leaves for its own tab and cannot reach back into this one —
           // unless it names something of ours, in which case it is a chip, and
           // opens where every other chip opens: inside this window.
+          //
+          // Only when the writer gave it no words of their own. A bare address
+          // is machinery the reader never wanted to see; `[read it](…)` is a
+          // sentence somebody wrote, and swapping it for the report's title
+          // threw those words away (bw-8fh2.5).
           a: ({ node, ...props }) => {
-            const ours = mentions?.link?.(String(props.href ?? ''));
+            const href = String(props.href ?? '');
+            const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
             if (ours) return <>{ours}</>;
             return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
           },

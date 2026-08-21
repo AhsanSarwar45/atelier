@@ -408,8 +408,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     if (asking.size > 0) disk.ask(Array.from(asking));
   }, [view.items, where, disk]);
 
-  const mentions = useMemo<Mentions>(
-    () => ({
+  const mentions = useMemo<Mentions>(() => {
+    const card = (id: string) => (
+      <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />
+    );
+    const report = (slug: string) => {
+      const found = byName.get(slug);
+      if (!found) return slug;
+      return <ReportChip project={found.project} slug={found.slug} title={found.title} className="mx-0.5" />;
+    };
+    return {
       split: (text) =>
         openableIn(
           text,
@@ -418,32 +426,21 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           disk,
         ),
       path: (absolute, raw, line) => <PathChip absolute={absolute} raw={raw} line={line} />,
-      card: (id) => <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />,
-      report: (slug) => {
-        const found = byName.get(slug);
-        if (!found) return slug;
-        return <ReportChip project={found.project} slug={found.slug} title={found.title} className="mx-0.5" />;
-      },
-      // The same two chips, from an address written out in full. It is how an
-      // agent hands over a report it has just written, and it was the one thing
-      // in a message that stayed raw blue text (bw-8fh2.2). Only ours, and only
-      // when the thing it names really is on this project — anything else stays
-      // the link it was.
+      card,
+      report,
+      // The very same two chips, from an address written out in full. It is how
+      // an agent hands over a report it has just written, and it was the one
+      // thing in a message that stayed raw blue text (bw-8fh2.2). Only ours,
+      // and only when the thing it names really is on this project — anything
+      // else stays the link it was.
       link: (href) => {
         const named = addressedBy(href);
         if (!named) return null;
-        if (named.kind === 'card') {
-          return knownCards.has(named.id) ? (
-            <BeadChip id={named.id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />
-          ) : null;
-        }
-        const found = byName.get(named.slug);
-        if (!found) return null;
-        return <ReportChip project={found.project} slug={found.slug} title={found.title} className="mx-0.5" />;
+        if (named.kind === 'card') return knownCards.has(named.id) ? card(named.id) : null;
+        return byName.has(named.slug) ? report(named.slug) : null;
       },
-    }),
-    [knownCards, byName, projectId, projectPath, where, disk],
-  );
+    };
+  }, [knownCards, byName, projectId, projectPath, where, disk]);
   const [draft, setDraft] = useState('');
   const [attached, setAttached] = useState<ImagePayload[]>([]);
   /** The picture being looked at, from the tray or from a message. */

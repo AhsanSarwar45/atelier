@@ -134,4 +134,20 @@ describe('an address written out in full', () => {
     expect(addressedBy('http://127.0.0.1:3008/project?id=p&tab=board')).toBeNull();
     expect(addressedBy('not an address at all')).toBeNull();
   });
+
+  // This app is served from the reader's own computer and nowhere else, so a
+  // link leaving for another machine is somebody else's however much its shape
+  // matches — and swallowing it would navigate inside this window to a card
+  // that merely shares an id (bw-8fh2.4).
+  it('names nothing on another machine, whatever the shape of it', () => {
+    expect(addressedBy('https://example.com/project?id=p&card=bw-1u1')).toBeNull();
+    expect(addressedBy('https://beads-web.example.org/project?tab=reports&report=a-report')).toBeNull();
+    expect(addressedBy('ftp://localhost/project?card=bw-1u1')).toBeNull();
+  });
+
+  it('reads the reader’s own machine by any of its names, on any port', () => {
+    expect(addressedBy('http://localhost:3008/project?card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+    expect(addressedBy('http://127.0.0.1:3027/project?card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+    expect(addressedBy('http://[::1]:3008/project?card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+  });
 });
