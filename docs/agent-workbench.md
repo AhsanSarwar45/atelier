@@ -1767,17 +1767,46 @@ removed, surviving in the one sentence a reader sees only when he has already
 been refused (bw-96is.13). The constant carries no full stop: the tooltip ends
 the sentence, the line continues it.
 
-**The mark carries an edge, so its shape does not depend on what it stands
+**Both marks carry an edge, so their shape does not depend on what they stand
 on.** A mark at rest is filled with the theme's `secondary`, and in every theme
 this app ships that is the same colour as `accent`, which is what fills the row
 the reader has open — so "Idle" and "Asleep" lost their shape on exactly the row
-he was looking at and read as loose text, the same disappearing act the badge
-beside them had just been fixed for (bw-96is.16). The fill stays, because on the
-other forty rows it is right; what is added is a border mixed from the mark's
-own text colour rather than named from a theme token, since `border` too equals
-`secondary` in half the themes while the text has to contrast with the fill or
-the mark could not be read at all. The check reads the drawn pixels and compares
-them with the row behind, not with a token.
+he was looking at and read as loose text (bw-96is.16). The fill stays, because
+on the other forty rows it is right; what is added is a border mixed from the
+mark's own text colour rather than named from a theme token, since `border` too
+equals `secondary` in half the themes while the text has to contrast with the
+fill or the mark could not be read at all.
+
+The badge beside it had the same disappearing act, and this document said for a
+while that it had already been cured. It had not. The cure named there —
+fading the badge's own colour by writing it as a faded arbitrary variable —
+**produced no border rule at all**: the styling tool cannot fade a colour it was
+handed by name rather than from its own palette, so it emitted nothing, warned
+about nothing, and the built sheet carried that colour as text and as a
+background and never once as an edge. What was left showing was the theme's
+plain `border`, which on the open row IS that row's fill: measured
+`rgb(39,39,42)` against `rgb(39,39,42)`, no shape whatever. The badge went on
+vanishing through four more cards while three of them recorded it as fixed
+(bw-96is.10, bw-96is.14, bw-96is.19).
+
+Two things follow. The border idiom is the mixed one on both marks, because a
+mix of the element's own text colour is a form the tool does compile and it
+cannot collide with whatever the mark is standing on — the text has to read
+against that surface or there would be nothing to read. And **the only proof a
+border exists is the built sheet or the drawn pixels**: a class name in the
+source proves nothing, and neither does a check that merely asks the border to
+be *some* colour, which is precisely the check that let this run for four cards.
+Both marks are now measured against the row behind them, and both cases fail
+when the fix is reverted.
+
+**The small mark gives its letters room to hang below the line.** The badge
+sizes set their own line height, and the smallest one set it shorter than its
+own text — while a badge's label is wrapped in `truncate`, which hides whatever
+does not fit. So every letter with a tail lost it and the rail read "Workina"
+where the mark says "Working", with the same word one size up in the open chat's
+line perfectly whole (bw-96is.20). The badge had height to spare all along,
+which is why nothing that measured the badge saw a fault: the box that does the
+hiding is the label inside it, and that is what the check measures.
 
 **A chat that is asleep says nothing at all.** Most of a list is asleep, and a
 pill on every row is a pill on none. The mark appears only when there is
