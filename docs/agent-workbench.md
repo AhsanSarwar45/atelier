@@ -1520,6 +1520,27 @@ A chat this app is not driving cannot be asked at all, and is told so:
 `NOT_OURS_TO_ASK` is printed verbatim rather than a figure worked out here from
 a guess (decision 13).
 
+The gauge takes its window from the same answer. The kit's ordinary messages
+almost never state one, so the line sat on the 200,000 default while a session
+actually running on a million read 3% full — and the panel that gauge opens,
+which asks outright, said `26k/1M` on the same screen (bw-3ug7.11). So
+`adoptWindow()` asks once per session on the first turn that reports fullness,
+and re-states the gauge if the answer differs. `reads()` says a window of a
+million as `1M`: written in thousands it came out `1000k`, four digits nobody
+reads as a million (bw-3ug7.12).
+
+Both this panel and the plan-usage panel beside it stand at the height of the
+screen and scroll their own bodies. They were each one growing box with
+`overflow-y-auto` and no ceiling, so a long picture ran off the bottom of the
+window with its last rows unreachable (bw-3ug7.13, bw-3ug7.14).
+
+The chip's test hook belongs on the painted pill, not on the button inside it.
+The line above a conversation is checked by measuring these hooks against each
+other, and a hook on the inner button reports a box a padding narrower than
+what is drawn — which would have kept that check passing straight through the
+overlap it exists to catch (bw-3ug7.9). The button carries a hook of its own,
+`context-chip-open`, as the plan chips do.
+
 **Ever — what the task has spent.** `src/workbench/token-picture.ts`, over the
 chat's own record file, whole. Two traps, both measured on record `bde56edd`:
 
