@@ -174,12 +174,30 @@ chat helper is started beside it. No Node.js or Rust needed.
 | `atelier run` | Start everything and open the board in your browser |
 | `atelier run --no-browser` | The same, without opening a browser |
 | `atelier` | The same as `run --no-browser` |
+| `atelier service install` | Have this computer start it at login, and keep it up |
+| `atelier service uninstall` | Stop having it started, and leave nothing behind |
+| `atelier service status` | Say whether this computer starts it |
 | `atelier --data-dir` | Print where this computer keeps Atelier's data |
 | `atelier --version` | Print which build this is |
 | `atelier --help` | List the above |
 
 It serves on http://localhost:3008 unless `ATELIER_PORT` says otherwise;
-`ATELIER_HOST` sets the address it binds.
+`ATELIER_HOST` sets the address it binds, and `ATELIER_DATA_DIR` moves where it
+keeps its data.
+
+### Start it with the computer
+
+```bash
+atelier service install
+```
+
+Registers a systemd user service on Linux, a launch agent on macOS, and a
+logon task on Windows — each of them starting `atelier run --no-browser`, so
+nothing opens a window over your login. Whatever `ATELIER_PORT`,
+`ATELIER_HOST` and `ATELIER_DATA_DIR` are set to when you install is written
+into the registration, because a service inherits no shell.
+
+`atelier service uninstall` stops it and removes the registration.
 
 ## Development
 

@@ -11,6 +11,7 @@ mod identity;
 mod laid_down;
 mod report_tools;
 mod routes;
+mod service;
 
 use axum::{
     body::Body,
@@ -104,6 +105,15 @@ async fn main() {
     match command_line::asked(env::args().skip(1)) {
         command_line::Ask::Run { open_browser } => serve(open_browser).await,
         command_line::Ask::Help => print!("{}", command_line::help()),
+        // Having the computer start it is one command, and taking that back
+        // off is one command, so nobody edits a service file by hand
+        // (bw-8um.3.13).
+        command_line::Ask::Service(action) => {
+            if let Err(e) = service::run(action) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
         command_line::Ask::Version => println!("{}", command_line::version()),
         // Where this computer keeps this program's data, printed and nothing
         // else. The report command runs from a shell and needs the same answer

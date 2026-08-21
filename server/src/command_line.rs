@@ -19,12 +19,15 @@
 //! screen written in somebody else's voice.
 
 use crate::identity::DISPLAY;
+use crate::service::Action;
 
 /// What the reader asked for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ask {
     /// Bring the whole thing up.
     Run { open_browser: bool },
+    /// Have the computer start it, stop having it, or ask which it is.
+    Service(Action),
     /// Print where this computer keeps the data, and nothing else.
     DataDir,
     /// Print what the program can do.
@@ -62,6 +65,15 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             }
             Ask::Run { open_browser }
         }
+        "service" => match args.get(1).map(String::as_str) {
+            // Asking is what a bare `service` means: it is the only one of the
+            // three that changes nothing, so it is the safe thing to do when
+            // the reader has not finished the sentence.
+            None | Some("status") => Ask::Service(Action::Status),
+            Some("install") => Ask::Service(Action::Install),
+            Some("uninstall") | Some("remove") => Ask::Service(Action::Uninstall),
+            Some(other) => Ask::Unknown(other.to_string()),
+        },
         "--data-dir" => Ask::DataDir,
         "--help" | "-h" | "help" => Ask::Help,
         "--version" | "-V" | "version" => Ask::Version,
@@ -79,6 +91,9 @@ Usage:
   atelier run                 Start everything and open the board in your browser
   atelier run --no-browser    The same, without opening a browser
   atelier                     The same as `run --no-browser`
+  atelier service install     Have this computer start it at login, and keep it up
+  atelier service uninstall   Stop having it started, and leave nothing behind
+  atelier service status      Say whether this computer starts it
   atelier --data-dir          Print where this computer keeps {DISPLAY}'s data
   atelier --version           Print which build this is
   atelier --help              This
@@ -156,10 +171,28 @@ mod tests {
     }
 
     #[test]
+    fn the_computer_can_be_asked_to_start_it_and_to_stop_starting_it() {
+        assert_eq!(ask(&["service", "install"]), Ask::Service(Action::Install));
+        assert_eq!(ask(&["service", "uninstall"]), Ask::Service(Action::Uninstall));
+        assert_eq!(ask(&["service", "remove"]), Ask::Service(Action::Uninstall));
+        assert_eq!(ask(&["service", "status"]), Ask::Service(Action::Status));
+    }
+
+    #[test]
+    fn a_half_finished_service_sentence_changes_nothing() {
+        // Asking is the only one of the three that touches nothing, so it is
+        // what a reader who stopped mid-sentence gets.
+        assert_eq!(ask(&["service"]), Ask::Service(Action::Status));
+        assert_eq!(ask(&["service", "instal"]), Ask::Unknown("instal".to_string()));
+    }
+
+    #[test]
     fn the_help_screen_names_run_among_the_things_it_can_do() {
         let help = help();
         assert!(help.contains("atelier run"), "run is not offered:\n{help}");
         assert!(help.contains("--data-dir"), "--data-dir is not offered:\n{help}");
+        assert!(help.contains("service install"), "service install is not offered:\n{help}");
+        assert!(help.contains("service uninstall"), "service uninstall is not offered:\n{help}");
     }
 
     #[test]

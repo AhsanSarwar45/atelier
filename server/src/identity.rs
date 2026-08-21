@@ -38,9 +38,20 @@ pub const EARLIER: (&str, &str, &str) = ("com", "beads", "kanban-ui");
 /// `None` only when the computer names no home directory at all, which is not
 /// a normal state; the callers then do nothing rather than fall back to a
 /// relative path resolved against wherever the program happened to start.
+/// `ATELIER_DATA_DIR` overrides it, for a person who keeps their data on
+/// another disk and for a check that must not touch the reader's own.
 pub fn data_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from(QUALIFIER, ORGANISATION, APPLICATION)
-        .map(|dirs| dirs.data_dir().to_path_buf())
+    resolve_data_dir(std::env::var("ATELIER_DATA_DIR").ok())
+}
+
+/// The rule behind it, kept apart from the environment so it can be tested
+/// without one test's variable reaching another running beside it.
+fn resolve_data_dir(override_dir: Option<String>) -> Option<PathBuf> {
+    match override_dir.filter(|d| !d.trim().is_empty()) {
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => directories::ProjectDirs::from(QUALIFIER, ORGANISATION, APPLICATION)
+            .map(|dirs| dirs.data_dir().to_path_buf()),
+    }
 }
 
 /// Where a copy installed under the earlier name kept its data.
@@ -265,6 +276,25 @@ mod tests {
         // path against whatever directory the program was started in.
         assert_eq!(resolve_dir(None, None, "reports"), None);
         assert_eq!(resolve_dir(None, None, "tools"), None);
+    }
+
+    #[test]
+    fn the_data_folder_can_be_moved_off_the_disk_it_defaults_to() {
+        // A registered service inherits no shell and is handed this in its own
+        // definition, so a check can register a copy that touches none of the
+        // reader's projects.
+        assert_eq!(
+            resolve_data_dir(Some("/another/disk".to_string())),
+            Some(PathBuf::from("/another/disk"))
+        );
+    }
+
+    #[test]
+    fn an_empty_data_folder_setting_is_not_a_folder() {
+        // An unset variable read as an empty string would otherwise resolve a
+        // relative path against wherever the program happened to start.
+        assert_eq!(resolve_data_dir(Some("  ".to_string())), data_dir());
+        assert_eq!(resolve_data_dir(None), data_dir());
     }
 
     #[test]
