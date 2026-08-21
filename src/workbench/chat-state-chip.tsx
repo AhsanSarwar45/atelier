@@ -114,6 +114,19 @@ export function ChatStateChip({
     );
   }
 
+  // A chip that is neither working nor waiting is filled with the theme's
+  // `secondary`, and in every theme this app ships that is the same colour as
+  // `accent`, which is what fills the row the reader has open. So "Idle" and
+  // "Asleep" lost their shape on exactly the row he is looking at and read as
+  // loose text — the fault just fixed on the badge beside them (bw-96is.16).
+  //
+  // The fill stays, because on the other forty rows it is right. What is added
+  // is an edge, so the shape survives whatever the chip is standing on. Mixed
+  // from the chip's own text colour rather than named from a theme token:
+  // `border` too equals `secondary` in half the themes, while the text has to
+  // contrast with the fill or the chip could not be read at all.
+  const atRest = !state.working && !state.waiting;
+
   return (
     <Badge
       variant={state.working ? 'primary' : state.waiting ? 'warning' : 'secondary'}
@@ -123,7 +136,11 @@ export function ChatStateChip({
       data-testid={testId}
       data-working={state.working ? 'yes' : 'no'}
       data-word={state.word}
-      className={cn('shrink-0 gap-1.5', className)}
+      className={cn(
+        'shrink-0 gap-1.5',
+        atRest && 'border-[color-mix(in_srgb,currentColor_30%,transparent)]',
+        className,
+      )}
     >
       {body}
     </Badge>

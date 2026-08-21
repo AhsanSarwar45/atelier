@@ -232,6 +232,15 @@ test.describe('a chat another program is in', () => {
 
       // And it is not the mark: a reader who does not stop to read the words
       // still has the colour and the corners to go on.
+      //
+      // Waited for rather than read straight off: the pane's own line is drawn
+      // from the app-wide stream, which arrives a beat after the transcript, so
+      // reading the pixels the moment the transcript appears failed under a
+      // loaded machine and passed on a quiet one — a check that is a coin toss
+      // proves nothing either way (bw-96is.17).
+      const line = page.getByTestId('session-state');
+      await expect(line.getByTestId('chat-external')).toBeVisible({ timeout: 30_000 });
+      await expect(line.getByTestId('session-state-chip')).toBeVisible({ timeout: 30_000 });
       const apart = await page.evaluate(() => {
         const seen = document.querySelector('[data-testid="session-state"]');
         const one = seen?.querySelector('[data-testid="chat-external"]');
@@ -264,6 +273,64 @@ test.describe('a chat another program is in', () => {
       expect(apart!.edge, 'the badge border is invisible, which is how it vanished before').not.toMatch(
         /rgba\(0, 0, 0, 0\)|transparent/,
       );
+    } finally {
+      release();
+    }
+    chat.forget();
+  });
+
+  test('keeps the mark itself whole on the row the reader has open', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const project = await aFixtureProject(request);
+    const chat = aChatSomebodyElseIsIn(project.path, 'Read the mark on the open row');
+    // At rest, which is the case that broke: a working mark is filled with the
+    // theme's primary and was never in danger.
+    const release = claimConversation(chat.id, { status: 'idle' });
+
+    try {
+      await openChatTab(page, project);
+      const row = rowFor(page, chat.id);
+      const mark = row.getByTestId('row-pill');
+      await expect(mark).toHaveAttribute('data-working', 'no', { timeout: 30_000 });
+
+      await row.getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript')).toBeVisible({ timeout: 30_000 });
+      await expect(row, 'the row left the rail when it was opened').toBeVisible();
+
+      const box = await mark.boundingBox();
+      expect(box, 'the mark drew no box on the row the reader has open').not.toBeNull();
+      expect(box!.width, 'the mark drew nothing wide').toBeGreaterThan(0);
+      expect(box!.height, 'the mark drew nothing tall').toBeGreaterThan(0);
+
+      // The measured fault: an idle mark is filled with `secondary`, and in
+      // every theme this app ships that is the same colour as `accent`, which
+      // is what fills the selected row — so "Idle" lost its shape on exactly
+      // the row he is looking at and read as loose text (bw-96is.16). Read off
+      // the drawn pixels, not a class, and compared against the row BEHIND it
+      // rather than against a token, because that is what the eye does.
+      const apart = await page.evaluate((id: string) => {
+        const row_ = document.querySelector(`[data-testid="restore-row"][data-external-id="${id}"]`);
+        const chip = row_?.querySelector('[data-testid="row-pill"]');
+        if (!row_ || !chip) return null;
+        const a = getComputedStyle(chip);
+        const b = getComputedStyle(row_);
+        return {
+          fill: a.backgroundColor,
+          edge: a.borderTopColor,
+          edgeWidth: parseFloat(a.borderTopWidth),
+          behind: b.backgroundColor,
+        };
+      }, chat.id);
+      expect(apart, 'the open row drew no mark').not.toBeNull();
+
+      const invisible = /rgba\(0, 0, 0, 0\)|transparent/;
+      const held =
+        (apart!.fill !== apart!.behind && !invisible.test(apart!.fill)) ||
+        (apart!.edgeWidth > 0 && !invisible.test(apart!.edge) && apart!.edge !== apart!.behind);
+      expect(
+        held,
+        `the mark has neither a fill nor an edge of its own: fill ${apart!.fill}, edge ${apart!.edge}, row ${apart!.behind}`,
+      ).toBe(true);
     } finally {
       release();
     }

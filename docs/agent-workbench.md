@@ -1622,6 +1622,18 @@ removed, surviving in the one sentence a reader sees only when he has already
 been refused (bw-96is.13). The constant carries no full stop: the tooltip ends
 the sentence, the line continues it.
 
+**The mark carries an edge, so its shape does not depend on what it stands
+on.** A mark at rest is filled with the theme's `secondary`, and in every theme
+this app ships that is the same colour as `accent`, which is what fills the row
+the reader has open — so "Idle" and "Asleep" lost their shape on exactly the row
+he was looking at and read as loose text, the same disappearing act the badge
+beside them had just been fixed for (bw-96is.16). The fill stays, because on the
+other forty rows it is right; what is added is a border mixed from the mark's
+own text colour rather than named from a theme token, since `border` too equals
+`secondary` in half the themes while the text has to contrast with the fill or
+the mark could not be read at all. The check reads the drawn pixels and compares
+them with the row behind, not with a token.
+
 **A chat that is asleep says nothing at all.** Most of a list is asleep, and a
 pill on every row is a pill on none. The mark appears only when there is
 something to say — working, waiting, reachable, or held.
