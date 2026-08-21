@@ -36,12 +36,43 @@ export interface RecordLine {
   message?: unknown;
   isSidechain?: boolean;
   isMeta?: boolean;
+  /**
+   * The mode the chat was in when this line was written. The kit stamps it onto
+   * a line of its own every time the mode changes, and onto the prompts a
+   * person types (bw-ja9l.2).
+   */
+  permissionMode?: string;
 }
+
+/**
+ * What a chat is running, as its own record says it.
+ *
+ * Both facts are written down and neither reaches the app: the kit's reader
+ * hands back conversation and nothing else, so a chat begun in a terminal drew
+ * no model and no mode for its whole life. Null on a field means the record did
+ * not say — never a guess, because the only guess to hand is this machine's own
+ * settings and the terminal may be in any mode at all (bw-ja9l.2).
+ */
+export interface Running {
+  /** The mode the record was last put into. */
+  permissionMode: string | null;
+  /** The model that last answered in the conversation itself. */
+  model: string | null;
+}
+
+/** Nothing said either way. */
+export const SAYS_NOTHING: Running = { permissionMode: null, model: null };
 
 /** What one look at the end of the record found. */
 export interface Grown {
   /** The lines that have arrived since the last look, in the order written. */
   fresh: RecordLine[];
+  /**
+   * What those same bytes said about the mode and the model, last one wins. A
+   * field is null when they said nothing about it, which leaves whatever was
+   * already known standing.
+   */
+  running: Running;
   /** The record is shorter than it was: it has been rewritten under us. */
   rewritten: boolean;
   /** How many bytes were read to find that out — zero when nothing moved. */
@@ -118,6 +149,48 @@ export function allLines(path: string): RecordLine[] {
     if (row !== null) lines.push(row);
   }
   return lines;
+}
+
+/**
+ * What the record says the chat is running, read from its END.
+ *
+ * Both answers are the LAST thing the record says on their subject, so the
+ * search starts at the end with a small window and doubles it until it has both
+ * or has read the whole file — the same shape {@link linePlace} uses, and for
+ * the same reason: on the manager's longest conversation a whole-record read is
+ * 124ms and 30MB, and this runs when a chat is opened.
+ *
+ * A chat that has been talking says both in its last few kilobytes. One that
+ * has not costs the widening, which is the honest price of an answer that is
+ * read rather than guessed.
+ */
+export async function runningIn(path: string): Promise<Running> {
+  let size: number;
+  try {
+    size = (await stat(path)).size;
+  } catch {
+    return { ...SAYS_NOTHING };
+  }
+  if (size === 0) return { ...SAYS_NOTHING };
+  const handle = await open(path, 'r');
+  try {
+    for (let window = 1 << 16; ; window *= 2) {
+      const from = Math.max(0, size - window);
+      const buf = Buffer.alloc(size - from);
+      await handle.read(buf, 0, buf.length, from);
+      const lines = buf.toString('utf8').split('\n');
+      // A window that does not reach the start of the file opens in the middle
+      // of a line. That line belongs to the next, wider look.
+      if (from > 0) lines.shift();
+      const found: Running = { permissionMode: null, model: null };
+      for (const line of lines) sipRunning(line, found);
+      // The whole file has been read, so nothing more is coming; otherwise keep
+      // widening until both are answered.
+      if (from === 0 || (found.permissionMode !== null && found.model !== null)) return found;
+    }
+  } finally {
+    await handle.close();
+  }
 }
 
 /**
@@ -235,14 +308,14 @@ export class RecordTail {
     try {
       size = (await stat(this.path)).size;
     } catch {
-      return { fresh: [], rewritten: false, read: 0 };
+      return { fresh: [], running: { ...SAYS_NOTHING }, rewritten: false, read: 0 };
     }
     if (size < this.at) {
       this.at = size;
       this.partial = '';
-      return { fresh: [], rewritten: true, read: 0 };
+      return { fresh: [], running: { ...SAYS_NOTHING }, rewritten: true, read: 0 };
     }
-    if (size === this.at) return { fresh: [], rewritten: false, read: 0 };
+    if (size === this.at) return { fresh: [], running: { ...SAYS_NOTHING }, rewritten: false, read: 0 };
 
     const length = size - this.at;
     const buffer = Buffer.allocUnsafe(length);
@@ -262,11 +335,16 @@ export class RecordTail {
     this.partial = lines.pop() ?? '';
 
     const fresh: RecordLine[] = [];
+    // Every line, not only the conversation: the mode a terminal is switched to
+    // is written on a line of its own, which is not conversation and is the
+    // only place that fact exists (bw-ja9l.2).
+    const running: Running = { ...SAYS_NOTHING };
     for (const line of lines) {
+      sipRunning(line, running);
       const said = readLine(line);
       if (said) fresh.push(said);
     }
-    return { fresh, rewritten: false, read: got };
+    return { fresh, running, rewritten: false, read: got };
   }
 }
 
@@ -278,15 +356,63 @@ export class RecordTail {
  * off, which belong to their own conversation and not to this one.
  */
 function readLine(line: string): RecordLine | null {
-  const trimmed = line.trim();
-  if (trimmed === '') return null;
-  let row: RecordLine;
-  try {
-    row = JSON.parse(trimmed) as RecordLine;
-  } catch {
-    return null; // Half a line, or something the kit writes that is not JSON.
-  }
+  const row = parsed(line);
+  if (row === null) return null;
   if (row.type !== 'user' && row.type !== 'assistant') return null;
   if (row.isSidechain === true || row.isMeta === true) return null;
   return row;
+}
+
+/**
+ * One line as JSON, whatever the kit wrote it for.
+ *
+ * The extra fields are declared optional above rather than being cast away
+ * here, so the two readers below — the conversation and what the chat is
+ * running — both work off one shape.
+ */
+function parsed(line: string): RecordLine | null {
+  const trimmed = line.trim();
+  if (trimmed === '') return null;
+  try {
+    const row = JSON.parse(trimmed) as unknown;
+    return row !== null && typeof row === 'object' ? (row as RecordLine) : null;
+  } catch {
+    return null; // Half a line, or something the kit writes that is not JSON.
+  }
+}
+
+/**
+ * The kit's own word for a message it wrote with no model behind it — an
+ * interruption, a refusal it composed itself. Drawn as the model this chat runs
+ * it would be a lie, and there are 391 such lines in the manager's records
+ * (measured 2026-08-21 over 1,063 of them).
+ */
+const NO_MODEL_BEHIND_IT = '<synthetic>';
+
+/**
+ * What one line says about what the chat is running, folded into `into`.
+ *
+ * Last one wins on each field, because the record is written by appending and
+ * the last thing it says on a subject is what is true now.
+ *
+ * The mode is taken from any line carrying one: the kit writes a line of its
+ * own — `{"type":"permission-mode","permissionMode":…}` — every time the mode
+ * changes, and stamps the mode onto the prompts a person types as well. Both
+ * are that mode at that moment, so both count.
+ *
+ * The model is taken only from a reply in THIS conversation. A helper the chat
+ * sent off answers on a model of its own, on a sidechain line, and that is the
+ * helper's model and not the chat's.
+ */
+function sipRunning(line: string, into: Running): void {
+  const row = parsed(line);
+  if (row === null) return;
+  if (typeof row.permissionMode === 'string' && row.permissionMode !== '') {
+    into.permissionMode = row.permissionMode;
+  }
+  if (row.type !== 'assistant' || row.isSidechain === true) return;
+  const said = row.message;
+  if (said === null || typeof said !== 'object') return;
+  const model = (said as { model?: unknown }).model;
+  if (typeof model === 'string' && model !== '' && model !== NO_MODEL_BEHIND_IT) into.model = model;
 }

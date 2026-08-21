@@ -72,7 +72,14 @@ describe('following a chat somebody else is driving', () => {
     const tail = new RecordTail(path);
     await tail.toEnd();
     const quiet = await tail.grown();
-    expect(quiet).toEqual({ fresh: [], rewritten: false, read: 0 });
+    // `running` is what the record says the chat is in and on; a beat that read
+    // nothing has read nothing on either subject either (bw-ja9l.2).
+    expect(quiet).toEqual({
+      fresh: [],
+      rewritten: false,
+      read: 0,
+      running: { permissionMode: null, model: null },
+    });
   });
 
   it('carries on from a byte another reader stopped at', async () => {

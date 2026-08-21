@@ -34,7 +34,17 @@ import { Linker } from './linker.ts';
 import { type HelperPast, helperNamed, helpersNow, helpersOf } from './helper-records.ts';
 import { readOwnerSettings, writeOwnerSetting } from './owner-settings.ts';
 import { spokenAsEvents } from './reading-back.ts';
-import { allLines, findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
+import {
+  allLines,
+  findRecord,
+  linePlace,
+  recordSize,
+  RecordTail,
+  runningIn,
+  SAYS_NOTHING,
+  type RecordLine,
+  type Running,
+} from './record-tail.ts';
 import { knownSessions } from './registry.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
@@ -894,6 +904,39 @@ export class Sessions {
     const links = new Linker(summary.id, summary.cwd, (e) => this.publish(summary.id, e));
 
     /**
+     * What this chat is running, said the way a chat this app drives says it.
+     *
+     * The model and the mode reached the screen from two events, and both are
+     * published only where this app drives the agent. A chat begun in a terminal
+     * is followed and never driven, so it drew neither for its whole life — and
+     * the guess on its store row is the OWNER'S settings, which say nothing
+     * about the terminal that chat is actually running in (bw-ja9l.2).
+     *
+     * Its record says both, so the follower reads them from there and announces
+     * them as `session.pinned` — the event the pickers and the header already
+     * fold. Said again whenever either changes, so a terminal switched into
+     * another mode says so on the screen as it happens.
+     */
+    const running: Running = { ...SAYS_NOTHING };
+    const saysWhatItRuns = (found: Running): void => {
+      // A null field is one this read said nothing about, which leaves what was
+      // already known standing — the same rule the event itself carries.
+      const permissionMode = found.permissionMode ?? running.permissionMode;
+      const model = found.model ?? running.model;
+      if (permissionMode === running.permissionMode && model === running.model) return;
+      running.permissionMode = permissionMode;
+      running.model = model;
+      this.publish(summary.id, { type: 'session.pinned', permissionMode, model });
+    };
+    // Once as the watching starts, over the record as it already stands: a
+    // terminal that has not changed mode since it opened writes nothing further
+    // about it, so a reader waiting for the next line would wait for ever.
+    void runningIn(path)
+      .then(saysWhatItRuns)
+      // Being written this instant, or moved: the beat below reads it again.
+      .catch(() => {});
+
+    /**
      * Every agent this chat has sent off, and how much of each one is drawn.
      *
      * A helper's turns are in a file of its own beside the record, and the tail
@@ -1037,6 +1080,9 @@ export class Sessions {
         mark();
         return;
       }
+      // Before the early return below: a terminal switched into another mode
+      // writes that line and no conversation, and the screen has to follow it.
+      saysWhatItRuns(grown.running);
       let fresh = grown.fresh;
       // Nothing held back yet, so these lines are the first this follower has
       // in hand and `from` is where they begin.
