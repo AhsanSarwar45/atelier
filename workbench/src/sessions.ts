@@ -9,7 +9,7 @@ import { getSessionInfo, getSessionMessages, type SessionMessage } from '@anthro
 import { randomUUID } from 'node:crypto';
 
 import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
-import { DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
+import { BRAND_DEFAULT_MODEL, DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
   carryOnAt,
   cut,
@@ -32,6 +32,7 @@ import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
 import { type HelperPast, helperNamed, helpersNow, helpersOf } from './helper-records.ts';
+import { readOwnerSettings, writeOwnerSetting } from './owner-settings.ts';
 import { spokenAsEvents } from './reading-back.ts';
 import { allLines, findRecord, linePlace, recordSize, RecordTail, type RecordLine } from './record-tail.ts';
 import { knownSessions } from './registry.ts';
@@ -198,6 +199,10 @@ export class Sessions {
       throw new Error(`No driver for brand "${params.brand}" yet — see docs/agent-workbench.md §3.2`);
     }
     const now = new Date().toISOString();
+    // What HE has already said a chat opens on, rather than what this app used
+    // to invent: the mode and the model out of his own settings, and the app's
+    // fallback only where his settings say nothing (bw-7ks.23, owner-settings.ts).
+    const owner = readOwnerSettings(params.projectPath);
     const summary: SessionSummary = {
       id: randomUUID(),
       brand: params.brand,
@@ -205,8 +210,8 @@ export class Sessions {
       projectId: params.projectId,
       projectPath: params.projectPath,
       cwd: params.projectPath,
-      model: params.model ?? null,
-      permissionMode: params.permissionMode ?? DEFAULT_PERMISSION_MODE,
+      model: params.model ?? owner.model ?? null,
+      permissionMode: params.permissionMode ?? owner.permissionMode ?? DEFAULT_PERMISSION_MODE,
       title: null,
       state: 'starting',
       createdAt: now,
@@ -215,7 +220,7 @@ export class Sessions {
     this.store.createSession({ ...summary, origin: 'app' });
     this.openings.forEach((fn) => fn(summary));
 
-    await this.attach(summary, params.model);
+    await this.attach(summary, summary.model ?? undefined);
 
     // Started FROM a card: the owner said so by pressing the button there, so
     // the link is recorded now rather than waited for. The brief is the chat's
@@ -291,7 +296,10 @@ export class Sessions {
       projectPath: params.projectPath,
       cwd: seen?.cwd ?? params.projectPath,
       model: null,
-      permissionMode: DEFAULT_PERMISSION_MODE,
+      // A chat begun in a terminal runs in whatever mode that terminal is in,
+      // and it says so itself the moment this app takes it over. Until it does,
+      // his own settings are the better guess than a literal (bw-7ks.23).
+      permissionMode: readOwnerSettings(params.projectPath).permissionMode ?? DEFAULT_PERMISSION_MODE,
       title: seen?.name ?? null,
       state: 'dormant',
       createdAt: new Date().toISOString(),
@@ -342,7 +350,10 @@ export class Sessions {
         projectPath: params.projectPath,
         cwd: params.projectPath,
         model: null,
-        permissionMode: DEFAULT_PERMISSION_MODE,
+        // Same as a chat this app started: his settings answer it, not a
+        // literal in here (bw-7ks.23). A row the app already knows keeps the
+        // mode it was left in — that is the `existing` branch above.
+        permissionMode: readOwnerSettings(params.projectPath).permissionMode ?? DEFAULT_PERMISSION_MODE,
         title: null,
         state: 'starting',
         createdAt: now,
@@ -1198,9 +1209,19 @@ export class Sessions {
   }
 
   /**
-   * Changes what the OPEN chat is pinned to, and remembers it: the mode is
+   * Changes what the OPEN chat is pinned to, and keeps the choice: the mode is
    * re-pinned on every resume (§3.1), so a change made here has to outlive the
-   * chat going to sleep.
+   * chat going to sleep — and, since bw-7ks.23, the chat itself. A setting he
+   * picks is a setting he has changed, so it goes back into the file he keeps
+   * it in and every chat opened afterwards starts there (owner-settings.ts).
+   *
+   * Only what HE picks. A mode the tool changes by itself mid-turn arrives as a
+   * status and is stored against that one chat (see the `session.pinned` arm of
+   * `absorb`); it never touches his settings, because nobody chose it.
+   *
+   * The chat is changed first and the file second, so a file that refuses the
+   * write — a company-wide setting overriding it — still leaves the open chat
+   * in the mode he asked for, with the reason on the screen beside it.
    */
   async pin(sessionId: string, what: { mode?: string; model?: string }): Promise<void> {
     const driver = this.require(sessionId);
@@ -1218,6 +1239,14 @@ export class Sessions {
       permissionMode: now?.permissionMode ?? null,
       model: now?.model ?? null,
     });
+    if (now) {
+      writeOwnerSetting(now.projectPath, {
+        permissionMode: what.mode,
+        // The picker's top row is the brand's own default, not a model anybody
+        // could name in a settings file. Picking it takes the key out.
+        model: what.model === BRAND_DEFAULT_MODEL ? null : what.model,
+      });
+    }
   }
 
   async stop(sessionId: string): Promise<void> {

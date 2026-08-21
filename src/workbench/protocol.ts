@@ -679,8 +679,24 @@ export const CLAUDE_PERMISSION_MODES = [
   'bypassPermissions',
 ] as const;
 
-/** The mode a workbench session is pinned to unless the owner picks another. */
+/**
+ * The mode a chat opens in when NOTHING says otherwise.
+ *
+ * Last, not first: what a chat opens in is what the owner's own settings say
+ * (workbench/src/owner-settings.ts, bw-7ks.23), and this is the answer only
+ * where they say nothing at all. It used to be handed to the kit on every
+ * start, which is why a machine set to skip every permission check still opened
+ * every chat asking about every tool (bw-b1o1).
+ */
 export const DEFAULT_PERMISSION_MODE = 'default';
+
+/**
+ * The model picker's own top row: not a model, but "whatever the brand would
+ * have picked". The kit's model list carries it, the header shows it for a chat
+ * nobody has pinned a model to, and choosing it takes the model key out of the
+ * owner's settings rather than writing this word into them.
+ */
+export const BRAND_DEFAULT_MODEL = 'default';
 
 /**
  * The folder a chat ran in, as a chip: the directory's own name, which for a

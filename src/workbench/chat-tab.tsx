@@ -63,6 +63,7 @@ import { SplitPaths } from '@/workbench/split-paths';
 import { useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -1119,7 +1120,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               testid="model-picker"
               // A session that has not been given a model is on the brand's own
               // default, and the list has a row for exactly that.
-              current={view.model ?? 'default'}
+              current={view.model ?? BRAND_DEFAULT_MODEL}
               asleep={asleep}
               options={view.menu.models.map((m) => ({
                 value: m.value,
