@@ -220,7 +220,7 @@ test.describe('a chat another program is in', () => {
       const said = page.getByTestId('held-elsewhere');
       await expect(said).toBeVisible();
       await expect(said).toContainText('terminal');
-      await expect(said).toContainText('comes back when they stop');
+      await expect(said).toContainText('comes back when they let go');
     } finally {
       release();
     }

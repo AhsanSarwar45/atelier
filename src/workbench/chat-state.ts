@@ -195,3 +195,25 @@ export function heldDoing(args: {
   if (!moving) return { doing: 'idle', since: null };
   return { doing: 'working', since: args.burstAt ?? args.recordMovedAt };
 }
+
+/**
+ * The line drawn where a held chat's writing box would be.
+ *
+ * Here rather than in the component because it has to agree with the mark
+ * beside it, and the mark is read here. It said "Somebody is working in this
+ * chat" whatever the holder was doing, so a chat whose terminal had gone quiet
+ * drew Idle and a line claiming somebody was working in it, a foot apart
+ * (bw-96is.9). What is always true is that they have it open; the working half
+ * is added only when the mark says so.
+ *
+ * "Let go", not "stop": the box comes back when the holder releases the
+ * conversation, and a terminal that has merely stopped working still holds it.
+ */
+export function heldLine(state: ChatState): string {
+  const open =
+    state.external?.holder === 'terminal'
+      ? 'Somebody has this chat open in a terminal'
+      : 'Another program has this chat open';
+  const now = state.working ? ', and is working in it now' : '';
+  return `${open}${now}. It draws here as it goes; the writing box comes back when they let go of it.`;
+}

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { RECORD_QUIET_MS, chatState, counting, heldDoing, type HeldChat } from '@/workbench/chat-state';
+import { RECORD_QUIET_MS, chatState, counting, heldDoing, heldLine, type HeldChat } from '@/workbench/chat-state';
 import type { SessionState } from '@/workbench/protocol';
 
 /** Every state a chat of ours can be published in, in the protocol's own order. */
@@ -169,5 +169,41 @@ describe('what a held chat is doing, from the two signals there are', () => {
       const read = heldDoing({ status, statusAt: now, recordMovedAt: now - RECORD_QUIET_MS - 1, burstAt: now, now });
       expect(read.since, `${status ?? 'no'} status left a count running`).toBeNull();
     }
+  });
+});
+
+describe('the line where a held chat’s writing box would be', () => {
+  /** The reading for a held chat, as the pane has it. */
+  const held = (doing: HeldChat['doing'], holder: HeldChat['holder'] = 'terminal') =>
+    chatState({ state: 'dormant', held: { id: 'c', holder, doing, since: 1_000 } });
+
+  it('claims somebody is working only while the mark beside it says so', () => {
+    // The two are a foot apart on the screen. The line used to say somebody was
+    // working in the chat whatever the holder was doing, so a terminal that had
+    // gone quiet drew "Idle" and a flat contradiction of it (bw-96is.9).
+    expect(heldLine(held('working'))).toContain('is working in it now');
+    for (const doing of ['idle', 'unknown'] as const) {
+      expect(heldLine(held(doing)), `${doing} was described as working`).not.toContain('working');
+    }
+  });
+
+  it('says they have it open whatever they are doing, because that is what is true', () => {
+    for (const doing of ['working', 'idle', 'unknown'] as const) {
+      expect(heldLine(held(doing)), `${doing} said nothing about who holds it`).toContain('has this chat open');
+    }
+  });
+
+  it('names a terminal as somebody and anything else as another program', () => {
+    expect(heldLine(held('idle', 'terminal'))).toContain('in a terminal');
+    expect(heldLine(held('idle', 'program'))).toContain('Another program');
+    expect(heldLine(held('idle', 'program'))).not.toContain('terminal');
+  });
+
+  it('promises the box back when they let go, not when they stop working', () => {
+    // A terminal that has stopped working still holds the conversation, so
+    // "when they stop" promised a box that does not arrive.
+    const line = heldLine(held('idle'));
+    expect(line).toContain('comes back when they let go');
+    expect(line).not.toContain('when they stop');
   });
 });

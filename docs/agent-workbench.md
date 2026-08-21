@@ -1588,6 +1588,17 @@ kit. It is drawn only on chats somebody else holds, so it means something by
 being there; the word it replaced meant "occupied" and was read as "working",
 which is the whole of what went wrong.
 
+**A held chat has no writing box, and the line in its place agrees with the
+mark.** The box used to be drawn in full and refuse every keystroke — a locked
+door where there is no door — because a message typed into it would wake a
+second agent on the same record (§6.3.3). What stands there instead is one
+sentence, and its words come from the same reading the mark does (`heldLine`),
+so the two cannot contradict: they *have this chat open*, and only when the mark
+says working does the sentence add that they are working in it now. It promises
+the box back when they **let go**, not when they stop — a terminal that has gone
+quiet still holds the conversation, and the box does not return until it exits
+(bw-96is.9).
+
 **A chat that is asleep says nothing at all.** Most of a list is asleep, and a
 pill on every row is a pill on none. The mark appears only when there is
 something to say — working, waiting, reachable, or held.

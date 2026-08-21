@@ -49,7 +49,7 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
-import { chatState } from '@/workbench/chat-state';
+import { chatState, heldLine } from '@/workbench/chat-state';
 import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
@@ -963,14 +963,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             is a door with a lock on it where there is no door: typing here
             would wake a SECOND agent on the same record (§6.3.3), so what
             stands in its place is the one line that says who is in there. It
-            comes back by itself when they stop, because the stream this is read
-            from does (bw-96is). */}
+            comes back by itself when they let go, because the stream this is
+            read from does (bw-96is). The line's words are the reading's, so it
+            cannot contradict the mark at the top of the pane (bw-96is.9). */}
         {held ? (
           <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-1 text-xs text-muted-foreground">
-            {state.external?.holder === 'terminal'
-              ? 'Somebody is working in this chat in a terminal.'
-              : 'Another program is working in this chat.'}{' '}
-            It draws here as it goes; the writing box comes back when they stop.
+            {heldLine(state)}
           </p>
         ) : (
         <div

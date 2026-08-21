@@ -20,10 +20,16 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { ChatState, Holder } from '@/workbench/chat-state';
 
-/** What the badge's tooltip calls each kind of holder. */
+/**
+ * What the badge's tooltip calls each kind of holder.
+ *
+ * Who has it, never what they are doing: the chip beside the badge is the only
+ * thing that speaks for that, and a tooltip claiming somebody was working
+ * contradicted an "Idle" chip an inch away (bw-96is.9).
+ */
 const HOLDER_WORD: Record<Holder, string> = {
-  terminal: 'Somebody is working in this chat in a terminal.',
-  program: 'Another program is working in this chat.',
+  terminal: 'Somebody has this chat open in a terminal.',
+  program: 'Another program has this chat open.',
 };
 
 const listeners = new Set<() => void>();
