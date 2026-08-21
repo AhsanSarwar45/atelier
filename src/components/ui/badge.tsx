@@ -39,7 +39,15 @@ const badgeVariants = cva(
   // keyboard alone and did nothing at all for the click he described
   // (bw-4wcd.12). The ring stays suppressed either way, so the keyboard reader
   // loses nothing: the same brightened border is what marks it.
-  'inline-flex items-center whitespace-nowrap justify-center border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
+  //
+  // `align-middle` is for the one place a chip is not a row's child: written
+  // into a sentence. A chip is an inline-flex box whose first item is its icon,
+  // and a browser reads such a box's baseline off that first item — an icon has
+  // none, so its BOTTOM edge is used, which hung every chip named in a message a
+  // third of a line above the words around it (bw-8fh2.1). Centring it on the
+  // text's own middle does not depend on the icon at all. Everywhere else a chip
+  // sits inside a flex row, where vertical-align is not read.
+  'inline-flex items-center whitespace-nowrap justify-center align-middle border border-transparent font-medium focus:outline-hidden focus-visible:outline-hidden focus:border-current [&_svg]:-ms-px [&_svg]:shrink-0',
   {
     variants: {
       variant: {
