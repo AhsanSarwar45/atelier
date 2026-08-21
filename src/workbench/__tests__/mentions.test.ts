@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { mentionsIn, rehypeMentions, type Existing } from '@/workbench/mentions';
+import { addressedBy, mentionsIn, rehypeMentions, type Existing } from '@/workbench/mentions';
 
 const BOARD: Existing = {
   card: (id) => ['bw-4wcd', 'bw-4wcd.3', 'bw-1u1'].includes(id),
@@ -91,6 +91,8 @@ describe('the rewriting step', () => {
     expect(pre.children[0]!.children[0]!.type).toBe('text');
   });
 
+  // The words inside a link stay words here; what the link ITSELF names is a
+  // separate question, answered by `addressedBy` when the page draws it.
   it('leaves a link alone, because it already goes somewhere', () => {
     const tree = {
       type: 'root',
@@ -102,5 +104,34 @@ describe('the rewriting step', () => {
     const link = tree.children[0] as { children: { type: string }[] };
     expect(link.children).toHaveLength(1);
     expect(link.children[0]!.type).toBe('text');
+  });
+});
+
+/**
+ * An agent hands a report over as the whole address, port and all — the way it
+ * would hand it to somebody outside the app. That is a link long before any of
+ * the rewriting above is asked anything, so the address itself has to say what
+ * it names (bw-8fh2.2).
+ */
+describe('an address written out in full', () => {
+  it('names the report it carries', () => {
+    const written =
+      'http://127.0.0.1:3008/project?id=7ec315b6-f66e-421e-84ae-a28088bdf16b&tab=reports&report=agents-you-cannot-see';
+    expect(addressedBy(written)).toEqual({ kind: 'report', slug: 'agents-you-cannot-see' });
+  });
+
+  it('names the card it carries, however the address spells it', () => {
+    expect(addressedBy('http://localhost:3008/project?id=p&card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+    expect(addressedBy('/project?id=p&bead=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+  });
+
+  it('gives the card when an address carries both, because its panel is what opens', () => {
+    expect(addressedBy('/project?tab=reports&report=a-report&card=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1' });
+  });
+
+  it('names nothing in an address that is not one of ours', () => {
+    expect(addressedBy('https://github.com/gastownhall/beads/issues/1')).toBeNull();
+    expect(addressedBy('http://127.0.0.1:3008/project?id=p&tab=board')).toBeNull();
+    expect(addressedBy('not an address at all')).toBeNull();
   });
 });

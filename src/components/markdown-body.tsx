@@ -28,6 +28,12 @@ export interface Mentions {
   report: (slug: string) => ReactNode;
   /** A file named in the words, drawn as the reader wrote it (bw-khe.13). */
   path?: (absolute: string, raw: string, line: number | null) => ReactNode;
+  /**
+   * A whole address, when it names a card or a report of this app's own — drawn
+   * as that chip rather than as raw blue text. Nothing, and the address is left
+   * the link it already was (bw-8fh2.2).
+   */
+  link?: (href: string) => ReactNode | null;
 }
 
 const PROSE_CLASSES =
@@ -76,10 +82,14 @@ export function MarkdownBody({
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]}
         components={{
-          // A link leaves for its own tab and cannot reach back into this one.
-          a: ({ node, ...props }) => (
-            <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />
-          ),
+          // A link leaves for its own tab and cannot reach back into this one —
+          // unless it names something of ours, in which case it is a chip, and
+          // opens where every other chip opens: inside this window.
+          a: ({ node, ...props }) => {
+            const ours = mentions?.link?.(String(props.href ?? ''));
+            if (ours) return <>{ours}</>;
+            return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
+          },
           // A name the rewriting step marked. Everything else drawn as a span
           // stays a span, so nothing about ordinary text changes.
           span: ({ node, ...props }) => {

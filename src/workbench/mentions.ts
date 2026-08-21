@@ -100,6 +100,48 @@ export function openableIn(text: string, existing: Existing, where: Rooted, disk
 }
 
 /* ------------------------------------------------------------------ *
+ * A name written out as a whole address.
+ * ------------------------------------------------------------------ */
+
+/** What an address of this app's own names. */
+export type Addressed = { kind: 'card'; id: string } | { kind: 'report'; slug: string };
+
+/** The spelling `card` used to have in an address, still written by older links. */
+const OLD_CARD = 'bead';
+
+/**
+ * The card or report an address names, or nothing.
+ *
+ * An agent that has just written a report hands it over the way it would hand it
+ * to somebody outside the app: the whole address, port and all. In prose that
+ * becomes a link before anything here sees it, and a link is the one place a
+ * mention is never looked for — so the thing in a message the reader most wants
+ * to open was the one thing drawn as raw blue text (bw-8fh2.2).
+ *
+ * Only the shape of this app's own screen counts: `/project` carrying a `report`
+ * or a `card`. Whether the thing it names exists is the caller's question, the
+ * same as it is for a bare name, and that is what keeps somebody else's
+ * `/project?card=…` from being drawn as one of ours.
+ */
+export function addressedBy(href: string): Addressed | null {
+  let url: URL;
+  try {
+    // A base, because the address may be written relative — a link made inside
+    // the app is `/project?…` and carries no host at all.
+    url = new URL(href, 'http://beads.invalid');
+  } catch {
+    return null;
+  }
+  if (!/(^|\/)project\/?$/.test(url.pathname)) return null;
+  // A card wins a tie: its panel is drawn OVER whichever tab the address asks
+  // for, so it is what the reader would land on.
+  const card = url.searchParams.get('card') ?? url.searchParams.get(OLD_CARD);
+  if (card) return { kind: 'card', id: card };
+  const report = url.searchParams.get('report');
+  return report ? { kind: 'report', slug: report } : null;
+}
+
+/* ------------------------------------------------------------------ *
  * The same rule, as the step that rewrites a rendered message.
  * ------------------------------------------------------------------ */
 

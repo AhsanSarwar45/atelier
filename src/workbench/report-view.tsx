@@ -19,6 +19,7 @@ import { FileText } from 'lucide-react';
 import { useReports } from '@/components/reports';
 import { Badge } from '@/components/ui/badge';
 import { addressWith } from '@/lib/address';
+import { cn } from '@/lib/utils';
 
 interface ReportRef {
   project: string;
@@ -47,10 +48,10 @@ function useOpenReport(slug: string): () => void {
  * is the surer link: a report names the card it belongs to, so a chat that
  * worked that card has that report (docs/agent-workbench.md §8.2.2).
  */
-export function ReportChip({ slug, title }: ReportRef & { title: string }) {
+export function ReportChip({ slug, title, className }: ReportRef & { title: string; className?: string }) {
   const open = useOpenReport(slug);
   return (
-    <Badge asChild variant="info" appearance="light" size="sm" shape="circle" className="shrink-0">
+    <Badge asChild variant="info" appearance="light" size="sm" shape="circle" className={cn('shrink-0', className)}>
       <button type="button" data-testid="chat-report-chip" data-report-slug={slug} title={title} onClick={open}>
         <FileText className="mr-1 h-3 w-3" />
         {title}

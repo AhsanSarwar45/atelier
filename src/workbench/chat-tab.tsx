@@ -55,7 +55,7 @@ import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
-import { openableIn } from '@/workbench/mentions';
+import { addressedBy, openableIn } from '@/workbench/mentions';
 import { PathChip, openPathClicked } from '@/workbench/path-chip';
 import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
@@ -418,17 +418,28 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           disk,
         ),
       path: (absolute, raw, line) => <PathChip absolute={absolute} raw={raw} line={line} />,
-      card: (id) => (
-        <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5 align-baseline" />
-      ),
+      card: (id) => <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />,
       report: (slug) => {
         const found = byName.get(slug);
         if (!found) return slug;
-        return (
-          <span className="mx-0.5 inline-flex align-baseline">
-            <ReportChip project={found.project} slug={found.slug} title={found.title} />
-          </span>
-        );
+        return <ReportChip project={found.project} slug={found.slug} title={found.title} className="mx-0.5" />;
+      },
+      // The same two chips, from an address written out in full. It is how an
+      // agent hands over a report it has just written, and it was the one thing
+      // in a message that stayed raw blue text (bw-8fh2.2). Only ours, and only
+      // when the thing it names really is on this project — anything else stays
+      // the link it was.
+      link: (href) => {
+        const named = addressedBy(href);
+        if (!named) return null;
+        if (named.kind === 'card') {
+          return knownCards.has(named.id) ? (
+            <BeadChip id={named.id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />
+          ) : null;
+        }
+        const found = byName.get(named.slug);
+        if (!found) return null;
+        return <ReportChip project={found.project} slug={found.slug} title={found.title} className="mx-0.5" />;
       },
     }),
     [knownCards, byName, projectId, projectPath, where, disk],
