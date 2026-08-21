@@ -200,7 +200,8 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 docs/designs/app-shell.md §1.9), `session.resume`, `prompt.send` (text +
 attachments + mentions), `ask.answer` (`askId, optionId, updatedInput?,
 freeText?`), `session.stop`, `session.end`, `session.mode` (`mode`) and
-`session.model` (`model`) — both acting on the LIVE session (§8.2.3) — and
+`session.model` (`model`) — both acting on the LIVE session and both kept in
+the owner's own settings afterwards (§8.2.3) — and
 `compact`, `clear`. A typed command is not its own message: it is sent as
 ordinary prompt text, which is how the brand runs one (§7).
 
@@ -251,11 +252,16 @@ and hooks.
 
 Fixed at launch, every session:
 
-- **The permission mode is always passed explicitly.** Defaults are shifting
-  and plan/bypass modes are *not* restored on resume, so the sidecar stores the
-  mode per session and re-pins it on every resume. The header shows the pinned
-  mode. Which mode asks about *every* tool was settled by running one and
-  watching: a permission request arrived for `Read` and again for `Edit`.
+- **The permission mode is always passed explicitly, and it is the owner's.**
+  Defaults are shifting and plan/bypass modes are *not* restored on resume, so
+  the sidecar stores the mode per session and re-pins it on every resume. The
+  header shows the pinned mode. What it is pinned TO is read out of his own
+  settings pile (§8.2.3) — passing a mode explicitly beats `permissions.
+  defaultMode`, so a value of this app's own invention here silently overrode
+  the one he had set (bw-b1o1, bw-7ks.23). The app's `default` is the last
+  answer, for a machine whose settings say nothing. Which mode asks about
+  *every* tool was settled by running one and watching: a permission request
+  arrived for `Read` and again for `Edit`.
 - **No MCP.** `--strict-mcp-config` with no `--mcp-config` — nothing attaches
   unless the owner asks (decision 6).
 - **His own commands, skills and settings are loaded** — `settingSources:
@@ -911,16 +917,19 @@ These same three things — a moving mark, the verb, the seconds — are what ev
 other screen draws about a chat as well, from one reading rather than four
 (§8.2.9).
 
-#### 8.2.3 Steering the chat you are in (bw-f1q)
+#### 8.2.3 Steering the chat, and the settings a chat opens on (bw-f1q, bw-7ks.23)
 
 Constraint: the mode, the model, the skills and the commands are chosen from the
-writing box, and they act on the chat that is open — not on the next one.
+writing box, and they act on the chat that is open. The mode and the model are
+not this app's to invent: a chat opens on what the owner's own settings already
+say, and picking one in the box changes those settings rather than that one chat.
 
 - **Permission mode** and **model** are pickers on the composer's own row. They
   send `session.mode` / `session.model`, which call the kit's
   `setPermissionMode` / `setModel` on the live session; the change comes back as
   an event, so every window watching that chat agrees and the header's pinned
-  mode is never a guess.
+  mode is never a guess. The same command then writes the pick into the owner's
+  settings, so the chat after it opens on it too.
 - **`/`** at the start of the box opens the command and skill menu (§7),
   filtered as he types, arrow keys and Enter to pick.
 - A **picture** — one waiting in the tray or one already sent — opens at full
@@ -929,6 +938,35 @@ writing box, and they act on the chat that is open — not on the next one.
 The mode a session is pinned to is still stored per session and re-pinned on
 resume (§3.1); a live change updates that store, so it survives the chat going
 to sleep and coming back.
+
+**Where those settings live.** The kit's own four files, in the kit's own order,
+the lowest first — the same order its command line reads them in:
+
+| whose | file |
+|---|---|
+| the owner's | `<config>/settings.json` — `CLAUDE_CONFIG_DIR`, else `~/.claude` |
+| the project's | `<project>/.claude/settings.json` |
+| this copy's | `<project>/.claude/settings.local.json` |
+| the company's | the managed file, where an install has one |
+
+The mode is `permissions.defaultMode` and the model is `model`; a chat is started
+on what the pile says, and only on the app's own `default` when it says nothing.
+The company's file is read and never written — it is the one an owner is not
+meant to be able to talk his way out of.
+
+**Where a pick is written.** Into the file that setting is already kept in —
+highest of the writable three that names the key, and the owner's own when none
+of them does. Writing a project file that never mentioned the key would put one
+person's choice in front of everyone who checks the repository out; writing under
+a file that overrides it would write a value that never takes effect. That second
+one is not left to reasoning: the write is read back through the whole pile, and
+a value that did not survive the trip is an error the picker shows rather than a
+change the owner thinks he made. Picking the model list's top row — the brand's
+own default — takes the key out of every file of his that holds it, because one
+left behind is the same as not having picked it.
+
+Only what HE picks is kept. A mode the kit changes by itself mid-turn arrives as
+a status and is drawn like one; it never reaches his settings.
 
 #### 8.2.4 Everything the agent does, on one page (bw-1u1)
 

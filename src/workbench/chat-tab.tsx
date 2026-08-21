@@ -1093,7 +1093,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             >
               <Paperclip className="h-4 w-4" />
             </Button>
-            {/* Both act on THIS chat, not the next one (§8.2.3). */}
+            {/* Both act on THIS chat, and are kept in his own settings so the
+                next one opens on them too (§8.2.3). */}
             <Picker
               icon={<ShieldCheck className="h-3.5 w-3.5" />}
               label="Permission mode"
