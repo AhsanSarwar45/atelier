@@ -10,6 +10,7 @@ import {
   HELPER_AGENT,
   HELPER_ANSWERED,
   HELPER_BRIEF,
+  HELPER_FAILED,
   HELPER_SAID,
   SENT_OFF_CALL,
   writeChatWithHelper,
@@ -89,6 +90,10 @@ const FIXTURE = join(__dirname, '..', '.workbench-run-agents');
 /** Where the read-back case builds a project with a board of its own. */
 const RECORD_RUN = join(__dirname, '..', '.workbench-run-record');
 const RECORD_PROJECT = join(RECORD_RUN, 'project');
+
+/** And where the case about a helper that came back red builds its own. */
+const RED_RUN = join(__dirname, '..', '.workbench-run-red');
+const RED_PROJECT = join(RED_RUN, 'project');
 
 /** And where the spend case builds its own, for a chat that sent three off. */
 const SPEND_RUN = join(__dirname, '..', '.workbench-run-spend');
@@ -738,6 +743,58 @@ test.describe('the agents a chat sends off', () => {
   });
 
   /**
+   * A helper that came back red, on a chat nobody is driving any more.
+   *
+   * Watched live, the row goes red off the same signal the kit sends about the
+   * call: the answer to whether it worked is on the CALL that sent it, never in
+   * the helper's own record, which says what it did and stops there. Read back
+   * off the disk that answer was thrown away and every row was drawn finished —
+   * so a chat closed and reopened turned a helper that failed into one that
+   * succeeded, silently, with its own words still saying otherwise
+   * (bw-7ks.22.28).
+   */
+  test('a helper that came back red still reads failed once the chat is read back', async ({ page, request }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    rmSync(RED_RUN, { recursive: true, force: true });
+    mkdirSync(RED_RUN, { recursive: true });
+    makeFixtureProject(RED_PROJECT, join(RED_RUN, 'reporting'));
+    const project = await projectAt(request, 'workbench-red', RED_PROJECT);
+    // Two agents, one of them red: what is under test is the two being told
+    // apart, which one row alone cannot show.
+    const written = writeChatWithHelper({
+      cwd: RED_PROJECT,
+      sessionId: randomUUID(),
+      card: PARENT_CARD,
+      sentOff: 2,
+      souredAt: 1,
+    });
+
+    try {
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await expect(page.getByTestId('chat-sidebar')).toBeVisible({ timeout: HELLO_MS });
+      const listed = page.locator(`[data-testid="restore-row"][data-external-id="${written.sessionId}"]`);
+      await listed.waitFor({ timeout: HELLO_MS });
+      await listed.getByTestId('row-name').click();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+
+      await expect(page.getByTestId('sent-away-panel')).toHaveAttribute('data-rows', '2');
+      const wentWell = page.locator(`[data-testid="sent-away-row"][data-agent="${HELPER_AGENT}"]`);
+      const wentRed = page.locator(`[data-testid="sent-away-row"][data-agent="${HELPER_AGENT}-2"]`);
+      await expect(wentWell).toHaveAttribute('data-state', 'done');
+      await expect(wentRed).toHaveAttribute('data-state', 'failed');
+      // And it still says what it said: a row that failed keeps its last word,
+      // which is the only place the reason for it is written down.
+      await expect(wentRed.getByTestId('sent-away-result')).toContainText(HELPER_FAILED);
+      await expect(wentWell.getByTestId('sent-away-result')).toContainText(HELPER_ANSWERED);
+
+      await page.screenshot({ path: `${SHOTS}/chat-agents-read-back-red.png`, fullPage: false });
+    } finally {
+      written.remove();
+      await request.delete(`/api/projects/${project.id}`);
+    }
+  });
+
+  /**
    * What a chat spent, on a chat that delegated most of its work.
    *
    * Written rather than run, and that is the point of it. What a delegated turn
@@ -885,6 +942,23 @@ test.describe('the agents a chat sends off', () => {
         })
         .toBe('done');
       await expect(row.getByTestId('sent-away-result')).toContainText(HELPER_ANSWERED);
+
+      // And one that comes back red ends red. How a helper went is on the
+      // answer to the call that sent it and nowhere in its own file, and the
+      // reading has to hold here as much as it does on a chat read back off the
+      // disk — otherwise a reader watching sees it fail and the same chat
+      // opened tomorrow says it succeeded (bw-7ks.22.28).
+      const soured = written.sendsOff('Read a board that is not there');
+      const red = page.locator(`[data-testid="sent-away-row"][data-agent="${soured.agentId}"]`);
+      await expect(red, 'the chat grew no row for the second agent').toHaveCount(1, { timeout: HELLO_MS });
+      soured.answers(HELPER_FAILED, false);
+      await expect
+        .poll(async () => red.getAttribute('data-state'), {
+          message: 'a helper whose call came back in error was drawn as finished',
+          timeout: HELLO_MS,
+        })
+        .toBe('failed');
+      await expect(red.getByTestId('sent-away-result')).toContainText(HELPER_FAILED);
     } finally {
       written.remove();
       await request.delete(`/api/projects/${project.id}`);

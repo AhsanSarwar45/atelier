@@ -1302,6 +1302,15 @@ missing today rather than merely thin:
   measured 2026-08-20; the tail reader's line discarding sidechain messages is
   vestigial — no such line reaches a parent's record on this version, and it
   still guards against pointing the tail at a helper's own file);
+- **how a helper went is on the call that sent it, and nowhere in its own
+  record.** A helper's file says what it did and stops there: nothing in it
+  marks a last line as last, let alone as a failure, and a helper that gave up
+  said so only in words. The answer is the `is_error` on the `tool_result`
+  answering the Task call — the same signal the live driver reads to choose
+  `done` from `failed`. Both the reading paths ignored it and drew every row
+  finished, so a helper watched failing was green when the chat was reopened,
+  and one that failed while a reader followed it went green the moment its
+  answer landed (bw-7ks.22.28);
 - a chat nobody is driving says nothing about what it cost, and what it cost is
   mostly the work it sent away. The claim this job opened with — that a turn's
   cost counts the main loop only — is **false for a live Claude chat** and was

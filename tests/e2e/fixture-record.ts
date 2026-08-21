@@ -38,6 +38,15 @@ export const HELPER_ANSWERED = 'Three cards, one of them closed.';
 /** The chat's own answer, which no helper said. */
 export const CHAT_SAID = 'Three cards on the board.';
 
+/**
+ * What a helper that came back red said last, and what its call came back with.
+ *
+ * A helper's own record says what it did and never whether it worked; the
+ * answer is on the call that sent it, which comes back marked in error
+ * (bw-7ks.22.28).
+ */
+export const HELPER_FAILED = 'I could not read the board: bd is not on the path.';
+
 /** What one turn cost, so a row has a spend to draw. */
 const SPENT = {
   input_tokens: 120,
@@ -88,8 +97,12 @@ export interface SentOffLater {
   agentId: string;
   /** It says something of its own, into its own file and nowhere else. */
   says(text: string): void;
-  /** It answers, and the chat hears that answer back: the row is over. */
-  answers(text: string): void;
+  /**
+   * It answers, and the chat hears that answer back: the row is over. `ok`
+   * false marks that answer in error, which is the only place how it went is
+   * ever written down.
+   */
+  answers(text: string, ok?: boolean): void;
 }
 
 export interface WrittenRecord {
@@ -122,10 +135,13 @@ export function writeChatWithHelper(opts: {
   at?: Date;
   /** How many agents this chat sent off. One unless a case needs a panel. */
   sentOff?: number;
+  /** Which of them came back red, if one did: the call that sent it is in error. */
+  souredAt?: number;
 }): WrittenRecord {
   const { cwd, sessionId, card } = opts;
   const branch = opts.branch ?? 'main';
   const many = opts.sentOff ?? 1;
+  const soured = opts.souredAt ?? -1;
   const began = opts.at ?? new Date(Date.now() - 60 * 60 * 1000);
   const when = (seconds: number): string => new Date(began.getTime() + seconds * 1000).toISOString();
 
@@ -193,7 +209,11 @@ export function writeChatWithHelper(opts: {
           type: 'user',
           message: {
             role: 'user',
-            content: [{ type: 'tool_result', tool_use_id: callOf(n), content: HELPER_ANSWERED }],
+            content: [
+              n === soured
+                ? { type: 'tool_result', tool_use_id: callOf(n), is_error: true, content: HELPER_FAILED }
+                : { type: 'tool_result', tool_use_id: callOf(n), content: HELPER_ANSWERED },
+            ],
           },
         },
         50 + n,
@@ -285,7 +305,7 @@ export function writeChatWithHelper(opts: {
             model: 'claude-fable-5',
             role: 'assistant',
             usage: SPENT,
-            content: [{ type: 'text', text: HELPER_ANSWERED }],
+            content: [{ type: 'text', text: n === soured ? HELPER_FAILED : HELPER_ANSWERED }],
           },
         },
         48 + n,
@@ -393,7 +413,7 @@ export function writeChatWithHelper(opts: {
           type: 'assistant',
           message: { id: `msg_${agentId}_said`, model: 'claude-fable-5', role: 'assistant', usage: SPENT, content: [{ type: 'text', text }] },
         }),
-      answers: (text: string): void => {
+      answers: (text: string, ok = true): void => {
         mineIs({
           type: 'assistant',
           message: { id: `msg_${agentId}_answer`, model: 'claude-fable-5', role: 'assistant', usage: SPENT, content: [{ type: 'text', text }] },
@@ -409,7 +429,10 @@ export function writeChatWithHelper(opts: {
           parentUuid: last,
           uuid: back,
           type: 'user',
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: call, content: text }] },
+          message: {
+            role: 'user',
+            content: [ok ? { type: 'tool_result', tool_use_id: call, content: text } : { type: 'tool_result', tool_use_id: call, is_error: true, content: text }],
+          },
         });
         last = back;
       },

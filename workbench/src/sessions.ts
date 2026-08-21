@@ -613,15 +613,31 @@ export class Sessions {
     // drawn is drawn first instead: the panel is every agent the chat sent off,
     // and a row missing from it is the same silence this card is about.
     const onPage = new Set(shown.flatMap((entry) => (entry.kind === 'call' ? [entry.id] : [])));
+    /**
+     * How each of the chat's own calls came back — read from the WHOLE record
+     * and not only the part drawn, because a helper whose call fell off the end
+     * is drawn all the same.
+     *
+     * A helper's own record says what it did and never whether it worked; the
+     * answer is on the call that sent it, which the reading already worked out
+     * from the same `is_error` the live driver reads to choose done from failed.
+     * Without it a chat watched live shows a failed helper red and the same chat
+     * reopened later shows it green (bw-7ks.22.28).
+     */
+    const wentWell = new Map<string, boolean>();
+    for (const entry of past) if (entry.kind === 'call') wentWell.set(entry.id, entry.ok);
+    const howItWent = (helper: HelperPast): boolean =>
+      helper.toolCallId === null ? true : (wentWell.get(helper.toolCallId) ?? true);
+
     const byCall = new Map<string, HelperPast>();
     for (const helper of helpers) {
       if (helper.toolCallId !== null && onPage.has(helper.toolCallId)) byCall.set(helper.toolCallId, helper);
-      else this.drawHelper(summary.id, helper);
+      else this.drawHelper(summary.id, helper, howItWent(helper));
     }
     for (const entry of shown) {
       this.draw(summary.id, entry);
       const helper = entry.kind === 'call' ? byCall.get(entry.id) : undefined;
-      if (helper) this.drawHelper(summary.id, helper);
+      if (helper) this.drawHelper(summary.id, helper, howItWent(helper));
     }
     leaveMark();
     return read;
@@ -640,9 +656,10 @@ export class Sessions {
    *
    * A helper the kit wrote no meta for has no call to hang off. Its row is
    * still drawn — it ran, and it spent what it spent — and its conversation
-   * hangs off its own name, which is what the pane falls back to.
+   * hangs off its own name, which is what the pane falls back to. Nothing says
+   * how that one went either, so it is read the kind way.
    */
-  private drawHelper(sessionId: string, helper: HelperPast): void {
+  private drawHelper(sessionId: string, helper: HelperPast, ok: boolean): void {
     const under = helper.toolCallId ?? helper.agentId;
     this.publish(sessionId, {
       type: 'agent.started',
@@ -661,9 +678,10 @@ export class Sessions {
     this.publish(sessionId, {
       type: 'agent.finished',
       agentId: helper.agentId,
-      // The record says what it did, never whether the chat was happy with it:
-      // a helper that failed said so in words, and those words are its answer.
-      state: 'done',
+      // Whether it worked is on the call that sent it, not in its own record —
+      // the same answer the live wire gives, so a chat reopened says what it
+      // said while it was running (bw-7ks.22.28).
+      state: ok ? 'done' : 'failed',
       seconds: helper.seconds,
       tokens: helper.tokens,
       calls: helper.calls,
@@ -927,7 +945,7 @@ export class Sessions {
      * The answer to a call landing, which is the only thing that says an agent
      * is over: nothing in its own file marks a last line as last.
      */
-    const answered = (callId: string): void => {
+    const answered = (callId: string, ok: boolean): void => {
       const agentId = startedBy.get(callId);
       if (agentId === undefined || sentOff.get(agentId)?.over) return;
       const helper = helperNamed(path, agentId);
@@ -936,9 +954,10 @@ export class Sessions {
       this.publish(summary.id, {
         type: 'agent.finished',
         agentId,
-        // What it did is in its own file; whether the chat was happy with it is
-        // nowhere, and a helper that gave up said so in words.
-        state: 'done',
+        // How it went is on the answer to that call — the same signal the live
+        // wire reads — and never in the helper's own file, which says what it
+        // did and stops there (bw-7ks.22.28).
+        state: ok ? 'done' : 'failed',
         seconds: helper.seconds,
         tokens: helper.tokens,
         calls: helper.calls,
@@ -1042,7 +1061,7 @@ export class Sessions {
       for (const entry of said) {
         if (entry.kind === 'call') links.observe(entry.name, entry.input);
         this.draw(summary.id, entry);
-        if (entry.kind === 'call') answered(entry.id);
+        if (entry.kind === 'call') answered(entry.id, entry.ok);
       }
       mark();
     };
