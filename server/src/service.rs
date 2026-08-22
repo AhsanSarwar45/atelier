@@ -125,10 +125,24 @@ fn settings_from(look: impl Fn(&str) -> Option<String>) -> Vec<(String, String)>
 /// so a folder or a list of places with a space in it would arrive as two
 /// settings, the second of them nonsense. Quoting the whole assignment stops
 /// that; a quote or a backslash inside is escaped so it cannot end the
-/// quoting early.
+/// quoting early, and a percent sign is doubled by `as_typed`.
 fn written_down(name: &str, value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped = as_typed(value).replace('\\', "\\\\").replace('"', "\\\"");
     format!("Environment=\"{name}={escaped}\"\n")
+}
+
+/// Text put where systemd reads its own specifiers, written so it arrives as
+/// the reader typed it.
+///
+/// `Environment=` values and `ExecStart=` both go through specifier expansion
+/// (systemd.exec(5), systemd.unit(5) "Specifiers"), where `%` opens one. A
+/// folder called `100%` under a list of places would arrive as something else
+/// entirely if the next letter happens to name a specifier — `%h` is the home
+/// directory — and if it names none, the machine refuses the whole definition
+/// and nothing starts at all. `%%` is how that manual says to write one
+/// (bw-bddz.7).
+fn as_typed(value: &str) -> String {
+    value.replace('%', "%%")
 }
 
 /// Text put inside a tag, with the characters that would end it turned back
@@ -150,6 +164,11 @@ fn as_text(value: &str) -> String {
 pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
     let args = STARTED_AS.join(" ");
     let environment: String = carried.iter().map(|(name, value)| written_down(name, value)).collect();
+    // Where the program sits is the reader's choice too, and this line is read
+    // the same way a setting is: split on spaces, and its percent signs
+    // expanded. Quoted and doubled, a folder with either in it still names one
+    // program.
+    let exe = format!("\"{}\"", as_typed(exe).replace('\\', "\\\\").replace('"', "\\\""));
     format!(
         "[Unit]\n\
          Description={DISPLAY} — the board, the screens and the chat\n\
@@ -507,7 +526,7 @@ mod tests {
         // the machine was doing, and it must be the same command a person
         // types — not a second way in that can drift from it.
         let unit = systemd_unit("/usr/bin/atelier", &at(3008));
-        assert!(unit.contains("ExecStart=/usr/bin/atelier run --no-browser"), "{unit}");
+        assert!(unit.contains("ExecStart=\"/usr/bin/atelier\" run --no-browser"), "{unit}");
 
         let plist = launch_agent("/usr/bin/atelier", &at(3008), "com.weselow.atelier");
         assert!(plist.contains("<string>run</string>"), "{plist}");
@@ -527,6 +546,31 @@ mod tests {
         assert!(systemd_unit("/usr/bin/atelier", &at(3456)).contains("Environment=\"ATELIER_PORT=3456\""));
         let plist = launch_agent("/usr/bin/atelier", &at(3456), "com.weselow.atelier");
         assert!(plist.contains("<string>3456</string>"), "{plist}");
+    }
+
+    #[test]
+    fn a_percent_sign_in_a_folder_name_is_not_read_as_one_of_the_machine_s_own_words() {
+        // systemd reads `%h` as the reader's home directory and refuses the
+        // whole definition when the letter after a `%` names nothing it knows.
+        // Either way the reader gets no board back, over a folder they were
+        // free to call whatever they liked.
+        let carried = vec![("ATELIER_DATA_DIR".to_string(), "/home/sam/100% mine/data".to_string())];
+        let unit = systemd_unit("/usr/bin/atelier", &carried);
+        assert!(
+            unit.contains("Environment=\"ATELIER_DATA_DIR=/home/sam/100%% mine/data\""),
+            "a percent sign reached the definition as one of systemd's own: {unit}"
+        );
+    }
+
+    #[test]
+    fn the_place_the_program_itself_sits_is_read_as_the_reader_typed_it() {
+        // The line that starts it is read the same way a setting is: split on
+        // spaces, and its percent signs expanded.
+        let unit = systemd_unit("/home/sam/my apps/100%/atelier", &at(3008));
+        assert!(
+            unit.contains("ExecStart=\"/home/sam/my apps/100%%/atelier\" run --no-browser"),
+            "the program's own place did not survive being written down: {unit}"
+        );
     }
 
     #[test]
