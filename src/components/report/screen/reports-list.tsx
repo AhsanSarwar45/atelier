@@ -69,9 +69,13 @@ export function ReportsList({
             onClick={() => onOpen(r.slug)}
           >
             <FileText className="size-4 shrink-0 opacity-60" aria-hidden="true" />
+            {/* `items-start` gives each line the width of its own words, and a
+                line as wide as its words has nothing to trim — so on a phone
+                the title ran on under the badges beside it. `w-full` bounds
+                the lines by the column, and the trimming works again. */}
             <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-              <span className="truncate text-sm font-semibold text-t-primary">{r.title}</span>
-              <span className="truncate font-mono text-xs text-t-muted">{r.slug}</span>
+              <span className="w-full truncate text-sm font-semibold text-t-primary">{r.title}</span>
+              <span className="w-full truncate font-mono text-xs text-t-muted">{r.slug}</span>
             </span>
             {r.waiting > 0 && (
               <Badge
