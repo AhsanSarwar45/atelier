@@ -556,4 +556,21 @@ test.describe('a mouse', () => {
     expect(coarse, 'a desktop window should not report a coarse pointer').toBeFalsy();
     await shoot(page, 'board-1440');
   });
+
+  test('the shut right rail takes no width on a wide screen either', async ({ page }) => {
+    // Its handle used to BE the shut rail, so a thin edge down the side was
+    // the way back in. The handle is on the bar now, and what the edge holds
+    // is nothing at all (bw-81wt.17).
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openProject(page, 'chat');
+    const rail = page.locator('[data-testid="chat-right-rail"]');
+    if (!(await rail.count())) return;
+    const shut = await rail.evaluate((el) => ({
+      open: el.getAttribute('data-open'),
+      wide: Math.round(el.getBoundingClientRect().width),
+    }));
+    if (shut.open === 'true') return;
+    expect(shut.wide, 'the shut right rail is a strip of dead width on a wide screen').toBeLessThanOrEqual(1);
+    await shoot(page, 'chat-rail-shut-1440');
+  });
 });

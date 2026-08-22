@@ -134,10 +134,12 @@ export function ChatRightRail({
               'absolute inset-y-10 right-2 w-72 max-w-[calc(100vw-1rem)] rounded-lg border shadow-2xl',
               'md:static md:inset-auto md:h-full md:w-72 md:max-w-none md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:shadow-none',
             )
-          : // Shut, it takes no width at all — not a sliver holding space
-            // hostage beside the transcript (bw-81wt.5) — and on a wide
-            // screen, the thin edge it always was.
-            'h-full w-0 md:relative md:w-8 md:border-l',
+          : // Shut, it takes no width at all, on a wide screen as much as on
+            // a phone. It used to keep a thin edge on a desktop because the
+            // edge WAS the handle; the handle is on the bar now, so what was
+            // left was two centimetres of bordered nothing down the side of
+            // every wide chat (bw-81wt.17).
+            'h-full w-0',
       )}
     >
       {/* Mounted whether or not it is open: a panel that unmounts on the way out
