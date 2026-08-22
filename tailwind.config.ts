@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import plugin from 'tailwindcss/plugin';
 
 const config: Config = {
   darkMode: ['class'],
@@ -144,6 +145,16 @@ const config: Config = {
   plugins: [
     require('tailwindcss-animate'),
     require('@tailwindcss/typography'),
+    // `coarse:` — only where the pointer is a finger.
+    //
+    // A thumb needs about nine millimetres of glass and a mouse needs none of
+    // it, so the sizes that make a bar readable on a desktop are the sizes
+    // that make it unusable on a phone. This is how a control says "and no
+    // smaller than this when somebody is tapping it" without growing the
+    // desktop at all (bw-81wt.12).
+    plugin(({ addVariant }: { addVariant: (name: string, rule: string) => void }) => {
+      addVariant('coarse', '@media (pointer: coarse)');
+    }),
   ],
 };
 

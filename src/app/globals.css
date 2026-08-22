@@ -348,3 +348,58 @@
   min-height: 100%;
   flex-shrink: 0;
 }
+
+/* A thumb's floor.
+ *
+ * A mouse pointer is a single pixel and hits a 28-pixel icon perfectly well,
+ * which is why the bars in this app are built from small ones. A thumb is
+ * about nine millimetres of glass, and on a phone those same icons are a game
+ * of chance. So where the pointer is coarse — and only there — every control
+ * you tap is at least 40 pixels each way.
+ *
+ * Written as element rules rather than a class because most of the controls in
+ * this app are plain `button` elements written where they are needed, not the
+ * shared component, and a rule that had to be added by hand to each of them is
+ * a rule the next one forgets. A button that is a word inside a sentence stays
+ * inline, and min-height does not apply to an inline box, so prose is left
+ * alone by the same rule that fixes the bars (bw-81wt.12).
+ */
+@media (pointer: coarse) {
+  button,
+  select,
+  textarea,
+  [role='button'],
+  [role='tab'],
+  [role='menuitem'],
+  [role='menuitemcheckbox'],
+  [role='menuitemradio'],
+  [role='option'],
+  [role='switch'],
+  [role='checkbox'],
+  input:not([type='hidden']):not([type='range']) {
+    min-height: 40px;
+  }
+
+  button,
+  [role='button'],
+  [role='tab'],
+  [role='switch'],
+  [role='checkbox'] {
+    min-width: 40px;
+  }
+
+  /* Links get the same floor, and the rule sorts prose out by itself: a
+     minimum size does not apply to an inline box, so a link inside a sentence
+     is untouched while a link that has been laid out as a button — the house
+     in the project bar, the back arrow, a card — grows. */
+  a[href] {
+    min-height: 40px;
+    min-width: 40px;
+  }
+
+  /* A slider is two pixels of track and a dot; the dot is what you drag, and
+     the height here is what gives your thumb somewhere to land. */
+  input[type='range'] {
+    height: 40px;
+  }
+}
