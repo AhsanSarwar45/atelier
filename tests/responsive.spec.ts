@@ -449,8 +449,12 @@ test.describe('overlays and dialogs', () => {
     await firstChat.click();
     await page.waitForTimeout(2500);
 
+    // The chip names are the ones the app really draws. This used to ask for
+    // `plan-chip-session`, which nothing anywhere renders, so the usage panel
+    // was skipped in silence on every run and had never been measured at all
+    // (bw-81wt.19).
     for (const [name, chipId, panelId] of [
-      ['usage', 'plan-chip-session', 'usage-view'],
+      ['usage', 'plan-chip', 'usage-view'],
       ['token', 'context-chip-open', 'token-view'],
     ] as const) {
       const chip = page.locator(`[data-testid="${chipId}"]`).first();
