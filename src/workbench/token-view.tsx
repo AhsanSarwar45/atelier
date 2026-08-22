@@ -33,6 +33,11 @@ import { reads, TIGHT } from '@/workbench/context-window';
 import type { Split, TaskSpend } from '@/workbench/token-picture';
 import type { Inside, TokenPicture, Weight, WindowNow } from '@/workbench/window-now';
 
+import { cn } from '@/lib/utils';
+
+import { Overlay, overlayPanel } from './overlay';
+
+
 /* ------------------------------------------------------------------ *
  * Reading the numbers out loud.
  * ------------------------------------------------------------------ */
@@ -389,12 +394,12 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
   }, [sessionId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-8" data-testid="token-view">
+    <Overlay testId="token-view">
       {/* The panel stands where the screen ends and scrolls inside itself. It
           used to be one growing box with `overflow-y-auto` and no ceiling, so a
           long chat's picture ran off the bottom of the window with its last
           rows unreachable (bw-3ug7.13). Header stays; only the body moves. */}
-      <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border/60 bg-background shadow-2xl">
+      <div className={cn(overlayPanel, 'max-w-3xl')}>
         <div className="flex items-center gap-2 border-b border-border/60 p-4">
           <h2 className="text-base font-semibold text-foreground">Tokens</h2>
           <Badge variant="secondary" appearance="light" size="sm">
@@ -429,7 +434,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
         )}
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

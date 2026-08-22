@@ -36,6 +36,11 @@ import { AgentSteering, forHowLong, isOver, KINDS, liveSeconds, modelNamed, spen
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import { sendCommand } from '@/workbench/use-session';
 
+import { cn } from '@/lib/utils';
+
+import { Overlay, overlayPanel } from './overlay';
+
+
 /**
  * Everything one sent-off agent said, in the order it said it.
  *
@@ -157,19 +162,11 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   }, [onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-8"
-      data-testid="agent-view"
-      data-agent={row.id}
-      data-said={said.length}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <Overlay testId="agent-view" data-agent={row.id} data-said={said.length} onBackdrop={onClose}>
       {/* One shape every time it is opened, and only the conversation inside it
           moves. Sized to its content, a pane opened on a helper that has said one
           line is a toast, and it grows under the reader as the helper talks. */}
-      <Panel tone="overlay" inset="none" className="flex h-[85vh] max-h-full w-full max-w-4xl flex-col">
+      <Panel tone="overlay" inset="none" className={cn(overlayPanel, 'max-w-4xl sm:h-[85vh]')}>
         <div className="flex items-start gap-2 border-b border-border/60 px-4 py-3">
           <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="min-w-0 flex-1">
@@ -249,6 +246,6 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
           </div>
         )}
       </Panel>
-    </div>
+    </Overlay>
   );
 }

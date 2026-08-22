@@ -16,6 +16,9 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import * as api from '@/lib/api';
 import { request } from '@/lib/api';
+import { cn } from '@/lib/utils';
+
+import { Overlay, overlayPanel } from './overlay';
 
 export interface Match {
   sessionId: string;
@@ -64,9 +67,20 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(wait);
   }, [q]);
 
+  // Escape closes it, as it closes every other panel. On a phone this one now
+  // covers the whole screen, so a reader who cannot find the small cross has
+  // no way back at all.
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-8" data-testid="search-panel">
-      <div className="w-full max-w-3xl overflow-hidden rounded-lg border border-border/60 bg-background shadow-2xl">
+    <Overlay testId="search-panel">
+      <div className={cn(overlayPanel, 'max-w-3xl')}>
         <div className="flex items-center gap-2 border-b border-border/60 p-3">
           {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
           <input
@@ -82,7 +96,10 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
           </Button>
         </div>
 
-        <div className="max-h-[60vh] overflow-y-auto">
+        {/* On a phone the panel is the screen, so the results take whatever
+            is left under the box you type in. On a desktop it stays the
+            content-sized card it was. */}
+        <div className="min-h-0 flex-1 overflow-y-auto sm:max-h-[60vh] sm:flex-none">
           {hits.map((h) => {
             const [before, hit, after] = split(h.sentence, h.match);
             return (
@@ -121,6 +138,6 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
           )}
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

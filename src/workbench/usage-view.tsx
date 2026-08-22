@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { usePlanUsage } from '@/workbench/live';
 import {
+
   clockReads,
   percentReads,
   sessionChipReads,
@@ -32,6 +33,10 @@ import {
   weekChipReads,
   windowReads,
 } from '@/workbench/plan-usage';
+
+import { cn } from '@/lib/utils';
+
+import { Overlay, overlayPanel } from './overlay';
 
 /* ------------------------------------------------------------------ *
  * Drawing it.
@@ -121,12 +126,12 @@ export function UsageView({ onClose }: { onClose: () => void }) {
   const windows = [usage.session, usage.week, ...usage.perModel].filter((w): w is PlanWindow => w !== null);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-8" data-testid="usage-view">
+    <Overlay testId="usage-view">
       {/* Capped and scrolled inside, as the token panel is: an uncapped box
           runs off the bottom of the window the moment the account has enough
           models to list (bw-3ug7.14). */}
       <div
-        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-border/60 bg-background shadow-2xl"
+        className={cn(overlayPanel, 'max-w-2xl')}
         data-available={usage.available}
       >
         <div className="flex items-center gap-2 border-b border-border/60 p-4">
@@ -188,7 +193,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
         </p>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 
