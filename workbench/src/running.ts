@@ -28,11 +28,13 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { answerOwed, heldDoing, isWorking, whatItIsDoing } from '../../src/workbench/chat-state.ts';
+import { answerOwed, heldDoing, isWorking, tailState, whatItIsDoing } from '../../src/workbench/chat-state.ts';
+import type { TailState } from '../../src/workbench/chat-state.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { toldDoing, toldFileFor, toldFileName } from '../../src/workbench/doing-told.ts';
 import { parseMarker, procStartFromStat, runningChats } from '../../src/workbench/running.ts';
 import type { RunningChat, SessionMarker } from '../../src/workbench/running.ts';
+import { helpersWorking } from './helper-records.ts';
 import { findRecord, lastSaidSync } from './record-tail.ts';
 
 /**
@@ -181,7 +183,15 @@ const burstAt = new Map<string, number>();
  * has not moved is still waste: nothing at the end of a file can change without
  * the file changing, so the answer stands until its mtime does.
  */
-const owedFor = new Map<string, { at: number; owed: boolean }>();
+const owedFor = new Map<string, { at: number; read: EndOfRecord }>();
+
+/** Both readings of a record's last line, which is read once for the two. */
+interface EndOfRecord {
+  /** Whether it leaves an answer owed. {@link answerOwed}. */
+  owed: boolean;
+  /** The state it names outright, where it names one. {@link tailState}. */
+  tail: TailState | null;
+}
 
 /**
  * What a session last said about itself, from the line its own hooks write
@@ -202,13 +212,21 @@ function saidOfItself(sessionId: string, now: number) {
   return toldDoing(text, now);
 }
 
-/** Whether the end of this record leaves an answer owed, remembered per write. */
-function owedAt(record: string, movedAt: number): boolean {
+/**
+ * What the end of this record says, remembered per write.
+ *
+ * Both questions off one read: whether a turn is in flight, and which of the two
+ * states the line names in so many words. They were never two reads — the second
+ * was simply not being asked, and a chat waiting out a usage limit read as one
+ * nobody was sitting at (bw-jaoz.14.7).
+ */
+function endAt(record: string, movedAt: number): EndOfRecord {
   const had = owedFor.get(record);
-  if (had && had.at === movedAt) return had.owed;
-  const owed = answerOwed(lastSaidSync(record));
-  owedFor.set(record, { at: movedAt, owed });
-  return owed;
+  if (had && had.at === movedAt) return had.read;
+  const said = lastSaidSync(record);
+  const read: EndOfRecord = { owed: answerOwed(said), tail: tailState(said) };
+  owedFor.set(record, { at: movedAt, read });
+  return read;
 }
 
 /**
@@ -244,15 +262,22 @@ export function holdsNow(fresh = false): HeldChat[] {
     // Whether a turn is in flight, which the mtime above cannot say: a think
     // writes nothing for minutes at a time (bw-jaoz.4).
     let owed: boolean | null = null;
+    let tail: TailState | null = null;
     if (record && movedAt !== null) {
       read.add(record);
-      owed = owedAt(record, movedAt);
+      const end = endAt(record, movedAt);
+      owed = end.owed;
+      tail = end.tail;
     }
     const guess = heldDoing({
       status: chat.status,
       statusAt: chat.statusAt,
       recordMovedAt: movedAt,
       owed,
+      tail,
+      // Asked only where the reading gets that far — a chat whose own turn has
+      // ended — so an active chat costs no directory listing at all.
+      helpersOut: record ? () => helpersWorking(record, now) : undefined,
       burstAt: burstAt.get(id) ?? null,
       now,
     });
@@ -261,7 +286,7 @@ export function holdsNow(fresh = false): HeldChat[] {
     const said = saidOfItself(id, now);
     const answer = whatItIsDoing({
       told: said,
-      read: { doing: guess.doing, since: guess.since },
+      read: { doing: guess.doing, since: guess.since, detail: guess.detail ?? null },
     });
     const doing = answer.doing;
     const since = answer.since;

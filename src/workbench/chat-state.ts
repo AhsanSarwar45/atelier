@@ -500,6 +500,14 @@ export const RECORD_QUIET_MS = 10_000;
  * is the opposite question: a record that grew a moment ago is a chat producing
  * something now. And failing both, `unknown`, which draws no claim at all.
  *
+ * Two of the vocabulary's words are not answers to "is anything happening" at
+ * all, and neither the status bit nor a modified time will ever reach them: a
+ * chat held back by a usage limit, and one whose work is being done by helpers.
+ * Both are read off the record instead — the words on its last line, and the
+ * files of the agents it sent off ({@link tailState}) — and both are preferred
+ * to the timers, which cannot contradict them because they are answering a
+ * narrower question.
+ *
  * `burstAt` is when this chat was first seen working in the current burst, kept
  * by the caller across beats, so the turn counted is the turn's and not the
  * beat's. It comes back as `turnSince`, the quiet number; `since` is the start
@@ -514,9 +522,22 @@ export function heldDoing(args: {
    * could be read. {@link answerOwed}.
    */
   owed: boolean | null;
+  /**
+   * What that same last line named outright, where it named one of the two
+   * states a modified time cannot reach. {@link tailState}.
+   */
+  tail?: TailState | null;
+  /**
+   * How many helpers this chat has out and still working, and when the oldest
+   * went off — asked as a question rather than passed as a number, because the
+   * answer is a directory listing and it is wanted in one case only: a turn of
+   * its own that is over while theirs are not. Every other reading below is
+   * settled without touching the disk again, and this is not asked at all.
+   */
+  helpersOut?: () => { out: number; since: number | null };
   burstAt: number | null;
   now: number;
-}): { doing: HeldDoing; since: number | null; turnSince: number | null } {
+}): { doing: HeldDoing; since: number | null; turnSince: number | null; detail?: string | null } {
   // The status bit says busy and nothing about steps: one clock, and no second
   // number to draw beside it.
   if (args.status === 'busy') return { doing: 'working', since: args.statusAt, turnSince: null };
@@ -528,12 +549,42 @@ export function heldDoing(args: {
   // the number the reader is watching. The burst's own start is the turn behind
   // it, and it goes in the quiet second place rather than over the top of the
   // step (bw-jaoz.14.4).
+  // What the last line SAID, before what its date implies. The two readings are
+  // of the same line, so this costs nothing extra and is strictly more specific:
+  // it names the step where the timers can only say that there is one.
+  if (args.tail) {
+    return {
+      doing: args.tail.doing,
+      since: args.recordMovedAt ?? args.burstAt ?? args.now,
+      turnSince: args.burstAt,
+      detail: args.tail.detail,
+    };
+  }
   if (args.owed === true) {
     return { doing: 'working', since: args.recordMovedAt ?? args.burstAt ?? args.now, turnSince: args.burstAt };
   }
   if (args.recordMovedAt === null) return { doing: 'unknown', since: null, turnSince: null };
   const moving = args.now - args.recordMovedAt < RECORD_QUIET_MS;
-  if (!moving) return { doing: 'idle', since: null, turnSince: null };
+  if (!moving) {
+    // Its own turn is over and somebody else's is not. A helper's turns are in
+    // a file of its own and the chat's record says nothing more about it once
+    // it has been sent off, so a chat with three agents mid-flight drew Idle —
+    // and it is the ordinary way they run: of the 1,445 dispatches on this
+    // machine, 1,344 were answered within two seconds and left the helper
+    // working detached behind them (2026-08-22).
+    const helpers = args.helpersOut?.() ?? { out: 0, since: null };
+    if (helpers.out > 0) {
+      return {
+        doing: 'helping',
+        since: helpers.since,
+        // The chat's own turn ended, so there is no turn of its own left to
+        // count: the helpers' own start is the only clock this state has.
+        turnSince: null,
+        detail: helperCount(helpers.out),
+      };
+    }
+    return { doing: 'idle', since: null, turnSince: null };
+  }
   return { doing: 'working', since: args.recordMovedAt, turnSince: args.burstAt };
 }
 
@@ -654,6 +705,156 @@ function assistantOwes(message: unknown): boolean {
     if (kind === 'thinking') thought = true;
   }
   return thought && !spoke;
+}
+
+/** The shape the kit stores a line in, as open as its own declaration of one. */
+type StoredLine = { type?: string; message?: unknown; [k: string]: unknown };
+
+/**
+ * A state a record's own last line names, and what that line says about it.
+ *
+ * Only the two the timers cannot reach. Everything else about a chat somebody
+ * else is driving is a question of whether anything is happening, which a
+ * modified time answers; these two are questions of WHAT, which only the words
+ * on the line answer.
+ */
+export interface TailState {
+  doing: Extract<Doing, 'retrying' | 'helping'>;
+  /** Its own text or its own count — the reset time, the brief, the number out. */
+  detail: string | null;
+}
+
+/**
+ * What the end of a record names outright, where it names one of those two.
+ *
+ * A chat held back by a usage limit is doing nothing at all and is not idle: it
+ * is waiting on a clock it will not miss, and the reader wants the time it comes
+ * round. A chat blocked on a helper is working, but not at anything of its own,
+ * and six minutes of "Working" with no hint that the six minutes belong to
+ * somebody else is the reading the manager complained about in its other form.
+ *
+ * Both are written down, and both were being thrown away. Measured over every
+ * record on this machine (1,116 of them, 2026-08-22): 234 lines saying a limit
+ * was hit, and 77 records whose last line is one — every one of those chats
+ * drawing Idle while it sat waiting for the reset. And 1,445 helper dispatches,
+ * of which 101 were still unanswered two seconds later, the longest for 616
+ * seconds: ten minutes of a chat claiming to be working at something of its own.
+ *
+ * Null when the line names neither, which is the ordinary case and leaves the
+ * timers to answer as they did before.
+ */
+export function tailState(said: StoredLine | null): TailState | null {
+  if (!said || said.type !== 'assistant') return null;
+  // The kit's own flag for a line it wrote in place of an answer. Asked first
+  // because such a line carries text and nothing else, so the helper read below
+  // could never match it anyway — but the order says which is meant.
+  if (said.isApiErrorMessage === true) return heldByALimit(said.message);
+  return helpersAskedFor(said.message);
+}
+
+/**
+ * The kit's own words for a limit, and the time it lifts.
+ *
+ * Its literal, over the 234 real lines above: `You've hit your session limit ·
+ * resets 4:40pm (Asia/Karachi)` — weekly in place of session on the long ones,
+ * a date in front of the time when the wait needs one (`resets Aug 23, 1pm`),
+ * and ` · progress saved` after it when the turn was kept.
+ *
+ * Only the reset survives into the detail. Which limit was hit does not change
+ * what the reader does about it, and the time is the whole of what they want.
+ * The zone in brackets is dropped: the kit prints this machine's own, and the
+ * app is read on this machine.
+ *
+ * Every other thing the kit files as an API error is deliberately left to the
+ * timers — a server overloaded, a connection lost mid-answer, credits run out,
+ * a login gone stale (all four are on this disk). Not one of them names a
+ * moment when anything resumes, and drawing Retrying over them would promise
+ * a retry that is never coming.
+ */
+const A_LIMIT_LIFTING = /\blimit\b[^·]*·\s*(resets\b[^·(]+)/i;
+
+/**
+ * Everything a stored line said in words.
+ *
+ * The kit's own notices are text blocks like any other, and one of them is
+ * written in several — so the blocks are joined rather than the first one taken.
+ */
+function wordsOn(message: unknown): string {
+  const content = (message as { content?: unknown } | null | undefined)?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const words: string[] = [];
+  for (const block of content) {
+    const part = block as { type?: string; text?: unknown } | null;
+    if (part?.type === 'text' && typeof part.text === 'string') words.push(part.text);
+  }
+  return words.join(' ');
+}
+
+function heldByALimit(message: unknown): TailState | null {
+  const lifting = A_LIMIT_LIFTING.exec(wordsOn(message));
+  if (!lifting) return null;
+  return { doing: 'retrying', detail: lifting[1]!.trim() };
+}
+
+/** The kit's name for sending a helper off, and the name it used before. */
+const A_HELPER_CALL: ReadonlySet<string> = new Set(['Agent', 'Task']);
+
+/** How much of a brief fits beside a word, before it is cut short. */
+const BRIEF_ROOM = 48;
+
+/**
+ * The helpers a line sent off and is still waiting on.
+ *
+ * A record is written by appending, so a dispatch standing at the END of one is
+ * a dispatch nothing has answered yet: the chat is blocked on somebody else's
+ * work. Both names are accepted — `Agent` is the call now, `Task` was the call
+ * before, and records written by the older kit are still on the disk.
+ *
+ * One helper names itself: the brief its sender wrote is on the call, and it
+ * says vastly more than the number 1. Several are a count, because eight briefs
+ * do not fit beside a word.
+ */
+function helpersAskedFor(message: unknown): TailState | null {
+  const content = (message as { content?: unknown } | null | undefined)?.content;
+  if (!Array.isArray(content)) return null;
+  const sent: { description?: unknown; subagent_type?: unknown }[] = [];
+  for (const block of content) {
+    const part = block as { type?: string; name?: unknown; input?: unknown } | null;
+    if (part?.type !== 'tool_use') continue;
+    if (typeof part.name !== 'string' || !A_HELPER_CALL.has(part.name)) continue;
+    sent.push((part.input ?? {}) as { description?: unknown; subagent_type?: unknown });
+  }
+  if (sent.length === 0) return null;
+  return { doing: 'helping', detail: sent.length === 1 ? oneBrief(sent[0]!) : helperCount(sent.length) };
+}
+
+/** What one helper was sent to do, in as much of the sender's own words as fits. */
+function oneBrief(input: { description?: unknown; subagent_type?: unknown }): string {
+  const said = typeof input.description === 'string' ? input.description.trim().split('\n')[0]!.trim() : '';
+  if (said) return said.length > BRIEF_ROOM ? cutShort(said) : said;
+  // No brief on the call: the kind of helper is the next most useful thing, and
+  // the count is what is left when the call says neither.
+  const kind = typeof input.subagent_type === 'string' ? input.subagent_type.trim() : '';
+  return kind || helperCount(1);
+}
+
+/**
+ * A brief too long for the room, cut back to a whole word.
+ *
+ * Cut on the character alone it reads as broken rather than shortened — "holds
+ * at the e…" — so the last part-word goes with it, unless dropping it would
+ * throw away most of what there was room for.
+ */
+function cutShort(said: string): string {
+  const room = said.slice(0, BRIEF_ROOM - 1);
+  const lastGap = room.lastIndexOf(' ');
+  return `${(lastGap > BRIEF_ROOM / 2 ? room.slice(0, lastGap) : room).trimEnd()}…`;
+}
+
+/** The count, said the way a reader says it. */
+export function helperCount(out: number): string {
+  return out === 1 ? '1 helper' : `${out} helpers`;
 }
 
 /**

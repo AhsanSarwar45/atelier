@@ -263,7 +263,7 @@ const TAIL_CAP = 1 << 20;
  * is one line longer than {@link TAIL_CAP} — either way nothing is claimed
  * about the chat rather than something guessed.
  */
-export function lastSaidSync(path: string): RecordLine | null {
+export function lastSaidSync(path: string, of: { sentOff?: boolean } = {}): RecordLine | null {
   let size: number;
   try {
     size = statSync(path).size;
@@ -291,7 +291,7 @@ export function lastSaidSync(path: string): RecordLine | null {
     // the file; otherwise it is whatever the read cut in half.
     if (from > 0) lines.shift();
     for (let i = lines.length - 1; i >= 0; i -= 1) {
-      const said = readLine(lines[i]!);
+      const said = readLine(lines[i]!, of.sentOff === true);
       if (said) return said;
     }
     if (from === 0 || window >= TAIL_CAP) return null;
@@ -460,11 +460,18 @@ export class RecordTail {
  * titles it made up, snapshots of files — and the turns of agents a chat sent
  * off, which belong to their own conversation and not to this one.
  */
-function readLine(line: string): RecordLine | null {
+function readLine(line: string, sentOff = false): RecordLine | null {
   const row = parsed(line);
   if (row === null) return null;
   if (row.type !== 'user' && row.type !== 'assistant') return null;
-  if (row.isSidechain === true || row.isMeta === true) return null;
+  if (row.isMeta === true) return null;
+  // A chat's own record and a helper's are read by the same reader, and the flag
+  // that tells one from the other means opposite things in the two files: in a
+  // chat's record a sidechain line is somebody else's turn and never the chat's
+  // last word, and in a helper's file EVERY line carries it (203,645 of 203,645
+  // over 1,645 helper records on this machine, 2026-08-22). Filtering it there
+  // would leave every helper looking like an empty file.
+  if (row.isSidechain === true && !sentOff) return null;
   return row;
 }
 

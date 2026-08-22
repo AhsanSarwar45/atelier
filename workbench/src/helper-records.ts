@@ -16,6 +16,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { answerOwed } from '../../src/workbench/chat-state.ts';
 import { type Split, spendIn } from '../../src/workbench/token-picture.ts';
 import {
   type PastEntry,
@@ -23,6 +24,7 @@ import {
   textOf,
   toolCallsOf,
 } from '../../src/workbench/imported-history.ts';
+import { lastSaidSync } from './record-tail.ts';
 
 /** One line of a helper's own record, as much of it as a row needs. */
 export interface HelperLine {
@@ -148,6 +150,73 @@ export function helpersNow(record: string): Map<string, number> {
     }
   }
   return sizes;
+}
+
+/**
+ * How long a helper's own file may have been quiet and still be counted as
+ * working.
+ *
+ * Its last line is asked as well, and the two guards catch different failures.
+ * The line says whether the helper's work was finished: 1,516 of the 1,645
+ * helper records on this machine end on the plain answer they came back with,
+ * which is the helper done. The other 129 end mid-work — a tool call never
+ * answered, a thought never followed — because the session they belonged to was
+ * killed under them, and those files would read as working for ever.
+ *
+ * So a quiet bound as well, and this is where it comes from: over 203,342 gaps
+ * between one line of a helper and its next, the median is 1.1 seconds and the
+ * 99th is 62. Two minutes keeps all but a few thousandths of the real pauses and
+ * holds a killed helper's ghost to two minutes (measured 2026-08-22).
+ */
+export const HELPER_QUIET_MS = 120_000;
+
+/**
+ * How many of a chat's helpers are still working, and when the oldest went off.
+ *
+ * The one thing a chat's own record cannot say. A helper is sent off and the
+ * record keeps the call and, once it comes back, the answer — and in between,
+ * for the whole of the work, nothing: 1,344 of the 1,445 dispatches on this
+ * machine were answered within two seconds and left the helper running detached.
+ * A chat whose own turn had ended with three of them still grinding drew Idle.
+ *
+ * A directory listing and one stat each, then the last 16KB of only those files
+ * that have moved lately — so a chat whose helpers are all long finished costs a
+ * listing and nothing more. Nothing is remembered between calls: a file that is
+ * still moving is a file whose answer cannot be cached anyway, and one that has
+ * stopped is dropped by its own modified time before it is ever read.
+ */
+export function helpersWorking(record: string, now: number): { out: number; since: number | null } {
+  const dir = sentOffDir(record);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return { out: 0, since: null }; // A chat that has sent nothing off.
+  }
+  let out = 0;
+  let since: number | null = null;
+  for (const name of names) {
+    if (!/^agent-(.+)\.jsonl$/.test(name)) continue;
+    const file = join(dir, name);
+    let moved: number;
+    let born: number;
+    try {
+      const stats = statSync(file);
+      moved = stats.mtimeMs;
+      born = stats.birthtimeMs;
+    } catch {
+      continue; // Taken away between the listing and the stat.
+    }
+    if (now - moved > HELPER_QUIET_MS) continue;
+    // Its own last line, read the way a chat's is — the same question, and the
+    // same answer: a turn that owes something is a turn still being worked on.
+    if (!answerOwed(lastSaidSync(file, { sentOff: true }))) continue;
+    out += 1;
+    // When it was sent off, which is when its file was made. Not every disk
+    // will say; the count stands either way and only the clock is lost.
+    if (Number.isFinite(born) && born > 0 && (since === null || born < since)) since = born;
+  }
+  return { out, since };
 }
 
 /**

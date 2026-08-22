@@ -22,6 +22,7 @@ import {
   heldLine,
   holderOnly,
   isWorking,
+  tailState,
   whatItIsDoing,
   type Doing,
   type HeldChat,
@@ -517,5 +518,249 @@ describe('the order the two signals are combined in', () => {
     // clock; drawn beside "Idle" it claims something is going on.
     expect(whatItIsDoing({ told: { doing: 'idle', since: now }, read: null }).since).toBeNull();
     expect(whatItIsDoing({ told: null, read: { doing: 'idle', since: now } }).since).toBeNull();
+  });
+});
+
+/**
+ * The two states the record itself names, read off lines this machine really
+ * wrote (bw-jaoz.14.7).
+ *
+ * Neither is a question a modified time can answer, and both were being thrown
+ * away: a chat held back by a usage limit drew Idle — 77 of the 1,116 records
+ * here end on such a line — and a chat blocked on a helper drew a bare
+ * "Working" for up to 616 measured seconds of somebody else's work.
+ */
+describe('what the end of a record names outright', () => {
+  /**
+   * A rate-limited turn, whole and verbatim off this disk — every field the kit
+   * wrote, down to the timestamp and the version that wrote it.
+   */
+  const LIMIT = String.raw`{"parentUuid":"ef400a78-ddbc-4c3b-88a4-00e0079e8cc3","isSidechain":false,"type":"assistant","uuid":"5b8cf753-2bf1-49d9-ae0a-c0f524914b5d","timestamp":"2026-07-27T09:34:40.248Z","message":{"id":"1a6329e6-3cdf-4d38-a2d9-c55822ffa708","container":null,"model":"<synthetic>","role":"assistant","stop_details":null,"stop_reason":"stop_sequence","stop_sequence":"","type":"message","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":null,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"inference_geo":null,"iterations":null,"speed":null},"content":[{"type":"text","text":"You've hit your session limit · resets 4:40pm (Asia/Karachi)"}],"context_management":null},"requestId":"req_011CdSLKM1m8WdMVJ82ChskD","error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429,"session_id":"96fb6595-d318-4b42-9637-074a87e40701","userType":"external","entrypoint":"cli","cwd":"/home/ahsan/dev/aspen/services/api/src","sessionId":"96fb6595-d318-4b42-9637-074a87e40701","version":"2.1.220","gitBranch":"staging"}`;
+
+  /**
+   * A helper going off, verbatim but for the brief's own thousand words, which
+   * are cut where the quoting shows. Every key, the tool's name and the shape
+   * around them are the kit's.
+   */
+  const DISPATCH = String.raw`{"parentUuid":"d0f46e0b-aaad-4d37-8510-022647126544","isSidechain":false,"message":{"model":"claude-opus-5","id":"msg_011Cdc2AMuH8HFBoCMykLkR8","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01XkpAoA87f6uJqFhZCJ5DW8","name":"Agent","input":{"subagent_type":"scout","description":"Locate quiz grade placeholder rendering","prompt":"In /home/ahsan/dev/aspen, find how the ProgramQuiz ${'`'}passCont"},"caller":{"type":"direct"}}],"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":4031,"cache_read_input_tokens":49293,"output_tokens":643,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":4031,"ephemeral_5m_input_tokens":0},"inference_geo":"not_available","iterations":[{"input_tokens":2,"output_tokens":643,"cache_read_input_tokens":49293,"cache_creation_input_tokens":4031,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":4031},"type":"message"}],"speed":"standard"},"diagnostics":null},"requestId":"req_011Cdc2AFwr8tuwtDTL3sYkp","type":"assistant","uuid":"51fc62b4-023c-43c3-9ac5-10a107fe4c79","timestamp":"2026-08-01T12:22:41.776Z","effort":"xhigh","session_id":"fcba6a02-3eca-44e4-b942-3912d37ecaa1","userType":"external","entrypoint":"cli","cwd":"/home/ahsan/dev/aspen","sessionId":"fcba6a02-3eca-44e4-b942-3912d37ecaa1","version":"2.1.220","gitBranch":"staging"}`;
+
+  /** The kit's own shape for a line it wrote in place of an answer. */
+  function apiError(text: string) {
+    return {
+      type: 'assistant',
+      isApiErrorMessage: true,
+      message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text }] },
+    };
+  }
+
+  /** A line asking for one helper, as the kit writes the call. */
+  function sends(name: string, input: Record<string, unknown>) {
+    return {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'toolu_01XkpAoA87f6uJqFhZCJ5DW8', name, input }],
+      },
+    };
+  }
+
+  it('a limit is a chat waiting on a clock, and the clock is what it says', () => {
+    expect(tailState(JSON.parse(LIMIT))).toEqual({ doing: 'retrying', detail: 'resets 4:40pm' });
+  });
+
+  it('keeps the time and drops what the reader already knows', () => {
+    // All three wordings are on this disk. The zone is this machine's own — the
+    // kit prints the local one — and "progress saved" is reassurance rather than
+    // a time. The date survives, because it is the only sign of a long wait.
+    expect(tailState(apiError("You've hit your session limit · resets 5:40pm (Asia/Karachi) · progress saved"))).toEqual(
+      { doing: 'retrying', detail: 'resets 5:40pm' },
+    );
+    expect(tailState(apiError("You've hit your weekly limit · resets 1pm (Asia/Karachi)"))).toEqual({
+      doing: 'retrying',
+      detail: 'resets 1pm',
+    });
+    expect(
+      tailState(apiError("You've hit your weekly limit · resets Aug 23, 1pm (Asia/Karachi) · progress saved")),
+    ).toEqual({ doing: 'retrying', detail: 'resets Aug 23, 1pm' });
+  });
+
+  it('claims no retry where the kit named no moment for one', () => {
+    // Every one of these is on this disk too, and not one of them says when
+    // anything resumes. Drawing Retrying over them would promise a return that
+    // is never coming; they are a turn that ended, which the timers say.
+    for (const text of [
+      'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com.',
+      'API Error: Connection lost mid-response. The response above may be incomplete.',
+      "You're out of usage credits. /model to switch models.",
+      'Not logged in · Please run /login',
+      'Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access',
+    ]) {
+      expect(tailState(apiError(text)), text).toBeNull();
+    }
+  });
+
+  it('a helper still out is what the chat is doing, in the sender’s own words', () => {
+    expect(tailState(JSON.parse(DISPATCH))).toEqual({
+      doing: 'helping',
+      detail: 'Locate quiz grade placeholder rendering',
+    });
+  });
+
+  it('several out are a count, because the briefs do not fit beside a word', () => {
+    const many = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'toolu_1', name: 'Agent', input: { description: 'Review the driver' } },
+          { type: 'tool_use', id: 'toolu_2', name: 'Agent', input: { description: 'Review the rows' } },
+          { type: 'tool_use', id: 'toolu_3', name: 'Agent', input: { description: 'Review the spend' } },
+        ],
+      },
+    };
+    expect(tailState(many)).toEqual({ doing: 'helping', detail: '3 helpers' });
+  });
+
+  it('answers for the call’s older name, whose records are still on the disk', () => {
+    expect(tailState(sends('Task', { description: 'Find the callers' }))).toEqual({
+      doing: 'helping',
+      detail: 'Find the callers',
+    });
+  });
+
+  it('cuts a brief too long to fit back to a whole word', () => {
+    const long = tailState(sends('Agent', { description: 'Work out why the summarising bar holds at the end' }));
+    expect(long?.doing).toBe('helping');
+    // Cut on the character it reads as broken — "holds at the e…" — so the
+    // part-word goes too. A brief is a person's sentence, not a field width.
+    expect(long?.detail).toBe('Work out why the summarising bar holds at the…');
+    expect(long!.detail!.length).toBeLessThanOrEqual(48);
+    const another = sends('Agent', { description: 'Reconcile every screen against the one reading of a chat' });
+    expect(tailState(another)?.detail).toBe('Reconcile every screen against the one reading…');
+  });
+
+  it('falls back when the call carries no brief at all', () => {
+    // No brief on the call: the kind of helper says the most of what is left,
+    // and the count is what is left when the call says neither.
+    expect(tailState(sends('Agent', { subagent_type: 'screen-check' }))?.detail).toBe('screen-check');
+    expect(tailState(sends('Agent', {}))?.detail).toBe('1 helper');
+  });
+
+  it('names nothing at the end of every other kind of line', () => {
+    expect(tailState(null)).toBeNull();
+    expect(tailState(sends('Bash', { command: 'npm test' }))).toBeNull();
+    expect(
+      tailState({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } }),
+    ).toBeNull();
+    // A person's line is not the kit naming a state, whatever is written on it.
+    expect(
+      tailState({ type: 'user', message: { role: 'user', content: "You've hit your session limit · resets 4pm" } }),
+    ).toBeNull();
+  });
+});
+
+describe('a state the record named, against the timers', () => {
+  const now = 1_787_138_400_000;
+  const limited = { doing: 'retrying' as const, detail: 'resets 4:40pm' };
+
+  it('beats a record that has gone quiet, and counts from the line itself', () => {
+    // The whole point: a chat waiting out a limit writes nothing at all, which
+    // is exactly what a chat nobody is sitting at looks like. 77 records on this
+    // machine end on one of these lines.
+    expect(
+      heldDoing({
+        status: null,
+        statusAt: null,
+        recordMovedAt: now - 20 * 60_000,
+        owed: false,
+        tail: limited,
+        burstAt: now - 25 * 60_000,
+        now,
+      }),
+    ).toEqual({ doing: 'retrying', since: now - 20 * 60_000, turnSince: now - 25 * 60_000, detail: 'resets 4:40pm' });
+  });
+
+  it('beats a turn in flight, which could only say that one was', () => {
+    expect(
+      heldDoing({
+        status: null,
+        statusAt: null,
+        recordMovedAt: now - 90_000,
+        owed: true,
+        tail: { doing: 'helping', detail: 'Locate quiz grade placeholder rendering' },
+        burstAt: now - 120_000,
+        now,
+      }),
+    ).toEqual({
+      doing: 'helping',
+      since: now - 90_000,
+      turnSince: now - 120_000,
+      detail: 'Locate quiz grade placeholder rendering',
+    });
+  });
+
+  it('and the holder’s own word still beats the line', () => {
+    // A program driving the chat publishes what it is doing; a line we read is
+    // never better than the tool saying so itself.
+    expect(
+      heldDoing({
+        status: 'idle',
+        statusAt: now,
+        recordMovedAt: now - 60_000,
+        owed: false,
+        tail: limited,
+        burstAt: null,
+        now,
+      }),
+    ).toEqual({ doing: 'idle', since: null, turnSince: null });
+  });
+
+  it('draws the helpers still out over a turn of its own that has ended', () => {
+    // The ordinary way they run: the call comes back in under two seconds and
+    // the helper works on detached, so the chat's own record says nothing more
+    // about it. This read drew Idle over three agents mid-flight.
+    expect(
+      heldDoing({
+        status: null,
+        statusAt: null,
+        recordMovedAt: now - RECORD_QUIET_MS - 1,
+        owed: false,
+        helpersOut: () => ({ out: 3, since: now - 200_000 }),
+        burstAt: null,
+        now,
+      }),
+    ).toEqual({ doing: 'helping', since: now - 200_000, turnSince: null, detail: '3 helpers' });
+  });
+
+  it('is idle when its own turn is over and nobody else is working either', () => {
+    expect(
+      heldDoing({
+        status: null,
+        statusAt: null,
+        recordMovedAt: now - RECORD_QUIET_MS - 1,
+        owed: false,
+        helpersOut: () => ({ out: 0, since: null }),
+        burstAt: null,
+        now,
+      }),
+    ).toEqual({ doing: 'idle', since: null, turnSince: null });
+  });
+
+  it('never asks the disk about helpers while the chat is answering', () => {
+    // The count is a directory listing, and it is wanted in one case only.
+    let asked = 0;
+    const ask = () => {
+      asked += 1;
+      return { out: 2, since: now };
+    };
+    for (const args of [
+      { status: 'busy', statusAt: now, recordMovedAt: null, owed: null },
+      { status: null, statusAt: null, recordMovedAt: now - 1_000, owed: true },
+      { status: null, statusAt: null, recordMovedAt: now - 1_000, owed: false },
+      { status: null, statusAt: null, recordMovedAt: null, owed: null },
+    ]) {
+      heldDoing({ ...args, helpersOut: ask, burstAt: null, now });
+    }
+    expect(asked, 'the disk was read for a chat that was plainly busy').toBe(0);
   });
 });
