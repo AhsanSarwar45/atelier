@@ -670,13 +670,16 @@ test.describe('workbench', () => {
   });
 
   /**
-   * Everything ever said, and what it cost.
+   * Everything ever said.
    *
    * Two chats in two projects, each told a word of its own, so a search has to
    * reach across both and a matched sentence has to name which chat it came
-   * from. The turns they cost are what the two charts are drawn from.
+   * from. What the turns cost is still what says both of them finished.
+   *
+   * The half of this case that opened the what-it-cost screen went with the
+   * button, and with the screen behind it (bw-81wt.13).
    */
-  test('search-spend finds words across chats and draws the two charts', async ({ page, request }) => {
+  test('search finds words across chats', async ({ page, request }) => {
     test.setTimeout(600_000);
     mkdirSync(SHOTS, { recursive: true });
 
@@ -723,7 +726,7 @@ test.describe('workbench', () => {
         )
         .toBeGreaterThanOrEqual(2);
 
-      // The two ways in live in the chat tab's own toolbar (docs/designs/app-shell.md §1.1).
+      // The way in lives at the top of the chat list (docs/designs/app-shell.md §1.1).
       await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
       await page.getByTestId('open-search').click();
       await page.getByTestId('search-input').fill(WORD);
@@ -742,16 +745,6 @@ test.describe('workbench', () => {
       // A hit lands on the chat that said it.
       await page.getByTestId('search-hit').first().click();
       await expect(page.getByTestId('chat-tab')).toBeVisible({ timeout: 60_000 });
-
-      // And the spend view: two charts, the money one with a bar in it.
-      await page.goto(`/project?id=${started[0].projectId}&tab=chat`);
-      await page.getByTestId('open-spend').click();
-      await expect(page.getByTestId('spend-money')).toBeVisible({ timeout: 60_000 });
-      await expect(page.getByTestId('spend-tokens')).toBeVisible();
-      await expect
-        .poll(async () => Number(await page.getByTestId('spend-money').getAttribute('data-days')), { timeout: 60_000 })
-        .toBeGreaterThanOrEqual(1);
-      await page.screenshot({ path: join(SHOTS, 'spend.png'), fullPage: false });
     } finally {
       for (const id of projectIds) {
         await request.delete(`/api/projects/${id}`);
