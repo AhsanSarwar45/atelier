@@ -73,7 +73,7 @@ import { DrawnTranscript } from '@/workbench/drawn-transcript';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
-import { WhatItRuns } from '@/workbench/what-it-runs';
+import { CHIP_GAP, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 import { workingLine } from '@/workbench/working-line';
 
@@ -831,7 +831,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           (docs/agent-workbench.md §8.2.6). */}
       <div
         data-testid="chat-status-line"
-        className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/60 px-4 text-sm"
+        // One distance between every two chips on this line, read from the one
+        // place it is written. The model/mode group inside it held its own pair
+        // half a step closer, so the four chips drew as two pairs instead of a
+        // row (bw-ja9l.10).
+        className={cn(
+          'flex h-10 shrink-0 items-center overflow-hidden border-b border-border/60 px-4 text-sm',
+          CHIP_GAP,
+        )}
       >
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
@@ -843,7 +850,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <span
           data-testid="session-state"
           data-state={held ? 'held' : view.state}
-          className="flex shrink-0 items-center gap-2"
+          className={cn('flex shrink-0 items-center', CHIP_GAP)}
         >
           <ChatStateChip state={state} testId="session-state-chip" />
           {state.external && <ExternalBadge holder={state.external.holder} />}
@@ -885,7 +892,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             they live on the line and not in the column beside it — the column
             holds what the chat produced (bw-7ks.22.13, bw-malh). Each wears its
             own mark, because three bare numbers in a row read as one. */}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className={cn('ml-auto flex shrink-0 items-center', CHIP_GAP)}>
           {view.context && (
             <ContextChip
               used={view.context.used}

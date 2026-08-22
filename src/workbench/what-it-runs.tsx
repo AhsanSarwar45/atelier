@@ -30,6 +30,15 @@ import type { ModelChoice } from '@/workbench/protocol';
 const BRAND_DEFAULT_LABEL = 'Default model';
 
 /**
+ * The one distance between two chips on the chat's status line.
+ *
+ * Exported because this group sits inside that line and must not space its own
+ * two chips differently: it is a shrinking device, not a grouping the reader is
+ * meant to see. Written once so the two cannot drift (bw-ja9l.10).
+ */
+export const CHIP_GAP = 'gap-3';
+
+/**
  * The model's name as the picker beside it says it.
  *
  * The picker's list is the only place display names exist, and a chat begun in
@@ -115,7 +124,14 @@ export function WhatItRuns({
       // its full width the chips inside shrank under their own words and what
       // the chat was running printed straight across the folder chip beside it,
       // which is `shrink-0` and never gives way (bw-7ks.22.15).
-      className={cn('flex min-w-0 shrink items-center gap-1.5 truncate whitespace-nowrap', className)}
+      //
+      // The spacing is the LINE's and not this group's, and it has to stay that
+      // way. A group is how these two chips shrink together; it is not a thing
+      // the reader can see, and holding them half a step closer than the line
+      // holds everything else drew the four chips as two pairs — 12px, 6px,
+      // 12px across the row (bw-ja9l.10). {@link CHIP_GAP} is the one value,
+      // read here and by the line itself.
+      className={cn('flex min-w-0 shrink items-center truncate whitespace-nowrap', CHIP_GAP, className)}
     >
       {modelLabel && (
         <Badge

@@ -26,7 +26,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ModelChoice } from '@/workbench/protocol';
-import { modelKey, WhatItRuns } from '@/workbench/what-it-runs';
+import { CHIP_GAP, modelKey, WhatItRuns } from '@/workbench/what-it-runs';
 
 /** The picker's own list, as a chat this app drives announces it. */
 const MENU: ModelChoice[] = [
@@ -160,6 +160,25 @@ describe('what the chat is running, on its own line', () => {
     ] as const) {
       expect(modelKey(wire), wire).toBe(family);
     }
+  });
+
+  it('spaces its two chips the way the line spaces everything else', () => {
+    // The group is a shrinking device and not a grouping anybody is meant to
+    // see. Holding its pair half a step closer than the line held the rest drew
+    // the four chips on that row as two pairs — 12px, 6px, 12px (bw-ja9l.10).
+    draw('opus', 'bypassPermissions');
+    const group = screen.getByTestId('session-meta');
+
+    const gaps = group.className.split(/\s+/).filter((c) => /^gap(-|$)/.test(c));
+    expect(gaps, 'the group spaces its chips once, and by the shared value').toEqual([CHIP_GAP]);
+
+    // And the line it sits in reads that same value rather than writing its
+    // own: two numbers is how they drifted apart in the first place.
+    const header = readFileSync(resolve(__dirname, '../chat-tab.tsx'), 'utf8');
+    const line = header.slice(header.indexOf('data-testid="chat-status-line"'));
+    const opening = line.slice(0, line.indexOf('>'));
+    expect(opening, 'the line spaces its chips by the shared value').toContain('CHIP_GAP');
+    expect(opening, 'and never by a number of its own').not.toMatch(/\bgap-[\d.]+/);
   });
 
   it('gives way before the folder chip does', () => {
