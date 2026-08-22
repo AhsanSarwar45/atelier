@@ -67,19 +67,8 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(wait);
   }, [q]);
 
-  // Escape closes it, as it closes every other panel. On a phone this one now
-  // covers the whole screen, so a reader who cannot find the small cross has
-  // no way back at all.
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, [onClose]);
-
   return (
-    <Overlay testId="search-panel">
+    <Overlay testId="search-panel" onClose={onClose}>
       <div className={cn(overlayPanel, 'max-w-3xl')}>
         <div className="flex items-center gap-2 border-b border-border/60 p-3">
           {/* eslint-disable-next-line jsx-a11y/no-autofocus */}

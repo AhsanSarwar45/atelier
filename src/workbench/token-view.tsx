@@ -394,7 +394,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
   }, [sessionId]);
 
   return (
-    <Overlay testId="token-view">
+    <Overlay testId="token-view" onClose={onClose}>
       {/* The panel stands where the screen ends and scrolls inside itself. It
           used to be one growing box with `overflow-y-auto` and no ceiling, so a
           long chat's picture ran off the bottom of the window with its last

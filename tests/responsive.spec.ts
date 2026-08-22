@@ -412,14 +412,24 @@ test.describe('overlays and dialogs', () => {
         return box ? Math.round(box.width) : null;
       });
 
-    /** A panel on a phone takes the screen; a 2rem inset leaves 326 of 390. */
-    const fillsTheScreen = async (name: string) => {
+    /**
+     * A panel on a phone takes the screen; a 2rem inset leaves 326 of 390.
+     *
+     * And Escape puts it away again: the panel IS the screen here, so a reader
+     * who does not spot the small cross in the corner has no way back at all
+     * (bw-81wt.18).
+     */
+    const fillsTheScreen = async (name: string, testid: string) => {
       const wide = await panelWidth();
       expect(wide, `no ${name} panel opened`).not.toBeNull();
       expect(wide!, `the ${name} panel is inset on a phone`).toBeGreaterThanOrEqual(PHONE.width - 1);
       await judge(page, `overlay-${name}-390`, { tap: false });
       await page.keyboard.press('Escape');
       await page.waitForTimeout(400);
+      expect(
+        await page.locator(`[data-testid="${testid}"]`).count(),
+        `the ${name} panel is still there after Escape`,
+      ).toBe(0);
     };
 
     // Search lives in the chat list now, and on a phone the list is a drawer:
@@ -429,7 +439,7 @@ test.describe('overlays and dialogs', () => {
     await page.waitForTimeout(400);
     await page.locator('[data-testid="open-search"]').first().click();
     await page.waitForTimeout(600);
-    await fillsTheScreen('search');
+    await fillsTheScreen('search', 'search-panel');
 
     // The usage and token panels open from the chips on the working strip, so
     // a chat has to be open before either of them exists. Picking one from the
@@ -439,18 +449,18 @@ test.describe('overlays and dialogs', () => {
     await firstChat.click();
     await page.waitForTimeout(2500);
 
-    for (const [name, testid] of [
-      ['usage', 'plan-chip-session'],
-      ['token', 'context-chip-open'],
+    for (const [name, chipId, panelId] of [
+      ['usage', 'plan-chip-session', 'usage-view'],
+      ['token', 'context-chip-open', 'token-view'],
     ] as const) {
-      const chip = page.locator(`[data-testid="${testid}"]`).first();
+      const chip = page.locator(`[data-testid="${chipId}"]`).first();
       // A machine with no plan reported draws no plan chip, and that is not a
       // fault in how wide its panel would have been.
       if (!(await chip.count())) continue;
       await chip.scrollIntoViewIfNeeded();
       await chip.click();
       await page.waitForTimeout(700);
-      await fillsTheScreen(name);
+      await fillsTheScreen(name, panelId);
     }
   });
 

@@ -126,7 +126,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
   const windows = [usage.session, usage.week, ...usage.perModel].filter((w): w is PlanWindow => w !== null);
 
   return (
-    <Overlay testId="usage-view">
+    <Overlay testId="usage-view" onClose={onClose}>
       {/* Capped and scrolled inside, as the token panel is: an uncapped box
           runs off the bottom of the window the moment the account has enough
           models to list (bw-3ug7.14). */}

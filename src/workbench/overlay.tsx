@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+'use client';
+
+import { useEffect, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -22,6 +24,7 @@ export function Overlay({
   testId,
   label,
   className,
+  onClose,
   onBackdrop,
   children,
   ...rest
@@ -30,19 +33,37 @@ export function Overlay({
   label?: string;
   /** Anything a caller needs on the backdrop itself: a darker dim, centring. */
   className?: string;
-  /** Called when the page behind the panel is clicked, not the panel. */
+  /**
+   * The way out, wired once for every panel: Escape closes it, and so does the
+   * dimmed page behind it. Written here rather than copied into each panel
+   * because two of the four had neither, and on a phone a panel IS the screen —
+   * a reader who does not spot the small cross in the corner has no way back at
+   * all (bw-81wt.18).
+   */
+  onClose?: () => void;
+  /** Only the page behind the panel, for a panel that wants Escape left alone. */
   onBackdrop?: () => void;
   children: ReactNode;
 } & Record<`data-${string}`, string | number | undefined>) {
+  useEffect(() => {
+    if (!onClose) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onClose]);
+
+  const backdrop = onBackdrop ?? onClose;
   return (
     <div
       data-testid={testId}
       aria-label={label}
       className={cn('fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-0 sm:p-8', className)}
       onClick={
-        onBackdrop
+        backdrop
           ? (e) => {
-              if (e.target === e.currentTarget) onBackdrop();
+              if (e.target === e.currentTarget) backdrop();
             }
           : undefined
       }

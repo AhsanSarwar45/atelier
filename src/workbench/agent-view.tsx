@@ -21,7 +21,7 @@
  */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { Clock, Coins, Send, X } from 'lucide-react';
 
@@ -151,18 +151,8 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   // beside a row reading `2s` is two accounts of one agent (measured 2026-08-20).
   const now = useNow(!isOver(row.state));
 
-  // The way out a reader tries first on anything that opened over what they
-  // were reading.
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, [onClose]);
-
   return (
-    <Overlay testId="agent-view" data-agent={row.id} data-said={said.length} onBackdrop={onClose}>
+    <Overlay testId="agent-view" data-agent={row.id} data-said={said.length} onClose={onClose}>
       {/* One shape every time it is opened, and only the conversation inside it
           moves. Sized to its content, a pane opened on a helper that has said one
           line is a toast, and it grows under the reader as the helper talks. */}
