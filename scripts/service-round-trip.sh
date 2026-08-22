@@ -313,8 +313,32 @@ fi
 
 # What the reader actually notices: a chat that answers after a reboot. The
 # kit it talks to Claude with is fetched once, over the network, so a machine
-# that is offline or slow is not a failure of the registration — but node
-# refusing to start is exactly the failure this job is about.
+# that is offline or slow is not a failure of the registration — but a tool
+# that could not be found at all is exactly the failure this job is about.
+#
+# Two tools are looked up here, and the kit's fetch comes first: `npm` is run
+# before `node` is ever reached, so a copy handed no list dies on npm and the
+# line about node is never written. Watching for that line alone let this check
+# fall through to the note below on the very failure it exists to catch
+# (bw-bddz.6). A fetch that ran and failed is the network's business and stays a
+# note; a tool that could not be run at all is this registration's doing.
+lost_tool() {
+  journalctl --user -u "$UNIT" --no-pager 2>/dev/null |
+    grep -E 'could not start node|could not be run' | tail -5
+}
+
+# Those are the server's own words, and a check watching for words the server
+# no longer writes catches nothing and says everything is fine. They are read
+# back out of the source here, so a rename goes red now rather than the next
+# time somebody reboots into a dead chat.
+for said in 'could not start node' 'could not be run'; do
+  if grep -qF "$said" server/src/routes/workbench.rs server/src/helper.rs; then
+    pass "a chat that cannot find its tool still says '$said', which is what is watched for"
+  else
+    fail "nothing in the server says '$said' any more, so the check below is watching for nothing"
+  fi
+done
+
 chat=0
 for _ in $(seq 1 120); do
   curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$HELPER_PORT/" >/dev/null 2>&1
@@ -322,7 +346,7 @@ for _ in $(seq 1 120); do
     chat=1
     break
   fi
-  if journalctl --user -u "$UNIT" --no-pager 2>/dev/null | grep -q 'could not start node'; then
+  if [ -n "$(lost_tool)" ]; then
     break
   fi
   sleep 1
@@ -330,9 +354,9 @@ done
 
 if [ "$chat" = "1" ]; then
   pass "the chat helper is answering, started by a copy nobody logged in for"
-elif journalctl --user -u "$UNIT" --no-pager 2>/dev/null | grep -q 'could not start node'; then
-  fail "the chat helper could not be started — the copy found no node:"
-  journalctl --user -u "$UNIT" --no-pager 2>/dev/null | grep 'workbench' | tail -5 | sed 's/^/      /'
+elif [ -n "$(lost_tool)" ]; then
+  fail "the chat helper could not be started — the copy could not find a tool it was handed no place to look for:"
+  lost_tool | sed 's/^/      /'
 else
   echo "  · the chat helper is still fetching its kit, which is a network"
   echo "    install and not this registration's doing; the reach above is what"
