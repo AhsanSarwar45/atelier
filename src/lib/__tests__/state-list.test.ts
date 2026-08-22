@@ -11,7 +11,7 @@
  * has to be reading STATES instead.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -49,7 +49,13 @@ function sourceFiles(): string[] {
   const out = execFileSync("git", ["ls-files", "src", "server/src"], {
     cwd: ROOT, encoding: "utf8",
   });
-  return out.split("\n").filter((p) => /\.(ts|tsx|rs)$/.test(p));
+  // `git ls-files` names what the index knows, not what the working tree still
+  // holds: a file removed ahead of its own commit stays listed until that
+  // commit lands, and reading it would fail for a reason this test has
+  // nothing to say about.
+  return out.split("\n")
+    .filter((p) => /\.(ts|tsx|rs)$/.test(p))
+    .filter((p) => existsSync(join(ROOT, p)));
 }
 
 /** The code of a file: no comments, and for Rust none of its own test module. */
