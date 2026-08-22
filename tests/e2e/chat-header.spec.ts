@@ -72,12 +72,16 @@ const RUNNING_MODE = 'bypassPermissions';
 const RUNNING_SAID = 'Skip all checks';
 
 /**
- * The model on that record's own replies, drawn without a picker to name it.
+ * The model on that record's own replies, and the name a reader is shown for it.
+ *
  * Nothing is driving that chat, so no list of display names was ever announced
- * for it and its own wire id is all there is (what-it-runs.tsx).
+ * for it — but the name is not the list's to give. It is the one every place
+ * that prints a model reads out of `modelName`, spelled the way the terminal
+ * spells it, so the tag here and the picker under the writing box cannot say
+ * two different things about one setting (what-it-runs.tsx, bw-ja9l.11).
  */
 const RUNNING_MODEL = 'claude-opus-5';
-const RUNNING_MODEL_SAID = 'Claude opus 5';
+const RUNNING_MODEL_SAID = 'Opus 5';
 
 /** A narrow window, where the line has the least room it is ever given. */
 const CRAMPED = { width: 720, height: 900 };
