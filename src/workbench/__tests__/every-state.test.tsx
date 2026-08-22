@@ -574,14 +574,14 @@ describe('the row and the bar say the same thing', () => {
 
   for (const state of ['starting', 'thinking', 'streaming', 'running_tool', 'waiting_permission'] as const) {
     it(`${state}: row and bar agree on the word, the clock and whether the mark moves`, () => {
-      const session = live({ state, activity: null });
+      const session = live({ state, activity: '' });
       const [row] = withLive([listed()], [session], PROJECT);
       expect(fromRow(row!)).toEqual(liveState(session));
     });
   }
 
   it('the driver falls quiet: the row stops counting the moment the bar does', () => {
-    const session = live({ state: 'idle', activity: null, busySince: null });
+    const session = live({ state: 'idle', activity: '', busySince: null });
     const [row] = withLive([listed({ state: 'running_tool' })], [session], PROJECT);
     expect(fromRow(row!)).toEqual(liveState(session));
     expect(fromRow(row!).since).toBeNull();

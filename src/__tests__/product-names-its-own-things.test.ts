@@ -68,7 +68,10 @@ const AS_A_WORD = /(?<![\w.$/\-])beads?(?![\w.[(/\-])/i;
 function readerFacing(said: string): string[] {
   const found: string[] = [];
   const quoted = /'([^'\n]*)'|"([^"\n]*)"|`([^`]*)`|>([^<>{}]*)</g;
-  for (const m of said.matchAll(quoted)) {
+  // Walked with the pattern's own cursor rather than as a list of matches: the
+  // build this repository typechecks under cannot step through one.
+  let m: RegExpExecArray | null;
+  while ((m = quoted.exec(said)) !== null) {
     const s = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? "").trim();
     // Text sitting between two angle brackets is drawn text — unless the two
     // brackets belong to a generic, in which case what is between them is
