@@ -27,13 +27,16 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  DOING_WORD,
   RECORD_QUIET_MS,
   answerOwed,
   chatState,
   heldDoing,
   heldLine,
   holderOnly,
+  isWorking,
   type ChatState,
+  type Doing,
   type HeldChat,
 } from '@/workbench/chat-state';
 import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
@@ -124,6 +127,8 @@ describe('a chat of ours, nobody else in it', () => {
     const read = chatState({ state: 'running_tool', label: 'Reading', since: BEGAN });
     expect(body(read, { busy: true, label: 'Reading', since: BEGAN })).toEqual({
       label: 'Reading',
+      // A chat of ours has nothing beyond its own word to add.
+      detail: null,
       // What it is, as well as what it says it is: the line draws a bar for one
       // of these and a clock for the rest (bw-jaoz.14.5).
       doing: 'running',
@@ -261,13 +266,23 @@ describe('a chat somebody else holds', () => {
   it('held and working: the body draws the holder\'s turn, and never the waiting mark', () => {
     const read = chatState({ state: 'dormant', held: held({ doing: 'working' }) });
     const line = body(read);
-    expect(line).toEqual({ label: 'Working', doing: 'working', since: BEGAN, turn: null, reported: 0, waiting: false, thought: 0 });
+    expect(line).toEqual({
+      label: 'Working',
+      detail: null,
+      doing: 'working',
+      since: BEGAN,
+      turn: null,
+      reported: 0,
+      waiting: false,
+      thought: 0,
+    });
   });
 
   it('held and working a command: the body names the command they are running', () => {
     const read = chatState({ state: 'dormant', held: held({ doing: 'working' }) });
     expect(body(read, { running: { title: 'rg --files', seconds: 7 } })).toEqual({
       label: 'rg --files',
+      detail: null,
       doing: 'working',
       since: BEGAN,
       turn: null,
@@ -607,4 +622,99 @@ describe('the row and the bar say the same thing', () => {
     expect(read.external).toEqual({ holder: 'terminal' });
     expect(read.since).toBeNull();
   });
+});
+
+/**
+ * The same chat, drawn on all four screens that say what one is doing
+ * (bw-jaoz.14.8).
+ *
+ * They used to answer the question four ways — the chat's own line drew the
+ * driver's label or the word "working", a row drew a pill that was ready or
+ * working, and a board card drew an activity — so the same chat read as three
+ * different things depending on which screen you were looking at. All four now
+ * draw one reading, and these cases hold them to it: the word, the mark, and
+ * the thing beside the word that says WHICH retry or WHOSE work.
+ */
+describe('the four screens that say what a chat is doing', () => {
+  /** What one screen ends up drawing about a chat. */
+  function drawn(state: ChatState, testId: string, size: 'chip' | 'inline' = 'chip') {
+    render(<ChatStateChip state={state} size={size} testId={testId} />);
+    const chip = screen.queryByTestId(testId);
+    if (!chip) return { word: null, detail: null, moving: false };
+    return {
+      word: chip.getAttribute('data-word'),
+      detail: chip.querySelector('[data-testid="chat-state-detail"]')?.textContent?.trim() ?? null,
+      moving: chip.getAttribute('data-working') === 'yes',
+    };
+  }
+
+  /** The row in the list, built the way the sidebar builds it (chat-sidebar.tsx). */
+  const onTheList = (h: HeldChat): ChatState =>
+    chatState({ state: 'dormant', label: 'Pulling the branch apart', since: BEGAN, held: h });
+
+  /** The chat's own pane: the same reading, with our own side of it asleep. */
+  const inThePane = (h: HeldChat): ChatState => chatState({ state: 'dormant', held: h });
+
+  it('a chat waiting out a usage limit says when it comes back, on every one of them', () => {
+    const waiting = held({ doing: 'retrying', detail: 'resets 4:40pm' });
+    // The row, the pane and the board card's smaller chip: one word, one time.
+    for (const [where, state, size] of [
+      ['row', onTheList(waiting), 'chip'],
+      ['pane', inThePane(waiting), 'chip'],
+      ['card', inThePane(waiting), 'inline'],
+    ] as const) {
+      expect(drawn(state, `four-${where}`, size), where).toEqual({
+        word: 'Retrying',
+        detail: '· resets 4:40pm',
+        moving: true,
+      });
+    }
+    // And the foot of the chat, which is the one a reader watches while waiting.
+    expect(body(inThePane(waiting))).toMatchObject({ label: 'Retrying', detail: 'resets 4:40pm' });
+  });
+
+  it('a chat blocked on its helpers says how many, on every one of them', () => {
+    const helping = held({ doing: 'helping', detail: '3 helpers' });
+    expect(drawn(onTheList(helping), 'four-row-helping')).toEqual({
+      word: 'Helper working',
+      detail: '· 3 helpers',
+      moving: true,
+    });
+    expect(drawn(inThePane(helping), 'four-card-helping', 'inline').detail).toBe('· 3 helpers');
+    expect(body(inThePane(helping))).toMatchObject({ label: 'Helper working', detail: '3 helpers' });
+  });
+
+  it('the command in flight beats the count at the foot, and is not said twice', () => {
+    // A helper sent off IS a call in flight, so the foot has both to draw. The
+    // call is the more specific of the two and takes the line; the detail only
+    // stands where it adds something the label does not already say.
+    const line = body(inThePane(held({ doing: 'helping', detail: 'Locate the placeholder' })), {
+      running: { title: 'Agent(scout)', seconds: 4 },
+    });
+    expect(line).toMatchObject({ label: 'Agent(scout)', detail: 'Locate the placeholder' });
+    const same = body(inThePane(held({ doing: 'working', detail: 'rg --files' })), {
+      running: { title: 'rg --files', seconds: 4 },
+    });
+    expect(same?.label).toBe('rg --files');
+    expect(same?.detail).toBe('rg --files');
+  });
+
+  for (const doing of Object.keys(DOING_WORD) as Doing[]) {
+    it(`${doing}: all four draw the one word for it, or none of them draws anything`, () => {
+      const h = held({ doing, since: isWorking(doing) ? BEGAN : null });
+      const word = DOING_WORD[doing] || null;
+      // The row and the pane read the same chat: the row carries our own stale
+      // word and clock as well, and neither may reach the screen while
+      // somebody else is in there.
+      expect(onTheList(h)).toEqual(inThePane(h));
+      expect(drawn(onTheList(h), `all-row-${doing}`).word, 'row').toBe(word);
+      expect(drawn(inThePane(h), `all-pane-${doing}`).word, 'pane').toBe(word);
+      expect(drawn(inThePane(h), `all-card-${doing}`, 'inline').word, 'card').toBe(word);
+      // The foot draws a line exactly while somebody owes an answer, and in the
+      // same words as the chip above it.
+      const line = body(inThePane(h));
+      if (isWorking(doing)) expect(line?.label, 'foot').toBe(word);
+      else expect(line, 'foot').toBeNull();
+    });
+  }
 });

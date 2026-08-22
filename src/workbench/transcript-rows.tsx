@@ -565,6 +565,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
  */
 export function WorkingLine({
   label,
+  detail,
   doing,
   since,
   turn,
@@ -573,6 +574,11 @@ export function WorkingLine({
   thought,
 }: {
   label: string;
+  /**
+   * What this particular one is, beside the label — the time a limit lifts, how
+   * many helpers are out. Null when the state carries nothing beyond itself.
+   */
+  detail?: string | null;
   /**
    * Which of the things a chat does this is. Only summarising draws a bar —
    * see summarising.ts for why it is the only state that can have one.
@@ -627,6 +633,12 @@ export function WorkingLine({
           otherwise — it is the one state where the screen is asking, not telling. */}
       <span className="min-w-0 truncate font-mono text-xs">
         {waiting ? `Waiting for you · ${label}` : label}
+        {/* The word says which of the things this is; this says which one of
+            them. A chat that has stopped until a limit lifts is the case that
+            makes it worth the room: "Retrying" on its own leaves the reader
+            with no idea whether to wait (bw-jaoz.14.8). Dropped when it only
+            repeats the label, which a call in flight can make it do. */}
+        {detail && detail !== label ? ` · ${detail}` : ''}
         {/* A think whose words are withheld still says how big it is getting —
             otherwise a two-minute think looks the same as a stuck one. */}
         {!waiting && thought > 0 ? ` · ~${Math.round(thought / 100) / 10}k thought` : ''}

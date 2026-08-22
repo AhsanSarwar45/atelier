@@ -170,6 +170,15 @@ export function ChatStateChip({
         data-mark={state.mark}
       />
       <span className="truncate">{state.word}</span>
+      {/* What this particular one is — the time a limit lifts, how many helpers
+          are out. Quieter than the word, and cut short rather than wrapping:
+          "Retrying" alone leaves the reader watching a chat that says nothing
+          about when it comes back (bw-jaoz.14.8). */}
+      {state.detail && (
+        <span data-testid="chat-state-detail" className="truncate opacity-70">
+          · {state.detail}
+        </span>
+      )}
       {count && <span className="shrink-0 font-mono tabular-nums opacity-70">{count}</span>}
     </>
   );

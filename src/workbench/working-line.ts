@@ -24,6 +24,12 @@ export interface WorkingLineNow {
   /** What is happening, in the words of whoever is doing it. */
   label: string;
   /**
+   * What this particular one is, beside the label: the time a limit lifts, how
+   * many helpers are out. Off the one reading, so the foot and the chip an inch
+   * above it name the same thing (bw-jaoz.14.8).
+   */
+  detail: string | null;
+  /**
    * Which of the things a chat does this is, off the one reading — so the line
    * can draw what a word cannot. Summarising is the state that gets a bar
    * (bw-jaoz.14.5); everything else is open-ended and gets a clock.
@@ -72,6 +78,7 @@ export function workingLine(now: {
   if (now.busy) {
     return {
       label: now.label,
+      detail: now.state.detail,
       doing: now.state.doing,
       since: now.since,
       // Off the one reading, so the line and the chip an inch above it cannot
@@ -90,6 +97,7 @@ export function workingLine(now: {
   if (now.state.working) {
     return {
       label: now.running?.title ?? now.state.word,
+      detail: now.state.detail,
       doing: now.state.doing,
       since: now.state.since,
       turn: now.state.turnSince,
