@@ -39,7 +39,22 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        // `w-full max-w-lg` was missing here, which is what every `sm:max-w-*`
+        // a caller passes is meant to narrow FROM — below `sm:` there was no
+        // width at all, so the box sized itself to whatever its content's
+        // natural width was instead of the viewport (bw-81wt.2). `max-h` +
+        // `overflow-y-auto` is the other half: a dialog taller than the phone
+        // (the folder browser, mainly) now scrolls inside its own box instead
+        // of running off both the top and the bottom of the screen.
+        // `grid-cols-1` closes the last gap: bare `grid` has no
+        // `grid-template-columns`, so the browser's default single implicit
+        // column sizes to its widest child's natural (unwrapped) content —
+        // same "grid item ignores the parent's width" bug as the project
+        // cards grid (bw-81wt.2) — and a long directory name inside the
+        // folder browser was enough to force the whole dialog to need
+        // sideways scrolling. `grid-cols-1` compiles to
+        // `repeat(1, minmax(0, 1fr))`, giving the column a real 0 minimum.
+        "fixed left-[50%] top-[50%] z-50 grid grid-cols-1 w-full max-w-lg max-h-[90dvh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
         className
       )}
       {...props}

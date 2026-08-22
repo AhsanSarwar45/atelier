@@ -163,7 +163,12 @@ export function QuickFilterBar({
   };
 
   return (
-    <Toolbar label="Quick filters">
+    // Nothing on this row is allowed to be squeezed. A flex child shrinks by
+    // default, so on a phone the eleven controls here did not overflow the row
+    // — they compressed inside it, and a row that does not overflow does not
+    // scroll, which is how New, the filters, the agents and the memory ended
+    // up both invisible and unreachable at 390 wide (bw-81wt.4).
+    <Toolbar label="Quick filters" className="[&>*]:shrink-0">
       {/* Search Input */}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-t-muted" aria-hidden="true" />
@@ -174,7 +179,7 @@ export function QuickFilterBar({
           placeholder="Search… (/)"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="pl-8 pr-8 w-[180px] h-8 bg-surface-overlay/50 border-b-strong text-t-primary placeholder:text-t-muted"
+          className="pl-8 pr-8 w-[9.5rem] sm:w-[180px] h-8 bg-surface-overlay/50 border-b-strong text-t-primary placeholder:text-t-muted"
         />
         {search && (
           <button

@@ -186,6 +186,9 @@ export function ProjectSettingsDialog({
                 setBrowsing(browsingKey);
               }}
               title="Browse folders"
+              // 36px (md) is under the 40px touch minimum; untouched
+              // on mouse (bw-81wt.2).
+              className="[@media(pointer:coarse)]:h-10"
             >
               <FolderSearch className="size-4" />
             </Button>
@@ -247,6 +250,7 @@ export function ProjectSettingsDialog({
                         setPath(localPath);
                         setLocalPath("");
                       }}
+                      className="[@media(pointer:coarse)]:h-10"
                     >
                       Clear
                     </Button>
@@ -284,13 +288,19 @@ export function ProjectSettingsDialog({
 
           {!browsing && (
             <>
-              <DialogFooter className="flex-row items-center border-t border-b-default pt-4 mt-4 gap-2">
-                <div className="flex items-center gap-2">
+              {/* Archive/Delete/Save forced a single row at every width, which
+                  clipped "Save" off the right edge at 360px with both
+                  destructive buttons present (bw-81wt.2) — stack the three
+                  full-width below `sm:`, keep the existing row exactly as
+                  it was at `sm:` and up. */}
+              <DialogFooter className="flex-col items-stretch border-t border-b-default pt-4 mt-4 gap-2 sm:flex-row sm:items-center">
+                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                   {onArchive && !archivedAt && (
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => { onArchive(); onOpenChange(false); }}
+                      className="w-full sm:w-auto [@media(pointer:coarse)]:h-10"
                     >
                       <Archive className="h-4 w-4" aria-hidden="true" />
                       Archive project
@@ -309,13 +319,14 @@ export function ProjectSettingsDialog({
                           onOpenChange(false);
                         }
                       }}
+                      className="w-full sm:w-auto [@media(pointer:coarse)]:h-10"
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                       Delete project
                     </Button>
                   )}
                 </div>
-                <Button type="submit" disabled={isSubmitting || !name.trim()} className="ml-auto">
+                <Button type="submit" disabled={isSubmitting || !name.trim()} className="w-full sm:w-auto sm:ml-auto [@media(pointer:coarse)]:h-10">
                   {isSubmitting ? (
                     <>
                       <Loader2 className="size-4 animate-spin" aria-hidden="true" />

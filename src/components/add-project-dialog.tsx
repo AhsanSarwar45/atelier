@@ -377,6 +377,9 @@ export function AddProjectDialog({
                     size="md"
                     onClick={() => setBrowsing(true)}
                     title="Browse folders"
+                    // 36px (md) is under the 40px touch minimum;
+                    // untouched on mouse (bw-81wt.2).
+                    className="[@media(pointer:coarse)]:h-10"
                   >
                     <FolderSearch className="size-4" />
                     Browse
@@ -395,6 +398,7 @@ export function AddProjectDialog({
                 <Button
                   onClick={() => validateAndProceed()}
                   disabled={!projectPath.trim() || isValidating}
+                  className="[@media(pointer:coarse)]:h-10"
                 >
                   {isValidating ? (
                     <>
@@ -435,10 +439,11 @@ export function AddProjectDialog({
                 type="button"
                 variant="outline"
                 onClick={() => setShowNameInput(false)}
+                className="[@media(pointer:coarse)]:h-10"
               >
                 Back
               </Button>
-              <Button type="submit" disabled={isSubmitting || !projectName.trim()}>
+              <Button type="submit" disabled={isSubmitting || !projectName.trim()} className="[@media(pointer:coarse)]:h-10">
                 {isSubmitting ? "Adding..." : "Add Project"}
               </Button>
             </DialogFooter>
