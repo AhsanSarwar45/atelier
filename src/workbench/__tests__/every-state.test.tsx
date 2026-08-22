@@ -124,6 +124,9 @@ describe('a chat of ours, nobody else in it', () => {
     const read = chatState({ state: 'running_tool', label: 'Reading', since: BEGAN });
     expect(body(read, { busy: true, label: 'Reading', since: BEGAN })).toEqual({
       label: 'Reading',
+      // What it is, as well as what it says it is: the line draws a bar for one
+      // of these and a clock for the rest (bw-jaoz.14.5).
+      doing: 'running',
       since: BEGAN,
       // Nothing said when the turn began, so there is no second number.
       turn: null,
@@ -258,13 +261,14 @@ describe('a chat somebody else holds', () => {
   it('held and working: the body draws the holder\'s turn, and never the waiting mark', () => {
     const read = chatState({ state: 'dormant', held: held({ doing: 'working' }) });
     const line = body(read);
-    expect(line).toEqual({ label: 'Working', since: BEGAN, turn: null, reported: 0, waiting: false, thought: 0 });
+    expect(line).toEqual({ label: 'Working', doing: 'working', since: BEGAN, turn: null, reported: 0, waiting: false, thought: 0 });
   });
 
   it('held and working a command: the body names the command they are running', () => {
     const read = chatState({ state: 'dormant', held: held({ doing: 'working' }) });
     expect(body(read, { running: { title: 'rg --files', seconds: 7 } })).toEqual({
       label: 'rg --files',
+      doing: 'working',
       since: BEGAN,
       turn: null,
       reported: 7,

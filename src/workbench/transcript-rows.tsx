@@ -22,7 +22,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
+import type { Doing } from '@/workbench/chat-state';
 import { forHowLong } from '@/workbench/elapsed';
+import { SUMMARY_HELD_AT, summaryFill } from '@/workbench/summarising';
 import { languageOf, languagesOf, paint, paintLines } from '@/workbench/colouring';
 import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
@@ -563,6 +565,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
  */
 export function WorkingLine({
   label,
+  doing,
   since,
   turn,
   reported,
@@ -570,6 +573,11 @@ export function WorkingLine({
   thought,
 }: {
   label: string;
+  /**
+   * Which of the things a chat does this is. Only summarising draws a bar —
+   * see summarising.ts for why it is the only state that can have one.
+   */
+  doing?: Doing;
   /** When the current step began, or null when nothing is owed. */
   since: number | null;
   /**
@@ -598,8 +606,11 @@ export function WorkingLine({
   // how long this has been going on; it cannot say whether anything is stuck,
   // so it stands behind the step rather than in front of it (bw-jaoz.14.4).
   const turnSeconds = turn ? Math.floor((Date.now() - turn) / 1000) : 0;
+  // The one state whose end can be predicted, and the one state that writes
+  // nothing at all while it runs, so the clock is otherwise all a reader has.
+  const filling = doing === 'summarising' && since ? summaryFill(Date.now() - since) : null;
 
-  return (
+  const line = (
     <div
       data-testid="working-line"
       data-seconds={seconds}
@@ -634,6 +645,34 @@ export function WorkingLine({
           {forHowLong(turnSeconds)} turn
         </span>
       )}
+    </div>
+  );
+
+  if (filling === null) return line;
+
+  // Held at the far end and still going: the estimate was a median, so half of
+  // all runs get here. The bar stops claiming progress it cannot see and says
+  // only that it is still going.
+  const held = filling >= SUMMARY_HELD_AT;
+  return (
+    <div className="flex flex-col gap-1">
+      {line}
+      <div
+        data-testid="summarising-bar"
+        data-fill={Math.round(filling * 100)}
+        data-held={held}
+        role="progressbar"
+        aria-label="How far through summarising this conversation is"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(filling * 100)}
+        className="mx-1 h-1 overflow-hidden rounded-full bg-muted"
+      >
+        <div
+          className={cn('h-full rounded-full bg-primary transition-[width] duration-1000 ease-linear', held && 'animate-pulse')}
+          style={{ width: `${filling * 100}%` }}
+        />
+      </div>
     </div>
   );
 }

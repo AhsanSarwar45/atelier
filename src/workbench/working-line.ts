@@ -17,12 +17,18 @@
  * Pure and out of the component so it can be read on its own: the component
  * around it is a chat screen with a stream, a store and a text box in it.
  */
-import type { ChatState } from '@/workbench/chat-state';
+import type { ChatState, Doing } from '@/workbench/chat-state';
 
 /** Everything the line draws, or nothing when no turn is in flight. */
 export interface WorkingLineNow {
   /** What is happening, in the words of whoever is doing it. */
   label: string;
+  /**
+   * Which of the things a chat does this is, off the one reading — so the line
+   * can draw what a word cannot. Summarising is the state that gets a bar
+   * (bw-jaoz.14.5); everything else is open-ended and gets a clock.
+   */
+  doing: Doing;
   /** When THIS step started, ms since the epoch, for the count beside the label. */
   since: number | null;
   /**
@@ -66,6 +72,7 @@ export function workingLine(now: {
   if (now.busy) {
     return {
       label: now.label,
+      doing: now.state.doing,
       since: now.since,
       // Off the one reading, so the line and the chip an inch above it cannot
       // disagree about whether the turn is worth a second number at all.
@@ -83,6 +90,7 @@ export function workingLine(now: {
   if (now.state.working) {
     return {
       label: now.running?.title ?? now.state.word,
+      doing: now.state.doing,
       since: now.state.since,
       turn: now.state.turnSince,
       reported,
