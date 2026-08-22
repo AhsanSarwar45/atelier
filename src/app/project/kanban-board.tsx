@@ -21,7 +21,7 @@ import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
-import { isDoltProject, projectDir } from "@/lib/utils";
+import { cn, isDoltProject, projectDir } from "@/lib/utils";
 import { STATES, type Bead, type BeadStatus } from "@/types";
 
 import { useBoardCards } from "./board-cards";
@@ -212,6 +212,59 @@ export default function KanbanBoard() {
   // Ref for search input (keyboard navigation)
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * Which column a phone is showing, and how to get to another one.
+   *
+   * A phone is one column wide, so five of the six are off the side of the
+   * screen with nothing to say they exist. The strip snaps, so a swipe always
+   * lands on a column squarely rather than halfway between two, and the row of
+   * names above it says which one you are on and jumps to any other. On a
+   * screen wide enough for several columns none of this applies: the names are
+   * hidden, the snapping is off, and the board is what it always was
+   * (bw-81wt.3).
+   */
+  const stripRef = useRef<HTMLElement | null>(null);
+  const namesRef = useRef<HTMLElement | null>(null);
+  const [columnOn, setColumnOn] = useState(0);
+
+  const goToColumn = useCallback((index: number) => {
+    const strip = stripRef.current;
+    const column = strip?.firstElementChild?.children[index] as HTMLElement | undefined;
+    if (!strip || !column) return;
+    strip.scrollTo({ left: column.offsetLeft - strip.offsetLeft, behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    // Read off the strip rather than kept in step with it: the reader scrolls
+    // with a thumb as well as with these buttons, and only the strip knows
+    // where a thumb left it.
+    const onScroll = () => {
+      const columns = Array.from(strip.firstElementChild?.children ?? []) as HTMLElement[];
+      if (!columns.length) return;
+      const middle = strip.scrollLeft + strip.clientWidth / 2;
+      let nearest = 0;
+      let best = Infinity;
+      columns.forEach((column, i) => {
+        const distance = Math.abs(column.offsetLeft - strip.offsetLeft + column.offsetWidth / 2 - middle);
+        if (distance < best) { best = distance; nearest = i; }
+      });
+      setColumnOn(nearest);
+    };
+    strip.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => strip.removeEventListener('scroll', onScroll);
+  }, [beadsLoading]);
+
+  // The names row is itself too wide for a phone, so it follows the strip: the
+  // name of the column you are on is never the one hanging off the side.
+  useEffect(() => {
+    const name = namesRef.current?.children[columnOn] as HTMLElement | undefined;
+    name?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, [columnOn]);
+
+
   // Keyboard navigation (use top-level beads for navigation)
   const { selectedId } = useKeyboardNavigation({
     beads: topLevelBeads,
@@ -328,10 +381,43 @@ export default function KanbanBoard() {
         />
       </TabTools>
 
+      {/* The column names, on a screen too narrow to show them all at once.
+          Each says how much is in it, and takes you there. */}
+      <nav
+        ref={namesRef}
+        data-testid="column-tabs"
+        aria-label="Columns"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/40 px-2 py-1 sm:hidden"
+      >
+        {COLUMNS.map(({ status, title }, i) => (
+          <button
+            key={status}
+            type="button"
+            aria-current={i === columnOn ? 'true' : undefined}
+            onClick={() => goToColumn(i)}
+            className={cn(
+              'flex min-h-[40px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-xs font-medium transition-colors',
+              i === columnOn
+                ? 'bg-surface-overlay text-t-primary'
+                : 'text-t-tertiary hover:text-t-primary',
+            )}
+          >
+            {title}
+            <span className="tabular-nums opacity-60">{(filteredBeadsByStatus[status] || []).length}</span>
+          </button>
+        ))}
+      </nav>
+
       {/* Kanban Columns. A column narrower than --column-min is unreadable, so
           past that the board scrolls sideways instead of cramming every column
-          into the window. */}
-      <main data-testid="board-scroll" className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4">
+          into the window. On a phone --column-min is the window itself, so
+          "narrower than one column" is every phone and the board is a stack of
+          full-width columns you swipe between. */}
+      <main
+        ref={stripRef}
+        data-testid="board-scroll"
+        className="min-h-0 flex-1 snap-x snap-mandatory scroll-pl-4 overflow-x-auto overflow-y-hidden p-4 [--column-min:calc(100vw_-_2rem)] sm:snap-none sm:[--column-min:20rem]"
+      >
         {beadsLoading ? (
           <div className="flex items-center justify-center h-full">
             <div role="status" className="text-t-muted">Loading cards…</div>
@@ -350,8 +436,11 @@ export default function KanbanBoard() {
             }}
           >
             {COLUMNS.map(({ status, title }) => (
+              // The snap point is this wrapper rather than the column itself,
+              // so where a swipe lands is the board's business and the column
+              // stays a column.
+              <div key={status} className="h-full min-w-0 snap-start sm:snap-align-none">
               <KanbanColumn
-                key={status}
                 status={status}
                 title={title}
                 beads={filteredBeadsByStatus[status] || []}
@@ -367,6 +456,7 @@ export default function KanbanBoard() {
                 fsPath={fsPath}
                 onUpdate={refreshBeads}
               />
+              </div>
             ))}
           </div>
         )}
