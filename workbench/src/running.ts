@@ -28,8 +28,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { answerOwed, heldDoing } from '../../src/workbench/chat-state.ts';
+import { answerOwed, heldDoing, isWorking, whatItIsDoing } from '../../src/workbench/chat-state.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
+import { toldDoing, toldFileFor, toldFileName } from '../../src/workbench/doing-told.ts';
 import { parseMarker, procStartFromStat, runningChats } from '../../src/workbench/running.ts';
 import type { RunningChat, SessionMarker } from '../../src/workbench/running.ts';
 import { findRecord, lastSaidSync } from './record-tail.ts';
@@ -64,6 +65,10 @@ export function readMarkers(): SessionMarker[] {
   const markers: SessionMarker[] = [];
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
+    // A session's own line about itself lives in the same directory and ends
+    // the same way. It is read by name, per conversation, and is not a marker
+    // (doing-told.ts).
+    if (toldFileFor(name) !== null) continue;
     let text: string;
     try {
       text = readFileSync(join(dir, name), 'utf8');
@@ -178,6 +183,25 @@ const burstAt = new Map<string, number>();
  */
 const owedFor = new Map<string, { at: number; owed: boolean }>();
 
+/**
+ * What a session last said about itself, from the line its own hooks write
+ * beside its marker (bw-jaoz.14.6).
+ *
+ * Missing is the ordinary case: only a session whose hooks are installed writes
+ * one, and only while it is in a state worth naming. Every other way of failing
+ * — unreadable, half-written, abandoned — is the same answer as missing, which
+ * is what {@link toldDoing} is careful about.
+ */
+function saidOfItself(sessionId: string, now: number) {
+  let text: string | null;
+  try {
+    text = readFileSync(join(claudeConfigDir(), 'sessions', toldFileName(sessionId)), 'utf8');
+  } catch {
+    return null;
+  }
+  return toldDoing(text, now);
+}
+
 /** Whether the end of this record leaves an answer owed, remembered per write. */
 function owedAt(record: string, movedAt: number): boolean {
   const had = owedFor.get(record);
@@ -224,7 +248,7 @@ export function holdsNow(fresh = false): HeldChat[] {
       read.add(record);
       owed = owedAt(record, movedAt);
     }
-    const { doing, since, turnSince } = heldDoing({
+    const guess = heldDoing({
       status: chat.status,
       statusAt: chat.statusAt,
       recordMovedAt: movedAt,
@@ -232,7 +256,21 @@ export function holdsNow(fresh = false): HeldChat[] {
       burstAt: burstAt.get(id) ?? null,
       now,
     });
-    if (doing === 'working') {
+    // Told over read, always: the session naming its own state beats anything
+    // we worked out from a file it happens to be writing (chat-state.ts).
+    const said = saidOfItself(id, now);
+    const answer = whatItIsDoing({
+      told: said,
+      read: { doing: guess.doing, since: guess.since },
+    });
+    const doing = answer.doing;
+    const since = answer.since;
+    // The burst is the turn, and a turn does not restart because the session
+    // moved from running a command to summarising itself: whichever tier
+    // answered, the first beat that saw it working is where the turn began.
+    const turnSince = guess.turnSince;
+    const busy = isWorking(doing);
+    if (busy) {
       if (!burstAt.has(id)) burstAt.set(id, turnSince ?? since ?? now);
     } else {
       burstAt.delete(id);
@@ -245,11 +283,13 @@ export function holdsNow(fresh = false): HeldChat[] {
       // know which window to go to.
       holder: chat.entrypoint === 'cli' ? 'terminal' : 'program',
       doing,
+      detail: answer.detail,
+      told: answer.told,
       // The step, which is the loud number; the burst behind it is the quiet
       // one. They used to be the same number, and it was the turn's — so a
       // forty-second summarising run read as an hour and a half (bw-jaoz.14.4).
-      since: doing === 'working' ? since : null,
-      turnSince: doing === 'working' ? (burstAt.get(id) ?? turnSince) : null,
+      since: busy ? since : null,
+      turnSince: busy ? (burstAt.get(id) ?? turnSince) : null,
     });
   });
 

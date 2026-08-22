@@ -66,6 +66,14 @@
             "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-touch.py"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+          }
+        ]
       }
     ],
     "SubagentStop": [
@@ -88,6 +96,10 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/habit-reading.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
           }
         ]
       }
@@ -109,6 +121,10 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-push.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
           }
         ]
       }
@@ -123,6 +139,43 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-gate.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/workbench/hooks/session-doing.py"
           }
         ]
       }

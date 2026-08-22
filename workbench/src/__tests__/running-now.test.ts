@@ -125,6 +125,10 @@ describe('what each held conversation is doing', () => {
       id: 'a-busy-terminal',
       holder: 'terminal',
       doing: 'working',
+      // Nothing said which of the things it is doing, and a busy bit is not a
+      // claim about that (bw-jaoz.14.6).
+      detail: null,
+      told: false,
       // Counted from when it said so. A busy bit says nothing about steps, so
       // there is no second number behind it.
       since: NOW - 12_000,
@@ -134,6 +138,8 @@ describe('what each held conversation is doing', () => {
       id: 'a-quiet-terminal',
       holder: 'terminal',
       doing: 'idle',
+      detail: null,
+      told: false,
       since: null,
       turnSince: null,
     });
@@ -183,6 +189,8 @@ describe('what each held conversation is doing', () => {
       id: 'a-silent-host',
       holder: 'program',
       doing: 'unknown',
+      detail: null,
+      told: false,
       since: null,
       turnSince: null,
     });
@@ -192,5 +200,126 @@ describe('what each held conversation is doing', () => {
     const holds = holdsNow(true);
     expect(holds.map((h) => h.id)).toEqual([...holds.map((h) => h.id)].sort());
     expect(holds.map((h) => h.id)).toEqual(Array.from(runningNow(true).keys()).sort());
+  });
+});
+
+/**
+ * What a session says about itself, picked up off the same directory.
+ *
+ * The marker carries one bit — busy or idle — so a chat summarising itself and
+ * a chat halfway through a command are the same fact to it. The line a hook
+ * writes beside the marker is the session naming its own state, and it wins
+ * over anything worked out from a file (bw-jaoz.14.6).
+ */
+describe('what a session says about itself', () => {
+  const NOW = new Date('2026-08-22T12:00:00Z').getTime();
+  let config = '';
+
+  function said(sessionId: string, what: unknown): void {
+    writeFileSync(join(sessionsDir, `${sessionId}.doing.json`), typeof what === 'string' ? what : JSON.stringify(what));
+  }
+
+  function record(sessionId: string, agoMs: number): void {
+    const folder = join(config, 'projects', '-home-me-project');
+    mkdirSync(folder, { recursive: true });
+    const path = join(folder, `${sessionId}.jsonl`);
+    writeFileSync(path, '{"type":"assistant"}\n');
+    const when = (NOW - agoMs) / 1000;
+    utimesSync(path, when, when);
+  }
+
+  beforeAll(() => {
+    config = mkdtempSync(join(tmpdir(), 'told-'));
+    sessionsDir = join(config, 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    process.env.CLAUDE_CONFIG_DIR = config;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+    if (wasConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = wasConfig;
+  });
+
+  it('takes the word of a session that named its own state, over the record', () => {
+    // The record says only that something was written 40 seconds ago, which is
+    // the whole of what the old reading had: 'Working'.
+    marker('3001', 'a-compacting-chat', { entrypoint: 'sdk-ts' });
+    record('a-compacting-chat', 40_000);
+    said('a-compacting-chat', { doing: 'summarising', since: NOW - 40_000, detail: 'auto' });
+
+    expect(holdsNow(true).find((h) => h.id === 'a-compacting-chat')).toMatchObject({
+      doing: 'summarising',
+      detail: 'auto',
+      told: true,
+      since: NOW - 40_000,
+    });
+  });
+
+  it('beats the marker’s own busy bit, which cannot say which of the things it is', () => {
+    marker('3002', 'a-waiting-terminal', { status: 'busy', statusUpdatedAt: NOW - 5_000 });
+    said('a-waiting-terminal', { doing: 'waiting', since: NOW - 5_000, detail: 'Bash: rm -rf build' });
+
+    expect(holdsNow(true).find((h) => h.id === 'a-waiting-terminal')).toMatchObject({
+      doing: 'waiting',
+      detail: 'Bash: rm -rf build',
+      told: true,
+    });
+  });
+
+  it('forgets a summarising claim nobody ever cleared', () => {
+    // There is no hook for the end of a compaction, so a session killed in the
+    // middle of one leaves this behind. A bar filling for ever is worse than
+    // the honest guess underneath it.
+    marker('3003', 'an-abandoned-claim', { entrypoint: 'sdk-ts' });
+    record('an-abandoned-claim', 2_000);
+    said('an-abandoned-claim', { doing: 'summarising', since: NOW - 3_600_000 });
+
+    expect(holdsNow(true).find((h) => h.id === 'an-abandoned-claim')).toMatchObject({
+      doing: 'working',
+      told: false,
+    });
+  });
+
+  it('lets a permission prompt stand however long the person is away', () => {
+    // People go to lunch. A prompt is answered by a person, not by a timer, and
+    // the hook that clears it fires when the turn ends.
+    marker('3004', 'a-long-prompt', { status: 'busy', statusUpdatedAt: NOW - 7_200_000 });
+    said('a-long-prompt', { doing: 'waiting', since: NOW - 7_200_000 });
+
+    expect(holdsNow(true).find((h) => h.id === 'a-long-prompt')).toMatchObject({ doing: 'waiting', told: true });
+  });
+
+  it('ignores a line it cannot believe, rather than drawing it', () => {
+    marker('3005', 'a-half-written-line', { status: 'busy', statusUpdatedAt: NOW - 1_000 });
+    said('a-half-written-line', '{"doing":"summari');
+    expect(holdsNow(true).find((h) => h.id === 'a-half-written-line')).toMatchObject({ doing: 'working', told: false });
+
+    said('a-half-written-line', { doing: 'napping', since: NOW });
+    expect(holdsNow(true).find((h) => h.id === 'a-half-written-line')).toMatchObject({ doing: 'working', told: false });
+
+    said('a-half-written-line', { doing: 'summarising', since: NOW + 600_000 });
+    expect(
+      holdsNow(true).find((h) => h.id === 'a-half-written-line'),
+      'a clock from the future is a clock nobody set',
+    ).toMatchObject({ doing: 'working', told: false });
+  });
+
+  it('does not restart the turn when the session moves from one state to the next', () => {
+    // Running a command, then summarising: two steps of one turn. The step's
+    // clock moves with the state; the turn's does not (bw-jaoz.14.4).
+    marker('3006', 'a-turn-of-two-halves', { entrypoint: 'sdk-ts' });
+    record('a-turn-of-two-halves', 4_000);
+    const first = holdsNow(true).find((h) => h.id === 'a-turn-of-two-halves');
+    expect(first?.doing).toBe('working');
+    const began = first?.turnSince ?? 0;
+
+    said('a-turn-of-two-halves', { doing: 'summarising', since: NOW });
+    const next = holdsNow(true).find((h) => h.id === 'a-turn-of-two-halves');
+    expect(next?.doing).toBe('summarising');
+    expect(next?.since, 'the step began when the session said so').toBe(NOW);
+    expect(next?.turnSince, 'the turn is where the burst began').toBe(began);
   });
 });

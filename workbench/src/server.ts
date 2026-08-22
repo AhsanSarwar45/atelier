@@ -135,7 +135,7 @@ let announced = '';
  * chat that has been answering all along.
  */
 function heldKey(holds: HeldChat[]): string {
-  return holds.map((h) => `${h.id}:${h.holder}:${h.doing}`).join(',');
+  return holds.map((h) => `${h.id}:${h.holder}:${h.doing}:${h.detail ?? ''}`).join(',');
 }
 
 function lookAtRunning(): void {
