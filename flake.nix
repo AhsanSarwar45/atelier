@@ -72,7 +72,7 @@
 
             meta = {
               description = "Visual Kanban UI for Beads CLI";
-              homepage = "https://github.com/ahsanswr/atelier";
+              homepage = "https://github.com/AhsanSarwar45/atelier";
               mainProgram = "atelier";
             };
           };

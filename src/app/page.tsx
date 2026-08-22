@@ -291,7 +291,7 @@ export default function ProjectsPage() {
       <footer className="mt-auto border-t border-b-default py-3">
         <div className="mx-auto flex max-w-[1200px] items-center justify-center gap-4 px-6">
           <a
-            href="https://github.com/ahsanswr/atelier"
+            href="https://github.com/AhsanSarwar45/atelier"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 text-sm text-t-muted transition-colors hover:text-t-secondary"

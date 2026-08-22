@@ -123,7 +123,7 @@ jobs:
           ARM=$(sha256sum release/atelier-darwin-arm64 | cut -d' ' -f1)
           INTEL=$(sha256sum release/atelier-darwin-x64 | cut -d' ' -f1)
           LINUX=$(sha256sum release/atelier-linux-x64 | cut -d' ' -f1)
-          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/ahsanswr/homebrew-atelier.git" tap
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/AhsanSarwar45/homebrew-atelier.git" tap
           mkdir -p tap/Formula
           sed -e "s|__VERSION__|${VERSION}|g" \
               -e "s|__ARM_SHA__|${ARM}|g" \

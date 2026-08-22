@@ -37,6 +37,12 @@ Three halves, and all of them have to hold:
               spelling sweep cannot see it because the address it names is
               spelled correctly and simply does not exist (bw-8um.3.15).
 
+  ONE ACCOUNT   every address of this product's own two repositories is under
+              the one account it publishes from. The owner has more than one
+              account and only one of them is his to publish under; an address
+              under the other is spelled perfectly, points at a real place, and
+              is still the wrong place (bw-8um.3.21).
+
 ## What is NOT the product name
 
 Three things share the old spelling and are not it, so each is exempt by a
@@ -307,6 +313,52 @@ def downloads_named(files):
     return failures
 
 
+# ------------------------------------------------------------- one account
+
+# The account this product publishes from. Every address of its own two
+# repositories is under this one; an address under any other account is not
+# a spelling mistake and the spelling sweep cannot see it.
+PUBLISHES_UNDER = "AhsanSarwar45"
+
+# Its own two repositories — the product, and the tap that carries the formula —
+# but only where the text is really an address. An account name followed by the
+# product name is also the tail of a dozen ordinary file paths (a build output
+# under `release`, the formula under `Formula`), so the account is only read
+# where one of the ways an address is actually written comes first.
+OWN_REPOS = re.compile(
+    r"(?:github\.com/|github:|brew install |[`*])"
+    r"(?P<owner>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"/(?P<repo>atelier|homebrew-atelier)\b(?!\.(?!git))"
+)
+
+
+def account_named(files):
+    """Every address of our own repositories that is under another account."""
+    failures = []
+    for path in files:
+        if path.endswith(SKIP_SUFFIX) or path.startswith(GENERATED):
+            continue
+        full = os.path.join(HERE, path)
+        if not os.path.isfile(full):
+            continue
+        try:
+            text = open(full, encoding="utf-8").read()
+        except (UnicodeDecodeError, OSError):
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            for found in OWN_REPOS.finditer(line):
+                # `brew install <account>/atelier/atelier` names the tap by its
+                # short form, so the account is what sits before `atelier`
+                # either way and one rule covers both spellings.
+                owner = found.group("owner")
+                if owner != PUBLISHES_UNDER:
+                    failures.append(
+                        "%s:%d names %s/%s, which is not the account this publishes"
+                        " from (%s): %s" % (path, number, owner, found.group("repo"),
+                                            PUBLISHES_UNDER, line.strip()))
+    return failures
+
+
 def main():
     name = defined_name()
     display = defined_display()
@@ -328,11 +380,14 @@ def main():
 
     failures.extend(built_screen(display))
     failures.extend(downloads_named(files))
+    failures.extend(account_named(files))
 
     print("the product is named %r, read as %r, defined in %s" % (name, display, IDENTITY))
     print("%d places must agree, %d tracked files swept, and %d built pages read as the"
           " reader meets them; every download a manifest names checked against the"
-          " releases that exist" % (len(agreements(name)), len(files), len(LANDED_ON)))
+          " releases that exist, and every address of its own repositories against"
+          " the one account %s publishes from"
+          % (len(agreements(name)), len(files), len(LANDED_ON), PUBLISHES_UNDER))
     for line in failures:
         print("  FAIL " + line)
     print("%d failures" % len(failures))

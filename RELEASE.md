@@ -12,9 +12,9 @@ distribution channel.
 
 | Channel | Where copies live | Updated by | One-time setup |
 |---------|-------------------|-----------|----------------|
-| GitHub Releases | `ahsanswr/atelier` → Releases | `release.yml` (automatic) | — |
+| GitHub Releases | `AhsanSarwar45/atelier` → Releases | `release.yml` (automatic) | — |
 | Nix (macOS/Linux/WSL) | `flake.nix` (this repo) | `ci.yml` refreshes deps hash; version is manual | — |
-| Homebrew (macOS/Linux) | `Formula/atelier.rb` in `ahsanswr/homebrew-atelier` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
+| Homebrew (macOS/Linux) | `Formula/atelier.rb` in `AhsanSarwar45/homebrew-atelier` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
 
 ## Cutting a release
 
@@ -81,24 +81,29 @@ Nix `npmDepsHash` current, auto-committing the refreshed hash when it drifts.
 
 ## Required repository secrets
 
-Set under *ahsanswr/atelier → Settings → Secrets and variables → Actions*:
+Set under *AhsanSarwar45/atelier → Settings → Secrets and variables → Actions*:
 
 | Secret | Purpose | How to create |
 |--------|---------|---------------|
 | `GITHUB_TOKEN` | built-in; release + Nix commits | automatic |
-| `HOMEBREW_TAP_TOKEN` | push the formula to `ahsanswr/homebrew-atelier` | fine-grained PAT, that repo only, **Contents: read/write** |
+| `HOMEBREW_TAP_TOKEN` | push the formula to `AhsanSarwar45/homebrew-atelier` | fine-grained PAT, that repo only, **Contents: read/write** |
 
 The Homebrew step no-ops cleanly when its token is absent.
 
 ## One-time setup (not yet done)
 
-This is a fork, and none of the publishing setup exists under `ahsanswr` yet.
+This is a fork, so everything it publishes to had to be made fresh. It all
+lives under the personal account `AhsanSarwar45`, never a work one — the
+addresses below are the only ones this project publishes to, and
+`scripts/one-name.py` fails the build if a different account appears anywhere.
 Before the first tag:
 
-- Create `ahsanswr/atelier` on GitHub and add it as the `origin` remote.
-- Create the tap repo `ahsanswr/homebrew-atelier`. It can be empty; the release
+- Create `AhsanSarwar45/atelier` on GitHub and add it as the `origin` remote.
+- Create the tap repo `AhsanSarwar45/homebrew-atelier`. It can be empty; the release
   run writes `Formula/atelier.rb` into it.
-- Add the `HOMEBREW_TAP_TOKEN` secret to `ahsanswr/atelier`.
+- Add the `HOMEBREW_TAP_TOKEN` secret to `AhsanSarwar45/atelier`.
+- The login that pushes needs the `workflow` right, or GitHub refuses any push
+  that carries `.github/workflows/release.yml`: `gh auth refresh -s workflow`.
 
 Until the tap token is set the Homebrew step no-ops, so the first tag still
 publishes binaries and checksums — just no formula.

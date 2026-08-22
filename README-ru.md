@@ -110,7 +110,7 @@ Atelier даёт вам Kanban-доску в реальном времени, м
 Одна команда:
 
 ```bash
-brew install ahsanswr/atelier/atelier
+brew install AhsanSarwar45/atelier/atelier
 ```
 
 Обновление: `brew upgrade atelier`.
@@ -119,7 +119,7 @@ brew install ahsanswr/atelier/atelier
 
 ### Скачать
 
-Скачайте бинарник для вашей платформы со страницы [GitHub Releases](https://github.com/ahsanswr/atelier/releases/latest):
+Скачайте бинарник для вашей платформы со страницы [GitHub Releases](https://github.com/AhsanSarwar45/atelier/releases/latest):
 
 | Платформа | Файл |
 |----------|------|
@@ -146,7 +146,7 @@ atelier-win-x64.exe
 Требования: Node.js 20+, [Rust toolchain](https://rustup.rs/) и [Beads CLI](https://github.com/gastownhall/beads) (`bd`) в PATH.
 
 ```bash
-git clone https://github.com/ahsanswr/atelier.git
+git clone https://github.com/AhsanSarwar45/atelier.git
 cd beads-web
 npm install
 ```
@@ -184,7 +184,7 @@ Dev-сервер Next.js (порт 3007) отдаёт frontend с горячей
 
 ### Сборка из исходников (готовый бинарник)
 
-Собирает тот же самодостаточный бинарник, что публикует CI в [Releases](https://github.com/ahsanswr/atelier/releases/latest) — frontend встроен, поэтому Rust при запуске не нужен и доске не нужен Node.js. Помощнику чата он по-прежнему нужен.
+Собирает тот же самодостаточный бинарник, что публикует CI в [Releases](https://github.com/AhsanSarwar45/atelier/releases/latest) — frontend встроен, поэтому Rust при запуске не нужен и доске не нужен Node.js. Помощнику чата он по-прежнему нужен.
 
 ```bash
 npm install
@@ -197,7 +197,7 @@ cargo build --release         # бинарник → server/target/release/ateli
 С Nix флейк собирает и запускает тот же бинарник без клона репозитория:
 
 ```bash
-nix run github:ahsanswr/atelier
+nix run github:AhsanSarwar45/atelier
 ```
 
 Запустите бинарник и откройте **http://localhost:3008**:

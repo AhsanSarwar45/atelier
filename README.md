@@ -116,7 +116,7 @@ Latte, Frappe, Macchiato, and Mocha are available from the theme switcher.
 One command:
 
 ```bash
-brew install ahsanswr/atelier/atelier
+brew install AhsanSarwar45/atelier/atelier
 ```
 
 Update later with `brew upgrade atelier`.
@@ -125,7 +125,7 @@ On Windows, take the file from the table below and put it somewhere on your PATH
 
 ### Download
 
-Download the binary for your platform from [GitHub Releases](https://github.com/ahsanswr/atelier/releases/latest):
+Download the binary for your platform from [GitHub Releases](https://github.com/AhsanSarwar45/atelier/releases/latest):
 
 | Platform | File |
 |----------|------|
@@ -225,7 +225,7 @@ into the registration, because a service inherits no shell.
 Prerequisites: Node.js 20+, [Rust toolchain](https://rustup.rs/), and the [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH.
 
 ```bash
-git clone https://github.com/ahsanswr/atelier.git
+git clone https://github.com/AhsanSarwar45/atelier.git
 cd beads-web
 npm install
 ```
@@ -277,7 +277,7 @@ The Next.js dev server (port 3007) serves the frontend with hot-reload; the Rust
 
 ### Build from Source (release binary)
 
-Produces the same self-contained binary that CI publishes to [Releases](https://github.com/ahsanswr/atelier/releases/latest) — the frontend is embedded, so nothing needs Rust at runtime and the board needs no Node.js. The chat helper still does.
+Produces the same self-contained binary that CI publishes to [Releases](https://github.com/AhsanSarwar45/atelier/releases/latest) — the frontend is embedded, so nothing needs Rust at runtime and the board needs no Node.js. The chat helper still does.
 
 ```bash
 npm install
@@ -290,7 +290,7 @@ cargo build --release         # binary → server/target/release/atelier (.exe o
 With Nix, the flake builds and runs the same binary without a checkout:
 
 ```bash
-nix run github:ahsanswr/atelier
+nix run github:AhsanSarwar45/atelier
 ```
 
 Run the binary and open **http://localhost:3008**:
