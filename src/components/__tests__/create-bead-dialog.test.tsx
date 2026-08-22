@@ -22,9 +22,9 @@ beforeEach(() => {
 });
 
 describe('CreateBeadDialog', () => {
-  it('renders with title "New Bead" when parentId is not set', () => {
+  it('renders with title "New Card" when parentId is not set', () => {
     render(<CreateBeadDialog {...defaultProps} />);
-    expect(screen.getByText('New Bead')).toBeInTheDocument();
+    expect(screen.getByText('New Card')).toBeInTheDocument();
   });
 
   it('renders with title "New Subtask" when parentId is set', () => {
