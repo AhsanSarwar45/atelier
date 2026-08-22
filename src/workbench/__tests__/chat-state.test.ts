@@ -156,6 +156,9 @@ describe('what a held chat is doing, from the two signals there are', () => {
     expect(heldDoing({ status: 'busy', statusAt: now - 4_000, recordMovedAt: null, owed: null, burstAt: null, now })).toEqual({
       doing: 'working',
       since: now - 4_000,
+      // A busy bit says busy and nothing about steps, so there is no second
+      // number to draw beside it.
+      turnSince: null,
     });
     // Its word beats the record even when the record disagrees: a chat that
     // has just been told to stop is idle the moment it says so, however
@@ -163,12 +166,13 @@ describe('what a held chat is doing, from the two signals there are', () => {
     expect(heldDoing({ status: 'idle', statusAt: now, recordMovedAt: now, owed: null, burstAt: null, now })).toEqual({
       doing: 'idle',
       since: null,
+      turnSince: null,
     });
   });
 
   it('falls back to the record moving when nothing says a word', () => {
     const moving = heldDoing({ status: null, statusAt: null, recordMovedAt: now - 2_000, owed: null, burstAt: null, now });
-    expect(moving).toEqual({ doing: 'working', since: now - 2_000 });
+    expect(moving).toEqual({ doing: 'working', since: now - 2_000, turnSince: null });
 
     const quiet = heldDoing({
       status: null,
@@ -178,17 +182,18 @@ describe('what a held chat is doing, from the two signals there are', () => {
       burstAt: null,
       now,
     });
-    expect(quiet).toEqual({ doing: 'idle', since: null });
+    expect(quiet).toEqual({ doing: 'idle', since: null, turnSince: null });
   });
 
-  it('counts the turn from where it began, not from the last line of it', () => {
-    // The record grows through an answer, so counting from its newest write
-    // would restart the seconds every few lines. The burst's own start is what
-    // the reader is watching.
+  it('counts the step from the last line written and the turn from where it began', () => {
+    // Two numbers, because they answer two questions. The record's newest write
+    // is where the step the reader is watching started; the burst's own start is
+    // how long the whole answer has run. One clock reported the second and was
+    // read as the first (bw-jaoz.14.4).
     const begun = now - 30_000;
     expect(
       heldDoing({ status: null, statusAt: null, recordMovedAt: now - 1_000, owed: null, burstAt: begun, now }),
-    ).toEqual({ doing: 'working', since: begun });
+    ).toEqual({ doing: 'working', since: now - 1_000, turnSince: begun });
   });
 
   it('says it does not know rather than guessing idle', () => {
@@ -197,6 +202,7 @@ describe('what a held chat is doing, from the two signals there are', () => {
     expect(heldDoing({ status: null, statusAt: null, recordMovedAt: null, owed: null, burstAt: null, now })).toEqual({
       doing: 'unknown',
       since: null,
+      turnSince: null,
     });
   });
 
@@ -213,14 +219,14 @@ describe('what a held chat is doing, from the two signals there are', () => {
       burstAt: now - 100_000,
       now,
     });
-    expect(thinking).toEqual({ doing: 'working', since: now - 100_000 });
+    expect(thinking).toEqual({ doing: 'working', since: now - 100_000, turnSince: now - 100_000 });
   });
 
   it('and the holder’s own word still beats it, either way', () => {
     // A chat told to stop mid-command owes an answer that is never coming.
     expect(
       heldDoing({ status: 'idle', statusAt: now, recordMovedAt: now, owed: true, burstAt: null, now }),
-    ).toEqual({ doing: 'idle', since: null });
+    ).toEqual({ doing: 'idle', since: null, turnSince: null });
   });
 
   it('is silent about when a chat went idle, so nothing counts against it', () => {
@@ -436,7 +442,7 @@ describe('the whole vocabulary for what a chat is doing', () => {
 
   it('forgets what a dropped chat was doing, and that it was ever told it', () => {
     const stale = holderOnly(held({ doing: 'summarising', since: 1_000, detail: 'freeing up room', told: true }));
-    expect(stale).toEqual({ ...held(), doing: 'unknown', since: null, detail: null, told: false });
+    expect(stale).toEqual({ ...held(), doing: 'unknown', since: null, turnSince: null, detail: null, told: false });
   });
 });
 

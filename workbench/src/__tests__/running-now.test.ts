@@ -125,14 +125,17 @@ describe('what each held conversation is doing', () => {
       id: 'a-busy-terminal',
       holder: 'terminal',
       doing: 'working',
-      // Counted from when it said so, so the reader sees the turn's own age.
+      // Counted from when it said so. A busy bit says nothing about steps, so
+      // there is no second number behind it.
       since: NOW - 12_000,
+      turnSince: NOW - 12_000,
     });
     expect(holds.find((h) => h.id === 'a-quiet-terminal')).toEqual({
       id: 'a-quiet-terminal',
       holder: 'terminal',
       doing: 'idle',
       since: null,
+      turnSince: null,
     });
   });
 
@@ -151,18 +154,24 @@ describe('what each held conversation is doing', () => {
     expect(holds.find((h) => h.id === 'a-quiet-host')).toMatchObject({ holder: 'program', doing: 'idle', since: null });
   });
 
-  it('counts one turn from where it began, however often the record grows', () => {
-    // The record of a working chat is written over and over; counting from the
-    // newest write would show a two-minute turn as one second, every second.
+  it('holds one turn where it began while the step follows the record', () => {
+    // The record of a working chat is written over and over. The two numbers
+    // split that: the step follows the newest write, which is the piece of work
+    // the reader is watching, and the turn stays where the burst began however
+    // often the file grows (bw-jaoz.14.4).
     const begun = NOW - 4_000;
     marker('2006', 'a-long-turn', { entrypoint: 'sdk-ts' });
     record('a-long-turn', 4_000);
-    expect(holdsNow(true).find((h) => h.id === 'a-long-turn')?.since).toBe(begun);
+    const first = holdsNow(true).find((h) => h.id === 'a-long-turn');
+    expect(first?.since).toBe(begun);
+    expect(first?.turnSince).toBe(begun);
 
     // Three seconds later the record has been written again, half a second ago.
     vi.setSystemTime(new Date(NOW + 3_000));
     record('a-long-turn', -2_500);
-    expect(holdsNow(true).find((h) => h.id === 'a-long-turn')?.since).toBe(begun);
+    const later = holdsNow(true).find((h) => h.id === 'a-long-turn');
+    expect(later?.since, 'the step must follow the record').toBe(NOW + 2_500);
+    expect(later?.turnSince, 'the turn must not restart on a write').toBe(begun);
     vi.setSystemTime(new Date(NOW));
   });
 
@@ -175,6 +184,7 @@ describe('what each held conversation is doing', () => {
       holder: 'program',
       doing: 'unknown',
       since: null,
+      turnSince: null,
     });
   });
 

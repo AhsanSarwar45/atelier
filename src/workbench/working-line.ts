@@ -23,8 +23,13 @@ import type { ChatState } from '@/workbench/chat-state';
 export interface WorkingLineNow {
   /** What is happening, in the words of whoever is doing it. */
   label: string;
-  /** When it started, ms since the epoch, for the count beside the label. */
+  /** When THIS step started, ms since the epoch, for the count beside the label. */
   since: number | null;
+  /**
+   * When the whole turn started, for the quieter number beside that one. Null
+   * when the step already says everything there is to say (turnWorthSaying).
+   */
+  turn: number | null;
   /** The brand's own count for the call being made, in seconds; 0 when none. */
   reported: number;
   /** It is waiting on the reader rather than working — a different mark. */
@@ -59,7 +64,16 @@ export function workingLine(now: {
 }): WorkingLineNow | null {
   const reported = now.running?.seconds ?? 0;
   if (now.busy) {
-    return { label: now.label, since: now.since, reported, waiting: now.waiting, thought: now.thought };
+    return {
+      label: now.label,
+      since: now.since,
+      // Off the one reading, so the line and the chip an inch above it cannot
+      // disagree about whether the turn is worth a second number at all.
+      turn: now.state.turnSince,
+      reported,
+      waiting: now.waiting,
+      thought: now.thought,
+    };
   }
   // Somebody else's turn. The label is the command they are running when there
   // is one — which is what their terminal is showing them — and their own state
@@ -67,7 +81,14 @@ export function workingLine(now: {
   // Never `waiting`: that mark means the chat is asking THIS reader for
   // something, and a chat held elsewhere is asking its holder, not them.
   if (now.state.working) {
-    return { label: now.running?.title ?? now.state.word, since: now.state.since, reported, waiting: false, thought: 0 };
+    return {
+      label: now.running?.title ?? now.state.word,
+      since: now.state.since,
+      turn: now.state.turnSince,
+      reported,
+      waiting: false,
+      thought: 0,
+    };
   }
   return null;
 }

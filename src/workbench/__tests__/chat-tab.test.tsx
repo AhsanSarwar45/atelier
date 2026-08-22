@@ -14,6 +14,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
+import { chatState } from '@/workbench/chat-state';
 import type { ChatState } from '@/workbench/chat-state';
 import { WorkingLine } from '@/workbench/transcript-rows';
 import { workingLine } from '@/workbench/working-line';
@@ -31,6 +32,7 @@ const HELD_WORKING: ChatState = {
   told: false,
   mark: 'working',
   since: NOW - 109_000,
+  turnSince: null,
   external: { holder: 'terminal' },
 };
 
@@ -44,6 +46,7 @@ const HELD_QUIET: ChatState = {
   told: false,
   mark: 'ready',
   since: null,
+  turnSince: null,
   external: { holder: 'terminal' },
 };
 
@@ -92,7 +95,7 @@ describe('a chat a driver of ours is working in', () => {
       since: NOW - 4_000,
       waiting: false,
       thought: 1_200,
-      state: { word: 'Thinking', working: true, waiting: false, doing: 'thinking', detail: null, told: true, mark: 'thinking', since: NOW, external: null },
+      state: { word: 'Thinking', working: true, waiting: false, doing: 'thinking', detail: null, told: true, mark: 'thinking', since: NOW, turnSince: null, external: null },
       running: null,
     });
     expect(now?.label).toBe('Thinking');
@@ -107,9 +110,53 @@ describe('a chat a driver of ours is working in', () => {
       since: NOW,
       waiting: true,
       thought: 0,
-      state: { word: 'Waiting for you', working: false, waiting: true, doing: 'waiting', detail: null, told: true, mark: 'waiting', since: NOW, external: null },
+      state: { word: 'Waiting for you', working: false, waiting: true, doing: 'waiting', detail: null, told: true, mark: 'waiting', since: NOW, turnSince: null, external: null },
       running: null,
     });
     expect(now?.waiting).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The photograph that started this: a Bash card sitting under `Working 1h 38m`
+// while the command in it had been going for forty seconds. One clock counted
+// the turn and was read as the step, so nothing on the screen could say whether
+// anything was stuck (bw-jaoz.14.4).
+// ---------------------------------------------------------------------------
+
+describe('a forty-second step inside a turn an hour and a half long', () => {
+  it('counts the step beside the word, and the turn quietly behind it', () => {
+    // Half a second of slack each way so the count a case asserts survives the
+    // milliseconds the render itself takes.
+    const now = Date.now();
+    const read = chatState({
+      state: 'dormant',
+      held: {
+        id: 'ef56704b',
+        holder: 'terminal',
+        doing: 'working',
+        since: now - 40_500,
+        turnSince: now - 5_880_500,
+      },
+    });
+    const line = workingLine({ ...NOTHING_OF_OURS, state: read, running: null });
+    render(<div>{line && <WorkingLine {...line} />}</div>);
+
+    expect(screen.getByTestId('working-elapsed').textContent, 'the loud number is this step').toBe('40s');
+    expect(screen.getByTestId('working-turn').textContent, 'the whole turn stands behind it').toBe('1h 38m turn');
+  });
+
+  it('says the turn once only, when it has anything to add to the step', () => {
+    // A turn that IS the step is one number, not the same number twice.
+    const now = Date.now();
+    const read = chatState({
+      state: 'dormant',
+      held: { id: 'ef56704b', holder: 'terminal', doing: 'working', since: now - 40_500, turnSince: now - 42_000 },
+    });
+    const line = workingLine({ ...NOTHING_OF_OURS, state: read, running: null });
+    render(<div>{line && <WorkingLine {...line} />}</div>);
+
+    expect(screen.getByTestId('working-elapsed').textContent).toBe('40s');
+    expect(screen.queryByTestId('working-turn'), 'a second clock saying the same thing is noise').toBeNull();
   });
 });

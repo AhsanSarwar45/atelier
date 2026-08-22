@@ -125,6 +125,8 @@ describe('a chat of ours, nobody else in it', () => {
     expect(body(read, { busy: true, label: 'Reading', since: BEGAN })).toEqual({
       label: 'Reading',
       since: BEGAN,
+      // Nothing said when the turn began, so there is no second number.
+      turn: null,
       reported: 0,
       waiting: false,
       thought: 0,
@@ -220,6 +222,8 @@ describe('a chat somebody else holds', () => {
         told: false,
         mark: 'working',
         since: BEGAN,
+        // The holder gave one clock and no turn behind it.
+        turnSince: null,
         external: { holder },
       });
       expect(mark(read)).toEqual({ word: 'Working', moving: true });
@@ -254,7 +258,7 @@ describe('a chat somebody else holds', () => {
   it('held and working: the body draws the holder\'s turn, and never the waiting mark', () => {
     const read = chatState({ state: 'dormant', held: held({ doing: 'working' }) });
     const line = body(read);
-    expect(line).toEqual({ label: 'Working', since: BEGAN, reported: 0, waiting: false, thought: 0 });
+    expect(line).toEqual({ label: 'Working', since: BEGAN, turn: null, reported: 0, waiting: false, thought: 0 });
   });
 
   it('held and working a command: the body names the command they are running', () => {
@@ -262,6 +266,7 @@ describe('a chat somebody else holds', () => {
     expect(body(read, { running: { title: 'rg --files', seconds: 7 } })).toEqual({
       label: 'rg --files',
       since: BEGAN,
+      turn: null,
       reported: 7,
       waiting: false,
       thought: 0,
@@ -308,11 +313,12 @@ describe('what the machine says a held chat is doing', () => {
     expect(heldDoing({ ...base, status: 'busy', statusAt: BEGAN })).toEqual({
       doing: 'working',
       since: BEGAN,
+      turnSince: null,
     });
   });
 
   it('its own process says idle: idle, whatever the record looks like', () => {
-    expect(heldDoing({ ...base, status: 'idle', owed: true })).toEqual({ doing: 'idle', since: null });
+    expect(heldDoing({ ...base, status: 'idle', owed: true })).toEqual({ doing: 'idle', since: null, turnSince: null });
   });
 
   it('no word from the process, a turn in flight: working', () => {
@@ -328,11 +334,13 @@ describe('what the machine says a held chat is doing', () => {
   });
 
   it('no word and no record: nothing is claimed', () => {
-    expect(heldDoing({ ...base, recordMovedAt: null })).toEqual({ doing: 'unknown', since: null });
+    expect(heldDoing({ ...base, recordMovedAt: null })).toEqual({ doing: 'unknown', since: null, turnSince: null });
   });
 
-  it('the seconds count from where the burst began, not from the beat', () => {
-    expect(heldDoing({ ...base, owed: true, burstAt: BEGAN, recordMovedAt: NOW }).since).toBe(BEGAN);
+  it('the turn counts from where the burst began, and the step from the last write', () => {
+    const read = heldDoing({ ...base, owed: true, burstAt: BEGAN, recordMovedAt: NOW });
+    expect(read.since, 'the step must not carry the whole turn').toBe(NOW);
+    expect(read.turnSince, 'the turn must survive the split, only quieter').toBe(BEGAN);
   });
 });
 
@@ -430,13 +438,16 @@ describe('the last thing written in a record', () => {
 // ---------------------------------------------------------------------------
 
 describe('a held chat read from its record alone', () => {
-  function readFrom(last: unknown, movedAt: number): ChatState {
+  // The burst is a separate argument because it is a separate fact: a step
+  // that started a minute ago can sit inside a turn that started an hour ago,
+  // and a fixture that ties them together cannot show the two clocks apart.
+  function readFrom(last: unknown, movedAt: number, burstAt = BEGAN): ChatState {
     const doing = heldDoing({
       status: null,
       statusAt: null,
       recordMovedAt: movedAt,
       owed: answerOwed(last as never),
-      burstAt: BEGAN,
+      burstAt,
       now: NOW,
     });
     return chatState({
@@ -446,10 +457,13 @@ describe('a held chat read from its record alone', () => {
   }
 
   it('mid-think, and quiet for a minute: still Working, and the body still moves', () => {
-    const read = readFrom(agent([{ type: 'thinking', thinking: '…' }]), NOW - 60_000);
+    const read = readFrom(agent([{ type: 'thinking', thinking: '…' }]), NOW - 60_000, NOW - 1_800_000);
     expect(read.working).toBe(true);
     expect(read.word).toBe('Working');
-    expect(read.since).toBe(BEGAN);
+    // The last line written is where the step began; the burst behind it is the
+    // quiet number, and it is far enough back to be worth saying.
+    expect(read.since).toBe(NOW - 60_000);
+    expect(read.turnSince).toBe(NOW - 1_800_000);
     expect(body(read)).not.toBeNull();
   });
 

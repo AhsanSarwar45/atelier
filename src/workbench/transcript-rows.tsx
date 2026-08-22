@@ -564,13 +564,19 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
 export function WorkingLine({
   label,
   since,
+  turn,
   reported,
   waiting,
   thought,
 }: {
   label: string;
-  /** When the agent started owing an answer, or null when it owes none. */
+  /** When the current step began, or null when nothing is owed. */
   since: number | null;
+  /**
+   * When the whole turn began, for the quieter number beside it, or null when
+   * the step already says everything there is to say.
+   */
+  turn: number | null;
   /** The brand's own count for the call it is running, in seconds. */
   reported: number;
   waiting: boolean;
@@ -588,11 +594,16 @@ export function WorkingLine({
   // not counted yet. Never the larger of the two: that is how one call's clock
   // ended up beside another call's name.
   const seconds = reported > 0 ? Math.round(reported) : counted;
+  // The whole answer's length, which used to be the only number here. It says
+  // how long this has been going on; it cannot say whether anything is stuck,
+  // so it stands behind the step rather than in front of it (bw-jaoz.14.4).
+  const turnSeconds = turn ? Math.floor((Date.now() - turn) / 1000) : 0;
 
   return (
     <div
       data-testid="working-line"
       data-seconds={seconds}
+      data-turn-seconds={turnSeconds > 0 ? turnSeconds : undefined}
       data-waiting={waiting}
       className={cn('flex items-center gap-2 px-1 py-1 text-sm', waiting ? 'text-amber-400' : 'text-muted-foreground')}
     >
@@ -612,6 +623,17 @@ export function WorkingLine({
       <span data-testid="working-elapsed" className="shrink-0 font-mono text-xs tabular-nums opacity-70">
         {forHowLong(seconds)}
       </span>
+      {/* Half the weight of the step beside it, because it answers the second
+          question and not the one the spinner is watched for. */}
+      {turnSeconds > 0 && (
+        <span
+          data-testid="working-turn"
+          title="How long this whole turn has been running"
+          className="shrink-0 font-mono text-xs tabular-nums opacity-40"
+        >
+          {forHowLong(turnSeconds)} turn
+        </span>
+      )}
     </div>
   );
 }

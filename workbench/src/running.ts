@@ -224,7 +224,7 @@ export function holdsNow(fresh = false): HeldChat[] {
       read.add(record);
       owed = owedAt(record, movedAt);
     }
-    const { doing, since } = heldDoing({
+    const { doing, since, turnSince } = heldDoing({
       status: chat.status,
       statusAt: chat.statusAt,
       recordMovedAt: movedAt,
@@ -233,7 +233,7 @@ export function holdsNow(fresh = false): HeldChat[] {
       now,
     });
     if (doing === 'working') {
-      if (!burstAt.has(id)) burstAt.set(id, since ?? now);
+      if (!burstAt.has(id)) burstAt.set(id, turnSince ?? since ?? now);
     } else {
       burstAt.delete(id);
     }
@@ -245,7 +245,11 @@ export function holdsNow(fresh = false): HeldChat[] {
       // know which window to go to.
       holder: chat.entrypoint === 'cli' ? 'terminal' : 'program',
       doing,
-      since: doing === 'working' ? (burstAt.get(id) ?? since) : null,
+      // The step, which is the loud number; the burst behind it is the quiet
+      // one. They used to be the same number, and it was the turn's — so a
+      // forty-second summarising run read as an hour and a half (bw-jaoz.14.4).
+      since: doing === 'working' ? since : null,
+      turnSince: doing === 'working' ? (burstAt.get(id) ?? turnSince) : null,
     });
   });
 

@@ -54,8 +54,14 @@ export interface HeldChat {
   id: string;
   holder: Holder;
   doing: HeldDoing;
-  /** When it started doing that, ms since the epoch, or null when unknown. */
+  /** When it started doing THAT — the current step — or null when unknown. */
   since: number | null;
+  /**
+   * When the turn it is part of began, ms since the epoch, or null when
+   * unknown. Absent reads as unknown, which is what every holder said before
+   * anything counted two clocks.
+   */
+  turnSince?: number | null;
   /**
    * What it is doing, in its own words — the command in flight, the reason a
    * retry is waiting, how many helpers are out. Absent when the state carries
@@ -83,7 +89,7 @@ export interface HeldChat {
  * (bw-96is.22).
  */
 export function holderOnly(held: HeldChat | null | undefined): HeldChat | null {
-  return held ? { ...held, doing: 'unknown', since: null, detail: null, told: false } : null;
+  return held ? { ...held, doing: 'unknown', since: null, turnSince: null, detail: null, told: false } : null;
 }
 
 /**
@@ -234,10 +240,51 @@ export interface ChatState {
   told: boolean;
   /** Which mark goes beside that word. */
   mark: StateMark;
-  /** Where the seconds count from, ms since the epoch, or null for no count. */
+  /**
+   * Where the loud seconds count from — the start of THIS step, ms since the
+   * epoch, or null for no count.
+   *
+   * The step and not the turn. One clock counted the whole answer, so the
+   * manager's screenshot said `1h 38m` beside a summarising run forty seconds
+   * old: a number that cannot say whether anything is stuck, which is the one
+   * question it is watched for (bw-jaoz.14.4).
+   */
   since: number | null;
+  /**
+   * Where the quiet second number counts from — the start of the whole turn.
+   *
+   * Null when there is nothing more to say than the step already says, which
+   * {@link turnWorthSaying} decides. The turn total is not deleted, only moved
+   * off the loud number: how long this has been going on overall is worth
+   * knowing, and it is not what the reader is asking when they look at a
+   * spinner.
+   */
+  turnSince: number | null;
   /** Set only when another program holds it. */
   external: { holder: Holder } | null;
+}
+
+/**
+ * How much longer the turn must have run than the step before it is worth a
+ * second number.
+ *
+ * Below this the two numbers are the same fact printed twice — `40s · 41s` —
+ * and a reader who has to compare two clocks to learn nothing is worse off than
+ * one reading a single number. Above it the turn total says the thing the step
+ * clock cannot: that this has been going on far longer than the piece of it you
+ * can see. A legibility threshold, not a measurement.
+ */
+export const TURN_WORTH_SAYING_MS = 30_000;
+
+/**
+ * The turn's start, or null when the step already tells the whole story.
+ *
+ * One place, because the chip, the foot line and a board card must not disagree
+ * about whether there is a second number at all.
+ */
+export function turnWorthSaying(step: number | null, turn: number | null): number | null {
+  if (step === null || turn === null) return null;
+  return step - turn >= TURN_WORTH_SAYING_MS ? turn : null;
 }
 
 /**
@@ -321,8 +368,14 @@ export interface ChatStateInput {
   state: SessionState;
   /** The word it published with it, if any. */
   label?: string | null;
-  /** When that state began, ms since the epoch, for the seconds count. */
+  /** When that state began, ms since the epoch, for the loud seconds count. */
   since?: number | null;
+  /**
+   * When the turn that state is part of began — the quiet second number. Our
+   * own driver restarts `since` on every change of words, which is what makes
+   * it a step clock and this the only place the whole answer's length lives.
+   */
+  turnSince?: number | null;
   /** What the sidecar says about the program holding it, when one does. */
   held?: HeldChat | null;
   /**
@@ -363,6 +416,7 @@ export function chatState(input: ChatStateInput): ChatState {
       // "Idle" says; the badge beside it is who is holding it.
       mark: DOING_MARK[doing],
       since: DOING_COUNTS[doing] ? held.since : null,
+      turnSince: DOING_COUNTS[doing] ? turnWorthSaying(held.since, held.turnSince ?? null) : null,
       external: { holder: held.holder },
     };
   }
@@ -382,6 +436,10 @@ export function chatState(input: ChatStateInput): ChatState {
     // ten we know (bw-ja9l.12).
     mark: OWN_MARK[input.state],
     since: working || input.state === 'waiting_permission' ? (input.since ?? null) : null,
+    turnSince:
+      working || input.state === 'waiting_permission'
+        ? turnWorthSaying(input.since ?? null, input.turnSince ?? null)
+        : null,
     external: null,
   };
 }
@@ -443,8 +501,9 @@ export const RECORD_QUIET_MS = 10_000;
  * something now. And failing both, `unknown`, which draws no claim at all.
  *
  * `burstAt` is when this chat was first seen working in the current burst, kept
- * by the caller across beats, so the seconds counted are the turn's and not the
- * beat's.
+ * by the caller across beats, so the turn counted is the turn's and not the
+ * beat's. It comes back as `turnSince`, the quiet number; `since` is the start
+ * of the step, which for a record we are only reading is its last write.
  */
 export function heldDoing(args: {
   status: string | null;
@@ -457,17 +516,25 @@ export function heldDoing(args: {
   owed: boolean | null;
   burstAt: number | null;
   now: number;
-}): { doing: HeldDoing; since: number | null } {
-  if (args.status === 'busy') return { doing: 'working', since: args.statusAt };
-  if (args.status === 'idle') return { doing: 'idle', since: null };
+}): { doing: HeldDoing; since: number | null; turnSince: number | null } {
+  // The status bit says busy and nothing about steps: one clock, and no second
+  // number to draw beside it.
+  if (args.status === 'busy') return { doing: 'working', since: args.statusAt, turnSince: null };
+  if (args.status === 'idle') return { doing: 'idle', since: null, turnSince: null };
   // A turn in flight, whether or not anything has been written this minute.
+  //
+  // The last line written is where the current step began: a command is issued,
+  // the record moves, and then it runs silently for as long as it runs. That is
+  // the number the reader is watching. The burst's own start is the turn behind
+  // it, and it goes in the quiet second place rather than over the top of the
+  // step (bw-jaoz.14.4).
   if (args.owed === true) {
-    return { doing: 'working', since: args.burstAt ?? args.recordMovedAt ?? args.now };
+    return { doing: 'working', since: args.recordMovedAt ?? args.burstAt ?? args.now, turnSince: args.burstAt };
   }
-  if (args.recordMovedAt === null) return { doing: 'unknown', since: null };
+  if (args.recordMovedAt === null) return { doing: 'unknown', since: null, turnSince: null };
   const moving = args.now - args.recordMovedAt < RECORD_QUIET_MS;
-  if (!moving) return { doing: 'idle', since: null };
-  return { doing: 'working', since: args.burstAt ?? args.recordMovedAt };
+  if (!moving) return { doing: 'idle', since: null, turnSince: null };
+  return { doing: 'working', since: args.recordMovedAt, turnSince: args.burstAt };
 }
 
 /**

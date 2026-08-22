@@ -616,6 +616,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     // show a one-second read as forty (bw-f1q.17).
   }, [busy, view.state, view.stateLabel]);
   /**
+   * When the whole turn began — the quiet second number.
+   *
+   * The same clock the one above used to be, kept where nothing restarts it:
+   * this one moves only when a turn starts or ends, so what the step clock
+   * gives up by counting steps is not lost, only moved off the loud number
+   * (bw-jaoz.14.4).
+   */
+  const [turnSince, setTurnSince] = useState<number | null>(null);
+  useEffect(() => {
+    setTurnSince(busy ? Date.now() : null);
+  }, [busy]);
+  /**
    * The one reading every screen draws (chat-state.ts). A held chat is read
    * from what the holder says about itself; ours from our own driver's word.
    */
@@ -623,6 +635,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     state: view.state,
     label: view.stateLabel,
     since: busySince,
+    turnSince,
     held: held ? (holder ?? { id: externalId ?? '', holder: 'program', doing: 'unknown', since: null }) : null,
   });
 
