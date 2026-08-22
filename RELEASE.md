@@ -16,6 +16,30 @@ distribution channel.
 | Nix (macOS/Linux/WSL) | `flake.nix` (this repo) | `ci.yml` refreshes deps hash; version is manual | — |
 | Homebrew (macOS/Linux) | `Formula/atelier.rb` in `AhsanSarwar45/homebrew-atelier` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
 
+## Publishing the source
+
+**Never push to `origin` from this checkout.** Use:
+
+```bash
+bash scripts/publish.sh              # put the trunk online
+bash scripts/publish.sh --dry-run    # every check, no push
+```
+
+Years of this project's saved changes are stamped with a work email address, and
+GitHub shows the author address on every one of them. `scripts/publish.sh` copies
+the history aside, swaps that address for the personal one in the copy, proves the
+copy holds byte-identical files to this checkout, and pushes the copy. This
+checkout is never touched — no branch, no working file, none of the side trees.
+
+The swap is the same every time, so the published line always walks forward from
+where it was; no push is ever forced. The addresses live in
+`~/.config/atelier/publish.mailmap`, outside this repository on purpose — a file
+here naming them would publish the thing it is hiding.
+
+Old release tags are deliberately left behind: twenty-five came in with the fork,
+and each one arriving would start a release build. A tag goes online only when it
+is named, which is what step 2 below does.
+
 ## Cutting a release
 
 ### 1. Bump the version
@@ -38,7 +62,7 @@ them to the new version (e.g. `0.12.0`):
 The Homebrew formula is rendered automatically from the git tag — do **not**
 hand-edit it.
 
-Commit the bump to `main`.
+Commit the bump to the trunk, then publish it (`bash scripts/publish.sh`).
 
 > Pushing to `main` triggers `ci.yml`, which may auto-commit a refreshed
 > `npmDepsHash` into `flake.nix` if dependencies changed. Pull that commit before
@@ -48,11 +72,14 @@ Commit the bump to `main`.
 
 ```bash
 git tag v0.12.0
-git push origin v0.12.0
+bash scripts/publish.sh --tag v0.12.0
 ```
 
+The second command is what puts both the commit and the tag online, with the
+addresses swapped. `git push origin v0.12.0` would publish the work address.
+
 Or run the **Release** workflow manually: *Actions → Release → Run workflow*,
-entering the version (e.g. `v0.12.0`).
+entering the version (e.g. `v0.12.0`) — the commit still has to be online first.
 
 ### 3. What runs automatically
 
@@ -102,8 +129,12 @@ Before the first tag:
 - Create the tap repo `AhsanSarwar45/homebrew-atelier`. It can be empty; the release
   run writes `Formula/atelier.rb` into it.
 - Add the `HOMEBREW_TAP_TOKEN` secret to `AhsanSarwar45/atelier`.
+- Write `~/.config/atelier/publish.mailmap` with one line per address to replace:
+  `Real Name <address to show> <address to replace>`. Without it
+  `scripts/publish.sh` refuses to run.
 - The login that pushes needs the `workflow` right, or GitHub refuses any push
-  that carries `.github/workflows/release.yml`: `gh auth refresh -s workflow`.
+  that carries `.github/workflows/release.yml` — which every push of this
+  history does: `gh auth refresh -s workflow`.
 
 Until the tap token is set the Homebrew step no-ops, so the first tag still
 publishes binaries and checksums — just no formula.
