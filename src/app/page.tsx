@@ -97,13 +97,15 @@ export default function ProjectsPage() {
     // on the owner has to be on the screen he starts from as well.
     <Shell bar={<><span className="font-heading text-sm font-semibold">{PRODUCT_NAME}</span><WorkbenchStatus /></>}>
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-base">
-      {/* Hero Section - pushed down with padding */}
-      <main className="flex flex-col items-center px-6 pt-32">
+      {/* Hero Section - pushed down with padding. The padding and heading
+          shrink below sm: at phone height, the full-size hero left room for
+          barely one card (bw-81wt.2) — the desktop numbers are untouched. */}
+      <main className="flex flex-col items-center px-6 pt-8 sm:pt-32">
         {/* Centered Heading with Space Grotesk */}
-        <h1 className="mb-4 text-center text-balance font-heading text-4xl font-bold tracking-tight text-t-primary sm:text-5xl">
+        <h1 className="mb-2 text-center text-balance font-heading text-2xl font-bold tracking-tight text-t-primary sm:mb-4 sm:text-5xl">
           Manage Your Projects
         </h1>
-        <p className="text-center text-t-tertiary text-sm mb-8">
+        <p className="text-center text-t-tertiary text-xs mb-4 sm:text-sm sm:mb-8">
           Highly recommended to use with the{" "}
           <a
             href="https://github.com/weselow/claude-protocol"
@@ -116,9 +118,11 @@ export default function ProjectsPage() {
         </p>
 
         <div className="w-full max-w-[1200px]">
-          {/* Add Project Dropdown */}
-          <div className="mb-6 flex justify-end">
-            <Button variant="mono" size="md" onClick={() => setIsAddDialogOpen(true)}>
+          {/* Add Project button: full-width on a phone, since a lone
+              right-aligned button above the search box reads as misplaced
+              when it's the only thing on its row at that width. */}
+          <div className="mb-4 flex sm:mb-6 sm:justify-end">
+            <Button variant="mono" size="md" onClick={() => setIsAddDialogOpen(true)} className="w-full sm:w-auto">
               <Plus aria-hidden="true" />
               Add Project
             </Button>
@@ -126,7 +130,7 @@ export default function ProjectsPage() {
 
           {/* Search and Filter Bar */}
           {projects.length > 0 && (
-            <div className="mb-6 space-y-3">
+            <div className="mb-4 space-y-3 sm:mb-6">
               {/* Search Input */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-t-muted" aria-hidden="true" />
@@ -209,7 +213,7 @@ export default function ProjectsPage() {
           )}
 
           {isLoading ? (
-            <div role="status" aria-label="Loading projects" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div role="status" aria-label="Loading projects" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="rounded-xl border border-b-default bg-surface-raised/70 p-4">
                   <div className="mb-3 flex gap-1.5">
@@ -231,7 +235,7 @@ export default function ProjectsPage() {
               </p>
             </div>
           ) : filteredProjects.length === 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-lg border border-dashed border-b-strong bg-surface-raised/70 p-6 text-center text-t-tertiary">
                 {hasActiveFilters ? (
                   <>
@@ -247,7 +251,7 @@ export default function ProjectsPage() {
               </div>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {filteredProjects.map((project) => (
                 <ProjectCard
                   key={project.id}
