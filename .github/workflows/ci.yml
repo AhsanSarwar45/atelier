@@ -6,8 +6,12 @@ on:
       - main
   workflow_dispatch:
 
+# Read only, on purpose. This run must never write to the published line: that
+# line is a copy of this machine's history with the addresses swapped, and it
+# only ever moves forward because the copy comes out the same every time. A
+# commit made here would sit online with no checkout holding it (bw-8um.3.24).
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -88,11 +92,28 @@ jobs:
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add flake.nix
-          git commit -m "Update Nix dependency hashes"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # This run does NOT commit the new hash back. The published line is a
+          # copy of this machine's history with the author addresses swapped, and
+          # it is only ever pushed forward because the swap gives the same result
+          # every time (see scripts/publish.sh). A commit written here would put a
+          # saved change online that no checkout has, so the next publish could
+          # not go forward without overwriting it — and the only way to fix that
+          # would be to overwrite somebody's work (bw-8um.3.24).
+          #
+          # So the run says what the value has to be and fails. A person puts it
+          # in flake.nix and publishes, and the two lines stay the same line.
+          {
+            echo
+            echo "This run does not commit the new value. Put it in \`flake.nix\` and publish:"
+            echo
+            echo '```bash'
+            echo "sed -i -E 's#npmDepsHash = \"sha256-[^\"]+\";#npmDepsHash = \"$got_hash\";#' flake.nix"
+            echo "bash scripts/publish.sh"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "flake.nix needs npmDepsHash = \"$got_hash\"; commit it and publish" >&2
+          exit 1
 
       - name: Check lockfiles did not drift
         run: git diff --exit-code -- flake.lock package-lock.json server/Cargo.lock

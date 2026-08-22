@@ -64,9 +64,12 @@ hand-edit it.
 
 Commit the bump to the trunk, then publish it (`bash scripts/publish.sh`).
 
-> Pushing to `main` triggers `ci.yml`, which may auto-commit a refreshed
-> `npmDepsHash` into `flake.nix` if dependencies changed. Pull that commit before
-> you tag.
+> Publishing triggers `ci.yml`. If the Nix dependency hash has drifted, that run
+> **fails and prints the value it should be** — it does not commit anything. Put
+> the printed value in `flake.nix`, publish again, then tag. It has to work that
+> way round: a commit made by the run would sit on the published line with no
+> checkout holding it, and the next publish could not go forward without
+> overwriting it.
 
 ### 2. Tag and push
 
@@ -98,8 +101,9 @@ entering the version (e.g. `v0.12.0`) — the commit still has to be online firs
 Homebrew is the only package manager this project publishes to. Windows users
 take `atelier-win-x64.exe` straight from the release page.
 
-Separately, `.github/workflows/ci.yml` runs on every push to `main` and keeps the
-Nix `npmDepsHash` current, auto-committing the refreshed hash when it drifts.
+Separately, `.github/workflows/ci.yml` runs on every push to `main` and checks the
+Nix `npmDepsHash` is current. When it has drifted the run fails and prints the
+value to use; it holds read-only rights and cannot write to the published line.
 
 ### 4. After the release
 
