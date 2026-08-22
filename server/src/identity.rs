@@ -7,9 +7,9 @@
 //!
 //! `scripts/one-name.py` reads `NAME` out of this file and then looks for the
 //! spelling it implies everywhere a person meets it — the binary, the npm
-//! package, the nix output, the scoop manifest, the homebrew formula, the
-//! winget package, the downloads a release publishes. A rename that stops here
-//! leaves the product answering to two names, and that check is what says so.
+//! package, the nix output, the homebrew formula, the downloads a release
+//! publishes. A rename that stops here leaves the product answering to two
+//! names, and that check is what says so.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -13,10 +13,8 @@ distribution channel.
 | Channel | Where copies live | Updated by | One-time setup |
 |---------|-------------------|-----------|----------------|
 | GitHub Releases | `ahsanswr/atelier` → Releases | `release.yml` (automatic) | — |
-| Scoop (Windows) | `bucket/atelier.json` (this repo) | `release.yml` (automatic) | — |
 | Nix (macOS/Linux/WSL) | `flake.nix` (this repo) | `ci.yml` refreshes deps hash; version is manual | — |
 | Homebrew (macOS/Linux) | `Formula/atelier.rb` in `ahsanswr/homebrew-atelier` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
-| winget (Windows) | `microsoft/winget-pkgs` | `release.yml` `winget` job via `wingetcreate` | first submission manual + `WINGET_TOKEN` |
 
 ## Cutting a release
 
@@ -37,8 +35,8 @@ them to the new version (e.g. `0.12.0`):
 > sit at the same version number (at 0.11.2 the crate `zerovec-derive` did).
 > Anchor on the `name = "atelier"` line.
 
-The package-manager manifests (Scoop, Homebrew, winget) are refreshed
-automatically from the git tag — do **not** hand-edit them.
+The Homebrew formula is rendered automatically from the git tag — do **not**
+hand-edit it.
 
 Commit the bump to `main`.
 
@@ -67,20 +65,11 @@ entering the version (e.g. `v0.12.0`).
    - downloads all four binaries,
    - generates `SHA256SUMS.txt`,
    - creates the GitHub Release (binaries + checksums + auto-generated notes),
-   - refreshes the Scoop manifest (`bucket/atelier.json`) and commits it to `main`,
    - renders the Homebrew formula from `packaging/homebrew/atelier.rb.tmpl` and
      pushes it to the tap repo (skipped if `HOMEBREW_TAP_TOKEN` is unset).
-3. **winget** job (Windows): downloads `wingetcreate` and runs
-   `wingetcreate update weselow.atelier` to open a version-bump PR against
-   `microsoft/winget-pkgs` (skipped if `WINGET_TOKEN` is unset).
 
-> **A red winget job does not mean a failed release.** `wingetcreate update`
-> only works once the package exists in the catalog, so until the first
-> submission PR is merged this job fails with
-> `repos/microsoft/winget-pkgs/contents/manifests/w/weselow/atelier was not
-> found`. It runs after `release`, so the GitHub Release, Scoop, and Homebrew are
-> already published by then and are unaffected. Nothing to fix — just don't
-> re-run the release on account of it.
+Homebrew is the only package manager this project publishes to. Windows users
+take `atelier-win-x64.exe` straight from the release page.
 
 Separately, `.github/workflows/ci.yml` runs on every push to `main` and keeps the
 Nix `npmDepsHash` current, auto-committing the refreshed hash when it drifts.
@@ -89,10 +78,6 @@ Nix `npmDepsHash` current, auto-committing the refreshed hash when it drifts.
 
 - Confirm the GitHub Release has all four binaries + `SHA256SUMS.txt`.
 - Homebrew: `brew update && brew upgrade atelier`.
-- Scoop: `scoop update atelier`.
-- winget: the CI-opened PR in `microsoft/winget-pkgs` must pass Microsoft's
-  validation and be merged (usually hours to a couple of days). You only sign the
-  Microsoft CLA on the **first** PR.
 
 ## Required repository secrets
 
@@ -100,31 +85,23 @@ Set under *ahsanswr/atelier → Settings → Secrets and variables → Actions*:
 
 | Secret | Purpose | How to create |
 |--------|---------|---------------|
-| `GITHUB_TOKEN` | built-in; release + Scoop/Nix commits | automatic |
+| `GITHUB_TOKEN` | built-in; release + Nix commits | automatic |
 | `HOMEBREW_TAP_TOKEN` | push the formula to `ahsanswr/homebrew-atelier` | fine-grained PAT, that repo only, **Contents: read/write** |
-| `WINGET_TOKEN` | fork `microsoft/winget-pkgs` and open the winget PR | classic PAT, **`public_repo`** scope |
 
-Both the Homebrew step and the winget job no-op cleanly when their token is absent.
+The Homebrew step no-ops cleanly when its token is absent.
 
-## One-time setup (already completed)
+## One-time setup (not yet done)
 
-- Tap repo `ahsanswr/homebrew-atelier` created and seeded with `Formula/atelier.rb`.
-- Secrets `HOMEBREW_TAP_TOKEN` and `WINGET_TOKEN` added.
-- First winget submission opened against `microsoft/winget-pkgs` and the Microsoft
-  CLA signed. Subsequent releases update winget automatically.
+This is a fork, and none of the publishing setup exists under `ahsanswr` yet.
+Before the first tag:
 
-### Manual first winget submission (reference)
+- Create `ahsanswr/atelier` on GitHub and add it as the `origin` remote.
+- Create the tap repo `ahsanswr/homebrew-atelier`. It can be empty; the release
+  run writes `Formula/atelier.rb` into it.
+- Add the `HOMEBREW_TAP_TOKEN` secret to `ahsanswr/atelier`.
 
-The CI `winget` job uses `wingetcreate update`, which only works once the package
-already exists in the catalog. The very first submission is manual, from a machine
-with the manifests checked out:
-
-```bash
-wingetcreate submit packaging/winget --token <WINGET_TOKEN>
-```
-
-This opens a PR to `microsoft/winget-pkgs`; sign the Microsoft CLA when the bot
-asks (`@microsoft-github-policy-service agree`).
+Until the tap token is set the Homebrew step no-ops, so the first tag still
+publishes binaries and checksums — just no formula.
 
 ## Known gaps
 

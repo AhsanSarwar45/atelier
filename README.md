@@ -111,6 +111,18 @@ Latte, Frappe, Macchiato, and Mocha are available from the theme switcher.
   run without it, but the chat helper is started with `node`, and `npm` fetches
   its kit once on first run
 
+### Homebrew (macOS / Linux)
+
+One command:
+
+```bash
+brew install ahsanswr/atelier/atelier
+```
+
+Update later with `brew upgrade atelier`.
+
+On Windows, take the file from the table below and put it somewhere on your PATH.
+
 ### Download
 
 Download the binary for your platform from [GitHub Releases](https://github.com/ahsanswr/atelier/releases/latest):
@@ -123,37 +135,6 @@ Download the binary for your platform from [GitHub Releases](https://github.com/
 | Linux x64 | `atelier-linux-x64` |
 
 Each release also ships a `SHA256SUMS.txt` to verify your download.
-
-### Package managers
-
-**Scoop (Windows):**
-
-```powershell
-scoop bucket add atelier https://github.com/ahsanswr/atelier
-scoop install atelier
-```
-
-Update later with `scoop update atelier`.
-
-**Nix (macOS / Linux / WSL):**
-
-```bash
-nix run github:ahsanswr/atelier
-```
-
-**Homebrew (macOS / Linux):**
-
-```bash
-brew install ahsanswr/atelier/atelier
-```
-
-**winget (Windows):**
-
-```powershell
-winget install weselow.atelier
-```
-
-> winget becomes available once the submission is accepted into the winget community repository.
 
 ### Run
 
@@ -304,6 +285,12 @@ npm install
 npm run build                 # static export → out/
 cd server
 cargo build --release         # binary → server/target/release/atelier (.exe on Windows)
+```
+
+With Nix, the flake builds and runs the same binary without a checkout:
+
+```bash
+nix run github:ahsanswr/atelier
 ```
 
 Run the binary and open **http://localhost:3008**:

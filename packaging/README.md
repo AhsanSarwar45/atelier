@@ -24,23 +24,10 @@ version and freshly computed SHA-256 hashes and pushes the result to
 brew install ahsanswr/atelier/atelier
 ```
 
-## `winget/`
-
-The three winget manifests (`version`, `installer`, `locale.en-US`) describe the
-Windows portable package `weselow.atelier`. On each release the `winget` job runs
-`wingetcreate update` to submit a new version PR to
-[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs).
-
-`wingetcreate update` only works after the package already exists in winget-pkgs, so
-the **first** submission is a one-time manual step:
-
-```
-wingetcreate submit packaging/winget --token <PAT>
-```
-
 ## Required repo secrets
 
 - `HOMEBREW_TAP_TOKEN` — a personal access token with push rights to
   `ahsanswr/homebrew-atelier`. When absent, the Homebrew step no-ops.
-- `WINGET_TOKEN` — a personal access token used by `wingetcreate` to open the
-  winget-pkgs PR. When absent, the winget job no-ops.
+
+Homebrew is the only package manager this project publishes to. Windows takes
+the `.exe` straight from the release page.

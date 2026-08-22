@@ -16,8 +16,8 @@ Three halves, and all of them have to hold:
 
   AGREEMENT   every place that must carry the name carries the derived
               spelling — the cargo package, the binary, the npm package, the
-              nix output, the scoop manifest, the homebrew formula, the winget
-              package, the data folder the shell tool falls back to.
+              nix output, the homebrew formula, the data folder the shell tool
+              falls back to.
 
   ONE SPELLING  no tracked file carries an older spelling of the product name,
               except where an older spelling is the right answer and the reason
@@ -96,12 +96,9 @@ def agreements(name):
         ("flake.nix", 'pname = "%s";' % name, "the nix package"),
         ("flake.nix", 'mainProgram = "%s";' % name, "what nix runs"),
         ("flake.nix", '"$out/bin/%s"' % name, "where nix installs it"),
-        ("bucket/%s.json" % name, '"bin": "%s.exe"' % name, "what scoop puts on the path"),
         ("packaging/homebrew/%s.rb.tmpl" % name, "class %s < Formula" % name.capitalize(),
          "the homebrew formula"),
         ("packaging/homebrew/%s.rb.tmpl" % name, '=> "%s"' % name, "what homebrew installs"),
-        ("packaging/winget/weselow.%s.yaml" % name, "PackageIdentifier: weselow.%s" % name,
-         "the winget package"),
         ("reporting/bin/report", "for exe in %s " % name, "the program the report tool asks"),
         ("reporting/bin/report", "com.weselow.%s" % name, "the mac data folder"),
         ("reporting/bin/report", "weselow/%s/data" % name, "the windows data folder"),
@@ -236,11 +233,10 @@ def built_screen(display):
 RELEASE_RUN = ".github/workflows/release.yml"
 
 # The manifests a package manager reads, all of which name a download.
-MANIFESTS = ("bucket/", "packaging/winget/", "packaging/homebrew/")
+MANIFESTS = ("packaging/homebrew/",)
 
-# A value the release run fills in. `__VERSION__` is ours; `$version` is what
-# scoop writes into an autoupdate address for a version it has not seen yet.
-FILLED_IN = re.compile(r"__[A-Z_]+__|\$version|\$\{[^}]+\}")
+# A value the release run fills in.
+FILLED_IN = re.compile(r"__[A-Z_]+__|\$\{[^}]+\}")
 
 DOWNLOAD = re.compile(r"releases/download/([^/\s\"']+)/([^\s\"'\)]+)")
 VERSION_FIELD = re.compile(

@@ -102,40 +102,12 @@ jobs:
           files: release/*
           generate_release_notes: true
 
-      # The Scoop bucket is served straight out of this repository, so it is
-      # the one manifest that has to carry a real version — and this step is
-      # what puts one there, from the release that just published. It ships
-      # holding placeholders so it can never name a download that does not
-      # exist, which is what it used to do (bw-8um.3.15).
-      - name: Checkout main for the Scoop manifest
+      # The Homebrew formula is written from the template in this repository,
+      # so the tag's own tree has to be on disk beside the built files.
+      - name: Checkout this tag for the Homebrew template
         uses: actions/checkout@v5
         with:
-          ref: main
           path: repo
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Fill the Scoop manifest from this release
-        run: |
-          set -euo pipefail
-          TAG="${{ inputs.version || github.ref_name }}"
-          VERSION="${TAG#v}"
-          HASH="$(sha256sum release/atelier-win-x64.exe | cut -d' ' -f1)"
-          cd repo
-          jq --arg v "$VERSION" --arg h "$HASH" --arg tag "$TAG" \
-            '.version = $v
-             | .architecture."64bit".url = "https://github.com/ahsanswr/atelier/releases/download/" + $tag + "/atelier-win-x64.exe#/atelier.exe"
-             | .architecture."64bit".hash = $h' \
-            bucket/atelier.json > bucket/atelier.json.tmp
-          mv bucket/atelier.json.tmp bucket/atelier.json
-          if git diff --quiet -- bucket/atelier.json; then
-            echo "The Scoop manifest already names this release"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bucket/atelier.json
-          git commit -m "chore(scoop): name the download $TAG published"
-          git push origin main
 
       - name: Update Homebrew formula
         env:
@@ -168,31 +140,3 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "atelier ${VERSION}"
           git push origin HEAD:main
-
-  # `wingetcreate update` only works AFTER the package already exists in
-  # microsoft/winget-pkgs, and it builds the manifest it submits from the
-  # download address alone — it never reads the files under `packaging/winget`.
-  # Those ship holding placeholders so they can never name a download that does
-  # not exist (bw-8um.3.15). The first submission is a one-time manual step, and
-  # it is where they get filled in, from a release that has already published:
-  #   sed -i -e "s|__VERSION__|<version>|g" -e "s|__HASH__|<sha256, upper case>|g" packaging/winget/*.yaml
-  #   wingetcreate submit packaging/winget --token <PAT>
-  # This job no-ops when WINGET_TOKEN is absent.
-  winget:
-    needs: release
-    runs-on: windows-latest
-    steps:
-      - name: Submit winget manifest
-        shell: pwsh
-        env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-        run: |
-          if (-not $env:WINGET_TOKEN) {
-            Write-Host "WINGET_TOKEN not set — skipping winget submission"
-            exit 0
-          }
-          $tag = "${{ inputs.version || github.ref_name }}"
-          $version = $tag.TrimStart('v')
-          $url = "https://github.com/ahsanswr/atelier/releases/download/$tag/atelier-win-x64.exe"
-          Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
-          .\wingetcreate.exe update weselow.atelier --version $version --urls $url --submit --token $env:WINGET_TOKEN

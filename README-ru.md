@@ -105,6 +105,18 @@ Atelier даёт вам Kanban-доску в реальном времени, м
 
 - [Beads CLI](https://github.com/gastownhall/beads) (`bd`) установлен и доступен в PATH
 
+### Homebrew (macOS / Linux)
+
+Одна команда:
+
+```bash
+brew install ahsanswr/atelier/atelier
+```
+
+Обновление: `brew upgrade atelier`.
+
+На Windows возьмите файл из таблицы ниже и положите его в любую папку из PATH.
+
 ### Скачать
 
 Скачайте бинарник для вашей платформы со страницы [GitHub Releases](https://github.com/ahsanswr/atelier/releases/latest):
@@ -115,37 +127,6 @@ Atelier даёт вам Kanban-доску в реальном времени, м
 | macOS Apple Silicon | `atelier-darwin-arm64` |
 | macOS Intel | `atelier-darwin-x64` |
 | Linux x64 | `atelier-linux-x64` |
-
-### Менеджеры пакетов
-
-**Scoop (Windows):**
-
-```powershell
-scoop bucket add atelier https://github.com/ahsanswr/atelier
-scoop install atelier
-```
-
-Обновление: `scoop update atelier`.
-
-**Nix (macOS / Linux / WSL):**
-
-```bash
-nix run github:ahsanswr/atelier
-```
-
-**Homebrew (macOS / Linux):**
-
-```bash
-brew install ahsanswr/atelier/atelier
-```
-
-**winget (Windows):**
-
-```powershell
-winget install weselow.atelier
-```
-
-> winget станет доступен после того, как заявка будет принята в общий каталог winget.
 
 ### Запуск
 
@@ -211,6 +192,12 @@ npm install
 npm run build                 # статический экспорт → out/
 cd server
 cargo build --release         # бинарник → server/target/release/atelier (.exe на Windows)
+```
+
+С Nix флейк собирает и запускает тот же бинарник без клона репозитория:
+
+```bash
+nix run github:ahsanswr/atelier
 ```
 
 Запустите бинарник и откройте **http://localhost:3008**:
