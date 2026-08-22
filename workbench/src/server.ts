@@ -22,7 +22,19 @@ import { holdsNow, runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 
-const PORT = Number(process.env.BEADS_WORKBENCH_PORT ?? 3009);
+// The operating system picks the port unless somebody names one. It used to be
+// 3009 always, and the app forwarded there on trust: whatever program held that
+// port received the reader's conversation and answered the health check in our
+// name (bw-8um.3.5). The parent now learns the port from the line printed at the
+// bottom of this file, so it can only ever reach a helper it started itself.
+const PORT = Number(process.env.BEADS_WORKBENCH_PORT ?? 0);
+
+// A word the parent invented and told only this process. Any program on this
+// computer can reach a loopback port; without this, one could drive the reader's
+// own chat. Empty when nobody set it — somebody running this helper by hand is
+// its only caller anyway.
+const TOKEN = process.env.ATELIER_WORKBENCH_TOKEN ?? '';
+const TOKEN_HEADER = 'x-atelier-workbench';
 
 const store = new Store();
 // Nothing survives a restart except the record of it, so no row may claim to
@@ -263,7 +275,12 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
 }
 
 const server = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
+  if (TOKEN && req.headers[TOKEN_HEADER] !== TOKEN) {
+    json(res, 403, { error: 'this helper answers only the app that started it' });
+    return;
+  }
+  // Only the path and the query are read off it; the host is a formality.
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1');
   lastAsk = Date.now();
   const path = url.pathname.replace(/^\/api\/workbench/, '') || '/';
 
@@ -387,7 +404,11 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[workbench] sidecar listening on http://127.0.0.1:${PORT}`);
+  const bound = server.address();
+  const port = typeof bound === 'object' && bound ? bound.port : PORT;
+  // The parent reads this exact line to learn where to send traffic, so its
+  // shape is a contract between the two — see server/src/routes/workbench.rs.
+  console.log(`[workbench] listening 127.0.0.1:${port}`);
   // The first click on a chat used to wait for its whole record to be read.
   // It is read here instead, with nobody waiting (bw-uiyz.12).
   void sessions.readAhead(() => Date.now() - lastAsk < READER_QUIET_MS).then((read) => {

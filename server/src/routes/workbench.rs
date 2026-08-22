@@ -14,17 +14,50 @@ use axum::{
 };
 use std::env;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, warn};
 
-/// Loopback only — never bound to the network.
-fn sidecar_base() -> String {
-    if let Ok(url) = env::var("BEADS_WORKBENCH_URL") {
-        return url.trim_end_matches('/').to_string();
-    }
-    let port = env::var("BEADS_WORKBENCH_PORT").unwrap_or_else(|_| "3009".to_string());
-    format!("http://127.0.0.1:{}", port)
+/// Where the helper THIS process started is answering, and the word that proves
+/// a caller is us.
+///
+/// There used to be a fixed port here — 3009 unless told otherwise — and the
+/// proxy forwarded to it on trust. Whatever program held that port received the
+/// reader's conversation, and answered the health check in our name: a release
+/// binary whose helper never started once still reported the chat healthy
+/// (bw-8um.3.5). The port is now learned from our own child, so an address is
+/// only ever forwarded to while the child that named it is alive.
+#[derive(Clone)]
+struct Live {
+    base: String,
+    token: Option<String>,
 }
+
+/// `None` — the state at startup and after every exit — means there is nothing
+/// of ours to forward to, and the proxy says so instead of guessing.
+fn live() -> &'static RwLock<Option<Live>> {
+    static LIVE: OnceLock<RwLock<Option<Live>>> = OnceLock::new();
+    LIVE.get_or_init(|| RwLock::new(None))
+}
+
+fn set_live(up: Option<Live>) {
+    if let Ok(mut slot) = live().write() {
+        *slot = up;
+    }
+}
+
+fn get_live() -> Option<Live> {
+    live().read().ok().and_then(|slot| slot.clone())
+}
+
+/// Carries the shared word to the helper. Loopback is not a boundary — any
+/// program on this machine can reach it — so the helper answers nobody else.
+const TOKEN_HEADER: HeaderName = HeaderName::from_static("x-atelier-workbench");
+
+/// The line the helper prints once it is listening, minus the address.
+const ANNOUNCE: &str = "[workbench] listening ";
 
 /// Describe one hop; copying them to the next breaks the stream.
 const HOP_BY_HOP: [&str; 8] = [
@@ -44,6 +77,17 @@ pub fn router() -> Router {
 
 /// Forwards one request to the sidecar and streams the answer back.
 async fn proxy(req: Request) -> Response {
+    // No helper of ours up, no forwarding: this is the whole of the fix for a
+    // health check that used to answer 200 out of a stranger's process.
+    let Some(up) = get_live() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "The agent workbench is not running. It starts with the server; \
+             set BEADS_WORKBENCH_URL to point at your own instance.",
+        )
+            .into_response();
+    };
+
     let (parts, body) = req.into_parts();
 
     let path_and_query = parts
@@ -51,7 +95,7 @@ async fn proxy(req: Request) -> Response {
         .path_and_query()
         .map(|pq| pq.as_str())
         .unwrap_or("/");
-    let target: Uri = match format!("{}{}", sidecar_base(), path_and_query).parse() {
+    let target: Uri = match format!("{}{}", up.base, path_and_query).parse() {
         Ok(u) => u,
         Err(e) => return (StatusCode::BAD_GATEWAY, format!("bad sidecar uri: {e}")).into_response(),
     };
@@ -63,8 +107,17 @@ async fn proxy(req: Request) -> Response {
 
     let mut headers = HeaderMap::new();
     for (name, value) in parts.headers.iter() {
-        if !HOP_BY_HOP.contains(&name.as_str()) && name != header::HOST {
+        if !HOP_BY_HOP.contains(&name.as_str())
+            && name != header::HOST
+            && name != TOKEN_HEADER
+        {
             headers.insert(name.clone(), value.clone());
+        }
+    }
+    // Ours, not the browser's: a page cannot borrow it by sending its own.
+    if let Some(token) = up.token.as_deref() {
+        if let Ok(value) = token.parse() {
+            headers.insert(TOKEN_HEADER, value);
         }
     }
 
@@ -122,8 +175,14 @@ async fn proxy(req: Request) -> Response {
 /// `BEADS_WORKBENCH_ENTRY` names a helper to start instead of the carried one,
 /// which is how somebody working on the helper runs their own edits.
 pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
-    if env::var("BEADS_WORKBENCH_URL").is_ok() {
+    if let Ok(url) = env::var("BEADS_WORKBENCH_URL") {
         info!("workbench: BEADS_WORKBENCH_URL set — not spawning a sidecar");
+        // Named by hand, so it is trusted by hand: no word is sent, because
+        // whoever set this is running the helper themselves.
+        set_live(Some(Live {
+            base: url.trim_end_matches('/').to_string(),
+            token: None,
+        }));
         return;
     }
     // A helper named by hand is somebody's own checkout, and its packages are
@@ -158,6 +217,10 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
             }
         }
 
+        // Invented here and told to nobody else, so a program that guesses the
+        // port still cannot drive the reader's chat.
+        let token = uuid::Uuid::new_v4().to_string();
+
         let mut backoff = Duration::from_secs(1);
         loop {
             info!("workbench: starting sidecar ({entry})");
@@ -168,6 +231,10 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
                 "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
                 &entry,
             ]);
+            node.env("ATELIER_WORKBENCH_TOKEN", &token);
+            // Read, not inherited: the helper's first line says which port it
+            // bound, and that line is the only thing that opens the proxy.
+            node.stdout(Stdio::piped());
             // Where this machine keeps our data is asked once, here, and told
             // to the helper. Left to work it out, it knew one kind of machine
             // and only one, and wrote its chats where nothing reads them
@@ -183,7 +250,31 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
                     return;
                 }
                 Ok(mut c) => {
+                    let said = c.stdout.take();
+                    let mine = token.clone();
+                    let listener = tokio::spawn(async move {
+                        let Some(said) = said else { return };
+                        let mut lines = BufReader::new(said).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            match line.strip_prefix(ANNOUNCE) {
+                                Some(address) => {
+                                    let base = format!("http://{}", address.trim());
+                                    info!("workbench: sidecar answering at {base}");
+                                    set_live(Some(Live {
+                                        base,
+                                        token: Some(mine.clone()),
+                                    }));
+                                }
+                                None => info!("workbench: {line}"),
+                            }
+                        }
+                    });
                     let status = c.wait().await;
+                    // Forgotten before anything else can be reached at that
+                    // port: the operating system is free to hand it out again
+                    // the moment the child is gone.
+                    set_live(None);
+                    listener.abort();
                     warn!("workbench: sidecar exited ({status:?}); restarting in {backoff:?}");
                 }
             }

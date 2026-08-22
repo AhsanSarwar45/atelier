@@ -76,14 +76,16 @@ cp "$BINARY" "$WORK/atelier"
 chmod +x "$WORK/atelier"
 pass "one file copied to $WORK, with a home directory made a second ago"
 
-# Two free ports: one the app serves on, one its chat helper listens on. Both
-# are picked rather than fixed for the same reason — the reader's own copy of
-# the app sits on 3008 with its helper on 3009, and a fixed pair would let this
-# whole check be answered by that copy without the binary under test ever
-# starting.
-read -r PORT HELPER_PORT <<<"$(python3 - <<'PY'
+# Three free ports: the one the app serves on, one a stranger holds for the last
+# case below, and one a second copy of the app serves on. They are picked rather
+# than fixed for the same reason — the reader's own copy of the app sits on
+# 3008, and a fixed port would let this whole check be answered by that copy
+# without the binary under test ever starting. The chat helper's own port is not
+# among them: it asks the machine for one and tells the app which it got, which
+# is what the last case here is about.
+read -r PORT SQUATTED SECOND_PORT <<<"$(python3 - <<'PY'
 import socket
-held = [socket.socket() for _ in range(2)]
+held = [socket.socket() for _ in range(3)]
 for sock in held:
     sock.bind(("127.0.0.1", 0))
 print(*(sock.getsockname()[1] for sock in held))
@@ -91,7 +93,7 @@ for sock in held:
     sock.close()
 PY
 )"
-if [ -z "${PORT:-}" ] || [ -z "${HELPER_PORT:-}" ]; then
+if [ -z "${PORT:-}" ] || [ -z "${SQUATTED:-}" ] || [ -z "${SECOND_PORT:-}" ]; then
   fail "could not find free ports to serve on"
   echo; echo "$failures failure(s)"; exit 1
 fi
@@ -118,7 +120,6 @@ env -i \
   HOME="$HOME_DIR" \
   ATELIER_HOST=127.0.0.1 \
   ATELIER_PORT="$PORT" \
-  BEADS_WORKBENCH_PORT="$HELPER_PORT" \
   "$WORK/atelier" >"$LOG" 2>&1 &
 SERVER=$!
 
@@ -197,6 +198,95 @@ if [ -f "$TOOLS" ]; then
 else
   fail "no report tools were written to $TOOLS"
 fi
+
+# ------------------------------------------- and a stranger on the chat's port
+
+say "A stranger holding the chat's port"
+
+# The fault this proves gone: the app forwarded to a fixed local port on trust.
+# Whatever program held it received the reader's conversation and answered the
+# health check in the app's name — a binary whose helper never started once
+# still reported the chat healthy (bw-8um.3.5). Here a stranger answers 200 to
+# everything on the port a second copy of the app is told to put its helper on,
+# so that helper can never bind it, and the app has to say so.
+python3 - "$SQUATTED" >"$WORK/stranger.txt" 2>&1 <<'PY' &
+import http.server, socketserver, sys
+
+class Stranger(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"status":"ok","sidecar":"not ours"}')
+
+    def log_message(self, *args):
+        pass
+
+socketserver.TCPServer.allow_reuse_address = True
+socketserver.TCPServer(("127.0.0.1", int(sys.argv[1])), Stranger).serve_forever()
+PY
+STRANGER=$!
+
+held=0
+for _ in $(seq 1 20); do
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SQUATTED/health")" = "200" ]; then
+    held=1
+    break
+  fi
+  sleep 0.5
+done
+
+if [ "$held" != "1" ]; then
+  fail "could not put a stranger on port $SQUATTED, so this case proves nothing"
+else
+  pass "a stranger answers 200 on port $SQUATTED"
+
+  SECOND_LOG="$WORK/second.txt"
+  env -i \
+    PATH="$PATH" \
+    HOME="$HOME_DIR" \
+    ATELIER_HOST=127.0.0.1 \
+    ATELIER_PORT="$SECOND_PORT" \
+    BEADS_WORKBENCH_PORT="$SQUATTED" \
+    "$WORK/atelier" >"$SECOND_LOG" 2>&1 &
+  SECOND=$!
+
+  up=0
+  for _ in $(seq 1 60); do
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SECOND_PORT/api/health")" = "200" ]; then
+      up=1
+      break
+    fi
+    kill -0 "$SECOND" 2>/dev/null || break
+    sleep 1
+  done
+
+  if [ "$up" != "1" ]; then
+    fail "a second copy told to use port $SQUATTED never served at all; it said:"
+    sed 's/^/      /' "$SECOND_LOG"
+  else
+    # Long enough for its helper to have tried, failed to bind and been
+    # restarted at least once, which is when the old code answered 200.
+    sleep 8
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SECOND_PORT/api/workbench/health")
+    if [ "$code" = "200" ]; then
+      fail "the chat reported itself healthy out of a stranger's process (/api/workbench/health returned $code)"
+    else
+      pass "the chat says it is not running ($code), and the stranger's answer never reaches the reader"
+    fi
+    if grep -q "answering at" "$SECOND_LOG"; then
+      fail "the second copy claimed a helper was answering when none of its own ever bound"
+    else
+      pass "no address was recorded, because no helper of its own announced one"
+    fi
+  fi
+
+  kill "$SECOND" 2>/dev/null
+  wait "$SECOND" 2>/dev/null
+fi
+
+kill "$STRANGER" 2>/dev/null
+wait "$STRANGER" 2>/dev/null
 
 say "$failures failure(s)"
 [ "$failures" = "0" ]

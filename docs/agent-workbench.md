@@ -27,7 +27,7 @@ Three processes, one port for the browser.
                         │ HTTP, loopback only
                         ▼
         ┌───────────────────────────────────────────┐
-        │  workbench sidecar  :3009  (127.0.0.1)    │
+        │  workbench sidecar  :?  (127.0.0.1)       │
         │  Node 22 · TypeScript                     │
         │  drivers · event log · linker · registry  │
         └───────────────────────────────────────────┘
@@ -75,13 +75,34 @@ the drivers across two runtimes.
 ### 1.2 Sidecar lifecycle
 
 `routes::workbench::spawn_sidecar()` is called once at axum startup. It spawns
-`node --experimental-strip-types workbench/src/server.ts` bound to
-`127.0.0.1:3009`, restarts it with backoff if it exits, and logs its
-stdout/stderr into the server's log. Three environment escapes:
+`node --experimental-strip-types workbench/src/server.ts`, restarts it with
+backoff if it exits, and logs its stdout/stderr into the server's log.
 
-- `BEADS_WORKBENCH_URL` — if set, do not spawn; proxy to that URL. This is dev
+**The port is the operating system's choice, and the proxy learns it from the
+child.** The sidecar binds port 0, prints `[workbench] listening 127.0.0.1:<port>`
+as its first line, and the supervisor reads that line off the child's stdout and
+records the address. The record is cleared the moment the child exits, so the
+proxy only ever forwards to a sidecar this process started and still has alive;
+with no record it answers 503, which is what `/api/workbench/health` returns
+whenever the chat is not actually running. The supervisor also invents a word per
+sidecar, passes it down as `ATELIER_WORKBENCH_TOKEN`, and sends it on every
+proxied request as `x-atelier-workbench`; the sidecar answers 403 without it.
+
+It used to be a fixed 3009, forwarded to on trust: whatever program held that
+port received the reader's conversation and answered the health check in the
+app's name, so a binary whose sidecar never started once still reported the chat
+healthy (bw-8um.3.5). Loopback is not a boundary — every program on the machine
+can reach it — which is what the shared word is for.
+
+Three environment escapes:
+
+- `BEADS_WORKBENCH_URL` — if set, do not spawn; proxy to that URL, with no word
+  sent, because whoever set it is running the sidecar themselves. This is dev
   mode: run `npm run workbench` in your own terminal and get hot reload.
-- `BEADS_WORKBENCH_PORT` — the port the spawned sidecar binds. Default 3009.
+- `BEADS_WORKBENCH_PORT` — the port the spawned sidecar tries to bind, instead of
+  asking the machine for a free one. It changes nothing about the trust: the
+  proxy still waits for the child's own announcement, so a port already held by
+  something else means no announcement and a 503, never a stranger's answer.
 - `BEADS_WORKBENCH_ENTRY` — the file to run. Default is the source above; a
   missing file is a warning and an offline Chat tab, not a crash.
 
