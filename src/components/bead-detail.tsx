@@ -9,7 +9,6 @@ import {
   Flag,
   Link2,
   Plus,
-  X,
 } from "lucide-react";
 
 import { CopyableText } from "@/components/copyable-text";
@@ -239,16 +238,22 @@ export function BeadDetail({
         data-testid="bead-detail"
         data-bead-id={bead.id}
         className={cn(
-          "fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl overflow-y-auto bg-surface-base border-l border-b-default p-6 shadow-lg transition-transform ease-in-out",
+          "fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl overflow-y-auto bg-surface-base border-l border-b-default p-4 sm:p-6 shadow-lg transition-transform ease-in-out",
           slid ? "translate-x-0" : "translate-x-full"
         )}
         style={{ transitionDuration: `${PANEL_SLIDE_MS}ms` }}
       >
-          {/* Header with Back button */}
+          {/* The one way out. There used to be two — this and a cross in the
+              far corner — which on a phone is two controls saying the same
+              thing at opposite ends of a screen you hold in one hand. The
+              cross was the smaller and the less clear of the two, so this is
+              what stayed, and it carries the cross's name (bw-81wt.6). */}
           <div className="flex items-center justify-between mb-6">
             <Button
               variant="ghost"
               size="sm"
+              data-testid="bead-detail-close"
+              aria-label="Close the card"
               onClick={() => onOpenChange(false)}
               className="gap-1.5 -ml-2"
             >
@@ -291,8 +296,10 @@ export function BeadDetail({
             )}
           </div>
 
-          {/* Inline Metadata Row */}
-          <div className="mt-6 flex justify-center items-center gap-3 text-sm text-t-tertiary">
+          {/* Inline Metadata Row. It wraps: on a phone the four facts and the
+              date are wider than the screen, and a row that will not wrap
+              strings the date down the side three characters at a time. */}
+          <div className="mt-6 flex flex-wrap justify-center items-center gap-x-3 gap-y-2 text-sm text-t-tertiary">
             <span className="flex items-center gap-1.5">
               <TypeIcon className="size-3.5" aria-hidden="true" />
               {isReadOnly ? (
@@ -491,16 +498,6 @@ export function BeadDetail({
           {/* Children slot for comments + timeline */}
           {children && <div className="mt-6">{children}</div>}
 
-        {/* Close button */}
-        <button
-          data-testid="bead-detail-close"
-          aria-label="Close the card"
-          onClick={() => onOpenChange(false)}
-          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-        >
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </button>
       </div>
 
       {/* Add Subtask Dialog (for epics) */}
