@@ -84,21 +84,34 @@ async function offscreen(page: Page): Promise<Offender[]> {
       return false;
     };
     /**
-     * Put away rather than spilling out.
+     * How much of an element is actually painted, after every ancestor that
+     * clips has had its say.
      *
-     * A drawer that is shut is parked off the side of a pane that clips it, so
-     * nothing of it is on the screen and nothing of it makes the screen wider.
-     * That is how a drawer is shut, not a thing drawn past the edge.
+     * Two things this settles, and they are the same thing. A drawer that is
+     * shut is parked off the side of a pane that clips it: none of it is on the
+     * screen and none of it makes the screen wider — that is how a drawer is
+     * shut, not a thing drawn past the edge. And a long command line inside a
+     * row that truncates has a BOX running off the side while what is drawn
+     * ends in an ellipsis well inside the screen; judging the box failed the
+     * whole run on whichever chat happened to be first in the list
+     * (bw-81wt.20).
+     *
+     * So the box is cut down to what survives its clipping ancestors, and that
+     * is what gets judged. An empty result means nothing of it is drawn at all.
      */
-    const parked = (el: Element) => {
+    const painted = (el: Element): { left: number; right: number } | null => {
       const r = el.getBoundingClientRect();
+      let left = r.left;
+      let right = r.right;
       for (let p = el.parentElement; p; p = p.parentElement) {
         const style = getComputedStyle(p);
         if (style.overflowX !== 'hidden' && style.overflowX !== 'clip') continue;
         const box = p.getBoundingClientRect();
-        if (r.right <= box.left + 1 || r.left >= box.right - 1) return true;
+        left = Math.max(left, box.left);
+        right = Math.min(right, box.right);
+        if (right <= left) return null;
       }
-      return false;
+      return { left, right };
     };
     for (const el of Array.from(document.body.querySelectorAll('*'))) {
       const style = getComputedStyle(el);
@@ -106,11 +119,12 @@ async function offscreen(page: Page): Promise<Offender[]> {
       if (el.closest('[aria-hidden="true"]')) continue;
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
-      const past = r.right > window.innerWidth + 1 || r.left < -1;
+      const seen = painted(el);
+      if (!seen) continue;
+      const past = seen.right > window.innerWidth + 1 || seen.left < -1;
       if (!past) continue;
       if (reachable(el)) continue;
-      if (parked(el)) continue;
-      out.push({ what: name(el), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), height: Math.round(r.height) });
+      out.push({ what: name(el), left: Math.round(seen.left), right: Math.round(seen.right), width: Math.round(r.width), height: Math.round(r.height) });
     }
     return out;
   });
