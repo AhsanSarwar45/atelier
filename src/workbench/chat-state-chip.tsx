@@ -16,14 +16,19 @@ import { useSyncExternalStore } from 'react';
 
 import {
   Bot,
+  Brain,
   CircleAlert,
   CircleCheck,
   CircleDashed,
   CircleSlash,
   Hand,
   Loader2,
+  MessageSquareDot,
   Moon,
+  RefreshCw,
+  Shrink,
   SquareTerminal,
+  Terminal,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -53,6 +58,12 @@ const HOLDER_ICON: Record<Holder, typeof Bot> = {
  * difference (bw-ja9l.12).
  */
 const MARK: Record<StateMark, typeof Bot> = {
+  thinking: Brain,
+  answering: MessageSquareDot,
+  running: Terminal,
+  summarising: Shrink,
+  retrying: RefreshCw,
+  helping: Bot,
   working: Loader2,
   waiting: Hand,
   ready: CircleCheck,
@@ -62,8 +73,21 @@ const MARK: Record<StateMark, typeof Bot> = {
   ended: CircleDashed,
 };
 
-/** The two that must not look still, and the rule for how they move. */
+/**
+ * The ones that must not look still, and the rule for how each moves.
+ *
+ * Everything happening moves; everything at rest is still. They do not all move
+ * the same way, because the difference is the point — a spin reads as a machine
+ * turning something over, a pulse as something waiting to be attended to. The
+ * two that are waiting on a person or on a clock pulse; the rest spin.
+ */
 const MOVES: Partial<Record<StateMark, string>> = {
+  thinking: 'animate-pulse',
+  answering: 'animate-pulse',
+  running: 'animate-pulse',
+  summarising: 'animate-pulse',
+  retrying: 'animate-spin',
+  helping: 'animate-pulse',
   working: 'animate-spin',
   waiting: 'animate-pulse',
 };
@@ -127,7 +151,11 @@ export function ChatStateChip({
   className?: string;
 }) {
   const now = useSecond();
-  const count = state.working ? seconds(state.since, now) : '';
+  // Whether seconds are counted is the reading's call, not this file's: it
+  // nulls `since` for everything at rest. Gating on `working` on top of that
+  // silently dropped the one clock that matters most — how long a chat has been
+  // stopped waiting for somebody to approve something (bw-jaoz.14.3).
+  const count = seconds(state.since, now);
   // Nothing is known and nothing is claimed: the external badge beside this is
   // the whole of what the screen can honestly say.
   if (!state.word) return null;

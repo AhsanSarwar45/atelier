@@ -26,6 +26,9 @@ const HELD_WORKING: ChatState = {
   word: 'Working',
   working: true,
   waiting: false,
+  doing: 'working',
+  detail: null,
+  told: false,
   mark: 'working',
   since: NOW - 109_000,
   external: { holder: 'terminal' },
@@ -36,6 +39,9 @@ const HELD_QUIET: ChatState = {
   word: 'Idle',
   working: false,
   waiting: false,
+  doing: 'idle',
+  detail: null,
+  told: false,
   mark: 'ready',
   since: null,
   external: { holder: 'terminal' },
@@ -86,7 +92,7 @@ describe('a chat a driver of ours is working in', () => {
       since: NOW - 4_000,
       waiting: false,
       thought: 1_200,
-      state: { word: 'Thinking', working: true, waiting: false, mark: 'working', since: NOW, external: null },
+      state: { word: 'Thinking', working: true, waiting: false, doing: 'thinking', detail: null, told: true, mark: 'thinking', since: NOW, external: null },
       running: null,
     });
     expect(now?.label).toBe('Thinking');
@@ -101,7 +107,7 @@ describe('a chat a driver of ours is working in', () => {
       since: NOW,
       waiting: true,
       thought: 0,
-      state: { word: 'Waiting for you', working: false, waiting: true, mark: 'waiting', since: NOW, external: null },
+      state: { word: 'Waiting for you', working: false, waiting: true, doing: 'waiting', detail: null, told: true, mark: 'waiting', since: NOW, external: null },
       running: null,
     });
     expect(now?.waiting).toBe(true);

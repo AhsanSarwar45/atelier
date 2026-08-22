@@ -212,7 +212,12 @@ describe('a chat somebody else holds', () => {
       expect(read).toEqual({
         working: true,
         waiting: false,
+        doing: 'working',
         word: 'Working',
+        // Plainly busy and nothing on the machine saying at what: the honest
+        // word, worked out from the record rather than told to us.
+        detail: null,
+        told: false,
         mark: 'working',
         since: BEGAN,
         external: { holder },

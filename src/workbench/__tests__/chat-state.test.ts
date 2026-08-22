@@ -10,6 +10,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DOING_COUNTS,
+  DOING_MARK,
+  DOING_WORD,
   HOLDER_WORD,
   RECORD_QUIET_MS,
   answerOwed,
@@ -18,6 +21,9 @@ import {
   heldDoing,
   heldLine,
   holderOnly,
+  isWorking,
+  whatItIsDoing,
+  type Doing,
   type HeldChat,
 } from '@/workbench/chat-state';
 import type { SessionState } from '@/workbench/protocol';
@@ -309,5 +315,201 @@ describe('the line where a held chat’s writing box would be', () => {
       // ends it.
       expect(word.endsWith('.'), `${holder} punctuates for its callers`).toBe(false);
     }
+  });
+});
+
+describe('the whole vocabulary for what a chat is doing', () => {
+  /**
+   * Every word the reading can draw, and what each one is owed.
+   *
+   * Written out here rather than read off the tables under test, so a table
+   * edited by hand cannot quietly agree with itself. The manager's screenshot,
+   * 2026-08-22, is why there is more than one row: a two-minute summarising run
+   * drawn as `Working 1h 38m`, which is what a reading with a single
+   * busy-or-not signal has to say about every one of these.
+   */
+  const VOCABULARY: {
+    doing: Doing;
+    word: string;
+    mark: string;
+    /** Whether seconds are drawn beside the word. */
+    counts: boolean;
+    /** Whether it means the chat owes an answer — the primary, moving mark. */
+    working: boolean;
+  }[] = [
+    { doing: 'thinking', word: 'Thinking', mark: 'thinking', counts: true, working: true },
+    { doing: 'answering', word: 'Answering', mark: 'answering', counts: true, working: true },
+    { doing: 'running', word: 'Running', mark: 'running', counts: true, working: true },
+    { doing: 'summarising', word: 'Summarising', mark: 'summarising', counts: true, working: true },
+    { doing: 'retrying', word: 'Retrying', mark: 'retrying', counts: true, working: true },
+    { doing: 'helping', word: 'Helper working', mark: 'helping', counts: true, working: true },
+    { doing: 'working', word: 'Working', mark: 'working', counts: true, working: true },
+    // Not working: it is the chat asking rather than answering, and the whole
+    // point of its own mark is that the two do not look alike.
+    { doing: 'waiting', word: 'Waiting for you', mark: 'waiting', counts: true, working: false },
+    { doing: 'idle', word: 'Idle', mark: 'ready', counts: false, working: false },
+    // The reading declining to claim anything. A badge beside it may still say
+    // who holds the chat; the chip itself draws nothing.
+    { doing: 'unknown', word: '', mark: 'ready', counts: false, working: false },
+  ];
+
+  it('gives each one its own word, its own mark and its own clock rule', () => {
+    for (const { doing, word, mark, counts, working } of VOCABULARY) {
+      expect(DOING_WORD[doing], `${doing} drew the wrong word`).toBe(word);
+      expect(DOING_MARK[doing], `${doing} drew the wrong mark`).toBe(mark);
+      expect(DOING_COUNTS[doing], `${doing} counted the wrong way`).toBe(counts);
+      expect(isWorking(doing), `${doing} was owed the wrong mark`).toBe(working);
+    }
+  });
+
+  it('covers every word the type allows, so a new one cannot be added unread', () => {
+    expect(VOCABULARY.map((v) => v.doing).sort()).toEqual(Object.keys(DOING_WORD).sort());
+  });
+
+  it('says a different thing for each: no two states read alike', () => {
+    // The fault this replaces, stated as a rule. Five of these drew the same
+    // word, so the screen could not tell a chat mid-thought from one stopped
+    // dead on a permission prompt.
+    const said = VOCABULARY.filter((v) => v.doing !== 'unknown').map((v) => `${v.word}/${v.mark}`);
+    expect(new Set(said).size).toBe(said.length);
+  });
+
+  it('draws it whole for a held chat, whatever our own side was left saying', () => {
+    for (const { doing, word, mark, counts, working } of VOCABULARY) {
+      const read = chatState({ state: 'dormant', held: held({ doing, since: 1_000 }) });
+      expect(read.doing, `${doing} was lost on the way through`).toBe(doing);
+      expect([read.word, read.mark], `${doing} drew the wrong chip`).toEqual([word, mark]);
+      expect(read.since, `${doing} counted the wrong way`).toBe(counts ? 1_000 : null);
+      expect(read.working, `${doing} was owed the wrong mark`).toBe(working);
+      // Never in place of the doing, in any state.
+      expect(read.external, `${doing} lost the badge`).toEqual({ holder: 'terminal' });
+    }
+  });
+
+  it('draws the waiting mark on a held chat stopped on a prompt, not a grey one', () => {
+    // It asks its holder rather than this reader, which settles who answers it
+    // and nothing about what the screen owes: the reader is looking at a chat
+    // that has stopped and is waiting on a person (bw-jaoz.14.3).
+    const read = chatState({ state: 'dormant', held: held({ doing: 'waiting', since: 1_000 }) });
+    expect([read.working, read.waiting, read.since]).toEqual([false, true, 1_000]);
+  });
+
+  it('gives our own driver’s states the same vocabulary, not a second one', () => {
+    const ours: [SessionState, Doing][] = [
+      ['thinking', 'thinking'],
+      ['streaming', 'answering'],
+      ['running_tool', 'running'],
+      ['waiting_permission', 'waiting'],
+      // Plainly busy, and nothing yet says at what. The honest word, not a guess.
+      ['starting', 'working'],
+    ];
+    for (const [state, doing] of ours) {
+      const read = chatState({ state, since: 5_000 });
+      expect(read.doing, `${state} read as the wrong thing`).toBe(doing);
+      expect(read.mark, `${state} drew a mark of its own`).toBe(DOING_MARK[doing]);
+      expect(read.since, `${state} counted the wrong way`).toBe(DOING_COUNTS[doing] ? 5_000 : null);
+    }
+  });
+
+  it('every state of ours that is at rest reads as idle, and counts nothing', () => {
+    for (const state of ['idle', 'stopped', 'errored', 'ended', 'dormant'] as const) {
+      const read = chatState({ state, since: 5_000 });
+      expect(read.doing, `${state} claimed to be doing something`).toBe('idle');
+      expect(read.since, `${state} left a clock running`).toBeNull();
+    }
+  });
+
+  it('says our own driver told us, and a record we read did not', () => {
+    // What the difference is for: a word we were told can be trusted to be
+    // specific, and one we worked out is only as good as the tail of a file.
+    expect(chatState({ state: 'thinking' }).told).toBe(true);
+    expect(chatState({ state: 'dormant', held: held({ doing: 'working' }) }).told).toBe(false);
+    expect(chatState({ state: 'dormant', held: held({ doing: 'summarising', told: true }) }).told).toBe(true);
+  });
+
+  it('carries the holder’s own words through, and nothing where there are none', () => {
+    expect(chatState({ state: 'dormant', held: held({ detail: 'npm test' }) }).detail).toBe('npm test');
+    expect(chatState({ state: 'dormant', held: held() }).detail).toBeNull();
+    expect(chatState({ state: 'running_tool', detail: 'Asking about Edit' }).detail).toBe('Asking about Edit');
+    expect(chatState({ state: 'running_tool' }).detail).toBeNull();
+  });
+
+  it('forgets what a dropped chat was doing, and that it was ever told it', () => {
+    const stale = holderOnly(held({ doing: 'summarising', since: 1_000, detail: 'freeing up room', told: true }));
+    expect(stale).toEqual({ ...held(), doing: 'unknown', since: null, detail: null, told: false });
+  });
+});
+
+describe('the order the two signals are combined in', () => {
+  const now = 1_787_138_400_000;
+
+  it('takes what the session said about itself over what we read off its record', () => {
+    // The one-sided failure this prevents: a summarising chat is silent for two
+    // minutes, so the record reads it as a chat somebody walked away from —
+    // confidently, and wrongly, exactly when the screen matters most.
+    expect(
+      whatItIsDoing({
+        told: { doing: 'summarising', since: now - 40_000 },
+        read: { doing: 'idle', since: null },
+      }),
+    ).toEqual({ doing: 'summarising', since: now - 40_000, detail: null, told: true });
+  });
+
+  it('never lets a guess override a told state, however sure the guess looks', () => {
+    for (const guess of Object.keys(DOING_WORD) as Doing[]) {
+      const both = whatItIsDoing({
+        told: { doing: 'waiting', since: now - 9_000, detail: 'Edit' },
+        read: { doing: guess, since: now },
+      });
+      expect(both, `a read '${guess}' beat what the session said`).toEqual({
+        doing: 'waiting',
+        since: now - 9_000,
+        detail: 'Edit',
+        told: true,
+      });
+    }
+  });
+
+  it('falls to the record only where nothing was told, and says which it was', () => {
+    expect(whatItIsDoing({ told: null, read: { doing: 'running', since: now } })).toEqual({
+      doing: 'running',
+      since: now,
+      detail: null,
+      told: false,
+    });
+  });
+
+  it('treats “I do not know” as declining to say, not as an answer', () => {
+    // Either side may decline. An unwired session tells us nothing while its
+    // record still shows it writing; a chat whose record we cannot find is
+    // still worth drawing from what it published.
+    expect(whatItIsDoing({ told: { doing: 'unknown', since: null }, read: { doing: 'running', since: now } })).toEqual({
+      doing: 'running',
+      since: now,
+      detail: null,
+      told: false,
+    });
+    expect(whatItIsDoing({ told: { doing: 'thinking', since: now }, read: null })).toEqual({
+      doing: 'thinking',
+      since: now,
+      detail: null,
+      told: true,
+    });
+  });
+
+  it('claims nothing at all when neither signal will say', () => {
+    expect(whatItIsDoing({ told: null, read: null })).toEqual({
+      doing: 'unknown',
+      since: null,
+      detail: null,
+      told: false,
+    });
+  });
+
+  it('drops a clock the state has no business counting, whichever side sent it', () => {
+    // A holder reporting `idle` with the moment it went idle is not offering a
+    // clock; drawn beside "Idle" it claims something is going on.
+    expect(whatItIsDoing({ told: { doing: 'idle', since: now }, read: null }).since).toBeNull();
+    expect(whatItIsDoing({ told: null, read: { doing: 'idle', since: now } }).since).toBeNull();
   });
 });

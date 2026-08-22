@@ -31,8 +31,15 @@ import type { SessionState } from '@/workbench/protocol';
 /** Which kind of program is holding a conversation of somebody else's. */
 export type Holder = 'terminal' | 'program';
 
-/** What a held conversation is doing, as far as the machine can tell. */
-export type HeldDoing = 'working' | 'idle' | 'unknown';
+/**
+ * What a held conversation is doing, as far as the machine can tell.
+ *
+ * The same vocabulary a chat of ours is drawn from, and not a shorter one:
+ * a terminal summarising itself is doing the same thing ours does, and the
+ * reader is owed the same word for it. What differs between the two is only
+ * how much of it the machine can see, which {@link ChatState.told} carries.
+ */
+export type HeldDoing = Doing;
 
 /**
  * A conversation another program holds, as the sidecar reports it.
@@ -49,6 +56,18 @@ export interface HeldChat {
   doing: HeldDoing;
   /** When it started doing that, ms since the epoch, or null when unknown. */
   since: number | null;
+  /**
+   * What it is doing, in its own words — the command in flight, the reason a
+   * retry is waiting, how many helpers are out. Absent when the state carries
+   * nothing beyond itself.
+   */
+  detail?: string | null;
+  /**
+   * Whether the holder said this itself or we worked it out from its record.
+   * Absent reads as worked out, which is what every reading of a held chat was
+   * before anything told us anything.
+   */
+  told?: boolean;
 }
 
 /**
@@ -64,7 +83,7 @@ export interface HeldChat {
  * (bw-96is.22).
  */
 export function holderOnly(held: HeldChat | null | undefined): HeldChat | null {
-  return held ? { ...held, doing: 'unknown', since: null } : null;
+  return held ? { ...held, doing: 'unknown', since: null, detail: null, told: false } : null;
 }
 
 /**
@@ -75,7 +94,121 @@ export function holderOnly(held: HeldChat | null | undefined): HeldChat | null {
  * chip with a mark of its own (bw-ja9l.12). The kind is decided here, with the
  * word, because it is the same reading — the chip only knows how to draw it.
  */
-export type StateMark = 'working' | 'waiting' | 'ready' | 'asleep' | 'stopped' | 'failed' | 'ended';
+export type StateMark =
+  | 'thinking'
+  | 'answering'
+  | 'running'
+  | 'summarising'
+  | 'retrying'
+  | 'helping'
+  | 'working'
+  | 'waiting'
+  | 'ready'
+  | 'asleep'
+  | 'stopped'
+  | 'failed'
+  | 'ended';
+
+/**
+ * The whole vocabulary for what a chat is doing this second, and the only list
+ * any screen draws from.
+ *
+ * There used to be one word for all of it. A chat summarising itself, one
+ * thinking, one stopped dead on a permission prompt, one retrying after the
+ * model refused and one whose helper is doing the work all drew "Working",
+ * because the only signal read off a running session was a single yes-or-no.
+ * The manager's screenshot, 2026-08-22: a two-minute summarising run drawn as
+ * `Working 1h 38m` beside a command card that had already finished.
+ *
+ * `working` survives as its own member and is not a failure of this list: it is
+ * what an honest reading says when the session is plainly busy and nothing on
+ * the machine says at what. Guessing which of the seven it is would be worse
+ * than the word it replaces.
+ */
+export type Doing =
+  | 'thinking'
+  | 'answering'
+  | 'running'
+  | 'waiting'
+  | 'summarising'
+  | 'retrying'
+  | 'helping'
+  | 'working'
+  | 'idle'
+  | 'unknown';
+
+/**
+ * The word each one draws. Empty for `unknown`, which is the reading declining
+ * to claim anything — a badge may still say who holds the chat.
+ */
+export const DOING_WORD: Record<Doing, string> = {
+  thinking: 'Thinking',
+  answering: 'Answering',
+  running: 'Running',
+  waiting: 'Waiting for you',
+  summarising: 'Summarising',
+  retrying: 'Retrying',
+  helping: 'Helper working',
+  working: 'Working',
+  idle: 'Idle',
+  unknown: '',
+};
+
+/** The mark each one wears, per {@link StateMark}. */
+export const DOING_MARK: Record<Doing, StateMark> = {
+  thinking: 'thinking',
+  answering: 'answering',
+  running: 'running',
+  waiting: 'waiting',
+  summarising: 'summarising',
+  retrying: 'retrying',
+  helping: 'helping',
+  working: 'working',
+  idle: 'ready',
+  unknown: 'ready',
+};
+
+/**
+ * Whether seconds are counted beside the word.
+ *
+ * Everything happening counts, including the wait on the reader — a permission
+ * prompt that has been up for four minutes is the one number that says so.
+ * Nothing at rest counts: a clock ticking beside "Idle" is a claim that
+ * something is going on.
+ */
+export const DOING_COUNTS: Record<Doing, boolean> = {
+  thinking: true,
+  answering: true,
+  running: true,
+  waiting: true,
+  summarising: true,
+  retrying: true,
+  helping: true,
+  working: true,
+  idle: false,
+  unknown: false,
+};
+
+/**
+ * Which of them mean the chat owes an answer.
+ *
+ * The wait on the reader is deliberately not one: it is the chat asking rather
+ * than working, and it has always drawn its own mark for exactly that reason.
+ */
+const DOING_WORKING: ReadonlySet<Doing> = new Set<Doing>([
+  'thinking',
+  'answering',
+  'running',
+  'summarising',
+  'retrying',
+  'helping',
+  'working',
+]);
+
+/** Whether this is the chat doing something, as opposed to asking or resting. */
+export function isWorking(doing: Doing): boolean {
+  return DOING_WORKING.has(doing);
+}
 
 /** The three facts, as every screen draws them. */
 export interface ChatState {
@@ -83,8 +216,22 @@ export interface ChatState {
   working: boolean;
   /** It is not working because it is waiting on the reader — a different mark. */
   waiting: boolean;
+  /** Which of the vocabulary this is, for a screen that draws more than a word. */
+  doing: Doing;
   /** Its own verb while working, where it stands otherwise, empty when unknown. */
   word: string;
+  /**
+   * What this particular one is doing, in its own words — the command being
+   * run, the reason a retry is waiting, how many helpers are out. Null when
+   * the state carries nothing beyond itself.
+   */
+  detail: string | null;
+  /**
+   * Whether the session said this itself, or we worked it out from its record.
+   * Kept because the two tiers are combined by rule and the rule is worth
+   * proving; a screen may also choose to be quieter about a guess.
+   */
+  told: boolean;
   /** Which mark goes beside that word. */
   mark: StateMark;
   /** Where the seconds count from, ms since the epoch, or null for no count. */
@@ -117,14 +264,37 @@ const OWN_WORD: Record<SessionState, string> = {
 const OWN_MARK: Record<SessionState, StateMark> = {
   starting: 'working',
   idle: 'ready',
-  thinking: 'working',
-  streaming: 'working',
-  running_tool: 'working',
+  thinking: 'thinking',
+  streaming: 'answering',
+  running_tool: 'running',
   waiting_permission: 'waiting',
   stopped: 'stopped',
   errored: 'failed',
   ended: 'ended',
   dormant: 'asleep',
+};
+
+/**
+ * Which of the vocabulary each of our own states is.
+ *
+ * Our own driver has always published a state per second; what it never had was
+ * a shared word for it, so the three busy ones all drew one mark and a chat of
+ * ours read no better than a terminal's. They map straight across — the
+ * vocabulary was built to hold both — and the states that are not the chat
+ * doing something map to `idle`, because where it stands is the other half of
+ * the reading and is drawn from {@link OWN_WORD} rather than from here.
+ */
+const OWN_DOING: Record<SessionState, Doing> = {
+  starting: 'working',
+  idle: 'idle',
+  thinking: 'thinking',
+  streaming: 'answering',
+  running_tool: 'running',
+  waiting_permission: 'waiting',
+  stopped: 'idle',
+  errored: 'idle',
+  ended: 'idle',
+  dormant: 'idle',
 };
 
 /** The states in which an agent of ours owes an answer. */
@@ -146,13 +316,6 @@ export function counting(state: SessionState): boolean {
   return OWN_WORKING.has(state) || state === 'waiting_permission';
 }
 
-/** What the reader is told a held chat is doing, per {@link HeldDoing}. */
-const HELD_WORD: Record<HeldDoing, string> = {
-  working: 'Working',
-  idle: 'Idle',
-  unknown: '',
-};
-
 export interface ChatStateInput {
   /** The state our own driver last published for this chat. */
   state: SessionState;
@@ -162,6 +325,11 @@ export interface ChatStateInput {
   since?: number | null;
   /** What the sidecar says about the program holding it, when one does. */
   held?: HeldChat | null;
+  /**
+   * What this one is doing, in its own words — the command being run, why a
+   * retry is waiting. Drawn beside the word, never in place of it.
+   */
+  detail?: string | null;
 }
 
 /**
@@ -177,14 +345,24 @@ export interface ChatStateInput {
 export function chatState(input: ChatStateInput): ChatState {
   const held = input.held ?? null;
   if (held) {
+    const doing = held.doing;
     return {
-      working: held.doing === 'working',
-      waiting: false,
-      word: HELD_WORD[held.doing],
-      // A held chat that is not working is standing there, which is what "Idle"
-      // says; the badge beside it is who is holding it.
-      mark: held.doing === 'working' ? 'working' : 'ready',
-      since: held.doing === 'working' ? held.since : null,
+      working: isWorking(doing),
+      // A held chat can be stopped on a permission prompt too, and it draws the
+      // same warning mark ours does. This used to be flatly `false` on the
+      // grounds that a held chat asks its holder rather than this reader — true
+      // of who answers it, and beside the point on a screen whose whole job is
+      // to show that something has stopped and is waiting on a person
+      // (bw-jaoz.14.3).
+      waiting: doing === 'waiting',
+      doing,
+      word: DOING_WORD[doing],
+      detail: held.detail ?? null,
+      told: held.told ?? false,
+      // A held chat that is doing nothing is standing there, which is what
+      // "Idle" says; the badge beside it is who is holding it.
+      mark: DOING_MARK[doing],
+      since: DOING_COUNTS[doing] ? held.since : null,
       external: { holder: held.holder },
     };
   }
@@ -194,13 +372,51 @@ export function chatState(input: ChatStateInput): ChatState {
   return {
     working,
     waiting: input.state === 'waiting_permission',
+    doing: OWN_DOING[input.state],
     word: word ?? '',
+    detail: input.detail ?? null,
+    // Our own driver publishes its state every second; nothing here is inferred.
+    told: true,
     // Off the state and never off the word: the driver names its own states, so
     // the word can be anything it likes while the standing behind it is one of
     // ten we know (bw-ja9l.12).
     mark: OWN_MARK[input.state],
     since: working || input.state === 'waiting_permission' ? (input.since ?? null) : null,
     external: null,
+  };
+}
+
+/**
+ * The two tiers of truth, in the one order they are ever combined.
+ *
+ * **Told** is a signal the session emitted about itself — our own driver's
+ * published state, or a hook the session fired as it began summarising or put a
+ * permission prompt up. It is exact.
+ *
+ * **Read** is what we worked out from the tail of its record. It is a good
+ * guess and it is never better than a fact, so it never wins.
+ *
+ * The order is a rule rather than a preference, because the failure it prevents
+ * is one-sided: a read that overrides a told signal draws a confident wrong
+ * word (a summarising chat, silent for two minutes, reads as a chat somebody
+ * walked away from), while a told signal that overrides a read one is only ever
+ * more specific than what it replaced.
+ *
+ * `unknown` on either side is that side declining to say, not an answer, so it
+ * never displaces the other.
+ */
+export function whatItIsDoing(now: {
+  told: { doing: Doing; since: number | null; detail?: string | null } | null;
+  read: { doing: Doing; since: number | null; detail?: string | null } | null;
+}): { doing: Doing; since: number | null; detail: string | null; told: boolean } {
+  const said = now.told && now.told.doing !== 'unknown' ? now.told : null;
+  const seen = said ?? now.read;
+  if (!seen) return { doing: 'unknown', since: null, detail: null, told: false };
+  return {
+    doing: seen.doing,
+    since: DOING_COUNTS[seen.doing] ? seen.since : null,
+    detail: seen.detail ?? null,
+    told: said !== null,
   };
 }
 
