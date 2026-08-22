@@ -104,6 +104,16 @@ Latte, Frappe, Macchiato, and Mocha are available from the theme switcher.
 
 ## Installation
 
+Three commands, and there is nothing else:
+
+```bash
+brew install AhsanSarwar45/atelier/atelier   # put it on this computer
+atelier service install                      # have the computer keep it running
+cd my-project && atelier init                # turn a project into one it runs
+```
+
+The first two are once per computer. The third is once per project.
+
 ### Prerequisites
 
 - [Beads CLI](https://github.com/gastownhall/beads) (`bd`) installed and available in PATH
@@ -160,6 +170,7 @@ with `node` and its kit fetched once with `npm`.
 | `atelier run` | Start everything and open the board in your browser |
 | `atelier run --no-browser` | The same, without opening a browser |
 | `atelier` | The same as `run --no-browser` |
+| `atelier init` | Set the folder you are in up as a project it runs |
 | `atelier service install` | Have this computer start it at login, and keep it up |
 | `atelier service uninstall` | Stop having it started, and leave nothing behind |
 | `atelier service status` | Say whether this computer starts it |
@@ -219,6 +230,31 @@ nothing opens a window over your login. Whatever `ATELIER_PORT`,
 into the registration, because a service inherits no shell.
 
 `atelier service uninstall` stops it and removes the registration.
+
+### Set a project up
+
+```bash
+cd my-project
+atelier init
+```
+
+One command turns a folder you already have into a project Atelier runs. It
+writes the working rules out beside this computer's data, gives the project a
+board, puts it on the board screen's list, and wires the project's session
+gates to Atelier by name.
+
+The first run asks you two things it cannot answer for you — a two or three
+letter prefix for the card ids, and who may land work — and writes them into a
+`machinery.toml` in the project for you to fill in. Answer those two lines and
+run it again; it does the rest. It can be run again any time, and re-running it
+repairs anything that has drifted.
+
+What it leaves in the project is two committable files: that `machinery.toml`,
+and a `.claude/settings.json` naming the gates as `atelier hook …`. Neither
+holds a path off your disk, so a teammate who clones the project and installs
+Atelier is running the same gates without editing anything.
+
+It needs `bd` and `python3` on your PATH.
 
 ## Development
 

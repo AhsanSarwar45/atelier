@@ -55,6 +55,13 @@ JOIN = "join"
 DECL = "project.py"
 
 FAULTS = [
+    ("a gate already wired as a word is not the gate being wired", JOIN,
+     lambda s: s.replace('                        if not runs(h.get("command"), name)]',
+                         '                        if os.path.basename('
+                         '(h.get("command") or "")) != name]')),
+    ("a gate is written as the joiner's own folder and not as a word", JOIN,
+     lambda s: s.replace('    return typed(name) or os.path.join(HOME, "hooks", name)',
+                         '    return os.path.join(HOME, "hooks", name)')),
     ("the guard stands aside where no board is running", GATE,
      lambda s: s.replace(
          "    made = routes(cmd, home)",

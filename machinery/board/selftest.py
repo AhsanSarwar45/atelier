@@ -4991,16 +4991,23 @@ def main():
     # heard, and touches nothing else.
     joining = tool("join")
 
-    def wired_after_join(already=None):
+    def wired_after_join(already=None, word=None, again=False):
         """A throwaway project put through the real `join`, and the Claude
         settings it has afterwards, read back as text and as an object.
 
         `already` is the settings file the project carries before it joins, or
         None for a project that has none at all.
+
+        `word` is the name an installed copy of the product answers to, set when
+        it is the thing doing the joining. `again` joins a second time, which is
+        what a person does the moment anything drifts — and what used to wire
+        every gate twice.
         """
         tmp = tempfile.mkdtemp(prefix="board-join-wired-")
         root = os.path.join(tmp, "project")
         env = dict(os.environ, HOME=tmp, BD_NON_INTERACTIVE="1")
+        if word:
+            env["ATELIER_GATE_WORD"] = word
         try:
             mine = os.path.join(tmp, "machinery")
             os.makedirs(os.path.join(mine, "hooks"))
@@ -5009,9 +5016,12 @@ def main():
                 shutil.copy(os.path.join(HOME, near), os.path.join(mine, near))
             # The one gate that is not this machinery's lives with the shared
             # report tools, and a machine that has not said where those are
-            # cannot wire it — so this one says.
+            # cannot wire it — so this one says. Except where a word is doing
+            # the joining: an installed copy carries the report tools itself, so
+            # the word has to reach that gate with nothing said about paths.
             with open(os.path.join(mine, "projects.toml"), "w") as fh:
-                fh.write('[projects]\n\n[home]\nreports = "%s"\n'
+                fh.write('[projects]\n' if word else
+                         '[projects]\n\n[home]\nreports = "%s"\n'
                          % os.path.join(tmp, "reporting"))
             os.makedirs(root)
             subprocess.run(["git", "init", "-q", "-b", "ours", "."], cwd=root,
@@ -5025,6 +5035,10 @@ def main():
                     json.dump(already, fh, indent=2)
             said = subprocess.run([sys.executable, os.path.join(mine, "join"), root],
                                   text=True, capture_output=True, timeout=600, env=env)
+            if again:
+                said = subprocess.run(
+                    [sys.executable, os.path.join(mine, "join"), root],
+                    text=True, capture_output=True, timeout=600, env=env)
             where = os.path.join(root, ".claude", "settings.json")
             text = open(where).read() if os.path.exists(where) else ""
             check = subprocess.run(
@@ -5098,6 +5112,49 @@ def main():
           "project's own Claude settings, keeps the gates, settings, ceiling and "
           "voice that project already chose, and moves a gate wired where it "
           "would never be heard rather than doubling it")
+
+    # And the same thing done by an installed copy of the product, which is how
+    # everybody but the two projects that carry these tools joins. What it
+    # writes is committed and cloned, so a gate named through the joiner's own
+    # home folder is a gate nobody else can run (bw-8um.3.3): it names a word
+    # instead. A word carries no directory, which is also what stopped the old
+    # spelling of "this gate is already wired" recognising one — so joining a
+    # second time wired every gate a second time, and each of them then ran
+    # twice per tool call.
+    join_said, wired_text, wired, wired_check = wired_after_join(
+        word="atelier", again=True)
+    absent = [name for _, _, names in joining.WIRING for name in names
+              if "atelier hook %s" % name not in wired_text]
+    assert not absent, \
+        "a project joined by an installed copy runs none of %s by the word that " \
+        "copy answers to: join said %r" % (", ".join(absent), join_said)
+    pathed = [held.get("command") for blocks in (wired.get("hooks") or {}).values()
+              for block in blocks for held in (block.get("hooks") or [])
+              if "/" in (held.get("command") or "")]
+    assert not pathed, \
+        "an installed copy wrote a gate into a project as a path (%r), so the " \
+        "settings file that project commits names a folder on one machine and " \
+        "nobody who clones it runs that gate: join said %r" % (pathed, join_said)
+    # Counted per event, because one gate belongs under more than one of them:
+    # the touch runs after a tool and again when a worker stops.
+    doubled = []
+    for event, _, under_event in joining.WIRING:
+        held = [one.get("command") or ""
+                for block in (wired.get("hooks") or {}).get(event) or []
+                for one in (block.get("hooks") or [])]
+        doubled += ["%s under %s" % (name, event) for name in under_event
+                    if sum(joining.runs(one, name) for one in held) != 1]
+    assert not doubled, \
+        "joining twice left %s wired other than exactly once, so each of them " \
+        "runs that many times on every tool call and the project pays for all " \
+        "of them: join said %r" % (", ".join(doubled), join_said)
+    assert "is wired into no event" not in wired_check, \
+        "join wrote the gates as a word and then reported them missing: %r" \
+        % wired_check
+
+    print("ok: an installed copy joining a project writes every gate as the "
+          "word it answers to rather than as a path off its own machine, and "
+          "joining again leaves each of them wired exactly once")
 
     # The board screen's own list of projects (bw-aisw.4). A project can have a
     # perfect board and still not be on the screen, because the screen shows the

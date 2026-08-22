@@ -12,6 +12,7 @@ mod laid_down;
 mod reachable;
 mod report_tools;
 mod routes;
+mod rules;
 mod serving;
 mod service;
 
@@ -139,6 +140,26 @@ async fn main() {
                 std::process::exit(1);
             }
         }
+        // The third of the three commands a teammate types. Installing gets
+        // them the program, `service install` has the computer keep it up, and
+        // this one turns a folder they already have into a project it runs
+        // (bw-8um.3.6).
+        command_line::Ask::Init(rest) => match rules::init(&rest) {
+            Ok(code) => std::process::exit(code),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
+        // Not typed by a person. A joined project's settings name this, so the
+        // gates it runs are a word rather than one machine's folder.
+        command_line::Ask::Hook { name, rest } => match rules::hook(&name, &rest) {
+            Ok(code) => std::process::exit(code),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
         command_line::Ask::Version => println!("{}", command_line::version()),
         // A copy the computer started at login printed its addresses into a
         // log nobody reads. Asking it where it is has to be something a person

@@ -124,6 +124,16 @@ MARK = "A forwarder, not the tool"
 # guard kept here. The session gates read a command before it runs and see only
 # what a session types; this reads the ref write itself, so a landing line moved
 # by something nobody read is still refused (bw-7e8.5).
+# What an installed copy of the product calls itself, when it is the one doing
+# the joining. A gate wired to a word runs on every machine and survives the
+# data folder moving; a gate wired to an absolute path is one person's home
+# folder written into a file everybody else clones (bw-8um.3.3).
+#
+# Set by `atelier init` and unset in a checkout, so it is only ever a fallback:
+# a project that holds the machinery itself keeps naming its own copy, and
+# nothing moves under the people already running one.
+WORD = (os.environ.get("ATELIER_GATE_WORD") or "").strip()
+
 GUARD = "reference-transaction"
 GUARD_MARK = "A pointer, not the guard"
 GUARD_SHIM = '''#!/usr/bin/env sh
@@ -146,6 +156,26 @@ GUARD="${MACHINERY_HOME:-%(home)s}/%(rel)s"
 [ -r "$GUARD" ] || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 exec python3 "$GUARD" "$@"
+'''
+GUARD_WORD_SHIM = '''#!/usr/bin/env sh
+# %(mark)s (machinery/join writes this file).
+#
+# The guard is `%(word)s hook %(name)s`. It reads the ref write on its standard
+# input and refuses a move of this project's landing line that no landing
+# explains; every other ref goes straight through, `refs/dolt/data` above all —
+# the board syncs that one, and breaking it breaks the board.
+#
+# A word and not a path, so this file holds nothing off one person's disk. An
+# install that has gone stands the guard down instead of wedging the
+# repository: a hook that cannot run must not be a hook that refuses
+# everything.
+#
+# Git calls this three times a transaction and only the first can refuse, so the
+# other two are turned round here rather than in python: this runs on every ref
+# write in the repository, and the board's own sync is most of them.
+[ "$1" = prepared ] || exit 0
+command -v %(word)s >/dev/null 2>&1 || exit 0
+exec %(word)s hook %(name)s "$@"
 '''
 GUARD_REL = os.path.join("hooks", "landing-gate.py")
 
@@ -598,8 +628,12 @@ def guard(root, say):
     board's answer as much as git's, and asking before there is a board answers
     with the one git ships and leaves the shim somewhere nothing reads.
     """
-    body = GUARD_SHIM % {"mark": GUARD_MARK, "home": HOME, "rel": GUARD_REL,
-                         "guard": os.path.join(HOME, GUARD_REL)}
+    if WORD and not ours(root):
+        body = GUARD_WORD_SHIM % {"mark": GUARD_MARK, "word": WORD,
+                                  "name": os.path.basename(GUARD_REL)}
+    else:
+        body = GUARD_SHIM % {"mark": GUARD_MARK, "home": HOME, "rel": GUARD_REL,
+                             "guard": os.path.join(HOME, GUARD_REL)}
     for where in hook_dirs(root):
         out = os.path.join(where, GUARD)
         if os.path.exists(out):
@@ -641,7 +675,13 @@ def there(path):
         said = open(path, errors="replace").read(2000)
     except OSError:
         return False
-    return GUARD_MARK in said and HOME in said
+    if GUARD_MARK not in said:
+        return False
+    # Two spellings, and both are this home's: a checkout naming the machinery
+    # by path, and a project an installed copy joined, which names the guard as
+    # a word instead — so a shim holding no path off anybody's disk is still
+    # read as the guard it is (bw-8um.3.3).
+    return HOME in said or "hook %s" % os.path.basename(GUARD_REL) in said
 
 
 MACHINE = os.path.expanduser("~/.claude")
@@ -1007,6 +1047,20 @@ def half_heard(text):
     return []
 
 
+def runs(command, name):
+    """Whether this hook command runs the gate of this name.
+
+    Two spellings reach here and both have to be recognised, because a gate this
+    table is about to write has to be taken out of wherever it already is or the
+    project ends up running it twice per join. A project that names its gates by
+    path holds one word ending in the gate's file name; a project an installed
+    copy joined holds a word, `hook`, and the file name. Asked of every word
+    rather than of the last, so a gate carrying an argument is still recognised.
+    """
+    return any(os.path.basename(word) == name
+               for word in (command or "").split())
+
+
 def gate(root, name):
     """Where this project types the gate of this name, or "" if nowhere.
 
@@ -1018,7 +1072,12 @@ def gate(root, name):
     """
     if name == PUBLISH:
         room = project.reports_dir()
-        return os.path.join(room, "tools", name) if room else ""
+        if room:
+            return os.path.join(room, "tools", name)
+        # An installed copy carries the report tools and writes them out beside
+        # its own data, so the word reaches them on a machine that has never
+        # been told where they live.
+        return typed(name)
     near = os.path.join("scripts", "hooks", name)
     if os.path.exists(os.path.join(root, near)):
         return os.path.join("$CLAUDE_PROJECT_DIR", near)
@@ -1026,10 +1085,28 @@ def gate(root, name):
     # joined, its gates are named through its own root and not through a path off
     # this disk — so the settings file that ships in the clone names no home
     # folder, and the clone runs its own gates wherever it is put (bw-8um.3.7).
-    inside = os.path.relpath(HOME, root)
-    if not os.path.isabs(inside) and not inside.startswith(os.pardir):
+    if ours(root):
+        inside = os.path.relpath(HOME, root)
         return os.path.join("$CLAUDE_PROJECT_DIR", inside, "hooks", name)
-    return os.path.join(HOME, "hooks", name)
+    # The word before the path: what an installed copy writes here is committed
+    # by whoever joined the project, and read by everybody who clones it.
+    return typed(name) or os.path.join(HOME, "hooks", name)
+
+
+def typed(name):
+    """The gate of this name as a word every machine has, or "" if there is none."""
+    return "%s hook %s" % (WORD, name) if WORD else ""
+
+
+def ours(root):
+    """True when the machinery running this sits inside `root` itself.
+
+    A project that ships the machinery names its own copy through its own root,
+    so the settings file in the clone names no home folder and the clone runs
+    its own gates wherever it is put (bw-8um.3.7).
+    """
+    rel = os.path.relpath(HOME, root)
+    return not os.path.isabs(rel) and not rel.startswith(os.pardir)
 
 
 def wire(root, say):
@@ -1078,7 +1155,7 @@ def wire(root, say):
                 continue
             for block in blocks:
                 kept = [h for h in (block.get("hooks") or [])
-                        if os.path.basename((h.get("command") or "")) != name]
+                        if not runs(h.get("command"), name)]
                 if len(kept) != len(block.get("hooks") or []):
                     block["hooks"] = kept
             home = next((b for b in blocks

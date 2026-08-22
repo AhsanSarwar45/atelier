@@ -136,6 +136,16 @@ pub fn helper_dir() -> Option<PathBuf> {
     resolve_dir(std::env::var("HELPER_DIR").ok(), data_dir(), "helper")
 }
 
+/// Where the working rules live — the board tools, the session gates, and the
+/// workers and skills a session reads.
+///
+/// The product carries them and lays them down here, so setting a project up
+/// works on a computer that has never held this repository. `RULES_DIR`
+/// overrides it, for tests.
+pub fn rules_dir() -> Option<PathBuf> {
+    resolve_dir(std::env::var("RULES_DIR").ok(), data_dir(), "rules")
+}
+
 /// The rule behind them, kept apart from the environment so it can be tested
 /// for the case where the computer names no home.
 fn resolve_dir(override_dir: Option<String>, data: Option<PathBuf>, leaf: &str) -> Option<PathBuf> {

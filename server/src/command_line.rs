@@ -32,6 +32,12 @@ pub enum Ask {
     Where,
     /// Print where this computer keeps the data, and nothing else.
     DataDir,
+    /// Set a project up: lay the working rules down and wire that project to
+    /// them. The words after it are passed to the rules' own joining tool.
+    Init(Vec<String>),
+    /// Run one session gate by name, on behalf of a project whose settings
+    /// name a word rather than a path.
+    Hook { name: String, rest: Vec<String> },
     /// Print what the program can do.
     Help,
     /// Print which build this is.
@@ -76,6 +82,16 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             Some("uninstall") | Some("remove") => Ask::Service(Action::Uninstall),
             Some(other) => Ask::Unknown(other.to_string()),
         },
+        // Everything after the word goes to the joining tool untouched, so
+        // its flags do not have to be listed in two places to keep working.
+        "init" => Ask::Init(args[1..].to_vec()),
+        // Not for typing. It is what a project's own settings file names, so
+        // the gates it runs are a word every machine has instead of one
+        // person's home folder (bw-8um.3.3).
+        "hook" => match args.get(1) {
+            Some(name) => Ask::Hook { name: name.clone(), rest: args[2..].to_vec() },
+            None => Ask::Unknown("hook".to_string()),
+        },
         "where" => Ask::Where,
         "--data-dir" => Ask::DataDir,
         "--help" | "-h" | "help" => Ask::Help,
@@ -94,6 +110,8 @@ Usage:
   atelier run                 Start everything and open the board in your browser
   atelier run --no-browser    The same, without opening a browser
   atelier                     The same as `run --no-browser`
+  atelier init [folder]       Set a project up here: the board, the working
+                              rules and the session gates, wired to each other
   atelier where               Print the addresses to open it at, and start nothing
   atelier service install     Have this computer start it at login, and keep it up
   atelier service uninstall   Stop having it started, and leave nothing behind
@@ -104,6 +122,12 @@ Usage:
 
 There is nothing else to start. The screens live inside this program and the
 chat helper is started beside it, so one command is the whole product.
+
+`init` is the one to run inside a project. It writes the working rules out
+beside this computer's data, puts that project on the board screen's list, and
+wires its session gates to this program by name — so the settings file it
+leaves behind holds no path off this disk and can be committed. It needs
+python3 and `bd` on your path, and it can be run again safely.
 
 Where it listens:
   ATELIER_PORT                the port (default {PORT})
@@ -163,6 +187,43 @@ mod tests {
         // The report tools run from a shell and ask the program where the
         // data is rather than working the per-platform paths out again.
         assert_eq!(ask(&["--data-dir"]), Ask::DataDir);
+    }
+
+    #[test]
+    fn setting_a_project_up_is_one_word_and_a_folder() {
+        assert_eq!(ask(&["init"]), Ask::Init(vec![]));
+        assert_eq!(ask(&["init", "."]), Ask::Init(vec![".".to_string()]));
+    }
+
+    #[test]
+    fn the_joining_tools_own_flags_reach_it_untouched() {
+        // Listing them here would be a second help screen to keep in step
+        // with the first, and it would go stale on the next flag.
+        assert_eq!(
+            ask(&["init", "--forward", "/somewhere"]),
+            Ask::Init(vec!["--forward".to_string(), "/somewhere".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_gate_is_run_by_name_and_carries_its_own_words() {
+        assert_eq!(
+            ask(&["hook", "board-gate.py", "--why"]),
+            Ask::Hook { name: "board-gate.py".to_string(), rest: vec!["--why".to_string()] }
+        );
+    }
+
+    #[test]
+    fn a_gate_with_no_name_is_not_a_gate() {
+        // A settings file that lost the name would otherwise run the server.
+        assert_eq!(ask(&["hook"]), Ask::Unknown("hook".to_string()));
+    }
+
+    #[test]
+    fn the_help_screen_names_setting_a_project_up() {
+        // The one command a teammate needs after installing, so it cannot be
+        // a thing they have to be told about out of band.
+        assert!(help().contains("atelier init"));
     }
 
     #[test]
