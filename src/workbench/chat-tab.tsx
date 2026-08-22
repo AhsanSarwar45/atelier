@@ -73,7 +73,7 @@ import { DrawnTranscript } from '@/workbench/drawn-transcript';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
-import { CHIP_GAP, WhatItRuns } from '@/workbench/what-it-runs';
+import { CHIP_GAP, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 import { workingLine } from '@/workbench/working-line';
 
@@ -113,6 +113,7 @@ function Picker({
   icon,
   label,
   current,
+  currentLabel,
   options,
   testid,
   asleep,
@@ -121,6 +122,12 @@ function Picker({
   icon: ReactNode;
   label: string;
   current: string | null;
+  /**
+   * What to say when the list has no row for what is set. A chat can be running
+   * something the list it announced does not offer, and the button then printed
+   * the wire id straight at the reader — `claude-opus-5[1m]` (bw-ja9l.11).
+   */
+  currentLabel?: string | null;
   options: { value: string; label: string; hint?: string }[];
   testid: string;
   /** No agent is attached, so there is nothing to change until he writes. */
@@ -128,7 +135,7 @@ function Picker({
   onPick: (value: string) => void;
 }) {
   if (!options.length) return null;
-  const shown = options.find((o) => o.value === current)?.label ?? current ?? label;
+  const shown = options.find((o) => o.value === current)?.label ?? currentLabel ?? current ?? label;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -1129,6 +1136,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               label="Permission mode"
               testid="mode-picker"
               current={view.permissionMode}
+              currentLabel={modeWords(view.permissionMode)?.label}
               asleep={asleep}
               // The setting's own spelling is not a label: `bypassPermissions`
               // is what he has to read to know whether this chat still asks
@@ -1151,10 +1159,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               // A session that has not been given a model is on the brand's own
               // default, and the list has a row for exactly that.
               current={view.model ?? BRAND_DEFAULT_MODEL}
+              currentLabel={modelName(view.model ?? BRAND_DEFAULT_MODEL)}
               asleep={asleep}
+              // The list announces ids as often as names — `claude-opus-5[1m]`
+              // is what one chat calls the model it is running — and the chip a
+              // few lines above this said something else about the same build.
+              // One function names it for both (bw-ja9l.11).
               options={view.menu.models.map((m) => ({
                 value: m.value,
-                label: m.displayName,
+                label: modelName(m.value, m.displayName) ?? m.displayName,
                 hint: m.description,
               }))}
               onPick={(model) => {

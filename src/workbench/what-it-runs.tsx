@@ -24,7 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
-import type { ModelChoice } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, type ModelChoice } from '@/workbench/protocol';
 
 /** The brand's own word for a chat nobody has pinned a model to. */
 const BRAND_DEFAULT_LABEL = 'Default model';
@@ -39,17 +39,71 @@ const BRAND_DEFAULT_LABEL = 'Default model';
 export const CHIP_GAP = 'gap-3';
 
 /**
+ * The families this app can name, spelled the way the terminal spells them.
+ *
+ * The terminal's own line reads `Opus 5 (1M context)`. Nothing else a reader
+ * looks at should call that build anything else, and two places here did: this
+ * chip ran the wire id through `inWords` and said `Claude opus 5[1m]`, while
+ * the picker an inch below it printed `claude-opus-5[1m]` raw (bw-ja9l.11).
+ */
+const FAMILY_NAME: Record<string, string> = {
+  opus: 'Opus',
+  sonnet: 'Sonnet',
+  haiku: 'Haiku',
+  fable: 'Fable',
+};
+
+/** What a build tag in brackets means, written out. */
+const BUILD_NAME: Record<string, string> = {
+  '1m': '1M context',
+};
+
+/**
+ * The one name for a model, wherever a model is named.
+ *
+ * `announced` is what the picker's list called it, where there is a list. It is
+ * the answer for an id this cannot parse, and for a bare family key — `opus`
+ * carries no version of its own and the list's `Opus 5` says more than `Opus`
+ * would. It is NOT the answer for an id this CAN parse, which is the whole
+ * correction: the list a chat announces names the long-context build
+ * `claude-opus-5[1m]`, and that is an id and not a name.
+ */
+export function modelName(wire: string | null, announced?: string | null): string | null {
+  if (!wire) return null;
+  const id = wire.toLowerCase();
+  if (id === BRAND_DEFAULT_MODEL) return BRAND_DEFAULT_LABEL;
+
+  const build = /\[([^\]]+)\]$/.exec(id)?.[1] ?? null;
+  const parts = id
+    .replace(/\[[^\]]*\]$/, '')
+    .replace(/^claude-/, '')
+    .replace(/-\d{8}$/, '')
+    .replace(/-(latest|v\d+)$/, '')
+    .split('-');
+
+  const family = FAMILY_NAME[parts[0]];
+  if (!family) return announced || inWords(wire);
+
+  // `4-5` is one version and not two, and the date has already come off above:
+  // what is left after the family is the number a reader knows the model by.
+  const version = parts.slice(1).filter((p) => /^\d+$/.test(p)).join('.');
+  if (!version && !build) return announced || family;
+
+  const tag = build ? ` (${BUILD_NAME[build] ?? build.toUpperCase()})` : '';
+  return `${family}${version ? ` ${version}` : ''}${tag}`;
+}
+
+/**
  * The model's name as the picker beside it says it.
  *
  * The picker's list is the only place display names exist, and a chat begun in
  * a terminal has no picker list of its own — nothing is driving it, so nothing
- * announced one. Its model comes off its record as the wire id, and `inWords`
- * is what stands between a reader and `claude-opus-5`.
+ * announced one. Both cases go through {@link modelName}, which is what keeps
+ * this chip and that picker saying one thing.
  */
 export function modelWords(model: string | null, models: ModelChoice[]): string | null {
   if (!model) return null;
-  const named = models.find((m) => m.value === model)?.displayName;
-  return named ?? inWords(model);
+  return modelName(model, models.find((m) => m.value === model)?.displayName);
 }
 
 /**

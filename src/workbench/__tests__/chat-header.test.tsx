@@ -26,7 +26,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ModelChoice } from '@/workbench/protocol';
-import { CHIP_GAP, modelKey, WhatItRuns } from '@/workbench/what-it-runs';
+import { CHIP_GAP, modelKey, modelName, WhatItRuns } from '@/workbench/what-it-runs';
 
 /** The picker's own list, as a chat this app drives announces it. */
 const MENU: ModelChoice[] = [
@@ -108,8 +108,56 @@ describe('what the chat is running, on its own line', () => {
     // list of models; its own record answers with the wire id (bw-ja9l.2).
     draw('claude-opus-5', 'bypassPermissions', NO_MENU);
 
-    expect(modelChip()?.textContent).toBe('Claude opus 5');
+    expect(modelChip()?.textContent).toBe('Opus 5');
     expect(modeChip()?.textContent).toBe('Skip all checks');
+  });
+
+  it('names the long-context build the way the terminal names it', () => {
+    // The chip said `Claude opus 5[1m]` and the picker an inch below it said
+    // `claude-opus-5[1m]`: two spellings of one build, neither of them the name
+    // the reader's own terminal prints (bw-ja9l.11).
+    draw('claude-opus-5[1m]', 'bypassPermissions', NO_MENU);
+
+    expect(modelChip()?.textContent).toBe('Opus 5 (1M context)');
+    // The id is still one hover away, which is where it belongs.
+    expect(modelChip()?.getAttribute('title')).toContain('claude-opus-5[1m]');
+  });
+
+  it('names every model the kit hands it, and defers where it cannot', () => {
+    for (const [wire, said] of [
+      ['claude-opus-5[1m]', 'Opus 5 (1M context)'],
+      ['claude-opus-5', 'Opus 5'],
+      ['claude-sonnet-5', 'Sonnet 5'],
+      ['claude-fable-5', 'Fable 5'],
+      ['claude-haiku-4-5-20251001', 'Haiku 4.5'],
+      ['claude-opus-4-5-20251101', 'Opus 4.5'],
+      ['claude-sonnet-5-latest', 'Sonnet 5'],
+      ['default', 'Default model'],
+      // No family it knows: the id opened up is better than the id.
+      ['some-new-thing', 'Some new thing'],
+    ] as const) {
+      expect(modelName(wire), wire).toBe(said);
+    }
+
+    // A bare family key carries no version, so the list's own word wins — and
+    // an id this CAN read never defers to the list, which is the correction:
+    // that list is where `claude-opus-5[1m]` came from.
+    expect(modelName('opus', 'Opus 5')).toBe('Opus 5');
+    expect(modelName('opus')).toBe('Opus');
+    expect(modelName('claude-opus-5[1m]', 'claude-opus-5[1m]')).toBe('Opus 5 (1M context)');
+    expect(modelName('opusplan', 'Opus, planning first')).toBe('Opus, planning first');
+    expect(modelName(null)).toBeNull();
+  });
+
+  it('gives the picker under the writing box the same name as the chip', () => {
+    // Both read one function. The picker's button prints whatever the list said
+    // only where this cannot parse the id (chat-tab.tsx).
+    const tab = readFileSync(resolve(__dirname, '../chat-tab.tsx'), 'utf8');
+    const picker = tab.slice(tab.indexOf('testid="model-picker"'));
+    const opening = picker.slice(0, picker.indexOf('/>'));
+
+    expect(opening, 'the list is named by the shared function').toContain('modelName(m.value, m.displayName)');
+    expect(opening, 'and so is a model the list has no row for').toContain('currentLabel={modelName(');
   });
 
   it('says the brand’s default only where there is a picker to mean it', () => {
