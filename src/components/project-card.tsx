@@ -237,7 +237,7 @@ export function ProjectCard({
                     onKeyDown={(e) => e.stopPropagation()}
                     role="note"
                     tabIndex={0}
-                    aria-label={`Old beads format — migrate with bd init --prefix ${deriveBeadPrefix(path, name)}`}
+                    aria-label={`Old data format — migrate with bd init --prefix ${deriveBeadPrefix(path, name)}`}
                   >
                     <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                     Old format — migrate
@@ -246,7 +246,7 @@ export function ProjectCard({
                 <TooltipContent side="top" className="max-w-xs">
                   <div className="space-y-1">
                     <p className="text-xs">
-                      This project uses the old JSONL beads format. Run this in the project directory to migrate to Dolt:
+                      This project uses the old JSONL data format. Run this in the project directory to migrate to Dolt:
                     </p>
                     <Badge asChild variant="secondary" appearance="light" size="sm" className="w-full font-mono">
                       <code>bd init --prefix {deriveBeadPrefix(path, name)}</code>

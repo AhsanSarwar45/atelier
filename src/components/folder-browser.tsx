@@ -287,7 +287,7 @@ export function FolderBrowser({
             .beads found
           </Badge>
           <span className="text-xs text-t-tertiary">
-            This folder contains a beads project
+            This folder holds a tracked project
           </span>
         </Panel>
       )}

@@ -157,7 +157,7 @@ export async function closeBead(beadId: string, cwd?: string): Promise<void> {
   const result = await executeBdCommand(["close", beadId], cwd);
 
   if (!result.success) {
-    throw new Error(result.stderr || `Failed to close bead: exit code ${result.code}`);
+    throw new Error(result.stderr || `Failed to close card: exit code ${result.code}`);
   }
 }
 
@@ -188,7 +188,7 @@ export async function createBead(
   );
 
   if (!result.success) {
-    throw new Error(result.stderr || `Failed to create bead: exit code ${result.code}`);
+    throw new Error(result.stderr || `Failed to create card: exit code ${result.code}`);
   }
 
   // Try to extract bead ID from output (format varies by CLI version)
@@ -210,7 +210,7 @@ export async function showBead(beadId: string, cwd?: string): Promise<string> {
   const result = await executeBdCommand(["show", beadId], cwd);
 
   if (!result.success) {
-    throw new Error(result.stderr || `Failed to show bead: exit code ${result.code}`);
+    throw new Error(result.stderr || `Failed to show card: exit code ${result.code}`);
   }
 
   return result.stdout;
@@ -229,7 +229,7 @@ export async function listBeads(cwd?: string): Promise<string> {
   const result = await executeBdCommand(["list"], cwd);
 
   if (!result.success) {
-    throw new Error(result.stderr || `Failed to list beads: exit code ${result.code}`);
+    throw new Error(result.stderr || `Failed to list cards: exit code ${result.code}`);
   }
 
   return result.stdout;

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
-  /** Fallback UI label (e.g., "Kanban Board", "Bead Detail") */
+  /** Fallback UI label (e.g., "Kanban Board", "Card Detail") */
   label?: string;
 }
 

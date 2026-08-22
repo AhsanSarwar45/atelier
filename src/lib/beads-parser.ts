@@ -142,7 +142,7 @@ export async function parseBeadsFromPath(projectPath: string): Promise<Bead[]> {
   try {
     return await loadProjectBeads(projectPath);
   } catch (error) {
-    console.error(`Failed to load beads from ${projectPath}:`, error);
+    console.error(`Failed to load cards from ${projectPath}:`, error);
     return [];
   }
 }

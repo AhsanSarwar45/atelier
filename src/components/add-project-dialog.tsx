@@ -260,7 +260,7 @@ export function AddProjectDialog({
           <DialogDescription>
             {showNameInput
               ? "Give your project a name."
-              : "Enter the path to a folder containing a beads project."}
+              : "Enter the path to a folder with a tracked project in it."}
           </DialogDescription>
         </DialogHeader>
 

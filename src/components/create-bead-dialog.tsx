@@ -94,7 +94,7 @@ export function CreateBeadDialog({
       handleOpenChange(false);
       onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create bead");
+      setError(err instanceof Error ? err.message : "Failed to create card");
     } finally {
       setIsSubmitting(false);
     }
@@ -104,7 +104,7 @@ export function CreateBeadDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl w-[90vw] bg-surface-raised border-b-default">
         <DialogHeader>
-          <DialogTitle className="text-t-primary">{parentId ? "New Subtask" : "New Bead"}</DialogTitle>
+          <DialogTitle className="text-t-primary">{parentId ? "New Subtask" : "New Card"}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">

@@ -170,7 +170,7 @@ export function QuickFilterBar({
         <Input
           ref={searchInputRef}
           type="text"
-          aria-label="Search beads"
+          aria-label="Search cards"
           placeholder="Search… (/)"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
@@ -372,13 +372,13 @@ export function QuickFilterBar({
                 <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
                 <span className="tabular-nums">{unknownStatusCount}</span>
                 <span className="sr-only">
-                  {unknownStatusCount === 1 ? 'bead has an' : 'beads have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
+                  {unknownStatusCount === 1 ? 'card has an' : 'cards have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
                 </span>
               </Badge>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-xs">
               <p className="font-medium">
-                {unknownStatusCount} {unknownStatusCount === 1 ? 'bead has an' : 'beads have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
+                {unknownStatusCount} {unknownStatusCount === 1 ? 'card has an' : 'cards have'} unknown {unknownStatusCount === 1 ? 'status' : 'statuses'}
               </p>
               <p className="text-primary-foreground/70 mt-1">
                 {unknownStatusNames.length > 0

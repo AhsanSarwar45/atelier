@@ -101,7 +101,7 @@ export default function ProjectsPage() {
       <main className="flex flex-col items-center px-6 pt-32">
         {/* Centered Heading with Space Grotesk */}
         <h1 className="mb-4 text-center text-balance font-heading text-4xl font-bold tracking-tight text-t-primary sm:text-5xl">
-          Manage Your Beads Projects
+          Manage Your Projects
         </h1>
         <p className="text-center text-t-tertiary text-sm mb-8">
           Highly recommended to use with the{" "}
@@ -111,7 +111,7 @@ export default function ProjectsPage() {
             rel="noopener noreferrer"
             className="text-info hover:text-info underline"
           >
-            Beads Orchestration Skill
+            Claude Protocol orchestration skill
           </a>
         </p>
 

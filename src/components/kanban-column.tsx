@@ -190,7 +190,7 @@ export const KanbanColumn = memo(function KanbanColumn({
         {beads.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-b-strong/50 rounded-lg">
             <PackageOpen className="size-8 text-t-muted mb-2" aria-hidden="true" />
-            <span className="text-t-muted text-sm">No beads</span>
+            <span className="text-t-muted text-sm">No cards</span>
           </div>
         ) : (
           <div className="relative" style={{ height }}>

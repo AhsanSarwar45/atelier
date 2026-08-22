@@ -254,7 +254,7 @@ export function ProjectSettingsDialog({
                 </div>
                 <p className="text-xs text-t-muted">
                   {localPath
-                    ? "Click Clear to switch from central Dolt server to per-project mode. The project will read beads from its local .beads/ folder instead."
+                    ? "Click Clear to switch from central Dolt server to per-project mode. The project will read its cards from its local .beads/ folder instead."
                     : "Set a Local Folder below first, then Clear will switch the project to per-project Dolt mode."}
                 </p>
               </div>
@@ -302,7 +302,7 @@ export function ProjectSettingsDialog({
                       variant="destructive"
                       onClick={() => {
                         const confirmed = window.confirm(
-                          "Delete this project from the dashboard? Your beads data and files will not be affected."
+                          "Delete this project from the dashboard? Your cards and files will not be affected."
                         );
                         if (confirmed) {
                           onDelete();

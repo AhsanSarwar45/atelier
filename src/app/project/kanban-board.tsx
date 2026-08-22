@@ -334,7 +334,7 @@ export default function KanbanBoard() {
       <main data-testid="board-scroll" className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-4">
         {beadsLoading ? (
           <div className="flex items-center justify-center h-full">
-            <div role="status" className="text-t-muted">Loading beads…</div>
+            <div role="status" className="text-t-muted">Loading cards…</div>
           </div>
         ) : beadsError ? (
           <div className="flex items-center justify-center h-full">

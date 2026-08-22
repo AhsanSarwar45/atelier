@@ -113,7 +113,7 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
     "data-bead-id": bead.id,
     role: "button" as const,
     tabIndex: 0,
-    "aria-label": `Select bead: ${bead.title}`,
+    "aria-label": `Select card: ${bead.title}`,
     onClick: () => onSelect(bead),
     onKeyDown: (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {

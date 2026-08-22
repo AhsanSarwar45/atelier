@@ -140,7 +140,7 @@ export function useProjects(): UseProjectsResult {
                 loaded++;
                 setLoadingStatus(
                   loaded < total
-                    ? `Loading beads: ${project.name} (${loaded}/${total})`
+                    ? `Loading cards: ${project.name} (${loaded}/${total})`
                     : null
                 );
                 setProjects((prev) =>
