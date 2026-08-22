@@ -42,9 +42,9 @@ Three halves, and all of them have to hold:
 Three things share the old spelling and are not it, so each is exempt by a
 named rule rather than by being quietly skipped:
 
-  the repository        `github.com/weselow/beads-web` is an address. Renaming
-                        the product does not move a repository, and an address
-                        that has moved is a redirect, not a rename.
+  where it came from    this is a fork, and the repository it was forked from
+                        is named in the record. A fact about the past is not a
+                        name the product still answers to.
   the checkout          the folder on disk and the project's name on the board
                         and in report paths. The project is not the product.
   what came before      the earlier data folder, the earlier switch names and
@@ -125,10 +125,8 @@ EARLIER = re.compile(
 # reason is the second half. Ordered most specific first so a refusal names the
 # narrowest rule that covers it.
 ALLOWED = [
-    (r"github\.com[:/]weselow/(beads-web|homebrew-beads-web)|github:weselow/beads-web"
-     r"|weselow/homebrew-beads-web|homebrew-beads-web",
-     "the repository address"),
-    (r'GITHUB_REPO|weselow/beads-web(/|"|`|\s|$)', "the repository address"),
+    (r"weselow/beads-web|Beads-Kanban-UI",
+     "where this fork came from, which is a fact about the past"),
     (r"beads-web(-checks)?[/'\"`]|[/'\"(=]beads-web|cd beads-web|dev/beads-web"
      r'|"Beads Web"|beads-web = ', "the checkout, or the project's name on the board"),
     (r"beads-web-[0-9a-z]{2,}|beads-kanban-ui-[0-9a-z]+|bd-beads-web-",

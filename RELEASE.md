@@ -12,10 +12,10 @@ distribution channel.
 
 | Channel | Where copies live | Updated by | One-time setup |
 |---------|-------------------|-----------|----------------|
-| GitHub Releases | `weselow/beads-web` → Releases | `release.yml` (automatic) | — |
+| GitHub Releases | `ahsanswr/atelier` → Releases | `release.yml` (automatic) | — |
 | Scoop (Windows) | `bucket/atelier.json` (this repo) | `release.yml` (automatic) | — |
 | Nix (macOS/Linux/WSL) | `flake.nix` (this repo) | `ci.yml` refreshes deps hash; version is manual | — |
-| Homebrew (macOS/Linux) | `Formula/atelier.rb` in `weselow/homebrew-beads-web` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
+| Homebrew (macOS/Linux) | `Formula/atelier.rb` in `ahsanswr/homebrew-atelier` | `release.yml` (automatic) | tap repo + `HOMEBREW_TAP_TOKEN` |
 | winget (Windows) | `microsoft/winget-pkgs` | `release.yml` `winget` job via `wingetcreate` | first submission manual + `WINGET_TOKEN` |
 
 ## Cutting a release
@@ -96,19 +96,19 @@ Nix `npmDepsHash` current, auto-committing the refreshed hash when it drifts.
 
 ## Required repository secrets
 
-Set under *weselow/beads-web → Settings → Secrets and variables → Actions*:
+Set under *ahsanswr/atelier → Settings → Secrets and variables → Actions*:
 
 | Secret | Purpose | How to create |
 |--------|---------|---------------|
 | `GITHUB_TOKEN` | built-in; release + Scoop/Nix commits | automatic |
-| `HOMEBREW_TAP_TOKEN` | push the formula to `weselow/homebrew-beads-web` | fine-grained PAT, that repo only, **Contents: read/write** |
+| `HOMEBREW_TAP_TOKEN` | push the formula to `ahsanswr/homebrew-atelier` | fine-grained PAT, that repo only, **Contents: read/write** |
 | `WINGET_TOKEN` | fork `microsoft/winget-pkgs` and open the winget PR | classic PAT, **`public_repo`** scope |
 
 Both the Homebrew step and the winget job no-op cleanly when their token is absent.
 
 ## One-time setup (already completed)
 
-- Tap repo `weselow/homebrew-beads-web` created and seeded with `Formula/atelier.rb`.
+- Tap repo `ahsanswr/homebrew-atelier` created and seeded with `Formula/atelier.rb`.
 - Secrets `HOMEBREW_TAP_TOKEN` and `WINGET_TOKEN` added.
 - First winget submission opened against `microsoft/winget-pkgs` and the Microsoft
   CLA signed. Subsequent releases update winget automatically.

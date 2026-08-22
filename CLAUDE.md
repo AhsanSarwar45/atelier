@@ -94,7 +94,7 @@ The more specific the LEARNED comment, the more useful it is next time.
 ## Current State
 
 - Independent project, checked out as `beads-web` (the repository name), forked from AvivK5498/Beads-Kanban-UI
-- GitHub: https://github.com/weselow/beads-web
+- GitHub: https://github.com/ahsanswr/atelier
 - npm package name: `atelier`
 - Default branch: `main` (merged from production, production branch kept for now)
 - 11 themes implemented with CSS variables and persistence

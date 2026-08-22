@@ -14,7 +14,7 @@ use tracing::{info, warn};
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// GitHub repository for release checks.
-const GITHUB_REPO: &str = "weselow/beads-web"; // the repository address, not the product name
+const GITHUB_REPO: &str = "ahsanswr/atelier"; // the repository address, not the product name
 
 /// Cache duration in seconds (1 hour).
 const CACHE_TTL_SECS: u64 = 3600;

@@ -113,7 +113,7 @@ Latte, Frappe, Macchiato, and Mocha are available from the theme switcher.
 
 ### Download
 
-Download the binary for your platform from [GitHub Releases](https://github.com/weselow/beads-web/releases/latest):
+Download the binary for your platform from [GitHub Releases](https://github.com/ahsanswr/atelier/releases/latest):
 
 | Platform | File |
 |----------|------|
@@ -129,7 +129,7 @@ Each release also ships a `SHA256SUMS.txt` to verify your download.
 **Scoop (Windows):**
 
 ```powershell
-scoop bucket add atelier https://github.com/weselow/beads-web
+scoop bucket add atelier https://github.com/ahsanswr/atelier
 scoop install atelier
 ```
 
@@ -138,13 +138,13 @@ Update later with `scoop update atelier`.
 **Nix (macOS / Linux / WSL):**
 
 ```bash
-nix run github:weselow/beads-web
+nix run github:ahsanswr/atelier
 ```
 
 **Homebrew (macOS / Linux):**
 
 ```bash
-brew install weselow/beads-web/atelier
+brew install ahsanswr/atelier/atelier
 ```
 
 **winget (Windows):**
@@ -244,7 +244,7 @@ into the registration, because a service inherits no shell.
 Prerequisites: Node.js 20+, [Rust toolchain](https://rustup.rs/), and the [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH.
 
 ```bash
-git clone https://github.com/weselow/beads-web.git
+git clone https://github.com/ahsanswr/atelier.git
 cd beads-web
 npm install
 ```
@@ -296,7 +296,7 @@ The Next.js dev server (port 3007) serves the frontend with hot-reload; the Rust
 
 ### Build from Source (release binary)
 
-Produces the same self-contained binary that CI publishes to [Releases](https://github.com/weselow/beads-web/releases/latest) — the frontend is embedded, so nothing needs Rust at runtime and the board needs no Node.js. The chat helper still does.
+Produces the same self-contained binary that CI publishes to [Releases](https://github.com/ahsanswr/atelier/releases/latest) — the frontend is embedded, so nothing needs Rust at runtime and the board needs no Node.js. The chat helper still does.
 
 ```bash
 npm install

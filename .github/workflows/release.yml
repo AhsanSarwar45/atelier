@@ -123,7 +123,7 @@ jobs:
           cd repo
           jq --arg v "$VERSION" --arg h "$HASH" --arg tag "$TAG" \
             '.version = $v
-             | .architecture."64bit".url = "https://github.com/weselow/beads-web/releases/download/" + $tag + "/atelier-win-x64.exe#/atelier.exe"
+             | .architecture."64bit".url = "https://github.com/ahsanswr/atelier/releases/download/" + $tag + "/atelier-win-x64.exe#/atelier.exe"
              | .architecture."64bit".hash = $h' \
             bucket/atelier.json > bucket/atelier.json.tmp
           mv bucket/atelier.json.tmp bucket/atelier.json
@@ -151,7 +151,7 @@ jobs:
           ARM=$(sha256sum release/atelier-darwin-arm64 | cut -d' ' -f1)
           INTEL=$(sha256sum release/atelier-darwin-x64 | cut -d' ' -f1)
           LINUX=$(sha256sum release/atelier-linux-x64 | cut -d' ' -f1)
-          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/weselow/homebrew-beads-web.git" tap
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/ahsanswr/homebrew-atelier.git" tap
           mkdir -p tap/Formula
           sed -e "s|__VERSION__|${VERSION}|g" \
               -e "s|__ARM_SHA__|${ARM}|g" \
@@ -193,6 +193,6 @@ jobs:
           }
           $tag = "${{ inputs.version || github.ref_name }}"
           $version = $tag.TrimStart('v')
-          $url = "https://github.com/weselow/beads-web/releases/download/$tag/atelier-win-x64.exe"
+          $url = "https://github.com/ahsanswr/atelier/releases/download/$tag/atelier-win-x64.exe"
           Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
           .\wingetcreate.exe update weselow.atelier --version $version --urls $url --submit --token $env:WINGET_TOKEN

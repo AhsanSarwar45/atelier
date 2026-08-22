@@ -18,10 +18,10 @@ the result to the tap, including the first time.
 
 On each release the `Update Homebrew formula` step renders the template with the new
 version and freshly computed SHA-256 hashes and pushes the result to
-`weselow/homebrew-beads-web` as `Formula/atelier.rb`. Users then install with:
+`ahsanswr/homebrew-atelier` as `Formula/atelier.rb`. Users then install with:
 
 ```
-brew install weselow/beads-web/atelier
+brew install ahsanswr/atelier/atelier
 ```
 
 ## `winget/`
@@ -41,6 +41,6 @@ wingetcreate submit packaging/winget --token <PAT>
 ## Required repo secrets
 
 - `HOMEBREW_TAP_TOKEN` — a personal access token with push rights to
-  `weselow/homebrew-beads-web`. When absent, the Homebrew step no-ops.
+  `ahsanswr/homebrew-atelier`. When absent, the Homebrew step no-ops.
 - `WINGET_TOKEN` — a personal access token used by `wingetcreate` to open the
   winget-pkgs PR. When absent, the winget job no-ops.

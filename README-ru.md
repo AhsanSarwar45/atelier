@@ -107,7 +107,7 @@ Atelier даёт вам Kanban-доску в реальном времени, м
 
 ### Скачать
 
-Скачайте бинарник для вашей платформы со страницы [GitHub Releases](https://github.com/weselow/beads-web/releases/latest):
+Скачайте бинарник для вашей платформы со страницы [GitHub Releases](https://github.com/ahsanswr/atelier/releases/latest):
 
 | Платформа | Файл |
 |----------|------|
@@ -121,7 +121,7 @@ Atelier даёт вам Kanban-доску в реальном времени, м
 **Scoop (Windows):**
 
 ```powershell
-scoop bucket add atelier https://github.com/weselow/beads-web
+scoop bucket add atelier https://github.com/ahsanswr/atelier
 scoop install atelier
 ```
 
@@ -130,13 +130,13 @@ scoop install atelier
 **Nix (macOS / Linux / WSL):**
 
 ```bash
-nix run github:weselow/beads-web
+nix run github:ahsanswr/atelier
 ```
 
 **Homebrew (macOS / Linux):**
 
 ```bash
-brew install weselow/beads-web/atelier
+brew install ahsanswr/atelier/atelier
 ```
 
 **winget (Windows):**
@@ -165,7 +165,7 @@ atelier-win-x64.exe
 Требования: Node.js 20+, [Rust toolchain](https://rustup.rs/) и [Beads CLI](https://github.com/gastownhall/beads) (`bd`) в PATH.
 
 ```bash
-git clone https://github.com/weselow/beads-web.git
+git clone https://github.com/ahsanswr/atelier.git
 cd beads-web
 npm install
 ```
@@ -203,7 +203,7 @@ Dev-сервер Next.js (порт 3007) отдаёт frontend с горячей
 
 ### Сборка из исходников (готовый бинарник)
 
-Собирает тот же самодостаточный бинарник, что публикует CI в [Releases](https://github.com/weselow/beads-web/releases/latest) — frontend встроен, поэтому Rust при запуске не нужен и доске не нужен Node.js. Помощнику чата он по-прежнему нужен.
+Собирает тот же самодостаточный бинарник, что публикует CI в [Releases](https://github.com/ahsanswr/atelier/releases/latest) — frontend встроен, поэтому Rust при запуске не нужен и доске не нужен Node.js. Помощнику чата он по-прежнему нужен.
 
 ```bash
 npm install
