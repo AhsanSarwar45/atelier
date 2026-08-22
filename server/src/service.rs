@@ -88,7 +88,17 @@ pub fn carried_settings() -> Vec<(String, String)> {
 }
 
 /// The names that travel, in the order they are written down.
-const CARRIED: [&str; 3] = ["ATELIER_HOST", "ATELIER_DATA_DIR", "BEADS_WORKBENCH_PORT"];
+///
+/// `PATH` is one of them because this program is a front onto command-line
+/// tools it does not carry: the chat helper is started with `node` and its kit
+/// fetched once with `npm`, the boards are read with `bd`, the database is
+/// `dolt`. Every one of those is a bare name looked up on a list of places.
+/// A service is started by something that never read the reader's shell, so
+/// with the list left behind the board comes up with a dead chat and no boards
+/// on it (bw-w5zs). It is carried exactly as the reader had it when they
+/// registered, because that is the list their own tools were found on.
+const CARRIED: [&str; 4] =
+    ["ATELIER_HOST", "ATELIER_DATA_DIR", "BEADS_WORKBENCH_PORT", "PATH"];
 
 /// The rule behind it, kept apart from the environment so it can be tested
 /// without one test's variable reaching another running beside it.
@@ -109,6 +119,28 @@ fn settings_from(look: impl Fn(&str) -> Option<String>) -> Vec<(String, String)>
  * What each registrar is handed.
  * ------------------------------------------------------------------ */
 
+/// One setting, written where a service manager splits its lines on spaces.
+///
+/// `Environment=` takes more than one setting on a line, separated by spaces,
+/// so a folder or a list of places with a space in it would arrive as two
+/// settings, the second of them nonsense. Quoting the whole assignment stops
+/// that; a quote or a backslash inside is escaped so it cannot end the
+/// quoting early.
+fn written_down(name: &str, value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("Environment=\"{name}={escaped}\"\n")
+}
+
+/// Text put inside a tag, with the characters that would end it turned back
+/// into text.
+///
+/// A folder or a list of places is the reader's, not ours: an ampersand in one
+/// writes a registration the machine refuses to read, and the reader is left
+/// with nothing starting and no idea why.
+fn as_text(value: &str) -> String {
+    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 /// The systemd user unit.
 ///
 /// A user unit rather than a system one: writing into `/etc` needs a password,
@@ -117,10 +149,7 @@ fn settings_from(look: impl Fn(&str) -> Option<String>) -> Vec<(String, String)>
 /// `install` turns on.
 pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
     let args = STARTED_AS.join(" ");
-    let environment: String = carried
-        .iter()
-        .map(|(name, value)| format!("Environment={name}={value}\n"))
-        .collect();
+    let environment: String = carried.iter().map(|(name, value)| written_down(name, value)).collect();
     format!(
         "[Unit]\n\
          Description={DISPLAY} — the board, the screens and the chat\n\
@@ -146,8 +175,12 @@ pub fn launch_agent(exe: &str, carried: &[(String, String)], agent: &str) -> Str
         .collect();
     let environment: String = carried
         .iter()
-        .map(|(name, value)| format!("\x20   <key>{name}</key>\n\x20   <string>{value}</string>\n"))
+        .map(|(name, value)| {
+            format!("\x20   <key>{}</key>\n\x20   <string>{}</string>\n", as_text(name), as_text(value))
+        })
         .collect();
+    let exe = as_text(exe);
+    let agent = as_text(agent);
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
@@ -397,9 +430,61 @@ mod tests {
         });
 
         let unit = systemd_unit("/usr/bin/atelier", &carried);
-        assert!(unit.contains("Environment=ATELIER_DATA_DIR=/somewhere/else"), "{unit}");
-        assert!(unit.contains("Environment=BEADS_WORKBENCH_PORT=4009"), "{unit}");
-        assert!(unit.contains("Environment=ATELIER_PORT="), "{unit}");
+        assert!(unit.contains("Environment=\"ATELIER_DATA_DIR=/somewhere/else\""), "{unit}");
+        assert!(unit.contains("Environment=\"BEADS_WORKBENCH_PORT=4009\""), "{unit}");
+        assert!(unit.contains("Environment=\"ATELIER_PORT="), "{unit}");
+    }
+
+    #[test]
+    fn the_places_the_reader_s_own_tools_were_found_travel_too() {
+        // The chat helper is started with `node`, its kit fetched with `npm`,
+        // the boards read with `bd`. Every one is a bare name looked up on a
+        // list, and a service is started by something that never read the
+        // reader's shell — so with the list left behind the board comes up
+        // with a dead chat and no boards on it (bw-w5zs).
+        let carried = settings_from(|name| match name {
+            "PATH" => Some("/home/me/.nvm/versions/node/v22/bin:/usr/bin".to_string()),
+            _ => None,
+        });
+        assert!(
+            carried.contains(&(
+                "PATH".to_string(),
+                "/home/me/.nvm/versions/node/v22/bin:/usr/bin".to_string()
+            )),
+            "{carried:?}"
+        );
+
+        let unit = systemd_unit("/usr/bin/atelier", &carried);
+        assert!(unit.contains("/home/me/.nvm/versions/node/v22/bin"), "{unit}");
+        let plist = launch_agent("/usr/bin/atelier", &carried, "com.weselow.atelier");
+        assert!(plist.contains("<key>PATH</key>"), "{plist}");
+    }
+
+    #[test]
+    fn a_place_with_a_space_in_its_name_stays_one_place() {
+        // `Environment=` takes several settings on a line, split on spaces, so
+        // an unquoted folder under "My Tools" would arrive as two — the second
+        // of them a setting nobody wrote.
+        let carried = settings_from(|name| match name {
+            "PATH" => Some("/Users/me/My Tools/bin:/usr/bin".to_string()),
+            _ => None,
+        });
+        let unit = systemd_unit("/usr/bin/atelier", &carried);
+        assert!(unit.contains("Environment=\"PATH=/Users/me/My Tools/bin:/usr/bin\""), "{unit}");
+    }
+
+    #[test]
+    fn a_folder_the_reader_named_cannot_write_a_registration_the_machine_refuses() {
+        // An ampersand or an angle bracket in a path is text, not a tag. Left
+        // as it stands, the machine reads a broken registration, starts
+        // nothing, and says nothing the reader can act on.
+        let carried = settings_from(|name| match name {
+            "ATELIER_DATA_DIR" => Some("/Users/me/R&D/<work>".to_string()),
+            _ => None,
+        });
+        let plist = launch_agent("/usr/bin/atelier", &carried, "com.weselow.atelier");
+        assert!(plist.contains("<string>/Users/me/R&amp;D/&lt;work&gt;</string>"), "{plist}");
+        assert!(!plist.contains("R&D"), "{plist}");
     }
 
     #[test]
@@ -439,7 +524,7 @@ mod tests {
         // A service has no shell and inherits nothing, so a port left to be
         // read from the environment would quietly become the default at the
         // next reboot.
-        assert!(systemd_unit("/usr/bin/atelier", &at(3456)).contains("Environment=ATELIER_PORT=3456"));
+        assert!(systemd_unit("/usr/bin/atelier", &at(3456)).contains("Environment=\"ATELIER_PORT=3456\""));
         let plist = launch_agent("/usr/bin/atelier", &at(3456), "com.weselow.atelier");
         assert!(plist.contains("<string>3456</string>"), "{plist}");
     }

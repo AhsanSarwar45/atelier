@@ -86,6 +86,31 @@ mkdir -p "$WORK/data"
 cp "$BINARY" "$WORK/atelier"
 chmod +x "$WORK/atelier"
 
+# A folder of our own on the reader's list of places, put in front of it.
+#
+# The chat helper is started with `node` and its kit fetched once with `npm`,
+# and both are bare names looked up on that list. The login manager has a list
+# of its own, and on this machine it happens to hold node too — so a check that
+# only asked whether the chat came up would pass whether or not the reader's
+# list travelled. These stand-ins are reachable ONLY through the folder below,
+# and each writes down that it was reached before handing on to the real one.
+# Their marks are therefore proof that the copy the machine started looked on
+# the list it was registered with (bw-w5zs).
+mkdir -p "$WORK/bin" "$WORK/reached"
+for tool in node npm; do
+  real="$(command -v "$tool" 2>/dev/null)"
+  if [ -z "$real" ]; then
+    continue
+  fi
+  cat > "$WORK/bin/$tool" <<SHIM
+#!/usr/bin/env bash
+: > "$WORK/reached/$tool"
+exec "$real" "\$@"
+SHIM
+  chmod +x "$WORK/bin/$tool"
+done
+PLACES="$WORK/bin:$PATH"
+
 NAME="atelier-check-$$"
 UNIT="$NAME.service"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -126,6 +151,7 @@ registered() {
       ATELIER_HOST=127.0.0.1 \
       ATELIER_DATA_DIR="$WORK/data" \
       BEADS_WORKBENCH_PORT="$HELPER_PORT" \
+      PATH="$PLACES" \
       "$WORK/atelier" service "$@" 2>&1
 }
 
@@ -159,13 +185,26 @@ fi
 
 # A service inherits no shell. Anything the reader had set when they registered
 # it has to be written down here or it silently reverts at the next reboot.
+# The assignment is quoted, so a folder with a space in its name arrives as one
+# setting rather than two.
 for setting in "ATELIER_PORT=$PORT" "ATELIER_DATA_DIR=$WORK/data" "BEADS_WORKBENCH_PORT=$HELPER_PORT"; do
-  if grep -qF "Environment=$setting" "$UNIT_FILE"; then
+  if grep -qF "Environment=\"$setting\"" "$UNIT_FILE"; then
     pass "it carried $setting into the definition"
   else
     fail "$setting was not carried into the definition"
   fi
 done
+
+# The list of places the reader's own tools were found on. Without it the
+# machine starts the board with a dead chat and no boards on it, because
+# `node`, `npm`, `bd` and `dolt` are all bare names looked up on a list a
+# service is handed none of (bw-w5zs).
+if grep -qF "Environment=\"PATH=$PLACES\"" "$UNIT_FILE"; then
+  pass "it carried the places the reader's own tools were found on"
+else
+  fail "the reader's list of places was not carried into the definition:"
+  grep -F 'Environment=' "$UNIT_FILE" | sed 's/^/      /'
+fi
 
 if grep -q 'WantedBy=default.target' "$UNIT_FILE"; then
   pass "it is wanted at login rather than waiting to be asked"
@@ -231,6 +270,73 @@ if [ -d "$WORK/data" ] && [ -n "$(ls -A "$WORK/data" 2>/dev/null)" ]; then
   pass "and it is using the data folder it was registered with, not the reader's"
 else
   fail "nothing was written to the data folder it was registered with"
+fi
+
+# ------------------------- the tools the reader has, found by what it started
+
+say "Finding the reader's own tools"
+
+if [ -n "$MAIN_PID" ] && [ "$MAIN_PID" != "0" ] && [ -r "/proc/$MAIN_PID/environ" ]; then
+  RUNNING_PLACES="$(tr '\0' '\n' < "/proc/$MAIN_PID/environ" | sed -n 's/^PATH=//p')"
+  if [ "$RUNNING_PLACES" = "$PLACES" ]; then
+    pass "the copy the machine started is looking exactly where the reader's tools are"
+  else
+    fail "the copy the machine started is looking somewhere else:"
+    printf '      wanted: %s\n      got:    %s\n' "$PLACES" "$RUNNING_PLACES"
+  fi
+else
+  fail "could not read the running copy's own settings"
+fi
+
+# The stand-ins are reachable only through the folder this check put at the
+# front of that list. One of them being reached is proof the copy looked there
+# — and a copy handed no list would have found the login manager's tools, or
+# none at all, and said nothing about it.
+reached=""
+for _ in $(seq 1 90); do
+  for tool in npm node; do
+    if [ -f "$WORK/reached/$tool" ]; then
+      reached="$tool"
+      break
+    fi
+  done
+  [ -n "$reached" ] && break
+  sleep 1
+done
+
+if [ -n "$reached" ]; then
+  pass "and it reached '$reached' through that list, not through the login manager's"
+else
+  fail "it never reached a tool through the list it was registered with:"
+  journalctl --user -u "$UNIT" -n 30 --no-pager 2>&1 | sed 's/^/      /'
+fi
+
+# What the reader actually notices: a chat that answers after a reboot. The
+# kit it talks to Claude with is fetched once, over the network, so a machine
+# that is offline or slow is not a failure of the registration — but node
+# refusing to start is exactly the failure this job is about.
+chat=0
+for _ in $(seq 1 120); do
+  curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$HELPER_PORT/" >/dev/null 2>&1
+  if [ $? != 7 ]; then
+    chat=1
+    break
+  fi
+  if journalctl --user -u "$UNIT" --no-pager 2>/dev/null | grep -q 'could not start node'; then
+    break
+  fi
+  sleep 1
+done
+
+if [ "$chat" = "1" ]; then
+  pass "the chat helper is answering, started by a copy nobody logged in for"
+elif journalctl --user -u "$UNIT" --no-pager 2>/dev/null | grep -q 'could not start node'; then
+  fail "the chat helper could not be started — the copy found no node:"
+  journalctl --user -u "$UNIT" --no-pager 2>/dev/null | grep 'workbench' | tail -5 | sed 's/^/      /'
+else
+  echo "  · the chat helper is still fetching its kit, which is a network"
+  echo "    install and not this registration's doing; the reach above is what"
+  echo "    proves it looked in the right place."
 fi
 
 # ------------------------------------------------------ taking it back off

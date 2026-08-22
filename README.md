@@ -107,6 +107,9 @@ Latte, Frappe, Macchiato, and Mocha are available from the theme switcher.
 ### Prerequisites
 
 - [Beads CLI](https://github.com/gastownhall/beads) (`bd`) installed and available in PATH
+- [Node.js](https://nodejs.org/) 20+ in PATH — the board and every other screen
+  run without it, but the chat helper is started with `node`, and `npm` fetches
+  its kit once on first run
 
 ### Download
 
@@ -167,7 +170,9 @@ atelier-win-x64.exe run
 ```
 
 There is nothing else to start: the screens are embedded in the binary and the
-chat helper is started beside it. No Node.js or Rust needed.
+chat helper is started beside it. Nothing needs Rust, and the board needs no
+Node.js — the chat is the one part that does, because the helper is started
+with `node` and its kit fetched once with `npm`.
 
 | Command | What it does |
 |---------|--------------|
@@ -291,7 +296,7 @@ The Next.js dev server (port 3007) serves the frontend with hot-reload; the Rust
 
 ### Build from Source (release binary)
 
-Produces the same self-contained binary that CI publishes to [Releases](https://github.com/weselow/beads-web/releases/latest) — the frontend is embedded, so no Node.js or Rust is needed at runtime.
+Produces the same self-contained binary that CI publishes to [Releases](https://github.com/weselow/beads-web/releases/latest) — the frontend is embedded, so nothing needs Rust at runtime and the board needs no Node.js. The chat helper still does.
 
 ```bash
 npm install

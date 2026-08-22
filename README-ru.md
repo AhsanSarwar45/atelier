@@ -158,7 +158,7 @@ chmod +x atelier-*
 atelier-win-x64.exe
 ```
 
-Откройте http://localhost:3008. Frontend встроен в бинарник — Node.js и Rust не требуются.
+Откройте http://localhost:3008. Frontend встроен в бинарник — Rust не нужен, доска и остальные экраны работают без Node.js. Node.js нужен только чату: помощник запускается через `node`, а `npm` один раз скачивает его комплект.
 
 ## Разработка
 
@@ -203,7 +203,7 @@ Dev-сервер Next.js (порт 3007) отдаёт frontend с горячей
 
 ### Сборка из исходников (готовый бинарник)
 
-Собирает тот же самодостаточный бинарник, что публикует CI в [Releases](https://github.com/weselow/beads-web/releases/latest) — frontend встроен, поэтому Node.js и Rust при запуске не нужны.
+Собирает тот же самодостаточный бинарник, что публикует CI в [Releases](https://github.com/weselow/beads-web/releases/latest) — frontend встроен, поэтому Rust при запуске не нужен и доске не нужен Node.js. Помощнику чата он по-прежнему нужен.
 
 ```bash
 npm install
