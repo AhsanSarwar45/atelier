@@ -23,10 +23,12 @@ import { cn } from '@/lib/utils';
 
 interface Slot {
   node: HTMLElement | null;
+  /** Before the tab selector: a control that opens something beside the tab, not on it. */
+  lead: HTMLElement | null;
   activeTab: string | null;
 }
 
-const ToolSlot = createContext<Slot>({ node: null, activeTab: null });
+const ToolSlot = createContext<Slot>({ node: null, lead: null, activeTab: null });
 
 /**
  * `data-shell-bar` is the count the acceptance suite reads: two, and a third
@@ -51,6 +53,7 @@ export function Shell({
   children: ReactNode;
 }) {
   const [node, setNode] = useState<HTMLElement | null>(null);
+  const [lead, setLead] = useState<HTMLElement | null>(null);
 
   return (
     <div data-testid="shell" className="flex h-dvh flex-col overflow-hidden bg-surface-base">
@@ -61,13 +64,33 @@ export function Shell({
             forgets, and one every page places differently. */}
         <GlobalSettingsButton />
       </div>
+      {/* One line on a wide screen. On a phone the tab selector alone fills it,
+          so the row is allowed to grow and the tools drop to a second line of
+          their own rather than being squeezed into what is left — still one
+          bar, so the count above holds. */}
       {tabs && (
-        <div data-shell-bar data-testid="tab-bar" className={BAR}>
+        <div
+          data-shell-bar
+          data-testid="tab-bar"
+          className={cn(BAR, 'h-auto min-h-12 flex-wrap py-1 sm:h-12 sm:flex-nowrap sm:py-0')}
+        >
+          {/* Before the tabs, not inside `tab-tools`: a tab that opens a drawer
+              beside the transcript wants its handle first on the row, ahead of
+              Chat/Board/Reports, not mixed in with its own toolbar. */}
+          <div data-testid="tab-lead" ref={setLead} className="flex shrink-0 items-center gap-2" />
           {tabs}
-          <div data-testid="tab-tools" ref={setNode} className="flex min-w-0 flex-1 items-center gap-2" />
+          {/* `grow` off its own content width, not `flex-1` off zero: that is
+              what lets the row wrap only when the tools really do not fit
+              beside the tab selector. A tab with two buttons keeps the line;
+              the board's eleven take the next one and scroll along it. */}
+          <div
+            data-testid="tab-tools"
+            ref={setNode}
+            className="flex min-w-0 grow items-center gap-2 sm:basis-0"
+          />
         </div>
       )}
-      <ToolSlot.Provider value={{ node, activeTab: activeTab ?? null }}>
+      <ToolSlot.Provider value={{ node, lead, activeTab: activeTab ?? null }}>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
       </ToolSlot.Provider>
     </div>
@@ -86,6 +109,19 @@ export function TabTools({ tab, children }: { tab: string; children: ReactNode }
   const { node, activeTab } = useContext(ToolSlot);
   if (!node || activeTab !== tab) return null;
   return createPortal(<Toolbar>{children}</Toolbar>, node);
+}
+
+/**
+ * A tab's own lead control, drawn ahead of the tab selector rather than after
+ * it. Plain children, not a `<Toolbar>`: this slot holds one or two buttons,
+ * never a row that needs its own overflow scroll. Still wrapped in its own
+ * `TooltipProvider` — a `ToolButton` reaches for one on its own account, and
+ * this slot sits outside the one `Toolbar` wraps around `TabTools`.
+ */
+export function TabLead({ tab, children }: { tab: string; children: ReactNode }) {
+  const { lead, activeTab } = useContext(ToolSlot);
+  if (!lead || activeTab !== tab) return null;
+  return createPortal(<TooltipProvider delayDuration={250}>{children}</TooltipProvider>, lead);
 }
 
 /**
