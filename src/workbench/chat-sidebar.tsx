@@ -16,7 +16,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { Bot, Loader2, Plus, Search } from 'lucide-react';
+
+import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, type HeldChat } from '@/workbench/chat-state';
@@ -268,9 +273,30 @@ interface ChatSidebarProps {
   onOpen: (sessionId: string) => void;
   /** Also the chats an agent started for another chat, and the empty ones. */
   everything?: boolean;
+  /**
+   * Search, the "everything" switch and New Chat used to live on the bar
+   * above the transcript; they belong to this list, not to it, so their
+   * triggers are handed in from the tab that owns the state (bw-81wt.5).
+   * Each is optional so a caller that only wants the list — a test among
+   * them — is not made to wire up things it never shows.
+   */
+  onSearch?: () => void;
+  onToggleEverything?: () => void;
+  onNewChat?: () => void;
+  startingNewChat?: boolean;
 }
 
-export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, everything = false }: ChatSidebarProps) {
+export function ChatSidebar({
+  projectId,
+  projectPath,
+  openSessionId,
+  onOpen,
+  everything = false,
+  onSearch,
+  onToggleEverything,
+  onNewChat,
+  startingNewChat = false,
+}: ChatSidebarProps) {
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
   const running = useRunningElsewhere();
@@ -405,6 +431,45 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
       data-testid="chat-sidebar"
       className="flex h-full min-h-0 w-72 shrink-0 flex-col border-r border-border/60"
     >
+      {/*
+        Search, the "everything" switch and New Chat all live here now — they
+        are what this list is for, not decorations on the bar above it. A
+        caller that renders the list on its own (a test, mainly) gets none of
+        these, because each trigger is optional and nothing here reaches for a
+        prop that was not handed in (bw-81wt.5).
+      */}
+      {(onSearch || onToggleEverything || onNewChat) && (
+        <TooltipProvider delayDuration={250}>
+          <div data-testid="chat-sidebar-header" className="flex shrink-0 items-center gap-1 border-b border-border/60 p-2">
+            {onSearch && <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={onSearch} />}
+            {onToggleEverything && (
+              <ToolButton
+                icon={<Bot />}
+                label={everything ? "Hide the agents' own chats" : "Show the agents' own chats"}
+                emphasis={everything ? 'loud' : 'quiet'}
+                data-testid="toggle-everything"
+                data-showing-everything={everything}
+                onClick={onToggleEverything}
+              />
+            )}
+            {onNewChat && (
+              <Button
+                size="sm"
+                variant="primary"
+                className="ml-auto shrink-0"
+                data-testid="new-chat-tool"
+                aria-label="New Chat"
+                disabled={startingNewChat}
+                onClick={onNewChat}
+              >
+                {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
+                {startingNewChat ? 'Starting…' : 'New Chat'}
+              </Button>
+            )}
+          </div>
+        </TooltipProvider>
+      )}
+
       {failed && (
         <p data-testid="restore-error" className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {failed}

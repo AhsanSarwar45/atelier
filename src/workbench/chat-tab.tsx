@@ -14,17 +14,16 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowDown,
   ArrowUp,
-  Bot,
   Coins,
   Cpu,
   Folder,
   FolderGit2,
   Loader2,
   PanelLeft,
+  PanelRight,
+  PanelRightClose,
   Paperclip,
   Plus,
-  Receipt,
-  Search,
   ShieldCheck,
   Square,
   X,
@@ -33,7 +32,7 @@ import {
 import { BeadChip } from '@/components/bead-chip-row';
 import { type Mentions } from '@/components/markdown-body';
 import { useReports } from '@/components/reports';
-import { TabTools, ToolButton } from '@/components/shell';
+import { TabLead, TabTools, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -69,7 +68,6 @@ import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
-import { SpendView } from '@/workbench/spend-view';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
@@ -246,7 +244,7 @@ function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () =>
       data-testid="picture-viewer"
       role="dialog"
       aria-label={image.alt || 'Picture'}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-6"
       onClick={onClose}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -483,8 +481,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [railOpen, setRailOpen] = useState(false);
   /** The chat's own column on the right, remembered between visits. */
   const [rightOpen, flipRight] = useRightRail();
-  /** The two ways in that live in this tab's toolbar, each a full-screen panel. */
-  const [showing, setShowing] = useState<'search' | 'spend' | 'usage' | 'tokens' | null>(null);
+  /** The ways in that live in this tab, each a full-screen panel. */
+  const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | null>(null);
   /** The ACCOUNT'S allowance — the same figure in every chat, not this one's (bw-malh). */
   const plan = usePlanUsage();
   /**
@@ -717,7 +715,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const shell = (inner: React.ReactNode) => (
     // The height is the shell's to give: this box fills what the bars left.
     <div className="relative flex min-h-0 flex-1">
-      <TabTools tab="chat">
+      {/* First thing on the row, ahead of Chat/Board/Reports: the way into the
+          chat list is not one tool among this tab's own, it opens a whole other
+          pane, the same reason the right rail's own way in sits on the bar and
+          not inside either pane (bw-81wt.5). */}
+      <TabLead tab="chat">
         <ToolButton
           icon={<PanelLeft />}
           label="Chats"
@@ -725,44 +727,30 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-testid="chat-rail-toggle"
           onClick={() => setRailOpen((v) => !v)}
         />
-        <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={() => setShowing('search')} />
-        <ToolButton icon={<Receipt />} label="What it cost" data-testid="open-spend" onClick={() => setShowing('spend')} />
-        <ToolButton
-          icon={<Bot />}
-          label={everything ? 'Hide the agents’ own chats' : 'Show the agents’ own chats'}
-          emphasis={everything ? 'loud' : 'quiet'}
-          data-testid="toggle-everything"
-          data-showing-everything={everything}
-          onClick={flipEverything}
-        />
+      </TabLead>
+
+      <TabTools tab="chat">
+        {/* Search, "everything" and New Chat used to live here; they moved into
+            the list they act on (bw-81wt.5) — what is left is the kind filter,
+            which reaches into this transcript rather than the list beside it,
+            and the way into the column on the right, mirroring the way into the
+            list on the left (bw-81wt point 4). Both toggles are pictures a
+            reader learns once; a bar of words for six controls is the bar that
+            put "New Chat" off the edge of a 390px screen (bw-81wt.5, .8). */}
+        {sessionId && (
+          <ToolButton
+            icon={rightOpen ? <PanelRightClose /> : <PanelRight />}
+            label={rightOpen ? 'Hide chat details' : 'Show chat details'}
+            emphasis={rightOpen ? 'loud' : 'quiet'}
+            data-testid="chat-right-rail-toggle"
+            data-open={rightOpen}
+            onClick={flipRight}
+          />
+        )}
         <KindFilter items={view.items} off={offKinds} onChange={changeKinds} />
-        {/* The one control on this bar that says what it does in words. Every
-            other tool here is a picture, and a picture is right for a thing you
-            reach for once you know the bar; starting a conversation is the first
-            thing a reader wants and the one he was hunting for (bw-4wcd.8). */}
-        <Button
-          size="sm"
-          variant="primary"
-          className="ml-auto shrink-0"
-          data-testid="new-chat-tool"
-          aria-label="New Chat"
-          disabled={starting}
-          onClick={() => void start()}
-        >
-          {starting ? (
-            <Loader2 className="animate-spin" aria-hidden="true" />
-          ) : (
-            /* The plus is drawn, not typed: a typed one is a letter of the
-               label and sits on the text's own baseline, a hair small and a
-               hair low against the words beside it (bw-4wcd.14). */
-            <Plus data-testid="new-chat-plus" aria-hidden="true" />
-          )}
-          {starting ? 'Starting…' : 'New Chat'}
-        </Button>
       </TabTools>
 
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
-      {showing === 'spend' && <SpendView onClose={() => setShowing(null)} />}
       {showing === 'usage' && <UsageView onClose={() => setShowing(null)} />}
       {showing === 'tokens' && sessionId && (
         <TokenView sessionId={sessionId} onClose={() => setShowing(null)} />
@@ -783,6 +771,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           openSessionId={sessionId}
           everything={everything}
           onOpen={(id) => { setRailOpen(false); open(id); }}
+          onSearch={() => setShowing('search')}
+          onToggleEverything={flipEverything}
+          // Same reason as `onOpen`: the drawer opened to reach this button, and
+          // its job is done once the chat it starts exists — left open, it would
+          // sit over the transcript it just created (bw-81wt.5).
+          onNewChat={() => { setRailOpen(false); void start(); }}
+          startingNewChat={starting}
         />
       </div>
       {/* Mounted either way and faded, so the darkening arrives with the panel
@@ -851,18 +846,25 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   return shell(
     <div className="flex min-h-0 flex-1 flex-col" data-testid="chat-tab" data-session-id={sessionId}>
-      {/* One line, and nothing on it grows with the work: the cards, the
-          reports and what the chat has spent are all in the column beside it
-          (docs/agent-workbench.md §8.2.6). */}
+      {/* Nothing on this line grows with the work: the cards, the reports and
+          what the chat has spent are all in the column beside it
+          (docs/agent-workbench.md §8.2.6). It is drawn as one line wherever
+          there is room for one; short of that it wraps rather than clipping,
+          because a pill that is merely cut off is a pill nobody can read and
+          `overflow-hidden` used to make the wire's own model name push the
+          plan chip and its number straight off a 390px screen with no way
+          back to them (bw-81wt.5). */}
       <div
         data-testid="chat-status-line"
         // One distance between every two chips on this line, read from the one
         // place it is written. The model/mode group inside it held its own pair
         // half a step closer, so the four chips drew as two pairs instead of a
-        // row (bw-ja9l.10).
+        // row (bw-ja9l.10). Wrapped rows sit closer than that, since the gap
+        // across a row and the gap between two rows are not the same distance.
         className={cn(
-          'flex h-10 shrink-0 items-center overflow-hidden border-b border-border/60 px-4 text-sm',
+          'flex min-h-10 shrink-0 flex-wrap items-center border-b border-border/60 px-4 py-1.5 text-sm',
           CHIP_GAP,
+          'gap-y-1',
         )}
       >
         {/* A chat another program is working in has no agent of OURS attached,
