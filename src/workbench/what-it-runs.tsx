@@ -20,6 +20,8 @@
  */
 'use client';
 
+import { Cpu, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
@@ -133,13 +135,46 @@ export function modelKey(model: string): string {
   return family || model.toLowerCase();
 }
 
+/**
+ * The mark on the mode chip, one shield per how much this chat still asks.
+ *
+ * The mode is the one thing on this line that MUST be read, and it was the only
+ * coloured chip with nothing but words in it. A shield that is whole, half or
+ * struck through says the same thing the words do, before they are read
+ * (bw-ja9l.12). Anything the kit invents after this release gets a plain shield
+ * — the honest answer is that we do not know how far it goes.
+ */
+const MODE_ICON: Record<string, typeof Shield> = {
+  default: ShieldCheck,
+  plan: ShieldCheck,
+  acceptEdits: ShieldHalf,
+  dontAsk: ShieldAlert,
+  auto: ShieldAlert,
+  bypassPermissions: ShieldOff,
+};
+
 /** The mode's name and colour, both off the one table (§8.2.4). */
-export function modeWords(mode: string | null): { label: string; tone: typeof UNKNOWN_MODE_TONE } | null {
+export function modeWords(
+  mode: string | null,
+): { label: string; tone: typeof UNKNOWN_MODE_TONE; Mark: typeof Shield } | null {
   if (!mode) return null;
   const known = PERMISSION_MODE[mode];
+  const Mark = MODE_ICON[mode] ?? Shield;
   return known
-    ? { label: known.label, tone: known.tone }
-    : { label: inWords(mode), tone: UNKNOWN_MODE_TONE };
+    ? { label: known.label, tone: known.tone, Mark }
+    : { label: inWords(mode), tone: UNKNOWN_MODE_TONE, Mark };
+}
+
+/**
+ * The mode's own shield, for anywhere outside this line that draws one.
+ *
+ * The picker under the writing box wore a fixed `ShieldCheck` whatever the chat
+ * was set to, so a chat that had stopped asking altogether still showed the
+ * mark for one that asks (bw-ja9l.12).
+ */
+export function ModeMark({ mode, className }: { mode: string | null; className?: string }) {
+  const Mark = modeWords(mode)?.Mark ?? Shield;
+  return <Mark className={className} aria-hidden="true" />;
 }
 
 /**
@@ -202,9 +237,12 @@ export function WhatItRuns({
           // The wire id in the tooltip: the chip has room for the name, and the
           // id is what a reader needs when two builds of one model are about.
           title={model ? `Model — ${model}` : 'Model — the brand’s own default'}
-          className="min-w-0 shrink truncate"
+          className="min-w-0 shrink gap-1 truncate"
         >
-          {modelLabel}
+          {/* The same mark the model picker under the writing box wears, so the
+              two are read as one setting seen twice (bw-ja9l.12). */}
+          <Cpu className="size-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{modelLabel}</span>
         </Badge>
       )}
       {mode && (
@@ -222,9 +260,10 @@ export function WhatItRuns({
           data-mode={permissionMode ?? ''}
           data-tone={mode.tone}
           title={`Permission mode — ${mode.label}`}
-          className="min-w-0 shrink truncate"
+          className="min-w-0 shrink gap-1 truncate"
         >
-          {mode.label}
+          <mode.Mark className="size-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{mode.label}</span>
         </Badge>
       )}
     </span>

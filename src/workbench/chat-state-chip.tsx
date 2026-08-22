@@ -14,11 +14,21 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { Bot, Hand, Loader2, SquareTerminal } from 'lucide-react';
+import {
+  Bot,
+  CircleAlert,
+  CircleCheck,
+  CircleDashed,
+  CircleSlash,
+  Hand,
+  Loader2,
+  Moon,
+  SquareTerminal,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { HOLDER_WORD, type ChatState, type Holder } from '@/workbench/chat-state';
+import { HOLDER_WORD, type ChatState, type Holder, type StateMark } from '@/workbench/chat-state';
 import { forHowLong } from '@/workbench/elapsed';
 
 /**
@@ -32,6 +42,30 @@ import { forHowLong } from '@/workbench/elapsed';
 const HOLDER_ICON: Record<Holder, typeof Bot> = {
   terminal: SquareTerminal,
   program: Bot,
+};
+
+/**
+ * The mark for each standing a chat can be in.
+ *
+ * Only the two moving ones had a mark before, so a chat at rest was a bare word
+ * on a line where every other chip carries one — and "Stopped", "Failed" and
+ * "Ended" all read alike at a glance because the word was the whole of the
+ * difference (bw-ja9l.12).
+ */
+const MARK: Record<StateMark, typeof Bot> = {
+  working: Loader2,
+  waiting: Hand,
+  ready: CircleCheck,
+  asleep: Moon,
+  stopped: CircleSlash,
+  failed: CircleAlert,
+  ended: CircleDashed,
+};
+
+/** The two that must not look still, and the rule for how they move. */
+const MOVES: Partial<Record<StateMark, string>> = {
+  working: 'animate-spin',
+  waiting: 'animate-pulse',
 };
 
 const listeners = new Set<() => void>();
@@ -98,10 +132,15 @@ export function ChatStateChip({
   // the whole of what the screen can honestly say.
   if (!state.word) return null;
 
+  const Mark = MARK[state.mark];
   const body = (
     <>
-      {state.working && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />}
-      {state.waiting && <Hand className="size-3 shrink-0 animate-pulse" aria-hidden="true" />}
+      <Mark
+        className={cn('size-3 shrink-0', MOVES[state.mark])}
+        aria-hidden="true"
+        data-testid="chat-state-mark"
+        data-mark={state.mark}
+      />
       <span className="truncate">{state.word}</span>
       {count && <span className="shrink-0 font-mono tabular-nums opacity-70">{count}</span>}
     </>

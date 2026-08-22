@@ -17,6 +17,8 @@ import {
   Bot,
   Coins,
   Cpu,
+  Folder,
+  FolderGit2,
   Loader2,
   PanelLeft,
   Paperclip,
@@ -73,7 +75,7 @@ import { DrawnTranscript } from '@/workbench/drawn-transcript';
 import { WorkingLine, whatItWasAsked } from '@/workbench/transcript-rows';
 import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
-import { CHIP_GAP, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
+import { CHIP_GAP, ModeMark, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 import { workingLine } from '@/workbench/working-line';
 
@@ -888,9 +890,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             // Never squeezed by the line, and never wider than a name: a chip
             // that shrinks under its own text spills it over its neighbour
             // (bw-7ks.22.15).
-            className="max-w-40 shrink-0 truncate font-mono"
+            className="max-w-40 shrink-0 gap-1 truncate font-mono"
           >
-            {facts.folder}
+            {/* A folder that is a checkout says so: the branch is already in
+                this chip's tooltip, and the mark is what says there is one to
+                hover for (bw-ja9l.12). */}
+            {facts.branch ? (
+              <FolderGit2 className="size-3 shrink-0" aria-hidden="true" />
+            ) : (
+              <Folder className="size-3 shrink-0" aria-hidden="true" />
+            )}
+            <span className="min-w-0 truncate">{facts.folder}</span>
           </Badge>
         )}
         {/* What this chat is using and what it has spent, then how much of the
@@ -1132,7 +1142,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {/* Both act on THIS chat, and are kept in his own settings so the
                 next one opens on them too (§8.2.3). */}
             <Picker
-              icon={<ShieldCheck className="h-3.5 w-3.5" />}
+              icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
               label="Permission mode"
               testid="mode-picker"
               current={view.permissionMode}

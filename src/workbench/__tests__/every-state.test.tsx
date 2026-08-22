@@ -154,6 +154,57 @@ describe('a chat of ours, nobody else in it', () => {
 // they can be doing.
 // ---------------------------------------------------------------------------
 
+describe('the mark beside the word', () => {
+  const EVERY: SessionState[] = [
+    'starting',
+    'idle',
+    'thinking',
+    'streaming',
+    'running_tool',
+    'waiting_permission',
+    'stopped',
+    'errored',
+    'ended',
+    'dormant',
+  ];
+
+  it('stands beside every state and not only the two that move', () => {
+    // A chat at rest was a bare word in a pill, on a line where every chip
+    // beside it carries a mark. And "Stopped", "Failed" and "Ended" all looked
+    // alike until they were read (bw-ja9l.12).
+    const seen = new Set<string>();
+    for (const state of EVERY) {
+      const read = chatState({ state, since: BEGAN });
+      render(<ChatStateChip state={read} testId="cell" />);
+      const drawn = screen.getByTestId('cell').querySelector('[data-mark]');
+      expect(drawn, `${state} draws a mark`).not.toBeNull();
+      expect(drawn?.getAttribute('data-mark'), `${state} names it`).toBe(read.mark);
+      seen.add(drawn?.getAttribute('class') ?? '');
+      cleanup();
+    }
+
+    // Ten states, but not ten marks: the four that are working share one, which
+    // is the point of the mark — the standing, not the verb.
+    expect(seen.size, 'a state at rest is told from a state that failed').toBeGreaterThan(4);
+  });
+
+  it('is the only thing that moves, and only while something is happening', () => {
+    const moving = (state: SessionState): boolean => {
+      render(<ChatStateChip state={chatState({ state, since: BEGAN })} testId="cell" />);
+      const drawn = screen.getByTestId('cell').querySelector('[data-mark]');
+      const cls = drawn?.getAttribute('class') ?? '';
+      cleanup();
+      return /animate-/.test(cls);
+    };
+
+    expect(moving('running_tool'), 'a chat mid-turn must not look still').toBe(true);
+    expect(moving('waiting_permission'), 'nor one asking him something').toBe(true);
+    expect(moving('idle'), 'a chat at rest must not twitch').toBe(false);
+    expect(moving('errored')).toBe(false);
+    expect(moving('dormant')).toBe(false);
+  });
+});
+
 describe('a chat somebody else holds', () => {
   for (const holder of ['terminal', 'program'] as const) {
     it(`${holder}, working: the mark says Working and counts, and the badge stands beside it`, () => {
@@ -162,6 +213,7 @@ describe('a chat somebody else holds', () => {
         working: true,
         waiting: false,
         word: 'Working',
+        mark: 'working',
         since: BEGAN,
         external: { holder },
       });

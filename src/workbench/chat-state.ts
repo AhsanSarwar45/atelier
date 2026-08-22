@@ -67,6 +67,16 @@ export function holderOnly(held: HeldChat | null | undefined): HeldChat | null {
   return held ? { ...held, doing: 'unknown', since: null } : null;
 }
 
+/**
+ * Which mark stands beside the word.
+ *
+ * A chat that is doing something and one waiting on the reader each had one;
+ * every other standing had a bare word, on a line where every neighbour is a
+ * chip with a mark of its own (bw-ja9l.12). The kind is decided here, with the
+ * word, because it is the same reading — the chip only knows how to draw it.
+ */
+export type StateMark = 'working' | 'waiting' | 'ready' | 'asleep' | 'stopped' | 'failed' | 'ended';
+
 /** The three facts, as every screen draws them. */
 export interface ChatState {
   /** Draw the moving mark: something is happening and the screen must not look still. */
@@ -75,6 +85,8 @@ export interface ChatState {
   waiting: boolean;
   /** Its own verb while working, where it stands otherwise, empty when unknown. */
   word: string;
+  /** Which mark goes beside that word. */
+  mark: StateMark;
   /** Where the seconds count from, ms since the epoch, or null for no count. */
   since: number | null;
   /** Set only when another program holds it. */
@@ -99,6 +111,20 @@ const OWN_WORD: Record<SessionState, string> = {
   errored: 'Failed',
   ended: 'Ended',
   dormant: 'Asleep',
+};
+
+/** Which mark each of our own states wears, per {@link StateMark}. */
+const OWN_MARK: Record<SessionState, StateMark> = {
+  starting: 'working',
+  idle: 'ready',
+  thinking: 'working',
+  streaming: 'working',
+  running_tool: 'working',
+  waiting_permission: 'waiting',
+  stopped: 'stopped',
+  errored: 'failed',
+  ended: 'ended',
+  dormant: 'asleep',
 };
 
 /** The states in which an agent of ours owes an answer. */
@@ -155,6 +181,9 @@ export function chatState(input: ChatStateInput): ChatState {
       working: held.doing === 'working',
       waiting: false,
       word: HELD_WORD[held.doing],
+      // A held chat that is not working is standing there, which is what "Idle"
+      // says; the badge beside it is who is holding it.
+      mark: held.doing === 'working' ? 'working' : 'ready',
       since: held.doing === 'working' ? held.since : null,
       external: { holder: held.holder },
     };
@@ -166,6 +195,10 @@ export function chatState(input: ChatStateInput): ChatState {
     working,
     waiting: input.state === 'waiting_permission',
     word: word ?? '',
+    // Off the state and never off the word: the driver names its own states, so
+    // the word can be anything it likes while the standing behind it is one of
+    // ten we know (bw-ja9l.12).
+    mark: OWN_MARK[input.state],
     since: working || input.state === 'waiting_permission' ? (input.since ?? null) : null,
     external: null,
   };

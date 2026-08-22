@@ -29,6 +29,7 @@ const working = (since: number): ChatState => ({
   word: 'Working',
   working: true,
   waiting: false,
+  mark: 'working',
   since,
   external: null,
 });
@@ -90,7 +91,7 @@ describe('how long a chat has been working, on the chip', () => {
   });
 
   it('counts nothing at all for a chat that is not working', () => {
-    render(<ChatStateChip state={{ word: 'Idle', working: false, waiting: false, since: null, external: null }} />);
+    render(<ChatStateChip state={{ word: 'Idle', working: false, waiting: false, mark: 'ready', since: null, external: null }} />);
     expect(screen.getByTestId('chat-state').textContent).toBe('Idle');
   });
 });

@@ -229,6 +229,47 @@ describe('what the chat is running, on its own line', () => {
     expect(opening, 'and never by a number of its own').not.toMatch(/\bgap-[\d.]+/);
   });
 
+  it('gives every tag on the line a mark of its own', () => {
+    // Three of the four chips on that line were words in a coloured pill and
+    // nothing else, next to a state chip that only had a mark while it moved.
+    // A row of pills that differ by reading alone is a row nobody scans
+    // (bw-ja9l.12).
+    draw('claude-opus-5[1m]', 'bypassPermissions', NO_MENU);
+
+    expect(modelChip()?.querySelector('svg'), 'the model wears one').not.toBeNull();
+    expect(modeChip()?.querySelector('svg'), 'so does the mode').not.toBeNull();
+    // And the model's words are still the model's words, not the mark's.
+    expect(modelChip()?.textContent).toBe('Opus 5 (1M context)');
+    expect(modeChip()?.textContent).toBe('Skip all checks');
+
+    // The folder chip is the fourth, and the header draws it a few lines below
+    // the group this file renders.
+    const header = readFileSync(resolve(__dirname, '../chat-tab.tsx'), 'utf8');
+    const folder = header.slice(header.indexOf('data-testid="chat-folder-chip"'));
+    expect(folder.slice(0, folder.indexOf('</Badge>')), 'the folder wears one too').toContain('<Folder');
+  });
+
+  it('changes the mode’s mark with the mode, so it is never read as safe', () => {
+    // The shield says how far this chat goes before it asks, ahead of the
+    // words: whole for one that asks, struck through for one that does not.
+    const marks = new Map<string, string>();
+    for (const wire of ['default', 'plan', 'acceptEdits', 'dontAsk', 'auto', 'bypassPermissions']) {
+      const { unmount } = draw('opus', wire);
+      marks.set(wire, modeChip()?.querySelector('svg')?.getAttribute('class') ?? '');
+      unmount();
+    }
+
+    // lucide names its own class after the icon, which is how a case tells one
+    // shield from another without reading the path data.
+    expect(marks.get('bypassPermissions')).not.toBe(marks.get('default'));
+    expect(marks.get('acceptEdits')).not.toBe(marks.get('default'));
+    expect(marks.get('acceptEdits')).not.toBe(marks.get('bypassPermissions'));
+
+    // A mode invented after this release still gets a shield rather than none.
+    draw('opus', 'askAboutEverythingTwice');
+    expect(modeChip()?.querySelector('svg')).not.toBeNull();
+  });
+
   it('gives way before the folder chip does', () => {
     draw('opus', 'bypassPermissions');
     const group = screen.getByTestId('session-meta');
