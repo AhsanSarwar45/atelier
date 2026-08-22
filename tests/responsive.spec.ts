@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 
 /**
  * Does the app draw whole on a phone.
@@ -245,6 +245,84 @@ async function openProject(page: Page, tab: 'board' | 'chat' | 'reports') {
 const onAPhone = { viewport: PHONE, hasTouch: true, isMobile: true };
 const onASmallPhone = { viewport: NARROW, hasTouch: true, isMobile: true };
 const onATablet = { viewport: TABLET, hasTouch: true, isMobile: true };
+
+// ─── Which copy of the app answered ───
+
+/**
+ * The one question asked before any screen is judged.
+ *
+ * The address defaults to the installed program on port 3008, whose screens
+ * were built into the binary and are as old as the last release. Pointed
+ * there, this sweep judges last month's app: most cases go red on controls
+ * that were fixed weeks ago, and every message blames a screen rather than the
+ * stale copy that served it — an afternoon went that way once (bw-81wt.24).
+ *
+ * So the run asks the app itself: on a touch screen, is a plain button floored
+ * at forty pixels, as this project's own stylesheet has floored every control
+ * since the phone work began? An app that says no is older than this suite,
+ * and the run stops with one sentence naming the address it reached instead of
+ * twenty verdicts about screens nobody is looking at.
+ */
+const GUARD = 'the app answering is the one this sweep was written for';
+
+/** How to reach a copy of the app that is actually the code being changed. */
+const INSTEAD =
+  'Point the sweep at a preview of the code you are changing — ' +
+  'BEADS_E2E_URL=http://127.0.0.1:3017 npx playwright test tests/responsive.spec.ts — ' +
+  'or rebuild the program so it serves the current screens.';
+
+/** A sentence when the wrong app answered, null when the right one did. */
+let wrongApp: string | null = null;
+
+async function askTheApp(browser: Browser, at: string): Promise<string | null> {
+  let context = null;
+  try {
+    context = await browser.newContext({ baseURL: at, ...onAPhone });
+    const page = await context.newPage();
+    await page.goto('/', { timeout: WAY_IN_MS });
+    const floor = await page.evaluate(() => {
+      const probe = document.createElement('button');
+      document.body.append(probe);
+      const style = getComputedStyle(probe);
+      const got = { tall: parseFloat(style.minHeight) || 0, wide: parseFloat(style.minWidth) || 0 };
+      probe.remove();
+      return got;
+    });
+    if (floor.tall >= TAP && floor.wide >= TAP) return null;
+    // An app with no such rule at all reports nothing rather than a number,
+    // and "0 by 0 pixels" would read as a measurement it never made.
+    const measured =
+      floor.tall === 0 && floor.wide === 0
+        ? 'sets no thumb-sized floor on a plain button at all'
+        : `floors a plain button at ${floor.wide} by ${floor.tall} pixels`;
+    return (
+      `The app answering at ${at} is older than this work: on a touch screen it ${measured}, ` +
+      `and this project floors every control at ${TAP}. The screens it is serving were built ` +
+      `before the phone work, so judging them says nothing about the code in this worktree. ` +
+      `${INSTEAD}`
+    );
+  } catch (e) {
+    return `Nothing this sweep can judge answered at ${at}: ${e instanceof Error ? e.message : String(e)}. ${INSTEAD}`;
+  } finally {
+    await context?.close();
+  }
+}
+
+// Once per worker, before anything is judged.
+test.beforeAll(async ({ browser }) => {
+  wrongApp = await askTheApp(browser, test.info().project.use.baseURL ?? 'http://localhost:3008');
+});
+
+test.beforeEach(() => {
+  // Every case but the guard steps aside when the wrong app answered, so the
+  // run reports one sentence about the app rather than twenty verdicts about
+  // screens it never reached.
+  if (wrongApp && test.info().title !== GUARD) test.skip(true, wrongApp);
+});
+
+test(GUARD, async () => {
+  expect(wrongApp, wrongApp ?? 'the app answering is the one this sweep was written for').toBeNull();
+});
 
 // ─── The project list ───
 

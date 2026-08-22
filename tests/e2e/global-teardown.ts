@@ -15,7 +15,13 @@
  * tests otherwise all passed.
  */
 
-const baseURL = process.env.BEADS_E2E_URL ?? 'http://localhost:3008';
+// The projects live in the PROGRAM, not in whatever is drawing the screens.
+// Driven against a dev preview the two are different addresses, and asking the
+// preview for the project list is answered 404 — so this used to shrug and
+// leave the leftovers on the real program (bw-81wt.25). Same address as the
+// rest of the suite reads its API from, and the browser's address only when
+// nothing said otherwise, which is the default single-program case.
+const baseURL = process.env.BEADS_E2E_BACKEND || process.env.BEADS_E2E_URL || 'http://localhost:3008';
 
 type ProjectRow = { id: string; isTest?: boolean };
 
