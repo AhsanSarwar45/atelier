@@ -506,6 +506,66 @@ test.describe('overlays and dialogs', () => {
       await page.keyboard.press('Escape');
     }
   });
+
+  /**
+   * The three things a card opens, which nothing else here reaches.
+   *
+   * The folder browser lives two clicks in — Add Project, then Browse — and the
+   * tag picker, the colour picker inside it and the open-with menu all hang off
+   * a project card. Every one of them was hand-fitted for a phone, and until
+   * this case existed the sweep judged none of them (bw-81wt.22).
+   */
+  test('the popups behind a card and a dialog fit a phone', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await page.goto('/');
+    await page.waitForTimeout(1200);
+
+    // Every open below is asserted rather than skipped when it is not found:
+    // an `if` here is how the sweep spent a month judging a panel it never
+    // opened (bw-81wt.19).
+    const add = page.getByRole('button', { name: /add project/i }).first();
+    await expect(add, 'no Add Project button on the list').toHaveCount(1);
+    await add.click();
+    await page.waitForTimeout(600);
+    const browse = page.getByRole('button', { name: /browse/i }).first();
+    await expect(browse, 'no Browse button in the Add Project dialog').toHaveCount(1);
+    await browse.click();
+    await page.waitForTimeout(900);
+    await judge(page, 'dialog-folder-browser-390');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+
+    const tags = page.getByRole('button', { name: /^add tag$/i }).first();
+    await expect(tags, 'no Add tag button on a project card').toHaveCount(1);
+    await tags.click();
+    await page.waitForTimeout(600);
+    await judge(page, 'popover-tags-390');
+
+    // The colour picker opens INSIDE the tag picker, under "Create new tag" —
+    // the only place in the app where a popover sits on top of another one.
+    const making = page.getByRole('button', { name: /create new tag/i }).first();
+    await expect(making, 'no way to create a tag in the tag picker').toHaveCount(1);
+    await making.click();
+    await page.waitForTimeout(400);
+    const colour = page.getByRole('button', { name: /pick a color/i }).first();
+    await expect(colour, 'no colour picker in the new-tag row').toHaveCount(1);
+    await colour.click();
+    await page.waitForTimeout(600);
+    await judge(page, 'popover-colour-390');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+
+    const openWith = page.getByRole('button', { name: /open in external application/i }).first();
+    await expect(openWith, 'no open-with button on a project card').toHaveCount(1);
+    await openWith.click();
+    await page.waitForTimeout(600);
+    await judge(page, 'menu-open-with-390');
+    await page.keyboard.press('Escape');
+  });
 });
 
 // ─── Reports and settings ───

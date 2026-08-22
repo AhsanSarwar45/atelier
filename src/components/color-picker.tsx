@@ -55,9 +55,6 @@ export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
           size="sm"
           className={cn(
             "h-8 w-8 p-0 border-2",
-            // 32px suits a mouse; touch gets the full 40 without
-            // disturbing the mouse-sized hit area (bw-81wt.2).
-            "[@media(pointer:coarse)]:size-10",
             className
           )}
           style={{ backgroundColor: value }}
@@ -74,10 +71,10 @@ export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
                 key={color}
                 className={cn(
                   "h-7 w-7 rounded-md border-2 transition-transform hover:scale-110",
-                  // 28px swatches are fine for a mouse; touch gets 40 —
-                  // the 5-column grid still fits the popover at 390px
-                  // (5*40 + 4*8 gap = 232px) (bw-81wt.2).
-                  "[@media(pointer:coarse)]:size-10",
+                  // 28px reads fine to a mouse, and a thumb gets 40 from the
+                  // app's own rule for a coarse pointer (globals.css). The
+                  // five-column grid is sized for the grown one: 5*40 plus
+                  // four 8px gaps is 232px, inside a 390px screen (bw-81wt.2).
                   value === color ? "border-t-primary ring-2 ring-t-primary ring-offset-1" : "border-transparent"
                 )}
                 style={{ backgroundColor: color }}

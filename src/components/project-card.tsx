@@ -277,10 +277,7 @@ export function ProjectCard({
                     variant="ghost"
                     size="sm"
                     mode="icon"
-                    // 32px reads fine to a mouse; a finger needs the full 40
-                    // (bw-81wt.2) — [@media(pointer:coarse)] leaves the mouse
-                    // hit area alone and only grows it under touch.
-                    className="shrink-0 [@media(pointer:coarse)]:size-10"
+                    className="shrink-0"
                     onClick={(e) => { e.stopPropagation(); onUnarchive?.(); }}
                     aria-label="Restore project"
                   >
@@ -301,7 +298,7 @@ export function ProjectCard({
                       variant="ghost"
                       size="sm"
                       mode="icon"
-                      className="shrink-0 [@media(pointer:coarse)]:size-10"
+                      className="shrink-0"
                       aria-label="Project settings"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -326,7 +323,7 @@ export function ProjectCard({
                           variant="ghost"
                           size="sm"
                           mode="icon"
-                          className="shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background [@media(pointer:coarse)]:size-10"
+                          className="shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                           aria-label="Open in external application"
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -339,7 +336,6 @@ export function ProjectCard({
                     </TooltipContent>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
-                        className="[@media(pointer:coarse)]:min-h-10"
                         onClick={(e) => handleOpenExternal('vscode', e)}
                         disabled={isOpening !== null}
                       >
@@ -351,7 +347,6 @@ export function ProjectCard({
                         VS Code
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        className="[@media(pointer:coarse)]:min-h-10"
                         onClick={(e) => handleOpenExternal('cursor', e)}
                         disabled={isOpening !== null}
                       >
@@ -363,7 +358,6 @@ export function ProjectCard({
                         Cursor
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        className="[@media(pointer:coarse)]:min-h-10"
                         onClick={(e) => handleOpenExternal('finder', e)}
                         disabled={isOpening !== null}
                       >

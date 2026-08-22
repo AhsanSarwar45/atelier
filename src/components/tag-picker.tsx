@@ -113,9 +113,6 @@ export function TagPicker({
           size="sm"
           className={cn(
             "h-6 w-6 p-0 rounded-full",
-            // 24px is fine for a mouse; a touch screen gets the full 40
-            // without disturbing the mouse-sized hit area (bw-81wt.2).
-            "[@media(pointer:coarse)]:size-10",
             "hover:bg-surface-overlay",
             className
           )}
@@ -195,7 +192,7 @@ export function TagPicker({
               <div className="flex items-center gap-1">
                 <Button
                   size="sm"
-                  className="h-7 flex-1 [@media(pointer:coarse)]:h-10"
+                  className="h-7 flex-1"
                   onClick={handleCreateTag}
                   disabled={!newTagName.trim() || isLoading}
                 >
@@ -204,7 +201,7 @@ export function TagPicker({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 [@media(pointer:coarse)]:size-10"
+                  className="h-7"
                   onClick={handleCancelCreate}
                   aria-label="Cancel"
                 >

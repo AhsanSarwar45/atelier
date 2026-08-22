@@ -239,9 +239,7 @@ export function FolderBrowser({
           mode="icon"
           onClick={navigateToHome}
           aria-label="Go to home directory"
-          // 28px (size="xs" mode="icon") is fine for a mouse; a finger
-          // needs the full 40 (bw-81wt.2).
-          className="shrink-0 [@media(pointer:coarse)]:size-10"
+          className="shrink-0"
         >
           <Home />
         </Button>
@@ -265,7 +263,6 @@ export function FolderBrowser({
                     type="button"
                     onClick={() => navigateToDirectory(root)}
                     title={root}
-                    className="[@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:px-2"
                   >
                     {root.charAt(0)}:
                   </button>
@@ -287,10 +284,6 @@ export function FolderBrowser({
                 onClick={() => navigateToDirectory(seg.path)}
                 className={cn(
                   "rounded px-1 py-0.5 text-sm transition-colors hover:bg-surface-raised",
-                  // Breadcrumb segments are plain inline buttons; on touch
-                  // they need real height and vertical centering, not just
-                  // a taller box (bw-81wt.2).
-                  "[@media(pointer:coarse)]:inline-flex [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:items-center",
                   isLast ? "text-t-primary" : "text-t-tertiary"
                 )}
               >
@@ -341,9 +334,6 @@ export function FolderBrowser({
                 onDoubleClick={() => navigateToDirectory(dir.path)}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                  // Rows are ~32px tall by padding alone; bump to a real
-                  // 40px tap target on touch (bw-81wt.2).
-                  "[@media(pointer:coarse)]:min-h-10",
                   selectedIndex === index
                     ? "bg-surface-raised text-t-primary"
                     : "text-t-secondary hover:bg-surface-raised/50",
@@ -381,9 +371,7 @@ export function FolderBrowser({
       <Button
         onClick={handleSelect}
         disabled={!currentPath || loading}
-        // 36px (default md size) is under the 40px touch minimum
-        // (bw-81wt.2); untouched on mouse.
-        className="w-full [@media(pointer:coarse)]:h-10"
+        className="w-full"
       >
         Select This Folder
       </Button>

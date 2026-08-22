@@ -186,9 +186,6 @@ export function ProjectSettingsDialog({
                 setBrowsing(browsingKey);
               }}
               title="Browse folders"
-              // 36px (md) is under the 40px touch minimum; untouched
-              // on mouse (bw-81wt.2).
-              className="[@media(pointer:coarse)]:h-10"
             >
               <FolderSearch className="size-4" />
             </Button>
@@ -250,7 +247,6 @@ export function ProjectSettingsDialog({
                         setPath(localPath);
                         setLocalPath("");
                       }}
-                      className="[@media(pointer:coarse)]:h-10"
                     >
                       Clear
                     </Button>
@@ -300,7 +296,7 @@ export function ProjectSettingsDialog({
                       type="button"
                       variant="outline"
                       onClick={() => { onArchive(); onOpenChange(false); }}
-                      className="w-full sm:w-auto [@media(pointer:coarse)]:h-10"
+                      className="w-full sm:w-auto"
                     >
                       <Archive className="h-4 w-4" aria-hidden="true" />
                       Archive project
@@ -319,14 +315,14 @@ export function ProjectSettingsDialog({
                           onOpenChange(false);
                         }
                       }}
-                      className="w-full sm:w-auto [@media(pointer:coarse)]:h-10"
+                      className="w-full sm:w-auto"
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                       Delete project
                     </Button>
                   )}
                 </div>
-                <Button type="submit" disabled={isSubmitting || !name.trim()} className="w-full sm:w-auto sm:ml-auto [@media(pointer:coarse)]:h-10">
+                <Button type="submit" disabled={isSubmitting || !name.trim()} className="w-full sm:w-auto sm:ml-auto">
                   {isSubmitting ? (
                     <>
                       <Loader2 className="size-4 animate-spin" aria-hidden="true" />
