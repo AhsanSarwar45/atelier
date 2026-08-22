@@ -305,7 +305,7 @@ test.describe('board', () => {
 
     await expect(page.locator('[data-testid="column-tabs"]'), 'no row of column names to say which column you are on').toBeVisible();
     await shoot(page, 'board-390-col1');
-    await judge(page, 'board-390', { tap: false });
+    await judge(page, 'board-390');
   });
 
   test('board tools are all reachable at 390', async ({ page }) => {
@@ -344,7 +344,7 @@ test.describe('board', () => {
     const closers = await page.locator('[data-testid="bead-detail"] [aria-label*="lose" i], [data-testid="bead-detail"] [aria-label*="ack" i]').count();
     expect(closers, 'the card panel has more than one way to close it').toBeLessThanOrEqual(1);
 
-    await judge(page, 'card-390', { tap: false });
+    await judge(page, 'card-390');
   });
 });
 
@@ -378,7 +378,7 @@ test.describe('chat', () => {
   test('chat screen fits a phone', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'chat');
-    await judge(page, 'chat-390', { tap: false });
+    await judge(page, 'chat-390');
 
     // Shut, the right rail must not leave a strip of dead width beside the
     // transcript; open, it is a sheet over the screen, not a column beside it.
@@ -391,7 +391,7 @@ test.describe('chat', () => {
     if (await toggle.count()) {
       await toggle.click();
       await page.waitForTimeout(400);
-      await judge(page, 'chat-rail-390', { tap: false });
+      await judge(page, 'chat-rail-390');
     }
   });
 
@@ -437,7 +437,7 @@ test.describe('overlays and dialogs', () => {
       const wide = await panelWidth();
       expect(wide, `no ${name} panel opened`).not.toBeNull();
       expect(wide!, `the ${name} panel is inset on a phone`).toBeGreaterThanOrEqual(PHONE.width - 1);
-      await judge(page, `overlay-${name}-390`, { tap: false });
+      await judge(page, `overlay-${name}-390`);
       await page.keyboard.press('Escape');
       await page.waitForTimeout(400);
       expect(
@@ -491,7 +491,7 @@ test.describe('overlays and dialogs', () => {
     if (await add.count()) {
       await add.click();
       await page.waitForTimeout(600);
-      await judge(page, 'dialog-add-project-390', { tap: false });
+      await judge(page, 'dialog-add-project-390');
       await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
     }
@@ -502,7 +502,7 @@ test.describe('overlays and dialogs', () => {
       await create.scrollIntoViewIfNeeded();
       await create.click();
       await page.waitForTimeout(600);
-      await judge(page, 'dialog-new-bead-390', { tap: false });
+      await judge(page, 'dialog-new-bead-390');
       await page.keyboard.press('Escape');
     }
   });
@@ -517,13 +517,13 @@ test.describe('reports', () => {
   test('reports fit a phone', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'reports');
-    await judge(page, 'reports-390', { tap: false });
+    await judge(page, 'reports-390');
 
     const first = page.locator('[data-testid="reports-list-item"]').first();
     if (await first.count()) {
       await first.click();
       await page.waitForTimeout(1500);
-      await judge(page, 'report-doc-390', { tap: false });
+      await judge(page, 'report-doc-390');
     }
   });
 });
@@ -536,7 +536,7 @@ test.describe('settings', () => {
     await page.setViewportSize(PHONE);
     await page.goto('/settings');
     await page.waitForTimeout(1200);
-    await judge(page, 'settings-390', { tap: false });
+    await judge(page, 'settings-390');
   });
 });
 
