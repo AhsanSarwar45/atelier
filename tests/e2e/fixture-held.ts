@@ -131,6 +131,32 @@ export function claimConversation(conversation: string, how: Holding = {}): () =
   return () => rmSync(file, { force: true });
 }
 
+/**
+ * What the session says about itself, in its own words, beside its marker.
+ *
+ * The marker carries one bit — busy or idle — so a chat summarising itself and a
+ * chat halfway through a command look identical from outside. A hook installed
+ * in the session writes this line the moment it enters a state worth naming
+ * (`workbench/hooks/session-doing.py`), and the sidecar believes it over
+ * anything it worked out for itself. A run cannot make a real session compact on
+ * cue, so it writes the line the hook would have written.
+ *
+ * `ago` is how long the session has been in that state, which is the number the
+ * screen counts and the bar fills from.
+ */
+export function saysItIsDoing(
+  conversation: string,
+  doing: string,
+  what: { ago?: number; detail?: string } = {},
+): () => void {
+  const file = join(markerDir(), `${conversation}.doing.json`);
+  writeFileSync(
+    file,
+    JSON.stringify({ doing, since: Date.now() - (what.ago ?? 0), detail: what.detail ?? null }),
+  );
+  return () => rmSync(file, { force: true });
+}
+
 /** One line of a record, in the shape the tool writes and the kit reads back. */
 function line(chat: { id: string; cwd: string }, parent: string | null, role: 'user' | 'assistant', text: string) {
   const uuid = randomUUID();

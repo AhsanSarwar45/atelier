@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { aChatSomebodyElseIsIn, claimConversation, openChatTab, type Project } from './fixture-held';
+import { aChatSomebodyElseIsIn, claimConversation, openChatTab, saysItIsDoing, type Project } from './fixture-held';
 
 /**
  * What a chat says about itself, on every screen.
@@ -558,6 +558,61 @@ test.describe('a chat another program is in', () => {
       await expect(drawn).toHaveAttribute('data-tool-status', 'ok', { timeout: 30_000 });
       await expect(drawn, 'the settled command was drawn a second time').toHaveCount(1);
     } finally {
+      release();
+    }
+    chat.forget();
+  });
+
+  /**
+   * A compaction, which is the one thing a chat does that has a length.
+   *
+   * The manager's screenshot, 2026-08-22: a chat summarising itself drew a
+   * spinner, a stale command and `Working 1h 38m`, so nothing on the screen
+   * said what was happening or how much of it was left. Everything else a chat
+   * does is open-ended and gets a word and a clock; this gets a bar, because
+   * this project's own runs have a measured middle (bw-jaoz.14.5).
+   *
+   * A real session cannot be told to compact on cue, so the line its hook would
+   * have written is written here — the same file, the same shape, read by the
+   * same code (`workbench/hooks/session-doing.py`, bw-jaoz.14.6).
+   */
+  test('draws a filling bar while it summarises itself', async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const project = await aFixtureProject(request);
+    const opening = 'Summarise where we got to';
+    const chat = aChatSomebodyElseIsIn(project.path, opening);
+    const release = claimConversation(chat.id, { status: 'busy' });
+    // Sixty-two seconds in: half of the middle run measured on this machine, so
+    // the bar is caught halfway rather than at either end (summarising.ts).
+    const quiet = saysItIsDoing(chat.id, 'summarising', { ago: 62_000, detail: 'auto' });
+
+    try {
+      await openChatTab(page, project);
+      await expect(rowFor(page, chat.id)).toBeVisible({ timeout: 30_000 });
+      await rowFor(page, chat.id).getByTestId('row-name').click();
+      await expect(page.getByTestId('transcript').getByText(opening)).toBeVisible({ timeout: 30_000 });
+
+      // The word first: a marker's busy bit cannot tell this state from any
+      // other, and the whole point of the line beside it is that this one is
+      // named rather than guessed.
+      const foot = page.getByTestId('working-line');
+      await expect(foot, 'the foot of a summarising chat says nothing').toBeVisible({ timeout: 30_000 });
+      await expect(foot, 'it is drawn as ordinary work, which is what it was').toContainText('Summarising', {
+        timeout: 30_000,
+      });
+
+      const bar = page.getByTestId('summarising-bar');
+      await expect(bar, 'the one run with a length gets the one bar').toBeVisible({ timeout: 30_000 });
+      const filled = Number(await bar.getAttribute('data-fill'));
+      expect(filled, 'caught mid-run: neither empty nor held at the top').toBeGreaterThan(20);
+      expect(filled).toBeLessThan(80);
+      expect(await bar.getAttribute('data-held'), 'a run inside its estimate is not overrunning').toBe('false');
+
+      // The picture the manager judges this by, beside the one he sent.
+      mkdirSync('tests/results', { recursive: true });
+      await page.screenshot({ path: 'tests/results/chat-summarising-bar.png', fullPage: false });
+    } finally {
+      quiet();
       release();
     }
     chat.forget();

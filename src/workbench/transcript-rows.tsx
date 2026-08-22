@@ -666,7 +666,11 @@ export function WorkingLine({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(filling * 100)}
-        className="mx-1 h-1 overflow-hidden rounded-full bg-muted"
+        // Compact, which is what he asked for: a bar the width of the words
+        // above it reads as a bar. Stretched across the whole transcript it
+        // read as a hairline rule under the line, and a rule is not a
+        // measurement of anything.
+        className="mx-1 h-1 w-40 max-w-full overflow-hidden rounded-full bg-muted"
       >
         <div
           className={cn('h-full rounded-full bg-primary transition-[width] duration-1000 ease-linear', held && 'animate-pulse')}
