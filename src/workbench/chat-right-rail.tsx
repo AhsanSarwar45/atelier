@@ -10,21 +10,25 @@
  * A column has height nobody is competing for, so all of them are drawn and
  * none of them is a count — docs/agent-workbench.md §8.2.1, §8.2.6.
  *
- * Shut, it is a thin edge with a handle, so the way back is where the rail was
- * rather than in a toolbar the reader has to go looking through. The choice is
- * remembered for the browser rather than for one chat: it is a way of looking,
- * the same reason the kind filter's switches are (bw-qdim).
+ * The way in and out is a button on the bar above, mirroring the one that
+ * opens the chat list on the other edge — not a handle built into the rail
+ * itself, which used to make this the one panel in the shell whose door was
+ * hidden inside the room (bw-81wt.5). The choice of open-or-shut is still
+ * remembered for the browser rather than for one chat: it is a way of
+ * looking, the same reason the kind filter's switches are (bw-qdim).
  *
- * It folds rather than jumps: the width moves and the eye follows the edge, so
- * the transcript is not two different widths on two consecutive frames. Anyone
- * who asked their machine for less motion gets the two ends and nothing between
- * them (bw-7ks.22.12).
+ * On a wide screen it still folds in place, part of the row: the width moves
+ * and the eye follows the edge, so the transcript is not two different widths
+ * on two consecutive frames. On a phone there is no room to fold anything —
+ * open, it is a sheet floating over the transcript, clear of the top and
+ * bottom of the screen so the reader can see there is still a conversation
+ * under it, and shut it takes no width at all rather than leaving a sliver
+ * behind (bw-81wt.5). Anyone who asked their machine for less motion gets the
+ * two ends and nothing between them (bw-7ks.22.12).
  */
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-
-import { PanelRight, PanelRightClose } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { cn } from '@/lib/utils';
@@ -91,6 +95,12 @@ export interface ChatRightRailProps {
   /** Opening one of them onto its own conversation. */
   onOpenAgent: (id: string) => void;
   open: boolean;
+  /**
+   * Kept on the type though nothing inside this component calls it any more:
+   * the button that flips `open` moved to the bar above (bw-81wt.5), and a
+   * caller still owns the state and still needs a way to change it from
+   * there. Removing the prop would be removing the only way in.
+   */
   onToggle: () => void;
 }
 
@@ -103,7 +113,6 @@ export function ChatRightRail({
   agentControls,
   onOpenAgent,
   open,
-  onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
   const empty = cards.length === 0 && reports.length === 0 && agents.length === 0;
@@ -114,38 +123,23 @@ export function ChatRightRail({
       data-cards={jobs.length}
       data-pieces={cards.length}
       className={cn(
-        'z-30 flex h-full shrink-0 flex-col overflow-hidden border-l border-border/60 bg-background',
-        // The fold is the width moving, so the eye follows the edge instead of
-        // finding the column somewhere else on the next frame. The content keeps
-        // its own width and is clipped by this, or the chips would reflow into a
-        // narrower and narrower column all the way down (bw-7ks.22.12).
+        'z-30 flex shrink-0 flex-col overflow-hidden border-border/60 bg-background',
         'transition-[width] duration-200 ease-out motion-reduce:transition-none',
-        // Open on a narrow screen, the transcript is what must stay readable, so
-        // the rail lies over it and a click outside puts it away — the same
-        // bargain the list of chats makes on the other side.
-        open ? 'absolute inset-y-0 right-0 w-72 shadow-xl md:relative md:shadow-none' : 'relative w-8',
+        open
+          ? // A sheet floating over the transcript on a phone — top and bottom
+            // both clear of the screen's edge, so the reader can see there is
+            // still a conversation under it — and on a wide screen, today's
+            // column, in the row and bordered on the one side that touches it.
+            cn(
+              'absolute inset-y-10 right-2 w-72 max-w-[calc(100vw-1rem)] rounded-lg border shadow-2xl',
+              'md:static md:inset-auto md:h-full md:w-72 md:max-w-none md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:shadow-none',
+            )
+          : // Shut, it takes no width at all — not a sliver holding space
+            // hostage beside the transcript (bw-81wt.5) — and on a wide
+            // screen, the thin edge it always was.
+            'h-full w-0 md:relative md:w-8 md:border-l',
       )}
     >
-      <button
-        type="button"
-        data-testid="chat-right-rail-toggle"
-        aria-label={open ? 'Hide what this chat has touched' : 'Show what this chat has touched'}
-        aria-expanded={open}
-        title={open ? 'Hide what this chat has touched' : 'Show what this chat has touched'}
-        onClick={onToggle}
-        className={cn(
-          'flex shrink-0 items-center gap-2 text-muted-foreground hover:text-foreground',
-          // Shut, the handle IS the rail: the whole edge is the way back in.
-          open ? 'h-10 w-full justify-end border-b border-border/60 px-3' : 'h-full w-full justify-center',
-        )}
-      >
-        {open ? (
-          <PanelRightClose className="h-4 w-4" aria-hidden="true" />
-        ) : (
-          <PanelRight className="h-4 w-4" aria-hidden="true" />
-        )}
-      </button>
-
       {/* Mounted whether or not it is open: a panel that unmounts on the way out
           has nothing left to animate, and the fold would be a jump with a delay
           in front of it. */}
