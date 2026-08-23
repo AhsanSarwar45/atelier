@@ -15,7 +15,6 @@ import { X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import * as api from '@/lib/api';
-import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 import { Overlay, overlayPanel } from './overlay';
@@ -59,7 +58,7 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
     }
     // A pause, so a search does not run on every keystroke.
     const wait = setTimeout(() => {
-      void request(`/api/workbench/search?q=${encodeURIComponent(typed)}`)
+      void api.request(`/api/workbench/search?q=${encodeURIComponent(typed)}`)
         .then((r) => (r.ok ? r.json() : []))
         .then((rows: Match[]) => setHits(rows))
         .catch(() => setHits([]));

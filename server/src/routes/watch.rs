@@ -264,6 +264,17 @@ async fn run_watcher(
             // due, keeping the quiet period measured from the last write.
             biased;
 
+            // The browser window went away. Nothing else in this loop notices:
+            // handing something down `tx` is the only thing that reads whether
+            // anybody is still listening, and that only happens when the board
+            // actually changes. So a window closed on a board that is then
+            // never touched again used to leave this task, its filesystem
+            // watcher and that watcher's handle from the operating system
+            // standing for the rest of the server's life — one for every such
+            // window ever opened, which is the same leak this route was fanned
+            // in to end (bw-zkh4.12).
+            _ = tx.closed() => break,
+
             received = notify_rx.recv() => {
                 let Some(event) = received else { break };
 
@@ -421,6 +432,49 @@ mod tests {
         assert!(store.is_board_change(&dir.join(".beads/embeddeddolt/bw/.dolt/noms/journal.idx")));
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A window that goes away stops the board watcher behind it.
+    ///
+    /// The fault this holds shut: the loop only ever noticed a window had gone
+    /// by failing to hand it a board change, and a board that nobody edits
+    /// never produces one. So a window closed on a quiet board left this task,
+    /// its filesystem watcher and that watcher's handle from the operating
+    /// system running for the rest of the server's life — one per window, for
+    /// every window ever opened. It is the same leak the sister case in
+    /// live.rs holds shut for the helper's streams (bw-zkh4.12).
+    #[tokio::test]
+    async fn a_window_going_away_stops_the_watcher_on_a_board_nobody_touches() {
+        // Under the reader's own folder, which is where this route allows a
+        // project to be at all.
+        let owner = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
+        let project = tempfile::TempDir::new_in(&owner).unwrap();
+        std::fs::create_dir_all(project.path().join(".beads")).unwrap();
+
+        let (tx, mut rx) = mpsc::channel::<Tagged>(10);
+        let watching = tokio::spawn(watch_board(
+            project.path().to_path_buf(),
+            tx,
+            None,
+            Arc::new(DoltManager::new()),
+            Arc::new(Database::new_in_memory().unwrap()),
+        ));
+
+        // The first thing it says is that it is watching, so what is dropped
+        // below is a watcher really running rather than one never started.
+        let connected = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("the watcher never said it was watching");
+        assert!(connected.is_some());
+
+        // The window closes, and the board file is never touched again.
+        drop(rx);
+
+        let stopped = tokio::time::timeout(Duration::from_secs(10), watching).await;
+        assert!(
+            stopped.is_ok(),
+            "the window went away and the board watcher went on watching for ever"
+        );
     }
 
     #[test]

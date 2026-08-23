@@ -124,15 +124,37 @@ function furthestSeen(chat: string): number {
   return seen;
 }
 
+/**
+ * Whether `path` is the project itself, or something inside it.
+ *
+ * Both separators count. The server builds the path it reports by joining onto
+ * the project path this window sent it, so on Windows it comes back written the
+ * Windows way — `C:\work\proj\.beads\issues.jsonl` under a project of
+ * `C:\work\proj`. Looking only for a forward slash after the project's name
+ * matched none of those, so every board change was dropped on the floor and a
+ * Windows board went on not moving until the page was reloaded: the exact fault
+ * this job exists to remove, left standing on one platform (bw-zkh4.13).
+ *
+ * The project's name has to end where its own does — `/work/proj-two` is not
+ * inside `/work/proj` — which is what looking at the character after it is for.
+ */
+function inside(path: string, project: string): boolean {
+  const withoutTrailing = (of: string) => of.replace(/[\\/]+$/, '');
+  const child = withoutTrailing(path);
+  const parent = withoutTrailing(project);
+  if (child === parent) return true;
+  if (!child.startsWith(parent)) return false;
+  const after = child[parent.length];
+  return after === '/' || after === '\\';
+}
+
 /** Whoever is listening for a board change under `path`. */
 function boardsUnder(path: string): Set<BoardListener>[] {
   const told: Set<BoardListener>[] = [];
   boards.forEach((listeners, project) => {
     // The server reports the file that moved — the board file itself, or the
     // database directory — which is always inside the project asked about.
-    if (path === project || path.startsWith(project.endsWith('/') ? project : `${project}/`)) {
-      told.push(listeners);
-    }
+    if (inside(path, project)) told.push(listeners);
   });
   return told;
 }

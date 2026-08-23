@@ -176,6 +176,30 @@ describe('one wire', () => {
     expect(theirs).toEqual(['/work/other/.beads/issues.jsonl']);
   });
 
+  it('routes a board change written the Windows way to the project it belongs to', async () => {
+    // The server builds the path it reports by joining onto the project path
+    // this window sent it, so a Windows project reports back
+    // `C:\work\atelier\.beads\issues.jsonl`. Looking only for a forward slash
+    // after the project's name matched none of those, so the change was
+    // dropped and the board went on not moving until the page was reloaded —
+    // this job's own fault, left standing on one platform (bw-zkh4.13).
+    const mine: string[] = [];
+    const theirs: string[] = [];
+    onBoard('C:\\work\\atelier', (e) => mine.push(e.path));
+    onBoard('C:\\work\\atelier-two', (e) => theirs.push(e.path));
+    await settled();
+
+    Stream.open[0].says(
+      'board',
+      JSON.stringify({ path: 'C:\\work\\atelier\\.beads\\issues.jsonl', type: 'modify' }),
+    );
+
+    expect(mine, 'a Windows board change reached nobody').toEqual([
+      'C:\\work\\atelier\\.beads\\issues.jsonl',
+    ]);
+    expect(theirs, 'a project whose name merely starts the same was told').toEqual([]);
+  });
+
   it('never leaves two open while what is watched changes', async () => {
     const letGo = onBoard('/work/atelier', () => {});
     await settled();
