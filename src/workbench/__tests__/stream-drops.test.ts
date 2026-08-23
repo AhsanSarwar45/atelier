@@ -161,4 +161,43 @@ describe('when the live stream drops', () => {
     expect(result.current, 'the accusation outlived the stream coming back').toBe(false);
   });
 
+  it('goes on waiting while screens come and go, rather than starting the count again', async () => {
+    // Moving around the app while the server is down is the ordinary case — a
+    // project is opened, a chat is closed — and each of those mounts or
+    // unmounts a watcher. The wait to the next attempt used to be thrown away
+    // and the connection reopened on the spot every time one did, so navigating
+    // during an outage hammered a door nobody was behind and the backing-off
+    // never actually happened (bw-zkh4.9).
+    const { useRunningElsewhere } = await freshModule();
+    const { onBoard } = await import('@/workbench/live-wire');
+    renderHook(() => useRunningElsewhere());
+
+    act(() => opened[0].dies());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(opened.length).toBe(2);
+
+    // That attempt fails too, so the next one is four seconds away.
+    act(() => opened[1].dies());
+
+    // A card list is drawn, which is what opening a project does.
+    const stopWatchingTheBoard = onBoard('/somewhere/a-project', () => {});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(opened.length, 'a screen mounting reopened it on the spot').toBe(2);
+
+    stopWatchingTheBoard();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(opened.length, 'the wait was put back to its floor').toBe(2);
+
+    // And the wait it was already keeping still runs out on its own.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(opened.length).toBe(3);
+  });
 });

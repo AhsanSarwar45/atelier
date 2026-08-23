@@ -275,8 +275,17 @@ function reshape(): void {
     stopWaiting();
     return;
   }
+  // It is down, and a wait is already counting towards trying again. A screen
+  // mounting or unmounting does not make a stopped server answer, and the wait
+  // reads what is watched afresh when it fires — so the new shape is carried by
+  // the wait that is already running. Cancelling it would put the count back to
+  // its floor, and ordinary navigation during an outage would then hammer a
+  // door nobody is behind, which is the one thing the backing-off is for
+  // (bw-zkh4.9).
+  if (again !== null) return;
   if (source === null) {
-    // Whatever wait was counting down towards reopening it, this is the reopen.
+    // Nothing was waiting: this is the first open, or the first after the
+    // reader stopped watching everything. The count starts from its floor.
     stopWaiting();
     open();
     return;
