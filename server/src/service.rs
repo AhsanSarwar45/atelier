@@ -161,6 +161,12 @@ fn as_text(value: &str) -> String {
 /// and a board with one person's projects in it belongs to that person's
 /// session. Starting before anybody logs in is what lingering is for, which
 /// `install` turns on.
+///
+/// It comes back however it stopped, not only when it died. A running copy
+/// stands down of its own accord the moment a newer build is installed over
+/// the program it was started from, and that is a clean exit — under
+/// `on-failure` the computer would take it at its word and leave the reader
+/// with nothing running at all (bw-8um.3.10.1).
 pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
     let args = STARTED_AS.join(" ");
     let environment: String = carried.iter().map(|(name, value)| written_down(name, value)).collect();
@@ -178,7 +184,7 @@ pub fn systemd_unit(exe: &str, carried: &[(String, String)]) -> String {
          Type=simple\n\
          {environment}\
          ExecStart={exe} {args}\n\
-         Restart=on-failure\n\
+         Restart=always\n\
          RestartSec=5\n\
          \n\
          [Install]\n\
@@ -252,6 +258,85 @@ fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
+/* ------------------------------------------------------------------ *
+ * Reading the registration back.
+ * ------------------------------------------------------------------ */
+
+/// The program this computer was told to start at login, read back out of the
+/// registration `install` wrote.
+///
+/// A registration names one exact file, and nothing that installs a program
+/// afterwards knows it exists. A reader who registered one copy and later
+/// installed another somewhere else is left with the computer faithfully
+/// starting the first one for the rest of its life — which is how a manager
+/// upgraded, saw no change, and had nothing to ask (bw-8um.3.10.4).
+pub fn registered_program() -> Option<String> {
+    let path = definition_path()?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    if cfg!(target_os = "macos") { program_in_plist(&text) } else { program_in_unit(&text) }
+}
+
+/// The program named by a systemd unit, undoing exactly what wrote it.
+pub fn program_in_unit(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| l.starts_with("ExecStart="))?;
+    let rest = line.strip_prefix("ExecStart=")?.trim_start();
+    let quoted = rest.strip_prefix('"')?;
+
+    // Read to the closing quote, honouring the escapes the writer put in — a
+    // path with a quote in it would otherwise end here rather than where it
+    // really ends.
+    let mut out = String::new();
+    let mut chars = quoted.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out.replace("%%", "%")),
+            '\\' => out.push(chars.next()?),
+            other => out.push(other),
+        }
+    }
+    None
+}
+
+/// Whether the registration on this computer brings the program back however
+/// it stopped — not only when it died.
+///
+/// A registration written by an older build says "restart it when it fails",
+/// which is not the same thing. A copy that stands down on purpose to let a
+/// newer build take over would be taken at its word under that rule and the
+/// reader would be left with nothing running at all — a worse outcome than the
+/// stale build they started with. So standing down is only ever done when this
+/// says yes. Nothing when this computer keeps no such file to read
+/// (bw-8um.3.10.1).
+pub fn registration_comes_back_however_it_stops() -> Option<bool> {
+    let path = definition_path()?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    Some(if cfg!(target_os = "macos") {
+        agent_comes_back_however_it_stops(&text)
+    } else {
+        unit_comes_back_however_it_stops(&text)
+    })
+}
+
+/// The rule behind it for systemd, over the text rather than the machine.
+pub fn unit_comes_back_however_it_stops(text: &str) -> bool {
+    text.lines().map(str::trim).any(|line| line == "Restart=always")
+}
+
+/// The rule behind it for launchd.
+pub fn agent_comes_back_however_it_stops(text: &str) -> bool {
+    text.split("<key>KeepAlive</key>")
+        .nth(1)
+        .is_some_and(|rest| rest.trim_start().starts_with("<true/>"))
+}
+
+/// The program named by a launchd agent: the first of its arguments.
+pub fn program_in_plist(text: &str) -> Option<String> {
+    let after = text.split("<key>ProgramArguments</key>").nth(1)?;
+    let opened = after.split("<string>").nth(1)?;
+    let named = opened.split("</string>").next()?;
+    Some(named.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+}
+
 /// Where the user's own systemd units live.
 fn systemd_dir() -> Option<PathBuf> {
     match std::env::var_os("XDG_CONFIG_HOME") {
@@ -264,11 +349,47 @@ fn systemd_dir() -> Option<PathBuf> {
  * Doing it.
  * ------------------------------------------------------------------ */
 
-/// Carry out what the reader asked, printing what happened.
-pub fn run(action: Action) -> Result<(), String> {
+/// The path worth writing into a registration, given the file this process is
+/// running and where a bare name would be looked up.
+///
+/// A registration has to name a path that still means "the installed program"
+/// a year later. This process's own path does not: a package manager installs
+/// each version into a folder of its own and points one link at the newest, so
+/// asking the running program where it sits gives the version-stamped folder —
+/// which the next upgrade deletes, leaving the computer starting nothing at
+/// all. The link is the stable name, so the link is what gets written down.
+///
+/// `named` is each place a bare name would be looked up, paired with the file
+/// it really leads to.
+pub fn worth_registering(exe: &str, named: &[(String, String)]) -> String {
+    named
+        .iter()
+        .find(|(candidate, leads_to)| leads_to == exe && candidate != exe)
+        .map(|(candidate, _)| candidate.clone())
+        .unwrap_or_else(|| exe.to_string())
+}
+
+/// The same question, asked of this computer.
+fn program_to_register() -> Result<String, String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("this program cannot find its own path, so nothing can be registered to start it: {e}"))?;
-    let exe = exe.display().to_string();
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe).display().to_string();
+    let named: Vec<(String, String)> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|dir| dir.join(NAME))
+        .filter_map(|candidate| {
+            let leads_to = std::fs::canonicalize(&candidate).ok()?;
+            Some((candidate.display().to_string(), leads_to.display().to_string()))
+        })
+        .collect();
+    Ok(worth_registering(&exe, &named))
+}
+
+/// Carry out what the reader asked, printing what happened.
+pub fn run(action: Action) -> Result<(), String> {
+    let exe = program_to_register()?;
     match action {
         Action::Install => install(&exe),
         Action::Uninstall => uninstall(),
@@ -294,7 +415,7 @@ fn install(exe: &str) -> Result<(), String> {
         println!("wrote {}", path.display());
     }
 
-    for step in install_steps() {
+    for step in install_steps(exe) {
         say(&step)?;
     }
 
@@ -372,16 +493,18 @@ fn words(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|p| p.to_string()).collect()
 }
 
-fn install_steps() -> Vec<Vec<String>> {
+fn install_steps(exe: &str) -> Vec<Vec<String>> {
     let label = label();
     if cfg!(target_os = "macos") {
         let path = definition_path().map(|p| p.display().to_string()).unwrap_or_default();
         vec![words(&["launchctl", "unload", &path]), words(&["launchctl", "load", "-w", &path])]
     } else if cfg!(target_os = "windows") {
-        let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default();
+        // The same path the other two registrars are given, not this process's
+        // own a second time: Windows keeps no file to read back, so a path
+        // that drifts here drifts silently.
         vec![words(&[
             "schtasks", "/Create", "/F", "/SC", "ONLOGON", "/TN", &label, "/TR",
-            &scheduled_command(&exe),
+            &scheduled_command(exe),
         ])]
     } else {
         let unit = format!("{label}.service");
@@ -583,11 +706,95 @@ mod tests {
     }
 
     #[test]
-    fn the_unit_comes_back_by_itself_when_it_dies() {
+    fn the_unit_comes_back_by_itself_however_it_stopped() {
+        // Not only when it died. A copy stands down on purpose the moment a
+        // newer build is installed over it, and under `on-failure` the
+        // computer would take that clean exit at its word and leave the reader
+        // with nothing running (bw-8um.3.10.1).
         let unit = systemd_unit("/usr/bin/atelier", &at(3008));
-        assert!(unit.contains("Restart=on-failure"), "{unit}");
+        assert!(unit.contains("Restart=always"), "{unit}");
         let plist = launch_agent("/usr/bin/atelier", &at(3008), "com.weselow.atelier");
         assert!(plist.contains("<key>KeepAlive</key>"), "{plist}");
+    }
+
+    #[test]
+    fn a_registration_can_be_read_back_to_find_it_is_registered_elsewhere() {
+        // The whole point of writing it down is being able to ask later which
+        // copy this computer actually starts.
+        let unit = systemd_unit("/home/me/.local/bin/atelier", &at(3008));
+        assert_eq!(program_in_unit(&unit).as_deref(), Some("/home/me/.local/bin/atelier"));
+
+        let plist = launch_agent("/opt/atelier/atelier", &at(3008), "com.weselow.atelier");
+        assert_eq!(program_in_plist(&plist).as_deref(), Some("/opt/atelier/atelier"));
+    }
+
+    #[test]
+    fn a_registration_written_for_an_awkward_path_reads_back_as_that_path() {
+        // Percent signs are doubled and quotes escaped on the way in; reading
+        // it back has to undo exactly that, or a reader whose program sits in
+        // `100%` is told it is registered somewhere it is not.
+        let unit = systemd_unit("/home/sam/my apps/100%/atelier", &at(3008));
+        assert_eq!(program_in_unit(&unit).as_deref(), Some("/home/sam/my apps/100%/atelier"));
+
+        let plist = launch_agent("/Users/me/R&D/atelier", &at(3008), "com.weselow.atelier");
+        assert_eq!(program_in_plist(&plist).as_deref(), Some("/Users/me/R&D/atelier"));
+    }
+
+    #[test]
+    fn a_registration_names_the_installed_program_and_not_the_version_it_is_today() {
+        // A package manager puts each version in a folder of its own and
+        // points one link at the newest. Written down, that link keeps meaning
+        // the installed program; the folder behind it is deleted by the very
+        // next upgrade, and the computer is left starting nothing at all.
+        let on_path = vec![
+            ("/usr/local/bin/atelier".to_string(), "/usr/local/bin/atelier".to_string()),
+            (
+                "/opt/brew/bin/atelier".to_string(),
+                "/opt/brew/Cellar/atelier/0.13.1/bin/atelier".to_string(),
+            ),
+        ];
+        assert_eq!(
+            worth_registering("/opt/brew/Cellar/atelier/0.13.1/bin/atelier", &on_path),
+            "/opt/brew/bin/atelier"
+        );
+    }
+
+    #[test]
+    fn a_registration_names_the_program_itself_when_no_name_leads_to_it() {
+        // Run out of a folder that is on nobody's list, its own path is the
+        // only name it has — and a copy of some other build sitting on the
+        // list is not it.
+        let on_path = vec![("/usr/bin/atelier".to_string(), "/usr/bin/atelier".to_string())];
+        assert_eq!(worth_registering("/home/me/build/atelier", &on_path), "/home/me/build/atelier");
+        assert_eq!(worth_registering("/usr/bin/atelier", &on_path), "/usr/bin/atelier");
+        assert_eq!(worth_registering("/usr/bin/atelier", &[]), "/usr/bin/atelier");
+    }
+
+    #[test]
+    fn handover_is_only_offered_by_a_registration_that_comes_back_however_it_stops() {
+        // What this build writes says yes; what an older build wrote says no,
+        // and a copy that stood down under it would never come back.
+        assert!(unit_comes_back_however_it_stops(&systemd_unit("/usr/bin/atelier", &at(3008))));
+        assert!(!unit_comes_back_however_it_stops(
+            "[Service]\nExecStart=\"/usr/bin/atelier\" run\nRestart=on-failure\n"
+        ));
+        assert!(!unit_comes_back_however_it_stops("[Service]\nExecStart=\"/usr/bin/atelier\" run\n"));
+
+        assert!(agent_comes_back_however_it_stops(&launch_agent(
+            "/usr/bin/atelier",
+            &at(3008),
+            "com.weselow.atelier"
+        )));
+        assert!(!agent_comes_back_however_it_stops(
+            "<dict><key>KeepAlive</key><false/></dict>"
+        ));
+        assert!(!agent_comes_back_however_it_stops("<dict></dict>"));
+    }
+
+    #[test]
+    fn nothing_is_read_back_out_of_a_registration_that_names_no_program() {
+        assert!(program_in_unit("[Service]\nType=simple\n").is_none());
+        assert!(program_in_plist("<plist><dict></dict></plist>").is_none());
     }
 
     #[test]
@@ -618,7 +825,7 @@ mod tests {
         let named = |steps: Vec<Vec<String>>| {
             steps.iter().flatten().any(|w| w.contains(&label()))
         };
-        assert!(named(install_steps()), "the install names no registration");
+        assert!(named(install_steps("/usr/bin/atelier")), "the install names no registration");
         assert!(named(uninstall_steps()), "taking it off names no registration");
         assert!(named(status_steps()), "asking after it names no registration");
     }

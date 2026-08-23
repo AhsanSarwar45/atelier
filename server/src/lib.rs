@@ -2,6 +2,7 @@
 pub mod command_line;
 pub mod db;
 pub mod dolt;
+pub mod handover;
 pub mod helper;
 pub mod identity;
 pub mod laid_down;

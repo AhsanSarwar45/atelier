@@ -110,6 +110,16 @@ value to use; it holds read-only rights and cannot write to the published line.
 - Confirm the GitHub Release has all four binaries + `SHA256SUMS.txt`.
 - Homebrew: `brew update && brew upgrade atelier`.
 
+A copy the computer starts at login takes the new build over by itself, within
+about fifteen seconds of the upgrade and with nothing to type: it watches the
+program it was registered against, stands down when a different one is
+installed there, and the computer starts the replacement. Coming from anything
+before 0.13.1 that happens once the registration has been rewritten — the older
+one only brings the program back when it *fails*, so a copy that stood down on
+purpose under it would never return. The new build knows that and refuses to
+stand down until `atelier service install` has been run once from the copy the
+computer should be starting.
+
 ## Required repository secrets
 
 Set under *AhsanSarwar45/atelier → Settings → Secrets and variables → Actions*:

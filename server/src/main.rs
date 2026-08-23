@@ -7,6 +7,7 @@ mod command_line;
 mod db;
 mod doing;
 mod dolt;
+mod handover;
 mod helper;
 mod identity;
 mod laid_down;
@@ -252,6 +253,62 @@ async fn serve(open_browser: bool) {
     let host = bind_host();
     let port = bind_port();
 
+    // The door is taken first, before a line of the rest of it runs.
+    //
+    // It used to be taken last. A reader whose computer was already serving
+    // watched five healthy lines go by — the database, the report tools, the
+    // tracker, the chat helper laid down and its sidecar started — and then
+    // the program died on a bind error with a debugger hint, having started a
+    // helper it then abandoned. Nothing it had said was untrue and none of it
+    // was the point (bw-8um.3.10.2).
+    let addr = format!("{}:{}", host, port);
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            let network = reachable::on_this_network();
+            let name = reachable::name_on_this_network(network);
+            let openable = reachable::openable_at(&host, port, network, name.as_deref());
+            let who = handover::who_is_there(port).await;
+            let ours = handover::program().map(|p| p.display().to_string());
+            let (said, code) =
+                handover::already_serving(who.as_ref(), ours.as_deref(), port, &openable);
+            print!("{said}");
+            std::process::exit(code);
+        }
+        Err(e) => {
+            eprintln!("{} could not listen on {addr}: {e}", identity::DISPLAY);
+            std::process::exit(1);
+        }
+    };
+
+    // Which copy this is, worked out once here rather than on the first
+    // request: reading the program's own bytes is the only honest way to tell
+    // two builds of one version apart, and nobody should wait on it.
+    let ours = handover::program().map(|p| p.display().to_string());
+    info!(
+        "{} {} (build {})",
+        identity::DISPLAY,
+        env!("CARGO_PKG_VERSION"),
+        handover::fingerprint()
+    );
+    let _ = handover::started_at();
+
+    // A registration names one exact file and nothing that installs a program
+    // afterwards knows it exists, so the copy this computer starts at login
+    // can quietly be one nobody has updated in months. Saying so is the whole
+    // of the fix — the reader can then point it at this one (bw-8um.3.10.4).
+    let registered = service::registered_program();
+    if let Some(note) = handover::a_different_copy(registered.as_deref(), ours.as_deref()) {
+        print!("{note}");
+    }
+
+    // And from here on, an install of a newer build over that same program
+    // takes over by itself: this copy stands down and the computer starts
+    // whatever replaced it (bw-8um.3.10.1).
+    if let Some(registered) = registered {
+        handover::stand_down_for_a_newer_build(std::path::PathBuf::from(registered));
+    }
+
     // Configure CORS for development
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -377,11 +434,6 @@ async fn serve(open_browser: bool) {
         .layer(Extension(database))
         .layer(Extension(dolt_manager))
         .layer(cors);
-
-    let addr = format!("{}:{}", host, port);
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("Failed to bind to address");
 
     // Where it bound, not an address to open: `http://0.0.0.0:3008` is not
     // something a browser can be pointed at, and offering it beside the two

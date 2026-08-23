@@ -27,16 +27,38 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Health check response structure.
+///
+/// It used to answer `ok` and nothing else, which is true of any copy of any
+/// build and so cannot settle the one question that actually gets asked: which
+/// copy is this? A reader with two builds installed had no way to tell which
+/// of them was serving, and the program starting up beside it had no way to
+/// name the copy already holding the port (bw-8um.3.10.3).
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
+    /// Whose answer this is, so a stranger on the port is not mistaken for us.
+    pub product: &'static str,
+    pub version: &'static str,
+    /// The exact file, where the version alone cannot tell two builds apart.
+    pub build: &'static str,
+    /// The program behind this copy, as this computer names it.
+    pub program: Option<String>,
+    pub since: &'static str,
 }
 
 /// Health check endpoint handler.
 ///
-/// Returns a JSON response indicating the server is running.
+/// Returns a JSON response indicating the server is running, and which copy of
+/// it is doing the running.
 pub async fn health() -> impl IntoResponse {
-    Json(HealthResponse { status: "ok" })
+    Json(HealthResponse {
+        status: "ok",
+        product: crate::identity::NAME,
+        version: env!("CARGO_PKG_VERSION"),
+        build: crate::handover::fingerprint(),
+        program: crate::handover::program().map(|p| p.display().to_string()),
+        since: crate::handover::started_at(),
+    })
 }
 
 /// Cached path to the `bd` CLI binary.
