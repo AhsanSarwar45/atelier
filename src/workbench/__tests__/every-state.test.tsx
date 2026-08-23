@@ -640,7 +640,14 @@ describe('the row and the bar say the same thing', () => {
  * the thing beside the word that says WHICH retry or WHOSE work.
  */
 describe('the four screens that say what a chat is doing', () => {
-  /** What one screen ends up drawing about a chat. */
+  /**
+   * What one screen ends up drawing about a chat.
+   *
+   * The reading, not the rail's own trimming of it: the list asks its chip to
+   * leave the clause off because 288px does not hold one, and that choice is
+   * measured where it is made (rail-row.test.tsx). What these cases hold is
+   * that the four screens are handed the same words to begin with.
+   */
   function drawn(state: ChatState, testId: string, size: 'chip' | 'inline' = 'chip') {
     render(<ChatStateChip state={state} size={size} testId={testId} />);
     const chip = screen.queryByTestId(testId);

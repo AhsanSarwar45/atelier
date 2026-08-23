@@ -142,11 +142,16 @@ function seconds(since: number | null, now: number): string {
 export function ChatStateChip({
   state,
   size = 'chip',
+  detail = true,
   testId = 'chat-state',
   className,
 }: {
   state: ChatState;
   size?: 'chip' | 'inline';
+  // Whether there is room for what this particular one is on. Asked for, never
+  // guessed from the size: the rail and the chat's own bar draw the same size
+  // of chip, and only one of them is 288px wide (the manager, 2026-08-23).
+  detail?: boolean;
   testId?: string;
   className?: string;
 }) {
@@ -177,8 +182,10 @@ export function ChatStateChip({
       {/* What this particular one is — the time a limit lifts, how many helpers
           are out. Quieter than the word, and cut short rather than wrapping:
           "Retrying" alone leaves the reader watching a chat that says nothing
-          about when it comes back (bw-jaoz.14.8). */}
-      {state.detail && (
+          about when it comes back (bw-jaoz.14.8). Where the caller says there
+          is no room for it, it is dropped whole rather than truncated to a
+          stub — "· au…" tells the reader less than nothing. */}
+      {detail && state.detail && (
         <span data-testid="chat-state-detail" className="truncate opacity-70">
           · {state.detail}
         </span>

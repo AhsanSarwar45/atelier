@@ -5,10 +5,12 @@
  * A row is an offer, never a wake-up. Nothing here starts an agent until the
  * owner clicks (decision 8) — see docs/agent-workbench.md §6.3.
  *
- * A row says three things and no more: what the conversation is called, which
- * folder it ran in, and how it is doing. The cards it worked on ride along as
- * `data-beads` for anything that needs to know, but they are not drawn: a rail
- * this narrow reads better without a wall of ids.
+ * A row says two things and no more: what the conversation is called, with the
+ * time beside it, and how it is doing. The folder it ran in and the cards it
+ * worked on ride along as `data-folder` and `data-beads` for anything that
+ * needs to know, and neither is drawn: the chat's own bar names the folder and
+ * its branch the moment the row is clicked, and a rail this narrow reads better
+ * without a second copy of it or a wall of ids (the manager, 2026-08-23).
  */
 'use client';
 
@@ -16,7 +18,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { apiUrl } from '@/lib/api-base';
-import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
@@ -460,16 +461,25 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                   // The cards this chat worked on. Carried, not drawn — the ids
                   // are what a chat is looked up by, and the row has no room.
                   data-beads={row.beads.join(' ')}
-                  // Two lines, never three: the name, then what it worked on and
-                  // where. Everything else — the time, the way back in — rides on
-                  // one of those two lines, because a rail this narrow turns a
-                  // third row into a wall of half-sentences.
+                  // Where it ran, the same way: the chat's own bar draws this
+                  // and its branch, so drawing it here too spent a line of a
+                  // two-line row saying what the next screen says anyway.
+                  data-folder={row.folder ?? ''}
+                  // Two lines, never three: the name, then what it is doing.
+                  // Everything else — the time, whoever else is in there — rides
+                  // on one of those two lines, because a rail this narrow turns
+                  // a third row into a wall of half-sentences.
                   className={cn(
                     'px-3 py-2 text-sm',
                     row.sessionId && row.sessionId === openSessionId && 'bg-accent',
                   )}
                 >
-                  <div className="flex items-baseline gap-2">
+                  {/* Centred, not sat on the name's baseline. The clock is
+                      three points smaller and in another typeface, and a shared
+                      baseline dropped it visibly below the middle of the name
+                      beside it — the two boxes are the same height, so centring
+                      them is what puts the clock on the name's own line. */}
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       data-testid="row-name"
@@ -483,41 +493,16 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       {clockTime(whenHeSpoke(row))}
                     </span>
                   </div>
-                  {(row.folder || state.external) && (
-                    <div className="mt-1 flex items-center gap-1 overflow-hidden">
-                      {row.folder && (
-                      <Badge
-                        hue={hueFor(row.folder)}
-                        appearance="light"
-                        size="sm"
-                        shape="circle"
-                        data-testid="row-folder-chip"
-                        data-folder={row.folder}
-                        // The full path and the branch in the tooltip: the chip
-                        // itself has room for the one word that tells two
-                        // checkouts of the same project apart.
-                        title={[row.cwdHint, row.branch].filter(Boolean).join(' · ')}
-                        className="min-w-0 shrink truncate font-mono"
-                      >
-                        {row.folder}
-                      </Badge>
-                      )}
-                      {/* Who holds the chat is a footnote and rides with the
-                          project it is in, which leaves the line below it whole
-                          for what the chat is doing — the thing being read
-                          (bw-jaoz.14.14). */}
-                      {state.external && (
-                        <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />
-                      )}
-                    </div>
-                  )}
                   {/*
-                    What it is doing gets a line of its own, and the whole width
-                    of it. Sharing the project chip's line pushed this to the
-                    right edge, where the badge saying somebody else is in there
-                    was clipped on a narrow rail and the word had no room for
-                    what it is on (bw-jaoz.14.14, the manager's own reading of
-                    the five-states picture).
+                    What it is doing is the second line, and the whole of it. It
+                    used to be the third, under a chip naming the folder — which
+                    the chat's own bar names again the moment the row is clicked,
+                    so the rail was spending a line of three on a fact the next
+                    screen carries anyway (the manager, 2026-08-23).
+
+                    The badge saying somebody else is in there rides at the far
+                    end of this line rather than on the folder's, which is where
+                    it sat when there was a folder line to sit on.
 
                     The same reading the chat's own line draws, in the same words
                     (chat-state.ts). A row that is asleep says nothing at all,
@@ -544,7 +529,17 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                         // the line to itself and what it is on cuts short only
                         // when the rail is genuinely too narrow for it
                         // (bw-jaoz.14.14).
-                        <ChatStateChip state={state} testId="row-pill" className="min-w-0 shrink" />
+                        //
+                        // Without its detail clause: 288px minus the badge for
+                        // whoever holds the chat leaves room for the word and
+                        // the clock, and "· auto" or "· 3 helpers" was arriving
+                        // truncated to a stub of itself. The clause is kept
+                        // where there is room for it — the chat's own bar
+                        // (the manager, 2026-08-23).
+                        <ChatStateChip state={state} detail={false} testId="row-pill" className="min-w-0 shrink" />
+                      )}
+                      {state.external && (
+                        <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />
                       )}
                     </div>
                   )}

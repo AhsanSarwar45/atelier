@@ -669,12 +669,14 @@ test.describe('a chat another program is in', () => {
         // The badge saying whose chat this is stays beside all five, because it
         // was never an answer to what the chat is doing (bw-96is).
         await expect(row.getByTestId('chat-external')).toBeVisible();
-        if (one.detail !== null) {
-          await expect(
-            pill.getByTestId('chat-state-detail'),
-            `${one.doing} says which one it is, not just which kind`,
-          ).toContainText(one.detail);
-        }
+        // Which one it is — "auto", "3 helpers" — is not said here. The rail is
+        // 288px wide and the clause arrived truncated to a stub of itself, so
+        // it moved to the chat's own bar, which is checked below on the one
+        // chat this test opens (the manager, 2026-08-23).
+        await expect(
+          pill.getByTestId('chat-state-detail'),
+          `${one.doing} spent the rail's width on a clause it cannot finish`,
+        ).toHaveCount(0);
       }
 
       // The picture the manager judges the job by: five rows, five states.
@@ -686,6 +688,12 @@ test.describe('a chat another program is in', () => {
       const summarising = made[0]!;
       await rowFor(page, summarising.chat.id).getByTestId('row-name').click();
       await expect(page.getByTestId('working-line')).toContainText('Summarising', { timeout: 30_000 });
+      // And here, where there is room for it, which compaction it is: the rail
+      // dropping the clause must not mean nobody says it at all.
+      await expect(
+        page.getByTestId('session-state-chip').getByTestId('chat-state-detail'),
+        'the chat that dropped the clause from the rail does not say it anywhere',
+      ).toContainText(summarising.detail!, { timeout: 30_000 });
       await expect(page.getByTestId('summarising-bar')).toBeVisible({ timeout: 30_000 });
       await page.screenshot({ path: 'tests/results/chat-state-summarising.png', fullPage: false });
 

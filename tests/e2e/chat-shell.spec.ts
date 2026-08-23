@@ -148,10 +148,48 @@ test.describe('the chat screen', () => {
   test('a chip on a chat is coloured, not the page\'s own grey', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=chat`);
-    await page.getByTestId('row-folder-chip').first().waitFor();
+    await page.getByTestId('restore-row').first().waitFor();
 
-    const chip = await paintedColour(page, '[data-testid="row-folder-chip"]');
+    // Measured on the chat's own bar, because that is where a hued chip is
+    // drawn now: the rail carries the folder as an attribute and spends its two
+    // lines on the name and the state (the manager, 2026-08-23).
+    const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"])');
+    await ready.first().waitFor({ timeout: 10_000 }).catch(() => {});
+    test.skip((await ready.count()) === 0, 'no chat is attached to open');
+    await ready.first().getByTestId('row-name').click();
+    await page.getByTestId('chat-folder-chip').waitFor();
+
+    const chip = await paintedColour(page, '[data-testid="chat-folder-chip"]');
     expect(colourfulness(chip.text), `the chip's words came out ${chip.text.join(',')}`).toBeGreaterThan(20);
     expect(colourfulness(chip.fill), `the chip's fill came out ${chip.fill.join(',')}`).toBeGreaterThan(4);
+  });
+
+  /**
+   * The manager, on the running copy 2026-08-23: "the time is not vertically
+   * aligned with the text". The clock sat on the name's baseline, and being
+   * three points smaller and in another typeface that put its middle visibly
+   * below the middle of the name beside it. Measured where he saw it — in the
+   * browser, with the fonts actually loaded — because a shared baseline is a
+   * true statement about the markup and still the wrong picture.
+   */
+  test('the time sits on the name own line', async ({ page, request }) => {
+    const id = await projectId(request);
+    await page.goto(`/project?id=${id}&tab=chat`);
+    const row = page.getByTestId('restore-row').first();
+    await row.waitFor();
+
+    const name = await row.getByTestId('row-name').boundingBox();
+    const clock = await row.locator('span.font-mono').first().boundingBox();
+    expect(name, 'the row drew no name').not.toBeNull();
+    expect(clock, 'the row drew no time beside the name').not.toBeNull();
+
+    const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
+    const apart = Math.abs(middle(name!) - middle(clock!));
+    // Half a point of rounding is the whole allowance: on his screen the two
+    // middles stood several points apart, which is what reads as sitting low.
+    expect(apart, `the time's middle is ${apart.toFixed(1)}px off the name's`).toBeLessThan(1);
+
+    // Beside it, not under it: one line, whatever the middles say.
+    expect(clock!.x, 'the time wrapped onto a line of its own').toBeGreaterThan(name!.x);
   });
 });

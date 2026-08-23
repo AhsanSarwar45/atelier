@@ -493,8 +493,10 @@ test.describe('workbench', () => {
       // which for a session with no title of its own is what was asked of it —
       // measured, and the same string this test typed into `claude -p`.
       await expect(terminalRow.getByTestId('row-name')).toHaveText('Reply with exactly: READY');
-      // And where it ran, by the folder's own name.
-      await expect(terminalRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
+      // And where it ran, by the folder's own name — carried on the row rather
+      // than drawn on it: the rail is two lines wide now and the chat's own bar
+      // names the folder and its branch the moment the row is clicked.
+      await expect(terminalRow).toHaveAttribute('data-folder', basename(FIXTURE));
       await page.screenshot({ path: join(SHOTS, 'restore.png'), fullPage: false });
 
       // ---- one click brings the terminal session back ---------------------
@@ -511,7 +513,7 @@ test.describe('workbench', () => {
 
       // ---- and the app's own chat is placed the same way ------------------
       const appRow = page.locator('[data-testid="restore-row"][data-origin="app"]').first();
-      await expect(appRow.getByTestId('row-folder-chip')).toHaveText(basename(FIXTURE));
+      await expect(appRow).toHaveAttribute('data-folder', basename(FIXTURE));
     } finally {
       await request.delete(`/api/projects/${project.id}`);
     }
