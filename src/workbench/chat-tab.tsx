@@ -808,7 +808,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // Over the whole screen, like the sheet it belongs to: the dimming
           // stops where the sheet stops, and a sheet that covers the bars with
           // bright bars showing through beside it is two panels arguing.
-          'fixed inset-0 z-40 bg-black/40 md:hidden',
+          // 80% and not 40%, which is what an opened card already uses: the
+          // app's own background is 9,9,11, so a light wash over it moves
+          // nothing an eye can see — what dims is the WRITING behind the
+          // sheet, and 40% left it perfectly readable (bw-81wt.30).
+          'fixed inset-0 z-40 bg-black/80 md:hidden',
           'transition-opacity duration-200 ease-out motion-reduce:transition-none',
           railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
@@ -842,7 +846,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             // Over the whole screen, like the sheet it belongs to: the dimming
           // stops where the sheet stops, and a sheet that covers the bars with
           // bright bars showing through beside it is two panels arguing.
-          'fixed inset-0 z-40 bg-black/40 md:hidden',
+          // 80% and not 40%, which is what an opened card already uses: the
+          // app's own background is 9,9,11, so a light wash over it moves
+          // nothing an eye can see — what dims is the WRITING behind the
+          // sheet, and 40% left it perfectly readable (bw-81wt.30).
+          'fixed inset-0 z-40 bg-black/80 md:hidden',
             'transition-opacity duration-200 ease-out motion-reduce:transition-none',
             rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
           )}
