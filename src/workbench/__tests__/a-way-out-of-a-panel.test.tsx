@@ -13,6 +13,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { Mentions } from '@/components/markdown-body';
+import { AgentView } from '@/workbench/agent-view';
+import type { SentAway } from '@/workbench/fold';
 import { SearchPanel } from '@/workbench/search-panel';
 import { TokenView } from '@/workbench/token-view';
 import { UsageView } from '@/workbench/usage-view';
@@ -44,6 +47,33 @@ const drawn = async (node: React.ReactElement) => {
 /** Nothing this file asks about needs an answer from the machine. */
 vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) })));
 
+/** Words drawn as themselves: nothing here is about how a message is marked up. */
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null, report: () => null };
+
+/**
+ * One finished helper, written out here rather than folded from a log.
+ *
+ * Finished on purpose: a running one starts a clock of its own, and this file
+ * asks one question — does the panel close — which a ticking second hand can
+ * only make flaky.
+ */
+const HELPER: SentAway = {
+  id: 'task-1',
+  toolCallId: null,
+  kind: 'helper',
+  what: 'read the board',
+  agentType: null,
+  model: null,
+  state: 'done',
+  startedAt: 0,
+  seconds: 2,
+  tokens: 120,
+  calls: 1,
+  doing: null,
+  result: 'it read the board',
+  relayed: [],
+};
+
 const escape = () =>
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -53,6 +83,16 @@ const panels = [
   ['the search panel', 'search-panel', (onClose: () => void) => <SearchPanel onClose={onClose} />],
   ['the tokens panel', 'token-view', (onClose: () => void) => <TokenView sessionId="chat-1" onClose={onClose} />],
   ['the plan usage panel', 'usage-view', (onClose: () => void) => <UsageView onClose={onClose} />],
+  // Wears the same shell as the three above and was the one left out of this
+  // list, so a break in the shell's way out would have taken it in silence
+  // (bw-81wt.26).
+  [
+    "one agent's own conversation",
+    'agent-view',
+    (onClose: () => void) => (
+      <AgentView row={HELPER} items={[]} sessionId="chat-1" controls={[]} mentions={PLAINLY} onClose={onClose} />
+    ),
+  ],
 ] as const;
 
 afterEach(() => {
