@@ -82,6 +82,23 @@ run() {
   "$@"
 }
 
+# The build online for one commit. Waiting for it to appear and waiting for it
+# to finish are two different waits: a run that has not been created yet and a
+# run still going look the same from here, and only the first is worth giving
+# up on before the build has had its say.
+ci_run_for() {
+  local sha=$1 waited=0 found=""
+  while [ "$waited" -lt "$WAIT_LIMIT" ]; do
+    found=$(gh run list -R "$SOURCE" --workflow CI --limit 12 \
+              --json databaseId,headSha --jq \
+              "[.[] | select(.headSha == \"$sha\")][0].databaseId" 2>/dev/null)
+    if [ -n "$found" ] && [ "$found" != "null" ]; then printf '%s' "$found"; return 0; fi
+    sleep 10
+    waited=$((waited + 10))
+  done
+  return 1
+}
+
 # ── 1 of 7 ────────────────────────────────────────────────────────────────
 step "1/7  This computer is ready"
 
@@ -172,11 +189,13 @@ step "3/7  The number, written in five places"
 # Every one of these names the version, and nothing but this keeps them in step.
 # server/Cargo.lock is here because a build machine reads it before the manifest;
 # flake.nix is here because it names it twice and sat two releases behind once.
-say "package.json          $NOW → $NEXT"
-say "package-lock.json     $NOW → $NEXT   (twice)"
-say "server/Cargo.toml     $NOW → $NEXT"
-say "server/Cargo.lock     $NOW → $NEXT"
-say "flake.nix             $NOW → $NEXT   (twice)"
+if [ "$NOW" != "$NEXT" ]; then
+  say "package.json          $NOW → $NEXT"
+  say "package-lock.json     $NOW → $NEXT   (twice)"
+  say "server/Cargo.toml     $NOW → $NEXT"
+  say "server/Cargo.lock     $NOW → $NEXT"
+  say "flake.nix             $NOW → $NEXT   (twice)"
+fi
 
 if [ "$NOW" = "$NEXT" ]; then
   # A run that died after the writing step and is being started again. Writing
@@ -269,19 +288,38 @@ else
     || die "could not put the line online"
   ok "pushed $(git rev-parse --short "$SHA")"
   say "waiting for the checks online — this is what stops a tag being written on a red build"
-  WAITED=0
-  RUN=""
-  while [ "$WAITED" -lt "$WAIT_LIMIT" ]; do
-    RUN=$(gh run list -R "$SOURCE" --workflow CI --limit 12 \
-            --json databaseId,headSha --jq \
-            "[.[] | select(.headSha == \"$SHA\")][0].databaseId" 2>/dev/null)
-    [ -n "$RUN" ] && [ "$RUN" != "null" ] && break
-    sleep 10; WAITED=$((WAITED + 10))
-  done
-  [ -n "$RUN" ] && [ "$RUN" != "null" ] \
+  RUN=$(ci_run_for "$SHA") \
     || die "no build online ever picked up $SHA — look at $SOURCE/actions"
-  gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 15 >/dev/null 2>&1 \
-    || die "the checks online went red on this commit, so no tag was written — gh run view $RUN -R $SOURCE --log-failed"
+
+  if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 15 >/dev/null 2>&1; then
+    # The one red a release causes rather than finds. Writing the new number
+    # rewrites package-lock.json, and the flake pins a hash over what that lock
+    # file fetches — so the number this release writes is the very thing that
+    # makes the frozen list stale, on every release, for ever. The build says
+    # which hash it wants. Writing that and pushing again is the whole repair,
+    # and it is done once: a second red is a real one (bw-sinv.5).
+    WANTED=$(gh run view "$RUN" -R "$SOURCE" --log-failed 2>/dev/null \
+               | grep -aoE 'npmDepsHash = "sha256-[^"]+"' | tail -1 \
+               | grep -aoE 'sha256-[^"]+')
+    [ -n "$WANTED" ] \
+      || die "the checks online went red on this commit, so no tag was written — gh run view $RUN -R $SOURCE --log-failed"
+
+    say "the frozen dependency list went stale on the number this release wrote; it asks for $WANTED"
+    sed -i -E "s#npmDepsHash = \"sha256-[^\"]+\";#npmDepsHash = \"$WANTED\";#" flake.nix \
+      || die "could not write the hash into flake.nix"
+    git add flake.nix || die "could not stage flake.nix"
+    git commit --quiet -m "chore(packaging): the frozen dependency list, after $NEXT" \
+      || die "could not save the hash the build asked for"
+    SHA=$(git rev-parse HEAD)
+    git push --quiet origin "$SHA:$PUBLISHED" \
+      || die "could not put the repaired line online"
+    ok "pushed $(git rev-parse --short "$SHA") with the hash the build asked for"
+
+    RUN=$(ci_run_for "$SHA") \
+      || die "no build online ever picked up $SHA — look at $SOURCE/actions"
+    gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 15 >/dev/null 2>&1 \
+      || die "the checks online are still red with the hash it asked for, so no tag was written — gh run view $RUN -R $SOURCE --log-failed"
+  fi
   ok "green online on the commit being released"
 fi
 
