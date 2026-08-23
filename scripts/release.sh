@@ -82,22 +82,30 @@ run() {
   "$@"
 }
 
-# The build online for one commit. Waiting for it to appear and waiting for it
-# to finish are two different waits: a run that has not been created yet and a
-# run still going look the same from here, and only the first is worth giving
-# up on before the build has had its say.
-ci_run_for() {
-  local sha=$1 waited=0 found=""
-  while [ "$waited" -lt "$WAIT_LIMIT" ]; do
-    found=$(gh run list -R "$SOURCE" --workflow CI --limit 12 \
-              --json databaseId,headSha --jq \
-              "[.[] | select(.headSha == \"$sha\")][0].databaseId" 2>/dev/null)
+# The build online for one thing, named the one way it can be recognised: the
+# checks are found by the commit they ran on, the release build by the tag that
+# started it. Waiting for a run to appear and waiting for it to finish are two
+# different waits — a run that has not been created yet and a run still going
+# look the same from here, and only the first is worth giving up on before the
+# build has had its say. One loop, because two copies of it drift apart.
+run_for() {
+  local workflow=$1 field=$2 value=$3 found=""
+  local WAITED=0
+  while [ "$WAITED" -lt "$WAIT_LIMIT" ]; do
+    found=$(gh run list -R "$SOURCE" --workflow "$workflow" --limit 12 \
+              --json databaseId,"$field" --jq \
+              "[.[] | select(.$field == \"$value\")][0].databaseId" 2>/dev/null)
     if [ -n "$found" ] && [ "$found" != "null" ]; then printf '%s' "$found"; return 0; fi
     sleep 10
-    waited=$((waited + 10))
+    WAITED=$((WAITED + 10))
   done
   return 1
 }
+
+# The one shape every rewrite of server/Cargo.lock uses, written once so the
+# command --dry-run prints is the command a real run runs. The lock file names
+# every package; ours is the one under `name = "atelier"`.
+LOCK_AWK='$0 == "name = \"atelier\"" { mine = 1 } mine && $0 == old { $0 = new; mine = 0 } { print }' 
 
 # ── 1 of 7 ────────────────────────────────────────────────────────────────
 step "1/7  This computer is ready"
@@ -136,14 +144,6 @@ NOW=$(node -p "require('./package.json').version" 2>/dev/null) \
 LAST=$(git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1)
 [ -n "$LAST" ] || die "there is no earlier release to count from"
 
-# The files and the last tag should name the same release. When they do not,
-# something was tagged without the five files being written — the build online
-# under that name reports a different one, and the recipe cannot be filled in
-# for it (it happened to v0.13.2). It does not stop this release, whose number
-# is worked out from the tag and written into the files below, but it is said
-# out loud because nothing else says it.
-[ "$NOW" = "$LAST" ] || say "note: the files here say $NOW while the last release is $LAST — that one went out under a name its build does not report"
-
 SUBJECTS=$(git log "v$LAST..HEAD" --format='%s')
 BODIES=$(git log "v$LAST..HEAD" --format='%b')
 COUNT=$(printf '%s\n' "$SUBJECTS" | grep -c . )
@@ -181,6 +181,17 @@ fi
 git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null \
   && stop "v$NEXT already exists here — a released number is never written twice"
 
+# The files and the last tag should name the same release. When they do not,
+# something was tagged without the five files being written — the build online
+# under that name reports a different one, and the recipe cannot be filled in
+# for it (it happened to v0.13.2). It is only said once the next number is
+# known, because files saying something other than the last tag is also exactly
+# what an interrupted run of this script leaves behind, and that is not a
+# mistagged release but this release, half written (bw-sinv.9).
+if [ "$NOW" != "$LAST" ] && [ "$NOW" != "$NEXT" ]; then
+  say "note: the files here say $NOW while the last release is $LAST — that one went out under a name its build does not report"
+fi
+
 ok "next: $NEXT   (a $BUMP change on $LAST)"
 
 # ── 3 of 7 ────────────────────────────────────────────────────────────────
@@ -205,7 +216,8 @@ if [ "$NOW" = "$NEXT" ]; then
 elif [ "$DRY_RUN" = 1 ]; then
   would "npm version --no-git-tag-version --allow-same-version $NEXT"
   would "sed -i \"0,/^version = \\\"$NOW\\\"/s//version = \\\"$NEXT\\\"/\" server/Cargo.toml"
-  would "the atelier entry in server/Cargo.lock, and both lines in flake.nix"
+  would "awk -v old='version = \"$NOW\"' -v new='version = \"$NEXT\"' '$LOCK_AWK' server/Cargo.lock > server/Cargo.lock.next && mv server/Cargo.lock.next server/Cargo.lock"
+  would "sed -i \"s/version = \\\"$NOW\\\";/version = \\\"$NEXT\\\";/g\" flake.nix"
 else
   npm version --no-git-tag-version --allow-same-version "$NEXT" >/dev/null \
     || die "npm would not write $NEXT into package.json and package-lock.json"
@@ -215,20 +227,31 @@ else
   sed -i "0,/^version = \"$NOW\"/s//version = \"$NEXT\"/" server/Cargo.toml \
     || die "could not write $NEXT into server/Cargo.toml"
 
-  # The lock file names every package; ours is the one under `name = "atelier"`.
-  awk -v old="version = \"$NOW\"" -v new="version = \"$NEXT\"" '
-    $0 == "name = \"atelier\"" { mine = 1 }
-    mine && $0 == old { $0 = new; mine = 0 }
-    { print }
-  ' server/Cargo.lock > server/Cargo.lock.next \
+  awk -v old="version = \"$NOW\"" -v new="version = \"$NEXT\"" \
+      "$LOCK_AWK" server/Cargo.lock > server/Cargo.lock.next \
     && mv server/Cargo.lock.next server/Cargo.lock \
     || die "could not write $NEXT into server/Cargo.lock"
 
   sed -i "s/version = \"$NOW\";/version = \"$NEXT\";/g" flake.nix \
     || die "could not write $NEXT into flake.nix"
 
-  LEFT=$(grep -l "\"$NOW\"" package.json package-lock.json server/Cargo.toml 2>/dev/null)
-  [ -z "$LEFT" ] || die "$LEFT still says $NOW"
+  # awk and sed both finish happily having matched nothing, so a file whose
+  # shape has drifted is left saying the old number while this step reports
+  # success — which is how a build once went out under a name it never had.
+  # Each of the five is read back where its number actually lives; a plain
+  # search of the lock file would not do, because a dependency in it may
+  # legitimately carry the number this release is leaving behind (bw-sinv.8).
+  LEFT=""
+  grep -q "\"version\": \"$NEXT\"" package.json      || LEFT="$LEFT package.json"
+  grep -q "\"version\": \"$NEXT\"" package-lock.json || LEFT="$LEFT package-lock.json"
+  grep -q "^version = \"$NEXT\"" server/Cargo.toml     || LEFT="$LEFT server/Cargo.toml"
+  MINE=$(awk '$0 == "name = \"atelier\"" { mine = 1; next }
+              mine && $0 ~ /^version = / { print; exit }' server/Cargo.lock)
+  [ "$MINE" = "version = \"$NEXT\"" ]                  || LEFT="$LEFT server/Cargo.lock"
+  if ! grep -q "version = \"$NEXT\";" flake.nix || grep -q "version = \"$NOW\";" flake.nix; then
+    LEFT="$LEFT flake.nix"
+  fi
+  [ -z "$LEFT" ] || die "these do not say $NEXT:$LEFT"
   ok "all five say $NEXT"
 fi
 
@@ -283,12 +306,13 @@ fi
 if [ "$DRY_RUN" = 1 ]; then
   would "git push --quiet origin <the release commit>:$PUBLISHED"
   would "gh run watch <the CI run on that very commit> --exit-status"
+  would "if it goes red on the frozen dependency list: write the hash that build asks for into flake.nix, push, and watch once more"
 else
   git push --quiet origin "$SHA:$PUBLISHED" \
     || die "could not put the line online"
   ok "pushed $(git rev-parse --short "$SHA")"
   say "waiting for the checks online — this is what stops a tag being written on a red build"
-  RUN=$(ci_run_for "$SHA") \
+  RUN=$(run_for CI headSha "$SHA") \
     || die "no build online ever picked up $SHA — look at $SOURCE/actions"
 
   if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 15 >/dev/null 2>&1; then
@@ -315,7 +339,7 @@ else
       || die "could not put the repaired line online"
     ok "pushed $(git rev-parse --short "$SHA") with the hash the build asked for"
 
-    RUN=$(ci_run_for "$SHA") \
+    RUN=$(run_for CI headSha "$SHA") \
       || die "no build online ever picked up $SHA — look at $SOURCE/actions"
     gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 15 >/dev/null 2>&1 \
       || die "the checks online are still red with the hash it asked for, so no tag was written — gh run view $RUN -R $SOURCE --log-failed"
@@ -336,16 +360,7 @@ if [ "$DRY_RUN" = 1 ]; then
   would "if it goes red: gh run rerun <that build> --failed, then watch it once more"
 else
   ok "v$NEXT is online, and the built files are being made"
-  WAITED=0
-  RUN=""
-  while [ "$WAITED" -lt "$WAIT_LIMIT" ]; do
-    RUN=$(gh run list -R "$SOURCE" --workflow Release --limit 12 \
-            --json databaseId,headBranch --jq \
-            "[.[] | select(.headBranch == \"v$NEXT\")][0].databaseId" 2>/dev/null)
-    [ -n "$RUN" ] && [ "$RUN" != "null" ] && break
-    sleep 10; WAITED=$((WAITED + 10))
-  done
-  [ -n "$RUN" ] && [ "$RUN" != "null" ] \
+  RUN=$(run_for Release headBranch "v$NEXT") \
     || die "no build ever picked up v$NEXT — look at $SOURCE/actions"
   if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20 >/dev/null 2>&1; then
     # Once in a while the far end simply drops one of the built files on its way
