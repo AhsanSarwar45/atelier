@@ -10,3 +10,11 @@ if (!('ResizeObserver' in globalThis)) {
     disconnect() {}
   };
 }
+
+// The same gap, and the same answer: with no layout there is nothing to scroll
+// and no scrolling to do it with. A screen that keeps the name of the column
+// you are on in sight asks for this, and on a bench with no viewport the honest
+// answer is to do nothing rather than to throw (bw-zkh4.11).
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
