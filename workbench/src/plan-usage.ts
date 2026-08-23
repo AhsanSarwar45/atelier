@@ -26,6 +26,7 @@
  */
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
+import { claudeProgram } from './claude-program.ts';
 import { believable, NOTHING_KNOWN, type PlanUsage, type RawPlanUsage, readUsage } from '../../src/workbench/plan-usage.ts';
 
 /**
@@ -96,7 +97,21 @@ function startProber(): Prober {
   };
   const q = query({
     prompt: silent(),
-    options: { cwd: process.cwd(), settingSources: [], strictMcpConfig: true },
+    options: {
+      cwd: process.cwd(),
+      settingSources: [],
+      strictMcpConfig: true,
+      // The program is named, exactly as every chat names it. Left unsaid, the
+      // kit's own package goes looking for the copy of the program it ships
+      // beside itself — and an installed reader's helper is deliberately laid
+      // down without one (`npm ci --omit=optional`, helper.rs), because the
+      // reader already has the program. So the prober died on
+      // "Native CLI binary for linux-x64 not found", `askTheKit` swallowed it,
+      // and the two chips vanished from every installed copy while a
+      // development tree, whose packages still carry the optional one, went on
+      // drawing them (bw-vsyx).
+      pathToClaudeCodeExecutable: claudeProgram(),
+    },
   }) as Prober;
   proberStop = () => {
     wake?.();

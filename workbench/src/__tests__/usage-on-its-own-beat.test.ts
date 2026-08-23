@@ -22,6 +22,11 @@ let answers: unknown[] = [];
 /** How many times the kit was asked, and how many probers were ever started. */
 let asked = 0;
 let started = 0;
+/** What each prober was opened with, so the options can be read back. */
+let opened: { options?: Record<string, unknown> }[] = [];
+
+/** Where the reader's own copy of the program is, as the resolver reports it. */
+const PROGRAM = '/somewhere/the/reader/keeps/claude';
 
 function limits(sessionPercent: number, resetsAt: string): unknown {
   return {
@@ -34,9 +39,12 @@ function limits(sessionPercent: number, resetsAt: string): unknown {
   };
 }
 
+vi.mock('../claude-program.ts', () => ({ claudeProgram: () => PROGRAM }));
+
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: () => {
+  query: (input: { options?: Record<string, unknown> }) => {
     started++;
+    opened.push(input);
     return {
       usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: () => {
         const next = answers[Math.min(asked, answers.length - 1)];
@@ -58,6 +66,7 @@ beforeEach(() => {
   answers = [];
   asked = 0;
   started = 0;
+  opened = [];
   vi.useFakeTimers();
 });
 
@@ -160,6 +169,26 @@ describe('the account figure', () => {
 
     await vi.advanceTimersByTimeAsync(5_000);
     expect(heard).toEqual([44, 47]);
+
+    stop();
+    stopProbing();
+  });
+
+  it('names the program its helper is to run, the way every chat does', async () => {
+    // Left unnamed, the kit's own package looks for the copy of the program it
+    // ships beside itself, and an installed reader's helper is laid down
+    // without one on purpose — the reader already has the program. The prober
+    // died on "Native CLI binary for linux-x64 not found", the throw was
+    // swallowed, and both chips went missing from every installed copy while a
+    // development tree went on drawing them (bw-vsyx).
+    answers = [limits(40, '2026-08-20T22:20:00Z')];
+    const { watchUsage, stopProbing } = await freshModule();
+
+    const stop = watchUsage(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(opened, 'no helper was ever opened').toHaveLength(1);
+    expect(opened[0]?.options?.pathToClaudeCodeExecutable).toBe(PROGRAM);
 
     stop();
     stopProbing();
