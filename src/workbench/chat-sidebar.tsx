@@ -483,8 +483,9 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       {clockTime(whenHeSpoke(row))}
                     </span>
                   </div>
-                  <div className="mt-1 flex items-center gap-1 overflow-hidden">
-                    {row.folder && (
+                  {(row.folder || state.external) && (
+                    <div className="mt-1 flex items-center gap-1 overflow-hidden">
+                      {row.folder && (
                       <Badge
                         hue={hueFor(row.folder)}
                         appearance="light"
@@ -500,34 +501,53 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
                       >
                         {row.folder}
                       </Badge>
-                    )}
-                    {busy === key ? (
-                      <Badge
-                        variant="warning"
-                        appearance="light"
-                        size="sm"
-                        shape="circle"
-                        data-testid="row-pill"
-                        data-pill="opening"
-                        className="ml-auto shrink-0"
-                      >
-                        opening
-                      </Badge>
-                    ) : (
-                      // The same reading the chat's own line draws, in the same
-                      // words (chat-state.ts): what it is doing, and beside it
-                      // — never in place of it — the badge that says somebody
-                      // else is in there. A row that is asleep says nothing at
-                      // all, because most of the list is asleep and a pill on
-                      // every one of them is a pill on none (bw-96is).
-                      (state.working || state.waiting || live || state.external) && (
-                        <span className="ml-auto flex shrink-0 items-center gap-1">
-                          <ChatStateChip state={state} testId="row-pill" />
-                          {state.external && <ExternalBadge holder={state.external.holder} />}
-                        </span>
-                      )
-                    )}
-                  </div>
+                      )}
+                      {/* Who holds the chat is a footnote and rides with the
+                          project it is in, which leaves the line below it whole
+                          for what the chat is doing — the thing being read
+                          (bw-jaoz.14.14). */}
+                      {state.external && (
+                        <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />
+                      )}
+                    </div>
+                  )}
+                  {/*
+                    What it is doing gets a line of its own, and the whole width
+                    of it. Sharing the project chip's line pushed this to the
+                    right edge, where the badge saying somebody else is in there
+                    was clipped on a narrow rail and the word had no room for
+                    what it is on (bw-jaoz.14.14, the manager's own reading of
+                    the five-states picture).
+
+                    The same reading the chat's own line draws, in the same words
+                    (chat-state.ts). A row that is asleep says nothing at all,
+                    because most of the list is asleep and a pill on every one of
+                    them is a pill on none (bw-96is).
+                  */}
+                  {(busy === key || state.working || state.waiting || live || state.external) && (
+                    <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
+                      {busy === key ? (
+                        <Badge
+                          variant="warning"
+                          appearance="light"
+                          size="sm"
+                          shape="circle"
+                          data-testid="row-pill"
+                          data-pill="opening"
+                          className="shrink-0"
+                        >
+                          opening
+                        </Badge>
+                      ) : (
+                        // The chip refuses to shrink everywhere else, which is
+                        // right where it stands beside body text. Here it has
+                        // the line to itself and what it is on cuts short only
+                        // when the rail is genuinely too narrow for it
+                        // (bw-jaoz.14.14).
+                        <ChatStateChip state={state} testId="row-pill" className="min-w-0 shrink" />
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

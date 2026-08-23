@@ -169,7 +169,11 @@ export function ChatStateChip({
         data-testid="chat-state-mark"
         data-mark={state.mark}
       />
-      <span className="truncate">{state.word}</span>
+      {/* The word is never the thing that gives way. On a narrow rail the chip
+          shrinks, and cutting the word first drew "Helper wo…", which is the
+          one part of the chip that has to be read whole — what it is on can be
+          cut short and still leave a true line (bw-jaoz.14.14). */}
+      <span className="shrink-0">{state.word}</span>
       {/* What this particular one is — the time a limit lifts, how many helpers
           are out. Quieter than the word, and cut short rather than wrapping:
           "Retrying" alone leaves the reader watching a chat that says nothing
