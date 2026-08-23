@@ -301,7 +301,19 @@ async fn relay(mut feed: Feed, tx: mpsc::Sender<Tagged>) {
                 wait = Duration::from_millis(AGAIN_MS);
                 let mut buffer: Vec<u8> = Vec::new();
                 loop {
-                    match answer.chunk().await {
+                    let heard = tokio::select! {
+                        // The browser went away. Nothing else here would notice
+                        // in time: a keep-alive is dropped before any send, and
+                        // sending is the only thing that reads whether the other
+                        // end is still there — so a window closed while its
+                        // helper had nothing to say used to leave this task and
+                        // its connection to the helper standing for ever, which
+                        // is the same leak this route exists to end, moved one
+                        // hop inwards (bw-zkh4.8).
+                        _ = tx.closed() => return,
+                        chunk = answer.chunk() => chunk,
+                    };
+                    match heard {
                         Ok(Some(bytes)) => {
                             buffer.extend_from_slice(&bytes);
                             for frame in frames(&mut buffer) {
@@ -325,7 +337,13 @@ async fn relay(mut feed: Feed, tx: mpsc::Sender<Tagged>) {
             }
             Err(e) => info!("live: {} is not answering ({e})", feed.tag),
         }
-        tokio::time::sleep(wait).await;
+        // Waiting out a helper that is down, and up to half a minute of it. A
+        // browser that closes in the meantime is not made to wait for the end
+        // of a wait it has no interest in (bw-zkh4.8).
+        tokio::select! {
+            _ = tx.closed() => return,
+            _ = tokio::time::sleep(wait) => {}
+        }
         wait = (wait * 2).min(Duration::from_millis(AGAIN_CEILING_MS));
     }
 }
@@ -397,6 +415,7 @@ fn frames(buffer: &mut Vec<u8>) -> Vec<Frame> {
 mod tests {
     use super::*;
     use axum::{routing::get, Router};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn a_frame_is_read_once_it_is_whole() {
@@ -458,17 +477,47 @@ mod tests {
         assert_eq!(Feed::new("/watch", "workbench").path(), "/watch");
     }
 
+    /// Counts the helper's ends of relayed streams as they are let go of.
+    ///
+    /// Which is all the leak can be seen by from outside: the relay dropping
+    /// its side is what closes this, and nothing else closes it.
+    struct LettingGoIsNoticed(Arc<AtomicUsize>);
+
+    impl Drop for LettingGoIsNoticed {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     /// Stands in for the chat helper: both of its streams, each written the way
     /// the real one writes it (workbench/src/server.ts).
-    async fn a_helper() -> String {
+    async fn a_helper(let_go: Arc<AtomicUsize>) -> String {
         let app = Router::new()
             .route(
                 "/watch",
-                get(|| async {
-                    (
-                        [("content-type", "text/event-stream")],
-                        "data: {\"kind\":\"snapshot\",\"sessions\":[]}\n\n",
-                    )
+                get(move || {
+                    let noticed = LettingGoIsNoticed(let_go.clone());
+                    async move {
+                        // One real frame and then nothing but keep-alives: what
+                        // a helper sends whenever nobody is typing, and the
+                        // state a browser going away used to go unnoticed in.
+                        let said =
+                            futures::stream::unfold((0u32, noticed), |(n, noticed)| async move {
+                                if n > 0 {
+                                    tokio::time::sleep(Duration::from_millis(20)).await;
+                                }
+                                let text = if n == 0 {
+                                    "data: {\"kind\":\"snapshot\",\"sessions\":[]}\n\n".to_string()
+                                } else {
+                                    ": keep-alive\n\n".to_string()
+                                };
+                                Some((Ok::<_, std::io::Error>(text), (n + 1, noticed)))
+                            });
+                        (
+                            [("content-type", "text/event-stream")],
+                            axum::body::Body::from_stream(said),
+                        )
+                    }
                 }),
             )
             .route(
@@ -488,13 +537,22 @@ mod tests {
         format!("http://{at}")
     }
 
-    /// A server of our own, with a board of its own to watch.
-    ///
-    /// Both ways of asking share one, because the helper this route reads is
-    /// named by a global: two cases each standing up their own would take that
-    /// name off one another halfway through.
-    async fn a_server() -> (String, tempfile::TempDir) {
-        std::env::set_var("BEADS_WORKBENCH_URL", a_helper().await);
+    /// The helper this route reads is named by a process-wide global, so two
+    /// cases each standing up their own would take that name off one another
+    /// halfway through. Every case here holds this for as long as it runs.
+    static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// A server of our own, with a board of its own to watch, a helper of its
+    /// own behind it, and the count of that helper's connections let go of.
+    async fn a_server() -> (
+        String,
+        tempfile::TempDir,
+        Arc<AtomicUsize>,
+        tokio::sync::MutexGuard<'static, ()>,
+    ) {
+        let alone = ONE_AT_A_TIME.lock().await;
+        let let_go = Arc::new(AtomicUsize::new(0));
+        std::env::set_var("BEADS_WORKBENCH_URL", a_helper(let_go.clone()).await);
         workbench::spawn_sidecar(None);
 
         let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
@@ -510,7 +568,7 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
-        (at.to_string(), project)
+        (at.to_string(), project, let_go, alone)
     }
 
     /// What a window asks for: every feed at once, on one connection.
@@ -533,7 +591,7 @@ mod tests {
         use futures::StreamExt as _;
         use tokio_tungstenite::tungstenite::Message as Said;
 
-        let (at, project) = a_server().await;
+        let (at, project, _let_go, _alone) = a_server().await;
         let asked = format!("ws://{at}{}", asking_for_everything(&project));
         let (mut socket, _) = tokio_tungstenite::connect_async(&asked).await.unwrap();
 
@@ -573,7 +631,7 @@ mod tests {
     /// ways out have drifted apart.
     #[tokio::test]
     async fn the_same_feeds_are_there_for_a_reader_with_curl() {
-        let (at, project) = a_server().await;
+        let (at, project, _let_go, _alone) = a_server().await;
         let asked = format!("http://{at}{}", asking_for_everything(&project));
         let mut answer = reqwest::get(&asked).await.unwrap();
         assert!(answer.status().is_success());
@@ -596,6 +654,65 @@ mod tests {
         assert!(
             heard.unwrap_or(false),
             "one stream should carry all three feeds, tagged; it said:\n{said}"
+        );
+    }
+
+    /// A window that goes away takes the server's own connections with it.
+    ///
+    /// The fault this holds shut: the browser's end of a stream costs a slot
+    /// out of six, and this route exists to spend one instead of three. But the
+    /// server then holds a connection of its own to the helper for every window
+    /// — and it only ever noticed a window had gone by failing to hand it
+    /// something. A helper with nothing to say sends keep-alives, which carry
+    /// nothing and are dropped before that hand-off, so a window closed during
+    /// a quiet spell left the relay and its connection to the helper standing
+    /// for ever: the same leak, one hop further in, and growing with every
+    /// window ever opened (bw-zkh4.8).
+    #[tokio::test]
+    async fn a_window_going_away_lets_go_of_the_helper_it_was_reading() {
+        use futures::StreamExt as _;
+        use tokio_tungstenite::tungstenite::Message as Said;
+
+        let (at, _project, let_go, _alone) = a_server().await;
+        let asked = format!("ws://{at}/api/live?workbench=1");
+        let (mut socket, _) = tokio_tungstenite::connect_async(&asked).await.unwrap();
+
+        // Wait until the helper's feed is really being carried, so what is let
+        // go of below is an open connection rather than one never opened.
+        let carrying = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(Ok(said)) = socket.next().await {
+                if let Said::Text(text) = said {
+                    if text.contains("\"workbench\"") {
+                        return true;
+                    }
+                }
+            }
+            false
+        })
+        .await;
+        assert!(
+            carrying.unwrap_or(false),
+            "the helper's feed never reached the window"
+        );
+        assert_eq!(
+            let_go.load(Ordering::SeqCst),
+            0,
+            "the helper was let go of while the window was still reading it"
+        );
+
+        // The window closes — abruptly, the way a shut browser closes it, with
+        // no goodbye and the helper mid keep-alive.
+        drop(socket);
+
+        let noticed = tokio::time::timeout(Duration::from_secs(10), async {
+            while let_go.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(
+            noticed.is_ok(),
+            "the window went away and the server kept its own connection to the helper open"
         );
     }
 }
