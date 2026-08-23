@@ -2474,6 +2474,16 @@ def main():
     # out there by hand goes stale the day the playbook changes, which is exactly
     # what happened to the eleven-step one (bw-a6o.2).
     prime = hook("board-prime")
+    # A board is brought up by joining a project, not by cloning it, so a fresh
+    # clone holds none — and the hook rightly says nothing at all for a checkout
+    # with no board in it. Handed the real root, this case therefore read the
+    # empty answer as the opening text being wrong, and every fresh clone failed
+    # here before it reached a single case of its own (bw-8um.3.4). It stands on
+    # a root it makes: this project's declaration, and the board directory.
+    said_root = tempfile.mkdtemp(prefix="board-prime-")
+    os.makedirs(os.path.join(said_root, ".beads"), exist_ok=True)
+    shutil.copyfile(os.path.join(ROOT, project.DECLARATION),
+                    os.path.join(said_root, project.DECLARATION))
     keep_prime = (prime.bc.bd, prime.bc.actor, prime.bc.load, prime.bc.save,
                   prime.bc.reviewing, prime.bc.board_root)
     prime.bc.bd = lambda args, root=None: (True, "[]")
@@ -2481,8 +2491,8 @@ def main():
     prime.bc.load = lambda sid: {"last_stop": T}
     prime.bc.save = lambda sid, state: None
     prime.bc.reviewing = lambda: ""
-    prime.bc.board_root = lambda cwd: ROOT
-    sys.stdin = io.StringIO(json.dumps({"session_id": "selftest", "cwd": ROOT}))
+    prime.bc.board_root = lambda cwd: said_root
+    sys.stdin = io.StringIO(json.dumps({"session_id": "selftest", "cwd": said_root}))
     spoke = io.StringIO()
     keep_out, sys.stdout = sys.stdout, spoke
     try:
@@ -2491,7 +2501,12 @@ def main():
         sys.stdout = keep_out
         (prime.bc.bd, prime.bc.actor, prime.bc.load, prime.bc.save,
          prime.bc.reviewing, prime.bc.board_root) = keep_prime
-    told = json.loads(spoke.getvalue())["hookSpecificOutput"]["additionalContext"]
+        shutil.rmtree(said_root, ignore_errors=True)
+        pin()
+    said = spoke.getvalue()
+    assert said.strip(), \
+        "the opening text said nothing at all for a checkout that holds a board"
+    told = json.loads(said)["hookSpecificOutput"]["additionalContext"]
 
     listed = ", ".join(("[%s]" % s) if spine.tier(s) != spine.MUST else s
                        for s in spine.ORDER)
