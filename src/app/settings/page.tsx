@@ -7,6 +7,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
+import { ReadFailed } from "@/components/ui/read-failed";
 import { getTags, createTag, deleteTag, type Tag } from "@/lib/db";
 import {
   applyFontSize,
@@ -23,20 +24,28 @@ export default function SettingsPage() {
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState("#3b82f6");
   const [isLoading, setIsLoading] = useState(true);
+  const [tagsError, setTagsError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
 
   useEffect(() => {
     async function loadTags() {
+      setIsLoading(true);
+      setTagsError(null);
       try {
         const loadedTags = await getTags();
         setTags(loadedTags);
       } catch (error) {
+        // Told to the reader, not only to a console he will never open: a read
+        // that failed here used to leave the screen saying he had no tags.
         console.error("Failed to load tags:", error);
+        setTags([]);
+        setTagsError(error instanceof Error ? error.message : String(error));
       }
       setIsLoading(false);
     }
     loadTags();
-  }, []);
+  }, [attempt]);
 
   useEffect(() => {
     const stored = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
@@ -182,6 +191,13 @@ export default function SettingsPage() {
             <div className="mt-4 space-y-2">
               {isLoading ? (
                 <p className="text-sm text-t-tertiary">Loading tags…</p>
+              ) : tagsError ? (
+                <ReadFailed
+                  data-testid="tags-error"
+                  what="Your tags could not be read."
+                  why={tagsError}
+                  onRetry={() => setAttempt((n) => n + 1)}
+                />
               ) : tags.length === 0 && !isAddingTag ? (
                 <p className="text-sm text-t-tertiary">No tags yet. Create one to get started.</p>
               ) : (

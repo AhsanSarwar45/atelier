@@ -7,6 +7,7 @@ import { Folder, FolderOpen, ChevronRight, Home } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { ReadFailed } from "@/components/ui/read-failed";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import * as api from "@/lib/api";
 import type { FsEntry } from "@/lib/api";
@@ -83,6 +84,8 @@ export function FolderBrowser({
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped by Try again, which is all a re-read of the same folder needs. */
+  const [attempt, setAttempt] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [currentPathHasBeads, setCurrentPathHasBeads] = useState(false);
   const [homeDir, setHomeDir] = useState<string>("");
@@ -167,7 +170,7 @@ export function FolderBrowser({
     };
 
     loadDirectories();
-  }, [currentPath]);
+  }, [currentPath, attempt]);
 
   const navigateToDirectory = useCallback(
     (path: string) => {
@@ -318,7 +321,13 @@ export function FolderBrowser({
               <span className="ml-2 text-sm">Loading...</span>
             </div>
           ) : error ? (
-            <div className="py-8 text-center text-sm text-danger">{error}</div>
+            <ReadFailed
+              className="m-2"
+              data-testid="folders-error"
+              what="This folder could not be read."
+              why={error}
+              onRetry={() => setAttempt((n) => n + 1)}
+            />
           ) : directories.length === 0 ? (
             <div className="py-8 text-center text-sm text-t-muted">
               No subdirectories found

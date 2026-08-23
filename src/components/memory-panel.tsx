@@ -33,8 +33,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ReadFailed } from "@/components/ui/read-failed";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -42,6 +42,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
 import { useMemory } from "@/hooks/use-memory";
 import type { MemoryEntry } from "@/types";
 
@@ -68,6 +69,7 @@ export function MemoryPanel({ open, onOpenChange, projectPath }: MemoryPanelProp
     createEntry,
     editEntry,
     deleteEntry,
+    refresh,
   } = useMemory(projectPath, open);
 
   // Create dialog state
@@ -175,13 +177,12 @@ export function MemoryPanel({ open, onOpenChange, projectPath }: MemoryPanelProp
                   <span className="sr-only">Loading memory entries</span>
                 </div>
               ) : error ? (
-                <div
-                  role="alert"
-                  className="rounded-lg border border-danger/30 bg-danger/10 p-4 text-center"
-                >
-                  <p className="text-sm text-danger">Failed to load memory entries</p>
-                  <p className="text-xs text-danger/60 mt-1">{error.message}</p>
-                </div>
+                <ReadFailed
+                  data-testid="memory-error"
+                  what="This project’s memory could not be read."
+                  why={error.message}
+                  onRetry={() => void refresh()}
+                />
               ) : filteredEntries.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <BrainCircuit className="size-8 text-t-faint mb-3" aria-hidden="true" />

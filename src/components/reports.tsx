@@ -18,8 +18,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { FileText } from "lucide-react";
 
-import { request } from '@/lib/api';
 import { addressWith } from "@/lib/address";
+import { request } from '@/lib/api';
 import { isDoltProject } from "@/lib/utils";
 
 export interface ReportEntry {
@@ -40,8 +40,19 @@ let inFlight: Promise<ReportEntry[]> | null = null;
 
 function fetchReports(): Promise<ReportEntry[]> {
   inFlight ??= request("/api/reports")
-    .then(res => (res.ok ? res.json() : []))
-    .catch(() => [])
+    .then(res => {
+      if (!res.ok) throw new Error(`The server answered ${res.status}.`);
+      return res.json() as Promise<ReportEntry[]>;
+    })
+    .catch((err: unknown) => {
+      // A failure is not worth holding on to. It used to be swallowed into an
+      // empty list, so a screen that could read nothing drew "no reports yet" —
+      // a wrong answer, told confidently (bw-zkh4). And a cached failure would
+      // hand the reader pressing Try again that same failure straight back,
+      // without the server hearing anything about it.
+      inFlight = null;
+      throw err;
+    })
     .finally(() => {
       // Held only for the burst of callers that mount together.
       setTimeout(() => { inFlight = null; }, 2_000);
@@ -53,17 +64,26 @@ function fetchReports(): Promise<ReportEntry[]> {
 export function useReports() {
   const [reports, setReports] = useState<ReportEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    setReports(await fetchReports());
-    setIsLoading(false);
+    setIsLoading(true);
+    setError(null);
+    try {
+      setReports(await fetchReports());
+    } catch (err) {
+      setReports([]);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  return { reports, isLoading, reload };
+  return { reports, isLoading, error, reload };
 }
 
 /**

@@ -21,6 +21,7 @@ import { useReports, type ReportEntry } from '@/components/reports';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { ReadFailed } from '@/components/ui/read-failed';
 
 export function ReportsList({
   projectPath,
@@ -31,7 +32,7 @@ export function ReportsList({
   projectLocalPath?: string | null;
   onOpen: (slug: string) => void;
 }) {
-  const { reports, isLoading } = useReports();
+  const { reports, isLoading, error, reload } = useReports();
   const folder = useMemo(
     () => reportFolder(projectPath, projectLocalPath),
     [projectPath, projectLocalPath],
@@ -44,6 +45,21 @@ export function ReportsList({
         <Loader2 className="size-4 animate-spin" aria-hidden="true" />
         Loading reports…
       </div>
+    );
+  }
+
+  // Before the empty state, never after it: a list that could not be read is
+  // not an empty list, and drawing "no reports yet" over a failed read told the
+  // reader his project had none when the truth was that nobody had asked.
+  if (error) {
+    return (
+      <ReadFailed
+        className="my-4"
+        data-testid="reports-list-error"
+        what="The list of reports could not be read."
+        why={error}
+        onRetry={() => void reload()}
+      />
     );
   }
 

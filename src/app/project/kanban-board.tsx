@@ -13,6 +13,7 @@ import { QuickFilterBar } from "@/components/quick-filter-bar";
 import { useReportsByCard } from "@/components/reports";
 import { TabTools } from "@/components/shell";
 import { Button } from "@/components/ui/button";
+import { ReadFailed } from "@/components/ui/read-failed";
 import { useBeadFilters } from "@/hooks/use-bead-filters";
 import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
@@ -49,6 +50,7 @@ export default function KanbanBoard() {
     project,
     isLoading: projectLoading,
     error: projectError,
+    refetch: refetchProject,
   } = useProject(projectId);
 
   // The one card list the project screen holds, shared with the card panel so an
@@ -313,11 +315,17 @@ export default function KanbanBoard() {
   // Show project error state
   if (projectError) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-dvh bg-surface-base gap-4">
-        <div role="alert" className="text-danger">Error: {projectError.message}</div>
-        <Button variant="outline" asChild>
-          <a href="/">Back to projects</a>
-        </Button>
+      <div className="flex flex-col items-center justify-center min-h-dvh bg-surface-base">
+        <ReadFailed
+          data-testid="project-error"
+          what="This project could not be read."
+          why={projectError.message}
+          onRetry={() => void refetchProject()}
+        >
+          <Button variant="ghost" size="sm" asChild>
+            <a href="/">Back to projects</a>
+          </Button>
+        </ReadFailed>
       </div>
     );
   }
@@ -424,7 +432,12 @@ export default function KanbanBoard() {
           </div>
         ) : beadsError ? (
           <div className="flex items-center justify-center h-full">
-            <div role="alert" className="text-danger">Error loading beads: {beadsError.message}</div>
+            <ReadFailed
+              data-testid="board-error"
+              what="This project’s cards could not be read."
+              why={beadsError.message}
+              onRetry={() => void refreshBeads()}
+            />
           </div>
         ) : (
           <div

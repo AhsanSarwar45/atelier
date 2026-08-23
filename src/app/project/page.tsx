@@ -14,6 +14,7 @@ import { useReports } from '@/components/reports';
 import { Shell } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ReadFailed } from '@/components/ui/read-failed';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProject } from '@/hooks/use-project';
 import { useTheme } from '@/hooks/use-theme';
@@ -48,7 +49,7 @@ function ProjectTabs() {
   // which card is over the top, so every one of them survives a link, a fresh
   // tab and the Back button (docs/designs/app-shell.md §1.7).
   const { id: projectId, tab, chat: openChat, card: openCard, report: openReport, section: openSection } = whereFrom(params);
-  const { project, refetch } = useProject(projectId);
+  const { project, error: projectError, refetch } = useProject(projectId);
   const { theme } = useTheme();
   const terminal = theme.headerVariant === 'terminal';
   // The tab says how many of this project's reports are still waiting on an
@@ -208,7 +209,27 @@ function ProjectTabs() {
         </Tabs>
       }
     >
-      {tab === 'chat' && (
+      {/* The project itself could not be read, so nothing under the tabs has
+          anything to draw: every one of them is mounted only once the project
+          is in hand. Without this the body was simply empty — the tabs sitting
+          over nothing, with no word about why and no way to ask again, which is
+          the same dead end as a spinner that never stops (bw-zkh4). */}
+      {projectError && !project && (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <ReadFailed
+            data-testid="project-error"
+            what="This project could not be read."
+            why={projectError.message}
+            onRetry={() => void refetch()}
+          >
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/">All projects</Link>
+            </Button>
+          </ReadFailed>
+        </div>
+      )}
+
+      {tab === 'chat' && !projectError && (
         <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
       )}
 

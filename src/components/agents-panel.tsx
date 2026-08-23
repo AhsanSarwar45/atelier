@@ -5,6 +5,7 @@ import { useState, useCallback, type CSSProperties } from "react";
 import { Bot, ChevronDown, Loader2, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { ReadFailed } from "@/components/ui/read-failed";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
@@ -222,7 +223,7 @@ export function AgentsPanel({
   onOpenChange,
   projectPath,
 }: AgentsPanelProps) {
-  const { agents, isLoading, error, updateAgent } = useAgents(projectPath, open);
+  const { agents, isLoading, error, updateAgent, refresh } = useAgents(projectPath, open);
 
   // Track which card is expanded
   const [expandedFilename, setExpandedFilename] = useState<string | null>(null);
@@ -303,17 +304,12 @@ export function AgentsPanel({
                 <span className="sr-only">Loading agents</span>
               </div>
             ) : error ? (
-              <div
-                role="alert"
-                className="rounded-lg border border-danger/30 bg-danger/10 p-4 text-center"
-              >
-                <p className="text-sm text-danger">
-                  Failed to load agents
-                </p>
-                <p className="text-xs text-danger/60 mt-1">
-                  {error.message}
-                </p>
-              </div>
+              <ReadFailed
+                data-testid="agents-error"
+                what="This project’s agents could not be read."
+                why={error.message}
+                onRetry={() => void refresh()}
+              />
             ) : agents.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Bot

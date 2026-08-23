@@ -14,6 +14,7 @@ import { Shell } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ReadFailed } from "@/components/ui/read-failed";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/hooks/use-projects";
 import { useToast } from "@/hooks/use-toast";
@@ -228,12 +229,13 @@ export default function ProjectsPage() {
               ))}
             </div>
           ) : error ? (
-            <div role="alert" className="rounded-lg border border-danger/50 bg-danger/70 p-6 text-center">
-              <p className="text-danger">Error loading projects: {error.message}</p>
-              <p className="mt-2 text-sm text-danger">
-                Make sure the Atelier server is reachable.
-              </p>
-            </div>
+            <ReadFailed
+              className="mx-auto"
+              data-testid="projects-error"
+              what="Your projects could not be read."
+              why={`${error.message}\n\nCheck that the Atelier server is still running.`}
+              onRetry={() => void refetch()}
+            />
           ) : filteredProjects.length === 0 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-lg border border-dashed border-b-strong bg-surface-raised/70 p-6 text-center text-t-tertiary">
