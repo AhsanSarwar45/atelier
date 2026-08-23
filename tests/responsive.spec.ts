@@ -494,14 +494,27 @@ test.describe('chat', () => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'chat');
 
-    /** As tall as the box the panels live in — the screen under the two bars. */
+    /**
+     * As tall as the SCREEN, not as tall as the box under the bars: the
+     * manager asked for proper side sheets, and a sheet that starts below the
+     * bars is a box inside the page (bw-81wt.30).
+     */
     const fillsTheHeight = async (testid: string) => {
       const short = await page.locator(`[data-testid="${testid}"]`).evaluate((el) => {
-        const mine = el.getBoundingClientRect().height;
-        const room = el.parentElement!.getBoundingClientRect().height;
-        return Math.round(room - mine);
+        const box = el.getBoundingClientRect();
+        return { top: Math.round(box.top), short: Math.round(window.innerHeight - box.height) };
       });
-      expect(short, `the ${testid} sheet is short of the screen by ${short}px`).toBeLessThanOrEqual(1);
+      expect(short.short, `the ${testid} sheet is short of the screen by ${short.short}px`).toBeLessThanOrEqual(1);
+      expect(short.top, `the ${testid} sheet starts ${short.top}px down the screen, under the bars`).toBeLessThanOrEqual(1);
+    };
+
+    /** The dimmed screen behind a sheet covers all of it, bars included. */
+    const dimsTheScreen = async (testid: string) => {
+      const gap = await page.locator(`[data-testid="${testid}"]`).evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        return Math.round(window.innerHeight - box.height) + Math.round(box.top);
+      });
+      expect(gap, `the ${testid} leaves ${gap}px of the screen undimmed`).toBeLessThanOrEqual(1);
     };
 
     const shut = async (testid: string) =>
@@ -511,6 +524,7 @@ test.describe('chat', () => {
     await page.locator('[data-testid="chat-rail-toggle"]').first().click();
     await page.waitForTimeout(400);
     await fillsTheHeight('chat-rail');
+    await dimsTheScreen('chat-rail-scrim');
     const listCross = page.locator('[data-testid="chat-rail-close"]').first();
     await expect(listCross, 'the chat list drawer has no way out inside it').toBeVisible();
     await listCross.click();
@@ -539,6 +553,7 @@ test.describe('chat', () => {
       await page.waitForTimeout(400);
     }
     await fillsTheHeight('chat-right-rail');
+    await dimsTheScreen('chat-right-rail-scrim');
     await judge(page, 'chat-rail-open-390');
     const railCross = page.locator('[data-testid="chat-right-rail-close"]').first();
     await expect(railCross, "the chat's own column has no way out inside it").toBeVisible();

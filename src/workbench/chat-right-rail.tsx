@@ -20,8 +20,8 @@
  * On a wide screen it still folds in place, part of the row: the width moves
  * and the eye follows the edge, so the transcript is not two different widths
  * on two consecutive frames. On a phone there is no room to fold anything —
- * open, it is a sheet down the whole right edge, the height of everything under
- * the bars, with a cross inside it and the screen beside it dimmed and tappable
+ * open, it is a sheet down the whole right edge, the height of the whole screen
+ * and over the bars, with a cross inside it and the rest dimmed and tappable
  * (bw-81wt.30). It floated as a small card clear of the top and bottom before
  * that, which read as a stray box rather than a panel. Shut, it takes no width
  * at all rather than leaving a sliver behind (bw-81wt.5). Anyone who asked
@@ -136,8 +136,8 @@ export function ChatRightRail({
             // and on a wide screen, today's column, in the row and bordered on
             // the one side that touches it.
             cn(
-              'absolute inset-y-0 right-0 w-72 max-w-[85vw] border-l shadow-2xl',
-              'md:static md:inset-auto md:h-full md:w-72 md:max-w-none md:shadow-none',
+              'fixed inset-y-0 right-0 z-50 w-72 max-w-[85vw] border-l shadow-2xl',
+              'md:static md:inset-auto md:z-30 md:h-full md:w-72 md:max-w-none md:shadow-none',
             )
           : // Shut, it takes no width at all, on a wide screen as much as on
             // a phone. It used to keep a thin edge on a desktop because the

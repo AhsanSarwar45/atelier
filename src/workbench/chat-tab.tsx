@@ -766,8 +766,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         data-testid="chat-rail"
         data-open={railOpen}
         className={cn(
-          'z-30 h-full shrink-0 bg-background transition-transform md:relative md:translate-x-0',
-          'absolute inset-y-0 left-0',
+          // On a phone it is a sheet over the WHOLE screen, bars included, not
+          // a panel inside the box the bars left over: a sheet that starts
+          // below them reads as a stray box in the page, which is what the
+          // manager sent this back for (bw-81wt.30). Hence `fixed` — the box
+          // around it is only the work area. On a wide screen it is a column
+          // of the row again, and behind the popups as it always was.
+          'z-50 h-full shrink-0 bg-background transition-transform md:relative md:z-30 md:translate-x-0',
+          'fixed inset-y-0 left-0',
           railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
         )}
       >
@@ -799,7 +805,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         data-testid="chat-rail-scrim"
         data-open={railOpen}
         className={cn(
-          'absolute inset-0 z-20 bg-black/40 md:hidden',
+          // Over the whole screen, like the sheet it belongs to: the dimming
+          // stops where the sheet stops, and a sheet that covers the bars with
+          // bright bars showing through beside it is two panels arguing.
+          'fixed inset-0 z-40 bg-black/40 md:hidden',
           'transition-opacity duration-200 ease-out motion-reduce:transition-none',
           railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
@@ -830,7 +839,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-testid="chat-right-rail-scrim"
           data-open={rightOpen}
           className={cn(
-            'absolute inset-0 z-20 bg-black/40 md:hidden',
+            // Over the whole screen, like the sheet it belongs to: the dimming
+          // stops where the sheet stops, and a sheet that covers the bars with
+          // bright bars showing through beside it is two panels arguing.
+          'fixed inset-0 z-40 bg-black/40 md:hidden',
             'transition-opacity duration-200 ease-out motion-reduce:transition-none',
             rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
           )}
