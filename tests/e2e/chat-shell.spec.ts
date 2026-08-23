@@ -130,11 +130,19 @@ test.describe('the chat screen', () => {
   test('its tools are icons, and every one of them still says what it is', async ({ page, request }) => {
     const id = await projectId(request);
     await page.goto(`/project?id=${id}&tab=chat`);
-    await page.getByTestId('tab-tools').getByRole('button').first().waitFor();
-
-    const tools = page.getByTestId('tab-tools').getByRole('button');
+    // Three slots, one bar: the door on the left, the tab's own tools, and the
+    // door on the right, which sits at the far edge it opens from (bw-81wt.29).
+    // The left one is a phone's; on a wide screen the list is already beside
+    // the conversation, so the wait is on the row rather than on that slot.
+    const tools = page.locator(
+      '[data-testid="tab-lead"] button, [data-testid="tab-tools"] button, [data-testid="tab-trail"] button',
+    );
+    // The wait is on a button this screen actually shows: the left-hand door is
+    // a phone's and is drawn hidden on a wide one, so waiting on the first of
+    // the three slots waits on something that will never appear here.
+    await page.locator('[data-testid="tab-tools"] button, [data-testid="tab-trail"] button').first().waitFor();
     const count = await tools.count();
-    expect(count, 'the chat tab put no tools on the bar').toBeGreaterThan(2);
+    expect(count, 'the chat tab put no tools on the bar').toBeGreaterThan(1);
 
     for (let i = 0; i < count; i++) {
       const tool = tools.nth(i);

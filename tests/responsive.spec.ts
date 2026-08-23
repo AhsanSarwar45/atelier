@@ -453,6 +453,43 @@ test.describe('chat', () => {
     await shoot(page, 'chat-tools-390');
   });
 
+  test('each panel button sits on the edge it opens', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openProject(page, 'chat');
+
+    // A chat has to be open for the right-hand panel to have a door at all.
+    const first = page.locator('[data-testid="chat-list"] [data-testid="row-name"]').first();
+    if (!(await page.locator('[data-testid="chat-right-rail-toggle"]').count()) && (await first.count())) {
+      await page.locator('[data-testid="chat-rail-toggle"]').first().click();
+      await page.waitForTimeout(400);
+      await first.click();
+      await page.waitForTimeout(2000);
+    }
+
+    // The bar's own edges, its padding taken off: a button cannot sit closer to
+    // the edge than the bar lets anything sit.
+    const inside = await page.locator('[data-testid="tab-bar"]').evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return { left: box.left + parseFloat(style.paddingLeft), right: box.right - parseFloat(style.paddingRight) };
+    });
+
+    const chats = await page.locator('[data-testid="chat-rail-toggle"]').first().boundingBox();
+    expect(chats, 'nothing on the bar opens the chat list').not.toBeNull();
+    expect(
+      Math.abs(chats!.x - inside.left),
+      'the chat list button is not on the left edge it opens from',
+    ).toBeLessThanOrEqual(8);
+
+    const details = page.locator('[data-testid="chat-right-rail-toggle"]').first();
+    if (!(await details.count())) return;
+    const box = await details.boundingBox();
+    expect(
+      Math.abs(inside.right - (box!.x + box!.width)),
+      'the right-hand panel button is adrift in the middle of the bar instead of on the edge it opens from',
+    ).toBeLessThanOrEqual(8);
+  });
+
   test('chat screen fits a phone', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'chat');

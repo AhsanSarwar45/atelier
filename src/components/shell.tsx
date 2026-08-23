@@ -25,10 +25,12 @@ interface Slot {
   node: HTMLElement | null;
   /** Before the tab selector: a control that opens something beside the tab, not on it. */
   lead: HTMLElement | null;
+  /** Hard against the right edge: the same, for something that opens on that side. */
+  trail: HTMLElement | null;
   activeTab: string | null;
 }
 
-const ToolSlot = createContext<Slot>({ node: null, lead: null, activeTab: null });
+const ToolSlot = createContext<Slot>({ node: null, lead: null, trail: null, activeTab: null });
 
 /**
  * `data-shell-bar` is the count the acceptance suite reads: two, and a third
@@ -54,6 +56,7 @@ export function Shell({
 }) {
   const [node, setNode] = useState<HTMLElement | null>(null);
   const [lead, setLead] = useState<HTMLElement | null>(null);
+  const [trail, setTrail] = useState<HTMLElement | null>(null);
 
   return (
     <div data-testid="shell" className="flex h-dvh flex-col overflow-hidden bg-surface-base">
@@ -88,9 +91,20 @@ export function Shell({
             ref={setNode}
             className="flex min-w-0 grow items-center gap-2 sm:basis-0"
           />
+          {/* Last on the row and pushed to the far edge: a control that opens
+              something on the right belongs on the right, mirroring `tab-lead`
+              on the left, so the two doors of the chat screen sit on the two
+              sides they open (bw-81wt.29). `ml-auto` as well as the growing
+              tools beside it, so it still hugs the edge on the line it lands on
+              when the row wraps on a phone. */}
+          <div
+            data-testid="tab-trail"
+            ref={setTrail}
+            className="ml-auto flex shrink-0 items-center gap-2"
+          />
         </div>
       )}
-      <ToolSlot.Provider value={{ node, lead, activeTab: activeTab ?? null }}>
+      <ToolSlot.Provider value={{ node, lead, trail, activeTab: activeTab ?? null }}>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
       </ToolSlot.Provider>
     </div>
@@ -122,6 +136,18 @@ export function TabLead({ tab, children }: { tab: string; children: ReactNode })
   const { lead, activeTab } = useContext(ToolSlot);
   if (!lead || activeTab !== tab) return null;
   return createPortal(<TooltipProvider delayDuration={250}>{children}</TooltipProvider>, lead);
+}
+
+/**
+ * A tab's own trailing control, drawn at the far right of the bar however many
+ * tools the tab put before it. Same shape as `TabLead` and for the same reason:
+ * the way into the panel on the right is not one tool among a tab's own, and a
+ * reader looking for it looks at the edge it opens from (bw-81wt.29).
+ */
+export function TabTrail({ tab, children }: { tab: string; children: ReactNode }) {
+  const { trail, activeTab } = useContext(ToolSlot);
+  if (!trail || activeTab !== tab) return null;
+  return createPortal(<TooltipProvider delayDuration={250}>{children}</TooltipProvider>, trail);
 }
 
 /**

@@ -32,7 +32,7 @@ import {
 import { BeadChip } from '@/components/bead-chip-row';
 import { type Mentions } from '@/components/markdown-body';
 import { useReports } from '@/components/reports';
-import { TabLead, TabTools, ToolButton } from '@/components/shell';
+import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -731,12 +731,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
       <TabTools tab="chat">
         {/* Search, "everything" and New Chat used to live here; they moved into
-            the list they act on (bw-81wt.5) — what is left is the kind filter,
-            which reaches into this transcript rather than the list beside it,
-            and the way into the column on the right, mirroring the way into the
-            list on the left (bw-81wt point 4). Both toggles are pictures a
-            reader learns once; a bar of words for six controls is the bar that
-            put "New Chat" off the edge of a 390px screen (bw-81wt.5, .8). */}
+            the list they act on (bw-81wt.5). What is left is the kind filter,
+            which reaches into this transcript rather than the list beside it.
+            The way into the column on the right is not here: it is a door, and
+            a door belongs on the side it opens (bw-81wt.29). */}
+        <KindFilter items={view.items} off={offKinds} onChange={changeKinds} />
+      </TabTools>
+
+      {/* The far right of the bar, mirroring the chat list's button on the far
+          left: the two panels of this screen, each reached from its own edge.
+          Both toggles are pictures a reader learns once; a bar of words for six
+          controls is the bar that put "New Chat" off the edge of a 390px
+          screen (bw-81wt.5, .8). */}
+      <TabTrail tab="chat">
         {sessionId && (
           <ToolButton
             icon={rightOpen ? <PanelRightClose /> : <PanelRight />}
@@ -747,8 +754,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             onClick={flipRight}
           />
         )}
-        <KindFilter items={view.items} off={offKinds} onChange={changeKinds} />
-      </TabTools>
+      </TabTrail>
 
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
       {showing === 'usage' && <UsageView onClose={() => setShowing(null)} />}
