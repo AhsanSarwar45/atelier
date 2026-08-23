@@ -5,6 +5,7 @@ Each one is a shape the measure got wrong at least once while it was being
 written, so each is here to stop it going wrong again quietly.
 """
 
+import base64
 import sys
 
 import importlib.util
@@ -36,6 +37,15 @@ def answered(ident="t1", body="x" * 400):
         {"type": "tool_result", "tool_use_id": ident, "content": body}]}}
 
 
+def png(wide, high, tail=b"\x00" * 400):
+    """A PNG header saying how big the picture is, as one is really handed over."""
+    blob = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+            + wide.to_bytes(4, "big") + high.to_bytes(4, "big") + tail)
+    return [{"type": "image", "source": {
+        "type": "base64", "media_type": "image/png",
+        "data": base64.b64encode(blob).decode()}}]
+
+
 def squashed():
     return {"type": "system", "subtype": "compact_boundary"}
 
@@ -52,14 +62,39 @@ def started(*entries):
 
 # A picture is paid for on every turn it survives, and stops being paid for the
 # moment the memory holding it is squashed.
-written, carried = cost.pictures_carried(
+written, carried, _ = cost.pictures_carried(
     [asked_for("/shots/a.png"), answered(), turn(), turn(), squashed(), turn(), turn()])
 check("a picture is written in once", written, 100)
 check("a picture is carried until the memory is squashed", carried, 200)
 
 # A file that is not a picture costs its one reading and nothing after it.
-written, carried = cost.pictures_carried([asked_for("/src/a.ts"), answered(), turn(), turn()])
+written, carried, _ = cost.pictures_carried([asked_for("/src/a.ts"), answered(), turn(), turn()])
 check("a file that is not a picture is not counted", (written, carried), (0, 0))
+
+# What a picture costs is read off its pixels, not off how many characters it
+# encoded into. The same screenshot compressing twice as well costs the same.
+check("a picture costs what its pixels cost", cost.tokens_for(800, 600), 640)
+check("a picture over the ceiling is charged the ceiling", cost.tokens_for(1440, 900), 1600)
+check("a wide picture is charged after its long edge is brought down",
+      cost.tokens_for(3136, 400), 418)
+written, carried, blind = cost.pictures_carried(
+    [asked_for("/shots/a.png"),
+     {"type": "user", "message": {"content": [
+         {"type": "tool_result", "tool_use_id": "t1", "content": png(1440, 900)}]}},
+     turn(), turn()])
+check("a real picture is charged its real cost", written, 1600)
+check("a picture whose size can be read is not guessed at", blind, 0)
+
+# A picture nobody can size is charged the most one can cost, and counted, so
+# the number is never quietly short.
+written, carried, blind = cost.pictures_carried(
+    [asked_for("/shots/b.png"),
+     {"type": "user", "message": {"content": [
+         {"type": "tool_result", "tool_use_id": "t1",
+          "content": [{"type": "image", "source": {"type": "base64", "data": "!!!!"}}]}]}},
+     turn()])
+check("a picture that cannot be sized is charged the ceiling", written, cost.MOST)
+check("and is counted as one that could not be sized", blind, 1)
 
 # Two rules answering one start is the fault being looked for.
 check("a rule registered twice reads as two",
@@ -83,8 +118,31 @@ check("reading a file whole is not a slice", len(cut), 1)
 cut = cost.slices_of([ran("sed -n 1,80p /src/bare.ts")])
 check("a slice written without quotes is still a slice", cut.get("/src/bare.ts"), 1)
 
+cut = cost.slices_of([ran('sed -n "1,80p" /src/quoted.ts')])
+check("a slice written in double quotes is still a slice", cut.get("/src/quoted.ts"), 1)
+
+# Two files of one name are two different files. Answering with whichever the
+# search happened to return first scored a reading against a file nobody read.
+import tempfile  # noqa: E402
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    (root / "one").mkdir()
+    (root / "two").mkdir()
+    (root / "one" / "README.md").write_text("a\n" * 10)
+    (root / "two" / "README.md").write_text("b\n" * 900)
+    (root / "only.ts").write_text("c\n" * 42)
+    lengths = cost.Lengths(root)
+    check("a file named by its path is measured where it was named",
+          lengths.of("one/README.md"), 10)
+    check("the other file of the same name is measured as itself",
+          lengths.of("two/README.md"), 900)
+    check("a bare name two files wear answers nothing",
+          lengths.of("README.md"), None)
+    check("a bare name only one file wears still answers",
+          lengths.of("only.ts"), 42)
+
 if FAILED:
     for line in FAILED:
         print("FAILED  " + line)
     sys.exit(1)
-print(f"all {8} cases pass")
+print(f"all {20} cases pass")

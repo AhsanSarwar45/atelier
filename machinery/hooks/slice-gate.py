@@ -25,8 +25,11 @@ import sys
 # Short enough that reading it whole is cheaper than deciding which part to read.
 SHORT = 800
 
-# `sed -n '120,240p' path`, quoted or not, anywhere in a line of shell.
-SED = re.compile(r"\bsed\b[^|;&]*?-n\s+'?(\d+),(\d+)p'?\s+(\S+)")
+# `sed -n '120,240p' path`, anywhere in a line of shell. The range may be
+# written in single quotes, in double quotes, or bare — all three are ordinary
+# shell habits, and a gate that knew only two of them left the third as a way
+# round it (bw-nqll.7).
+SED = re.compile(r"\bsed\b[^|;&]*?-n\s+['\"]?(\d+),(\d+)p['\"]?\s+(\S+)")
 
 # `awk 'NR>=120 && NR<=240' path` and the same written as a range.
 AWK = re.compile(r"\bawk\b[^|;&]*?NR\s*[<>=]{1,2}\s*\d+[^|;&]*?\s(\S+)$")
@@ -107,6 +110,10 @@ def selftest():
 
     check("a slice of a short file", judge("Bash", {"command": "sed -n '1,60p' /t/small.ts"}, measure), True)
     check("a slice written without quotes", judge("Bash", {"command": "sed -n 1,60p /t/tiny.md"}, measure), True)
+    check("a slice written in double quotes",
+          judge("Bash", {"command": 'sed -n "1,60p" /t/small.ts'}, measure), True)
+    check("a slice of a long file in double quotes",
+          judge("Bash", {"command": 'sed -n "1,60p" /t/huge.py'}, measure), False)
     check("a slice of a long file", judge("Bash", {"command": "sed -n '1,60p' /t/huge.py"}, measure), False)
     check("a slice piped onward", judge("Bash", {"command": "sed -n '1,60p' /t/small.ts | grep x"}, measure), True)
     check("a short file read whole", judge("Bash", {"command": "cat /t/small.ts"}, measure), False)
@@ -124,7 +131,7 @@ def selftest():
         for line in failed:
             print("FAILED  " + line)
         return 1
-    print("all 11 cases pass")
+    print("all 13 cases pass")
     return 0
 
 
