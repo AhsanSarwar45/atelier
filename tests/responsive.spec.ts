@@ -600,6 +600,8 @@ test.describe('chat', () => {
       return { clipper, left: Math.round(box.left), right: Math.round(box.right), width: Math.round(box.width) };
     });
 
+    // Kept, because this is one the manager looks at rather than reads.
+    await shoot(page, 'label-390');
     expect(where.clipper, `the label is cut off by ${where.clipper}, which clips what overflows it`).toBeNull();
     expect(where.left, 'the label hangs off the left of the screen').toBeGreaterThanOrEqual(0);
     expect(where.right, 'the label hangs off the right of the screen').toBeLessThanOrEqual(PHONE.width);
