@@ -146,29 +146,15 @@ pub async fn watch_beads(
     Extension(db): Extension<Arc<Database>>,
     Query(params): Query<WatchParams>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let project_path = PathBuf::from(&params.path);
-
-    // Reject dolt:// paths — no filesystem to watch
-    if let Err(e) = validate_path_security(&project_path) {
-        warn!("Watch rejected for invalid path: {}", e);
-        let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(1);
-        drop(tx); // Close immediately
-        return Sse::new(ReceiverStream::new(rx));
-    }
-
-    let store = BoardStore::resolve(&project_path);
-
-    info!("Starting board watcher for: {:?}", store.reported_path());
-
     // Create channel for events with buffer for debouncing
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(100);
 
-    // Spawn the watcher task
-    let watched = project_path.to_string_lossy().to_string();
+    // This route is one feed on its own connection, so its events carry no
+    // tag: whoever asked for it asked for nothing else. The one stream a
+    // window holds is /api/live, where every event is tagged (live.rs).
+    let project_path = PathBuf::from(&params.path);
     tokio::spawn(async move {
-        if let Err(e) = run_watcher(store, watched, tx, dolt_manager, db).await {
-            error!("Board watcher error: {}", e);
-        }
+        watch_board(project_path, tx, None, dolt_manager, db).await;
     });
 
     let stream = ReceiverStream::new(rx);
@@ -179,11 +165,56 @@ pub async fn watch_beads(
     )
 }
 
+/// Watches one project's board and reports every change down `tx`.
+///
+/// `tag` names the feed each event belongs to, for a caller carrying more than
+/// one on a single stream; `None` leaves them unnamed, which is what a stream
+/// carrying only this one wants (live.rs).
+///
+/// A path with no filesystem behind it — a `dolt://` project — closes the
+/// channel and stops, which the caller reads as a feed that said nothing.
+pub(super) async fn watch_board(
+    project_path: PathBuf,
+    tx: mpsc::Sender<Result<Event, Infallible>>,
+    tag: Option<&'static str>,
+    dolt_manager: Arc<DoltManager>,
+    db: Arc<Database>,
+) {
+    if let Err(e) = validate_path_security(&project_path) {
+        warn!("Watch rejected for invalid path: {}", e);
+        return;
+    }
+
+    let store = BoardStore::resolve(&project_path);
+    info!("Starting board watcher for: {:?}", store.reported_path());
+
+    let watched = project_path.to_string_lossy().to_string();
+    if let Err(e) = run_watcher(store, watched, tx, tag, dolt_manager, db).await {
+        error!("Board watcher error: {}", e);
+    }
+}
+
+/// One board change, as it goes on the wire.
+fn frame(tag: Option<&'static str>, path: &str, change_type: &str) -> Event {
+    let said = Event::default().data(
+        serde_json::to_string(&FileChangeEvent {
+            path: path.to_string(),
+            change_type: change_type.to_string(),
+        })
+        .unwrap_or_default(),
+    );
+    match tag {
+        Some(tag) => said.event(tag),
+        None => said,
+    }
+}
+
 /// Runs the board watcher and sends events through the channel.
 async fn run_watcher(
     store: BoardStore,
     watched: String,
     tx: mpsc::Sender<Result<Event, Infallible>>,
+    tag: Option<&'static str>,
     dolt_manager: Arc<DoltManager>,
     db: Arc<Database>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -221,14 +252,7 @@ async fn run_watcher(
     let reported_path = store.reported_path().to_string_lossy().to_string();
 
     // Send initial connection event
-    let connect_event = Event::default().data(
-        serde_json::to_string(&FileChangeEvent {
-            path: reported_path.clone(),
-            change_type: "connected".to_string(),
-        })
-        .unwrap_or_default(),
-    );
-    let _ = tx.send(Ok(connect_event)).await;
+    let _ = tx.send(Ok(frame(tag, &reported_path, "connected"))).await;
 
     // Trailing-edge debounce: a burst is reported once it goes quiet, so the
     // client always refetches after the final write rather than before it.
@@ -266,14 +290,7 @@ async fn run_watcher(
             read_again = read_again.recv() => {
                 match read_again {
                     Ok(board) if board == watched => {
-                        let sse_event = Event::default().data(
-                            serde_json::to_string(&FileChangeEvent {
-                                path: reported_path.clone(),
-                                change_type: "modified".to_string(),
-                            })
-                            .unwrap_or_default(),
-                        );
-                        if tx.send(Ok(sse_event)).await.is_err() {
+                        if tx.send(Ok(frame(tag, &reported_path, "modified"))).await.is_err() {
                             info!("Client disconnected, stopping watcher");
                             break;
                         }
@@ -314,14 +331,7 @@ async fn run_watcher(
                 // could not run we say so ourselves rather than leave the
                 // screen holding an answer the change made wrong.
                 if !refresh_board(&dolt_manager, &db, &watched).await {
-                    let sse_event = Event::default().data(
-                        serde_json::to_string(&FileChangeEvent {
-                            path: reported_path.clone(),
-                            change_type: change_type.to_string(),
-                        })
-                        .unwrap_or_default(),
-                    );
-                    if tx.send(Ok(sse_event)).await.is_err() {
+                    if tx.send(Ok(frame(tag, &reported_path, change_type))).await.is_err() {
                         info!("Client disconnected, stopping watcher");
                         break;
                     }

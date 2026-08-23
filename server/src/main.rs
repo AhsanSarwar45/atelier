@@ -426,6 +426,9 @@ async fn serve(open_browser: bool) {
                 .delete(routes::memory::delete_memory),
         )
         .route("/api/watch/beads", get(routes::watch_beads))
+        // One connection for a whole window: the board, the helper's feed and
+        // the open chat, each event tagged (routes/live.rs, bw-zkh4).
+        .route("/api/live", get(routes::live::live))
         .nest("/api/workbench", routes::workbench::router())
         .route("/api/version/check", get(routes::version::version_check))
         .route("/api/update", post(routes::version::perform_update))

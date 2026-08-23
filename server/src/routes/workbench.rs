@@ -164,6 +164,33 @@ async fn proxy(req: Request) -> Response {
         .unwrap_or_else(|e| (StatusCode::BAD_GATEWAY, format!("stream: {e}")).into_response())
 }
 
+/// Opens one of the helper's streams from THIS process, rather than from the
+/// browser.
+///
+/// The browser allows six connections to one address across every window it
+/// has, and an event stream never gives its slot back — which is what left an
+/// ordinary read queued behind streams that never end (live.rs, bw-zkh4). A
+/// connection made here is not one of those six, so the window can hold one
+/// stream while the server holds as many as the feeds need.
+pub async fn upstream(path_and_query: &str) -> Result<reqwest::Response, String> {
+    let Some(up) = get_live() else {
+        return Err("no helper of ours is up".to_string());
+    };
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut asking = client.get(format!("{}{}", up.base, path_and_query));
+    // Ours, not the browser's, exactly as the proxy above sends it.
+    if let Some(token) = up.token.as_deref() {
+        asking = asking.header(TOKEN_HEADER, token);
+    }
+    let answer = asking.send().await.map_err(|e| e.to_string())?;
+    if !answer.status().is_success() {
+        return Err(format!("the helper answered {}", answer.status()));
+    }
+    Ok(answer)
+}
+
 /// Starts the sidecar beside the server and restarts it if it dies.
 ///
 /// `laid_down` is the copy of the helper the product carried and wrote out
