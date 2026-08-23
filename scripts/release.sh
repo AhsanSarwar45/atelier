@@ -333,6 +333,7 @@ run git push --quiet origin "v$NEXT" \
 
 if [ "$DRY_RUN" = 1 ]; then
   would "gh run watch <the Release build for v$NEXT> --exit-status"
+  would "if it goes red: gh run rerun <that build> --failed, then watch it once more"
 else
   ok "v$NEXT is online, and the built files are being made"
   WAITED=0
@@ -346,8 +347,20 @@ else
   done
   [ -n "$RUN" ] && [ "$RUN" != "null" ] \
     || die "no build ever picked up v$NEXT — look at $SOURCE/actions"
-  gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20 >/dev/null 2>&1 \
-    || die "the release build went red — the tag is online but there is nothing to install; gh run view $RUN -R $SOURCE --log-failed"
+  if ! gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20 >/dev/null 2>&1; then
+    # Once in a while the far end simply drops one of the built files on its way
+    # up and hands back an error page. Nothing here is wrong, and there is
+    # nothing to fix — so ask the parts that died to run again, once, the same
+    # way the frozen dependency list is repaired once above. A second red is
+    # somebody's real fault and still stops the release.
+    say "the release build went red; asking the parts that died to run again, once"
+    gh run rerun "$RUN" -R "$SOURCE" --failed >/dev/null 2>&1 \
+      || die "the release build went red and would not run again — the tag is online but there is nothing to install; gh run view $RUN -R $SOURCE --log-failed"
+    sleep 15
+    gh run watch "$RUN" -R "$SOURCE" --exit-status --interval 20 >/dev/null 2>&1 \
+      || die "the release build went red twice — the tag is online but there is nothing to install; gh run view $RUN -R $SOURCE --log-failed"
+    ok "it went green the second time"
+  fi
   ok "a built file for every computer, with its fingerprints"
 fi
 
