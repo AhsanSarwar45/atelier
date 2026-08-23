@@ -121,6 +121,25 @@ check("a slice written without quotes is still a slice", cut.get("/src/bare.ts")
 cut = cost.slices_of([ran('sed -n "1,80p" /src/quoted.ts')])
 check("a slice written in double quotes is still a slice", cut.get("/src/quoted.ts"), 1)
 
+# The gate refuses three shapes of the same habit. A count that saw only one of
+# them would read a session moving between them as an improvement.
+cut = cost.slices_of([ran("awk 'NR>=1 && NR<=60' /src/awked.ts")])
+check("an awk line range is a slice", cut.get("/src/awked.ts"), 1)
+check("awk doing something else is not a slice",
+      cost.slices_of([ran("awk '{print $1}' /src/awked.ts")]).get("/src/awked.ts"), None)
+
+
+def read_part(path, ident="r1"):
+    return {"type": "assistant", "message": {"usage": {"output_tokens": 1}, "content": [
+        {"type": "tool_use", "id": ident, "name": "Read",
+         "input": {"file_path": path, "offset": 40, "limit": 20}}]}}
+
+
+cut = cost.slices_of([read_part("/src/tooled.ts")])
+check("part of a file asked for by the reading tool is a slice", cut.get("/src/tooled.ts"), 1)
+check("a whole file asked for by the reading tool is not",
+      cost.slices_of([asked_for("/src/tooled.ts")]).get("/src/tooled.ts"), None)
+
 # Two files of one name are two different files. Answering with whichever the
 # search happened to return first scored a reading against a file nobody read.
 import tempfile  # noqa: E402
@@ -145,4 +164,4 @@ if FAILED:
     for line in FAILED:
         print("FAILED  " + line)
     sys.exit(1)
-print(f"all {20} cases pass")
+print(f"all {24} cases pass")

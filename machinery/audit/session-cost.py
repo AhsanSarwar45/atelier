@@ -48,6 +48,12 @@ SMALL = 800
 # the three left the third uncounted (bw-nqll.7).
 SLICE = re.compile(r"sed -n\s+['\"]?(\d+),(\d+)p['\"]?\s+(\S+)")
 
+# `awk 'NR>=120 && NR<=240' some/file` — the same reading, written the other
+# common way. The gate refuses this shape, so the count has to see it too, or
+# the number this job is judged on misses whatever the gate is turning away
+# (bw-nqll.13).
+AWK = re.compile(r"\bawk\b[^|;]*?NR\s*[<>=]{1,2}\s*\d+[^|;]*?\s(\S+)$")
+
 PICTURE = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif")
 
 # What a picture costs to read is decided by its pixels, not by how many
@@ -233,7 +239,14 @@ def briefings_a_start(records) -> int:
 
 
 def slices_of(records) -> collections.Counter:
-    """Every file a session opened a slice of, and how many times."""
+    """Every file a session opened a slice of, and how many times.
+
+    All three shapes the gate refuses are counted: a sed range, an awk line
+    range, and the reading tool asked for part of a file. Counting only the
+    first left the number blind to two habits the gate itself stops, so a
+    session could move from one to another and read as an improvement
+    (bw-nqll.13).
+    """
     cut: collections.Counter = collections.Counter()
     for r in records:
         if r.get("type") != "assistant":
@@ -241,9 +254,16 @@ def slices_of(records) -> collections.Counter:
         for block in (r.get("message") or {}).get("content") or []:
             if not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
+            got = block.get("input") or {}
             if block.get("name") == "Bash":
-                for m in SLICE.finditer((block.get("input") or {}).get("command") or ""):
+                command = got.get("command") or ""
+                for m in SLICE.finditer(command):
                     cut[m.group(3)] += 1
+                for m in AWK.finditer(command):
+                    cut[m.group(1)] += 1
+            elif block.get("name") == "Read" and (got.get("offset") or got.get("limit")):
+                if got.get("file_path"):
+                    cut[got["file_path"]] += 1
     return cut
 
 
@@ -437,7 +457,7 @@ def main() -> int:
             return 1
         return 0
 
-    live = os.environ.get("CLAUDE_SESSION_ID", "")[:8] or None
+    live = os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8] or None
     paths = most_recent(folder, args.last, live)
     if not paths:
         print(f"no sessions under {folder}", file=sys.stderr)

@@ -31,8 +31,12 @@ SHORT = 800
 # round it (bw-nqll.7).
 SED = re.compile(r"\bsed\b[^|;&]*?-n\s+['\"]?(\d+),(\d+)p['\"]?\s+(\S+)")
 
-# `awk 'NR>=120 && NR<=240' path` and the same written as a range.
-AWK = re.compile(r"\bawk\b[^|;&]*?NR\s*[<>=]{1,2}\s*\d+[^|;&]*?\s(\S+)$")
+# `awk 'NR>=120 && NR<=240' path` and the same written as a range. The two
+# conditions are joined by `&&`, so the run between them must be allowed to
+# contain `&` — barring it meant this never matched the one form it was
+# written to catch, and the case that would have said so was never written
+# (bw-nqll.12).
+AWK = re.compile(r"\bawk\b[^|;]*?NR\s*[<>=]{1,2}\s*\d+[^|;]*?\s(\S+)$")
 
 REASON = (
     "{where} is {lines} lines. Reading it in pieces costs a turn for each "
@@ -124,6 +128,12 @@ def selftest():
     check("a short file read whole by tool", judge("Read", {"file_path": "/t/small.ts"}, measure), False)
     check("a part of a long file asked for by tool",
           judge("Read", {"file_path": "/t/huge.py", "offset": 40, "limit": 20}, measure), False)
+    check("an awk range over a short file",
+          judge("Bash", {"command": "awk 'NR>=1 && NR<=60' /t/small.ts"}, measure), True)
+    check("an awk range over a long file",
+          judge("Bash", {"command": "awk 'NR>=1 && NR<=60' /t/huge.py"}, measure), False)
+    check("awk doing something that is not a line range",
+          judge("Bash", {"command": "awk '{print $1}' /t/small.ts"}, measure), False)
     check("one short and one long in the same line",
           judge("Bash", {"command": "sed -n '1,9p' /t/huge.py; sed -n '1,9p' /t/small.ts"}, measure), True)
 
@@ -131,7 +141,7 @@ def selftest():
         for line in failed:
             print("FAILED  " + line)
         return 1
-    print("all 13 cases pass")
+    print("all 16 cases pass")
     return 0
 
 
