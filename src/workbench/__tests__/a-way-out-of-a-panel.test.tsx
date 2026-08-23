@@ -21,7 +21,14 @@ import { TokenView } from '@/workbench/token-view';
 import { UsageView } from '@/workbench/usage-view';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('@/lib/api', () => ({ projects: { list: () => Promise.resolve([]) } }));
+vi.mock('@/lib/api', () => ({
+  projects: { list: () => Promise.resolve([]) },
+  // The tokens panel asks the program for its figures the moment it draws. No
+  // program answers in here, and none did before this call went through the
+  // shared helper either — the panel drew its "could not read that" face and
+  // closed the same way. Nothing comes back, so it still does (bw-81wt.28).
+  request: () => Promise.reject(new Error('no program answers in a test')),
+}));
 vi.mock('@/workbench/live', () => ({
   usePlanUsage: () => ({
     available: false,
