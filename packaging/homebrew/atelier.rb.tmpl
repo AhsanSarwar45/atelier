@@ -4,11 +4,12 @@ class Atelier < Formula
   version "__VERSION__"
   license "MIT"
 
-  # The chat helper is started beside the server and is written for node, so an
-  # install without it serves the board and answers nothing on the Chat tab.
-  # Asked for here rather than left to the reader: the chat is half of what this
-  # program is, and a silent half is worse than a bigger download.
-  depends_on "node"
+  # No `depends_on "node"`. Homebrew would install its own node and link it
+  # ahead of whatever node manager the reader already runs — which is how most
+  # people who have node have it — and a program that quietly changes which node
+  # their other work is built with has done them more harm than a missing chat.
+  # The chat is never silently dead either way: the program says, in words, that
+  # it could not run npm and what that costs.
 
   on_macos do
     on_arm do
@@ -42,6 +43,10 @@ class Atelier < Formula
 
       It answers your whole network, so the board opens on your phone —
       starting it prints the address to type there.
+
+      The Chat tab needs node and npm on your PATH — your own, whichever way you
+      install them. Without them the board and the screens still work, and the
+      chat says what is missing.
 
       `init` needs python3 and the Beads CLI (bd) on your PATH:
         https://github.com/gastownhall/beads
