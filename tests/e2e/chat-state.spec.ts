@@ -617,6 +617,93 @@ test.describe('a chat another program is in', () => {
     }
     chat.forget();
   });
+
+  /**
+   * The five states side by side, which is the picture the job is judged by.
+   *
+   * The manager's screenshot, 2026-08-22: one chat, one word, `Working 1h 38m`.
+   * Everything a chat could be doing arrived on the screen as that word, because
+   * the only thing read off a running session was a busy bit — so a two-minute
+   * compaction, a think, a permission prompt nobody had answered, a wait on a
+   * usage limit and three helpers grinding away all read the same (bw-jaoz.14).
+   *
+   * Each of the five is its own word, its own mark, and — for the two a clock
+   * cannot see the end of — the thing beside the word that says which retry or
+   * whose work (bw-jaoz.14.7). Read off the rows rather than five separate
+   * chats' own pages, because reading them side by side is the whole complaint:
+   * five rows that used to be indistinguishable.
+   */
+  test('says which of the five things it is doing, each with its own word and mark', async ({ page, request }) => {
+    test.setTimeout(300_000);
+    const project = await aFixtureProject(request);
+    /** What each of the five looks like, in the order the picture reads. */
+    const FIVE = [
+      { doing: 'summarising', word: 'Summarising', mark: 'summarising', detail: 'auto', ago: 62_000, bar: true },
+      { doing: 'thinking', word: 'Thinking', mark: 'thinking', detail: null, ago: 14_000, bar: false },
+      { doing: 'waiting', word: 'Waiting for you', mark: 'waiting', detail: 'Bash', ago: 240_000, bar: false },
+      { doing: 'retrying', word: 'Retrying', mark: 'retrying', detail: 'resets 4:40pm', ago: 30_000, bar: false },
+      { doing: 'helping', word: 'Helper working', mark: 'helping', detail: '3 helpers', ago: 95_000, bar: false },
+    ] as const;
+
+    const made = FIVE.map((it) => {
+      const chat = aChatSomebodyElseIsIn(project.path, `A chat that is ${it.doing}`);
+      return {
+        ...it,
+        chat,
+        release: claimConversation(chat.id, { status: 'busy' }),
+        quiet: saysItIsDoing(chat.id, it.doing, { ago: it.ago, detail: it.detail ?? undefined }),
+      };
+    });
+
+    try {
+      await openChatTab(page, project);
+      for (const one of made) {
+        const row = rowFor(page, one.chat.id);
+        await expect(row, `the ${one.doing} chat was not offered`).toBeVisible({ timeout: 30_000 });
+        const pill = row.getByTestId('row-pill');
+        // Its own word, and never the one word they all used to share.
+        await expect(pill, one.doing).toHaveAttribute('data-word', one.word, { timeout: 30_000 });
+        // Its own mark beside it: five words in one typeface still read alike
+        // at a glance, and the mark is what makes them different at a glance.
+        await expect(pill.getByTestId('chat-state-mark')).toHaveAttribute('data-mark', one.mark);
+        // The badge saying whose chat this is stays beside all five, because it
+        // was never an answer to what the chat is doing (bw-96is).
+        await expect(row.getByTestId('chat-external')).toBeVisible();
+        if (one.detail !== null) {
+          await expect(
+            pill.getByTestId('chat-state-detail'),
+            `${one.doing} says which one it is, not just which kind`,
+          ).toContainText(one.detail);
+        }
+      }
+
+      // The picture the manager judges the job by: five rows, five states.
+      mkdirSync('tests/results', { recursive: true });
+      await page.screenshot({ path: 'tests/results/chat-five-states.png', fullPage: false });
+
+      // And the one of them with a length gets the bar, in its own chat, which
+      // no other state may draw.
+      const summarising = made[0]!;
+      await rowFor(page, summarising.chat.id).getByTestId('row-name').click();
+      await expect(page.getByTestId('working-line')).toContainText('Summarising', { timeout: 30_000 });
+      await expect(page.getByTestId('summarising-bar')).toBeVisible({ timeout: 30_000 });
+      await page.screenshot({ path: 'tests/results/chat-state-summarising.png', fullPage: false });
+
+      const thinking = made[1]!;
+      await rowFor(page, thinking.chat.id).getByTestId('row-name').click();
+      await expect(page.getByTestId('working-line')).toContainText('Thinking', { timeout: 30_000 });
+      await expect(
+        page.getByTestId('summarising-bar'),
+        'a think has no measured length, so it may not draw a bar',
+      ).toHaveCount(0);
+    } finally {
+      for (const one of made) {
+        one.quiet();
+        one.release();
+      }
+    }
+    for (const one of made) one.chat.forget();
+  });
 });
 
 test.describe('a chat nothing is running', () => {
