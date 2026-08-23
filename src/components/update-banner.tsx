@@ -73,7 +73,17 @@ export function UpdateBanner() {
   if (!info?.update_available || dismissed) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 max-w-sm rounded-lg border border-success/30 bg-surface-raised shadow-lg p-4 animate-in slide-in-from-bottom-4 fade-in duration-300">
+    // Below anything that opens over the screen, not beside it. A phone panel
+    // is a sheet with a dimmed page behind it, and this notice used to float
+    // at the same height as that dimming: the sheet covered its left two
+    // thirds and the strip sticking out past the sheet read as a torn-off
+    // fragment of a sentence. Underneath the dimming it is background, which
+    // is what a notice about a future release is while somebody is busy
+    // (bw-81wt.33).
+    <div
+      data-testid="update-banner"
+      className="fixed bottom-4 right-4 z-30 max-w-sm rounded-lg border border-success/30 bg-surface-raised p-4 shadow-lg animate-in slide-in-from-bottom-4 fade-in duration-300"
+    >
       <button
         onClick={() => setDismissed(true)}
         className="absolute right-2 top-2 text-t-muted hover:text-t-primary rounded-sm p-0.5"

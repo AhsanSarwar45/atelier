@@ -818,6 +818,66 @@ test.describe('overlays and dialogs', () => {
     await judge(page, 'menu-open-with-390');
     await page.keyboard.press('Escape');
   });
+
+  for (const [label, size] of [['390', PHONE], ['360', NARROW]] as const) {
+    test(`the update notice fits a phone at ${label}`, async ({ page }) => {
+      await page.setViewportSize(size);
+      // The notice only draws when there is a newer release, and usually there
+      // is not, so the run answers the version question itself rather than
+      // waiting for one.
+      await page.route('**/api/version/check', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            current: '0.15.0',
+            latest: '0.16.0',
+            update_available: true,
+            download_url: 'https://example.invalid/release',
+            release_notes: null,
+            asset_url: 'https://example.invalid/asset',
+          }),
+        }),
+      );
+      await openProject(page, 'chat');
+
+      const notice = page.locator('[data-testid="update-banner"]');
+      await expect(notice, 'the update notice never appeared').toBeVisible({ timeout: WAY_IN_MS });
+      const box = await notice.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: Math.round(r.left), right: Math.round(r.right) };
+      });
+
+      expect(box.left, `the update notice starts ${box.left}px from the left, off the screen`).toBeGreaterThanOrEqual(0);
+      expect(box.right, `the update notice ends ${box.right}px across a ${size.width}px screen`).toBeLessThanOrEqual(size.width);
+      await judge(page, `update-notice-${label}`);
+
+      // And with a sheet open it is background, not a torn-off strip beside
+      // it: the notice floated at the same height as the dimming, so the sheet
+      // covered its left two thirds and what stuck out past the sheet read as
+      // half a sentence (bw-81wt.33).
+      await page.locator('[data-testid="chat-rail-toggle"]').first().click();
+      await page.waitForTimeout(600);
+      const showing = await notice.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return [0.1, 0.5, 0.9]
+          .map((across) => {
+            const hit = document.elementFromPoint(
+              Math.round(r.left + r.width * across),
+              Math.round(r.top + r.height / 2),
+            );
+            let owner: Element | null = hit;
+            while (owner && !owner.getAttribute('data-testid')) owner = owner.parentElement;
+            return owner?.getAttribute('data-testid') === 'update-banner' ? Math.round(across * 100) : null;
+          })
+          .filter((at): at is number => at !== null);
+      });
+      expect(
+        showing,
+        `with the chat list open the update notice is still drawn over it, ${showing.length} of 3 points across`,
+      ).toEqual([]);
+      await shoot(page, `update-notice-${label}-under-sheet`);
+    });
+  }
 });
 
 // ─── Reports and settings ───
