@@ -120,6 +120,31 @@ describe('api.version', () => {
   });
 });
 
+describe('nothing about the work is kept by the browser', () => {
+  // The screens are checked with the server on every visit, and that was only
+  // ever half of it: the answers underneath them said nothing, so a browser was
+  // free to draw a board out of a copy it already had, with cards that had
+  // since moved. A board has no name a stale copy could be asked about by — its
+  // address is the same after a card moves as before (bw-8um.3.18).
+  it('asks for a board without keeping it', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ beads: [] }));
+
+    await api.beads.read('/test/path');
+
+    const [, options] = mockFetch.mock.calls[0];
+    expect(options.cache).toBe('no-store');
+  });
+
+  it('says the same on a write as on a read', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ success: true }));
+
+    await api.beads.update({ path: '/test/path', id: 'bead-1', status: 'closed' });
+
+    const [, options] = mockFetch.mock.calls[0];
+    expect(options.cache).toBe('no-store');
+  });
+});
+
 describe('fetchApi error handling', () => {
   it('throws on non-OK response with error body', async () => {
     mockFetch.mockResolvedValue(

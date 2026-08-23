@@ -9,7 +9,13 @@
 # browser still held. A hard reload fixed it, which nobody should have to know
 # (bw-8um.3.11).
 #
-# The unit tests hold the rule. This holds the running server to it, over a
+# The screens were the half that was fixed. The answers underneath them still
+# said nothing, so a browser was free to draw a board out of a copy it already
+# had and show cards that had since moved (bw-8um.3.18). A board has no name a
+# stale copy could answer to — its address is the same after a card moves — so
+# those are not kept at all.
+#
+# The unit tests hold both rules. This holds the running server to them, over a
 # real socket, on all four of the routes it answers on — because the fault was
 # never in the rule, it was in there being no rule at any of the four places a
 # response is built.
@@ -158,6 +164,35 @@ if [ "$(status_of "$current")" = "304" ]; then
   pass "a browser holding this build is told to keep it (304, no page sent)"
 else
   fail "a browser holding the current page was sent it again ($(status_of "$current")) — asking costs a full page every visit"
+fi
+
+# ------------------------------------------- what must not be kept at all
+
+say "Answers about the work itself"
+
+# A file is kept and asked about by its tag. These have no tag they could be
+# asked about by: the address of a board is the same after a card moves as it
+# was before it, so the only safe answer is that there is nothing to keep.
+for asked in "/api/health" "/api/beads?path=$REPO" "/api/projects"; do
+  head="$(headers_of "http://127.0.0.1:$PORT$asked")"
+  kept="$(value_of "$head" "cache-control")"
+  name="${asked%%\?*}"
+  if [ -z "$kept" ]; then
+    fail "$name says nothing about being kept — a browser will draw it again after the work has moved"
+  elif [ "$kept" != "no-store" ]; then
+    fail "$name may be kept ($kept), and nothing about its address could ever say it went stale"
+  else
+    pass "$name: $kept"
+  fi
+done
+
+# The other half of the same rule: a page must NOT pick this up, or its tag
+# stops being used and every visit pays for the whole page again.
+head="$(headers_of "http://127.0.0.1:$PORT/")"
+if [ "$(value_of "$head" "cache-control")" = "no-store" ]; then
+  fail "the home page was swept up with the answers about the work and lost its tag"
+else
+  pass "the pages kept their tags"
 fi
 
 # ------------------------------------------------- what never needs asking about

@@ -148,13 +148,24 @@ function eitherOf(theirs: AbortSignal | null | undefined, deadline: AbortSignal)
  * that wants the raw answer rather than the parsed one — so a read cannot be
  * written without a deadline by forgetting to add one. A read that runs out of
  * time fails in words a screen can draw, rather than as an abort nobody prints.
+ *
+ * It is also where nothing is kept. Everything asked for here is a picture of
+ * work that changes while the reader is looking at it, and its address is the
+ * same after a card moves as it was before — so there is no name a stale copy
+ * could ever be asked about by. The server says so on every answer it gives;
+ * this is the same thing said on the way out, so a browser that never saw the
+ * header still does not draw a board out of a copy it kept (bw-8um.3.18).
  */
 export async function request(path: string, options?: ReadOptions): Promise<Response> {
   const { deadlineMs, signal, ...rest } = options ?? {};
   const wait = deadlineMs ?? DEADLINE_MS;
   const deadline = AbortSignal.timeout(wait);
   try {
-    return await fetch(apiUrl(path), { ...rest, signal: eitherOf(signal, deadline) });
+    return await fetch(apiUrl(path), {
+      ...rest,
+      cache: 'no-store',
+      signal: eitherOf(signal, deadline),
+    });
   } catch (e) {
     // Only the deadline's own firing is reworded: a caller that cancelled its
     // read already knows why, and the browser's network errors say something.

@@ -21,7 +21,8 @@ mod service;
 use axum::{
     body::Body,
     extract::Extension,
-    http::{header, Request, Response, StatusCode},
+    http::{header, HeaderValue, Request, Response, StatusCode},
+    middleware::{self, Next},
     response::IntoResponse,
     routing::{delete, get, patch, post, put},
     Router,
@@ -93,6 +94,26 @@ async fn serve_static(req: Request<Body>) -> impl IntoResponse {
         .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from("Not Found"))
         .unwrap()
+}
+
+/// Every answer about the work says a browser must not keep it.
+///
+/// The screens are told to check with us on every visit, and that fixed a
+/// rebuilt app drawing the old one — but it only ever covered the files. The
+/// answers underneath them said nothing at all, so a browser applied a guess of
+/// its own and was free to draw a board out of a copy it already had, with
+/// cards that had since moved. One place rather than the forty routes, for the
+/// same reason `served` below is one place rather than four (bw-8um.3.18).
+async fn said_not_to_keep(req: Request<Body>, next: Next) -> Response<Body> {
+    let about_the_work = serving::about_the_work(req.uri().path());
+    let mut answer = next.run(req).await;
+    if about_the_work {
+        answer.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static(serving::NOT_KEPT),
+        );
+    }
+    answer
 }
 
 /// One embedded file, answered the same way whichever of the four routes above
@@ -433,6 +454,7 @@ async fn serve(open_browser: bool) {
         .route("/api/version/check", get(routes::version::version_check))
         .route("/api/update", post(routes::version::perform_update))
         .fallback(serve_static)
+        .layer(middleware::from_fn(said_not_to_keep))
         .layer(Extension(version_cache))
         .layer(Extension(database))
         .layer(Extension(dolt_manager))

@@ -27,6 +27,25 @@ pub fn kept_for(path: &str) -> &'static str {
     }
 }
 
+/// What a browser may keep of an answer about the work itself: none of it.
+///
+/// A board, a card, the counts on the project list, the health line — each is a
+/// picture of something that changes while the reader is looking at it, and
+/// none of them has a name a stale copy could answer to. The address of a board
+/// is the same after a card moves as it was before, so `no-cache` and a tag
+/// would only invite a browser to keep a copy it can never be told is wrong.
+/// `no-store` says there is nothing here worth keeping (bw-8um.3.18).
+pub const NOT_KEPT: &str = "no-store";
+
+/// Whether this address hands out an answer about the work rather than a file.
+///
+/// Asked of the whole address the browser used, so `/api` and everything under
+/// it is one rule in one place — the same reason `served` above exists rather
+/// than four copies of a header.
+pub fn about_the_work(path: &str) -> bool {
+    path == "/api" || path.starts_with("/api/")
+}
+
 /// The name this exact content answers to.
 ///
 /// It is the hash of the bytes themselves, which rust-embed already computed
@@ -98,6 +117,41 @@ mod tests {
                 "{same_name} keeps its name across builds and cannot be kept blind"
             );
         }
+    }
+
+    #[test]
+    fn every_answer_about_the_work_is_one() {
+        for asked in [
+            "/api/health",
+            "/api/beads",
+            "/api/projects",
+            "/api/reports/spec",
+            "/api/workbench/chats",
+            "/api",
+        ] {
+            assert!(
+                about_the_work(asked),
+                "{asked} would be kept by a browser and drawn after the work moved"
+            );
+        }
+    }
+
+    #[test]
+    fn a_screen_or_a_file_is_not() {
+        // These are files with tags: they ARE kept, and asked about by tag.
+        for asked in ["/", "/index.html", "/project", "/_next/static/main.js", "/apiary"] {
+            assert!(
+                !about_the_work(asked),
+                "{asked} would lose its tag and be fetched whole on every visit"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_about_the_work_may_be_kept_at_all() {
+        // no-cache would let a browser keep a board and ask whether it is still
+        // good — and nothing about a board's address could ever answer that.
+        assert_eq!(NOT_KEPT, "no-store");
     }
 
     #[test]
