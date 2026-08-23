@@ -52,6 +52,14 @@ WAITING = "waiting"
 #: the session has been quiet, which the marker's own bit already says.
 PERMISSION = "permission_prompt"
 
+#: What the tool's own permission notification says, verbatim. There is no
+#: tool_name on this payload to read instead: the Notification schema shipped in
+#: 2.1.240 is session_id, transcript_path, cwd, hook_event_name, message, an
+#: optional title and notification_type, and the tool is named only inside the
+#: sentence — `Claude needs your permission to use ${tool}`. The chip has room
+#: for the one word, so the one word is what comes out of it (bw-jaoz.14.13).
+ASKING = "needs your permission to use "
+
 
 def sessions_dir() -> Path:
     """Where the tool keeps its markers, resolved the way the tool resolves it."""
@@ -120,6 +128,23 @@ def a_word(data: dict, *keys):
     return None
 
 
+def asked_about(data: dict):
+    """The tool a permission prompt is asking about, in one word where it can be.
+
+    `tool_name` first, so a version that starts sending one is read straight
+    rather than parsed; the sentence next, which is where the tool is named
+    today; and the sentence whole if it is worded some way this does not know —
+    a long detail is worse than a short one and better than none.
+    """
+    said = a_word(data, "tool_name", "message", "title")
+    if not said:
+        return None
+    at = said.find(ASKING)
+    if at < 0:
+        return said
+    return said[at + len(ASKING):].strip().strip(".") or said
+
+
 def main() -> None:
     try:
         data = json.load(sys.stdin)
@@ -147,8 +172,12 @@ def main() -> None:
         # claim is left alone here and only the wait is cleared.
         hush(session_id, only=WAITING)
     elif event == "Notification":
+        # Six seconds after the prompt goes up, not the instant it does: the
+        # tool holds this notification back that long and drops it entirely if
+        # he answers first, so a wait the screen names is a wait he is actually
+        # sitting in front of.
         if a_word(data, "notification_type") == PERMISSION:
-            say(session_id, WAITING, a_word(data, "tool_name", "title", "message"))
+            say(session_id, WAITING, asked_about(data))
     elif event in ("PostToolUse", "UserPromptSubmit"):
         hush(session_id, only=WAITING)
 

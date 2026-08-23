@@ -105,16 +105,41 @@ describe('a compaction says so as it begins and ends', () => {
 });
 
 describe('a permission prompt is the one wait worth a word', () => {
-  it('names the tool it is asking about', () => {
+  // Every payload below is the shape the tool actually sends (2.1.240): the
+  // tool is named inside the sentence and nowhere else. An earlier version of
+  // this suite hand-fed a tool_name field that does not exist, so it passed
+  // while the chip drew a whole sentence (bw-jaoz.14.13).
+  it('names the tool it is asking about, out of the sentence it is asked in', () => {
     fire({
       hook_event_name: 'Notification',
       session_id: CHAT,
       notification_type: 'permission_prompt',
-      tool_name: 'Bash',
+      message: 'Claude needs your permission to use Bash',
     });
     const said = readBack();
     expect(said?.doing).toBe('waiting');
     expect(said?.detail).toBe('Bash');
+  });
+
+  it('says the sentence whole rather than nothing when it is worded some other way', () => {
+    fire({
+      hook_event_name: 'Notification',
+      session_id: CHAT,
+      notification_type: 'permission_prompt',
+      message: 'Claude is asking about something',
+    });
+    expect(readBack()?.detail).toBe('Claude is asking about something');
+  });
+
+  it('reads a tool_name straight if a later version ever sends one', () => {
+    fire({
+      hook_event_name: 'Notification',
+      session_id: CHAT,
+      notification_type: 'permission_prompt',
+      tool_name: 'Edit',
+      message: 'Claude needs your permission to use Edit',
+    });
+    expect(readBack()?.detail).toBe('Edit');
   });
 
   it('says nothing at all when the notification is just a nudge', () => {
@@ -129,7 +154,7 @@ describe('a permission prompt is the one wait worth a word', () => {
       hook_event_name: 'Notification',
       session_id: CHAT,
       notification_type: 'permission_prompt',
-      tool_name: 'Edit',
+      message: 'Claude needs your permission to use Edit',
     });
     fire({ hook_event_name: 'PostToolUse', session_id: CHAT, tool_name: 'Edit' });
     expect(readBack(), 'he answered it, so nothing is being asked').toBeNull();
