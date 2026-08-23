@@ -129,6 +129,8 @@ describe('a chat of ours, nobody else in it', () => {
       label: 'Reading',
       // A chat of ours has nothing beyond its own word to add.
       detail: null,
+      // Nor a measured compaction length: only a summarising chat carries one.
+      typicalMs: null,
       // What it is, as well as what it says it is: the line draws a bar for one
       // of these and a clock for the rest (bw-jaoz.14.5).
       doing: 'running',
@@ -269,6 +271,7 @@ describe('a chat somebody else holds', () => {
     expect(line).toEqual({
       label: 'Working',
       detail: null,
+      typicalMs: null,
       doing: 'working',
       since: BEGAN,
       turn: null,
@@ -283,6 +286,7 @@ describe('a chat somebody else holds', () => {
     expect(body(read, { running: { title: 'rg --files', seconds: 7 } })).toEqual({
       label: 'rg --files',
       detail: null,
+      typicalMs: null,
       doing: 'working',
       since: BEGAN,
       turn: null,

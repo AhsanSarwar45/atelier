@@ -30,6 +30,12 @@ export interface WorkingLineNow {
    */
   detail: string | null;
   /**
+   * What the bar fills against, in milliseconds — this project's own median
+   * once the app has watched enough of its runs, null for the machine-wide one
+   * (summarising.ts).
+   */
+  typicalMs: number | null;
+  /**
    * Which of the things a chat does this is, off the one reading — so the line
    * can draw what a word cannot. Summarising is the state that gets a bar
    * (bw-jaoz.14.5); everything else is open-ended and gets a clock.
@@ -73,12 +79,15 @@ export function workingLine(now: {
   /** The one reading, as the chip beside it draws it (chat-state.ts). */
   state: ChatState;
   running: CallInFlight | null;
+  /** How long this project's summarising runs take, when it has enough of its own. */
+  typicalMs?: number | null;
 }): WorkingLineNow | null {
   const reported = now.running?.seconds ?? 0;
   if (now.busy) {
     return {
       label: now.label,
       detail: now.state.detail,
+      typicalMs: now.typicalMs ?? null,
       doing: now.state.doing,
       since: now.since,
       // Off the one reading, so the line and the chip an inch above it cannot
@@ -98,6 +107,7 @@ export function workingLine(now: {
     return {
       label: now.running?.title ?? now.state.word,
       detail: now.state.detail,
+      typicalMs: now.typicalMs ?? null,
       doing: now.state.doing,
       since: now.state.since,
       turn: now.state.turnSince,

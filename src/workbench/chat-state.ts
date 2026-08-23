@@ -74,6 +74,13 @@ export interface HeldChat {
    * before anything told us anything.
    */
   told?: boolean;
+  /**
+   * How long a summarising run usually takes in THIS project, measured from the
+   * runs the app has watched begin and end — or null until it has watched
+   * enough of them, and on every state that is not summarising, which has
+   * nothing to fill a bar with (bw-jaoz.14.9).
+   */
+  typicalMs?: number | null;
 }
 
 /**

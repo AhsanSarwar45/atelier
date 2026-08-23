@@ -16,7 +16,15 @@ import { describe, expect, it } from 'vitest';
 
 import { chatState } from '@/workbench/chat-state';
 import type { Doing } from '@/workbench/chat-state';
-import { SUMMARY_HELD_AT, SUMMARY_TYPICAL_MS, summaryFill, summaryOverrun } from '@/workbench/summarising';
+import {
+  SUMMARY_HELD_AT,
+  SUMMARY_RUNS_ENOUGH,
+  SUMMARY_TYPICAL_MS,
+  ownSummaryMedian,
+  summaryFill,
+  summaryOverrun,
+  typicalSummaryMs,
+} from '@/workbench/summarising';
 import { WorkingLine } from '@/workbench/transcript-rows';
 import { workingLine } from '@/workbench/working-line';
 
@@ -51,14 +59,28 @@ describe('how full the bar is', () => {
   });
 });
 
-/** The foot of a chat a terminal holds, doing whatever the case says. */
-function foot(doing: Doing, sinceMs: number) {
+/**
+ * The foot of a chat a terminal holds, doing whatever the case says.
+ *
+ * `typicalMs` is what the sidecar measured in that chat's own project, which is
+ * null for a project it has not watched enough of (bw-jaoz.14.9).
+ */
+function foot(doing: Doing, sinceMs: number, typicalMs: number | null = null) {
   const now = Date.now();
   const read = chatState({
     state: 'dormant',
-    held: { id: 'ef56704b', holder: 'terminal', doing, since: now - sinceMs, turnSince: null },
+    held: { id: 'ef56704b', holder: 'terminal', doing, since: now - sinceMs, turnSince: null, typicalMs },
   });
-  const line = workingLine({ busy: false, label: 'Ready', since: null, waiting: false, thought: 0, state: read, running: null });
+  const line = workingLine({
+    busy: false,
+    label: 'Ready',
+    since: null,
+    waiting: false,
+    thought: 0,
+    state: read,
+    running: null,
+    typicalMs,
+  });
   render(<div>{line && <WorkingLine {...line} />}</div>);
   return screen.queryByTestId('summarising-bar');
 }
@@ -93,5 +115,62 @@ describe('the bar on the screen', () => {
     foot('summarising', 40_000);
     expect(screen.getByTestId('working-line').textContent).toContain('Summarising');
     expect(screen.getByTestId('working-elapsed').textContent).toBe('40s');
+  });
+});
+
+/**
+ * Whose two minutes the bar is filling against (bw-jaoz.14.9).
+ *
+ * The machine-wide median was measured over every project on this computer at
+ * once, which makes it nobody's number in particular: a long conversation in a
+ * large repository summarises for longer than a short one, on the same machine,
+ * on the same afternoon. A project the app has watched enough of is measured
+ * against itself instead — and until then the machine-wide figure stands in,
+ * because a bar filling against one recorded run is worse than one filling
+ * against 453.
+ */
+describe("the estimate is this project's own once it has one", () => {
+  /** A project's history, as many runs as asked for, all the same length. */
+  const runs = (n: number, ms: number) => Array.from({ length: n }, () => ms);
+
+  it('stands the machine-wide median in until a project has enough runs of its own', () => {
+    expect(typicalSummaryMs([]), 'nothing watched yet').toBe(SUMMARY_TYPICAL_MS);
+    expect(typicalSummaryMs(runs(SUMMARY_RUNS_ENOUGH - 1, 40_000))).toBe(SUMMARY_TYPICAL_MS);
+    // And says so as a different answer, not as the same number: "not watched"
+    // and "watched, and it is 124 seconds" are not the same fact.
+    expect(ownSummaryMedian(runs(SUMMARY_RUNS_ENOUGH - 1, 40_000))).toBeNull();
+  });
+
+  it('takes the middle of them once it does', () => {
+    expect(typicalSummaryMs(runs(SUMMARY_RUNS_ENOUGH, 40_000))).toBe(40_000);
+    // The middle and not the mean: one compaction that ran for an hour must not
+    // drag every later bar out with it.
+    expect(typicalSummaryMs([30_000, 34_000, 36_000, 38_000, 3_600_000])).toBe(36_000);
+    // An even count takes the two in the middle.
+    expect(typicalSummaryMs([10_000, 20_000, 30_000, 44_000, 50_000, 60_000])).toBe(37_000);
+    // A length of nothing is not a run, and cannot be half of a median either.
+    expect(typicalSummaryMs([0, -1, 20_000, 20_000, 20_000, 20_000, 20_000])).toBe(20_000);
+  });
+
+  it('fills the bar on the screen against that median rather than the machine-wide one', () => {
+    // A project whose own runs take forty seconds, forty seconds in: over its
+    // own estimate and holding, while against the machine-wide 124s the same
+    // run would be a third of the way across.
+    const its = foot('summarising', 40_000, 40_000);
+    expect(its?.getAttribute('data-fill')).toBe('95');
+    expect(its?.getAttribute('data-held'), 'past its own estimate, waiting on the finish').toBe('true');
+  });
+
+  it('draws the same run as barely begun for a project whose runs are long', () => {
+    // The other side of the same fact: forty seconds into a project that
+    // usually takes twenty minutes is nowhere near done, and the bar says so.
+    const slow = foot('summarising', 40_000, 1_200_000);
+    expect(Number(slow?.getAttribute('data-fill'))).toBe(3);
+  });
+
+  it('falls back to the machine-wide bar for a project it has not watched', () => {
+    // Exactly what the bar drew before anything was measured per project.
+    const none = foot('summarising', SUMMARY_TYPICAL_MS / 2, null);
+    expect(none?.getAttribute('data-fill')).toBe('48');
   });
 });

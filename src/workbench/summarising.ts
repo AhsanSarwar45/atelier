@@ -45,6 +45,43 @@ export function summaryFill(elapsedMs: number, typicalMs: number = SUMMARY_TYPIC
   return Math.min(SUMMARY_HELD_AT, (elapsedMs / typicalMs) * SUMMARY_HELD_AT);
 }
 
+/**
+ * How many runs of its own a project needs before its median is used.
+ *
+ * A median of two is not a median; it is whichever of the two was slower. Below
+ * this the machine-wide number stands in, because a bar filling against one
+ * measurement is less honest than one filling against 453.
+ */
+export const SUMMARY_RUNS_ENOUGH = 5;
+
+/**
+ * The middle of the runs THIS project actually took, or null while it has not
+ * taken enough of them.
+ *
+ * Null rather than a number, so the caller decides what to stand in — and so
+ * "we have not watched this project summarise yet" is a different answer from
+ * "this project summarises in 124 seconds".
+ */
+export function ownSummaryMedian(runs: number[], enough = SUMMARY_RUNS_ENOUGH): number | null {
+  const sane = runs.filter((ms) => ms > 0).sort((a, b) => a - b);
+  if (sane.length < enough) return null;
+  const mid = Math.floor(sane.length / 2);
+  return sane.length % 2 === 1 ? sane[mid]! : Math.round((sane[mid - 1]! + sane[mid]!) / 2);
+}
+
+/**
+ * What the bar should fill against for a project, given the runs it has taken.
+ *
+ * Every project summarises at its own length: a long conversation in a large
+ * repository takes longer than a short one on the same machine, and the median
+ * of 453 runs across all of them is nobody's number in particular. So a project
+ * the app has watched enough of is measured against itself, and the
+ * machine-wide figure stands in until then (bw-jaoz.14.9).
+ */
+export function typicalSummaryMs(runs: number[], enough = SUMMARY_RUNS_ENOUGH): number {
+  return ownSummaryMedian(runs, enough) ?? SUMMARY_TYPICAL_MS;
+}
+
 /** Past the estimate, where the bar has stopped moving and the wait is open-ended. */
 export function summaryOverrun(elapsedMs: number, typicalMs: number = SUMMARY_TYPICAL_MS): boolean {
   return typicalMs > 0 && elapsedMs >= typicalMs;

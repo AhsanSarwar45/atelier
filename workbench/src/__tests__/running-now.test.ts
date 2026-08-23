@@ -133,6 +133,7 @@ describe('what each held conversation is doing', () => {
       // there is no second number behind it.
       since: NOW - 12_000,
       turnSince: NOW - 12_000,
+      typicalMs: null,
     });
     expect(holds.find((h) => h.id === 'a-quiet-terminal')).toEqual({
       id: 'a-quiet-terminal',
@@ -142,6 +143,7 @@ describe('what each held conversation is doing', () => {
       told: false,
       since: null,
       turnSince: null,
+      typicalMs: null,
     });
   });
 
@@ -193,6 +195,7 @@ describe('what each held conversation is doing', () => {
       told: false,
       since: null,
       turnSince: null,
+      typicalMs: null,
     });
   });
 

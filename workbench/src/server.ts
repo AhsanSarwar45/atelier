@@ -18,9 +18,10 @@ import { watchOutside } from './outside.ts';
 import { planUsage, watchUsage } from './plan-usage.ts';
 import { knownSessions, restoreList } from './registry.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
-import { holdsNow, runningNow } from './running.ts';
+import { holdsNow, rememberSummaryRuns, runningNow } from './running.ts';
 import { Sessions } from './sessions.ts';
 import { Store } from './store.ts';
+import { summaryMemoryOf } from './summary-runs.ts';
 
 // The operating system picks the port unless somebody names one. It used to be
 // 3009 always, and the app forwarded there on trust: whatever program held that
@@ -41,6 +42,9 @@ const store = new Store();
 // be running until a click brings it back.
 store.markAllDormant();
 const sessions = new Sessions(store);
+// The bar over a compaction fills against this project's own middle run, once
+// enough of them have been watched from beginning to end (bw-jaoz.14.9).
+rememberSummaryRuns(summaryMemoryOf(store));
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);

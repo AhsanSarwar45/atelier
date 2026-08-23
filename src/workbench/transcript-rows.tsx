@@ -566,6 +566,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
 export function WorkingLine({
   label,
   detail,
+  typicalMs,
   doing,
   since,
   turn,
@@ -579,6 +580,11 @@ export function WorkingLine({
    * many helpers are out. Null when the state carries nothing beyond itself.
    */
   detail?: string | null;
+  /**
+   * What the bar fills against, in milliseconds. Null falls back to the median
+   * measured across this whole machine (summarising.ts).
+   */
+  typicalMs?: number | null;
   /**
    * Which of the things a chat does this is. Only summarising draws a bar —
    * see summarising.ts for why it is the only state that can have one.
@@ -614,7 +620,7 @@ export function WorkingLine({
   const turnSeconds = turn ? Math.floor((Date.now() - turn) / 1000) : 0;
   // The one state whose end can be predicted, and the one state that writes
   // nothing at all while it runs, so the clock is otherwise all a reader has.
-  const filling = doing === 'summarising' && since ? summaryFill(Date.now() - since) : null;
+  const filling = doing === 'summarising' && since ? summaryFill(Date.now() - since, typicalMs ?? undefined) : null;
 
   const line = (
     <div

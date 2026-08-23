@@ -652,6 +652,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     thought: view.thinkingTokens,
     state,
     running,
+    // Measured in this project, by the sidecar watching runs begin and end. Only
+    // the bar reads it, and only while summarising (bw-jaoz.14.9).
+    typicalMs: holder?.typicalMs ?? null,
   });
 
   /** The `/` menu is open only while the draft is one unfinished word starting with a slash. */

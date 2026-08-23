@@ -129,6 +129,21 @@ const MIGRATIONS: string[] = [
   // has arrived since" (bw-uiyz.19).
   `ALTER TABLE session ADD COLUMN followed_to INTEGER;
    ALTER TABLE session ADD COLUMN followed_drawn INTEGER;`,
+
+  // How long each summarising run took, per project. The bar drawn over a
+  // compaction fills against the median of these; until a project has enough of
+  // its own it fills against the 124s measured across this machine
+  // (bw-jaoz.14.9). Measured and not reported: the tool fires a hook as a
+  // compaction begins and none as it ends, so the end is the beat on which the
+  // chat stopped saying it was summarising.
+  `CREATE TABLE summary_run (
+     project TEXT NOT NULL,
+     session_id TEXT NOT NULL,
+     at TEXT NOT NULL,
+     ms INTEGER NOT NULL,
+     PRIMARY KEY (project, session_id, at)
+   );
+   CREATE INDEX summary_run_by_project ON summary_run(project, at);`,
 ];
 
 export class Store {
@@ -151,6 +166,33 @@ export class Store {
       version = i + 1;
     }
     this.db.prepare('UPDATE schema_version SET version = ?').run(version);
+  }
+
+  /**
+   * One finished summarising run, written down as it ended.
+   *
+   * Keyed by the chat and the moment, so a beat seen twice cannot count the same
+   * run twice. The project is its working directory: a held chat is known by
+   * where it is running and by nothing else we could join on.
+   */
+  noteSummaryRun(run: { project: string; sessionId: string; at: number; ms: number }): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO summary_run (project, session_id, at, ms) VALUES (?,?,?,?)')
+      .run(run.project, run.sessionId, new Date(run.at).toISOString(), Math.round(run.ms));
+  }
+
+  /**
+   * How long this project's last runs took, newest first.
+   *
+   * Bounded because the estimate should follow the project as it grows: a
+   * conversation that summarised in ninety seconds a month ago says little
+   * about one summarising now.
+   */
+  summaryRuns(project: string, limit = 20): number[] {
+    const rows = this.db
+      .prepare('SELECT ms FROM summary_run WHERE project = ? ORDER BY at DESC LIMIT ?')
+      .all(project, limit) as { ms: number }[];
+    return rows.map((r) => r.ms);
   }
 
   createSession(s: SessionSummary & { origin: string }): void {

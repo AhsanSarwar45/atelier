@@ -36,6 +36,8 @@ import { parseMarker, procStartFromStat, runningChats } from '../../src/workbenc
 import type { RunningChat, SessionMarker } from '../../src/workbench/running.ts';
 import { helpersWorking } from './helper-records.ts';
 import { findRecord, lastSaidSync } from './record-tail.ts';
+import { noteSummaryRuns } from './summary-runs.ts';
+import type { BeatOfAChat, SummaryMemory } from './summary-runs.ts';
 
 /**
  * Where the tool keeps its state, resolved the way the tool resolves it:
@@ -177,6 +179,21 @@ export function runningNow(fresh = false): Map<string, RunningChat> {
 const burstAt = new Map<string, number>();
 
 /**
+ * Where measured compaction lengths are kept, or nothing.
+ *
+ * Injected once at start-up rather than imported, so this file — which is the
+ * path every beat runs down — never opens a database, and so the whole reading
+ * still works with no memory at all: a bar then fills against the machine-wide
+ * median, which is what it did before anything was measured (bw-jaoz.14.9).
+ */
+let runMemory: SummaryMemory | null = null;
+
+/** Hand the beat somewhere to keep what it measures. Null forgets it again. */
+export function rememberSummaryRuns(memory: SummaryMemory | null): void {
+  runMemory = memory;
+}
+
+/**
  * The last answer about a record's end, kept against the moment it was written.
  *
  * Reading the tail is cheap and reading it three times a second for a chat that
@@ -242,6 +259,8 @@ export function holdsNow(fresh = false): HeldChat[] {
   const running = runningNow(fresh);
   const now = Date.now();
   const holds: HeldChat[] = [];
+  /** This beat as the compaction clock sees it: who is summarising, and where. */
+  const beat: BeatOfAChat[] = [];
   const seen = new Set<string>();
   const read = new Set<string>();
 
@@ -300,6 +319,7 @@ export function holdsNow(fresh = false): HeldChat[] {
     } else {
       burstAt.delete(id);
     }
+    beat.push({ id, project: chat.cwd, doing, since });
     holds.push({
       id,
       // A person at a terminal and a program driving through the kit are the
@@ -315,8 +335,16 @@ export function holdsNow(fresh = false): HeldChat[] {
       // forty-second summarising run read as an hour and a half (bw-jaoz.14.4).
       since: busy ? since : null,
       turnSince: busy ? (burstAt.get(id) ?? turnSince) : null,
+      // Asked only of the one state that draws a bar, so a screenful of chats
+      // costs no lookups at all; and null when this project has not summarised
+      // enough times to have a middle run of its own.
+      typicalMs: doing === 'summarising' ? (runMemory?.typical(chat.cwd) ?? null) : null,
     });
   });
+
+  // After the holds and not during them: a run's length is written down as it
+  // ends, and what ended is only known once the whole beat has been read.
+  if (runMemory) noteSummaryRuns(beat, now, (run) => runMemory?.note(run));
 
   burstAt.forEach((_, id) => {
     if (!seen.has(id)) burstAt.delete(id);
