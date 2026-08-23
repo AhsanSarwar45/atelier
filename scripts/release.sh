@@ -145,8 +145,15 @@ step "2/7  What is going out"
 
 NOW=$(node -p "require('./package.json').version" 2>/dev/null) \
   || die "package.json does not say what version this is"
-LAST=$(git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1)
-[ -n "$LAST" ] || die "there is no earlier release to count from"
+# The tag list is not all releases. This repo already carries v0.6.1-rc2, and a
+# tag shaped like that reaches the sums below as a patch field of "1-rc2", which
+# bash reads as 1 minus an unset rc2 — the number 1, worked out in silence and
+# then published. A silently wrong number is the one thing this whole script
+# exists to prevent, so only a plain X.Y.Z counts as a release to count from,
+# and the shape is said again before anything is added to it (bw-sinv.14).
+PLAIN='^[0-9]+\.[0-9]+\.[0-9]+$'
+LAST=$(git tag -l 'v*' | sed 's/^v//' | grep -E "$PLAIN" | sort -V | tail -1)
+[ -n "$LAST" ] || die "there is no earlier release to count from — no tag here is a plain v0.0.0"
 
 SUBJECTS=$(git log "v$LAST..HEAD" --format='%s')
 BODIES=$(git log "v$LAST..HEAD" --format='%b')
@@ -168,6 +175,8 @@ elif printf '%s\n' "$SUBJECTS" | grep -qE '^feat(\([^)]*\))?:'; then
   BUMP=minor
 fi
 
+printf '%s' "$LAST" | grep -qE "$PLAIN" \
+  || die "the newest release is v$LAST, which is not a plain number, so the next one cannot be worked out from it"
 IFS=. read -r MA MI PA <<<"$LAST"
 case "$BUMP" in
   major) NEXT="$((MA + 1)).0.0" ;;
@@ -415,8 +424,19 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-bash scripts/tap.sh "v$NEXT" >/dev/null 2>&1 \
-  || die "the release is online but the recipe was not written — run: bash scripts/tap.sh v$NEXT"
+# The only step that can fail once the release is already fully published, which
+# makes it the one where a generic message costs most: the tag and the built
+# files are online and cannot be taken back, so the reason has to be on screen
+# rather than found by running it again blind. Same as the checks above — the
+# output is kept and shown when, and only when, it turns out to matter
+# (bw-sinv.15).
+TAPLOG=$(mktemp) || die "nowhere to put the recipe output"
+if ! bash scripts/tap.sh "v$NEXT" >"$TAPLOG" 2>&1; then
+  tail -20 "$TAPLOG" >&2
+  rm -f "$TAPLOG"
+  die "the release is online but the recipe was not written, for the reason above — run: bash scripts/tap.sh v$NEXT"
+fi
+rm -f "$TAPLOG"
 ok "the tap holds the recipe for $NEXT"
 
 printf '\n  \033[1m%s is online.\033[0m\n' "$NEXT"
