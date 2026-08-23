@@ -19,6 +19,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
 import type { RestoreRow } from '@/workbench/protocol';
 
+import { tagged } from './tagged';
+
 const PROJECT = 'p1';
 const PATH = '/home/me/project';
 /** The tool's own id for the conversation a terminal is working in. */
@@ -26,7 +28,7 @@ const HELD = 'held-in-a-terminal';
 
 let opened: FakeStream[] = [];
 
-/** The browser's EventSource, as much of it as the live store touches. */
+/** The browser's WebSocket, as much of it as the live store touches. */
 class FakeStream {
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -37,19 +39,10 @@ class FakeStream {
 
   close(): void {}
 
-  /**
-   * Every feed a window watches now arrives on its one connection, each frame
-   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
-   * frames are tagged `workbench`, and that is the one this fake carries.
-   */
-  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
-    if (tag === 'workbench') this.onmessage = listener;
-  }
 
   /** The helper naming who is in a chat, and what that chat is doing. */
   saysWhoIsWorking(holds: { id: string; doing: string; detail?: string }[]): void {
-    this.onmessage?.({
-      data: JSON.stringify({
+    this.onmessage?.(tagged('workbench', JSON.stringify({
         kind: 'running',
         holds: holds.map((h) => ({
           id: h.id,
@@ -58,8 +51,7 @@ class FakeStream {
           since: null,
           detail: h.detail ?? null,
         })),
-      }),
-    });
+      })));
   }
 }
 
@@ -111,7 +103,7 @@ beforeEach(() => {
     row({ sessionId: 'in-a-terminal', externalId: HELD, origin: 'terminal', title: 'Worked in a terminal' }),
     row({ sessionId: 'asleep', title: 'Nobody is in this one' }),
   ];
-  vi.stubGlobal('EventSource', FakeStream);
+  vi.stubGlobal('WebSocket', FakeStream);
   vi.stubGlobal('IntersectionObserver', FakeFoot);
   vi.stubGlobal(
     'fetch',

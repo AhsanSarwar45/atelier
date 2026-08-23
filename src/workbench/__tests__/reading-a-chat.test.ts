@@ -15,6 +15,8 @@ import { movesTheClock } from '@/workbench/live';
 import type { SessionState, WbpEvent } from '@/workbench/protocol';
 import { useSession } from '@/workbench/use-session';
 
+import { tagged } from './tagged';
+
 describe('a chat’s own clock', () => {
   it('does not move for a chat that is asleep', () => {
     expect(movesTheClock('dormant')).toBe(false);
@@ -139,24 +141,20 @@ describe('building a conversation out of its log', () => {
 /** Every stream opened during a case, newest last. */
 let opened: FakeStream[] = [];
 
-/** The browser's EventSource, as much of it as the hook touches. */
+/**
+ * The browser's WebSocket, as much of it as the hook touches.
+ *
+ * Every feed a window watches arrives on its one connection, each frame naming
+ * the feed it came from (live-wire.ts, bw-zkh4). The open chat's are `chat`
+ * and `chat.snapshot`.
+ */
 class FakeStream {
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
-  private readonly named = new Map<string, (e: { data: string }) => void>();
 
   constructor(readonly url: string) {
     opened.push(this);
-  }
-
-  /**
-   * Every feed a window watches now arrives on its one connection, each frame
-   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The open chat's
-   * are `chat` and `chat.snapshot`.
-   */
-  addEventListener(name: string, listener: (e: { data: string }) => void): void {
-    this.named.set(name, listener);
   }
 
   close(): void {
@@ -171,12 +169,12 @@ class FakeStream {
    * screen copes with the shape it wrote itself.
    */
   hands(view: SessionView | Record<string, unknown>): void {
-    this.named.get('chat.snapshot')?.({ data: JSON.stringify(view) });
+    this.onmessage?.(tagged('chat.snapshot', JSON.stringify(view)));
   }
 
   /** One event arriving live, after the conversation was drawn. */
   says(e: WbpEvent): void {
-    this.named.get('chat')?.({ data: JSON.stringify(e) });
+    this.onmessage?.(tagged('chat', JSON.stringify(e)));
   }
 
   dies(): void {
@@ -189,7 +187,7 @@ describe('a chat opened, and opened again after the stream drops', () => {
     opened = [];
     stamped = 0;
     vi.useFakeTimers();
-    vi.stubGlobal('EventSource', FakeStream);
+    vi.stubGlobal('WebSocket', FakeStream);
   });
 
   afterEach(() => {
@@ -253,7 +251,7 @@ describe('a conversation handed over by an older sidecar', () => {
     opened = [];
     stamped = 0;
     vi.useFakeTimers();
-    vi.stubGlobal('EventSource', FakeStream);
+    vi.stubGlobal('WebSocket', FakeStream);
   });
 
   afterEach(() => {

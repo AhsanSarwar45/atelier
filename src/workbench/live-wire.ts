@@ -13,9 +13,15 @@
  * out before the streams reopen (bw-zkh4).
  *
  * So every feed is asked for here, and the server fans them in: one route
- * carries all of them, each event tagged with the feed it came from
+ * carries all of them, each frame tagged with the feed it came from
  * (server/src/routes/live.rs). This part owns the connection; the status bar,
  * the card list and the open chat read from it by tag and never open one.
+ *
+ * And that connection is a socket rather than an event stream, which is what
+ * takes it off the budget of six altogether: a browser counts event streams
+ * against the six and does not count sockets. One stream per window was still
+ * one of the six, so six windows brought the whole fault back; a socket costs
+ * the reads nothing, so any number of windows can be open (bw-zkh4.10).
  *
  * What is watched changes as the reader moves — a project is opened, a chat is
  * clicked — and the connection is asked again with the new shape. Never two at
@@ -59,7 +65,7 @@ const boards = new Map<string, Set<BoardListener>>();
 const workbenchers = new Set<WorkbenchListener>();
 const chats = new Map<string, Set<ChatListener>>();
 
-let source: EventSource | null = null;
+let source: WebSocket | null = null;
 /** The shape the open connection was opened with, so a change is visible. */
 let asked = '';
 /** A reshape is already queued; several hooks mounting cost one open. */
@@ -132,9 +138,71 @@ function boardsUnder(path: string): Set<BoardListener>[] {
 }
 
 function close(): void {
-  source?.close();
+  const going = source;
+  // Emptied first, so this window hanging up is not read as the connection
+  // failing: a socket tells its owner when it closes however it closed, and
+  // the two are told apart by whether it is still the one being held.
   source = null;
   asked = '';
+  going?.close();
+}
+
+/**
+ * The address of the one connection.
+ *
+ * `ws` rather than `http`, and absolute, because a socket has no notion of the
+ * page's own address to be relative to.
+ */
+function wire(want: string): string {
+  const path = apiUrl(`/api/live?${want}`);
+  const absolute = /^https?:/i.test(path) ? path : new URL(path, window.location.href).toString();
+  return absolute.replace(/^http/i, 'ws');
+}
+
+/** One frame off the connection: which feed spoke, and what it said. */
+interface Frame {
+  tag?: string;
+  data?: string;
+}
+
+/** Hands one frame to whoever asked for that feed. */
+function heard(raw: string): void {
+  spoke();
+  let frame: Frame;
+  try {
+    frame = JSON.parse(raw) as Frame;
+  } catch {
+    // A frame this window cannot read is not worth the whole connection.
+    return;
+  }
+  const said = frame.data ?? '';
+  switch (frame.tag) {
+    case 'board': {
+      try {
+        const moved = JSON.parse(said) as WatchEvent;
+        for (const listeners of boardsUnder(moved.path)) listeners.forEach((tell) => tell(moved));
+      } catch {
+        // As above: one unreadable board frame, not the connection.
+      }
+      return;
+    }
+    case 'workbench':
+      workbenchers.forEach((w) => w.frame(said));
+      return;
+    case 'chat': {
+      const chat = openChat();
+      if (chat) chats.get(chat)?.forEach((c) => c.event(said));
+      return;
+    }
+    case 'chat.snapshot': {
+      const chat = openChat();
+      if (chat) chats.get(chat)?.forEach((c) => c.snapshot(said));
+      return;
+    }
+    default:
+      // A feed this build does not know about: a newer server, an older page.
+      return;
+  }
 }
 
 /**
@@ -166,39 +234,23 @@ function open(): void {
   if (!want) return;
   // Drawn where there is no connection to be had at all — a server render, a
   // test bench. Those simply hear nothing.
-  if (typeof EventSource === 'undefined') return;
+  if (typeof WebSocket === 'undefined') return;
 
   asked = want;
-  source = new EventSource(apiUrl(`/api/live?${want}`));
+  const socket = new WebSocket(wire(want));
+  source = socket;
 
-  source.addEventListener('board', (msg) => {
-    spoke();
-    try {
-      const said = JSON.parse((msg as MessageEvent).data) as WatchEvent;
-      for (const listeners of boardsUnder(said.path)) listeners.forEach((tell) => tell(said));
-    } catch {
-      // A frame this window cannot read is not worth the whole connection.
-    }
-  });
-
-  source.addEventListener('workbench', (msg) => {
-    spoke();
-    workbenchers.forEach((w) => w.frame((msg as MessageEvent).data));
-  });
-
-  source.addEventListener('chat', (msg) => {
-    spoke();
-    const chat = openChat();
-    if (chat) chats.get(chat)?.forEach((c) => c.event((msg as MessageEvent).data));
-  });
-
-  source.addEventListener('chat.snapshot', (msg) => {
-    spoke();
-    const chat = openChat();
-    if (chat) chats.get(chat)?.forEach((c) => c.snapshot((msg as MessageEvent).data));
-  });
-
-  source.onerror = dropped;
+  socket.onmessage = (msg: MessageEvent) => {
+    if (source === socket) heard(String(msg.data));
+  };
+  // A socket that fails reports both of these, one after the other; a socket
+  // this window closed itself is no longer the one being held, so its close
+  // says nothing.
+  const gone = () => {
+    if (source === socket) dropped();
+  };
+  socket.onclose = gone;
+  socket.onerror = gone;
 }
 
 /** Speaking again: the next drop starts its count from the short wait. */

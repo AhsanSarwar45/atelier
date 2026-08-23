@@ -6,8 +6,12 @@
  * feed, so two or three windows spent the whole budget and every ordinary read
  * queued behind streams that would never end — a screen stuck on loading until
  * it was reloaded (bw-zkh4). These are what stop that coming back: the count
- * itself, and the source rule that keeps the next stream from being opened
+ * itself, and the source rule that keeps the next connection from being opened
  * somewhere else.
+ *
+ * The connection is a socket, which a browser does not count against those six
+ * at all — so windows no longer compete for the reads (bw-zkh4.10). That is
+ * why nothing here may open an event stream either.
  */
 import { readFileSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
@@ -19,7 +23,8 @@ class Stream {
   static open: Stream[] = [];
   static made = 0;
 
-  readonly heard = new Map<string, ((e: MessageEvent) => void)[]>();
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
 
   constructor(readonly url: string) {
@@ -27,23 +32,21 @@ class Stream {
     Stream.open.push(this);
   }
 
-  addEventListener(name: string, fn: (e: MessageEvent) => void): void {
-    this.heard.set(name, [...(this.heard.get(name) ?? []), fn]);
-  }
-
   close(): void {
     Stream.open = Stream.open.filter((s) => s !== this);
+    this.onclose?.();
   }
 
-  /** The server says something on this connection. */
-  says(name: string, data: string): void {
-    (this.heard.get(name) ?? []).forEach((fn) => fn({ data } as MessageEvent));
+  /** The server says something on this connection, on the feed named. */
+  says(tag: string, data: string): void {
+    this.onmessage?.(tagged(tag, data));
   }
 
-  /** The connection goes away. */
+  /** The connection goes away under the window, rather than being hung up. */
   breaks(): void {
-    this.close();
+    Stream.open = Stream.open.filter((s) => s !== this);
     this.onerror?.();
+    this.onclose?.();
   }
 
   static forget(): void {
@@ -52,10 +55,12 @@ class Stream {
   }
 }
 
-vi.stubGlobal('EventSource', Stream);
+vi.stubGlobal('WebSocket', Stream);
 
 // eslint-disable-next-line import/first
 import { forgetEverything, onBoard, onChat, onWorkbench, streamsOpen, watching } from '../live-wire';
+// eslint-disable-next-line import/first
+import { tagged } from './tagged';
 
 /** Lets the wire finish reshaping, which it does once per paint rather than
  * once per hook. */
@@ -100,7 +105,7 @@ describe('one wire', () => {
       readFileSync(file, 'utf8')
         .split('\n')
         .forEach((line, i) => {
-          if (/new\s+EventSource\s*\(/.test(line)) opening.push(`${where}:${i + 1}`);
+          if (/new\s+(EventSource|WebSocket)\s*\(/.test(line)) opening.push(`${where}:${i + 1}`);
         });
     }
     expect(opening).toEqual([]);

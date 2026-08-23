@@ -29,12 +29,18 @@
 //! `chat.snapshot` comes from: the helper names that frame `snapshot`.
 
 use axum::{
-    extract::Query,
-    response::sse::{Event, Sse},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Query,
+    },
+    response::{
+        sse::{Event, Sse},
+        IntoResponse, Response,
+    },
     Extension,
 };
-use futures::stream::Stream;
-use serde::Deserialize;
+use futures::{sink::SinkExt, stream::StreamExt};
+use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -54,6 +60,43 @@ use crate::dolt::DoltManager;
 /// either way.
 const AGAIN_MS: u64 = 2_000;
 const AGAIN_CEILING_MS: u64 = 30_000;
+
+/// One thing a feed said, and which feed said it.
+///
+/// Every feed this route fans in writes these, and the two ways out of here
+/// dress them differently: a WebSocket sends the whole thing as one JSON
+/// object, an event stream sends the data with the tag as the event's name.
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct Tagged {
+    /// The feed it belongs to. `None` on a connection carrying one feed only,
+    /// where naming it would say nothing (watch.rs).
+    pub tag: Option<String>,
+    /// What the feed said, exactly as it said it.
+    pub data: String,
+}
+
+impl Tagged {
+    pub(super) fn new(tag: Option<&str>, data: String) -> Self {
+        Tagged {
+            tag: tag.map(str::to_string),
+            data,
+        }
+    }
+
+    /// The same thing on an event stream, where the tag is the event's name.
+    pub(super) fn as_event(&self) -> Event {
+        let said = Event::default().data(self.data.clone());
+        match &self.tag {
+            Some(tag) => said.event(tag),
+            None => said,
+        }
+    }
+
+    /// The same thing on a WebSocket, where nothing names a frame for us.
+    fn as_text(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+}
 
 /// What this window is watching. Everything is optional: a window drawing only
 /// the board asks for only the board, and pays for nothing else.
@@ -80,13 +123,14 @@ fn asked(flag: &Option<String>) -> bool {
     )
 }
 
-/// One stream carrying every feed this window needs.
+/// One connection carrying every feed this window needs.
 pub async fn live(
     Extension(dolt_manager): Extension<Arc<DoltManager>>,
     Extension(db): Extension<Arc<Database>>,
     Query(params): Query<LiveParams>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(100);
+    upgrade: Option<WebSocketUpgrade>,
+) -> Response {
+    let (tx, rx) = mpsc::channel::<Tagged>(100);
 
     for board in boards(&params.board) {
         let tx = tx.clone();
@@ -113,14 +157,71 @@ pub async fn live(
     }
 
     // The last sender is dropped here; a window watching nothing at all gets an
-    // open stream that says nothing, rather than an error it cannot act on.
+    // open connection that says nothing, rather than an error it cannot act on.
     drop(tx);
 
-    Sse::new(ReceiverStream::new(rx)).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(30))
-            .text("ping"),
-    )
+    match upgrade {
+        Some(upgrade) => upgrade.on_upgrade(move |socket| carry(socket, rx)),
+        // Nothing in the app asks this way any more. It is kept because a
+        // stream is what a person with curl, and this file's own tests, can
+        // read — and because the feeds behind it are the same either way.
+        None => Sse::new(ReceiverStream::new(rx).map(|said| Ok::<_, Infallible>(said.as_event())))
+            .keep_alive(
+                axum::response::sse::KeepAlive::new()
+                    .interval(Duration::from_secs(30))
+                    .text("ping"),
+            )
+            .into_response(),
+    }
+}
+
+/// How often the socket is pinged while nothing is happening.
+///
+/// A window can sit on a quiet board for hours. This is what tells the two
+/// ends apart from a connection that has silently died, and it is what the
+/// browser's own drop handler waits for.
+const PING_EVERY: Duration = Duration::from_secs(30);
+
+/// Carries every fanned-in feed onto one WebSocket until either end stops.
+///
+/// The reason this is a socket and not an event stream: a browser rations
+/// connections to one address — six, across every window it has — and an event
+/// stream holds one of those six for as long as it is open. A WebSocket is not
+/// counted against that ration at all, so a reader can have as many windows of
+/// this app open as he likes and an ordinary read still goes out at once
+/// (bw-zkh4.10).
+async fn carry(socket: WebSocket, mut rx: mpsc::Receiver<Tagged>) {
+    let (mut writing, mut reading) = socket.split();
+    let mut feeds_open = true;
+    let mut ping = tokio::time::interval(PING_EVERY);
+    ping.tick().await; // the first tick is now, and there is nothing to say yet
+
+    loop {
+        tokio::select! {
+            said = rx.recv(), if feeds_open => match said {
+                Some(said) => {
+                    if writing.send(Message::Text(said.as_text())).await.is_err() {
+                        return;
+                    }
+                }
+                // Every feed has stopped. The socket stays up rather than
+                // dropping: the browser reads a close as a fault and opens
+                // another, and there would be nothing different about it.
+                None => feeds_open = false,
+            },
+            // Nothing on this app is sent up the wire; this is here to hear
+            // the window go away, which is the ordinary end of the connection.
+            heard = reading.next() => match heard {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
+                _ => {}
+            },
+            _ = ping.tick() => {
+                if writing.send(Message::Ping(Vec::new())).await.is_err() {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// The projects to watch, as the browser joined them.
@@ -189,7 +290,7 @@ impl Feed {
 
 /// Carries one helper stream onto this window's one connection, and keeps
 /// carrying it across the helper's own restarts.
-async fn relay(mut feed: Feed, tx: mpsc::Sender<Result<Event, Infallible>>) {
+async fn relay(mut feed: Feed, tx: mpsc::Sender<Tagged>) {
     let mut wait = Duration::from_millis(AGAIN_MS);
     loop {
         if tx.is_closed() {
@@ -211,8 +312,7 @@ async fn relay(mut feed: Feed, tx: mpsc::Sender<Result<Event, Infallible>>) {
                                     Some(name) => format!("{}.{name}", feed.tag),
                                     None => feed.tag.to_string(),
                                 };
-                                let out = Event::default().event(tag).data(frame.data);
-                                if tx.send(Ok(out)).await.is_err() {
+                                if tx.send(Tagged::new(Some(&tag), frame.data)).await.is_err() {
                                     return;
                                 }
                             }
@@ -388,15 +488,15 @@ mod tests {
         format!("http://{at}")
     }
 
-    /// The whole point of the route: one request, more than one feed, and the
-    /// browser able to tell which is which.
-    #[tokio::test]
-    async fn one_request_carries_every_feed_a_window_watches_each_tagged() {
+    /// A server of our own, with a board of its own to watch.
+    ///
+    /// Both ways of asking share one, because the helper this route reads is
+    /// named by a global: two cases each standing up their own would take that
+    /// name off one another halfway through.
+    async fn a_server() -> (String, tempfile::TempDir) {
         std::env::set_var("BEADS_WORKBENCH_URL", a_helper().await);
         workbench::spawn_sidecar(None);
 
-        // A board of our own to watch, so the board feed has something real to
-        // report itself connected to.
         let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
         let project = tempfile::TempDir::new_in(&home).unwrap();
         std::fs::create_dir_all(project.path().join(".beads")).unwrap();
@@ -410,11 +510,71 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
+        (at.to_string(), project)
+    }
 
-        let asked = format!(
-            "http://{at}/api/live?board={}&chat=abc&since=0&workbench=1",
+    /// What a window asks for: every feed at once, on one connection.
+    fn asking_for_everything(project: &tempfile::TempDir) -> String {
+        format!(
+            "/api/live?board={}&chat=abc&since=0&workbench=1",
             urlencoded(&project.path().to_string_lossy())
+        )
+    }
+
+    /// The whole point of the route, and the way the app itself asks for it:
+    /// one connection, every feed, and the browser able to tell them apart.
+    ///
+    /// A socket rather than an event stream is what lets a reader keep as many
+    /// windows open as he likes — a browser rations event streams against the
+    /// six connections it allows one address, and does not ration sockets
+    /// (bw-zkh4.10).
+    #[tokio::test]
+    async fn one_socket_carries_every_feed_a_window_watches_each_naming_itself() {
+        use futures::StreamExt as _;
+        use tokio_tungstenite::tungstenite::Message as Said;
+
+        let (at, project) = a_server().await;
+        let asked = format!("ws://{at}{}", asking_for_everything(&project));
+        let (mut socket, _) = tokio_tungstenite::connect_async(&asked).await.unwrap();
+
+        let mut tags: Vec<String> = Vec::new();
+        let all_three = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(Ok(said)) = socket.next().await {
+                if let Said::Text(text) = said {
+                    let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    // Every frame names its feed and carries what that feed
+                    // said untouched, which is the whole contract with
+                    // src/workbench/live-wire.ts.
+                    assert!(frame["data"].is_string(), "a frame carried no data: {text}");
+                    tags.push(frame["tag"].as_str().unwrap_or_default().to_string());
+                }
+                if ["board", "workbench", "chat.snapshot"]
+                    .iter()
+                    .all(|want| tags.iter().any(|got| got == want))
+                {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
+
+        assert!(
+            all_three.unwrap_or(false),
+            "one socket should carry all three feeds, each naming itself; it said: {tags:?}"
         );
+    }
+
+    /// The same feeds, asked for the old way.
+    ///
+    /// Nothing in the app asks like this any more. It is kept because a person
+    /// with curl can read it, and because it is the same fanning-in behind
+    /// both — so this case failing while the one above passes means the two
+    /// ways out have drifted apart.
+    #[tokio::test]
+    async fn the_same_feeds_are_there_for_a_reader_with_curl() {
+        let (at, project) = a_server().await;
+        let asked = format!("http://{at}{}", asking_for_everything(&project));
         let mut answer = reqwest::get(&asked).await.unwrap();
         assert!(answer.status().is_success());
 
@@ -437,6 +597,5 @@ mod tests {
             heard.unwrap_or(false),
             "one stream should carry all three feeds, tagged; it said:\n{said}"
         );
-        std::env::remove_var("BEADS_WORKBENCH_URL");
     }
 }

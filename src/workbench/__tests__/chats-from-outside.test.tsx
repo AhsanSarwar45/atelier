@@ -18,13 +18,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RestoreRow } from '@/workbench/protocol';
 
+import { tagged } from './tagged';
+
 const PROJECT = 'p1';
 const PATH = '/home/me/project';
 
 /** Every stream opened during a case, newest last. */
 let opened: FakeStream[] = [];
 
-/** The browser's EventSource, as much of it as the live store touches. */
+/** The browser's WebSocket, as much of it as the live store touches. */
 class FakeStream {
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -35,21 +37,13 @@ class FakeStream {
 
   close(): void {}
 
-  /**
-   * Every feed a window watches now arrives on its one connection, each frame
-   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
-   * frames are tagged `workbench`, and that is the one this fake carries.
-   */
-  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
-    if (tag === 'workbench') this.onmessage = listener;
-  }
 
   /**
    * The sidecar has heard the tools' own session folders move, in the working
    * directories named — or, with none named, somewhere it could not place.
    */
   saysOutside(folders?: string[]): void {
-    this.onmessage?.({ data: JSON.stringify({ kind: 'outside', folders }) });
+    this.onmessage?.(tagged('workbench', JSON.stringify({ kind: 'outside', folders })));
   }
 
   /** The connection dies, the way a rebuild or a restart kills it. */
@@ -59,7 +53,7 @@ class FakeStream {
 
   /** And the sidecar answers again, starting as it always does. */
   saysSnapshot(): void {
-    this.onmessage?.({ data: JSON.stringify({ kind: 'snapshot', sessions: [] }) });
+    this.onmessage?.(tagged('workbench', JSON.stringify({ kind: 'snapshot', sessions: [] })));
   }
 }
 
@@ -124,7 +118,7 @@ beforeEach(() => {
   feet = [];
   asked = [];
   list = [row()];
-  vi.stubGlobal('EventSource', FakeStream);
+  vi.stubGlobal('WebSocket', FakeStream);
   vi.stubGlobal('IntersectionObserver', FakeFoot);
   vi.stubGlobal(
     'fetch',
@@ -272,7 +266,12 @@ describe('when the stream has been away', () => {
     // The sidecar was rebuilt; a chat was begun in Zed while it was gone.
     act(() => opened[0].dies());
     list = [row(), row({ sessionId: 'zed', title: 'Begun while it was down' })];
-    act(() => opened[0].saysSnapshot());
+
+    // The word arrives on the connection that comes back, not on the dead one:
+    // the window stops listening to a connection it has given up on, so a frame
+    // off a corpse is nobody's answer (live-wire.ts, bw-zkh4.10).
+    await waitFor(() => expect(opened).toHaveLength(2), { timeout: 4_000 });
+    act(() => opened[1].saysSnapshot());
 
     await waitFor(() => expect(screen.getByText('Begun while it was down')).toBeInTheDocument());
     expect(restores()).toHaveLength(2);

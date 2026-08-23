@@ -22,6 +22,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RestoreRow } from '@/workbench/protocol';
 
+import { tagged } from './tagged';
+
 const PROJECT = 'p1';
 const PATH = '/home/me/project';
 /** The tool's own id for the conversation the terminal is in. */
@@ -30,7 +32,7 @@ const HELD = 'held-in-a-terminal';
 /** Every stream opened during a case, newest last. */
 let opened: FakeStream[] = [];
 
-/** The browser's EventSource, as much of it as the live store touches. */
+/** The browser's WebSocket, as much of it as the live store touches. */
 class FakeStream {
   onmessage: ((e: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -42,36 +44,30 @@ class FakeStream {
   close(): void {}
 
   /**
-   * Every feed a window watches now arrives on its one connection, each frame
-   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
-   * frames are tagged `workbench`, and that is the one this fake carries.
-   */
-  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
-    if (tag === 'workbench') this.onmessage = listener;
-  }
-
-  /**
    * The helper as it was BEFORE this job: the same word, carrying a list of
    * bare conversation ids. This is the exact frame the manager's own helper was
    * still sending, read off the wire at 14:00 that day.
    */
   saysTheOldWay(ids: string[]): void {
-    this.onmessage?.({ data: JSON.stringify({ kind: 'running', conversations: ids }) });
+    this.onmessage?.(tagged('workbench', JSON.stringify({ kind: 'running', conversations: ids })));
   }
 
   /** The helper as it is now: each chat, with what it is doing. */
   saysWhoIsWorking(holds: { id: string; doing: string }[]): void {
-    this.onmessage?.({
-      data: JSON.stringify({
-        kind: 'running',
-        holds: holds.map((h) => ({ id: h.id, holder: 'terminal', doing: h.doing, since: null })),
-      }),
-    });
+    this.onmessage?.(
+      tagged(
+        'workbench',
+        JSON.stringify({
+          kind: 'running',
+          holds: holds.map((h) => ({ id: h.id, holder: 'terminal', doing: h.doing, since: null })),
+        }),
+      ),
+    );
   }
 
   /** Something no version of this app has ever sent. */
   saysSomethingUnreadable(): void {
-    this.onmessage?.({ data: 'not json at all' });
+    this.onmessage?.(tagged('workbench', 'not json at all'));
   }
 }
 
@@ -119,7 +115,7 @@ beforeEach(() => {
     row({ sessionId: 'in-a-terminal', externalId: HELD, origin: 'terminal', title: 'Worked in a terminal' }),
     row({ sessionId: 'asleep', title: 'Nobody is in this one' }),
   ];
-  vi.stubGlobal('EventSource', FakeStream);
+  vi.stubGlobal('WebSocket', FakeStream);
   vi.stubGlobal('IntersectionObserver', FakeFoot);
   vi.stubGlobal(
     'fetch',

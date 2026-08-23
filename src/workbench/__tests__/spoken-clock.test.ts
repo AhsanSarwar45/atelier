@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SessionState, WatchFrame } from '@/workbench/protocol';
 
+import { tagged } from './tagged';
+
 /** Every stream opened during a case, newest last. */
 let opened: FakeStream[] = [];
 
@@ -28,17 +30,9 @@ class FakeStream {
     this.closed = true;
   }
 
-  /**
-   * Every feed a window watches now arrives on its one connection, each frame
-   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
-   * frames are tagged `workbench`, and that is the one this fake carries.
-   */
-  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
-    if (tag === 'workbench') this.onmessage = listener;
-  }
 
   says(frame: WatchFrame): void {
-    this.onmessage?.({ data: JSON.stringify(frame) });
+    this.onmessage?.(tagged('workbench', JSON.stringify(frame)));
   }
 }
 
@@ -81,7 +75,7 @@ async function freshModule() {
 
 beforeEach(() => {
   opened = [];
-  vi.stubGlobal('EventSource', FakeStream);
+  vi.stubGlobal('WebSocket', FakeStream);
 });
 
 afterEach(() => {

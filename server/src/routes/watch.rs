@@ -11,7 +11,7 @@ use axum::{
     extract::Query,
     response::sse::{Event, Sse},
 };
-use futures::stream::Stream;
+use futures::stream::{Stream, StreamExt};
 use notify::{
     event::ModifyKind, Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
@@ -26,6 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
 use super::beads::{boards_read_again, recompute_epic_statuses, refresh_board, resolve_issues_path};
+use super::live::Tagged;
 use super::validate_path_security;
 use crate::db::Database;
 use crate::dolt::DoltManager;
@@ -147,7 +148,7 @@ pub async fn watch_beads(
     Query(params): Query<WatchParams>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     // Create channel for events with buffer for debouncing
-    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(100);
+    let (tx, rx) = mpsc::channel::<Tagged>(100);
 
     // This route is one feed on its own connection, so its events carry no
     // tag: whoever asked for it asked for nothing else. The one stream a
@@ -157,7 +158,7 @@ pub async fn watch_beads(
         watch_board(project_path, tx, None, dolt_manager, db).await;
     });
 
-    let stream = ReceiverStream::new(rx);
+    let stream = ReceiverStream::new(rx).map(|said| Ok::<_, Infallible>(said.as_event()));
     Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(Duration::from_secs(30))
@@ -175,7 +176,7 @@ pub async fn watch_beads(
 /// channel and stops, which the caller reads as a feed that said nothing.
 pub(super) async fn watch_board(
     project_path: PathBuf,
-    tx: mpsc::Sender<Result<Event, Infallible>>,
+    tx: mpsc::Sender<Tagged>,
     tag: Option<&'static str>,
     dolt_manager: Arc<DoltManager>,
     db: Arc<Database>,
@@ -195,25 +196,22 @@ pub(super) async fn watch_board(
 }
 
 /// One board change, as it goes on the wire.
-fn frame(tag: Option<&'static str>, path: &str, change_type: &str) -> Event {
-    let said = Event::default().data(
+fn frame(tag: Option<&'static str>, path: &str, change_type: &str) -> Tagged {
+    Tagged::new(
+        tag,
         serde_json::to_string(&FileChangeEvent {
             path: path.to_string(),
             change_type: change_type.to_string(),
         })
         .unwrap_or_default(),
-    );
-    match tag {
-        Some(tag) => said.event(tag),
-        None => said,
-    }
+    )
 }
 
 /// Runs the board watcher and sends events through the channel.
 async fn run_watcher(
     store: BoardStore,
     watched: String,
-    tx: mpsc::Sender<Result<Event, Infallible>>,
+    tx: mpsc::Sender<Tagged>,
     tag: Option<&'static str>,
     dolt_manager: Arc<DoltManager>,
     db: Arc<Database>,
@@ -252,7 +250,7 @@ async fn run_watcher(
     let reported_path = store.reported_path().to_string_lossy().to_string();
 
     // Send initial connection event
-    let _ = tx.send(Ok(frame(tag, &reported_path, "connected"))).await;
+    let _ = tx.send(frame(tag, &reported_path, "connected")).await;
 
     // Trailing-edge debounce: a burst is reported once it goes quiet, so the
     // client always refetches after the final write rather than before it.
@@ -290,7 +288,7 @@ async fn run_watcher(
             read_again = read_again.recv() => {
                 match read_again {
                     Ok(board) if board == watched => {
-                        if tx.send(Ok(frame(tag, &reported_path, "modified"))).await.is_err() {
+                        if tx.send(frame(tag, &reported_path, "modified")).await.is_err() {
                             info!("Client disconnected, stopping watcher");
                             break;
                         }
@@ -331,7 +329,7 @@ async fn run_watcher(
                 // could not run we say so ourselves rather than leave the
                 // screen holding an answer the change made wrong.
                 if !refresh_board(&dolt_manager, &db, &watched).await {
-                    if tx.send(Ok(frame(tag, &reported_path, change_type))).await.is_err() {
+                    if tx.send(frame(tag, &reported_path, change_type)).await.is_err() {
                         info!("Client disconnected, stopping watcher");
                         break;
                     }
