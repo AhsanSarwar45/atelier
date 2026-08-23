@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, Loader2, Plus, Search } from 'lucide-react';
+import { Bot, Loader2, Plus, Search, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -284,6 +284,13 @@ interface ChatSidebarProps {
   onToggleEverything?: () => void;
   onNewChat?: () => void;
   startingNewChat?: boolean;
+  /**
+   * The way out of the drawer, on a phone where this list IS the screen. Drawn
+   * inside the list rather than only on the bar behind it: the bar is under the
+   * sheet there, so the cross in here and the tap outside are the two ways out
+   * a reader has (bw-81wt.30).
+   */
+  onClose?: () => void;
 }
 
 export function ChatSidebar({
@@ -296,6 +303,7 @@ export function ChatSidebar({
   onToggleEverything,
   onNewChat,
   startingNewChat = false,
+  onClose,
 }: ChatSidebarProps) {
   const [fetched, setFetched] = useState<RestoreRow[]>([]);
   const live = useLiveSessions();
@@ -438,7 +446,7 @@ export function ChatSidebar({
         these, because each trigger is optional and nothing here reaches for a
         prop that was not handed in (bw-81wt.5).
       */}
-      {(onSearch || onToggleEverything || onNewChat) && (
+      {(onSearch || onToggleEverything || onNewChat || onClose) && (
         <TooltipProvider delayDuration={250}>
           <div data-testid="chat-sidebar-header" className="flex shrink-0 items-center gap-1 border-b border-border/60 p-2">
             {onSearch && <ToolButton icon={<Search />} label="Search chats" data-testid="open-search" onClick={onSearch} />}
@@ -465,6 +473,17 @@ export function ChatSidebar({
                 {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
                 {startingNewChat ? 'Starting…' : 'New Chat'}
               </Button>
+            )}
+            {/* Last on the row and only on a phone: on a wide screen the list
+                is part of the shell and has nothing to close (bw-81wt.30). */}
+            {onClose && (
+              <ToolButton
+                icon={<X />}
+                label="Close the chat list"
+                className={cn('shrink-0 md:hidden', onNewChat ? undefined : 'ml-auto')}
+                data-testid="chat-rail-close"
+                onClick={onClose}
+              />
             )}
           </div>
         </TooltipProvider>

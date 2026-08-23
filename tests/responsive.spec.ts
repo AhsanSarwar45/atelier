@@ -490,6 +490,69 @@ test.describe('chat', () => {
     ).toBeLessThanOrEqual(8);
   });
 
+  test('both phone panels are full-height sheets with a way out inside them', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openProject(page, 'chat');
+
+    /** As tall as the box the panels live in — the screen under the two bars. */
+    const fillsTheHeight = async (testid: string) => {
+      const short = await page.locator(`[data-testid="${testid}"]`).evaluate((el) => {
+        const mine = el.getBoundingClientRect().height;
+        const room = el.parentElement!.getBoundingClientRect().height;
+        return Math.round(room - mine);
+      });
+      expect(short, `the ${testid} sheet is short of the screen by ${short}px`).toBeLessThanOrEqual(1);
+    };
+
+    const shut = async (testid: string) =>
+      page.locator(`[data-testid="${testid}"]`).getAttribute('data-open');
+
+    // The chat list, on the left.
+    await page.locator('[data-testid="chat-rail-toggle"]').first().click();
+    await page.waitForTimeout(400);
+    await fillsTheHeight('chat-rail');
+    const listCross = page.locator('[data-testid="chat-rail-close"]').first();
+    await expect(listCross, 'the chat list drawer has no way out inside it').toBeVisible();
+    await listCross.click();
+    await page.waitForTimeout(400);
+    expect(await shut('chat-rail'), 'the cross did not shut the chat list').toBe('false');
+
+    // And again, shut by tapping the dimmed screen beside it.
+    await page.locator('[data-testid="chat-rail-toggle"]').first().click();
+    await page.waitForTimeout(400);
+    await page.locator('[data-testid="chat-rail-scrim"]').click({ position: { x: 370, y: 400 } });
+    await page.waitForTimeout(400);
+    expect(await shut('chat-rail'), 'tapping beside the chat list did not shut it').toBe('false');
+
+    // The chat's own column, on the right. It exists only with a chat open.
+    const first = page.locator('[data-testid="chat-list"] [data-testid="row-name"]').first();
+    if (!(await page.locator('[data-testid="chat-right-rail-toggle"]').count()) && (await first.count())) {
+      await page.locator('[data-testid="chat-rail-toggle"]').first().click();
+      await page.waitForTimeout(400);
+      await first.click();
+      await page.waitForTimeout(2000);
+    }
+    const door = page.locator('[data-testid="chat-right-rail-toggle"]').first();
+    if (!(await door.count())) return;
+    if ((await shut('chat-right-rail')) === 'false') {
+      await door.click();
+      await page.waitForTimeout(400);
+    }
+    await fillsTheHeight('chat-right-rail');
+    await judge(page, 'chat-rail-open-390');
+    const railCross = page.locator('[data-testid="chat-right-rail-close"]').first();
+    await expect(railCross, "the chat's own column has no way out inside it").toBeVisible();
+    await railCross.click();
+    await page.waitForTimeout(400);
+    expect(await shut('chat-right-rail'), "the cross did not shut the chat's own column").toBe('false');
+
+    await door.click();
+    await page.waitForTimeout(400);
+    await page.locator('[data-testid="chat-right-rail-scrim"]').click({ position: { x: 20, y: 400 } });
+    await page.waitForTimeout(400);
+    expect(await shut('chat-right-rail'), "tapping beside the chat's own column did not shut it").toBe('false');
+  });
+
   test('chat screen fits a phone', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'chat');

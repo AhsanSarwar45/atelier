@@ -784,6 +784,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // sit over the transcript it just created (bw-81wt.5).
           onNewChat={() => { setRailOpen(false); void start(); }}
           startingNewChat={starting}
+          // The cross inside the drawer, for a phone where the bar that opened
+          // it is behind the sheet (bw-81wt.30).
+          onClose={() => setRailOpen(false)}
         />
       </div>
       {/* Mounted either way and faded, so the darkening arrives with the panel

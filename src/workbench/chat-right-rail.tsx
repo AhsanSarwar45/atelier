@@ -20,17 +20,22 @@
  * On a wide screen it still folds in place, part of the row: the width moves
  * and the eye follows the edge, so the transcript is not two different widths
  * on two consecutive frames. On a phone there is no room to fold anything —
- * open, it is a sheet floating over the transcript, clear of the top and
- * bottom of the screen so the reader can see there is still a conversation
- * under it, and shut it takes no width at all rather than leaving a sliver
- * behind (bw-81wt.5). Anyone who asked their machine for less motion gets the
- * two ends and nothing between them (bw-7ks.22.12).
+ * open, it is a sheet down the whole right edge, the height of everything under
+ * the bars, with a cross inside it and the screen beside it dimmed and tappable
+ * (bw-81wt.30). It floated as a small card clear of the top and bottom before
+ * that, which read as a stray box rather than a panel. Shut, it takes no width
+ * at all rather than leaving a sliver behind (bw-81wt.5). Anyone who asked
+ * their machine for less motion gets the two ends and nothing between them
+ * (bw-7ks.22.12).
  */
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { X } from 'lucide-react';
+
 import { BeadChip } from '@/components/bead-chip-row';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway } from '@/workbench/fold';
@@ -96,10 +101,9 @@ export interface ChatRightRailProps {
   onOpenAgent: (id: string) => void;
   open: boolean;
   /**
-   * Kept on the type though nothing inside this component calls it any more:
-   * the button that flips `open` moved to the bar above (bw-81wt.5), and a
-   * caller still owns the state and still needs a way to change it from
-   * there. Removing the prop would be removing the only way in.
+   * Shutting it. The button that opens it is on the bar above (bw-81wt.5), and
+   * on a phone that bar is behind this sheet — so the same call is what the
+   * cross inside the sheet does (bw-81wt.30).
    */
   onToggle: () => void;
 }
@@ -113,6 +117,7 @@ export function ChatRightRail({
   agentControls,
   onOpenAgent,
   open,
+  onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
   const empty = cards.length === 0 && reports.length === 0 && agents.length === 0;
@@ -126,13 +131,13 @@ export function ChatRightRail({
         'z-30 flex shrink-0 flex-col overflow-hidden border-border/60 bg-background',
         'transition-[width] duration-200 ease-out motion-reduce:transition-none',
         open
-          ? // A sheet floating over the transcript on a phone — top and bottom
-            // both clear of the screen's edge, so the reader can see there is
-            // still a conversation under it — and on a wide screen, today's
-            // column, in the row and bordered on the one side that touches it.
+          ? // A sheet down the whole right edge on a phone, as tall as the
+            // screen under the bars and hard against the side it opens from —
+            // and on a wide screen, today's column, in the row and bordered on
+            // the one side that touches it.
             cn(
-              'absolute inset-y-10 right-2 w-72 max-w-[calc(100vw-1rem)] rounded-lg border shadow-2xl',
-              'md:static md:inset-auto md:h-full md:w-72 md:max-w-none md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:shadow-none',
+              'absolute inset-y-0 right-0 w-72 max-w-[85vw] border-l shadow-2xl',
+              'md:static md:inset-auto md:h-full md:w-72 md:max-w-none md:shadow-none',
             )
           : // Shut, it takes no width at all, on a wide screen as much as on
             // a phone. It used to keep a thin edge on a desktop because the
@@ -154,6 +159,21 @@ export function ChatRightRail({
           open ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
       >
+          {/* Only on a phone: on a wide screen this is a column of the row and
+              the button on the bar is in plain sight above it (bw-81wt.30). */}
+          <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2 md:hidden">
+            <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">This chat</h2>
+            <Button
+              size="sm"
+              mode="icon"
+              variant="ghost"
+              aria-label="Close what this chat has touched"
+              data-testid="chat-right-rail-close"
+              onClick={onToggle}
+            >
+              <X aria-hidden="true" />
+            </Button>
+          </div>
           {/* First in the column because it is the only part of it that moves.
               Cards and reports are a record and will still be there; a helper
               that has been going four minutes is the thing the reader opened
