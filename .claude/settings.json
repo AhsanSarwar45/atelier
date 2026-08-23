@@ -55,6 +55,15 @@
             "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/plan-doc-lint.py"
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/picture-gate.py"
+          }
+        ]
       }
     ],
     "PostToolUse": [

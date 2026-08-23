@@ -114,4 +114,7 @@ fi
 python3 settings-lint.py --selftest
 python3 settings-lint.py
 
+# A picture never sits in the conversation (bw-nqll.1).
+python3 hooks/picture-gate.py --selftest
+
 printf 'checked in %ss\n' "$((SECONDS - began))"
