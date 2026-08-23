@@ -166,6 +166,13 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err(format!("`{name}` is not the name of a gate"));
     }
+    // One gate the program answers to itself. Everything else here is a
+    // script laid down beside the data and run with the reader's own python;
+    // this one has to work on a computer that has no python at all, which is
+    // most of the computers this ships to (bw-14ij.1).
+    if crate::doing::is_ours(name) {
+        return Ok(crate::doing::run());
+    }
     let mut looked = Vec::new();
     let mut found = None;
     for place in gate_places(name) {
@@ -314,6 +321,14 @@ mod tests {
         let places = gate_places("board-gate.py");
         assert!(!places.is_empty());
         assert!(places[0].to_string_lossy().contains("machinery"));
+    }
+
+    #[test]
+    fn the_one_gate_the_program_answers_to_itself_is_not_looked_for_on_disk() {
+        // It is the only one that has to run where there is no python, so it
+        // cannot be a script under the rules folder like the others.
+        assert!(crate::doing::is_ours("doing"));
+        assert!(!crate::doing::is_ours("board-gate.py"));
     }
 
     #[test]

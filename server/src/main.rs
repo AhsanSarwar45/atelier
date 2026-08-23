@@ -5,6 +5,7 @@
 
 mod command_line;
 mod db;
+mod doing;
 mod dolt;
 mod helper;
 mod identity;
@@ -400,6 +401,19 @@ async fn serve(open_browser: bool) {
         println!("  {line}");
     }
     println!("The screens and the chat are inside this program; there is nothing else to start.");
+
+    // What a chat says it is doing only reaches the screen if the session is
+    // told to say it, and being told is one line in a settings file nobody
+    // should have to know about. So the first run writes it, and says so once
+    // (bw-14ij.1). A copy that cannot write there still serves the board.
+    match doing::wire_up() {
+        Ok((done, settings)) => {
+            if let Some(line) = doing::said_it(&done, &settings) {
+                println!("{line}");
+            }
+        }
+        Err(e) => tracing::warn!("Your chats were not wired up to say what they are doing: {}", e),
+    }
 
     if open_browser || env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {
         if let Err(e) = open::that(format!("http://localhost:{}", port)) {
