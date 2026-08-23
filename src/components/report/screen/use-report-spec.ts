@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { apiUrl } from '@/lib/api-base';
+import { request } from '@/lib/api';
 
 import type { ReportSpec } from '../types';
 
@@ -40,7 +40,7 @@ class Refused extends Error {}
 
 /** The report's facts. `fresh` waits for a run of the toolchain. */
 async function facts(query: string, fresh: boolean): Promise<string> {
-  const res = await fetch(apiUrl(`/api/reports/spec?${query}${fresh ? '&fresh=1' : ''}`));
+  const res = await request(`/api/reports/spec?${query}${fresh ? '&fresh=1' : ''}`);
   const body = await res.text();
   if (!res.ok) throw new Refused(body.trim() || `the server answered ${res.status}`);
   return body;

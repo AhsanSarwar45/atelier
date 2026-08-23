@@ -28,7 +28,7 @@ import { Gauge, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { apiUrl } from '@/lib/api-base';
+import { request } from '@/lib/api';
 import { reads, TIGHT } from '@/workbench/context-window';
 import type { Split, TaskSpend } from '@/workbench/token-picture';
 import type { Inside, TokenPicture, Weight, WindowNow } from '@/workbench/window-now';
@@ -375,7 +375,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
 
   useEffect(() => {
     let dropped = false;
-    void fetch(apiUrl(`/api/workbench/tokens?session=${encodeURIComponent(sessionId)}`))
+    void request(`/api/workbench/tokens?session=${encodeURIComponent(sessionId)}`)
       .then((r) => (r.ok ? (r.json() as Promise<TokenPicture>) : Promise.reject(new Error(String(r.status)))))
       .then((got) => {
         if (!dropped) setPicture(got);

@@ -14,8 +14,8 @@ import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { apiUrl } from '@/lib/api-base';
 import * as api from '@/lib/api';
+import { request } from '@/lib/api';
 
 export interface Match {
   sessionId: string;
@@ -56,7 +56,7 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
     }
     // A pause, so a search does not run on every keystroke.
     const wait = setTimeout(() => {
-      void fetch(apiUrl(`/api/workbench/search?q=${encodeURIComponent(typed)}`))
+      void request(`/api/workbench/search?q=${encodeURIComponent(typed)}`)
         .then((r) => (r.ok ? r.json() : []))
         .then((rows: Match[]) => setHits(rows))
         .catch(() => setHits([]));

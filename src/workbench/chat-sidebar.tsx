@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
-import { apiUrl } from '@/lib/api-base';
+import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { chatState, holderOnly, type HeldChat } from '@/workbench/chat-state';
 import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
@@ -294,7 +294,7 @@ export function ChatSidebar({ projectId, projectPath, openSessionId, onOpen, eve
     const q = new URLSearchParams({ project: projectId, path: projectPath });
     if (everything) q.set('all', '1');
     try {
-      const res = await fetch(apiUrl(`/api/workbench/restore?${q}`));
+      const res = await request(`/api/workbench/restore?${q}`);
       if (res.ok) setFetched((await res.json()) as RestoreRow[]);
     } catch {
       // The workbench may not be running; the board half is unaffected.

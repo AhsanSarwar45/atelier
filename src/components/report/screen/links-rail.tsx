@@ -29,7 +29,7 @@ import { FileText, MessagesSquare } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
-import { apiUrl } from '@/lib/api-base';
+import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { STATE_BY_ID, type Bead, type BeadStatus } from '@/types';
 import type { LinkedChat } from '@/workbench/protocol';
@@ -130,7 +130,7 @@ export function LinksRail({
     const q = new URLSearchParams({ path: projectPath });
     Promise.all(
       ids.map((id) =>
-        fetch(apiUrl(`/api/workbench/links/bead/${encodeURIComponent(id)}?${q}`))
+        request(`/api/workbench/links/bead/${encodeURIComponent(id)}?${q}`)
           .then((r) => (r.ok ? r.json() : []))
           .catch(() => [] as LinkedChat[]),
       ),

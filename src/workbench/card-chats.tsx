@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 
 import { MessagesSquare } from 'lucide-react';
 
-import { apiUrl } from '@/lib/api-base';
+import { request } from '@/lib/api';
 import type { LinkedChat } from '@/workbench/protocol';
 
 interface CardChatsProps {
@@ -27,7 +27,7 @@ export function CardChats({ beadId, projectId, projectPath }: CardChatsProps) {
   useEffect(() => {
     let live = true;
     const q = new URLSearchParams({ path: projectPath });
-    fetch(apiUrl(`/api/workbench/links/bead/${encodeURIComponent(beadId)}?${q}`))
+    request(`/api/workbench/links/bead/${encodeURIComponent(beadId)}?${q}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: LinkedChat[]) => {
         if (live) setChats(rows);

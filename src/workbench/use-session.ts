@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { apiUrl } from '@/lib/api-base';
+import { request } from '@/lib/api';
 import { asView, EMPTY, reduce, type SessionView } from '@/workbench/fold';
 import type { ImagePayload, SessionFacts, SessionState, WbpCommand, WbpEvent } from '@/workbench/protocol';
 
@@ -64,7 +65,7 @@ async function refusal(res: Response, command: string): Promise<string> {
 }
 
 export async function sendCommand<T = unknown>(cmd: WbpCommand): Promise<T> {
-  const res = await fetch(apiUrl('/api/workbench/command'), {
+  const res = await request('/api/workbench/command', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(cmd),
@@ -89,7 +90,7 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
     let live = true;
     void (async () => {
       try {
-        const res = await fetch(apiUrl(`/api/workbench/session/${encodeURIComponent(sessionId)}`));
+        const res = await request(`/api/workbench/session/${encodeURIComponent(sessionId)}`);
         if (live && res.ok) setFacts((await res.json()) as SessionFacts);
       } catch {
         // The header falls back to what the stream itself carries.

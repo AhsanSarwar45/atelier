@@ -106,9 +106,83 @@ async function chore<T>(run: () => Promise<T>): Promise<T> {
 const readsInFlight = new Map<string, Promise<unknown>>();
 
 /**
+ * How long a read may go unanswered before the app gives up on it.
+ *
+ * Nothing here used to have a deadline, and a read the browser never managed to
+ * send — queued behind a stream that never ends, sitting on a socket whose peer
+ * had quietly gone — simply never settled. The screen waiting on it drew its
+ * spinner until the page was reloaded, with no error and no way back (bw-zkh4).
+ * A deadline turns every one of those, including the causes nobody has found
+ * yet, into something a screen can draw and a reader can try again.
+ */
+export const DEADLINE_MS = 10_000;
+
+/** What a read takes, on top of the browser's own options. */
+export interface ReadOptions extends RequestInit {
+  /** How long to wait for an answer. {@link DEADLINE_MS} unless said otherwise. */
+  deadlineMs?: number;
+}
+
+/**
+ * One signal that fires when either of two do, so a caller's own cancel and the
+ * deadline can both end the same read. `AbortSignal.any` would do it in a line
+ * and is too new to rely on everywhere this runs.
+ */
+function eitherOf(theirs: AbortSignal | null | undefined, deadline: AbortSignal): AbortSignal {
+  if (!theirs) return deadline;
+  const both = new AbortController();
+  const follow = (s: AbortSignal) => {
+    if (s.aborted) both.abort(s.reason);
+    else s.addEventListener('abort', () => both.abort(s.reason), { once: true });
+  };
+  follow(theirs);
+  follow(deadline);
+  return both.signal;
+}
+
+/**
+ * The one place in the app that asks the server for anything.
+ *
+ * Everything else goes through here — this file's own reads, and every screen
+ * that wants the raw answer rather than the parsed one — so a read cannot be
+ * written without a deadline by forgetting to add one. A read that runs out of
+ * time fails in words a screen can draw, rather than as an abort nobody prints.
+ */
+export async function request(path: string, options?: ReadOptions): Promise<Response> {
+  const { deadlineMs, signal, ...rest } = options ?? {};
+  const wait = deadlineMs ?? DEADLINE_MS;
+  const deadline = AbortSignal.timeout(wait);
+  try {
+    return await fetch(apiUrl(path), { ...rest, signal: eitherOf(signal, deadline) });
+  } catch (e) {
+    // Only the deadline's own firing is reworded: a caller that cancelled its
+    // read already knows why, and the browser's network errors say something.
+    if (deadline.aborted && !signal?.aborted) {
+      throw new Error(
+        `no answer from the app in ${Math.round(wait / 1000)}s — it may be stopped, or busy`,
+      );
+    }
+    throw e;
+  }
+}
+
+/**
+ * Whether the app answers at all, waiting no longer than told to. An answer of
+ * any kind counts, a refusal included: the question is whether it is up.
+ */
+export async function reachable(path: string, deadlineMs: number): Promise<boolean> {
+  try {
+    await request(path, { deadlineMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Helper for fetch with error handling
  */
-function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+function fetchApi<T>(path: string, options?: ReadOptions): Promise<T> {
   const method = options?.method ?? 'GET';
   // A caller that brought its own cancel wants to cancel its own read and
   // nobody else's, so it does not join or become a shared one.
@@ -125,10 +199,9 @@ function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return journey;
 }
 
-async function readApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(apiUrl(path), {
+async function readApi<T>(path: string, options?: ReadOptions): Promise<T> {
+  const res = await request(path, {
     ...options,
-    signal: options?.signal ?? AbortSignal.timeout(10000),
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,
@@ -302,7 +375,10 @@ export const git = {
   worktreeStatus: async (repoPath: string, beadId: string, signal?: AbortSignal) => {
     const data = await chore(() => fetchApi<WorktreeStatus>(
       `/api/git/worktree-status?repo_path=${encodeURIComponent(repoPath)}&bead_id=${encodeURIComponent(beadId)}`,
-      signal ? { signal } : undefined
+      // A git walk over a big repository is slow on purpose, so this one waits
+      // longer than a read a person is sitting in front of — but it still waits
+      // a bounded time, which it did not before.
+      { deadlineMs: 30_000, ...(signal ? { signal } : {}) }
     ));
     WorktreeStatusSchema.parse(data);
     return data;
@@ -461,7 +537,7 @@ export const version = {
 export const update = {
   perform: () => fetchApi<UpdateResponse>('/api/update', {
     method: 'POST',
-    signal: AbortSignal.timeout(600000), // 10 min timeout for large downloads
+    deadlineMs: 600_000, // a large download may take ten minutes
   }),
 };
 

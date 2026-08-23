@@ -17,8 +17,7 @@
  * The board's own join names the chats (`GET /links/bead/:id`), never our
  * cache — the same read the links rail and the card panel already do.
  */
-import { bd } from '@/lib/api';
-import { apiUrl } from '@/lib/api-base';
+import { bd, request } from '@/lib/api';
 import type { LinkedChat } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -94,7 +93,7 @@ export async function chatsFor(cards: string[], projectPath: string): Promise<Li
   const q = new URLSearchParams({ path: projectPath });
   const lists = await Promise.all(
     cards.map((id) =>
-      fetch(apiUrl(`/api/workbench/links/bead/${encodeURIComponent(id)}?${q}`))
+      request(`/api/workbench/links/bead/${encodeURIComponent(id)}?${q}`)
         .then((r) => (r.ok ? (r.json() as Promise<LinkedChat[]>) : []))
         .catch(() => [] as LinkedChat[]),
     ),

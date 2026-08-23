@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Download, Loader2, RefreshCw, X } from "lucide-react";
 
 import * as api from "@/lib/api";
-import { apiUrl } from "@/lib/api-base";
+import { reachable } from '@/lib/api';
 
 type UpdateState = "idle" | "downloading" | "restarting" | "error";
 
@@ -53,15 +53,11 @@ export function UpdateBanner() {
       setTimeout(() => {
         const checkServer = async () => {
           for (let i = 0; i < 20; i++) {
-            try {
-              await fetch(apiUrl("/api/health"), {
-                signal: AbortSignal.timeout(2000),
-              });
+            if (await reachable("/api/health", 2000)) {
               window.location.reload();
               return;
-            } catch {
-              await new Promise((r) => setTimeout(r, 1000));
             }
+            await new Promise((r) => setTimeout(r, 1000));
           }
           // After 20 attempts, reload anyway
           window.location.reload();

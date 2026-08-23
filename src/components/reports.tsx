@@ -18,7 +18,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { FileText } from "lucide-react";
 
-import { apiUrl } from "@/lib/api-base";
+import { request } from '@/lib/api';
 import { addressWith } from "@/lib/address";
 import { isDoltProject } from "@/lib/utils";
 
@@ -39,7 +39,7 @@ export interface ReportEntry {
 let inFlight: Promise<ReportEntry[]> | null = null;
 
 function fetchReports(): Promise<ReportEntry[]> {
-  inFlight ??= fetch(apiUrl("/api/reports"))
+  inFlight ??= request("/api/reports")
     .then(res => (res.ok ? res.json() : []))
     .catch(() => [])
     .finally(() => {

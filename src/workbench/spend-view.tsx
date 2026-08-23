@@ -13,8 +13,8 @@ import { X } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { Button } from '@/components/ui/button';
-import { apiUrl } from '@/lib/api-base';
 import * as api from '@/lib/api';
+import { request } from '@/lib/api';
 
 interface Row {
   day: string;
@@ -130,7 +130,7 @@ export function SpendView({ onClose }: { onClose: () => void }) {
   const [names, setNames] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
-    void fetch(apiUrl('/api/workbench/spend'))
+    void request('/api/workbench/spend')
       .then((r) => (r.ok ? r.json() : []))
       .then((got: Row[]) => setRows(got))
       .catch(() => setRows([]));
