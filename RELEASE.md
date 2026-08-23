@@ -18,23 +18,22 @@ distribution channel.
 
 ## Publishing the source
 
-**Never push to `origin` from this checkout.** Use:
-
 ```bash
-bash scripts/publish.sh              # put the trunk online
-bash scripts/publish.sh --dry-run    # every check, no push
+git push
 ```
 
-Years of this project's saved changes are stamped with a work email address, and
-GitHub shows the author address on every one of them. `scripts/publish.sh` copies
-the history aside, swaps that address for the personal one in the copy, proves the
-copy holds byte-identical files to this checkout, and pushes the copy. This
-checkout is never touched — no branch, no working file, none of the side trees.
+The trunk of this checkout **is** the line online. `git push` with no arguments
+sends `ours` to `main` on `origin`; this checkout says so in its own settings
+(`remote.origin.push = refs/heads/ours:refs/heads/main`). Nothing is copied,
+nothing is rewritten, no push is ever forced.
 
-The swap is the same every time, so the published line always walks forward from
-where it was; no push is ever forced. The addresses live in
-`~/.config/atelier/publish.mailmap`, outside this repository on purpose — a file
-here naming them would publish the thing it is hiding.
+Every saved change here carries the address it was written under, and GitHub
+shows that address to anybody who opens the page. This used to go through a
+script that copied the history aside and swapped that address before every
+upload. The owner has since said his work address is fine to show and set this
+project to save new changes under his personal one, so the copy bought nothing
+and cost a full rewrite of nine hundred saved changes on every release
+(bw-8um.3.29).
 
 Old release tags are deliberately left behind: twenty-five came in with the fork,
 and each one arriving would start a release build. A tag goes online only when it
@@ -44,10 +43,11 @@ is named, which is what step 2 below does.
 
 ### 1. Bump the version
 
-The version lives in four files that are **not** auto-synced. Update all of
+The version lives in five files that are **not** auto-synced. Update all of
 them to the new version (e.g. `0.12.0`):
 
 - `package.json` → `"version"`
+- `package-lock.json` → both `"version"` lines (the top one and the `""` package)
 - `server/Cargo.toml` → `version`
 - `server/Cargo.lock` → `version` in the `[[package]] name = "atelier"` block
 - `flake.nix` → **both** `version = "…"` lines (the frontend package and the default package)
@@ -62,24 +62,24 @@ them to the new version (e.g. `0.12.0`):
 The Homebrew formula is rendered automatically from the git tag — do **not**
 hand-edit it.
 
-Commit the bump to the trunk, then publish it (`bash scripts/publish.sh`).
+Commit the bump to the trunk, then put it online (`git push`).
 
-> Publishing triggers `ci.yml`. If the Nix dependency hash has drifted, that run
+> Pushing triggers `ci.yml`. If the Nix dependency hash has drifted, that run
 > **fails and prints the value it should be** — it does not commit anything. Put
-> the printed value in `flake.nix`, publish again, then tag. It has to work that
-> way round: a commit made by the run would sit on the published line with no
-> checkout holding it, and the next publish could not go forward without
-> overwriting it.
+> the printed value in `flake.nix`, push again, then tag. It has to work that way
+> round: a commit made by the run would sit online with no checkout holding it,
+> and the next push could not go forward without overwriting it.
 
 ### 2. Tag and push
 
 ```bash
 git tag v0.12.0
-bash scripts/publish.sh --tag v0.12.0
+git push
+git push origin v0.12.0
 ```
 
-The second command is what puts both the commit and the tag online, with the
-addresses swapped. `git push origin v0.12.0` would publish the work address.
+The commit has to be online before the tag names it, or the release run has
+nothing to build.
 
 Or run the **Release** workflow manually: *Actions → Release → Run workflow*,
 entering the version (e.g. `v0.12.0`) — the commit still has to be online first.
@@ -121,27 +121,24 @@ Set under *AhsanSarwar45/atelier → Settings → Secrets and variables → Acti
 
 The Homebrew step no-ops cleanly when its token is absent.
 
-## One-time setup (not yet done)
+## One-time setup (done)
 
 This is a fork, so everything it publishes to had to be made fresh. It all
 lives under the personal account `AhsanSarwar45`, never a work one — the
 addresses below are the only ones this project publishes to, and
 `scripts/one-name.py` fails the build if a different account appears anywhere.
-Before the first tag:
+All of it was done before 0.13.0:
 
 - Create `AhsanSarwar45/atelier` on GitHub and add it as the `origin` remote.
 - Create the tap repo `AhsanSarwar45/homebrew-atelier`. It can be empty; the release
   run writes `Formula/atelier.rb` into it.
 - Add the `HOMEBREW_TAP_TOKEN` secret to `AhsanSarwar45/atelier`.
-- Write `~/.config/atelier/publish.mailmap` with one line per address to replace:
-  `Real Name <address to show> <address to replace>`. Without it
-  `scripts/publish.sh` refuses to run.
 - The login that pushes needs the `workflow` right, or GitHub refuses any push
   that carries `.github/workflows/release.yml` — which every push of this
   history does: `gh auth refresh -s workflow`.
 
-Until the tap token is set the Homebrew step no-ops, so the first tag still
-publishes binaries and checksums — just no formula.
+Until the tap token is set the Homebrew step no-ops, so a tag still publishes
+binaries and checksums — just no formula.
 
 ## Known gaps
 
@@ -152,5 +149,7 @@ publishes binaries and checksums — just no formula.
   locally before tagging. On Windows `cargo test` (full) hangs because the
   `memory_bd` integration test starts Dolt — use `cargo test --lib`.
 - **Version duplication.** The version is repeated in `package.json`,
-  `server/Cargo.toml`, `server/Cargo.lock`, and `flake.nix` (twice) with no
-  automated consistency check.
+  `package-lock.json`, `server/Cargo.toml`, `server/Cargo.lock`, and `flake.nix`
+  (twice). Only the first three are held together by a check
+  (`server/tests/one_version_for_the_whole_product.rs`); `Cargo.lock` and
+  `flake.nix` are still on the person cutting the release.

@@ -92,23 +92,22 @@ jobs:
             exit 0
           fi
 
-          # This run does NOT commit the new hash back. The published line is a
-          # copy of this machine's history with the author addresses swapped, and
-          # it is only ever pushed forward because the swap gives the same result
-          # every time (see scripts/publish.sh). A commit written here would put a
-          # saved change online that no checkout has, so the next publish could
-          # not go forward without overwriting it — and the only way to fix that
-          # would be to overwrite somebody's work (bw-8um.3.24).
+          # This run does NOT commit the new hash back. The line online is the
+          # trunk of somebody's checkout, pushed forward and never forced. A
+          # commit written here would put a saved change online that no checkout
+          # has, so the next push could not go forward without overwriting it —
+          # and the only way to fix that would be to overwrite somebody's work
+          # (bw-8um.3.24).
           #
           # So the run says what the value has to be and fails. A person puts it
-          # in flake.nix and publishes, and the two lines stay the same line.
+          # in flake.nix and pushes, and the two lines stay the same line.
           {
             echo
             echo "This run does not commit the new value. Put it in \`flake.nix\` and publish:"
             echo
             echo '```bash'
             echo "sed -i -E 's#npmDepsHash = \"sha256-[^\"]+\";#npmDepsHash = \"$got_hash\";#' flake.nix"
-            echo "bash scripts/publish.sh"
+            echo "git push"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

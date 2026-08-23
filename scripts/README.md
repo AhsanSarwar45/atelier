@@ -358,20 +358,3 @@ Run it against a built instance. It is how the memory panel was caught reading
 what the project remembers before anyone had opened it — a `bd` run of its own,
 a seventh of a second, for an empty list (bw-uiyz.14).
 
-## Not a check: `publish.sh`
-
-The only way source leaves this machine. Every saved change on this line carries
-the address it was authored with, and GitHub shows that address to anybody who
-opens the page — so a plain `git push` publishes a private work address along
-with the code (bw-8um.3.22).
-
-```
-bash scripts/publish.sh --dry-run
-bash scripts/publish.sh
-```
-
-It copies the history aside, swaps the address in the copy, proves the copy's
-files are byte-identical to this checkout, and pushes the copy. This checkout is
-never touched. The swap is the same every time, so the published line walks
-forward and no push is forced. `RELEASE.md` has the rest, including why old tags
-stay behind.
