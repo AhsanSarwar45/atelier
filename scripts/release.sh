@@ -246,19 +246,20 @@ step "5/7  Onto the line, and wait for it to go green online"
 # already be somebody else's commit, and a tag written on HEAD would then name
 # a build nothing had checked and nothing had put online. It happened on the
 # first real run of this script (bw-sinv.3).
-WANT="chore(packaging): release $NEXT"
-SHA=$(git log "v$LAST..HEAD" --format='%H%x09%s' \
-        | awk -F'\t' -v want="$WANT" '$2 == want { print $1; exit }')
-
-if [ -n "$SHA" ]; then
-  say "the release commit is already made: $(git rev-parse --short "$SHA")"
+SHA=""
+if [ "$NOW" = "$NEXT" ]; then
+  # A run started again after an earlier one already saved the number. What goes
+  # out is the line as it stands now, which carries that commit and anything
+  # landed on top of it since — not the older commit by name, whose checks may
+  # be exactly what the earlier run stopped for.
+  say "the number is already saved, so what goes out is the line as it stands"
 else
   run git add package.json package-lock.json server/Cargo.toml server/Cargo.lock flake.nix \
     || die "could not stage the five files"
-  run git commit --quiet -m "$WANT" \
+  run git commit --quiet -m "chore(packaging): release $NEXT" \
     || die "could not save the version bump"
-  [ "$DRY_RUN" = 1 ] || SHA=$(git rev-parse HEAD)
 fi
+[ "$DRY_RUN" = 1 ] || SHA=$(git rev-parse HEAD)
 
 if [ "$DRY_RUN" = 1 ]; then
   would "git push --quiet origin <the release commit>:$PUBLISHED"
