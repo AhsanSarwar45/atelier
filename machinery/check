@@ -12,7 +12,33 @@
 # against everything the job built. No commit hook runs it. Held back per commit
 # it was the same minutes over and over for a change nobody had finished making
 # (bw-a6o.2).
+#
+# The reinjection is eleven of the twelve minutes this used to cost, and it can
+# only ever say something about the gates themselves. Put in front of every
+# change it charged that to jobs it could not have an opinion about: a release
+# whose only code change was a version number waited it out twice, and an hour of
+# the manager's afternoon went with it (bw-7lex.1). So it is asked for by what the
+# tree actually changes — anything under `machinery/`, and it runs; nothing there,
+# and it does not.
+#
+#   machinery/check              selftest, and the reinjection only if the gates moved
+#   machinery/check --faults     the reinjection whatever the tree says
+#   machinery/check --no-faults  never the reinjection, however the gates moved
+#   machinery/check --say        print which of those two it would run, and stop
+#
 set -euo pipefail
+
+FAULTS=auto
+SAY=0
+for said in "$@"; do
+  case "$said" in
+    --faults)    FAULTS=yes ;;
+    --no-faults) FAULTS=no ;;
+    --say)       SAY=1 ;;
+    -h|--help)   sed -n '2,30p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) printf 'check: unknown option %s\n' "$said" >&2; exit 2 ;;
+  esac
+done
 
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -39,10 +65,45 @@ export TREE
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
       GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_PREFIX
 
+# Asked of the tree being judged, not of the working files: what a commit would
+# contain is the same thing every case below is run against. Against the line the
+# work lands on, because a job is judged by everything it changed and not by
+# whatever its last commit happened to touch. No trunk to compare with — a fresh
+# clone, a detached head — and the reinjection runs: not knowing is not a reason
+# to skip the half that catches a gate going quiet.
+gates_moved() {
+  local trunk
+  # In a checkout the project's declaration is the folder above this one. An
+  # exported copy of this folder is run on its own with the declaration laid
+  # beside it instead, and a copy with neither has no line to compare against —
+  # the faults then go back rather than being skipped on a file that is not there.
+  local said=../machinery.toml
+  [ -f "$said" ] || said=./machinery.toml
+  trunk=$(sed -n 's/^lands_on *= *"\([^"]*\)".*/\1/p' "$said" 2>/dev/null || true)
+  [ -n "$trunk" ] || return 0
+  git rev-parse -q --verify "refs/heads/$trunk" >/dev/null || return 0
+  ! git diff --quiet "refs/heads/$trunk" "$TREE" -- . 2>/dev/null
+}
+
+if [ "$FAULTS" = auto ]; then
+  if gates_moved; then FAULTS=yes; else FAULTS=no; fi
+fi
+
+if [ "$SAY" = 1 ]; then
+  printf 'board/selftest.py\n'
+  [ "$FAULTS" = yes ] && printf 'board/inject.py\n'
+  exit 0
+fi
+
+began=$SECONDS
 python3 board/selftest.py
 
-# Each fault is a whole suite run in a copy of its own, so this is tens of
-# seconds rather than one. That is why the hook asks for it only when the gates
-# themselves are changing, and why another project's push runs the cheap half
-# (`--anchors`) instead.
-python3 board/inject.py
+# Each fault is a whole suite run in a copy of its own, so this is minutes rather
+# than one. That is why it is asked for only when the gates themselves are
+# changing, and why another project's push runs the cheap half (`--anchors`).
+if [ "$FAULTS" = yes ]; then
+  python3 board/inject.py
+else
+  printf '\nthe gates did not move, so the faults were not put back — `machinery/check --faults` does that\n'
+fi
+printf 'checked in %ss\n' "$((SECONDS - began))"

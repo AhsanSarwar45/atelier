@@ -6584,6 +6584,64 @@ def main():
           "of what it guards")
 
 
+    # The reinjection is eleven of this command's twelve minutes and can only say
+    # something about the gates. Charged to every job it made a release whose one
+    # code change was a version number wait it out twice (bw-7lex.1), so the plain
+    # run has to be able to leave it out — and to be caught leaving it in.
+    # This machinery, in the checkout it is a copy of — not ROOT, which for a
+    # side tree is the checkout it was cut from and carries somebody else's copy
+    # of the very file under test.
+    my_machinery = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # In a checkout the declaration is the folder above this one; in an exported
+    # copy, which has no project around it and no git of its own, it is laid
+    # beside it. With neither there is no line to compare a tree against, and
+    # only the two outright answers below can be held to anything.
+    trunk = ""
+    declared = os.path.join(my_machinery, os.pardir, "machinery.toml")
+    if not os.path.exists(declared):
+        declared = os.path.join(my_machinery, "machinery.toml")
+    if os.path.exists(declared):
+        for line in open(declared):
+            if line.startswith("lands_on"):
+                trunk = line.split('"')[1]
+        assert trunk, "this project's declaration names no line for work to land on"
+
+    # Started rather than run: a case above this one replaces `subprocess.run` for
+    # the whole process and never puts it back, so anything asked through it here
+    # is answered with that case's pretend board instead of by the command
+    # (bw-m7la). `Popen` is the same library untouched.
+    def would_run(tree, *said):
+        told = subprocess.Popen(
+            [os.path.join(my_machinery, "check"), "--say"] + list(said),
+            cwd=my_machinery, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=dict(os.environ, TREE=tree))
+        said_out, said_err = told.communicate()
+        assert told.returncode == 0, "the check would not say what it runs: %s" % said_err
+        return said_out.split()
+
+    # The trunk's own tree against the trunk: nothing under the gates moved, by
+    # construction, whatever this checkout happens to be carrying.
+    still = ""
+    if trunk:
+        asking = subprocess.Popen(["git", "rev-parse", "refs/heads/%s^{tree}" % trunk],
+                                  cwd=my_machinery, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True)
+        still = asking.communicate()[0].strip()
+    if still:
+        assert "board/inject.py" not in would_run(still), \
+            "a tree that changes nothing under the gates still puts every fault back, " \
+            "so a job that cannot affect the gates pays the eleven minutes anyway"
+        assert "board/selftest.py" in would_run(still), \
+            "leaving the faults out left the cases out with them"
+    assert "board/inject.py" in would_run(still or "HEAD", "--faults"), \
+        "asked for the faults outright, the check does not put them back"
+    assert "board/inject.py" not in would_run(still or "HEAD", "--no-faults"), \
+        "told to leave the faults out, the check puts them back anyway"
+
+    print("ok: the faults go back when the gates themselves moved and are asked for "
+          "outright, and a run that cannot affect them is not charged for them")
+
+
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a
     # case that is red anyway says so in its own words before this reruns it.
