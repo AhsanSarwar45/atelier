@@ -2014,6 +2014,63 @@ disagree; it is a function rather than a component because the sidebar row, the
 chat's own line, the board card and the glance strip all need the answer and
 only two of them are in the same tree.
 
+**Ten words, one list, and never one word for five things.** `DOING_WORD` in
+`chat-state.ts` is the whole vocabulary a chat may be in — summarising itself,
+thinking, answering, running a command, waiting on the reader, retrying, a
+helper working, working, idle, and unknown — each with its own mark
+(`DOING_MARK`) and its own answer to whether a clock counts against it
+(`DOING_COUNTS`). Every screen reads that one table. Before it, a running chat
+was a single yes-or-no: busy, or not. The manager's screenshot, 2026-08-22, is
+a two-minute compaction drawn as `Working 1h 38m` beside a command card that
+had already finished — one word for a compaction, a think, a permission prompt
+nobody had answered, a wait on a usage limit, and three helpers grinding away.
+
+**Told beats read, and the order is a rule.** `whatItIsDoing` combines exactly
+two tiers. **Told** is a signal the session emitted about itself: our own
+driver's published state, or a hook the session fires as it enters a state
+worth naming. **Read** is what was worked out from the tail of its record. The
+failure the order prevents is one-sided — a read that overrides a told signal
+draws a confident wrong word (a summarising chat is silent, and silence reads
+as somebody who walked away), while a told signal that overrides a read one is
+only ever more specific than what it replaced. `unknown` on either side is that
+side declining to answer, not an answer, so it never displaces the other.
+
+**The told tier distrusts its own file.** A session writes
+`<config>/sessions/<id>.doing.json` beside the marker Claude Code writes, and
+`doing-told.ts` reads it as nothing-said whenever it is unreadable, not JSON,
+carries a word the table does not have, carries a clock more than a minute
+ahead of ours, or makes a claim old enough that the session has plainly moved
+on. There is no hook for the *end* of a compaction, only its start, so a told
+summarising claim expires at fifteen minutes — far past the longest run
+measured on this machine (371s) and far short of a wait anybody would sit
+through. A permission prompt never expires: it stands until a person answers
+it, and people go to lunch.
+
+**Two clocks, and only one of them is loud.** The number beside the word is the
+STEP — how long this state has run — because that is the number that says
+whether something is stuck, and it is the number every terminal already shows.
+The turn behind it is said quietly, and only when it adds thirty seconds or
+more (`turnWorthSaying`). They used to be one number and it was the turn's, so
+a forty-second compaction read as an hour and a half.
+
+**One state has a known length, so one state gets a bar.** Summarising, and
+nothing else. `summaryFill` fills against 124 seconds — the middle of 453 runs
+recorded on this machine, half of them inside 108–140s — and holds at 95%
+rather than claiming to finish, because the real finish lands on top of it.
+Once a project has been watched through five runs of its own, it fills against
+that project's own middle run instead (`typicalSummaryMs`,
+`SUMMARY_RUNS_ENOUGH`): a median of two is not a median, it is whichever of the
+two was slower, and a bar filling against one measurement is less honest than
+one filling against 453.
+
+**The runs are measured by the beat that was already running.** The sidecar's
+own beat watches each chat enter and leave summarising and writes the length to
+`summary_run` (`summary-runs.ts`). The beat itself never opens a database: the
+memory is injected once at boot, so the whole reading still works with none at
+all. A run longer than half an hour is discarded rather than recorded — that is
+a closed laptop, not a compaction — and a chat killed mid-run writes nothing,
+since a run that never ended has no length.
+
 **The mark is the same mark, ours or somebody else's.** A spinner, the verb in
 its own words, and the seconds — the picture §8.2.2 defines for our own agent —
 is what a chat a terminal holds draws too, because to a reader those are the
