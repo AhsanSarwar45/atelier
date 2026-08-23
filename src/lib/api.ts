@@ -4,6 +4,7 @@
  */
 
 import { apiUrl } from '@/lib/api-base';
+import { onBoard, type WatchEvent } from '@/workbench/live-wire';
 import { BeadsResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
 import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, MemoryEntry, Agent, AgentModel, CachedCounts } from '@/types';
 
@@ -51,12 +52,12 @@ export interface BdCommandResult {
 }
 
 /**
- * File watcher event
+ * File watcher event.
+ *
+ * Defined beside the connection that carries it, because the board feed is one
+ * tag on the window's one stream rather than a stream of its own (bw-zkh4).
  */
-export interface WatchEvent {
-  path: string;
-  type: string;
-}
+export type { WatchEvent } from '@/workbench/live-wire';
 
 /**
  * How many background chores may be in the air at once.
@@ -542,15 +543,15 @@ export const update = {
 };
 
 /**
- * File Watcher (Server-Sent Events)
+ * File Watcher.
+ *
+ * The board is one tag on the window's one connection rather than a stream of
+ * its own: a stream never gives its browser connection back, and a handful of
+ * them is what left ordinary reads queued behind streams that would never end
+ * (live-wire.ts, bw-zkh4). This also means a dropped board watch is opened
+ * again — it used to close on the first error and stay closed, so the cards
+ * quietly stopped following the file until the page was reloaded.
  */
 export const watch = {
-  beads: (path: string, onEvent: (event: WatchEvent) => void) => {
-    const eventSource = new EventSource(
-      apiUrl(`/api/watch/beads?path=${encodeURIComponent(path)}`)
-    );
-    eventSource.onmessage = (e) => onEvent(JSON.parse(e.data));
-    eventSource.onerror = () => eventSource.close();
-    return () => eventSource.close();
-  },
+  beads: (path: string, onEvent: (event: WatchEvent) => void) => onBoard(path, onEvent),
 };

@@ -36,6 +36,15 @@ class FakeStream {
   close(): void {}
 
   /**
+   * Every feed a window watches now arrives on its one connection, each frame
+   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
+   * frames are tagged `workbench`, and that is the one this fake carries.
+   */
+  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
+    if (tag === 'workbench') this.onmessage = listener;
+  }
+
+  /**
    * The sidecar has heard the tools' own session folders move, in the working
    * directories named — or, with none named, somewhere it could not place.
    */

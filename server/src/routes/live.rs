@@ -59,7 +59,9 @@ const AGAIN_CEILING_MS: u64 = 30_000;
 /// the board asks for only the board, and pays for nothing else.
 #[derive(Debug, Deserialize, Default)]
 pub struct LiveParams {
-    /// The project whose board file to watch.
+    /// The projects whose board files to watch, joined by a newline. A
+    /// repeated key is the one thing a query string cannot say plainly, and a
+    /// project path never contains a newline (src/workbench/live-wire.ts).
     pub board: Option<String>,
     /// The chat that is open, if one is.
     pub chat: Option<String>,
@@ -86,8 +88,10 @@ pub async fn live(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(100);
 
-    if let Some(board) = params.board.filter(|b| !b.is_empty()) {
+    for board in boards(&params.board) {
         let tx = tx.clone();
+        let dolt_manager = dolt_manager.clone();
+        let db = db.clone();
         tokio::spawn(async move {
             super::watch::watch_board(PathBuf::from(board), tx, Some("board"), dolt_manager, db)
                 .await;
@@ -117,6 +121,22 @@ pub async fn live(
             .interval(Duration::from_secs(30))
             .text("ping"),
     )
+}
+
+/// The projects to watch, as the browser joined them.
+///
+/// Every one of them, never only the first: a window drawing two boards that
+/// silently watched one would show a card list that stopped following its file,
+/// which is the fault this whole route exists to end.
+fn boards(asked: &Option<String>) -> Vec<String> {
+    asked
+        .as_deref()
+        .unwrap_or("")
+        .split('\n')
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Percent-encodes what a query value may not carry literally.
@@ -315,6 +335,17 @@ mod tests {
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].data, "hi");
         assert_eq!(read[0].name.as_deref(), Some("ping"));
+    }
+
+    #[test]
+    fn every_board_the_window_watches_is_watched() {
+        assert_eq!(boards(&None), Vec::<String>::new());
+        assert_eq!(boards(&Some(String::new())), Vec::<String>::new());
+        assert_eq!(boards(&Some("/one".into())), vec!["/one".to_string()]);
+        assert_eq!(
+            boards(&Some("/one\n/two\n".into())),
+            vec!["/one".to_string(), "/two".to_string()]
+        );
     }
 
     #[test]

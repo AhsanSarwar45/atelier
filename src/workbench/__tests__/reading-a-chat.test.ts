@@ -150,6 +150,11 @@ class FakeStream {
     opened.push(this);
   }
 
+  /**
+   * Every feed a window watches now arrives on its one connection, each frame
+   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The open chat's
+   * are `chat` and `chat.snapshot`.
+   */
   addEventListener(name: string, listener: (e: { data: string }) => void): void {
     this.named.set(name, listener);
   }
@@ -166,12 +171,12 @@ class FakeStream {
    * screen copes with the shape it wrote itself.
    */
   hands(view: SessionView | Record<string, unknown>): void {
-    this.named.get('snapshot')?.({ data: JSON.stringify(view) });
+    this.named.get('chat.snapshot')?.({ data: JSON.stringify(view) });
   }
 
   /** One event arriving live, after the conversation was drawn. */
   says(e: WbpEvent): void {
-    this.onmessage?.({ data: JSON.stringify(e) });
+    this.named.get('chat')?.({ data: JSON.stringify(e) });
   }
 
   dies(): void {

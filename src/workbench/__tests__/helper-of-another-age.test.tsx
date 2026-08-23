@@ -42,6 +42,15 @@ class FakeStream {
   close(): void {}
 
   /**
+   * Every feed a window watches now arrives on its one connection, each frame
+   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
+   * frames are tagged `workbench`, and that is the one this fake carries.
+   */
+  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
+    if (tag === 'workbench') this.onmessage = listener;
+  }
+
+  /**
    * The helper as it was BEFORE this job: the same word, carrying a list of
    * bare conversation ids. This is the exact frame the manager's own helper was
    * still sending, read off the wire at 14:00 that day.

@@ -28,6 +28,15 @@ class FakeStream {
     this.closed = true;
   }
 
+  /**
+   * Every feed a window watches now arrives on its one connection, each frame
+   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
+   * frames are tagged `workbench`, and that is the one this fake carries.
+   */
+  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
+    if (tag === 'workbench') this.onmessage = listener;
+  }
+
   says(frame: WatchFrame): void {
     this.onmessage?.({ data: JSON.stringify(frame) });
   }

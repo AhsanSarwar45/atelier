@@ -3,16 +3,20 @@
  *
  * The waiting-on-you tray, the glance strip and the live dot on a board card
  * are three views of the same fact — what each session is doing right now — so
- * they share a single module-level store over a single EventSource rather than
- * each opening its own (docs/agent-workbench.md §8.6). The idiom is the repo's
- * own: `useSyncExternalStore` over a listener set, as in `use-theme.ts`.
+ * they share a single module-level store rather than each opening its own
+ * (docs/agent-workbench.md §8.6). The idiom is the repo's own:
+ * `useSyncExternalStore` over a listener set, as in `use-theme.ts`.
+ *
+ * The connection under that store is not this file's any more. It is the one
+ * connection the whole window holds, and this reads the helper's frames off it
+ * by tag (live-wire.ts, bw-zkh4).
  */
 'use client';
 
 import { useMemo, useSyncExternalStore } from 'react';
 
-import { apiUrl } from '@/lib/api-base';
 import { chatState, counting, type ChatState, type HeldChat } from '@/workbench/chat-state';
+import { onWorkbench } from '@/workbench/live-wire';
 import { NOTHING_KNOWN, type PlanUsage } from '@/workbench/plan-usage';
 import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
 
@@ -101,7 +105,8 @@ export function isLive(s: LiveSession): boolean {
 
 const listeners = new Set<() => void>();
 let sessions: LiveSession[] = [];
-let source: EventSource | null = null;
+/** How to stop reading the helper's feed off the window's one connection. */
+let stop: (() => void) | null = null;
 /** Rebuilt on every change so `useSyncExternalStore` sees a new reference. */
 let snapshot: LiveSession[] = sessions;
 /**
@@ -448,19 +453,6 @@ function absorb(frame: WatchFrame): void {
 }
 
 /**
- * How long after a dropped stream we try again, and the ceiling it climbs to.
- *
- * The workbench may not be running at all — the board half of the app works
- * without it — so the wait doubles up to half a minute rather than hammering a
- * door nobody is behind. It never stops trying: a sidecar that comes back is
- * the ordinary case (a rebuild, a restart), and until it does the screen is
- * working from facts that stopped moving.
- */
-const RETRY_MS = 2_000;
-const RETRY_CEILING_MS = 30_000;
-let retryIn = RETRY_MS;
-let retrying: ReturnType<typeof setTimeout> | null = null;
-/**
  * The stream has been away, so what happened outside this app while it was gone
  * was said to nobody. Cleared by the snapshot that comes back.
  */
@@ -479,8 +471,6 @@ let missedSomething = false;
  * about what it knows.
  */
 function dropped(): void {
-  source?.close();
-  source = null;
   missedSomething = true;
   // Both, together. What each held chat is DOING is the half that goes stale
   // visibly: the mark keeps spinning and its seconds keep climbing on the last
@@ -494,51 +484,32 @@ function dropped(): void {
     holds = null;
     announce();
   }
-  if (retrying !== null || listeners.size === 0) return;
-  retrying = setTimeout(() => {
-    retrying = null;
-    retryIn = Math.min(retryIn * 2, RETRY_CEILING_MS);
-    connect();
-  }, retryIn);
-}
-
-function connect(): void {
-  if (source) return;
-  // A card is drawn in places with no live connection to be had at all — a
-  // server render, a test bench. Those simply see no sessions.
-  if (typeof EventSource === 'undefined') return;
-  if (listeners.size === 0) return;
-  source = new EventSource(apiUrl('/api/workbench/watch'));
-  source.onmessage = (msg) => {
-    // Speaking again: the next drop starts its own count from the short wait.
-    retryIn = RETRY_MS;
-    try {
-      absorb(JSON.parse(msg.data) as WatchFrame);
-    } catch {
-      // Whatever else a helper of another age can send that this cannot read,
-      // it gets the same answer as the frame checked by hand above: the page
-      // says the helper does not match and goes on reading the frames it does
-      // understand, rather than dying inside a handler nobody is watching
-      // (bw-96is.24).
-      noteMismatch(true);
-    }
-  };
-  source.onerror = dropped;
+  // Opening it again is the wire's job, and it keeps its own count: this
+  // store is one reader of a connection the whole window shares.
 }
 
 function subscribe(fn: () => void): () => void {
   listeners.add(fn);
-  connect();
+  stop ??= onWorkbench({
+    frame: (data) => {
+      try {
+        absorb(JSON.parse(data) as WatchFrame);
+      } catch {
+        // Whatever else a helper of another age can send that this cannot read,
+        // it gets the same answer as the frame checked by hand above: the page
+        // says the helper does not match and goes on reading the frames it does
+        // understand, rather than dying inside a handler nobody is watching
+        // (bw-96is.24).
+        noteMismatch(true);
+      }
+    },
+    dropped,
+  });
   return () => {
     listeners.delete(fn);
     if (listeners.size === 0) {
-      source?.close();
-      source = null;
-      if (retrying !== null) {
-        clearTimeout(retrying);
-        retrying = null;
-      }
-      retryIn = RETRY_MS;
+      stop?.();
+      stop = null;
     }
   };
 }

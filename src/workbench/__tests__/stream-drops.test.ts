@@ -33,6 +33,15 @@ class FakeStream {
     this.closed = true;
   }
 
+  /**
+   * Every feed a window watches now arrives on its one connection, each frame
+   * tagged with the feed it came from (live-wire.ts, bw-zkh4). The helper's
+   * frames are tagged `workbench`, and that is the one this fake carries.
+   */
+  addEventListener(tag: string, listener: (e: { data: string }) => void): void {
+    if (tag === 'workbench') this.onmessage = listener;
+  }
+
   /** The sidecar says which conversations a live process is holding, and what each is doing. */
   says(conversations: string[]): void {
     const holds = conversations.map((id) => ({ id, holder: 'terminal', doing: 'unknown', since: null }));

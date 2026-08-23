@@ -7,13 +7,17 @@
  * already built (one `snapshot` frame), and this only folds what has happened
  * since; a stream that drops is opened again from the last event drawn rather
  * than from the beginning of time (docs/agent-workbench.md §4).
+ *
+ * The connection is not this file's: the chat is one tag on the one connection
+ * the window holds, and the number of the last event drawn is what that
+ * connection carries when it is asked again (live-wire.ts, bw-zkh4).
  */
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 
-import { apiUrl } from '@/lib/api-base';
 import { request } from '@/lib/api';
+import { onChat } from '@/workbench/live-wire';
 import { asView, EMPTY, reduce, type SessionView } from '@/workbench/fold';
 import type { ImagePayload, SessionFacts, SessionState, WbpCommand, WbpEvent } from '@/workbench/protocol';
 
@@ -104,9 +108,6 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
   return facts;
 }
 
-/** How long after a stream drops before it is opened again. */
-const AGAIN_MS = 1_000;
-
 export function useSession(sessionId: string | null): SessionView {
   // What has been drawn and which chat it was drawn from are one value. Held
   // apart, a second chat folds onto the first chat's messages and its own
@@ -123,58 +124,48 @@ export function useSession(sessionId: string | null): SessionView {
     seen.current = 0;
     if (!sessionId) return;
 
-    let live = true;
-    let source: EventSource | null = null;
-    let again: ReturnType<typeof setTimeout> | null = null;
-
     const draw = (view: SessionView) => {
       seen.current = view.lastSeq;
       // Late events from the chat just left are dropped by the id, not by luck
-      // of ordering: the socket is closed on the way out, but a message already
-      // in flight still arrives.
+      // of ordering: the connection is told to stop on the way out, but a
+      // message already in flight still arrives.
       setDrawn((d) => (d.id === sessionId ? { id: d.id, view } : d));
     };
 
-    const open = () => {
-      const url = apiUrl(
-        `/api/workbench/events?session=${encodeURIComponent(sessionId)}&since=${seen.current}`,
-      );
-      source = new EventSource(url);
+    return onChat(sessionId, {
+      // What the connection asks from when it is opened, or opened again after
+      // a drop. Asking from zero would send the whole conversation a second
+      // time, and fold it onto itself.
+      since: () => seen.current,
 
       // The conversation as the sidecar built it — everything said before this
       // browser asked, in one frame. Only the tail is folded here.
-      source.addEventListener('snapshot', (msg) => {
-        // Filled against a blank chat rather than trusted: the sidecar is a
-        // process that outlives this page, so it can be older than the screen
-        // and simply not send a list the screen draws (bw-7ks.22.16).
-        draw(asView(JSON.parse((msg as MessageEvent).data) as Partial<SessionView>));
-      });
+      snapshot: (data) => {
+        try {
+          // Filled against a blank chat rather than trusted: the sidecar is a
+          // process that outlives this page, so it can be older than the screen
+          // and simply not send a list the screen draws (bw-7ks.22.16).
+          draw(asView(JSON.parse(data) as Partial<SessionView>));
+        } catch {
+          // A frame this page cannot read leaves the transcript as it stands.
+        }
+      },
 
-      source.onmessage = (msg) => {
-        const event = JSON.parse(msg.data) as WbpEvent;
+      event: (data) => {
+        let event: WbpEvent;
+        try {
+          event = JSON.parse(data) as WbpEvent;
+        } catch {
+          return;
+        }
         setDrawn((d) => {
           if (d.id !== sessionId) return d;
           const view = reduce(d.view, event);
           seen.current = view.lastSeq;
           return { id: d.id, view };
         });
-      };
-
-      source.onerror = () => {
-        source?.close();
-        if (!live) return;
-        // A dropped stream used to stay dropped, and the chat went quiet until
-        // the page was reloaded. It comes back from where it left off.
-        again = setTimeout(open, AGAIN_MS);
-      };
-    };
-
-    open();
-    return () => {
-      live = false;
-      if (again) clearTimeout(again);
-      source?.close();
-    };
+      },
+    });
   }, [sessionId]);
 
   // Never the last chat's transcript under this chat's name, not even for the
