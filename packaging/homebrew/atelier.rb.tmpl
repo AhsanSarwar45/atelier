@@ -4,6 +4,12 @@ class Atelier < Formula
   version "__VERSION__"
   license "MIT"
 
+  # The chat helper is started beside the server and is written for node, so an
+  # install without it serves the board and answers nothing on the Chat tab.
+  # Asked for here rather than left to the reader: the chat is half of what this
+  # program is, and a silent half is worse than a bigger download.
+  depends_on "node"
+
   on_macos do
     on_arm do
       url "https://github.com/AhsanSarwar45/atelier/releases/download/v__VERSION__/atelier-darwin-arm64"
@@ -28,13 +34,21 @@ class Atelier < Formula
 
   def caveats
     <<~EOS
-      atelier needs the Beads CLI (bd) on your PATH:
+      Three commands, and nothing else to start:
+
+        atelier run              start everything and open the board
+        atelier service install  have this computer start it at login
+        atelier init             set the project in this folder up on it
+
+      It answers your whole network, so the board opens on your phone —
+      starting it prints the address to type there.
+
+      `init` needs python3 and the Beads CLI (bd) on your PATH:
         https://github.com/gastownhall/beads
-      Run `atelier` and open http://localhost:3008
     EOS
   end
 
   test do
-    assert_path_exists bin/"atelier"
+    assert_match version.to_s, shell_output("#{bin}/atelier --version")
   end
 end
