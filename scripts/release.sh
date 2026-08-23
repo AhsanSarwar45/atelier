@@ -16,11 +16,15 @@
 #
 #   bash scripts/release.sh              # cut and publish the next version
 #   bash scripts/release.sh --dry-run    # print every step and write nothing
-#   bash scripts/release.sh --as 1.0.0   # use this number instead of working one out
+#   bash scripts/release.sh --as 1.0.0   # take a bigger step than the work asks for
 #
 # Nothing is published until the checks here are green AND the build online is
 # green on the very commit being tagged, which is the whole reason the tag is
 # written after the push rather than beside it (bw-sinv.3).
+#
+# --as cannot name a number of its own. It may only be one of the three steps up
+# from the last release, and never a smaller one than the work asks for — so the
+# version is still never typed, only how big a step it is (bw-sinv.13).
 
 set -uo pipefail
 
@@ -39,7 +43,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1 ;;
     --as) shift; AS="${1:-}" ;;
     --as=*) AS="${1#--as=}" ;;
-    -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
     *) printf 'release: unknown option %s\n' "$1" >&2; exit 2 ;;
   esac
   shift
@@ -171,11 +175,30 @@ case "$BUMP" in
   patch) NEXT="$MA.$MI.$((PA + 1))" ;;
 esac
 
+# The one thing the messages cannot say is that a release is the 1.0: going to it
+# is a decision about the project, not something any change in it implies. So
+# --as exists — but it does not let a number be typed. It may only name one of
+# the three steps up from the last release, and never a smaller one than the
+# work asks for, which would ship a breaking change as a patch. Everything else,
+# 9.9.9 included, is refused: the choice is how big the step is, never what the
+# number is (bw-sinv.13).
 if [ -n "$AS" ]; then
-  printf '%s' "$AS" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
-    || die "--as wants a number like 1.0.0, not $AS"
-  say "worked out $NEXT from the changes, using $AS because you asked for it"
-  NEXT="$AS"
+  case "$BUMP" in
+    major) ALLOWED="$((MA + 1)).0.0" ;;
+    minor) ALLOWED="$MA.$((MI + 1)).0 $((MA + 1)).0.0" ;;
+    patch) ALLOWED="$MA.$MI.$((PA + 1)) $MA.$((MI + 1)).0 $((MA + 1)).0.0" ;;
+  esac
+  case " $ALLOWED " in
+    *" $AS "*) ;;
+    *) die "--as $AS is not a step this release can take.
+      the work asks for $NEXT, and the only numbers allowed from $LAST are: $ALLOWED" ;;
+  esac
+  if [ "$AS" = "$NEXT" ]; then
+    say "$NEXT is what the changes ask for anyway"
+  else
+    say "the changes ask for $NEXT; going to $AS instead because you asked for it"
+    NEXT="$AS"
+  fi
 fi
 [ "$NEXT" != "$LAST" ] || die "the next number is the one already released"
 git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null \
