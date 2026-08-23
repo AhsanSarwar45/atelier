@@ -178,7 +178,12 @@ say "server/Cargo.toml     $NOW → $NEXT"
 say "server/Cargo.lock     $NOW → $NEXT"
 say "flake.nix             $NOW → $NEXT   (twice)"
 
-if [ "$DRY_RUN" = 1 ]; then
+if [ "$NOW" = "$NEXT" ]; then
+  # A run that died after the writing step and is being started again. Writing
+  # them a second time is not wrong, but the check below would then read the new
+  # number as the old one still standing and stop a release that is fine.
+  ok "the five already say $NEXT"
+elif [ "$DRY_RUN" = 1 ]; then
   would "npm version --no-git-tag-version --allow-same-version $NEXT"
   would "sed -i \"0,/^version = \\\"$NOW\\\"/s//version = \\\"$NEXT\\\"/\" server/Cargo.toml"
   would "the atelier entry in server/Cargo.lock, and both lines in flake.nix"
@@ -236,18 +241,32 @@ fi
 # ── 5 of 7 ────────────────────────────────────────────────────────────────
 step "5/7  Onto the line, and wait for it to go green online"
 
-run git add package.json package-lock.json server/Cargo.toml server/Cargo.lock flake.nix \
-  || die "could not stage the five files"
-run git commit --quiet -m "chore(packaging): release $NEXT" \
-  || die "could not save the version bump"
-run git push --quiet origin "$TRUNK:$PUBLISHED" \
-  || die "could not put the line online"
+# The one commit this release is, named here and used by everything after it.
+# Work lands on the trunk all day: between the push and the tag, HEAD can
+# already be somebody else's commit, and a tag written on HEAD would then name
+# a build nothing had checked and nothing had put online. It happened on the
+# first real run of this script (bw-sinv.3).
+WANT="chore(packaging): release $NEXT"
+SHA=$(git log "v$LAST..HEAD" --format='%H%x09%s' \
+        | awk -F'\t' -v want="$WANT" '$2 == want { print $1; exit }')
+
+if [ -n "$SHA" ]; then
+  say "the release commit is already made: $(git rev-parse --short "$SHA")"
+else
+  run git add package.json package-lock.json server/Cargo.toml server/Cargo.lock flake.nix \
+    || die "could not stage the five files"
+  run git commit --quiet -m "$WANT" \
+    || die "could not save the version bump"
+  [ "$DRY_RUN" = 1 ] || SHA=$(git rev-parse HEAD)
+fi
 
 if [ "$DRY_RUN" = 1 ]; then
-  would "gh run watch <the CI run on this very commit> --exit-status"
+  would "git push --quiet origin <the release commit>:$PUBLISHED"
+  would "gh run watch <the CI run on that very commit> --exit-status"
 else
-  SHA=$(git rev-parse HEAD)
-  ok "pushed $(git rev-parse --short HEAD)"
+  git push --quiet origin "$SHA:$PUBLISHED" \
+    || die "could not put the line online"
+  ok "pushed $(git rev-parse --short "$SHA")"
   say "waiting for the checks online — this is what stops a tag being written on a red build"
   WAITED=0
   RUN=""
@@ -268,7 +287,7 @@ fi
 # ── 6 of 7 ────────────────────────────────────────────────────────────────
 step "6/7  The release"
 
-run git tag -a "v$NEXT" -m "$NEXT" \
+run git tag -a "v$NEXT" -m "$NEXT" "${SHA:-HEAD}" \
   || die "could not write the tag"
 run git push --quiet origin "v$NEXT" \
   || die "could not put the tag online"
