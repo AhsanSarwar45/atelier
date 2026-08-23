@@ -106,4 +106,12 @@ if [ "$FAULTS" = yes ]; then
 else
   printf '\nthe gates did not move, so the faults were not put back — `machinery/check --faults` does that\n'
 fi
+
+# Where the gates are written down, and how they are spelled. Cheap, and it
+# catches the two faults that cost the most for the least work: a gate spelled
+# as one computer's folder, and a gate written down in two settings files so it
+# runs twice on every turn (bw-nqll.3, bw-nqll.4).
+python3 settings-lint.py --selftest
+python3 settings-lint.py
+
 printf 'checked in %ss\n' "$((SECONDS - began))"
