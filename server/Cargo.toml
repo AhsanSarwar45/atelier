@@ -1,6 +1,6 @@
 [package]
 name = "atelier"
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 
 # The command a person types. One name, from `src/identity.rs`.
