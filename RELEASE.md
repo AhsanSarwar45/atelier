@@ -150,6 +150,8 @@ binaries and checksums — just no formula.
   `memory_bd` integration test starts Dolt — use `cargo test --lib`.
 - **Version duplication.** The version is repeated in `package.json`,
   `package-lock.json`, `server/Cargo.toml`, `server/Cargo.lock`, and `flake.nix`
-  (twice). Only the first three are held together by a check
-  (`server/tests/one_version_for_the_whole_product.rs`); `Cargo.lock` and
-  `flake.nix` are still on the person cutting the release.
+  (twice). All but `Cargo.lock` are held together by a check
+  (`server/tests/one_version_for_the_whole_product.rs`), which goes red if any
+  of them drifts. `Cargo.lock` is left out on purpose: cargo rewrites that
+  number to match `Cargo.toml` before any test can read the file, so an
+  assertion on it could never go red.

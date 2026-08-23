@@ -22,11 +22,11 @@
 
           frontend = pkgs.buildNpmPackage {
             pname = "atelier-frontend";
-            version = "0.12.2";
+            version = "0.13.0";
             src = ./.;
 
             nodejs = pkgs.nodejs_22;
-            npmDepsHash = "sha256-kuXKrpcka1I1XoSR5yoIXH8ZVMjss4fijHSAE93Ugmw=";
+            npmDepsHash = "sha256-mqzfb4fiJqrXpR0N9QZFT1niuouSJF9G6Q02Z/5KNGY=";
 
             env.NEXT_TELEMETRY_DISABLED = "1";
 
@@ -41,7 +41,7 @@
         {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "atelier";
-            version = "0.12.2";
+            version = "0.13.0";
             src = ./.;
 
             cargoLock.lockFile = ./server/Cargo.lock;
