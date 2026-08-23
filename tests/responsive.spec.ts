@@ -568,6 +568,63 @@ test.describe('chat', () => {
     expect(await shut('chat-right-rail'), "tapping beside the chat's own column did not shut it").toBe('false');
   });
 
+  test('a button\u2019s label is drawn whole, not clipped by the pane it sits in', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openProject(page, 'chat');
+
+    // A panel scrolls its own contents, which means it clips them — right for
+    // the rows inside it, fatal for a label that has to be drawn outside it.
+    // The chat list's own search is the control the manager caught it on.
+    await page.locator('[data-testid="chat-rail-toggle"]').first().click();
+    await page.waitForTimeout(400);
+    await page.locator('button[aria-label="Search chats"]').first().hover();
+    // The drawn label, not the copy a screen reader is handed: that one is a
+    // one-pixel span and would pass any measurement.
+    const tip = page.locator('[data-radix-popper-content-wrapper] > *').first();
+    await expect(tip, 'hovering a control inside the chat list showed no label at all').toBeVisible({ timeout: 5_000 });
+
+    const where = await tip.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      /** The nearest thing above it that cuts off whatever overflows. */
+      let clipper: string | null = null;
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        const style = getComputedStyle(p);
+        if (/hidden|auto|scroll|clip/.test(style.overflowX + style.overflowY)) {
+          const r = p.getBoundingClientRect();
+          if (box.left < r.left - 1 || box.right > r.right + 1 || box.top < r.top - 1 || box.bottom > r.bottom + 1) {
+            clipper = p.getAttribute('data-testid') ?? p.tagName.toLowerCase();
+            break;
+          }
+        }
+      }
+      return { clipper, left: Math.round(box.left), right: Math.round(box.right), width: Math.round(box.width) };
+    });
+
+    expect(where.clipper, `the label is cut off by ${where.clipper}, which clips what overflows it`).toBeNull();
+    expect(where.left, 'the label hangs off the left of the screen').toBeGreaterThanOrEqual(0);
+    expect(where.right, 'the label hangs off the right of the screen').toBeLessThanOrEqual(PHONE.width);
+    expect(where.width, 'the label is drawn as a sliver').toBeGreaterThan(20);
+  });
+
+  test('a button with a picture and words keeps them apart', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openProject(page, 'chat');
+    await page.locator('[data-testid="chat-rail-toggle"]').first().click();
+    await page.waitForTimeout(400);
+
+    const gap = await page.locator('[data-testid="new-chat-tool"]').evaluate((el) => {
+      const icon = el.querySelector('svg');
+      const words = [...el.childNodes].find((n) => n.nodeType === 3 && (n.textContent ?? '').trim());
+      if (!icon || !words) return null;
+      const range = document.createRange();
+      range.selectNodeContents(words);
+      return Math.round(range.getBoundingClientRect().left - icon.getBoundingClientRect().right);
+    });
+
+    expect(gap, 'the New Chat button has no picture and words to keep apart').not.toBeNull();
+    expect(gap!, `the picture and the words are ${gap}px apart, which reads as one jammed-together lump`).toBeGreaterThanOrEqual(4);
+  });
+
   test('chat screen fits a phone', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'chat');

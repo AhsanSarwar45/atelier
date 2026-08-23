@@ -40,7 +40,7 @@ const buttonVariants = cva(
       size: {
         lg: 'h-10 px-4 text-sm gap-1.5 [&_svg:not([class*=size-])]:size-4',
         md: 'h-9 px-3 gap-1.5 text-sm [&_svg:not([class*=size-])]:size-4',
-        sm: 'h-8 px-2.5 gap-1.25 text-xs [&_svg:not([class*=size-])]:size-3.5',
+        sm: 'h-8 px-2.5 gap-1.5 text-xs [&_svg:not([class*=size-])]:size-3.5',
         xs: 'h-7 px-2 gap-1 text-xs [&_svg:not([class*=size-])]:size-3.5',
         icon: 'size-9 [&_svg:not([class*=size-])]:size-4 shrink-0',
       },
@@ -345,7 +345,7 @@ const buttonVariants = cva(
         mode: 'input',
         variant: 'outline',
         size: 'sm',
-        className: 'gap-1.25',
+        className: 'gap-1.5',
       },
       {
         mode: 'input',
