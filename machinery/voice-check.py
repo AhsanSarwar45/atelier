@@ -31,7 +31,7 @@ TARGETS = [
     "reporting/README.md",
 ]
 
-EM_DASH_PER_1K = 4.0     # the manager's own writing runs at 3.2
+EM_DASH_PER_1K = 4.0     # the manager's own writing runs at 1.3 (see --chat)
 SEMICOLON_PER_1K = 5.0
 
 # Sentence shapes that make a fact sound like an aphorism. Each one costs the
