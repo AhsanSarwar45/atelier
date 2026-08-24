@@ -84,7 +84,6 @@ dependencies = [
  "mysql_async",
  "notify",
  "open",
- "regex",
  "reqwest",
  "rusqlite",
  "rust-embed",
