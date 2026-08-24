@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """PreToolUse — a search over a tree is run by the tool that reads the ignore list.
 
-`grep -r` reads every file in the tree byte by byte. It has no idea that
-`server/target`, `node_modules`, `.next` and `worktrees` are build output, and
-no search result has ever come out of any of them.
+`grep -r` reads every file in the tree byte by byte. It has no idea which of
+those folders are build output, and no search result has ever come out of one.
 
-Measured in a built copy of this project (91,146 files, 11 GB of build output
-inside it): one string cost 23.94 s with `grep -rn` and 0.011 s with `rg -n`.
-In a larger project on the same machine with no build output checked in:
-9.20 s against 0.009 s. Two thousand times, in both, and the whole of it is
-that `rg` reads the `.gitignore` the project already wrote.
+Measured on this computer, in a built copy of a project (91,146 files, 11 GB of
+build output inside it): one string cost 23.94 s with `grep -rn` and 0.011 s
+with `rg -n`. In a larger project with no build output checked in: 9.20 s
+against 0.009 s. Two thousand times, in both, and the whole of it is that `rg`
+reads the `.gitignore` the project already wrote.
+
+It is registered in the personal settings rather than any one project's, so it
+stands in front of every project on this computer and its words name none of
+them (bw-2x54.2).
 
 A session reaches for `grep` because it is told to. In bypassPermissions mode
 Claude Code puts a line in front of every turn that says to work through Bash
@@ -50,12 +53,16 @@ HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1.*?^\s*\2\s*$",
 # A leading `VAR=value` or two, which a command may carry before its own name.
 ASSIGN = re.compile(r"^[A-Za-z_]\w*=")
 
+# This doorman stands in front of every project on the computer, so its words
+# name no one project's folders and quote no one project's measurement
+# (bw-2x54.5).
 REASON = (
-    "`{name}` walks the tree file by file and reads every byte of it, "
-    "including the build output. Measured in a copy of this project: 23.94 s "
-    "for one string, against 0.011 s for the same string with `rg`, which "
-    "reads the .gitignore this project already wrote and skips "
-    "server/target, node_modules, .next and worktrees for free.\n\n"
+    "`{name}` walks the tree file by file and reads every byte of it, the "
+    "build output included. Measured on this computer: 23.94 s for one "
+    "string in a project carrying its build folders, 9.20 s in one that does "
+    "not, against 0.011 s and 0.009 s for the same strings with `rg` — which "
+    "reads the .gitignore the project already wrote and skips everything "
+    "named in it for free.\n\n"
     "Run it as:\n"
     "    {fixed}\n\n"
     "Patterns are ripgrep's regex, which is what `grep -E` speaks. `grep` "
@@ -197,11 +204,17 @@ def selftest():
     says("the rewrite of the proxy's renamed form",
          "rtk grep -rn 'thing' .", "rg -n 'thing' .")
 
+    # It speaks in every project, so it names no one project's folders.
+    said = judge("Bash", {"command": "grep -rn thing ."}) or ""
+    for folder in ("server/target", "node_modules", ".next", "worktrees"):
+        if folder in said:
+            failed.append("the refusal names one project's folder: %s" % folder)
+
     if failed:
         for line in failed:
             print("FAILED  " + line)
         return 1
-    print("all 27 cases pass")
+    print("all 28 cases pass")
     return 0
 
 
