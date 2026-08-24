@@ -109,13 +109,13 @@ READ_CAP = 200
 
 TOO_MANY = (
     "This line puts more than %d commands on one call, and what the ones past "
-    "that write to is not read — so nothing here can say whether it reaches a "
+    "that write to is not read, so nothing here can say whether it reaches a "
     "line this project ships from.\n\nSplit it into separate calls."
 )
 
 UNREAD = (
     "This names the line by running something, and which line that comes out as "
-    "is not settled until the shell runs it — so nothing here can tell whether it "
+    "is not settled until the shell runs it, so nothing here can tell whether it "
     "is one this project ships from.\n\n"
     "Spell it out, or name the position you are standing at: `git push origin "
     "HEAD` pushes the line you are on and is read as that line."
@@ -157,7 +157,7 @@ REFUSED = (
     "%s is a line this project ships from, and putting work onto it is not the "
     "agent's to do here.\n\n"
     "Work on a line of your own and offer it up for review; the merge is the "
-    "manager's. Staying current is always allowed — bring %s into your own line, "
+    "manager's. Staying current is always allowed: bring %s into your own line, "
     "or rebase your line onto it, and resolve the conflicts as usual.\n\n"
     "If this project's work should land without asking, say so once in its "
     "%s: `agent_merges = true`."
@@ -166,7 +166,7 @@ REFUSED = (
 
 WEDGED = (
     "\n\nThis checkout also runs a board, and a card here closes only once a "
-    "commit naming it reaches %s — the line just refused. Until this project says "
+    "commit naming it reaches %s, the line just refused. Until this project says "
     "who lands its work, nothing here can finish: `agent_merges = true` if agents "
     "land their own, or a line they may land on in `lands_on` with only what they "
     "may not in `protected = [\"main\", \"staging\"]`."
@@ -1183,14 +1183,14 @@ HELD_BY = (
     "The landing gate: %(who)s is at work in %(tree)s and this landing needs "
     "these files of theirs out of the way first:\n%(files)s\n\n"
     "Nothing of theirs has been touched. Left to git this refuses with "
-    "\"Working directory has staged changes\" and names nobody, which is what "
-    "cost three sessions ten minutes on 2026-08-18. Wait for them to land or to "
+    "\"Working directory has staged changes\" and names nobody. That cost three "
+    "sessions ten minutes on 2026-08-18. Wait for them to land or to "
     "put it aside themselves and run this again, or ask them directly."
 )
 NOTE = (
     "The landing gate set %(count)d leftover file(s) aside in %(tree)s before "
     "this landing. No live session was holding them:\n%(files)s\n\n"
-    "Nothing was discarded — they are in a stash labelled\n  %(label)s\n"
+    "Nothing was discarded. They are in a stash labelled\n  %(label)s\n"
     "and `git -C %(tree)s stash list` shows it."
 )
 NO_SWEEP = (

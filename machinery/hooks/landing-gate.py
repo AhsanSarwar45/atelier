@@ -107,7 +107,7 @@ The one road onto it: rebase your work in your own tree, take the slot with
 branch>`, and give the slot back with `bd merge-slot release`."""
 
 NO_SLOT = """The landing gate: this moves %(ref)s, the line this project's work lands on, and
-nobody is holding the merge slot. Landings are serialised through it so two
+the merge slot is free. Landings are serialised through it so two
 sessions never resolve conflicts in the same tree at once.
 
 Take it with `bd merge-slot acquire` (add `--wait` to queue), fast-forward the

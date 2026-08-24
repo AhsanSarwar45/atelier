@@ -39,10 +39,10 @@ SED = re.compile(r"\bsed\b[^|;&]*?-n\s+['\"]?(\d+),(\d+)p['\"]?\s+(\S+)")
 AWK = re.compile(r"\bawk\b[^|;]*?NR\s*[<>=]{1,2}\s*\d+[^|;]*?\s(\S+)$")
 
 REASON = (
-    "{where} is {lines} lines. Reading it in pieces costs a turn for each "
-    "piece, and a turn is this whole conversation read again — about 117,000 "
-    "tokens on the measured average, to see a part of a file that fits in one "
-    "look.\n\n"
+    "{where} is {lines} lines. Reading it in pieces costs you a turn for each "
+    "piece, and a turn means this whole conversation is read again. On the "
+    "measured average that is about 117,000 tokens to see part of a file that "
+    "fits in one look.\n\n"
     "Read it whole, once:\n"
     "    cat {where}\n\n"
     "Slicing is for files too long to hold. Over {short} lines this gate says "

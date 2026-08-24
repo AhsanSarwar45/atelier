@@ -59,8 +59,9 @@ UNREPORTED = bc.UNREPORTED
 # Said when a goal cannot close because nobody has read it. The reading has no card
 # of its own, so "close the steps" is the wrong instruction for that one.
 UNREAD = (
-    " The reading is not one of them — it has no card. The board sends a reader when "
-    "a job's last piece closes and it signs the goal itself; if that one died, "
+    " The reading is not one of them, because it has no card. The board sends a "
+    "reader when a job's last piece closes and it signs the goal itself. If that "
+    "one died, "
     "`%s --rerun` sends another."
 )
 
@@ -563,8 +564,8 @@ def without_a_copy(cid, goal, root, here):
             "Then claim it from there." % (cid, goal, stood, mine)
         )
     return (
-        "%s is a piece of %s, which makes code, and that job has no copy of its own "
-        "— so the change would be made in %s, where two jobs edit one file under "
+        "%s is a piece of %s, which makes code, and that job has no copy of its own. "
+        "The change would be made in %s, where two jobs edit one file under "
         "each other and neither can see it happening. Cut it one%s and work "
         "there:\n  %s\n"
         "Then claim it from there."
@@ -779,7 +780,7 @@ def main():
 
     if CREATE.search(bare):
         deny(
-            "Cards are not written by hand — that is how the board filled up with work "
+            "Cards are not written by hand. That is how the board filled up with work "
             "nobody could confirm. A job: %(pour)s new --what … --evidence … "
             "--done … --area … --kind …, which pours the goal and its steps together. "
             "A fault this job's own change would touch: %(pour)s under <goal> "
@@ -794,7 +795,7 @@ def main():
         deny(
             "A commit has to name the card it belongs to, because that is what lets "
             "the board tell a written change from a landed one. This commit is being "
-            "made in %s, whose board issues %s — put one of those ids in the message. "
+            "made in %s, whose board issues %s. Put one of those ids in the message. "
             "A card from another project's board does not land a change here."
             % (root, " or ".join(p + "-…" for p in bc.prefixes(root)))
         )
@@ -802,9 +803,9 @@ def main():
 
     if RESOLVE.search(bare):
         deny(
-            "A gate is not opened from the session it is holding — that is the whole "
-            "of its value. The board's own reader opens the one on a job when it has "
-            "read the change; if it died, fire another: "
+            "A gate is not opened from the session it is holding. That is where all "
+            "its value comes from. The board's own reader opens the one on a job when "
+            "it has read the change. If it died, fire another: "
             "`%s <the goal> --rerun`." % bc.tool(root, "review")
         )
         return
@@ -816,8 +817,8 @@ def main():
             if card.get("status") == bc.MANAGER_REVIEW:
                 deny(
                     "%s is waiting on the manager, and no session moves a card out of "
-                    "his column — not forward, not back. He signs it on his own "
-                    "screen." % cid
+                    "their column, not forward and not back. They sign it on their "
+                    "own screen." % cid
                 )
                 return
             if reading and "job" not in (card.get("labels") or []):
@@ -851,8 +852,9 @@ def main():
             if card.get("status") == bc.MANAGER_REVIEW:
                 deny(
                     "%s is waiting on the manager, and no session moves a card out of "
-                    "his column — not to done, not back to the start. He signs it on "
-                    "his own screen. If something is wrong with it, say so and leave "
+                    "their column, not to done and not back to the start. They sign "
+                    "it on their own screen. If something is wrong with it, say so and "
+                    "leave "
                     "it where it is." % cid
                 )
                 return
@@ -860,12 +862,11 @@ def main():
             if shut:
                 deny(
                     "%s is held shut by %s, and this close says the work landed. A "
-                    "gate is a reading somebody is owed: it opens when a reader that "
-                    "did not write the job has read it, and there is no other way to "
-                    "land.\n\nIf this job is not being delivered at all, that is a "
-                    "different thing and has its own route — it resolves the gate in "
-                    "writing and marks the job as never delivered, so the manager's "
-                    "board never counts it as something he got:\n  %s cancel %s "
+                    "gate is a reading somebody is owed. It opens when a reader that "
+                    "did not write the job has read it. Nothing else lands a job.\n\nIf this job is not being delivered at all, it has its "
+                    "own route. That one resolves the gate in writing and marks the job "
+                    "as never delivered, so the manager's board never counts it as "
+                    "something they got:\n  %s cancel %s "
                     "--reason=\"<why this is being dropped>\"\n\nIf it is being "
                     "delivered, let the reader finish; if the reader died, "
                     "`%s %s --rerun` sends another."
@@ -892,8 +893,8 @@ def main():
             if step and len(notes) < 30:
                 deny(
                     "%s is the %s step and has not said what it did here. Every step of "
-                    "every job says the same thing otherwise, which is what made the last "
-                    "board unreadable: say it in the close itself, `bd close %s "
+                    "every job says the same thing otherwise. That is what made the "
+                    "last board unreadable. Say it in the close itself, `bd close %s "
                     "--reason=\"<what you actually ran, decided or found>\"`, or on the "
                     "card with `bd update %s --append-notes=\"…\"`."
                     % (cid, step[5:], cid, cid)
@@ -913,7 +914,7 @@ def main():
                     wrote = wrote_code(cid, card, data.get("session_id"), root)
                     if wrote:
                         deny(
-                            "%s is the %s step, which makes no code — and %d project "
+                            "%s is the %s step, which makes no code, and %d project "
                             "file(s) it changed are still standing under it, starting "
                             "with %s. Put that work on a work item of its own, land it "
                             "under that card, and this step is clear."
@@ -948,8 +949,8 @@ def main():
                         return
                     if bc.held_by(slot_holder(root), data.get("session_id")):
                         deny(
-                            "%s still holds the merge slot. Release it — `bd merge-slot "
-                            "release` — so the next job can land." % cid
+                            "%s still holds the merge slot. Release it with `bd "
+                            "merge-slot release` so the next job can land." % cid
                         )
                         return
                     mine = owned_copies(cid, card, root)
@@ -967,7 +968,7 @@ def main():
                         if loose:
                             deny(
                                 "%s is the teardown and %s still holds work nobody "
-                                "committed:\n%s\nDeal with those first — commit them "
+                                "committed:\n%s\nDeal with those first. Commit them "
                                 "under a card, or put them on a branch of their own. "
                                 "Nothing here will delete them for you."
                                 % (cid, path, loose[:600])
@@ -976,7 +977,8 @@ def main():
                         deny(
                             "%s cannot close while %s is still on the disk: this step "
                             "means the copy is gone, and saying so is not the same as "
-                            "doing it. `git worktree remove` will refuse — git rejects "
+                            "doing it. `git worktree remove` will refuse, because git "
+                            "rejects "
                             "any copy carrying a submodule, and every copy here carries "
                             "vendor/iced. This is the route that works:\n  %s"
                             % (cid, path, removal(path, branch, root))
@@ -986,9 +988,10 @@ def main():
                         deny(
                             "%s belongs to a job the manager signs off, and its goal "
                             "carries nothing for him to look at. Put the page or the "
-                            "picture on the goal — `bd update %s --append-notes=\"…\"` "
-                            "— before it reaches his column; a card he cannot act on "
-                            "is worse there than not there." % (cid, goal)
+                            "picture on the goal with `bd update %s "
+                            "--append-notes=\"…\"` before it reaches their column. A "
+                            "card they cannot act on is worse there than not there."
+                            % (cid, goal)
                         )
                         return
             if not set(card.get("labels") or []) & set(UNREPORTED) \
@@ -998,8 +1001,8 @@ def main():
                     "manager hears about finished work through the page, so writing it "
                     "is part of finishing rather than a debt owed afterwards: "
                     "`report list` finds the one for this job, `report <slug>` brings it "
-                    "up to date, and the link it prints is what goes to him — last in "
-                    "the message, so he does not scroll for it. Then close." % cid
+                    "up to date, and the link it prints is what goes to the manager, "
+                    "last in the message so they do not scroll for it. Then close." % cid
                 )
                 return
             if set(card.get("labels") or []) & set(NO_CODE):
@@ -1015,7 +1018,7 @@ def main():
                 if away:
                     deny(
                         "%s belongs to a job that says its change lands in %s, and that "
-                        "checkout is not on this machine — so nothing here can tell "
+                        "checkout is not on this machine, so nothing here can tell "
                         "whether it landed. Bring the checkout back, or take the "
                         "%s%s label off the goal if the work no longer lands there."
                         % (cid, " and ".join(away), bc.LANDS, away[0])
@@ -1024,8 +1027,8 @@ def main():
                 deny(
                     "%s cannot close: no commit naming it has reached the main line. "
                     "A card is done when its change is merged, not when the work feels "
-                    "finished. Land it first, or — if this card was never going to "
-                    "produce code — label it no-code and say why in the reason."
+                    "finished. Land it first. If this card was never going to produce "
+                    "code, label it no-code and say why in the reason."
                     % cid
                 )
                 return
@@ -1059,15 +1062,15 @@ def main():
                 deny(
                     "%s has work broken out underneath it, so it is a container rather "
                     "than a job: it finishes when its children do, not when someone "
-                    "decides it has. Claim one of them — `bd list --parent %s`."
+                    "decides it has. Claim one of them with `bd list --parent %s`."
                     % (cid, cid)
                 )
                 return
             if "find" in (card.get("labels") or []):
                 deny(
                     "%s is something noticed, not yet a job: it has no proof, no "
-                    "definition of done and no steps. Promote it — %s "
-                    "new --source %s --what … --evidence … --done … --area … — or "
+                    "definition of done and no steps. Promote it with %s "
+                    "new --source %s --what … --evidence … --done … --area …, or "
                     "close it as not real." % (cid, bc.tool(root, "job"), cid)
                 )
                 return

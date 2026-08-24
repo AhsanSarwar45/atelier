@@ -51,36 +51,36 @@ WORKER_REASON = (
     "with no memory of this conversation and cannot see the manager, so a brief "
     "written by anyone but the lead running the job is the one way the "
     "arrangement fails. Either do the work yourself under a claimed card, or "
-    "tell the manager in one line that it wants a lead — he starts one by "
-    "typing `/lead` himself, and you may not start one for him."
+    "tell the manager in one line that it wants a lead. They start one by "
+    "typing `/lead` themselves, and you may not start one for them."
 )
 
 LEAD_REASON = (
-    "A lead is the manager's to start, and he starts it by typing `/lead` "
-    "himself. Nothing in this turn says he did, so this would be a lead he "
-    "never asked for — which has happened, and is what this fence exists to "
-    "stop (mch-1p2). Do the work yourself under a claimed card, or say in one "
-    "line that it wants a lead and leave the asking to him."
+    "A lead is the manager's to start, and they start it by typing `/lead` "
+    "themselves. Nothing in this turn says they did, so this would be a lead "
+    "they never asked for. That has happened before, and stopping it is why "
+    "this fence exists (mch-1p2). Do the work yourself under a claimed card, "
+    "or say in one line that it wants a lead and leave the asking to them."
 )
 
 HELPER_REASON = (
-    "A lead is the manager's to start, and only ever from his own session. A "
-    "helper agent cannot see him, so a lead it starts is one nobody asked for. "
-    "Report what you have and let the session you answer to put it to him."
+    "A lead is the manager's to start, and only ever from their own session. A "
+    "helper agent cannot see them, so a lead it starts is one nobody asked for. "
+    "Report what you have and let the session you answer to put it to them."
 )
 
 SECOND_REASON = (
     "The manager asked for one lead this turn and one has already been started. "
-    "A second is work he has not asked for. Wait for the first to report, and "
-    "if another piece needs a lead of its own, say so and let him type `/lead` "
+    "A second is work they have not asked for. Wait for the first to report. If "
+    "another piece needs a lead of its own, say so and let them type `/lead` "
     "again."
 )
 
 UNREADABLE_REASON = (
     "This turn cannot be read, so there is no proving the manager typed "
-    "`/lead` — and a lead he did not ask for is the one thing this fence "
-    "exists to stop (mch-1p2). If he did ask, the answer is for him to ask "
-    "again; if he did not, this is the refusal working."
+    "`/lead`. A lead they did not ask for is exactly what this fence exists to "
+    "stop (mch-1p2). If they did ask, the answer is for them to ask again. If "
+    "they did not, this is the refusal working."
 )
 
 

@@ -18,11 +18,12 @@ import board_common as bc  # noqa: E402
 ASKS = ("AskUserQuestion",)
 
 REASON = (
-    "A question reaches the manager behind the page that carries it, and this turn "
-    "has not built one. Put the question in the page's own slot for it — every "
-    "answer with what it costs — build it (`report list` finds the one for this "
-    "job, `report <slug>` brings it up to date), then ask, with the link last in "
-    "the message so he does not scroll for it."
+    "You can only ask the manager a question from behind the page that carries it, "
+    "and this turn has not built one. Put the question in the page's own slot, "
+    "giving each answer with what it costs. Then build the page: `report list` "
+    "finds the one for this job and `report <slug>` brings it up to date. Ask "
+    "after that, and put the link last in the message so nobody has to scroll for "
+    "it."
 )
 
 

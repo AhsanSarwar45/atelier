@@ -82,8 +82,8 @@ HANDOVER = (
     "You ticked off %s this turn, and this reply does not end on the link to its "
     "page. Finished work reaches the manager as a page: `report list` finds the one "
     "for this job, `report <slug>` prints its link, and the link goes LAST in the "
-    "message — his standing instruction, so he does not scroll back up for the one "
-    "thing he is meant to click."
+    "message. That is the manager's standing instruction, so they do not have to "
+    "scroll back up to find the link they are meant to click."
 )
 
 
@@ -95,7 +95,7 @@ HABIT = (
     "He is pointing at how you work, not at one wrong answer: %(what)s.\n\n"
     "Answering the examples he named leaves whatever produced them running, and it "
     "produces them again next week. Before this reply ends, the CAUSE goes on the "
-    "board — one card naming the thing that let this happen, not the instances:\n"
+    "board as one card naming what let this happen, not the instances:\n"
     '    %(pour)s find "<what is wrong>" "<where it is, how it shows>" '
     "--area <system> --kind bug\n"
     "`--area board` for the way work runs, `tooling`, `docs` or `tests` when the "
@@ -357,7 +357,7 @@ def main():
             "(`bd update <id> --claim`), or pour the job first "
             "(`%s new --what … --evidence … --done … --area …`) "
             "and claim its first step. "
-            "Your board name is %s — it is stamped on automatically, so run "
+            "Your board name is %s. It is stamped on automatically, so run "
             "board commands on their own rather than chained after another tool.%s"
             % (len(orphan), ", ".join(orphan[:6]), bc.tool(root, "job"), name,
                ("\n\nThese are claimed under the shared machine name and own "
@@ -393,13 +393,13 @@ def main():
     if found and not made:
         block(
             'Your reply reports something left standing ("%s") and this turn '
-            "recorded nothing. A fault never stays in the session's memory — it goes "
-            "one of two ways before you finish, and there is no third:\n"
-            "  RELATED — the same change would touch it, or it shares this job's "
+            "recorded nothing. A fault never stays in the session's memory. It goes "
+            "one of two ways before you finish, and those are the only two:\n"
+            "  RELATED: the same change would touch it, or it shares this job's "
             "cause. It is a work item on the current goal, and you fix it in this "
             "job rather than hand it on:\n"
             '    %s under <goal> --do "<what to do>|<how we know it is done>"\n'
-            "  SEPARATE — another system or another cause, or it would swell this job "
+            "  SEPARATE: another system or another cause, or it would swell this job "
             "past the done it was poured with. It is its own card:\n"
             '    %s find "<what is wrong>" "<where it is, how it shows>"'
             " --area <system> --kind <bug|feature|chore>\n"
@@ -414,7 +414,7 @@ def main():
             block(
                 "A card you made this turn does not say how anyone would know it is "
                 "done, so nobody can ever close it honestly:\n\n%s\n"
-                "Fill it in — `bd update <id> --acceptance=\"<the command, and the "
+                "Fill it in with `bd update <id> --acceptance=\"<the command, and the "
                 "number or image it must produce>\"`." % out.strip()[:1200]
             )
             return
@@ -423,7 +423,8 @@ def main():
             block(
                 "Every card carries two tags, and these do not: %s. One says which "
                 "system it belongs to (`area:`), one says what kind of work it is "
-                "(`kind:` — bug, feature or chore). Without both, the board cannot be "
+                "(`kind:`, meaning bug, feature or chore). Without both, the board "
+                "cannot be "
                 "read by system or by kind. `bd update <id> --add-label area:<system> "
                 "--add-label kind:<bug|feature|chore>`, or pour the card again through "
                 "`%s`, which requires both."

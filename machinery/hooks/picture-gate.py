@@ -29,16 +29,16 @@ PICTURES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", "
 LOOKER = "screen-check"
 
 REASON = (
-    "A picture read here goes into this conversation, and this conversation is "
-    "read again in full on every turn that follows — so the picture is paid for "
-    "on every one of them, not once. Ten sessions spent about forty dollars "
+    "A picture read here goes into this conversation, and the whole conversation "
+    "is read again on every turn that follows. You pay for that picture on every "
+    "one of those turns, not once. Ten sessions spent about forty dollars "
     "carrying 53 of them, more than on anything else they did.\n\n"
     "Send `screen-check` instead. It looks at the picture itself and returns "
     "what it sees in words, and the picture dies with it:\n"
     "    Agent(subagent_type=\"screen-check\", prompt=\"Look at {where} and say "
     "whether <what you need to know>\")\n\n"
-    "If what you need is a fact about the file rather than what it shows — that "
-    "it exists, how big it is, when it changed — ask for that instead."
+    "If you only need a fact about the file rather than what it shows, such as "
+    "whether it exists, how big it is or when it changed, ask for that instead."
 )
 
 

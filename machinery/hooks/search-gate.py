@@ -65,7 +65,7 @@ REASON = (
     "named in it for free.\n\n"
     "Run it as:\n"
     "    {fixed}\n\n"
-    "Patterns are ripgrep's regex, which is what `grep -E` speaks. `grep` "
+    "Patterns are ripgrep's regex. That is what `grep -E` speaks too. `grep` "
     "down a pipe or over a named file is untouched — only a walk of a tree "
     "is refused."
 )

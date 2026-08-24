@@ -12,6 +12,7 @@ the markers there and the output follows.
     python3 machinery/voice-check.py --chat 12    what the last 12 sessions actually wrote
 """
 import argparse
+import ast
 import glob
 import json
 import os
@@ -27,7 +28,7 @@ TARGETS = [
     ".claude/agents/*.md",
     ".claude/skills/*/SKILL.md",
     ".claude/commands/*.md",
-    "machinery/hooks/board-prime.py",
+    "machinery/hooks/*.py",
     "reporting/README.md",
 ]
 
@@ -94,11 +95,48 @@ def drop_label_dashes(text):
     return "\n".join(out)
 
 
+# A pattern, a key or a fragment of shell is not English and must not be weighed
+# as if it were.
+CODEY = re.compile(r"\\[sbdwSBDW]|\(\?|^\^|^[A-Za-z_.]+$|^--|^/")
+
+
+def spoken(path):
+    """The strings a hook prints into an agent's tool result.
+
+    This is the channel that teaches the voice: a gate's refusal arrives in the
+    same place a reply does, every session, and an agent copies it. A docstring
+    inside the same file is a note to whoever edits the file, read no more often
+    than any other source in the repo, so it is left out.
+    """
+    try:
+        tree = ast.parse(open(path, encoding="utf-8", errors="replace").read())
+    except SyntaxError:
+        return ""
+    docs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            body = getattr(node, "body", None) or []
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                    and isinstance(body[0].value.value, str):
+                docs.add(id(body[0].value))
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        if id(node) in docs:
+            continue
+        v = node.value.strip()
+        if len(v.split()) < 4 or CODEY.search(v):
+            continue
+        out.append(v)
+    return "\n".join(out)
+
+
 def prose(path):
-    """The words a reader takes as an example. For Python, only the docstrings."""
+    """The words a reader takes as an example. For Python, what it says to an agent."""
     text = open(path, encoding="utf-8", errors="replace").read()
     if path.endswith(".py"):
-        text = "\n".join(re.findall(r'"""(.*?)"""', text, re.S))
+        text = spoken(path)
     text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)   # frontmatter
     text = re.sub(r"```.*?```", " ", text, flags=re.S)          # fenced code
     # A block another tool generates and stamps with its own hash is not ours to
@@ -241,6 +279,15 @@ def selftest():
         if "—" not in drop_label_dashes(line):
             faults.append("label exemption: a prose dash was let through as a label: %s" % line)
 
+    # A hook teaches the voice through what it says to an agent, not through the
+    # notes it keeps for whoever edits it.
+    sample = os.path.join(ROOT, "machinery/hooks/picture-gate.py")
+    said = spoken(sample)
+    if "screen-check" not in said:
+        faults.append("spoken(): a gate's refusal text was not read")
+    if "Fails open" in said:
+        faults.append("spoken(): a note to the editor was read as if an agent saw it")
+
     style = os.path.join(ROOT, ".claude/output-styles/manager.md")
     if not os.path.isfile(style):
         faults.append("the manager style file is not where this expects it")
@@ -253,7 +300,7 @@ def selftest():
     for f in faults:
         print("  " + f)
     print("voice-check --selftest: %d rules, %d faults"
-          % (len(BANNED) + 3 + len(LABEL_EXEMPT) + len(LABEL_COUNTED), len(faults)))
+          % (len(BANNED) + 5 + len(LABEL_EXEMPT) + len(LABEL_COUNTED), len(faults)))
     return 1 if faults else 0
 
 
