@@ -94,6 +94,9 @@ gate = hook("board-gate")
 # place of its state reader stands it in front of all of them. Kept from before
 # the first case runs, for the cases that write real state and read it back.
 REAL_STATE = (touch.bc.load, touch.bc.save)
+# The same for the name a session works under: several cases below stand a fixed
+# one in front of it, and the cases for the name itself need the real one back.
+REAL_ACTOR = touch.bc.actor
 status = hook("board-status-gate")
 reading = hook("habit-reading")
 runner = touch.run
@@ -697,6 +700,10 @@ def landed(merge_fails, release_fails=False, main_on="main", litter=(),
     land.gate.leftovers = lambda tree: list(litter)
     land.gate.holding = lambda tree, paths, root, when=None: dict(held_by or {})
     land.gate.sweep = swept
+    # A board that answers no cards at all, so these cases stay about the slot and
+    # the merge: what a landing then closes is asked of a real repository in
+    # `landing_closes` below.
+    kept_bd, land.bc.bd = land.bc.bd, lambda args, root=None: (True, "[]")
     # Restored: this suite decides whether to run itself again by looking at its
     # own arguments, and a case that leaves somebody else's there makes every run
     # spawn two more, without end (mch-aa9.10).
@@ -709,7 +716,127 @@ def landed(merge_fails, release_fails=False, main_on="main", litter=(),
         out.write(str(stop))
     finally:
         sys.argv, sys.stdout = keep, kept_out
+        land.bc.bd = kept_bd
     return dict(seen, asked=asked, said=out.getvalue())
+
+
+# A job at the moment its branch is being landed: the goal, two work items and a
+# step card of its own. The step card is here because the landing must never
+# touch one — a step says what it did and is closed by the session that ran it.
+JOB_CARDS = [
+    {"id": "tst-j", "status": "in_progress", "issue_type": "epic", "priority": 1,
+     "labels": ["job", "area:board", "kind:chore"],
+     "metadata": {"spine": "work,checks,review,land", "area": "board",
+                  "kind": "chore", "subject": "a job", "checks": "./check",
+                  "done": "`./check` reports 0 failures"}},
+    {"id": "tst-j.1", "status": "in_progress", "issue_type": "task",
+     "title": "the first item", "labels": ["step:work", "of:tst-j", "area:board",
+                                           "kind:chore"]},
+    {"id": "tst-j.2", "status": "open", "issue_type": "task",
+     "title": "the second item", "labels": ["step:work", "of:tst-j", "area:board",
+                                            "kind:chore"]},
+    {"id": "tst-j.8", "status": "open", "issue_type": "task",
+     "title": "Land: a job", "labels": ["step:land", "of:tst-j", "no-code",
+                                        "area:board", "kind:chore"]},
+]
+# The commits of an ordinary landing: one per item, each naming the item it
+# carries, the way every commit here names its card.
+JOB_COMMITS = [("one", "fix(board): tst-j.1 the first half of the change"),
+               ("two", "fix(board): tst-j.2 the second half of the change")]
+WHO_LANDS = "j-1a2b3c4d"
+
+
+def landing_closes(commits=JOB_COMMITS, rows=None, refuse=(), goal="tst-j"):
+    """What a landing closes and opens once its merge has gone through.
+
+    The commits are real ones in a throwaway repository, so the range the landing
+    reads is a `git log` and not an answer somebody wrote for it. The board is a
+    recorder, as everywhere else here — and the closing half is called on its own,
+    with the two shas the merge moved the trunk between, so no merge slot and no
+    second checkout are needed to ask what it closes.
+
+    `refuse` names the items the board will not close, which is a real answer: an
+    item may be held by this same session under another tree's name.
+    """
+    spec = importlib.util.spec_from_loader(
+        "board_land", importlib.machinery.SourceFileLoader(
+            "board_land", os.path.join(HOME, "board", "land")))
+    land = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(land)
+    pin()
+    where = tempfile.mkdtemp()
+
+    def g(*args):
+        return subprocess.run(["git"] + list(args), cwd=where, capture_output=True,
+                              text=True).stdout.strip()
+
+    g("init", "-q", "-b", "main", ".")
+    g("config", "user.email", "selftest@example.com")
+    g("config", "user.name", "selftest")
+    open(os.path.join(where, "first"), "w").write("first\n")
+    g("add", "-A")
+    g("commit", "-m", "the file this case starts from")
+    before = g("rev-parse", "HEAD")
+    for name, message in commits:
+        open(os.path.join(where, name), "w").write("changed\n")
+        g("add", "-A")
+        g("commit", "-m", message)
+
+    cards = {r["id"]: dict(r, labels=list(r.get("labels") or []))
+             for r in (rows if rows is not None else JOB_CARDS)}
+    asked, shut = [], []
+
+    def recorder(args, root=None):
+        asked.append(" ".join(args))
+        if args[:2] == ["list", "--parent"]:
+            return True, json.dumps([c for c in cards.values() if c["id"] != args[2]])
+        if args[0] == "show":
+            return True, json.dumps(cards.get(args[1], {}))
+        if args[0] == "create":
+            made = {"id": goal + ".9", "status": "open", "issue_type": "task",
+                    "title": args[args.index("--title") + 1],
+                    "labels": [args[i + 1] for i, w in enumerate(args) if w == "-l"]}
+            cards[made["id"]] = made
+            return True, json.dumps({"id": made["id"]})
+        if args[0] == "update":
+            row = cards.setdefault(args[1], {"id": args[1]})
+            for flag, key in (("-a", "assignee"), ("-s", "status")):
+                if flag in args:
+                    row[key] = args[args.index(flag) + 1]
+            if "--set-labels" in args:
+                row["labels"] = args[args.index("--set-labels") + 1].split(",")
+            return True, "{}"
+        return True, "[]"
+
+    def closing(args):
+        shut.append(" ".join(args))
+        if args[0] != "close":
+            return True, ""
+        if args[1] in refuse:
+            return False, "%s is held by somebody else" % args[1]
+        cards[args[1]]["status"] = "closed"
+        return True, "closed %s" % args[1]
+
+    # One `board_common` answers land and the run alike, so the recorder stands
+    # in front of both of them at once.
+    keep = (land.bc.bd, land.board, land.ROOT, land.HERE_TREE, runner._RULES)
+    land.bc.bd = recorder
+    land.board = closing
+    land.ROOT = where
+    land.HERE_TREE = os.path.join(where, "worktrees", goal)
+    try:
+        found = land.what_landed(goal, where, "%s..HEAD" % before)
+        closed, refused, fresh, held_back = land.close_landed(goal, found, WHO_LANDS)
+        job = land.job_of(goal + ".1")
+    finally:
+        (land.bc.bd, land.board, land.ROOT, land.HERE_TREE,
+         runner._RULES) = keep
+        shutil.rmtree(where, ignore_errors=True)
+    return {"closed": [c for c, _ in closed], "refused": refused, "opened": fresh,
+            "held_back": held_back, "asked": asked, "shut": shut, "job": job,
+            "still_open": [c["id"] for c in cards.values()
+                           if c.get("status") not in ("closed", None)
+                           and "step:work" in (c.get("labels") or [])]}
 
 
 def counted(issued):
@@ -841,7 +968,7 @@ def stopping(claims, closed, held, asked=True):
     gate.bc.load = lambda sid: dict(state)
     gate.bc.save = lambda sid, s: None
     gate.bc.now = lambda: T + 50
-    gate.bc.held = lambda name, root=None: list(held)
+    gate.bc.held = lambda name, root=None, session_id=None: list(held)
     gate.bc.machine_name = lambda root=None: "someone"
     gate.bc.reviewing = lambda: ""
     gate.bc.actor = lambda sid, cwd: "test-session"
@@ -1455,7 +1582,7 @@ def carrying_on(held, closed=(), goals=(), asked=False, helper=False, pushes=0,
     gate.bc.load = lambda sid: dict(state)
     gate.bc.save = lambda sid, s: kept.update(s)
     gate.bc.now = lambda: T + 50
-    gate.bc.held = lambda name, root=None: list(held)
+    gate.bc.held = lambda name, root=None, session_id=None: list(held)
     gate.bc.machine_name = lambda root=None: "someone"
     gate.bc.reviewing = lambda: ""
     gate.bc.actor = lambda sid, cwd: "test-session"
@@ -1536,7 +1663,7 @@ def closing(cmd, labels=()):
     kept = (touch.run.card, touch.run.advance, touch.run.started, touch.bc.held)
     touch.bc.load, touch.bc.save = REAL_STATE
     touch.bc.reviewing = lambda: ""
-    touch.bc.held = lambda name, root=None: []
+    touch.bc.held = lambda name, root=None, session_id=None: []
     touch.run.card = lambda cid, *a, **k: {"id": cid, "labels": list(labels)}
     touch.run.advance = lambda cid, *a, **k: None
     touch.run.started = lambda cid, *a, **k: None
@@ -1571,7 +1698,7 @@ def reporting(said, made=()):
     gate.bc.load = lambda sid: dict(state)
     gate.bc.save = lambda sid, s: None
     gate.bc.now = lambda: T + 50
-    gate.bc.held = lambda name, root=None: ["c"]
+    gate.bc.held = lambda name, root=None, session_id=None: ["c"]
     gate.bc.machine_name = lambda root=None: "someone"
     gate.bc.reviewing = lambda: ""
     gate.bc.actor = lambda sid, cwd: "test-session"
@@ -1616,7 +1743,7 @@ def pointed_at(verdict, made=(), prompt="habit-case", said=None, standing=()):
     gate.bc.load = lambda sid: dict(state)
     gate.bc.save = lambda sid, s: None
     gate.bc.now = lambda: T + 50
-    gate.bc.held = lambda name, root=None: ["c"]
+    gate.bc.held = lambda name, root=None, session_id=None: ["c"]
     gate.bc.machine_name = lambda root=None: "someone"
     gate.bc.reviewing = lambda: ""
     gate.bc.actor = lambda sid, cwd: "test-session"
@@ -1822,7 +1949,7 @@ REAL_SPINE = status.unfinished_spine
 
 
 def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
-             where=None):
+             where=None, by_label=False):
     """What the gate says to a session claiming a new job's first step, while it
     still owns the scratch copy — whose own job either has work left, or does not.
 
@@ -1840,6 +1967,10 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
     spent from the moment its work closes, which is the moment its checks, its
     reader's findings, its record and its landing are claimed — so read without
     care this refusal tells a session to finish the job before starting it.
+
+    `by_label` is how a claim records the copy it was made in now: on the card,
+    while the name it is held under says only which session (bw-aczr.2). Off, it
+    is the old spelling, which a claim made before the change still carries.
     """
     goal = {"id": "tst-old", "issue_type": "epic", "labels": ["job"],
             "metadata": {"spine": order} if order else {}}
@@ -1865,6 +1996,13 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
             return True, json.dumps(parented if args[2] == "tst-old" else [])
         if args[0] == "list" and "--assignee" in args:
             held = args[args.index("--assignee") + 1]
+            if by_label:
+                # The name says no folder at all, so a reading that still went by
+                # the name finds no copy here and the refusal never fires.
+                return True, json.dumps(
+                    [{"id": "tst-old.1",
+                      "labels": ["of:tst-old", "copy:second"]}]
+                    if held == "s-selftest" else [])
             return True, json.dumps(
                 [{"id": "tst-old.1", "labels": ["of:tst-old"]}]
                 if held == "second-selftest" else [])
@@ -1874,6 +2012,9 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
     status.bc.reviewing = lambda: ""
     # An earlier case stubs this out; here it is the thing under test.
     status.unfinished_spine = REAL_SPINE
+    # And so is the name the session works under, for `by_label`: earlier cases
+    # stand a fixed one in front of it, and this one asks the board by it.
+    was_actor, status.bc.actor = status.bc.actor, REAL_ACTOR
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest",
          "cwd": where or os.path.join(tmp, "worktrees",
@@ -1887,6 +2028,7 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
         status.main()
     finally:
         sys.stdout = keep
+        status.bc.actor = was_actor
         if here is not None:
             os.environ["CLAUDE_PROJECT_DIR"] = here
     said = out.getvalue().strip()
@@ -2398,8 +2540,11 @@ def main():
 
             # A step that makes no code is read and written from wherever the
             # session stands, and is handed over with nothing said about copies.
+            # Which copy it is being worked in still goes onto the card, because
+            # the name it is handed to says only which session (bw-aczr.2).
             asked, held = handed_on("h.2", ITEMS, here=tmp, root=tmp)
-            assert "update h.next -a %s -s in_progress" % ME in asked and not held, \
+            assert "update h.next -a %s -s in_progress --add-label copy:main" % ME \
+                in asked and not held, \
                 "a step that makes no code was held back for want of a copy it "\
                 "never needed: %s" % (held or asked)
 
@@ -2407,9 +2552,11 @@ def main():
                            cwd=tmp, capture_output=True)
             inside, held = handed_on("h.2", ITEMS, order="work,record,land",
                                      here=MINE, root=tmp)
-            assert "update h.next -a %s -s in_progress" % ME in inside and not held, \
+            assert "update h.next -a %s -s in_progress --add-label copy:h" % ME \
+                in inside and not held, \
                 "a session standing in the job's own copy was refused the step it "\
-                "closed the one before: %s" % (held or inside)
+                "closed the one before, or was handed it without the copy it is "\
+                "being worked in: %s" % (held or inside)
         finally:
             runner.bc.landings = keep_lands
     finally:
@@ -2437,7 +2584,7 @@ def main():
     touch.bc.reviewing = lambda: ""
     touch.bc.prefix = lambda root=None: "tst"
     touch.bc.actor = lambda sid, cwd: "here-99999999"
-    touch.bc.held = lambda name, root=None: []
+    touch.bc.held = lambda name, root=None, session_id=None: []
     touch.run.card = lambda cid, root: {"id": cid, "status": "closed",
                                         "labels": ["step:work", "of:tst-h"]}
     touch.run.advance = lambda cid, root, actor=None, here=None: \
@@ -3311,6 +3458,14 @@ def main():
         assert unknown == "", \
             "a job whose order was never recorded was read as finished: %s" % unknown
 
+        # Which copy a card was claimed in is read off the card's own label, not
+        # off the name it is held under: one session has one name wherever it
+        # stands (bw-aczr.2), and that name carries no folder to read.
+        labelled = next_job(tmp, work_left=False, by_label=True)
+        assert "nothing left to build in it" in labelled and "tst-old" in labelled, \
+            "the abandoned copy was not found from the `copy:` label the claim " \
+            "wrote onto the card: %s" % (labelled or "ALLOWED")
+
         part = next_job(tmp, work_left=True, half=True)
         assert part == "", \
             "a stage with one piece closed and one still open was read as built, " \
@@ -3579,6 +3734,53 @@ def main():
         code, said = pour(shape)
         assert code != 0 and WORDS in said, \
             "`job %s` accepted a line only its author can read: %s" % (shape[0], said)
+
+    # One refusal that names every fault of the pour. Over 537 sessions the board
+    # wrote 611 refusals and 54 of the 105 refused pours took two to five tries
+    # each: every try fixed the one fault it was told about and met the next one
+    # (bw-aczr.1). Nothing here reaches the board, so all of it is said at once.
+    code, said = pour(["new", "--what", UNREADABLE, "--evidence", "short",
+                       "--done", "it works", "--not", NOT_IN, "--area", AREA,
+                       "--kind", "bug", "--judge", "agent"])
+    assert code != 0, "a pour with three faults in it was accepted: %s" % said
+    for fault, wanted in (
+            ("a title only its author can read", WORDS),
+            ("evidence that says nothing",
+             "--evidence must say what makes this real today"),
+            ("a finish line nobody can run", "--done names nothing anyone can run")):
+        assert wanted in said, \
+            "a pour carrying three faults was refused without naming %s, so the " \
+            "next try meets it and pays another round trip: %s" % (fault, said)
+    assert "3 things wrong" in said, \
+        "the pour named its faults without saying how many there are: %s" % said
+
+    # Several work items on one command, each fault carrying the item it belongs
+    # to: a batch refused as a whole leaves a session guessing which of six to fix.
+    code, said = pour(["under", "g", "--do", "%s|it works" % UNREADABLE,
+                       "--do", READABLE])
+    assert code != 0 and "--do #1" in said and "--do #2" in said, \
+        "two faulty work items on one command were refused without saying which " \
+        "item each fault belongs to: %s" % said
+    assert WORDS in said and "has no second half" in said, \
+        "a batch of work items was refused on the first fault of the first item, " \
+        "so the second item is met on the try after: %s" % said
+
+    # And the refusals argparse writes itself, which are 20 of those 611: it names
+    # the one flag you got wrong, so a session feels its way to the shape one flag
+    # at a time. Both whole commands are printed instead.
+    for name, argv in (("a flag that is not there", ["new", "--wat", "x"]),
+                       ("a flag left out", ["new", "--what", READABLE])):
+        code, said = pour(argv)
+        assert code != 0, "%s was poured anyway: %s" % (name, said)
+        assert "%s new \\" % bars.EG_POUR in said and "--judge agent" in said, \
+            "%s was handed the rule it broke and not the whole `job new` to " \
+            "type: %s" % (name, said)
+        assert "%s under <the goal id>" % bars.EG_POUR in said, \
+            "%s was never shown how a job's work items are poured: %s" % (name, said)
+
+    print("ok: a pour is refused once with every fault of it named and counted, "
+          "each work item's faults carry the item they belong to, and a flag typed "
+          "wrong or left out prints both whole commands to type")
 
     # A word list that cannot be read refuses rather than waves through: a check
     # that could not run is not a check that passed.
@@ -3957,6 +4159,82 @@ def main():
               "one, a line saying why it stands alone opens it and is written onto "
               "the card, a reason that says nothing is refused, a closed goal is "
               "nothing to fold into, and a work item is never asked")
+
+        # A small job pours its one work item in the same command that opens its
+        # goal. `--size` used to write a tag nothing on this board ever read, so a
+        # small job still paid a second command to say the one thing it already
+        # knew while its goal was being written (bw-aczr.5).
+        ONE_ITEM = ("The board keeps two cards for one page|`cargo test` reports 0 "
+                    "failures with one card left")
+        ANOTHER = ("The count above the list names one row too few|`cargo test` "
+                   "reports 0 failures with every row counted")
+        board(goals=[])
+        code, said, err, asked = opens("--size", "small", "--do", ONE_ITEM)
+        assert code == 0, \
+            "a small job pouring its one work item was refused: %s" % (said + err)
+        made = [l for l in asked if l.startswith("create ")]
+        assert len(made) == 2, \
+            "a small job did not open its goal and pour its one work item in the " \
+            "same command: %s" % made
+        assert "--parent tst-made1" in made[1] and "-l step:work" in made[1] \
+            and "-l of:tst-made1" in made[1], \
+            "what a small job poured is not an open work item of its goal, so the " \
+            "run has nothing to move on from: %s" % made[1]
+        assert said.splitlines()[0].startswith("tst-made1") and "tst-made2" in said, \
+            "a small job printed neither the goal it opened nor the item it " \
+            "poured, so nobody can claim either: %s" % said
+        assert "nothing left to pour" in said, \
+            "a small job whose item is already on the board was left looking for " \
+            "the command that pours it: %s" % said
+        assert "runs: work → checks → review → land" in said, \
+            "a small job runs something other than the run every job runs: %s" % said
+
+        # The item is held to the shape `job under` holds one to, by the same code:
+        # one list of bars, so the two routes onto the board cannot drift apart.
+        board(goals=[])
+        code, said, err, asked = opens(
+            "--size", "small", "--do", "The board keeps two cards for one page")
+        assert code != 0 and "has no second half" in (said + err), \
+            "a small job's work item was held to something other than the shape " \
+            "`job under` holds one to: %s" % (said + err)
+
+        # Exactly one, and only for a small job. A job with more than one item is
+        # not a small one, and a job that size decides what its items are after its
+        # goal is open.
+        for name, extra, wanted in (
+                ("a medium job handed a work item",
+                 ("--size", "medium", "--do", ONE_ITEM),
+                 "does not pour its work items here"),
+                ("a large job handed a work item",
+                 ("--size", "large", "--do", ONE_ITEM),
+                 "does not pour its work items here"),
+                ("a small job handed no work item", ("--size", "small"),
+                 "needs exactly one --do"),
+                ("a small job handed two work items",
+                 ("--size", "small", "--do", ONE_ITEM, "--do", ANOTHER),
+                 "needs exactly one --do")):
+            board(goals=[])
+            code, said, err, asked = opens(*extra)
+            assert code != 0 and wanted in (said + err), \
+                "%s was poured anyway: %s" % (name, said + err)
+            assert not [l for l in asked if l.startswith("create ")], \
+                "%s was refused after the board had been written: %s" % (name, asked)
+
+        board(goals=[])
+        code, said, err, asked = opens("--size", "medium", "--do", ONE_ITEM)
+        assert "under <the goal id> --do" in (said + err), \
+            "a medium job handed a work item was refused without being told where " \
+            "its items go: %s" % (said + err)
+
+        board(goals=[])
+        code, said, err, asked = ran(["new", "--help"])
+        assert "small: one work item, poured here with --do" in said, \
+            "the help for --size still describes a tag nobody reads: %s" % said
+
+        print("ok: a small job pours its one work item in the command that opens "
+              "its goal, prints both ids, runs what every job runs, holds the item "
+              "to the shape `job under` holds one to, and refuses a second item, no "
+              "item at all, or a medium or large job handed one")
 
         # A placeholder filled in where it stands (bw-7dqe). The route this replaced
         # closed the bare card as finished and opened a fresh one beside it, so the
@@ -5651,22 +5929,37 @@ def main():
 
     # One session holding two cards, which is the ordinary way of working here:
     # it left these files in the checkout the landing lands in and then claimed
-    # something from a tree of its own, inside the same lease. The refusal has to
-    # call it by the tree the files are in; the name it holds elsewhere sends
-    # whoever reads it to a checkout with nothing of the sort in it.
+    # something from a tree of its own, inside the same lease. Both are held under
+    # the one name it answers to wherever it stands (bw-aczr.2), so the refusal
+    # calls it that once and never reads as two sessions.
+    one_name = "s-" + LIVE_SID[:8]
     got = landing_in(["theirs.txt"],
-                     live=[(LIVE_SID, "lit-9.3", "main-" + LIVE_SID[:8],
-                            ["theirs.txt"]),
-                           (LIVE_SID, "lit-9.4", "bw-vb2-" + LIVE_SID[:8], [])])
+                     live=[(LIVE_SID, "lit-9.3", one_name, ["theirs.txt"]),
+                           (LIVE_SID, "lit-9.4", one_name, [])])
     assert got["refused"], \
         "a landing walked over the half-done work of a session still at it: %r" \
         % got["said"]
-    assert ("main-" + LIVE_SID[:8]) in got["said"], \
-        "the refusal names the session by a tree it moved on to rather than by " \
-        "the one its files are sitting in: %r" % got["said"]
-    assert ("bw-vb2-" + LIVE_SID[:8]) not in got["said"], \
-        "the refusal carries a name from another tree as well, so it reads as " \
-        "two sessions where there is one: %r" % got["said"]
+    assert one_name in got["said"], \
+        "the refusal names the session by something other than the name the board " \
+        "is holding its cards under: %r" % got["said"]
+    assert got["said"].count("is at work in") == 1, \
+        "one session working in two trees was named twice, so the refusal reads " \
+        "as two sessions where there is one: %r" % got["said"]
+
+    # The same session as it stood before a name lost its folder: it holds those
+    # two cards under two old spellings, and a refusal calling it by the name it
+    # would take today names a holder the board has never heard of. Compat, and
+    # this half goes once no old-style claim is open.
+    old = landing_in(["theirs.txt"],
+                     live=[(LIVE_SID, "lit-9.3", "main-" + LIVE_SID[:8],
+                            ["theirs.txt"]),
+                           (LIVE_SID, "lit-9.4", "bw-vb2-" + LIVE_SID[:8], [])])
+    assert old["refused"] and one_name not in old["said"], \
+        "the refusal named a session by a name the board is holding nothing " \
+        "under: %r" % old["said"]
+    assert ("main-" + LIVE_SID[:8]) in old["said"] \
+        or ("bw-vb2-" + LIVE_SID[:8]) in old["said"], \
+        "the refusal names nobody the board has heard of: %r" % old["said"]
 
     # The push spelling, which is how work lands here and the strict one: every
     # tracked change blocks it, whether or not the landing goes near the file.
@@ -5868,6 +6161,70 @@ def main():
           "name and queues for it, sets aside leftovers no live session holds before "
           "merging and refuses by name the ones somebody holds, merges, and gives the "
           "slot back — when the merge fails as well, and says so loudly when it cannot")
+
+    # The closes were 968 by hand over 63 jobs, each its own turn and its own
+    # round trip past the gate that asks whether a commit naming the card is on
+    # the main line. The landing has just put those commits there (bw-aczr.3).
+    shipped = landing_closes()
+    assert shipped["closed"] == ["tst-j.1", "tst-j.2"], \
+        "a landing did not close the work items its own commits carried: %s" % shipped
+    assert all("--actor " + WHO_LANDS in c for c in shipped["shut"]), \
+        "a landing closed a card under a name that is not the landing session's: %s" \
+        % shipped["shut"]
+    assert all(re.search(r"--reason landed at [0-9a-f]{7,}: \S", c)
+               for c in shipped["shut"]), \
+        "a close made by the landing does not say where the work landed: %s" \
+        % shipped["shut"]
+    assert [r["id"] for r in shipped["opened"]] == ["tst-j.9"], \
+        "the step after the work never opened, so the job stops where the landing " \
+        "left it: %s" % shipped
+    assert shipped["opened"][0].get("assignee") == WHO_LANDS, \
+        "the step the landing opened was handed to nobody, so a job claimed once " \
+        "needs claiming again: %s" % shipped["opened"]
+    assert "step:checks" in shipped["opened"][0].get("labels", []), \
+        "what opened after the work was not the checks step: %s" % shipped["opened"]
+    assert shipped["job"] == "tst-j", \
+        "the landing read a work item's job off something other than its `of:` " \
+        "label: %s" % shipped["job"]
+
+    # Never a step card, whatever its commit says. A step is proved by what it
+    # wrote on itself, and a landing has nothing to say about that.
+    a_step = landing_closes(commits=JOB_COMMITS + [
+        ("three", "chore(board): tst-j.8 the teardown, named by a landed commit")])
+    assert "tst-j.8" not in a_step["closed"], \
+        "a landing closed a step card of the job because a commit named it: %s" \
+        % a_step["closed"]
+
+    # And only the item's own name. The close gate widens to the step above a
+    # work item; a landing does not, because a `bd` run from a subprocess never
+    # reaches that gate and a looser check is the gate switched off.
+    by_goal = landing_closes(commits=[("one", "fix(board): tst-j the job itself")])
+    assert by_goal["closed"] == [], \
+        "a landing closed work items on a commit that names only their goal: %s" \
+        % by_goal["closed"]
+    lookalike = landing_closes(commits=[("one", "fix(board): tst-j.11 another item")])
+    assert lookalike["closed"] == [], \
+        "a landing closed tst-j.1 on a commit naming tst-j.11: %s" % lookalike["closed"]
+    assert landing_closes(commits=[JOB_COMMITS[0]])["closed"] == ["tst-j.1"], \
+        "a landing closed an item no commit of it named, or missed one it did"
+    assert landing_closes(commits=[JOB_COMMITS[0]])["still_open"] == ["tst-j.2"], \
+        "an item nothing landed for was closed with the rest"
+    assert [r["id"] for r in landing_closes(commits=[JOB_COMMITS[0]])["opened"]] == [], \
+        "the run moved past the work while an item of it was still open"
+
+    # One item the board will not have is no reason to leave the others open: the
+    # assignee may be this same session under another tree's name.
+    partly = landing_closes(refuse=("tst-j.1",))
+    assert partly["closed"] == ["tst-j.2"] and partly["refused"], \
+        "one refused close stopped a landing closing the rest: %s" % partly
+    assert "held by somebody else" in partly["refused"][0][1], \
+        "a landing swallowed the board's own refusal, so nobody can see which item " \
+        "is still open and why: %s" % partly["refused"]
+
+    print("ok: a landing closes the work items its own commits carried, under the "
+          "landing session's name and saying where each landed, hands the next step "
+          "to that session, and never touches a step card, an item named only by its "
+          "goal or a lookalike id")
 
     # A step is proved by a note or by the reason its close is carrying, and the
     # two answer to the same bar: `bd close --reason` writes neither the notes nor

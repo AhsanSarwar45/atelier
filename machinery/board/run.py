@@ -445,6 +445,11 @@ def hand_over(piece, actor, root, only_if_free=False, here=None):
     if nowhere:
         return HELD_BACK % (cid, nowhere)
     args = ["update", cid, "-a", actor, "-s", "in_progress"]
+    # Which copy the work is being done in, written onto the card because the
+    # board name no longer carries it (board_common.copy_label). Never a second
+    # time: a card that already says which copy it belongs to keeps that answer.
+    if here and not any(l.startswith(bc.COPY) for l in (piece or {}).get("labels") or []):
+        args += ["--add-label", bc.copy_label(here)]
     if only_if_free:
         args += ["--if-assignee", ""]
     bc.bd(args, root)

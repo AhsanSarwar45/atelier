@@ -340,6 +340,16 @@ FAULTS = [
     ("a blocked landing says the whole of its refusal twice", LAND,
      lambda s: s.replace("        if refused:",
                          "        if refused and print(said) is None:")),
+    ("a landing closes any card of the job its commits name", LAND,
+     lambda s: s.replace("            if WORK in (r.get(\"labels\") or [])",
+                         "            if any(l.startswith(\"step:\") "
+                         "for l in r.get(\"labels\") or [])")),
+    ("an item's name is looked for anywhere in the message", LAND,
+     lambda s: s.replace('    named = re.compile(r"\\b%s\\b" % re.escape(item_id))',
+                         "    named = re.compile(re.escape(item_id))")),
+    ("a landing closes what it merged and leaves the run standing there", LAND,
+     lambda s: s.replace("    said = running.advance(closed[-1][0], ROOT, actor, "
+                         "HERE_TREE)", '    said = ""')),
     ("a reading counts whatever the repository keeps a ref for", READING,
      lambda s: s.replace('                ["git", "log", "--branches", "--tags", '
                          '"--remotes",\n',
@@ -453,6 +463,28 @@ FAULTS = [
          "        before = [name for start, name in runs if start <= at]\n"
          "        out.add((before[-1] if before else runs[0][1], spot))\n",
          "        for _, name in runs:\n            out.add((name, spot))\n")),
+
+    # One refusal that names every fault, rather than one refusal per rule: 54 of
+    # the 105 pours refused over 537 sessions took two to five tries, each fixing
+    # the one fault it was told about and meeting the next (bw-aczr.1).
+    ("a pour is refused on the first fault of it and never on the rest", POUR,
+     lambda s: s.replace("    if problem not in FOUND:\n"
+                         "        FOUND.append(problem)\n",
+                         "    sys.exit(problem)\n")),
+    ("a flag typed wrong is handed the rule it broke and not the command to type",
+     POUR,
+     lambda s: s.replace(
+         '        sys.exit("%s: error: %s\\n\\n%s" % (self.prog, message, worked()))',
+         '        sys.exit("%s: error: %s" % (self.prog, message))')),
+
+    # A small job is one work item, poured by the command that opens its goal
+    # (bw-aczr.5). Both halves: the item that never reaches the board, and the
+    # size that goes back to being a tag any job may hand a work item to.
+    ("a small job opens its goal and leaves its one work item unpoured", POUR,
+     lambda s: s.replace('    made = make_items(root, getattr(a, "do", None) or [],',
+                         "    made = make_items(root, [],")),
+    ("--size is a tag again, so a job of any size may hand work items to the pour",
+     POUR, lambda s: s.replace("    one_item_here(a)\n", "")),
 
     # One claim a job: the four ways the hand-over goes back to one claim a step —
     # the step nobody is given, the next piece nobody is given, a piece taken off
