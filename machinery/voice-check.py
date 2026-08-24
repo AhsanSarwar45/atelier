@@ -32,6 +32,12 @@ TARGETS = [
     "reporting/README.md",
 ]
 
+# A rule nobody can delete quietly. The selftest proves each rule refuses its own
+# bad example, which says nothing about a rule that is no longer there, so the
+# count has a floor. Raise this when you add one; lowering it is the deliberate
+# act of dropping a rule.
+MIN_RULES = 32
+
 EM_DASH_PER_1K = 4.0     # the manager's own writing runs at 1.3 (see --chat)
 SEMICOLON_PER_1K = 5.0
 
@@ -70,6 +76,56 @@ BANNED = [
      r"(?m)^\s*(?:[-*]\s*)?Now the\b",
      "Now the two-clock split.",
      "Next I split the two clocks apart, so the timer shows the current step."),
+
+    # Words that vouch for the writing instead of showing it. A booster
+    # "introduces a shade of grey, and with it, the possibility of doubt"
+    # (wordrake.com/resources/delete-intensifiers-and-qualifiers), so calling a
+    # thing real invites the reader to wonder whether it is.
+    ("vouching adverb",
+     r"\b(?:actually|genuinely|truly|really|certainly|obviously|clearly"
+     r"|undoubtedly|definitely|absolutely|incredibly|extremely)\b",
+     "It actually works now.",
+     "It works now."),
+    ("vouching adjective",
+     r"\b(?:real|actual|genuine|proper)\s+\w+",
+     "Every line is a real reply from an actual session.",
+     "I sent him every line below."),
+    ("empty booster phrase",
+     r"\bin fact\b|\bindeed\b|\bit is important to note\b|\bit should be noted\b"
+     r"|\bneedless to say\b",
+     "In fact, it is important to note that the run failed.",
+     "The run failed."),
+
+    # A machine given a body. Nouns made from verbs "substitute abstract
+    # entities for human beings", so the sentence stops saying who did what
+    # (Helen Sword, writersdiet.com/writers-diet-help).
+    ("machine carrying something",
+     r"\bcarr(?:ies|y|ying|ied)\b",
+     "The board carries the running order.",
+     "I keep the order of the work on the board."),
+    ("machine handing, owing or wearing",
+     r"\bhands\s+(?:you|it|the|its|itself|him|her|them|over)\b|\bowes?\b|\bwears\b",
+     "The gate hands the refusal to the agent.",
+     "The agent gets told no, and why."),
+    ("machine sitting somewhere",
+     r"\bsits?\s+(?:in|on|at|beside|above|below|under|inside|outside|next to)\b",
+     "The check sits beside the build.",
+     "The check runs just after the build."),
+
+    # GOV.UK bans these from public writing because they sound like work and
+    # name none of it. The fix it gives is to break the term into what you are
+    # doing (guidance.publishing.service.gov.uk, service-manual.ons.gov.uk).
+    ("vague verb GOV.UK bans",
+     r"\b(?:leverag(?:e|es|ed|ing)|streamlin(?:e|es|ed|ing)|robust|overarching"
+     r"|utilis(?:e|es|ed|ing)|utiliz(?:e|es|ed|ing)|foster(?:s|ed|ing)?"
+     r"|tackl(?:e|es|ed|ing)|facilitat(?:e|es|ed|ing))\b",
+     "We will leverage a robust process to streamline the work.",
+     "I will use the build we have and cut two steps out of it."),
+    ("management filler",
+     r"\bgoing forward\b|\bin order to\b|\breach(?:ing|ed)? out\b|\bdeep dive\b"
+     r"|\bone-stop shop\b|\bring-fenc",
+     "Going forward, in order to fix this, I will reach out.",
+     "From now on I will ask him first."),
 ]
 
 
@@ -93,6 +149,12 @@ def drop_label_dashes(text):
             line = line.replace("—", "", 1)
         out.append(line)
     return "\n".join(out)
+
+
+# A line quoting somebody else is not our prose, and rewriting a source's words
+# to suit our own rules would misquote it. Only a blockquote counts, so a rule
+# cannot be dodged by putting a sentence in speech marks.
+QUOTE = re.compile(r"(?m)^\s*>.*$")
 
 
 # A pattern, a key or a fragment of shell is not English and must not be weighed
@@ -157,6 +219,7 @@ def files():
 
 def check_text(name, text):
     """Return a list of failure lines."""
+    text = QUOTE.sub(" ", text)          # a source's own words are not ours to rewrite
     words = len(text.split())
     if words < 60:
         return []
@@ -244,6 +307,10 @@ LABEL_EXEMPT = [
     "- code-reviewer — adversarial review with DEMO verification",
     "-   — a label whose term was inline code and got stripped",
 ]
+QUOTED = [
+    "> One line, and it is compulsory.",
+    ">   there is no third way",
+]
 LABEL_COUNTED = [
     "Absence never announces itself — you have to go looking for it deliberately.",
     "- Read the actual code — don't grep for keywords only",
@@ -288,6 +355,10 @@ def selftest():
     if "Fails open" in said:
         faults.append("spoken(): a note to the editor was read as if an agent saw it")
 
+    for line in QUOTED:
+        if check_text("case", filler + "\n" + line):
+            faults.append("quotation: a source's own words were checked as ours: %s" % line)
+
     style = os.path.join(ROOT, ".claude/output-styles/manager.md")
     if not os.path.isfile(style):
         faults.append("the manager style file is not where this expects it")
@@ -297,10 +368,15 @@ def selftest():
         if not check_text("manager.md", prose(style) + "\n" + BANNED[0][2] + "\n"):
             faults.append("the manager style file passed with a banned line put back")
 
+    rules = len(BANNED) + 5 + len(LABEL_EXEMPT) + len(LABEL_COUNTED) + len(QUOTED)
+    if rules < MIN_RULES:
+        faults.append("%d rules, down from %d. A rule was deleted, or MIN_RULES is wrong."
+                      % (rules, MIN_RULES))
+
     for f in faults:
         print("  " + f)
     print("voice-check --selftest: %d rules, %d faults"
-          % (len(BANNED) + 5 + len(LABEL_EXEMPT) + len(LABEL_COUNTED), len(faults)))
+          % (rules, len(faults)))
     return 1 if faults else 0
 
 

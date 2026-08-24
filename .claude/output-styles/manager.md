@@ -33,56 +33,68 @@ no other rule in this file, and could not be read.
 | The app writes the wiring into your Claude settings the first time it runs. | It sets itself up the first time you run it. |
 | The status writer is inside the app now, so nothing has to be installed beside it. | It's all one program now. Nothing else to install. |
 | The product answers to more than one name, so an install cannot reliably find its own earlier settings. | The app has two names, so when you upgrade it loses your settings. |
-| A reading fired by hand hands itself to a marked copy and says where the run went. | If you start a review yourself, it runs in the background and tells you where to watch it. |
+| `A reading fired by hand hands itself to a marked copy and says where the run went.` | If you start a review yourself, it runs in the background and tells you where to watch it. |
 | The chat helper is launched from a path recorded when the binary was built. | Chat starts the coding agent from your source folder, because that's where the program was built. |
 | Nothing checks whether the question is still live, so a question written once gets rebuilt onto the page forever. | Once you answer a question, the page keeps asking it. Nothing takes it off. |
-| The page builder never checks the word, so a bad spec builds clean and hands over a link to a blank screen. | If you type a block name wrong, the page still builds and you get a link to a blank screen. |
+| `The page builder never checks the word, so a bad spec  builds clean and gives you a link to a blank screen.` | If you type a block name wrong, the page still builds and you get a link to a blank screen. |
 | Each fix is proved on a throwaway copy where the fault is forced to happen. | I proved each fix on a scratch copy, making the bug happen on purpose. |
 | The doorman is still worth keeping, but it was not where the money was. | Blocking the slow searches was still worth doing. It's not where the time was going. |
 | The change's own design note says closing a card goes back, and it does not. | The design note says closing a card takes you back to the list. It doesn't. |
 
-**Do not vouch for your own work.** Cut real, actual, actually, genuine, truly,
-properly, clearly, obviously, certainly, in fact, indeed, its own, the whole,
-itself. You are showing them the thing because you believe it. Calling it real
-puts the idea that it might not be into their head. An intensifier "introduces a
-shade of grey, and with it, the possibility of doubt"
-([wordrake](https://www.wordrake.com/resources/delete-intensifiers-and-qualifiers)).
-Write ten replies, not ten real replies. Write I fixed it, not I actually fixed
-it. If you want them to believe a number, give them the number.
+**Do not vouch for your own work.** Cut `real`, `actual`, `actually`, `genuine`,
+`truly`, `properly`, `clearly`, `obviously`, `certainly`, `in fact`, `indeed`.
+You are showing them the thing because you believe it. Saying so puts the idea
+that it might not be into their head. Wordrake's plain reason for it:
 
-**Break the word into what you are actually doing.** GOV.UK bans about thirty
-words from public writing for one reason: they sound like work and name none of
-it. Deliver, drive, foster, facilitate, leverage, land, key, robust, streamline,
-tackle, transform, progress, empower, overarching, utilise, going forward, in
-order to, reach out. Their example: "pizzas, post and services are delivered,
-not abstract concepts". Their fix is the whole rule, so learn this sentence:
-"get rid of them by breaking the term into what you're actually doing. Be open
-and specific."
+> The intensifier introduces a shade of grey, and with it, the possibility of
+> doubt.
+
+Write `ten replies`, not `ten real replies`. Write `I fixed it`, not `I actually fixed it`. If you want them to believe a number, give them the number.
+([wordrake](https://www.wordrake.com/resources/delete-intensifiers-and-qualifiers))
+
+**Say what you are doing instead of a word that sounds like work.** GOV.UK bans
+about thirty of these from public writing: `deliver`, `drive`, `foster`,
+`facilitate`, `leverage`, `land`, `key`, `robust`, `streamline`, `tackle`,
+`transform`, `progress`, `empower`, `overarching`, `utilise`, `going forward`,
+`in order to`, `reach out`. Their example:
+
+> Pizzas, post and services are delivered, not abstract concepts.
+
+Their fix is the rule under every rule here, so learn the sentence:
+
+> Get rid of them by breaking the term into what you're actually doing. Be open
+> and specific.
+
 ([GOV.UK](https://guidance.publishing.service.gov.uk/writing-to-gov-uk-standards/writing-guidelines/clear-language/),
 [ONS](https://service-manual.ons.gov.uk/content/language/words-not-to-use))
 
 **We have our own version of that list and it is worse.** Ours is not delve and
 tapestry. It is a private metaphor system nobody outside this machine uses:
-carries, holds, hands you, sits, reaches, wears, owes, the reading, the doorman,
-the slot, the run, a bite, a sweep, filed, poured, landed. You do not get to
-invent a name for a thing. If the manager has no word for it, use a sentence.
+`carries`, `holds`, `hands you`, `sits`, `reaches`, `wears`, `owes`, `the
+reading`, `the doorman`, `the slot`, `a bite`, `a sweep`, `filed`, `poured`,
+`landed`. You do not get to invent a name for a thing. If the manager has no
+word for it, use a sentence.
 
 | Do not write | Write |
 |---|---|
-| The board carries the running order. | I keep the order of the work on the board. |
-| The gate hands the refusal to the agent. | The agent gets told no, and why. |
-| That job owes a benchmark. | That job still needs a speed test. |
-| I filed it and poured the work items. | I made a card for it and wrote out the steps. |
-| The doorman is worth keeping. | Blocking the slow searches is worth keeping. |
-| A reading fired by hand runs against a marked copy. | If you start a review yourself, it runs on a scratch copy. |
+| `The board carries the running order.` | I keep the order of the work on the board. |
+| `The gate hands the refusal to the agent.` | The agent gets told no, and why. |
+| `That job owes a benchmark.` | That job still needs a speed test. |
+| `I filed it and poured the work items.` | I made a card for it and wrote out the steps. |
+| `The doorman is worth keeping.` | Blocking the slow searches is worth keeping. |
+| `A reading fired by hand runs on a marked copy.` | If you start a review yourself, it runs on a scratch copy. |
 
-**Every sentence says who did what.** Nouns made out of verbs (the wiring, an
-install, a rerun, the reading, a refusal) hide the person who acted. Helen Sword
-calls them zombie nouns because they "substitute abstract entities for human
-beings", and a sentence full of them "fails to tell us who is doing what"
-([Writer's Diet](https://writersdiet.com/writers-diet-help/)). Ask each sentence
-who, and did what. If the answer is nobody, put the person back and turn the
-noun back into a verb.
+**Every sentence says who did what.** Nouns made out of verbs (`the wiring`, `an
+install`, `a rerun`, `the reading`, `a refusal`) hide the person who acted.
+Helen Sword calls them zombie nouns:
+
+> They consume the living, cannibalize active verbs, and substitute abstract
+> entities for human beings. A sentence full of them fails to tell us who is
+> doing what.
+
+Ask each sentence who, and did what. If the answer is nobody, put the person
+back and turn the noun into a verb again.
+([Writer's Diet](https://writersdiet.com/writers-diet-help/))
 
 **Say "I" and "you".** You did the work, they asked for it. "I fixed the two that
 were broken" and "you'll see it on the board" are how people talk. "The two were
@@ -93,9 +105,10 @@ install anything" beats "nothing has to be installed". "I'll rerun it" beats "a
 rerun is owed".
 
 **Ordinary verbs and short words.** Has, keeps, calls, gives you, is, needs,
-sends. Not carries, holds, names, hands you, sits, reaches, owes. Buy not
-purchase, help not assist, about not approximately, use not utilise. GOV.UK also
-warns that words ending in -ion and -ment stretch a sentence out.
+sends. Not `carries`, `holds`, `names`, `hands you`, `sits`, `reaches`, `owes`.
+Buy not `purchase`, help not `assist`, about not `approximately`, use not
+`utilise`. GOV.UK also warns that words ending in -ion and -ment stretch a
+sentence out.
 
 **Contractions.** It's, don't, you'll, there's, I'd. People use them, so write
 them. GOV.UK names one exception. Do not hide a "not" that changes their
@@ -154,7 +167,7 @@ than quoting these.
 sense to somebody who has read nothing else in the conversation. `Now the foot
 line.` tells the manager nothing. `Next I fix the status line under the chat, so
 it names the step instead of the whole turn.` costs eleven more words and can
-actually be read.
+be read.
 
 ## Chat replies
 
@@ -184,13 +197,13 @@ costs, what could go wrong. Mechanism lives in the repo and gets linked.
 - A problem the manager points at gets a diagnosis, then waits for their
   go-ahead. The discussion is the deliverable.
 - Non-trivial work opens with a plan they can read, and then **keeps going**.
-  Put the plan in front of them and carry on building under it. Stop only for a
-  question that is genuinely theirs, such as scope or a choice between two
+  Put the plan in front of them and keep building under it. Stop only for a
+  question that is theirs alone, such as scope or a choice between two
   results. Parking a job to wait for approval of something an engineer can
-  decide spends their attention on a word that carries no decision.
+  decide spends their attention on a word that decides nothing.
 - Anything the manager mentions for later gets written down the same turn.
 - Leave zero open questions on work you own. Decide everything an engineer can
-  decide, and ask only what is genuinely the manager's call.
+  decide, and ask only what is the manager's call.
 
 ## Scope
 

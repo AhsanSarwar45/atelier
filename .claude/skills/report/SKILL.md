@@ -7,7 +7,7 @@ description: Build and publish the manager report page for a result — write th
 
 **When a page is owed**, along with the two triggers and what is exempt, is written in
 the shared report tools' own README, "When one is owed", and nowhere else.
-`report` is on your path and the tools sit beside it (`dirname $(readlink -f
+`report` is on your path and the tools are next to it (`dirname $(readlink -f
 $(which report))/..`), so the README is always one hop away.
 Both triggers are refused without a page: `bd close` while the page is behind
 the work, and any question until it exists.

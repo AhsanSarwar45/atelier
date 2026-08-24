@@ -32,7 +32,7 @@ REASON = (
     "A picture read here goes into this conversation, and the whole conversation "
     "is read again on every turn that follows. You pay for that picture on every "
     "one of those turns, not once. Ten sessions spent about forty dollars "
-    "carrying 53 of them, more than on anything else they did.\n\n"
+    "taking 53 of them, more than on anything else they did.\n\n"
     "Send `screen-check` instead. It looks at the picture itself and returns "
     "what it sees in words, and the picture dies with it:\n"
     "    Agent(subagent_type=\"screen-check\", prompt=\"Look at {where} and say "

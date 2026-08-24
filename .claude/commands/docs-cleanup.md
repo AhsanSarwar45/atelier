@@ -38,7 +38,7 @@ LINKS to it.** So your cleanup obeys these, in priority order:
 ## What to REMOVE
 
 - **Outdated / wrong** — statements the code no longer matches (verify against
-  the actual symbol via code-review-graph / Read before calling it stale).
+  the symbol via code-review-graph / Read before calling it stale).
 - **Duplicates** — the same fact stated in 2+ places → collapse to owner+link.
 - **Fluff** — restating the question, "as we can see", "basically/simply/just",
   decorative recaps, obvious-from-code comments (`// increment i`), praise.

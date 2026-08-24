@@ -16,7 +16,7 @@ observation. `~45°` reads identically whether it came from a bisection against 
 known anchor or from a vibe. The reader cannot tell, so the error survives and every
 decision downstream inherits it.
 
-**Recognition answers "what is this?". Almost every real question is "what exactly
+**Recognition answers "what is this?". Almost every question is "what exactly
 is it doing?" Recognition cannot answer that.** It is a lookup against a
 category, so it returns the category's typical member, not the thing in front of
 you. That is why it feels certain and is often wrong in the details that matter.
@@ -40,7 +40,7 @@ more than a figure that might be invented.
 Visual estimation is legitimate and often sufficient. What is banned is a
 **quantity with no stated method and no uncertainty**.
 
-## Visual measurement techniques — how to actually look
+## Visual measurement techniques — how to look
 
 You are poor at absolute perceptual judgements and much better at **comparisons,
 bisections and counts**. Convert every question into one of those.
@@ -106,7 +106,7 @@ Walk this list explicitly. Skipping a row is a decision; make it a conscious one
 | **artefacts** | compression, aliasing, banding, resampling, watermarks, JPEG rings |
 
 Not every row applies to every image. **Variation** is the one most often skipped
-and most often where the answer is: real things are irregular in patterned ways,
+and most often where the answer is: things are irregular in patterned ways,
 and generated things are usually irregular in the wrong way, or not at all.
 
 ### 4. Tabulate
@@ -130,7 +130,7 @@ proposed from the label. That is the failure this skill exists to stop.
 ## Prefer the instrument where one exists
 
 If the artifact came out of **our own code**, the code already knows the answer, so
-print it. A probe that dumps the real values beats any amount of squinting, is
+print it. A probe that dumps the values beats any amount of squinting, is
 reproducible, and becomes a regression test later. Per
 [`CLAUDE.md`](../../../CLAUDE.md), the *second* manual inspection becomes a tool: if
 you are cropping the same region twice, stop and write the probe.

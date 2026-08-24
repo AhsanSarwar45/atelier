@@ -6,13 +6,13 @@ description: Decide whether to compact, hand off to a fresh session, or just fin
 # compact-handoff
 
 Long, noisy contexts make the model measurably worse ("context rot"), which
-causes *more* failed tries. The tries, not the token count, are the real
-cost. The size number is not the trigger. **Whether the context is helping or
+causes *more* failed tries. The tries, not the token count, are what it
+costs. The size number is not the trigger. **Whether the context is helping or
 hurting** is. This is a 3-way decision, not "reset yes/no".
 
 ## Decide
 
-**Making real progress? → `/compact`, stay in the session.**
+**Getting somewhere? → `/compact`, stay in the session.**
 Compact distills the understanding (the goal, the relevant code, what's been ruled
 out) and drops raw file-dumps and error spew, *while keeping the thread*. This is
 the default. Do NOT start a fresh session here, because you would pay to re-discover

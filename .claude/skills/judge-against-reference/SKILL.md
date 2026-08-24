@@ -41,7 +41,7 @@ usually already in the repo under a `reference/` folder beside the outputs.
 ### 1. Align: same scale, same origin, same orientation
 
 An overlay of two differently-scaled images is worse than useless: the mismatch it
-shows is the scaling. Normalise on something both sides genuinely share, such as total
+shows is the scaling. Normalise on something both sides share, such as total
 height, a bounding box, a landmark, a known anchor point.
 
 Put the alignment in a script, not a one-off command. You will run it dozens of
@@ -70,7 +70,7 @@ magick ref.png -colorspace gray -format '%[fx:minima] %[fx:mean] %[fx:maxima]\n'
 
 ### 3. Tabulate BOTH sides: same rows, same units, every dimension
 
-This step produces the actual finding. One table, with a column for the reference and a
+This step produces the finding. One table, with a column for the reference and a
 column for ours, a column for the delta. Walk the full dimension list from
 [`read-image`](../read-image/SKILL.md) §3: geometry, structure, silhouette, tone,
 colour, texture, **variation**, lighting, material, edges.
@@ -87,7 +87,7 @@ comes from a probe in our own code, **never from the render**. `unmeasured` is a
 legitimate cell. An invented number is not.
 
 **Variation is the row most often skipped and most often where the answer is.**
-Real things are irregular in patterned ways. Generated things are usually uniform,
+Things are irregular in patterned ways. Generated things are usually uniform,
 or irregular in a way that reads as noise. A perfect match on every other row with
 this row wrong still looks fake.
 

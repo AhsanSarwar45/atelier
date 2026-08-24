@@ -63,7 +63,7 @@ QUIET_LIMIT = 4  # turns of code changes a held card may go without a word writt
 PUSH_LIMIT = 1
 
 CARRY_ON = (
-    "Work still open, nothing waiting on the manager: %s. Carry on, or ask "
+    "Work still open, nothing waiting on the manager: %s. Keep going, or ask "
     "him. docs/board.md#4f-when-a-session-may-stop"
 )
 
@@ -100,7 +100,7 @@ HABIT = (
     "--area <system> --kind bug\n"
     "`--area board` for the way work runs, `tooling`, `docs` or `tests` when the "
     "cause lives there. Then answer him: fix the examples too if you like, but say "
-    "which card carries the cause."
+    "which card the cause belongs to."
 )
 
 
@@ -325,7 +325,7 @@ def main():
         block(
             "The board did not answer, so no work state can be recorded. Bring it "
             "back before finishing: `bd ready` will say what is wrong (the Dolt "
-            "server may be down). Do not carry on with the board unreachable."
+            "server may be down). Do not keep going with the board unreachable."
         )
         return
     if again:
@@ -403,7 +403,7 @@ def main():
             "past the done it was poured with. It is its own card:\n"
             '    %s find "<what is wrong>" "<where it is, how it shows>"'
             " --area <system> --kind <bug|feature|chore>\n"
-            "If nothing was actually left standing, say so without the phrase."
+            "If nothing was left standing, say so without the phrase."
             % (found.group(0), bc.tool(root, "job"), bc.tool(root, "job"))
         )
         return
@@ -421,7 +421,7 @@ def main():
         bare = untagged(made, root)
         if bare:
             block(
-                "Every card carries two tags, and these do not: %s. One says which "
+                "Every card needs two tags, and these do not: %s. One says which "
                 "system it belongs to (`area:`), one says what kind of work it is "
                 "(`kind:`, meaning bug, feature or chore). Without both, the board "
                 "cannot be "

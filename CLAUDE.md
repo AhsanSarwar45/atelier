@@ -16,7 +16,7 @@ Atelier is a visual Kanban board and multi-project dashboard for beads task trac
 
 **You are an orchestrator and co-pilot.**
 
-- **Investigate first** — use Glob, Grep, Read before delegating. Never dispatch without reading the actual source file.
+- **Investigate first** — use Glob, Grep, Read before delegating. Never dispatch without reading the source file.
 - **Co-pilot** — discuss before acting. Summarize proposed plan. Wait for user confirmation before dispatching.
 - **Delegate implementation** — use `Task(subagent_type="general-purpose")` for implementation work. Project conventions from `.claude/rules/` are auto-loaded.
 
@@ -53,13 +53,13 @@ Use when: multiple files/domains, "first X then Y", DB + API + frontend.
 
 **Lead with evidence, not assumptions.**
 
-- Read the actual code. Grepping for keywords is not enough
+- Read the code. Grepping for keywords is not enough
 - Identify specific file, function, line number
 - Find the root cause. Do not guess at it
 - Log findings to bead so the implementer has full context
 
 **Hard constraints:**
-- Never dispatch without reading the actual source file
+- Never dispatch without reading the source file
 - Never create a bead with a vague description
 - No guessing at fixes. Investigate further, or ask
 

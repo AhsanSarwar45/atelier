@@ -20,7 +20,7 @@ RULES = """# Board — the only place work state lives
 Your board name: {name} (stamped onto your board commands for you).
 
 Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --reason="..."`.
-One claim carries the whole job, so closing a piece hands you whatever opens after
+One claim covers the whole job, so closing a piece gives you whatever opens after
 it, either the next step or the next work item nobody is holding. Nothing after the
 first card is claimed by hand.
 
@@ -34,21 +34,21 @@ first card is claimed by hand.
   `{pour} find "<what is wrong>" "<where it is, how it shows>"
   --area <system> --kind <bug|feature|chore>`.
   Those are the only two routes, and the stop gate enforces it.
-- Every card carries both tags. `area:` names the system ({areas}). `kind:` is
+-  Every card needs both tags. `area:` names the system ({areas}). `kind:` is
   bug, feature or chore.
   The pour tool requires them and the stop gate refuses a turn that made a card without them.
 - Cards are never written by hand. `bd create` is refused. A job opens with
   `{pour} new --what … --evidence … --done … --area … --kind …
   --steps <the optional ones it runs>`, which creates the goal and its first step.
-  Closing a step opens the next one and hands it to you, so a job never shows a step
+  Closing a step opens the next one and gives it to you, so a job never shows a step
   nobody has thought about yet. A goal is not claimable, so claim its step. Promote a
   find with `job new --source <id> …`.
 - The playbook IS the run of steps: {steps}. The bracketed ones
-  run only when `--steps` names them. You owe nothing for the ones it does not name.
+  run only when `--steps` names them. You do not need the ones it does not name.
   The rest are mandatory. A speed claim in `--done` selects benchmark by itself and
   cannot be dropped. A document named in `--done` or in `--record` selects record.
 - Every step is proved by one of three things, and the close gate knows which.
-  A commit naming THAT step on main. A note carrying its own evidence: a run with its
+  A commit naming THAT step on main. A note with its own evidence: a run with its
   number, the exact command the checks step ran and the count it came back with, a
   source, the manager's words, the review's points. Or an outside fact: you are
   standing in the worktree, the tree and branch are gone, the slot is free.
@@ -60,13 +60,13 @@ first card is claimed by hand.
   container and cannot be claimed.
 - The checks step is the project's own checks command, run once over everything the
   job built and in front of the reader. Not per edit, and not from the commit hook,
-  which no longer runs it. Its note carries the exact command and the count it came
+  which no longer runs it. Its note gives the exact command and the count it came
   back with. A project that declares none says on the card what it ran instead.
-- The board carries the running order and the running notes
+- The board keeps the order of the work and the notes
   (`bd update <id> --append-notes="..."`). Docs and comments may name a card and
   nothing else: no TODO lines, no handoff files, no plan-in-a-doc.
 - Your history compacts itself at 200k tokens. Let it take the old transcript when a
-  step lands. The board and the tree carry the work state, and these rules arrive
+  step lands. The board and the tree keep the work state, and these rules arrive
   again after.
 - Merging is how a code step closes, once per step rather than once per job. One
   command from your own tree does all of it, `{land} <card>`, and it

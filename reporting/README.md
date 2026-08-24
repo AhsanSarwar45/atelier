@@ -13,16 +13,16 @@ Two triggers, and nothing else:
    two ways. It goes in the page's own slot for it, with what each answer
    costs, before it is put to them.
 
-Turns spent building, reading, searching or answering them owe nothing. Neither
-does bookkeeping. Helpers an agent sends off owe nothing either: they answer to
-the agent that sent them, and that agent owes the page.
+Turns spent building, reading, searching or answering them need none. Neither
+does bookkeeping. Helpers an agent sends off need none either: they answer to
+the agent that sent them, and that agent must write the page.
 
 Where a project's machinery can refuse, neither is a judgement call: closing a
 card is refused while its page is behind the work, and asking anything is
-refused until the page carrying it exists.
+refused until the page for it exists.
 
 The tools here ship inside the product: making a report is one of the things it
-is for, and the app carries this toolchain and lays it down the first time it
+is for, and the app brings this toolchain and lays it down the first time it
 runs. A project keeps no report code of its own. It calls the command, which
 every project shares.
 
@@ -45,7 +45,7 @@ A report is **never published anywhere**. The build prints a link to the file
 it wrote, and that link is the whole delivery; `tools/publish-gate.py` refuses
 a built page handed to the Artifact tool.
 
-**The link goes last in the message that hands it over.** That is the manager's
+**The link goes last in the message that gives it to him.** That is the manager's
 standing instruction, so the thing they click is where their eye already is and
 they never scroll back up for it. Nothing follows it: no recap, no next steps,
 no sign-off.
@@ -96,7 +96,7 @@ their updates is a merge that should not touch it.
 
 A report is a running page — same page, same decision numbers, updated in place
 for the life of the work. Nothing about it is committed anywhere: a spec and
-its built page both sit in the data folder. That is what keeps one person's
+its built page both live in the data folder. That is what keeps one person's
 projects out of something the whole team installs.
 
 The manager owns the final result and never the mechanism. Everything below
@@ -116,14 +116,14 @@ Six, in this order, and none of them optional:
 | 5 | Decisions | Every call already made, each overridable by its number |
 | 6 | Next | What happens if the manager says nothing, then the steps with a cost each |
 
-A question reaches slot 2 only when the manager's input is genuinely required.
+A question reaches slot 2 only when the manager's input is needed.
 Everything else is decided and listed in slot 5, where a single button flags it
 for change.
 
 ### A question names the work it is holding up
 
 `"holds": "<card id>"`, on every question. Slot 2 is the one part of a report
-nobody thinks to delete: the answer arrives in chat, the work carries on, and
+nobody thinks to delete: the answer arrives in chat, the work keeps going, and
 the question is rebuilt onto every page after it. The card is what kills it.
 The board closes the work, and the next build refuses the page rather than ask
 again, naming every dead question at once and telling you to put the call it
@@ -139,7 +139,7 @@ A card with other work under it is refused, because it is unfinished until
 everything beneath it is, so a question hung on one survives every answer it is
 ever given. That is how a settled question stayed on a page for a full day of
 work. Everything under it counts, a job's own steps included. They are the
-longest-lived thing under a goal, and on a real board they are usually all a
+longest-lived thing under a goal, and on a working board they are usually all a
 goal has. Work already under way is refused too: work that did not wait was not
 waiting on this. In every case the fix is the same. Name the piece that cannot
 start until the answer arrives, or take the question off and put the call in
@@ -149,7 +149,7 @@ A machine with no board cannot say either way, so it says so instead: the build
 prints what it could not check and the line handed over counts it, because a
 page still asking about unconfirmed work otherwise reads exactly like a
 finished one. A board that is installed and still could not answer is a
-different thing again, and is refused carrying its own reason. Being sent to
+different thing again, and is refused, with the reason. Being sent to
 rename a card that was never the problem costs more than the report did.
 
 ### Where we are, read from the board
@@ -179,7 +179,7 @@ was made, then its own number. Ticks fall where the work fell. Grouping the
 finished ones at the top reads as two lists running in opposite directions.
 A checklist must never be that.
 
-A row is named by the step it belongs to when exactly one child wears that
+A row is named by the step it belongs to when exactly one child is at that
 step, because a step's own title only repeats the goal's. When several children
 share a step, which is the normal shape for a job's work, each is
 named by its own title instead, or the page would print one word many times.
@@ -218,7 +218,7 @@ This one **warns rather than blocks**, which is the manager's call, so an
 unfamiliar term never costs a report. The build names every hit and what to say
 instead, and the count rides along in the line the agent reports back.
 
-`tools/phrasebook.json` carries both halves — the banned term and what to say
+`tools/phrasebook.json` gives both halves — the banned term and what to say
 instead. It grows: a term that leaks into a report and gets caught in review
 belongs in the phrasebook the same day.
 
@@ -248,10 +248,10 @@ report cannot reach the cloud by being renamed or lightly edited.
 
 ## Debt
 
-- Every spec written before this rule carries a question that names nothing, or
+- Every spec written before this rule has a question that names nothing, or
   names a card with work under it — 20 pages and 33 questions of the 72 specs
   on this machine the day the second half landed, 26 naming nothing and 7
-  naming a card that carries work. Each is refused on its next build until
+  naming a card with work on it. Each is refused on its next build until
   someone names the piece of work that is waiting. Nothing sweeps them. Each is
   fixed the next time its page is built. Measured again on 2026-08-19 by
   rebuilding all 73 through the running copy: 51 rebuilt, 20 still refused on
@@ -260,8 +260,7 @@ report cannot reach the cloud by being renamed or lightly edited.
 - One spec names its pictures at a session cache that no longer exists, which
   no rule can mend from here, because the files are gone, not moved. Filed as bw-3m1.
 - A next step's cost is checked for being there and not for being one of the
-  four words the reader draws, so a spec that writes a plain duration builds
-  clean and hands over a link to a blank screen. Filed as bw-6of0.
+  four words the reader draws, so a spec that writes a plain duration  builds clean and gives you a link to a blank screen. Filed as bw-6of0.
 - The phrasebook is seeded from the terms one project used most. It is not a
   complete list of what a report should not say.
 - Charts are static pictures. No hover readouts, no live data.

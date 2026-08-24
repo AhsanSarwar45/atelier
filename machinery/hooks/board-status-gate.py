@@ -434,7 +434,7 @@ def owned_copies(cid, card, root):
 
 # The command git accepts. `git worktree remove` is refused outright for any copy
 # holding a populated submodule — "working trees containing submodules cannot be
-# moved or removed" — and every copy of this project carries vendor/iced, so the
+# moved or removed" — and every copy of this project has vendor/iced, so the
 # obvious instruction is one almost nobody here can follow (cor-futg).
 REMOVE = ("rm -rf %(path)s && git -C %(main)s worktree prune"
           "%(branch)s")
@@ -905,7 +905,7 @@ def main():
                 shaped, wanted = spine.note_ok(which, notes)
                 if not shaped:
                     deny(
-                        "%s is the %s step and its note does not carry %s. Thirty "
+                        "%s is the %s step and its note does not give %s. Thirty "
                         "characters of anything is not proof that the step ran: write "
                         "what would let someone else believe it." % (cid, which, wanted)
                     )
@@ -979,7 +979,7 @@ def main():
                             "means the copy is gone, and saying so is not the same as "
                             "doing it. `git worktree remove` will refuse, because git "
                             "rejects "
-                            "any copy carrying a submodule, and every copy here carries "
+                            "any copy that has a submodule, and every copy here has "
                             "vendor/iced. This is the route that works:\n  %s"
                             % (cid, path, removal(path, branch, root))
                         )
@@ -987,7 +987,7 @@ def main():
                     if goal and not looked_at(show(goal, root) or {}):
                         deny(
                             "%s belongs to a job the manager signs off, and its goal "
-                            "carries nothing for him to look at. Put the page or the "
+                            "gives him nothing to look at. Put the page or the "
                             "picture on the goal with `bd update %s "
                             "--append-notes=\"…\"` before it reaches their column. A "
                             "card they cannot act on is worse there than not there."

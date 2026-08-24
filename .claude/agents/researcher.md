@@ -21,8 +21,7 @@ training-cutoff guess. Never answer from memory when a primary source exists.
 
 ## Method
 
-- Fan out 2 to 4 searches from different angles, then follow into the actual
-  source.
+- Fan out 2 to 4 searches from different angles, then follow into  the source.
 - **Check adversarially.** Does a second independent source agree? Is this the
   current best method or has it been superseded? Note the version, the date and
   any caveats.
@@ -31,7 +30,7 @@ training-cutoff guess. Never answer from memory when a primary source exists.
 ## What to return
 
 - The recommended approach, concise, with the parameters and maths that matter.
-- **Every claim carries a citation**: a URL, a repo path, or a paper plus
+- **Every claim needs a citation**: a URL, a repo path, or a paper plus
   section.
 - An explicit note on current best versus legacy, and any disagreement between
   sources.
