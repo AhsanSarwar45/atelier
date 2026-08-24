@@ -573,7 +573,11 @@ html[data-theme="catppuccin-latte"] {
   --secondary-foreground: 234 16% 35%;
   --muted: 223 16% 83%;
   --muted-foreground: 233 10% 47%;
-  --accent: 231 97% 72%;
+  /* Surface0, the shade Catppuccin fills a hovered row with in Latte. The
+     lavender that was here is a brand colour, not a surface: no text this
+     palette owns reads on it at 4.5 to 1, so a button filled while it was
+     hovered or held open lost its label (bw-jqv9). */
+  --accent: 223 16% 83%;
   --accent-foreground: 234 16% 35%;
   --destructive: 347 87% 44%;
   --destructive-foreground: 220 23% 95%;

@@ -69,13 +69,7 @@ export function ThemeSwitcher() {
               <ThemePreview theme={theme} isActive={isActive} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  {/* The chosen card sits on the theme's accent, where the
-                      library's own pairing is right; the rest sit on the page,
-                      where three themes set that same colour to their own
-                      background and the name would vanish (bw-jqv9). Names
-                      only the resting colour, and comes out when that is
-                      fixed. */}
-                  <span className={isActive ? "text-sm font-medium" : "text-sm font-medium text-t-secondary"}>
+                  <span className="text-sm font-medium">
                     {theme.name}
                   </span>
                   <Badge
