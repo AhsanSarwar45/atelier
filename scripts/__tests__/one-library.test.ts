@@ -177,3 +177,17 @@ describe("the one-library check", () => {
     expect(said).toMatch(/placed\.tsx:3: /);
   });
 });
+
+describe("every screen in the app", () => {
+  /**
+   * The gate itself. The cases above prove the check can still see an offence;
+   * this one runs it over the real app, so a screen that starts painting its
+   * own control again turns the project's own checks red on the spot instead
+   * of waiting for someone to remember to run a script (bw-dks8.9).
+   */
+  it("takes its controls from the library", () => {
+    const { said, failed } = run(resolve(__dirname, "..", "..", "src"));
+    // The listing itself is the failure message: it names screen and line.
+    expect(failed ? said : "", "a screen is painting its own controls again").toBe("");
+  });
+});
