@@ -36,7 +36,7 @@ TARGETS = [
 # bad example, which says nothing about a rule that is no longer there, so the
 # count has a floor. Raise this when you add one; lowering it is the deliberate
 # act of dropping a rule.
-MIN_RULES = 32
+MIN_RULES = 41
 
 EM_DASH_PER_1K = 4.0     # the manager's own writing runs at 1.3 (see --chat)
 SEMICOLON_PER_1K = 5.0
@@ -104,7 +104,8 @@ BANNED = [
      "The board carries the running order.",
      "I keep the order of the work on the board."),
     ("machine handing, owing or wearing",
-     r"\bhands\s+(?:you|it|the|its|itself|him|her|them|over)\b|\bowes?\b|\bwears\b",
+     r"\bhands\s+(?:you|it|the|its|itself|him|her|them|over)\b"
+     r"|\bowe[sd]?\b|\bowing\b|\bwears\b",
      "The gate hands the refusal to the agent.",
      "The agent gets told no, and why."),
     ("machine sitting somewhere",
@@ -126,6 +127,68 @@ BANNED = [
      r"|\bone-stop shop\b|\bring-fenc",
      "Going forward, in order to fix this, I will reach out.",
      "From now on I will ask him first."),
+
+    # A noun built out of a verb, standing where the person who acted belongs.
+    # Helen Sword's name for these is zombie nouns, because a sentence full of
+    # them "fails to tell us who is doing what" (writersdiet.com).
+    ("noun standing where a person belongs",
+     r"\b(?:[Tt]he|[AaN]n?)\s+(?:wiring|install|rerun|reading|refusal|teardown"
+     r"|invocation|activation|cancellation)\b",
+     "The wiring goes into your settings on the first run.",
+     "It sets itself up the first time you run it."),
+
+    # Claiming the work is sound instead of showing it. The reader believes a
+    # number; they do not believe a sentence that says to believe it.
+    ("claiming ownership or self-proof",
+     r"\b(?:I|[Ww]e)\s+own\b"
+     r"|\b(?:proves?|speaks?|explains?|justifies|answers?)\s+(?:for\s+)?itself\b"
+     r"|\b[Tt]he whole thing\b",
+     "The benchmark speaks for itself.",
+     "The board run drops from 46 seconds to 8."),
+
+    # A file that teaches an agent how to write goes into a system prompt word
+    # for word, so a column of the prose it forbids puts that exact prose in
+    # front of the model every turn. Show the target voice only.
+    ("specimen of forbidden prose inside a brief",
+     r"(?mi)^\|\s*(?:do not write|don't write|instead of|before|bad|wrong)\s*\|",
+     "| Do not write | Write |",
+     "One example of the voice you want, and nothing to copy from."),
+
+    ("copula avoidance",
+     r"\b(?:serves?|stands?|functions?|acts?)\s+as\b",
+     "The board serves as the record of the work.",
+     "The board is the record of the work."),
+
+    ("opening on a compliment",
+     r"(?i)\b(?:you(?:'re| are) (?:right|absolutely right)|good (?:catch|point|question)"
+     r"|(?:that|this)(?:'s| is) (?:a )?(?:fair|good|great) (?:point|question|catch)"
+     r"|that(?:'s| is) on me|fair enough)\b",
+     "Good catch, you're right to push back on that.",
+     "I got it wrong. The count is 87, not 115."),
+
+    ("negative parallelism across two sentences",
+     r"(?:^|[.!?]\s+)(?:It|This|That|The\s+\w+)\s+(?:is|was)\s+not\s+"
+     r"[^.!?\n]{1,70}[.!?]\s+(?:It|This|That|The)\s+(?:is|was)\b",
+     "It is not a warning. It is a refusal.",
+     "It refuses. It does not warn."),
+
+    ("self-authenticating jargon",
+     r"\b(?:load-bearing|smoking gun|hand-?waving|the real tension"
+     r"|worth stating plainly|worth naming precisely|non-trivially|first-class)\b",
+     "The load-bearing fact here is the retry loop.",
+     "The retry loop is what breaks it."),
+
+    ("arguing with the reader before answering",
+     r"(?i)\b(?:here(?:'s| is) where I(?:'d| would)|I(?:'d| would) push back"
+     r"|to be clear|to be fair|let me be direct|the honest answer)\b",
+     "To be fair, here's where I'd push back on that.",
+     "That would break the Windows build."),
+
+    ("hedge stacked on a hedge",
+     r"\b(?:may|might|could)\s+(?:potentially|possibly|arguably|conceivably)\b"
+     r"|\bit (?:seems|appears) (?:likely|possible) that\b|\bsomewhat\b|\brelatively\b",
+     "This might possibly be somewhat slower.",
+     "I have not timed it."),
 ]
 
 
