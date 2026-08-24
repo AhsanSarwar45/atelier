@@ -379,21 +379,19 @@ export default function KanbanBoard() {
         className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/40 px-2 py-1 sm:hidden"
       >
         {COLUMNS.map(({ status, title }, i) => (
-          <button
+          <Button
             key={status}
             type="button"
+            variant="ghost"
+            size="sm"
+            selected={i === columnOn}
             aria-current={i === columnOn ? 'true' : undefined}
             onClick={() => goToColumn(i)}
-            className={cn(
-              'flex min-h-[40px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-xs font-medium transition-colors',
-              i === columnOn
-                ? 'bg-surface-overlay text-t-primary'
-                : 'text-t-tertiary hover:text-t-primary',
-            )}
+            className="min-h-[40px] shrink-0"
           >
             {title}
             <span className="tabular-nums opacity-60">{(filteredBeadsByStatus[status] || []).length}</span>
-          </button>
+          </Button>
         ))}
       </nav>
 

@@ -163,17 +163,20 @@ export function QuickFilterBar({
           placeholder="Search… (/)"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="pl-8 pr-8 w-[9.5rem] sm:w-[180px] h-8 bg-surface-overlay/50 border-b-strong text-t-primary placeholder:text-t-muted"
+          className="h-8 w-[9.5rem] pl-8 pr-8 sm:w-[180px]"
         />
         {search && (
-          <button
+          <Button
             type="button"
+            variant="dim"
+            mode="icon"
+            size="sm"
             onClick={() => onSearchChange('')}
-            className="absolute right-0 top-1/2 -translate-y-1/2 size-11 flex items-center justify-center text-t-muted hover:text-t-secondary"
             aria-label="Clear search"
+            className="absolute right-0 top-1/2 h-11 w-11 -translate-y-1/2"
           >
             <X className="h-3.5 w-3.5" />
-          </button>
+          </Button>
         )}
       </div>
 
@@ -182,7 +185,6 @@ export function QuickFilterBar({
         <Button
           size="sm"
           onClick={onNewBead}
-          className="h-8 px-3 gap-1.5 bg-success text-white hover:bg-success/85 font-medium shadow-sm"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           New
@@ -195,25 +197,21 @@ export function QuickFilterBar({
           <Button
             variant="ghost"
             size="sm"
-            className={cn(
-              'h-8 px-3 gap-1.5 bg-surface-overlay/50 text-sm font-medium',
-              activeType ? 'text-t-primary' : 'text-t-tertiary hover:text-t-secondary'
-            )}
+            selected={!!activeType}
             aria-label="Filter by issue type"
           >
             <TypeTriggerIcon className={cn('size-4 shrink-0', activeType?.colorClass)} aria-hidden="true" />
             {activeType ? activeType.label : 'All types'}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="bg-surface-raised border-b-default">
+        <DropdownMenuContent align="start">
           <DropdownMenuCheckboxItem
             checked={typeFilter === 'all'}
             onCheckedChange={() => onTypeFilterChange('all')}
-            className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
           >
             All types
           </DropdownMenuCheckboxItem>
-          <DropdownMenuSeparator className="bg-surface-overlay" />
+          <DropdownMenuSeparator />
           {ISSUE_TYPES.map((option) => {
             const Icon = option.icon;
             return (
@@ -221,7 +219,6 @@ export function QuickFilterBar({
                 key={option.value}
                 checked={typeFilter === option.value}
                 onCheckedChange={() => onTypeFilterChange(option.value)}
-                className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
               >
                 <span className="flex items-center gap-2">
                   <Icon className={cn('size-3.5 shrink-0', option.colorClass)} aria-hidden="true" />
@@ -239,29 +236,25 @@ export function QuickFilterBar({
           <Button
             variant="ghost"
             size="sm"
-            className={cn(
-              'h-8 px-3 gap-1.5 bg-surface-overlay/50 text-sm font-medium',
-              tags.length > 0 ? 'text-t-primary' : 'text-t-tertiary hover:text-t-secondary'
-            )}
+            selected={tags.length > 0}
             aria-label="Filter by tag"
           >
             <Tag className="size-4 shrink-0" aria-hidden="true" />
             {tagTriggerLabel}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="bg-surface-raised border-b-default max-h-[60vh] overflow-y-auto">
+        <DropdownMenuContent align="start" className="max-h-[60vh] overflow-y-auto">
           <DropdownMenuCheckboxItem
             checked={tags.length === 0}
             onCheckedChange={onTagsClear}
-            className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
           >
             All tags
           </DropdownMenuCheckboxItem>
           {LABEL_NAMESPACES.map((namespace) => (
             availableTags[namespace].length > 0 && (
               <React.Fragment key={namespace}>
-                <DropdownMenuSeparator className="bg-surface-overlay" />
-                <DropdownMenuLabel className="text-t-muted text-xs">
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs">
                   {LABEL_NAMESPACE_TITLES[namespace]}
                 </DropdownMenuLabel>
                 {availableTags[namespace].map((value) => {
@@ -271,7 +264,6 @@ export function QuickFilterBar({
                       key={raw}
                       checked={tags.includes(raw)}
                       onCheckedChange={() => onTagToggle(raw)}
-                      className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
                     >
                       <span className="flex items-center gap-2">
                         <span
@@ -290,20 +282,17 @@ export function QuickFilterBar({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Today's Active Toggle - styled to match tabs */}
-      <button
+      {/* Today's active only — on and off are the library's own two states. */}
+      <Button
         type="button"
-        onClick={() => onTodayOnlyChange(!todayOnly)}
+        variant="ghost"
+        size="sm"
+        selected={todayOnly}
         aria-pressed={todayOnly}
-        className={cn(
-          'h-8 px-3 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised',
-          todayOnly
-            ? 'bg-epic/20 text-epic'
-            : 'bg-surface-overlay/50 text-t-tertiary hover:text-t-secondary'
-        )}
+        onClick={() => onTodayOnlyChange(!todayOnly)}
       >
         Today
-      </button>
+      </Button>
 
       {/* No Reports button: this bar is the board's own, and reports are a tab
           of the project in the bar above it (bw-7ks.21.14). */}
@@ -343,22 +332,21 @@ export function QuickFilterBar({
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
+            mode="icon"
             size="sm"
-            className="h-8 px-2 text-t-tertiary hover:text-t-primary"
             aria-label="Sort options"
           >
             <ArrowUpDown className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="bg-surface-raised border-b-default">
-          <DropdownMenuLabel className="text-t-tertiary">Sort by</DropdownMenuLabel>
-          <DropdownMenuSeparator className="bg-surface-overlay" />
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+          <DropdownMenuSeparator />
           {SORT_OPTIONS.map((option) => (
             <DropdownMenuCheckboxItem
               key={option.value}
               checked={currentSortValue === option.value}
               onCheckedChange={() => handleSortOptionSelect(option.value)}
-              className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
             >
               {option.label}
             </DropdownMenuCheckboxItem>
@@ -372,25 +360,21 @@ export function QuickFilterBar({
           <Button
             variant="ghost"
             size="sm"
-            className={cn(
-              'h-8 px-2',
-              hasActiveFilters ? 'text-epic' : 'text-t-tertiary hover:text-t-primary'
-            )}
+            selected={hasActiveFilters}
             aria-label="Filter options"
           >
             <SlidersHorizontal className="h-4 w-4" />
-            {hasActiveFilters && <span className="ml-1 text-xs" aria-hidden="true">•</span>}
+            {hasActiveFilters && <span className="text-xs" aria-hidden="true">•</span>}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56 bg-surface-raised border-b-default">
-          <DropdownMenuLabel className="text-t-tertiary">Status</DropdownMenuLabel>
-          <DropdownMenuSeparator className="bg-surface-overlay" />
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuLabel>Status</DropdownMenuLabel>
+          <DropdownMenuSeparator />
           {STATUS_OPTIONS.map((option) => (
             <DropdownMenuCheckboxItem
               key={option.value}
               checked={statuses.includes(option.value)}
               onCheckedChange={() => onStatusToggle(option.value)}
-              className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
             >
               {option.label}
             </DropdownMenuCheckboxItem>
@@ -398,15 +382,14 @@ export function QuickFilterBar({
 
           {availableOwners.length > 0 && (
             <>
-              <DropdownMenuSeparator className="bg-surface-overlay" />
-              <DropdownMenuLabel className="text-t-tertiary">Owner</DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-surface-overlay" />
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Owner</DropdownMenuLabel>
+              <DropdownMenuSeparator />
               {availableOwners.map((owner) => (
                 <DropdownMenuCheckboxItem
                   key={owner}
                   checked={owners.includes(owner)}
                   onCheckedChange={() => onOwnerToggle(owner)}
-                  className="text-t-secondary focus:bg-surface-overlay focus:text-t-primary"
                 >
                   {owner}
                 </DropdownMenuCheckboxItem>
@@ -416,10 +399,10 @@ export function QuickFilterBar({
 
           {hasActiveFilters && (
             <>
-              <DropdownMenuSeparator className="bg-surface-overlay" />
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={onClearFilters}
-                className="text-danger focus:bg-surface-overlay focus:text-danger"
+                className="text-danger focus:text-danger"
               >
                 Clear filters
               </DropdownMenuItem>
