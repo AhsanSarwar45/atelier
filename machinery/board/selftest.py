@@ -7213,7 +7213,7 @@ def main():
         DECLARED = ('name = "picked"\nprefix = "tst"\nlands_on = "main"\n'
                     'checks = "npm test && (cd server && cargo test) && machinery/check"\n')
 
-        def branch_that_changed(files, says=DECLARED, before=()):
+        def branch_that_changed(files, says=DECLARED, before=(), landed=""):
             """A throwaway checkout whose branch changed exactly these files.
 
             Real git, because what the tool reads is `git diff --name-only main...HEAD`
@@ -7239,12 +7239,18 @@ def main():
                 with open(spot, "w") as fh:
                     fh.write("a line\n")
             git_here("add", "-A")
-            git_here("commit", "-q", "-m", "the work")
+            git_here("commit", "-q", "-m", ("fix: %s the work" % landed) if landed
+                     else "the work")
+            if landed:
+                # The branch is already on the trunk, which is how the checks step
+                # opens now: board/land merges, closes the items, opens this.
+                git_here("checkout", "-q", "main")
+                git_here("merge", "-q", "--ff-only", "mine")
             return tmp
 
-        def picks(files, *said, before=()):
+        def picks(files, *said, before=(), landed=""):
             """Which suites the tool would run for a branch that changed these files."""
-            tmp = branch_that_changed(files, before=before)
+            tmp = branch_that_changed(files, before=before, landed=landed)
             try:
                 out = subprocess.run([sys.executable, CHECKS_TOOL, "--dry"] + list(said),
                                      cwd=tmp, capture_output=True, text=True, timeout=120)
@@ -7278,6 +7284,13 @@ def main():
         for name in ("npm-test", "cargo-test", "machinery-check"):
             assert name not in prose, \
                 "a branch that only changed a document was handed %s: %s" % (name, prose)
+        after = picks(["machinery/board/spine.py"], "tst-c.3", landed="tst-c.1")
+        assert "machinery-check" in after and "--faults" in after, \
+            "a job whose branch already landed, which is how the checks step opens " \
+            "now, was handed nothing to run, or its machinery ran without the fault " \
+            "sweep: %s" % after
+        assert "npm-test" not in after, \
+            "a landed job that never touched the screen was handed npm: %s" % after
         whole = picks(["README.md"], "--all")
         for name in ("npm-test", "cargo-test", "machinery-check"):
             assert name in whole, \

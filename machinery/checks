@@ -225,10 +225,31 @@ def told(said):
     return out
 
 
-def changed(where, trunk):
-    """Every file this branch has changed against the line the work lands on."""
+def changed(where, trunk, job=""):
+    """Every file this job has changed, and whether it read them off the trunk.
+
+    Before a landing that is the branch against the line the work lands on. After
+    one, the two are one tree and that diff is empty, and a landing is exactly
+    what opens this step (board/land closes the work items and hands the run on).
+    The files are then what the job's own commits on the trunk changed: every
+    commit there naming the goal or one of its cards.
+    """
     out = git(["diff", "--name-only", "%s...HEAD" % trunk], where)
-    return [f for f in out.splitlines() if f.strip()]
+    files = [f for f in out.splitlines() if f.strip()]
+    if files or not job:
+        return files, False
+    shas = git(["log", "--format=%H", "-E", "--grep",
+                r"\b%s(\.[0-9]+)?\b" % re.escape(job), trunk], where).split()
+    for sha in shas:
+        for f in git(["show", "--name-only", "--format=", sha], where).splitlines():
+            if f.strip() and f not in files:
+                files.append(f)
+    return files, True
+
+
+def job_of(cid):
+    """The goal a card belongs to, read off its id: tst-c.3 is a card of tst-c."""
+    return cid.rsplit(".", 1)[0] if cid and "." in cid else (cid or "")
 
 
 def counted(name, out, ok):
@@ -375,14 +396,33 @@ def main():
                  "Run what holds a change in this project and write on the card "
                  "what that was." % os.path.join(ROOT, project.DECLARATION))
 
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    actor = me()
+    cid = a.card
+    if not cid and not a.suites:
+        cid, why_not = open_step(actor, session)
+        if not cid and not a.dry:
+            sys.exit(why_not)
+
     # A stub line has no paths to ask about, so it runs whole. So does `--all`.
-    files = [] if a.suites else changed(HERE_TREE, decl.lands_on)
+    files, landed = ([], False) if a.suites else changed(HERE_TREE, decl.lands_on,
+                                                         job_of(cid))
     picked, why = [], {}
     for suite in every:
         want = "you asked for every suite" if (a.all or a.suites) else suite.wanted(files)
         if want:
             picked.append(suite)
             why[suite.name] = want
+    # The machinery's own check runs its fault sweep only when the machinery
+    # differs from the landing line. After a landing it never does, so the sweep
+    # that proves every case still bites would be skipped on the one run that
+    # matters. Ask for it outright.
+    for suite in picked:
+        if (landed and suite.name == "machinery-check"
+                and "--faults" not in suite.command and "--no-faults" not in suite.command):
+            suite.command += " --faults"
+            why[suite.name] += ", and the branch already landed, so the fault sweep " \
+                               "is asked for outright"
 
     # A branch that touched none of the suites' paths, a document or a rule file,
     # still has to close its checks step on a note the gate can prove. The prose
@@ -397,7 +437,9 @@ def main():
                                   "suite, so the prose check runs alone")
 
     if a.dry:
-        print("%d file(s) changed against %s" % (len(files), decl.lands_on))
+        print("%d file(s) changed %s %s"
+              % (len(files), "by the landed commits of" if landed else "against",
+                 job_of(cid) if landed else decl.lands_on))
         if not picked:
             print("no suite would run: nothing this branch changed asks for one. Say "
                   "that on the card, or run `machinery/checks --all` to run them all.")
@@ -407,13 +449,8 @@ def main():
                                                           why[suite.name]))
         return
 
-    session = os.environ.get("CLAUDE_CODE_SESSION_ID")
-    actor = me()
-    cid = a.card
     if not cid:
-        cid, why_not = open_step(actor, session)
-        if not cid:
-            sys.exit(why_not)
+        sys.exit("no checks step to run this for: name the card")
 
     if not picked:
         sys.exit("nothing this branch changed asks for a suite, so none was run. Write "

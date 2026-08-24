@@ -722,6 +722,12 @@ FAULTS = [
     # A branch that touched a document and nothing else still owes the board a
     # note it can prove. Without the prose check standing in, such a step never
     # closes, and a session writes the note by hand again.
+    # After a landing the trunk and the branch are one tree, and a landing is what
+    # opens the checks step now. A tool that only diffed the two would run nothing
+    # for every job.
+    ("a job whose branch already landed is handed nothing to run", CHECKS,
+     lambda s: s.replace('    if files or not job:\n',
+                         '    if True:\n')),
     ("a branch that changed only a document is handed nothing to run", CHECKS,
      lambda s: s.replace('        if os.path.exists(prose):\n',
                          '        if False and os.path.exists(prose):\n')),
