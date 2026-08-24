@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { panelVariants } from "@/components/ui/panel";
+import { Panel, panelVariants } from "@/components/ui/panel";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import type { DoltDatabase, DoltServer } from "@/lib/api";
@@ -280,14 +280,15 @@ export function AddProjectDialog({
                       || server.db_name
                       || `Port ${server.port}`;
                     return (
-                      <button
+                      <Button
                         key={`${server.pid}-${server.port}`}
                         type="button"
+                        variant="ghost"
                         onClick={() => handleServerQuickAdd(server)}
                         disabled={isSubmitting}
                         className={cn(
                           panelVariants({ inset: 'sm' }),
-                          "flex w-full items-center justify-between text-left text-sm transition-colors hover:bg-surface-overlay",
+                          "h-auto w-full justify-between text-left text-sm font-normal",
                         )}
                       >
                         <div className="min-w-0 flex-1">
@@ -297,7 +298,7 @@ export function AddProjectDialog({
                         <Badge variant="success" appearance="light" size="xs" shape="circle" className="ml-2 shrink-0">
                           :{server.port}
                         </Badge>
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
@@ -315,15 +316,16 @@ export function AddProjectDialog({
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {newDoltDatabases.map((db) => (
-                    <button
+                    <Button
                       key={db.name}
                       type="button"
+                      variant="ghost"
                       onClick={() => handleDoltQuickAdd(db)}
                       disabled={isSubmitting}
-                      className={cn(panelVariants({ inset: 'sm' }), "inline-flex items-center gap-1.5 py-1.5 text-sm transition-colors hover:bg-surface-overlay")}
+                      className={cn(panelVariants({ inset: 'sm' }), "h-auto gap-1.5 py-1.5 text-sm font-normal")}
                     >
                       {db.project_name}
-                    </button>
+                    </Button>
                   ))}
                 </div>
                 <p className="text-xs text-t-muted">
@@ -338,13 +340,14 @@ export function AddProjectDialog({
                   <label className="text-sm font-medium text-t-secondary">
                     Browse Folders
                   </label>
-                  <button
+                  <Button
                     type="button"
+                    variant="dim"
+                    size="xs"
                     onClick={() => setBrowsing(false)}
-                    className="text-xs text-t-muted hover:text-t-secondary transition-colors"
                   >
                     Type path instead
-                  </button>
+                  </Button>
                 </div>
                 <FolderBrowser
                   currentPath={browserPath}
@@ -425,9 +428,9 @@ export function AddProjectDialog({
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-t-secondary">Location</label>
-                <p className="truncate rounded-md bg-surface-overlay px-3 py-2 text-sm text-t-tertiary">
+                <Panel inset="sm" className="truncate text-sm text-t-tertiary">
                   {projectPath}
-                </p>
+                </Panel>
               </div>
             </div>
             <DialogFooter className="gap-2">

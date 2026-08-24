@@ -13,7 +13,9 @@ import { useReports } from "@/components/reports";
 import { Shell } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RoiuiCard } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Panel } from "@/components/ui/panel";
 import { ReadFailed } from "@/components/ui/read-failed";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/hooks/use-projects";
@@ -140,7 +142,7 @@ export default function ProjectsPage() {
                   placeholder="Search projects..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-surface-raised/50 border-b-strong"
+                  className="pl-10"
                   aria-label="Search projects"
                 />
               </div>
@@ -152,46 +154,48 @@ export default function ProjectsPage() {
                   {allTags.map((tag) => {
                     const isSelected = selectedTagIds.includes(tag.id);
                     return (
-                      <button
+                      <Badge
                         key={tag.id}
-                        type="button"
-                        onClick={() => toggleTag(tag.id)}
-                        className="transition-opacity"
-                        aria-pressed={isSelected}
-                        aria-label={`Filter by ${tag.name}`}
+                        asChild
+                        variant={isSelected ? "primary" : "outline"}
+                        size="sm"
+                        style={
+                          isSelected
+                            ? {
+                                backgroundColor: tag.color,
+                                color: "#fff",
+                                borderColor: tag.color,
+                              }
+                            : {
+                                backgroundColor: `${tag.color}10`,
+                                color: tag.color,
+                                borderColor: `${tag.color}50`,
+                              }
+                        }
                       >
-                        <Badge
-                          variant={isSelected ? "primary" : "outline"}
-                          size="sm"
-                          style={
-                            isSelected
-                              ? {
-                                  backgroundColor: tag.color,
-                                  color: "#fff",
-                                  borderColor: tag.color,
-                                }
-                              : {
-                                  backgroundColor: `${tag.color}10`,
-                                  color: tag.color,
-                                  borderColor: `${tag.color}50`,
-                                }
-                          }
+                        <button
+                          type="button"
+                          onClick={() => toggleTag(tag.id)}
+                          aria-pressed={isSelected}
+                          aria-label={`Filter by ${tag.name}`}
                         >
                           {tag.name}
-                        </Badge>
-                      </button>
+                        </button>
+                      </Badge>
                     );
                   })}
                   {hasActiveFilters && (
-                    <button
+                    <Button
                       type="button"
+                      variant="dim"
+                      size="xs"
                       onClick={clearFilters}
-                      className="ml-2 flex items-center gap-1 text-xs text-t-muted hover:text-t-secondary transition-colors"
+                      className="ml-2"
                       aria-label="Clear all filters"
                     >
                       <X className="h-3 w-3" aria-hidden="true" />
                       Clear
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}
@@ -216,16 +220,18 @@ export default function ProjectsPage() {
           {isLoading ? (
             <div role="status" aria-label="Loading projects" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-xl border border-b-default bg-surface-raised/70 p-4">
-                  <div className="mb-3 flex gap-1.5">
-                    <Skeleton className="h-5 w-16" />
-                    <Skeleton className="h-5 w-12" />
+                <RoiuiCard key={i} className="min-h-[155px]">
+                  <div>
+                    <div className="mb-3 flex gap-1.5">
+                      <Skeleton className="h-5 w-16" />
+                      <Skeleton className="h-5 w-12" />
+                    </div>
+                    <Skeleton className="h-5 w-40" />
+                    <Skeleton className="mt-2 h-4 w-48" />
+                    <Skeleton className="mt-4 h-4 w-32" />
+                    <Skeleton className="mt-2 h-3 w-28" />
                   </div>
-                  <Skeleton className="h-5 w-40" />
-                  <Skeleton className="mt-2 h-4 w-48" />
-                  <Skeleton className="mt-4 h-4 w-32" />
-                  <Skeleton className="mt-2 h-3 w-28" />
-                </div>
+                </RoiuiCard>
               ))}
             </div>
           ) : error ? (
@@ -238,7 +244,7 @@ export default function ProjectsPage() {
             />
           ) : filteredProjects.length === 0 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-lg border border-dashed border-b-strong bg-surface-raised/70 p-6 text-center text-t-tertiary">
+              <Panel inset="none" className="border-dashed p-6 text-center text-t-tertiary">
                 {hasActiveFilters ? (
                   <>
                     <p>No matching projects</p>
@@ -250,7 +256,7 @@ export default function ProjectsPage() {
                     <p className="mt-1 text-sm text-t-muted">Click the Add Project button above to get started</p>
                   </>
                 )}
-              </div>
+              </Panel>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -280,14 +286,16 @@ export default function ProjectsPage() {
           {/* Archive toggle */}
           {!isLoading && (
             <div className="mt-6 flex items-center justify-center">
-              <button
+              <Button
                 type="button"
+                variant="dim"
+                size="sm"
                 onClick={toggleShowArchived}
-                className="flex items-center gap-2 text-sm text-t-muted hover:text-t-secondary transition-colors"
+                className="gap-2 text-sm"
               >
                 <Archive className="h-4 w-4" aria-hidden="true" />
                 {showArchived ? "Hide archived" : "Show archived"}
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -296,25 +304,19 @@ export default function ProjectsPage() {
       {/* Footer */}
       <footer className="mt-auto border-t border-b-default py-3">
         <div className="mx-auto flex max-w-[1200px] items-center justify-center gap-4 px-6">
-          <a
-            href="https://github.com/AhsanSarwar45/atelier"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-sm text-t-muted transition-colors hover:text-t-secondary"
-          >
-            <Github className="h-4 w-4" aria-hidden="true" />
-            <span>Atelier</span>
-          </a>
+          <Button asChild variant="dim" size="sm" className="gap-2 text-sm">
+            <a href="https://github.com/AhsanSarwar45/atelier" target="_blank" rel="noopener noreferrer">
+              <Github className="h-4 w-4" aria-hidden="true" />
+              <span>Atelier</span>
+            </a>
+          </Button>
           <span className="text-t-faint" aria-hidden="true">·</span>
-          <a
-            href="https://github.com/gastownhall/beads"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-sm text-t-muted transition-colors hover:text-t-secondary"
-          >
-            <Github className="h-4 w-4" aria-hidden="true" />
-            <span>Beads CLI</span>
-          </a>
+          <Button asChild variant="dim" size="sm" className="gap-2 text-sm">
+            <a href="https://github.com/gastownhall/beads" target="_blank" rel="noopener noreferrer">
+              <Github className="h-4 w-4" aria-hidden="true" />
+              <span>Beads CLI</span>
+            </a>
+          </Button>
         </div>
       </footer>
 

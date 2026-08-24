@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef, useId } from "react";
 
-import { Folder, FolderOpen, ChevronRight, Home } from "lucide-react";
+import { Folder, FolderOpen, ChevronRight, Home, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Panel } from "@/components/ui/panel";
+import { Panel, panelVariants } from "@/components/ui/panel";
 import { ReadFailed } from "@/components/ui/read-failed";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import * as api from "@/lib/api";
@@ -282,16 +282,18 @@ export function FolderBrowser({
 
           return (
             <div key={seg.path} className="flex items-center gap-1 shrink-0">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 onClick={() => navigateToDirectory(seg.path)}
                 className={cn(
-                  "rounded px-1 py-0.5 text-sm transition-colors hover:bg-surface-raised",
+                  "h-auto px-1 py-0.5 text-sm font-normal",
                   isLast ? "text-t-primary" : "text-t-tertiary"
                 )}
               >
                 {seg.label}
-              </button>
+              </Button>
               {!isLast && (
                 <ChevronRight className="size-3 shrink-0 text-t-muted" />
               )}
@@ -313,11 +315,11 @@ export function FolderBrowser({
       )}
 
       {/* Directory list */}
-      <ScrollArea className="h-[300px] rounded-md border border-b-strong bg-surface-overlay/50">
+      <ScrollArea className={cn(panelVariants({ inset: 'none' }), "h-[300px]")}>
         <div ref={listRef} className="p-2" role="listbox" aria-label="Directories">
           {loading ? (
             <div className="flex items-center justify-center py-8 text-t-muted">
-              <div className="size-4 animate-spin rounded-full border-2 border-b-strong border-t-transparent" />
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               <span className="ml-2 text-sm">Loading...</span>
             </div>
           ) : error ? (
@@ -334,18 +336,18 @@ export function FolderBrowser({
             </div>
           ) : (
             directories.map((dir, index) => (
-              <button
+              <Button
                 key={dir.path}
                 type="button"
+                variant="ghost"
+                size="sm"
                 role="option"
+                selected={selectedIndex === index}
                 aria-selected={selectedIndex === index}
                 onClick={() => setSelectedIndex(index)}
                 onDoubleClick={() => navigateToDirectory(dir.path)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                  selectedIndex === index
-                    ? "bg-surface-raised text-t-primary"
-                    : "text-t-secondary hover:bg-surface-raised/50",
+                  "h-auto w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal",
                   dir.hasBeads && "border-l-2 border-info"
                 )}
               >
@@ -365,7 +367,7 @@ export function FolderBrowser({
                     .beads
                   </Badge>
                 )}
-              </button>
+              </Button>
             ))
           )}
         </div>
