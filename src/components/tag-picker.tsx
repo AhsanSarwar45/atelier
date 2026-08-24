@@ -136,13 +136,11 @@ export function TagPicker({
           {allTags.length > 0 && (
             <div className="space-y-1">
               {allTags.map((tag) => (
-                <button
+                <Button
                   key={tag.id}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                    "hover:bg-surface-overlay",
-                    isLoading && "opacity-50 pointer-events-none"
-                  )}
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal"
                   onClick={() => handleToggleTag(tag)}
                   disabled={isLoading}
                   type="button"
@@ -156,7 +154,7 @@ export function TagPicker({
                   {isTagSelected(tag.id) && (
                     <Check className="h-4 w-4 text-success shrink-0" aria-hidden="true" />
                   )}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -210,14 +208,16 @@ export function TagPicker({
               </div>
             </div>
           ) : (
-            <button
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-t-tertiary transition-colors hover:bg-surface-overlay"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal text-t-tertiary"
               onClick={() => setIsCreating(true)}
               type="button"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
               <span>Create new tag</span>
-            </button>
+            </Button>
           )}
         </div>
       </PopoverContent>

@@ -4,6 +4,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 
 import { Loader2, Pencil } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 interface EditableFieldProps {
@@ -112,48 +115,47 @@ export function EditableField({
   }
 
   if (isEditing) {
-    const sharedClasses = "w-full bg-surface-raised border border-b-strong rounded px-2 py-1 text-t-primary focus:outline-none focus:border-t-muted";
-
     if (multiline) {
       return (
-        <textarea
+        <Textarea
           ref={inputRef as React.RefObject<HTMLTextAreaElement>}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={save}
           onKeyDown={handleKeyDown}
           rows={Math.max(3, editValue.split("\n").length)}
-          className={cn(sharedClasses, "resize-y text-sm", className)}
+          className={cn("resize-y px-2 py-1 text-sm", className)}
         />
       );
     }
 
     return (
-      <input
+      <Input
         ref={inputRef as React.RefObject<HTMLInputElement>}
         type="text"
         value={editValue}
         onChange={(e) => setEditValue(e.target.value)}
         onBlur={save}
         onKeyDown={handleKeyDown}
-        className={cn(sharedClasses, className)}
+        className={cn("h-auto px-2 py-1", className)}
       />
     );
   }
 
   const editButton = (
-    <button
+    <Button
       type="button"
+      variant="dim"
+      mode="icon"
+      size="xs"
       onClick={() => setIsEditing(true)}
       aria-label="Edit"
       className={cn(
-        "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity",
-        "text-t-muted hover:text-t-secondary rounded p-0.5",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-t-tertiary"
+        "size-5 opacity-0 transition-[color,box-shadow,opacity] group-hover:opacity-100 focus-visible:opacity-100",
       )}
     >
       <Pencil className="size-3.5" aria-hidden="true" />
-    </button>
+    </Button>
   );
 
   // Block layout for renderValue (e.g. Markdown): div with pen absolutely top-right.

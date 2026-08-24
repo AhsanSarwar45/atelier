@@ -14,8 +14,10 @@ names every raw element carrying paint of its own, and exits non-zero, so it can
 stand as a gate.
 
 It reads markup, not intent: a raw <button> with no paint at all is left alone
-(it is a click target, not a control), and everything under the library itself
-is exempt because that is where the paint is supposed to live. Any other
+(it is a click target, not a control), a circle is left alone because the
+library's cards and panels are rounded rectangles and a ring is a drawing, and
+everything under the library itself is exempt because that is where the paint
+is supposed to live. Any other
 exemption is named in EXEMPT below with its reason and printed in the summary,
 so a skipped file is never a silent one.
 """
@@ -125,8 +127,9 @@ def offences_in(text):
         elif "fixed inset-0" in classes and painted:
             found.append((line, "a dimmed backdrop painted by hand",
                           "the overlay <Dialog> or <Sheet> already draws"))
-        elif tag in SURFACE_TAGS and "rounded" in classes and re.search(
-                r"\bborder(\b|-)", classes):
+        elif (tag in SURFACE_TAGS and "rounded" in classes
+                and "rounded-full" not in classes
+                and re.search(r"\bborder(\b|-)", classes)):
             found.append((line, "a card or panel face painted by hand",
                           "<Card> or <Panel> from the library"))
     return found

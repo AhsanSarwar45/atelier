@@ -6,6 +6,7 @@ import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Panel } from "@/components/ui/panel";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
@@ -67,10 +68,13 @@ export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
           {/* Preset colors */}
           <div className="grid grid-cols-5 gap-2">
             {PRESET_COLORS.map((color) => (
-              <button
+              <Button
                 key={color}
+                variant="outline"
+                mode="icon"
+                size="sm"
                 className={cn(
-                  "h-7 w-7 rounded-md border-2 transition-transform hover:scale-110",
+                  "size-7 border-2 transition-transform hover:scale-110",
                   // 28px reads fine to a mouse, and a thumb gets 40 from the
                   // app's own rule for a coarse pointer (globals.css). The
                   // five-column grid is sized for the grown one: 5*40 plus
@@ -85,14 +89,15 @@ export function ColorPicker({ value, onChange, className }: ColorPickerProps) {
                   <Check className="h-4 w-4 mx-auto text-white drop-shadow-sm" />
                 )}
                 <span className="sr-only">{color}</span>
-              </button>
+              </Button>
             ))}
           </div>
 
           {/* Custom hex input */}
           <div className="flex items-center gap-2">
-            <div
-              className="h-7 w-7 rounded-md border"
+            <Panel
+              inset="none"
+              className="size-7 shrink-0"
               style={{ backgroundColor: customColor }}
             />
             <Input

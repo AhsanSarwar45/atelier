@@ -4,8 +4,9 @@ import { useState, useEffect } from "react";
 
 import { Check, Palette } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { THEMES, getSavedTheme, applyTheme, type ThemeDefinition } from "@/lib/themes";
-import { cn } from "@/lib/utils";
 
 /**
  * Theme preview swatch — shows 4 color dots representing the theme palette
@@ -55,43 +56,42 @@ export function ThemeSwitcher() {
         {THEMES.map((theme) => {
           const isActive = theme.id === activeTheme;
           return (
-            <button
+            <Button
               key={theme.id}
+              variant="outline"
+              size="md"
+              selected={isActive}
               onClick={() => handleSelect(theme.id)}
               aria-pressed={isActive}
               aria-label={`Apply ${theme.name} theme`}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                "hover:bg-surface-overlay/50",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base",
-                isActive
-                  ? "border-info bg-info/5"
-                  : "border-b-default"
-              )}
+              className="h-auto justify-start gap-3 px-3 py-2.5 text-left font-normal"
             >
               <ThemePreview theme={theme} isActive={isActive} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className={cn(
-                    "text-sm font-medium",
-                    isActive ? "text-t-primary" : "text-t-secondary"
-                  )}>
+                  {/* The chosen card sits on the theme's accent, where the
+                      library's own pairing is right; the rest sit on the page,
+                      where three themes set that same colour to their own
+                      background and the name would vanish (bw-jqv9). Names
+                      only the resting colour, and comes out when that is
+                      fixed. */}
+                  <span className={isActive ? "text-sm font-medium" : "text-sm font-medium text-t-secondary"}>
                     {theme.name}
                   </span>
-                  <span className={cn(
-                    "text-[10px] uppercase tracking-wide px-1 py-0.5 rounded",
-                    theme.mode === 'dark'
-                      ? "bg-surface-overlay text-t-muted"
-                      : "bg-warning/10 text-warning"
-                  )}>
+                  <Badge
+                    variant={theme.mode === 'dark' ? 'secondary' : 'warning'}
+                    appearance="light"
+                    size="xs"
+                    className="uppercase tracking-wide"
+                  >
                     {theme.mode}
-                  </span>
+                  </Badge>
                 </div>
                 <p className="text-xs text-t-muted truncate">
                   {theme.description}
                 </p>
               </div>
-            </button>
+            </Button>
           );
         })}
       </div>

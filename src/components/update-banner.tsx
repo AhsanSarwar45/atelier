@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 
 import { Download, Loader2, RefreshCw, X } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/ui/panel";
 import * as api from "@/lib/api";
 import { reachable } from '@/lib/api';
 
@@ -80,18 +82,23 @@ export function UpdateBanner() {
     // fragment of a sentence. Underneath the dimming it is background, which
     // is what a notice about a future release is while somebody is busy
     // (bw-81wt.33).
-    <div
+    <Panel
+      tone="overlay"
+      inset="none"
       data-testid="update-banner"
-      className="fixed bottom-4 right-4 z-30 max-w-sm rounded-lg border border-success/30 bg-surface-raised p-4 shadow-lg animate-in slide-in-from-bottom-4 fade-in duration-300"
+      className="fixed bottom-4 right-4 z-30 max-w-sm border-success/30 p-4 animate-in slide-in-from-bottom-4 fade-in duration-300"
     >
-      <button
+      <Button
+        variant="dim"
+        mode="icon"
+        size="xs"
         onClick={() => setDismissed(true)}
-        className="absolute right-2 top-2 text-t-muted hover:text-t-primary rounded-sm p-0.5"
+        className="absolute right-2 top-2 size-6"
         aria-label="Dismiss"
         disabled={updateState === "downloading" || updateState === "restarting"}
       >
         <X className="size-3.5" />
-      </button>
+      </Button>
 
       <div className="flex items-start gap-3 pr-4">
         <Download className="size-5 text-success shrink-0 mt-0.5" aria-hidden="true" />
@@ -111,10 +118,12 @@ export function UpdateBanner() {
 
           <div className="flex items-center gap-3 mt-2">
             {info.asset_url && updateState !== "restarting" && (
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 onClick={handleUpdate}
                 disabled={updateState === "downloading"}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-success hover:text-success/80 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-0 text-success hover:bg-transparent hover:text-success/80"
               >
                 {updateState === "downloading" ? (
                   <>
@@ -127,7 +136,7 @@ export function UpdateBanner() {
                     Update &amp; Restart
                   </>
                 )}
-              </button>
+              </Button>
             )}
 
             {updateState === "restarting" && (
@@ -138,18 +147,15 @@ export function UpdateBanner() {
             )}
 
             {info.download_url && updateState === "idle" && (
-              <a
-                href={info.download_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-t-muted hover:text-t-secondary underline underline-offset-2"
-              >
-                GitHub
-              </a>
+              <Button asChild variant="dim" size="xs" className="px-0 underline underline-offset-2">
+                <a href={info.download_url} target="_blank" rel="noopener noreferrer">
+                  GitHub
+                </a>
+              </Button>
             )}
           </div>
         </div>
       </div>
-    </div>
+    </Panel>
   );
 }

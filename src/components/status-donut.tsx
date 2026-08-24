@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { Panel } from "@/components/ui/panel";
 import { colorFor } from "@/lib/state-styles";
 import { STATES, type BeadCounts } from "@/types";
 
@@ -23,7 +24,7 @@ interface StatusDonutProps {
 // Custom tooltip showing all statuses
 function StatusTooltip({ beadCounts, total }: { beadCounts: BeadCounts; total: number }) {
   return (
-    <div className="rounded-lg border border-b-strong bg-surface-raised px-3 py-2 shadow-lg">
+    <Panel tone="overlay" inset="sm">
       <div className="mb-1.5 text-xs font-medium text-t-secondary">
         {total} task{total !== 1 ? "s" : ""}
       </div>
@@ -36,7 +37,7 @@ function StatusTooltip({ beadCounts, total }: { beadCounts: BeadCounts; total: n
           </div>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }
 

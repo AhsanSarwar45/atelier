@@ -96,6 +96,18 @@ describe("the one-library check", () => {
     expect(said).toContain("<Card>");
   });
 
+  it("leaves a circle alone, because a ring is a drawing and not a panel", () => {
+    const path = screen(
+      "ring.tsx",
+      `export const A = () => (
+         <div className="size-10 rounded-full border-2 border-dashed border-b-strong" />
+       );`,
+    );
+    const { said, failed } = run(path);
+    expect(said).toContain("0 hand-painted");
+    expect(failed).toBe(false);
+  });
+
   it("reads classes the screen builds up rather than spells out", () => {
     const path = screen(
       "built-up.tsx",
