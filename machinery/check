@@ -123,4 +123,21 @@ python3 hooks/slice-gate.py --selftest
 # A search over a tree is run by the tool that reads the ignore list (bw-cp9o.1).
 python3 hooks/search-gate.py --selftest
 
+# That doorman is registered in the personal settings rather than this project's,
+# because the habit it answers is the personal settings' own and every project on
+# the computer pays for it (bw-2x54.2). So the copy that actually stands in front
+# of a session is the installed one, and the cases above prove the one in the
+# repository. This is the line between them. Asked only where the personal
+# settings register it: a computer that has not put it up is not failed for a
+# file it never asked for (bw-2x54.3).
+worn=$HOME/.claude/hooks/search-gate.py
+if grep -qF "$worn" "$HOME/.claude/settings.json" 2>/dev/null; then
+  if ! cmp -s hooks/search-gate.py "$worn"; then
+    printf '\nthe search doorman standing in front of every project is not the one in this repository\n' >&2
+    printf '  install -m 755 %s/hooks/search-gate.py %s\n' "$PWD" "$worn" >&2
+    exit 1
+  fi
+  printf 'the installed search doorman matches this one\n'
+fi
+
 printf 'checked in %ss\n' "$((SECONDS - began))"
