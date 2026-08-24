@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Voice check — the instruction files must be written the way we want agents to write.
 
-An agent copies the register of its own prompt. Measured over 68 sessions and 1294
-chat messages, agent replies carried 18.2 em-dashes per 1000 words against 3.2 in
-the manager's own typing, and every file that teaches the voice sat between 7 and 24.
-So the files are what this checks: cap the markers there and the output follows.
+An agent copies the register of its own prompt. Measured over 68 sessions, agent
+replies carried 11.1 em-dashes per 1000 words across 59,479 words, against 2.8 in
+the 8,476 words the manager typed back. Every file that teaches the voice sat above
+the same line. So the files are what this checks: cap the markers there and the
+output follows.
 
     python3 machinery/voice-check.py              the instruction files, exit 1 on any failure
+    python3 machinery/voice-check.py --selftest   put each fault back, and watch every rule go red
     python3 machinery/voice-check.py --chat 12    what the last 12 sessions actually wrote
 """
 import argparse
@@ -115,7 +117,7 @@ def check_text(name, text):
         if per1k > cap:
             bad.append("%s: %.1f %s per 1000 words, cap is %.0f" % (name, per1k, label, cap))
     for label, pattern, was, better in BANNED:
-        for m in re.finditer(pattern, text):
+        for m in re.finditer(pattern, text, re.I):
             line = text[:m.start()].count("\n") + 1
             snippet = text[max(0, m.start() - 30):m.end() + 30].replace("\n", " ").strip()
             bad.append("%s:%d %s\n      ...%s...\n      instead of: %s\n      write:      %s"
@@ -153,16 +155,56 @@ def chat(limit):
     print("  em-dashes per 1000 words: %.1f   (cap %.0f)" % (text.count("—") * 1000 / words, EM_DASH_PER_1K))
     print("  semicolons per 1000 words: %.1f  (cap %.0f)" % (text.count(";") * 1000 / words, SEMICOLON_PER_1K))
     for label, pattern, _, _ in BANNED:
-        n = len(re.findall(pattern, text))
+        n = len(re.findall(pattern, text, re.I))
         if n:
             print("  %-34s %d" % (label, n))
 
 
+def selftest():
+    """Put every fault back and watch its own rule go red.
+
+    A gate nobody has seen refuse is a gate nobody knows still works. Each shape
+    below is fed its own bad example, which must fail, and its own rewrite, which
+    must pass. Then the real style file is checked as it stands and again with one
+    banned line put back on the end.
+    """
+    faults = []
+    filler = "word " * 200
+    for label, _, was, better in BANNED:
+        if not check_text("case", filler + "\n" + was):
+            faults.append("%s: the bad example passed" % label)
+        if check_text("case", filler + "\n" + better):
+            faults.append("%s: the rewrite it suggests fails its own check" % label)
+    if not check_text("case", "A sentence and then a dash — a restatement. " * 30):
+        faults.append("em-dash rate: a page of dashes passed")
+    if not check_text("case", "A sentence and then a splice; a second clause. " * 30):
+        faults.append("semicolon rate: a page of splices passed")
+
+    style = os.path.join(ROOT, ".claude/output-styles/manager.md")
+    if not os.path.isfile(style):
+        faults.append("the manager style file is not where this expects it")
+    else:
+        if check_text("manager.md", prose(style)):
+            faults.append("the manager style file does not pass as it stands")
+        if not check_text("manager.md", prose(style) + "\n" + BANNED[0][2] + "\n"):
+            faults.append("the manager style file passed with a banned line put back")
+
+    for f in faults:
+        print("  " + f)
+    print("voice-check --selftest: %d rules, %d faults" % (len(BANNED) + 3, len(faults)))
+    return 1 if faults else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--selftest", action="store_true",
+                    help="put each fault back and check every rule goes red")
     ap.add_argument("--chat", type=int, metavar="N", nargs="?", const=12,
                     help="report what the last N sessions wrote, and check nothing")
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest()
 
     if args.chat:
         chat(args.chat)

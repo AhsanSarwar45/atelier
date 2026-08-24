@@ -92,6 +92,7 @@ fi
 if [ "$SAY" = 1 ]; then
   printf 'board/selftest.py\n'
   [ "$FAULTS" = yes ] && printf 'board/inject.py\n'
+  printf 'voice-check.py\n'
   exit 0
 fi
 
@@ -139,5 +140,11 @@ if grep -qF "$worn" "$HOME/.claude/settings.json" 2>/dev/null; then
   fi
   printf 'the installed search doorman matches this one\n'
 fi
+
+# The files that teach an agent how to write are held to how we want it to write.
+# An agent copies the register of its own prompt, so the instruction files are
+# where the register is set and where it drifts back (bw-ld63).
+python3 voice-check.py --selftest
+python3 voice-check.py
 
 printf 'checked in %ss\n' "$((SECONDS - began))"

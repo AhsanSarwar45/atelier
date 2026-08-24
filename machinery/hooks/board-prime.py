@@ -20,8 +20,8 @@ RULES = """# Board — the only place work state lives
 Your board name: {name} (stamped onto your board commands for you).
 
 Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --reason="..."`.
-One claim carries the whole job. Closing a piece hands you whatever opens after it,
-either the next step or the next work item nobody is holding, so nothing after the
+One claim carries the whole job, so closing a piece hands you whatever opens after
+it, either the next step or the next work item nobody is holding. Nothing after the
 first card is claimed by hand.
 
 - Changing code requires a claimed card. The stop gate refuses to finish a turn without one.
