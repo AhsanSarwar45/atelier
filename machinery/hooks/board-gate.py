@@ -8,7 +8,7 @@ poured this turn or already standing — before anything he said gets answered; 
 card this session held when it changed it (`bc.unowned` — the held set at the
 instant of stopping would make a job's clean finish look like work under no card
 at all); anything the reply reports as found-but-not-fixed must already be
-recorded, as a work item of this job or as a find of its own; a card this session
+recorded, as a work item of this job or as a job of its own; a card this session
 made must say how anyone would know it is done; and last, the job it is running
 must be finished or waiting on somebody (`carry_on`, docs/board.md#4f-when-a-session-may-stop).
 
@@ -95,9 +95,9 @@ HABIT = (
     "He is pointing at how you work, not at one wrong answer: %(what)s.\n\n"
     "Answering the examples he named leaves whatever produced them running, and it "
     "produces them again next week. Before this reply ends, the CAUSE goes on the "
-    "board as one card naming what let this happen, not the instances:\n"
-    '    %(pour)s find "<what is wrong>" "<where it is, how it shows>" '
-    "--area <system> --kind bug\n"
+    "board as one whole job naming what let this happen, not the instances:\n"
+    "    %(pour)s new --what … --evidence … --done … --not … "
+    "--area <system> --kind bug --judge …\n"
     "`--area board` for the way work runs, `tooling`, `docs` or `tests` when the "
     "cause lives there. Then answer him: fix the examples too if you like, but say "
     "which card the cause belongs to."
@@ -180,30 +180,38 @@ def rows(ids, root):
     return got if isinstance(got, list) else [got]
 
 
-# What a card has to be to answer for a cause: a find, which is the one shape
-# something wrong is recorded in, and the shape this very refusal asks for. A job
-# is work rather than a fault, and a session names the work it is doing in almost
-# every reply it writes, so counting one would stand the refusal down on ordinary
-# business (found by the board's own reader). A cause promoted into a job leaves
-# its find standing and closed, and a closed card still answers here.
-CAUSES = ("find",)
-
-
-def cause_named(message, root):
+def cause_named(message, root, mine=()):
     """Whether the reply points at a card already on the board carrying the cause.
 
     What the refusal asks for is the cause recorded, not the cause recorded
     *this turn*. A habit he names twice is one cause and wants one card, so the
-    second turn's honest answer is to point at the find the first turn poured —
+    second turn's honest answer is to point at the card the first turn poured —
     and a session that poured nothing has nothing to point at, which is what the
     refusal is for. Read off the board and not off the wording: the card has to
     be there, and it has to be the shape a cause is kept in.
+
+    That shape is a job now that a fault opens whole (bw-7dqe), and the bare
+    placeholders the retired find route left standing still answer. What does
+    not answer is the job this session is already running: it names that one in
+    almost every reply it writes, so counting it would stand the refusal down on
+    ordinary business (found by the board's own reader).
     """
     named = set()
     for said in bc.prefixes(root):
         named.update(re.findall(r"\b%s-[0-9a-z.-]{2,16}\b" % re.escape(said),
                                 message or ""))
-    return any(set(r.get("labels") or []) & set(CAUSES) for r in rows(named, root))
+    if not named:
+        return False
+    held = set(mine or [])
+    held.update(g[3:] for r in rows(sorted(held), root)
+                for g in (r.get("labels") or []) if g.startswith("of:"))
+    for r in rows(named, root):
+        labels = set(r.get("labels") or [])
+        if "find" in labels:
+            return True
+        if "job" in labels and r.get("id") not in held:
+            return True
+    return False
 
 
 # A goal here is work this session is expected to carry on with. The rest are
@@ -341,7 +349,7 @@ def main():
         # else in that slot is a file half-written or edited by hand, and a gate that
         # refuses on those refuses on damage rather than on an answer.
         if habit.get("habit") is True \
-                and not cause_named(data.get("last_assistant_message"), root):
+                and not cause_named(data.get("last_assistant_message"), root, mine):
             block(HABIT % {"what": habit.get("what")
                                        or "a way of working he has named before",
                                        "pour": bc.tool(root, "job")})
@@ -400,9 +408,10 @@ def main():
             "job rather than hand it on:\n"
             '    %s under <goal> --do "<what to do>|<how we know it is done>"\n'
             "  SEPARATE: another system or another cause, or it would swell this job "
-            "past the done it was poured with. It is its own card:\n"
-            '    %s find "<what is wrong>" "<where it is, how it shows>"'
-            " --area <system> --kind <bug|feature|chore>\n"
+            "past the done it was poured with. It opens whole, as a claimable job "
+            "of its own:\n"
+            "    %s new --what … --evidence … --done … --not …"
+            " --area <system> --kind <bug|feature|chore> --judge …\n"
             "If nothing was left standing, say so without the phrase."
             % (found.group(0), bc.tool(root, "job"), bc.tool(root, "job"))
         )

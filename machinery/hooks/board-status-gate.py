@@ -785,8 +785,8 @@ def main():
             "--done … --area … --kind …, which pours the goal and its steps together. "
             "A fault this job's own change would touch: %(pour)s under <goal> "
             "--do \"<what to do>|<how we know it is done>\". "
-            "Something you noticed and are not doing now: %(pour)s find "
-            "\"<what>\" \"<where it is, how it shows>\" --area … --kind …."
+            "Something you noticed and are not doing now opens the same way a job "
+            "does, whole and claimable: %(pour)s new … — there is no lighter shape."
             % {"pour": bc.tool(root, "job")}
         )
         return
@@ -1068,10 +1068,12 @@ def main():
                 return
             if "find" in (card.get("labels") or []):
                 deny(
-                    "%s is something noticed, not yet a job: it has no proof, no "
-                    "definition of done and no steps. Promote it with %s "
-                    "new --source %s --what … --evidence … --done … --area …, or "
-                    "close it as not real." % (cid, bc.tool(root, "job"), cid)
+                    "%s is a bare placeholder, not yet a job: it has no proof, no "
+                    "definition of done and no steps. Fill it in where it stands, "
+                    "under the same id, with %s upgrade %s --what … --evidence … "
+                    "--done … --not … --area … --kind … --judge …, and then claim "
+                    "it; or drop it with %s cancel %s --reason …."
+                    % (cid, bc.tool(root, "job"), cid, bc.tool(root, "job"), cid)
                 )
                 return
             # Any piece of a job, not the card that used to cut the tree: the

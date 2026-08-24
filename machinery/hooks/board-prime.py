@@ -30,9 +30,9 @@ first card is claimed by hand.
   cause. It becomes a work item on the current goal and is fixed here and now:
   `{pour} under <goal> --do "<what to do>|<how we know it is done>"`.
   A separate fault belongs to another system or another cause, or it would swell the
-  job past its `--done`. It gets its own card:
-  `{pour} find "<what is wrong>" "<where it is, how it shows>"
-  --area <system> --kind <bug|feature|chore>`.
+  job past its `--done`. It opens whole, as a claimable job of its own:
+  `{pour} new --what … --evidence … --done … --not …
+  --area <system> --kind <bug|feature|chore> --judge …`.
   Those are the only two routes, and the stop gate enforces it.
 - Every card needs both tags. `area:` names the system ({areas}). `kind:` is
   bug, feature or chore.
@@ -41,8 +41,10 @@ first card is claimed by hand.
   `{pour} new --what … --evidence … --done … --area … --kind …
   --steps <the optional ones it runs>`, which creates the goal and its first step.
   Closing a step opens the next one and gives it to you, so a job never shows a step
-  nobody has thought about yet. A goal is not claimable, so claim its step. Promote a
-  find with `job new --source <id> …`.
+  nobody has thought about yet. A goal is not claimable, so claim its step. A bare
+  placeholder card left by the retired find route is filled in where it stands —
+  same id, same fields as new — with `{pour} upgrade <id> …`, or dropped with
+  `{pour} cancel <id> --reason …`.
 - The playbook IS the run of steps: {steps}. The bracketed ones
   run only when `--steps` names them. You do not need the ones it does not name.
   The rest are mandatory. A speed claim in `--done` selects benchmark by itself and

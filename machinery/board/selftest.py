@@ -2864,7 +2864,7 @@ def main():
     refused = reporting(PUT_DOWN)
     assert refused, "a fault the reply named and put down ended the turn with " \
         "nothing recorded anywhere but the session"
-    assert "job under" in refused and "job find" in refused, \
+    assert "job under" in refused and "job new" in refused, \
         "the refusal named only one of the two ways a fault is recorded: %s" % refused
     assert reporting(PUT_DOWN, made=["tst-x.7"]) == "", \
         "a turn that did record the fault was refused anyway: %s" \
@@ -2927,7 +2927,7 @@ def main():
             "board naming what produced it: %s" % (said or "ALLOWED")
         # The pour by the name THIS project's session types it: a project carrying a
         # forwarder is told its own path, one without is told the machinery's.
-        assert "%s find" % project.tool(DECL, "job") in said and "--kind bug" in said, \
+        assert "%s new" % project.tool(DECL, "job") in said and "--kind bug" in said, \
             "the refusal did not name the command that files the cause: %s" % said
         assert fired == ["habit-cause"], \
             "the refusal fired without counting, so the manager's number stays a " \
@@ -2948,14 +2948,23 @@ def main():
             YES, said="That is on the board already — it is tst-fff.",
             standing=[A_FIND])
         assert named == "" and not fired, \
-            "a reply naming the find already carrying the cause was refused: %s" \
-            % (named or "ALLOWED")
-        # Anything that is not a find. A session names the job it is running in
-        # almost every reply it writes, and a step is one move inside somebody's
-        # plan; neither is a fault anybody recorded.
-        for what, card in (("a goal", A_GOAL), ("a step", A_STEP)):
+            "a reply naming the placeholder already carrying the cause was refused: " \
+            "%s" % (named or "ALLOWED")
+        # A fault opens whole now (bw-7dqe), so a job standing on the board answers
+        # for a cause too. A step is one move inside somebody's plan and does not;
+        # nor does the very job this session is running, which it names in almost
+        # every reply it writes — here the session holds c, a piece of tst-ggg.
+        whole, fired = pointed_at(
+            YES, said="That is on the board already — it is tst-ggg.",
+            standing=[A_GOAL])
+        assert whole == "" and not fired, \
+            "a reply naming the job already carrying the cause was refused: %s" \
+            % (whole or "ALLOWED")
+        A_MINE = {"id": "c", "labels": ["step:work", "of:tst-ggg"]}
+        for what, cards in (("a step", [A_STEP]),
+                            ("the goal of the job this session holds", [A_GOAL, A_MINE])):
             said, _ = pointed_at(
-                YES, said="I am on it, see %s." % card["id"], standing=[card])
+                YES, said="I am on it, see %s." % cards[0]["id"], standing=cards)
             assert "how you work" in said, \
                 "%s named instead of a cause stood the refusal down: %s" \
                 % (what, said or "ALLOWED")
@@ -3053,8 +3062,9 @@ def main():
 
     print("ok: a habit the manager points at cannot end the turn with nothing on the "
           "board naming what produced it, a card in the same turn satisfies it, so "
-          "does pointing at a find already standing while a goal, a step or a card "
-          "that is not there does not, every reading that is not a plain yes lets the "
+          "does pointing at a placeholder or a job already standing while a step, the "
+          "session's own job or a card that is not there does not, every reading that "
+          "is not a plain yes lets the "
           "reply through, and either way of switching the gate off stops the refusal "
           "and the reading both")
 
@@ -3531,18 +3541,21 @@ def main():
     DONE = "`cargo test` reports 0 failures"
     NOT_IN = "the words a card is written in (%s)" % bars.EG_CARD
 
-    code, said = pour(["find", UNREADABLE, WHERE,
-                       "--area", AREA, "--kind", "bug"])
+    def fresh(what, area=AREA, evidence="x" * 40):
+        """A whole job, the only shape a noticed fault opens in now."""
+        return ["new", "--what", what, "--evidence", evidence, "--done", DONE,
+                "--not", NOT_IN, "--area", area, "--kind", "bug", "--judge", "agent"]
+
+    code, said = pour(fresh(UNREADABLE))
     assert code != 0 and WORDS in said, \
-        "a find whose title only its author can read was not refused: %s" % said
+        "a job whose title only its author can read was not refused: %s" % said
     for term, plain_word in (("shader", "colours a surface"), ("pass", "step"),
                              ("framebuffer", "picture being drawn")):
         assert term in said and plain_word in said, \
             "the refusal named %r without saying what to write instead: %s" % (term, said)
 
-    code, said = pour(["find", READABLE, WHERE,
-                       "--area", LAST_AREA, "--kind", "bug"])
-    assert WORDS not in said, "a find anyone can read was refused anyway: %s" % said
+    code, said = pour(fresh(READABLE, LAST_AREA))
+    assert WORDS not in said, "a job anyone can read was refused anyway: %s" % said
 
     # The shapes code leaves behind carry no banned word at all, and they are how
     # most of this board's unreadable titles are actually written: 140 of 566 on
@@ -3551,8 +3564,7 @@ def main():
                         ("arm_review swallows the failure", "a run-together code name"),
                         ("close_gate() never fires", "call syntax"),
                         ("The GPU budget is never read", "shouted initials")):
-        code, said = pour(["find", line, WHERE,
-                           "--area", LAST_AREA, "--kind", "bug"])
+        code, said = pour(fresh(line, LAST_AREA))
         assert code != 0 and shape in said, \
             "a title written as %s was accepted: %s" % (shape, said)
 
@@ -3598,22 +3610,21 @@ def main():
                     if a not in DECL.areas)
     if theirs:
         area, owner = theirs[0]
-        code, said = pour(["find", READABLE, WHERE, "--area", area, "--kind", "bug"])
+        code, said = pour(fresh(READABLE, area))
         assert code != 0 and owner in said and elsewhere[owner].path in said, \
             "a card filed here under %r, which is %s's subject and not this " \
             "project's, was not routed there: %s" % (area, owner, said)
 
     for owner, decl in sorted(elsewhere.items()):
-        code, said = pour(["find", READABLE,
-                           "%s, in %s" % (WHERE, os.path.realpath(decl.path)),
-                           "--area", LAST_AREA, "--kind", "bug"])
+        code, said = pour(fresh(READABLE, LAST_AREA,
+                                "%s, in %s" % (WHERE, os.path.realpath(decl.path))))
         assert code != 0 and owner in said, \
             "a card whose evidence names %s's own checkout was filed here: %s" \
             % (owner, said)
 
     # And a card that belongs here is not caught by either half — a router that
     # refuses everything routes nothing.
-    code, said = pour(["find", READABLE, WHERE, "--area", LAST_AREA, "--kind", "bug"])
+    code, said = pour(fresh(READABLE, LAST_AREA))
     assert "file it there" not in said, \
         "a card about this project's own %s was sent somewhere else: %s" \
         % (LAST_AREA, said)
@@ -3667,33 +3678,23 @@ def main():
         "a work item's finish line was held to a length rather than to its parent's " \
         "bar: %s" % said
 
-    for name, where, wanted in (
-            ("a find that says where it is but not how it shows",
-             "scripts/board/job, on every pour", "not HOW IT SHOWS"),
-            ("a find that says neither", "over there", "must say WHERE it is")):
-        code, said = pour(["find", READABLE, where, "--area", LAST_AREA, "--kind", "bug"])
-        assert code != 0 and wanted in said, "%s was accepted: %s" % (name, said)
-
     code, said = job_new()
     assert "must say" not in said and "names nothing" not in said, \
         "a job with every section filled properly was refused anyway: %s" % said
 
-    # Both kinds carried all the way past their bars, not only up to them: the cases
-    # above stop at the refusal, so a card the bars let through went to the board
-    # untried and a fault in what it writes there showed up on somebody's real find.
-    for kind, args in (("a job", []),
-                       ("a find", ["find", READABLE, WHERE,
-                                   "--area", LAST_AREA, "--kind", "bug"])):
-        _, said = (job_new() if not args else pour(args))
-        # `bd` is off the path for every case here, so reaching the board command is
-        # the pass — the card's whole body was built first. Stopping anywhere earlier
-        # is the fault this catches.
-        assert "No such file or directory: 'bd'" in said, \
-            "%s that cleared every bar never reached the board: %s" % (kind, said)
+    # Carried all the way past the bars, not only up to them: the cases above stop
+    # at the refusal, so a card the bars let through went to the board untried and
+    # a fault in what it writes there showed up on somebody's real card.
+    _, said = job_new()
+    # `bd` is off the path for every case here, so reaching the board command is
+    # the pass — the card's whole body was built first. Stopping anywhere earlier
+    # is the fault this catches.
+    assert "No such file or directory: 'bd'" in said, \
+        "a job that cleared every bar never reached the board: %s" % said
 
     print("ok: a card is refused unless what is wrong is observable, the finish line "
-          "names a run and its outcome, the scope line was written for this job, a "
-          "work item is held to its parent's bar, and a find says where and how")
+          "names a run and its outcome, the scope line was written for this job, and "
+          "a work item is held to its parent's bar")
 
     # What a job costs before it is allowed to start. Eleven steps, of which four
     # were ceremony a job paid in cards: a worktree card for a tree the gates
@@ -3822,8 +3823,8 @@ def main():
           "a job already running keeps every position of its own order")
 
     # Batching, which is settled at the pour or nowhere: a job that could be a work
-    # item of a goal already open, several finds promoted as one job, and an item
-    # poured where an open sibling already lands. Every case runs the real command
+    # item of a goal already open, a placeholder filled in where it stands, and an
+    # item poured where an open sibling already lands. Every case runs the real command
     # against a `bd` that answers what it is told to and writes down what it was
     # asked, so what is judged is the pour's own decision and nothing is left behind.
     tmp = tempfile.mkdtemp(prefix="board-batch-")
@@ -3935,150 +3936,139 @@ def main():
             assert [l for l in asked if l.startswith("create ")], \
                 "%s let the pour through without a card being made: %s" % (name, asked)
 
-        # The two pours the refusal must never reach. A work item poured under a
-        # goal IS the fold, and a find carries no run to batch.
+        # The pour the refusal must never reach: a work item poured under a goal IS
+        # the fold.
         PARENT = {"id": "tst-goal", "status": "open", "issue_type": "epic",
                   "priority": 1, "labels": ["job", "area:" + AREA, "kind:bug"],
                   "title": "The board keeps two cards for one page"}
-        for name, argv in (
-                ("pouring a work item under an open goal",
-                 ["under", "tst-goal", "--do", "%s|%s" % (READABLE, DONE)]),
-                ("filing a find",
-                 ["find", READABLE, WHERE, "--area", AREA, "--kind", "bug"])):
-            board(goals=[OPEN_GOAL], cards={"tst-goal": PARENT}, kin=[])
-            code, said, err, asked = ran(argv)
-            assert code == 0, \
-                "%s was refused because a goal of its system is open, so a job in " \
-                "flight cannot be worked at all: %s" % (name, said + err)
-            assert not any("--label job" in l for l in asked), \
-                "the fold refusal asked its question for %s, where there is nothing " \
-                "to fold: %s" % (name, asked)
+        board(goals=[OPEN_GOAL], cards={"tst-goal": PARENT}, kin=[])
+        code, said, err, asked = ran(
+            ["under", "tst-goal", "--do", "%s|%s" % (READABLE, DONE)])
+        assert code == 0, \
+            "a work item poured under an open goal was refused because a goal of " \
+            "its system is open, so a job in flight cannot be worked at all: %s" \
+            % (said + err)
+        assert not any("--label job" in l for l in asked), \
+            "the fold refusal asked its question for a work item, where there is " \
+            "nothing to fold: %s" % asked
 
         print("ok: a job opened into a system already carrying an open goal is "
               "refused, named those goals and handed the command that folds it into "
               "one, a line saying why it stands alone opens it and is written onto "
               "the card, a reason that says nothing is refused, a closed goal is "
-              "nothing to fold into, and neither a work item nor a find is ever asked")
+              "nothing to fold into, and a work item is never asked")
 
-        # Several finds, one job. Promotion took one find at a time, so three faults
-        # on one page cost three jobs and three whole runs of ceremony.
-        FINDS = {
-            "tst-f1": {"id": "tst-f1", "status": "open", "labels": ["find"],
+        # A placeholder filled in where it stands (bw-7dqe). The route this replaced
+        # closed the bare card as finished and opened a fresh one beside it, so the
+        # board said "done" about work nobody had touched. Now the same card becomes
+        # the job: same id, its history kept, nothing closed and nothing made twice.
+        PLACEHOLDER = {"id": "tst-f1", "status": "open", "priority": 1,
+                       "labels": ["find", "area:" + AREA, "kind:bug"],
                        "title": "The settings page forgets the choice the manager made",
                        "description": "## Where it is\nui/settings.tsx draws the "
-                                      "choice back as its first one\n"},
-            "tst-f2": {"id": "tst-f2", "status": "open", "labels": ["find"],
-                       "title": "The settings page loses the tick when the page turns",
-                       "description": "## Where it is\nui/settings.tsx reads the tick "
-                                      "back as off\n"},
-            "tst-f3": {"id": "tst-f3", "status": "open", "labels": ["find"],
-                       "title": "The count above the list names one row too few",
-                       "description": "## Where it is\nui/report.tsx prints one less "
-                                      "than the rows under it\n"}}
-        # Where a find says it is only has to name a place and show how it manifests,
-        # so it is not a finish line and the item promoted from it says how we will
-        # know it is fixed.
-        FIXED = {"tst-f1": "`npm test` reports 0 failures with ui/settings.tsx "
-                           "keeping the choice",
-                 "tst-f2": "`npm test` reports 0 failures with ui/settings.tsx "
-                           "keeping the tick",
-                 "tst-f3": "`npm test` reports 0 failures with ui/report.tsx "
-                           "counting every row"}
-        board(goals=[], cards=FINDS)
-        code, said, err, asked = opens(
-            *sum([["--source", "%s|%s" % (f, FIXED[f])] for f in sorted(FINDS)], []))
-        assert code == 0, "three finds promoted together were refused: %s" % (said + err)
+                                      "choice back as its first one\n"}
+
+        def fills_in(*extra, **over):
+            args = {"--what": READABLE, "--evidence": "x" * 40, "--done": DONE,
+                    "--not": NOT_IN, "--area": AREA, "--kind": "bug",
+                    "--judge": "agent"}
+            args.update(over)
+            flat = ["upgrade", "tst-f1"]
+            for flag, value in args.items():
+                if value is not None:
+                    flat += [flag, value]
+            return ran(flat + list(extra))
+
+        board(goals=[], cards={"tst-f1": PLACEHOLDER})
+        code, said, err, asked = fills_in()
+        assert code == 0, "filling a placeholder in was refused: %s" % (said + err)
+        assert not [l for l in asked if l.startswith("create ")], \
+            "filling a placeholder in made a fresh card beside it, which is the " \
+            "retired route back again: %s" % asked
+        assert not [l for l in asked if l.startswith("close ")], \
+            "filling a placeholder in closed something, so the board says done " \
+            "about work nobody has touched: %s" % asked
+        rewrote = [l for l in asked if l.startswith("update tst-f1 ") and "--title" in l]
+        assert len(rewrote) == 1, \
+            "the placeholder was not rewritten where it stands: %s" % asked
+        body = rewrote[0].replace("\\n", "\n")
+        assert "--type epic" in body and READABLE in body and DONE in body, \
+            "the rewritten card is not the shape a goal is, an epic carrying what " \
+            "is wrong and how we know it is done: %s" % rewrote[0]
+        where = bars.part(PLACEHOLDER["description"], "where")
+        assert where and "Where it was first noticed: " + where in body, \
+            "where the placeholder said it shows is gone from the job, so the only " \
+            "words anyone wrote about it are lost on the way up: %s" % rewrote[0]
+        assert " -p 1 " in rewrote[0], \
+            "the placeholder's own priority was dropped when nobody gave one: %s" \
+            % rewrote[0]
+        worn = [l.split("--set-labels", 1)[1].split()[0].split(",")
+                for l in asked if l.startswith("update tst-f1 ") and "--set-labels" in l]
+        assert worn and "job" in worn[-1] and "find" not in worn[-1], \
+            "the filled-in card still wears the placeholder label, or never got the " \
+            "job one, so the board cannot tell it from a bare card: %s" % worn
+        assert "no first step to open" in said, \
+            "a job with no optional steps was not told where its work begins: %s" \
+            % said
+
+        # Where the placeholder said it shows is carried only when it clears the
+        # same bar a fresh card's evidence does; a rumour stays behind.
+        board(goals=[], cards={"tst-f1": dict(
+            PLACEHOLDER, description="## Where it is\nover there\n")})
+        code, said, err, asked = fills_in()
+        assert code == 0, "a placeholder whose where-line names nothing could not " \
+            "be filled in at all: %s" % (said + err)
+        rewrote = [l for l in asked if l.startswith("update tst-f1 ") and "--title" in l]
+        assert len(rewrote) == 1 and "first noticed" not in rewrote[0], \
+            "a where-line that names no place was written into the job's evidence " \
+            "as if it were proof: %s" % rewrote
+
+        # With an optional step named, the same card gets its first step opened,
+        # exactly as a fresh job does.
+        board(goals=[], cards={"tst-f1": PLACEHOLDER})
+        code, said, err, asked = fills_in("--steps", "design")
         made = [l for l in asked if l.startswith("create ")]
-        assert len([l for l in made if "--type epic" in l]) == 1, \
-            "promoting three finds at once made more than one job, which is the " \
-            "ceremony being paid three times over: %s" % made
-        assert len(made) == 4, \
-            "promoting three finds made %d cards where one goal and one work item " \
-            "per find were owed: %s" % (len(made), made)
-        for fid, find in sorted(FINDS.items()):
-            item = [l for l in made if find["title"] in l]
-            assert item, \
-                "the work item promoted from %s does not carry the words the find " \
-                "was filed in, so a reader has to go back to the closed card: %s" \
-                % (fid, made)
-            where = bars.part(find["description"], "where")
-            assert where and where in item[0], \
-                "the item promoted from %s dropped where the find said it was, so " \
-                "the words survive only on the card that was just closed: %s" \
-                % (fid, item[0])
-            assert "-l step:work" in item[0] and "-l of:" in item[0], \
-                "the item promoted from %s is not one of the job's own work items, " \
-                "so nothing moves the run on when it closes: %s" % (fid, item[0])
-            # Read back the way `board/job` itself reads a card apart, because a
-            # section runs to the next heading or to the end of the body: what a
-            # promoted card was filed as, written after its finish line, is read
-            # back as part of it and matched against siblings it never lands with.
-            body = item[0].replace("\\n", "\n")
-            half = bars.part(body, "Acceptance Criteria").split("\n -l ", 1)[0].strip()
-            assert not bars.finish_line(half), \
-                "the item promoted from %s boarded with a second half that `job " \
-                "under` would have bounced, so promotion is the way onto the board " \
-                "for a card nothing can close it against: %s" \
-                % (fid, bars.finish_line(half))
-            assert half == FIXED[fid], \
-                "the finish line read back off the item promoted from %s is not the " \
-                "one it was given — everything else in the section is measured as " \
-                "part of it: %r" % (fid, half)
-        closed = [l for l in asked if l.startswith("close ")]
-        assert len(closed) == 3, \
-            "promoting three finds closed %d of them, so the rest stand open as " \
-            "work nobody will do again: %s" % (len(closed), closed)
-        for fid in sorted(FINDS):
-            assert any(l.startswith("close " + fid) and "promoted into" in l
-                       for l in closed), \
-                "%s was not closed as promoted: %s" % (fid, closed)
+        assert code == 0 and len(made) == 1 and "of:tst-f1" in made[0], \
+            "filling a placeholder in with a design step did not open that step " \
+            "under the same card: %s" % (said + err + "\n".join(made))
         assert "no first step to open" not in said, \
-            "a job whose work items are the finds it was promoted from still told " \
-            "the pourer to pour them by hand: %s" % said
+            "a job whose first step was just opened was told to open it by hand: %s" \
+            % said
 
-        # One find still promotes the way it always did, and where it says it is
-        # stands as the item's own finish line when those words already are one.
-        READY = {"id": "tst-f4", "status": "open", "labels": ["find"],
-                 "title": "The count above the list is written twice over",
-                 "description": "## Where it is\n`npm test` reports 1 failure over "
-                                "ui/report.tsx, which counts every row twice\n"}
-        board(goals=[], cards={"tst-f4": READY})
-        code, said, err, asked = opens("--source", "tst-f4")
-        assert code == 0 and len([l for l in asked if l.startswith("create ")]) == 2, \
-            "promoting a single find stopped making one goal and one work item: %s" \
-            % (said + err)
-        assert any(l.startswith("close tst-f4") for l in asked), \
-            "the find a job was promoted from was left open: %s" % asked
+        # What it refuses, and every refusal writes nothing.
+        for name, cards, wanted in (
+                ("a card that is already a job",
+                 {"tst-f1": dict(PLACEHOLDER, labels=["job", "area:" + AREA,
+                                                        "kind:bug"])},
+                 "not a placeholder"),
+                ("a card that is not there", {}, "no card tst-f1"),
+                ("a placeholder already closed",
+                 {"tst-f1": dict(PLACEHOLDER, status="closed")}, "closed")):
+            board(goals=[], cards=cards)
+            code, said, err, asked = fills_in()
+            assert code != 0 and wanted in (said + err), \
+                "upgrading %s was not refused: %s" % (name, said + err)
+            assert not [l for l in asked if l.split(" ", 1)[0] in ("update", "create")], \
+                "upgrading %s was refused after the board had been written: %s" \
+                % (name, asked)
 
-        # A find's where-it-is is a weaker thing than a finish line: it says where to
-        # go and look, not what settles it. Promotion is not the way onto the board
-        # for a work item `job under` would have bounced.
-        board(goals=[], cards={"tst-f1": FINDS["tst-f1"]})
-        code, said, err, asked = opens("--source", "tst-f1")
-        assert code != 0, \
-            "a find whose where-it-is names nothing runnable was promoted into a " \
-            "work item anyway, so closing against it is an opinion: %s" % (said + err)
-        assert '--source "tst-f1|' in (said + err), \
-            "the refusal never handed over the way to promote this find, so the " \
-            "batch it belongs to cannot be opened at all: %s" % (said + err)
-        assert not [l for l in asked if l.startswith("create ")], \
-            "the promotion was refused after cards had already been written: %s" % asked
+        # And it stands alone or folds, the same as a fresh job: a goal already open
+        # in its system is the question, asked before anything is rewritten.
+        board(goals=[OPEN_GOAL], cards={"tst-f1": PLACEHOLDER})
+        code, said, err, asked = fills_in()
+        assert code != 0 and "--alone" in (said + err), \
+            "a placeholder was filled in beside an open goal of its own system " \
+            "without the fold question being put: %s" % (said + err)
+        assert not [l for l in asked if l.startswith("update ")], \
+            "the fold refusal came after the placeholder had been rewritten: %s" \
+            % asked
 
-        # A find nobody can read is a promotion that would carry no words at all.
-        board(goals=[], cards={})
-        code, said, err, asked = opens("--source", "tst-nosuch")
-        assert code != 0 and "nothing to promote" in (said + err), \
-            "a job was promoted from a card that is not there, so its work item " \
-            "carries no words: %s" % (said + err)
-        assert not [l for l in asked if l.startswith("create ")], \
-            "a promotion refused after the goal was written leaves half a job " \
-            "standing that nobody asked for: %s" % asked
-
-        print("ok: naming several finds on one opening makes one job carrying one "
-              "work item per find in the words it was filed in, closes every one of "
-              "them as promoted, holds each promoted item to the same finish line "
-              "`under` holds one to, still promotes a single find the way it did, "
-              "and refuses a source card that is not there")
+        print("ok: a placeholder is filled in where it stands as a whole job under "
+              "the same id, closing nothing and making nothing beside it, keeping its "
+              "priority and where it was noticed when that names a place, opening its "
+              "first step when one is named, refused for a job, a missing card or a "
+              "closed one before anything is written, and put the fold question a "
+              "fresh job is put")
 
         # The merge nudge. Two buttons and a checkbox on one page arrive as three
         # work items settled by one run in one place, and nothing said so.
@@ -4130,9 +4120,9 @@ def main():
             "two items of one batch settled by one run in one place were poured " \
             "with nothing said between them: %r" % err
 
-        # A promoted card standing as somebody's sibling: what it was filed as is
-        # not what it is judged by, so the place the find named is no reason to
-        # merge an item that only lands there.
+        # A card the retired promotion route left standing as somebody's sibling:
+        # what it was filed as is not what it is judged by, so the place its
+        # placeholder named is no reason to merge an item that only lands there.
         PROMOTED = [{"id": "tst-goal.9", "status": "open",
                      "title": "The settings page forgets the choice the manager made",
                      "description": "## Where it is\nui/report.tsx prints one less "

@@ -425,25 +425,25 @@ FAULTS = [
                          "")),
 
     # Batching, which the opening command is the only place anybody is asked about:
-    # a job nobody was told could fold into an open goal, finds promoted one at a
-    # time, and an item poured where an open sibling already lands (bw-msdm).
+    # a job nobody was told could fold into an open goal, and an item poured where
+    # an open sibling already lands (bw-msdm).
     ("a job is opened into a system already carrying an open goal", POUR,
      lambda s: s.replace("    stands_alone(a)\n", "")),
-    ("only the first of the finds named on one opening is promoted", POUR,
-     lambda s: s.replace("    for value in sources:\n",
-                         "    for value in sources[:1]:\n")),
-    ("a find is promoted into a work item on words that settle nothing", POUR,
-     lambda s: s.replace("        if wrong:\n", "        if False:\n")),
     ("the whole of a work item's body is read as the finish line it is judged by",
      POUR,
      lambda s: s.replace(
          'sections.part(card.get("description") or "", "Acceptance Criteria")',
          '(card.get("description") or "")')),
-    ("what a promoted card was filed as is written where its finish line is read "
-     "back from", POUR,
-     lambda s: s.replace(
-         '"## Where it is\\n%s\\n\\n%s\\n\\n## Acceptance Criteria\\n%s\\n"',
-         '"## Acceptance Criteria\\n%s\\n\\n%s\\n\\n## Where it is\\n%s\\n"')),
+    # Filling a placeholder in where it stands (bw-7dqe): the same card becomes the
+    # job, so nothing is closed as done that nobody did — and the guard rails on
+    # that route are these two.
+    ("an upgrade fills in any card it is pointed at, placeholder or not", POUR,
+     lambda s: s.replace('    if "find" not in (card.get("labels") or []):\n',
+                         "    if False:\n")),
+    ("what the placeholder said about where it shows is dropped on the way up",
+     POUR,
+     lambda s: s.replace("    if where:\n        a.evidence = ",
+                         "    if False:\n        a.evidence = ")),
     ("what is already open under a goal is nothing a new item is measured against",
      POUR,
      lambda s: s.replace("    kin = siblings_of(a.parent)\n", "    kin = []\n")),
