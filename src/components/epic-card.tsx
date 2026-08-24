@@ -251,19 +251,24 @@ export const EpicCard = memo(function EpicCard({
   // Shared children section
   const childrenSection = (
     <div className="pt-2 border-t border-b-strong">
-      <button
+      <Button
+        variant="ghost"
+        size="xs"
         onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
         aria-expanded={isExpanded}
         aria-label={`${isExpanded ? 'Collapse' : 'Expand'} child tasks`}
-        className="flex items-center gap-1 text-xs font-semibold text-epic hover:text-epic/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-epic rounded mb-2"
+        className="mb-2 h-auto p-0 font-semibold text-epic hover:bg-transparent hover:text-epic/80 focus-visible:ring-epic"
       >
-        {isExpanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
+        {/* Named its own colour so the library leaves it at full strength: a
+            ghost button dims an icon that says nothing, and this one is the
+            only thing saying the list opens. */}
+        {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-epic" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 text-epic" aria-hidden="true" />}
         {/* What the job is made of, and what it dropped — never the two added
             together, which is the number the bar deliberately does not count. */}
         Child Tasks ({progress.dropped > 0
           ? `${progress.total} · ${progress.dropped} dropped`
           : children.length})
-      </button>
+      </Button>
       <SubtaskList
         childTasks={children}
         onChildClick={onChildClick}

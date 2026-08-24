@@ -7,6 +7,7 @@ import { FolderOpen, Link2, MessageSquare } from "lucide-react";
 import { BeadKindTag, BeadSystemTag, BeadTags } from "@/components/bead-tags";
 import { CopyableText } from "@/components/copyable-text";
 import { Badge } from "@/components/ui/badge";
+import { Panel } from "@/components/ui/panel";
 import { useTheme } from "@/hooks/use-theme";
 import { tagFor } from "@/lib/bead-labels";
 import { formatBeadId, formatWorktreePath, isBlockedBy, truncate } from "@/lib/bead-utils";
@@ -34,38 +35,38 @@ export interface BeadCardProps {
 }
 
 /**
- * Get worktree status color for the status box
- * Green: work is ahead of main and needs nothing from it
- * Red: needs rebase
- * Gray: no copy of the work, or nobody is waiting on the bead any more
+ * What the copy of the work is saying, as one of the library's panel tones:
+ * success when it is ahead of main and needs nothing from it, danger when it
+ * needs rebasing, and the plain tone when there is no copy or nobody is
+ * waiting on the bead any more.
  */
-function getWorktreeStatusColor(worktreeStatus?: WorktreeStatus, beadStatus?: string): string {
+function getWorktreeTone(worktreeStatus?: WorktreeStatus, beadStatus?: string): "success" | "danger" | "default" {
   // Work nobody is waiting on gets no colour: the greens and ambers here say
   // "this is in flight", and dropped work is as settled as finished work. This
   // used to ask only whether the bead was closed, so a dropped one kept the
   // colours of live work.
   if (beadStatus !== undefined && !standing(beadStatus)) {
-    return "bg-surface-overlay/50 border-b-default/50";
+    return "default";
   }
 
   if (!worktreeStatus?.exists) {
-    return "bg-surface-overlay/50 border-b-default/50";
+    return "default";
   }
 
   // Check worktree ahead/behind
   const { ahead, behind } = worktreeStatus;
 
   if (ahead > 0 && behind > 0) {
-    // Needs rebase - red
-    return "bg-danger/10 border-danger/30";
+    // Needs rebase
+    return "danger";
   }
 
   if (ahead > 0 && behind === 0) {
-    // Ahead of main with nothing to take back - green
-    return "bg-success/10 border-success/30";
+    // Ahead of main with nothing to take back
+    return "success";
   }
 
-  return "bg-surface-overlay/50 border-b-default/50";
+  return "default";
 }
 
 /**
@@ -125,19 +126,14 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
 
   // Shared worktree section
   const worktreeSection = hasWorktree && worktreeStatus?.worktree_path && (
-    <div
-      className={cn(
-        "rounded-md border p-2 space-y-1.5",
-        getWorktreeStatusColor(worktreeStatus, bead.status)
-      )}
-    >
+    <Panel tone={getWorktreeTone(worktreeStatus, bead.status)} inset="none" className="p-2 space-y-1.5">
       <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
         <FolderOpen className="size-3 shrink-0" aria-hidden="true" />
         <span className="font-mono truncate">
           {formatWorktreePath(worktreeStatus.worktree_path)}
         </span>
       </div>
-    </div>
+    </Panel>
   );
 
   // A card nobody is waiting on is dimmed and struck through, whether the work

@@ -19,6 +19,10 @@ const panelVariants = cva('rounded-md border', {
       attention: 'border-amber-500/60 bg-amber-500/10',
       /** Telling the reader something they did not ask about. */
       info: 'border-info/40 bg-info/10',
+      /** What is inside is in good order and needs nothing doing to it. */
+      success: 'border-success/30 bg-success/10',
+      /** What is inside is wrong, and somebody has to act on it. */
+      danger: 'border-danger/30 bg-danger/10',
       /** Sits above the page: opaque, and lifted off what it covers. */
       overlay: 'border-border/60 bg-background shadow-lg',
     },
