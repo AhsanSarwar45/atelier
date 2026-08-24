@@ -34,7 +34,7 @@ first card is claimed by hand.
   `{pour} find "<what is wrong>" "<where it is, how it shows>"
   --area <system> --kind <bug|feature|chore>`.
   Those are the only two routes, and the stop gate enforces it.
--  Every card needs both tags. `area:` names the system ({areas}). `kind:` is
+- Every card needs both tags. `area:` names the system ({areas}). `kind:` is
   bug, feature or chore.
   The pour tool requires them and the stop gate refuses a turn that made a card without them.
 - Cards are never written by hand. `bd create` is refused. A job opens with

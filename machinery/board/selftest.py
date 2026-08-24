@@ -2516,7 +2516,7 @@ def main():
     assert "--skip" not in told, \
         "the opening text still asks a job to write a refusal for every step it " \
         "does not run, which the cut stopped demanding"
-    assert re.search(r"closing a piece hands you", told), \
+    assert re.search(r"Nothing after the\s+first card is claimed by hand", told), \
         "the opening text still tells a session to claim every step by hand"
     assert re.search(r"checks step is the project's own checks command", told), \
         "the opening text does not say what the checks step runs or when"
