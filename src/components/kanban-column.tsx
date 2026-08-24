@@ -8,6 +8,7 @@ import { BeadCard } from "@/components/bead-card";
 import { EpicCard } from "@/components/epic-card";
 import { CardReportLink, type ReportEntry } from "@/components/reports";
 import { Badge } from "@/components/ui/badge";
+import { Panel } from "@/components/ui/panel";
 import { useDrawnRows } from "@/hooks/use-drawn-rows";
 import { classesFor, colorFor } from "@/lib/state-styles";
 import { cn } from "@/lib/utils";
@@ -160,11 +161,12 @@ export const KanbanColumn = memo(function KanbanColumn({
   );
 
   return (
-    <div
-      className={cn(
-        "flex flex-col h-full min-h-0 theme-column",
-        "bg-surface-raised/30 border border-b-default/50"
-      )}
+    <Panel
+      inset="none"
+      // The frame is the library's, so a column is the same face as every other
+      // boxed thing in the app; `theme-column` is the hook the eleven themes
+      // dress it through, and it still wins the rounding (bw-dks8.6).
+      className="flex flex-col h-full min-h-0 theme-column"
       data-column={status}
       data-cards={beads.map((bead) => bead.id).join(" ")}
       style={{ '--column-accent': colorFor(status) } as React.CSSProperties}
@@ -188,10 +190,10 @@ export const KanbanColumn = memo(function KanbanColumn({
           how much is drawn, and each drawn card sits at its own place in it. */}
       <div ref={paneRef} data-testid="column-scroll" className="flex-1 min-h-0 overflow-y-auto p-3">
         {beads.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-b-strong/50 rounded-lg">
+          <Panel inset="none" className="flex flex-col items-center justify-center py-8 border-dashed">
             <PackageOpen className="size-8 text-t-muted mb-2" aria-hidden="true" />
             <span className="text-t-muted text-sm">No cards</span>
-          </div>
+          </Panel>
         ) : (
           <div className="relative" style={{ height }}>
             {rows.map(({ index, key, top }) => (
@@ -220,6 +222,6 @@ export const KanbanColumn = memo(function KanbanColumn({
           </div>
         )}
       </div>
-    </div>
+    </Panel>
   );
 });

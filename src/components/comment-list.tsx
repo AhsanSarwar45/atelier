@@ -7,8 +7,8 @@ import { formatDistanceToNow } from "date-fns";
 import { MarkdownBody } from "@/components/markdown-body";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Panel } from "@/components/ui/panel";
 import { addComment } from "@/lib/cli";
-import { cn } from "@/lib/utils";
 import type { Comment } from "@/types";
 
 export interface CommentListProps {
@@ -35,11 +35,7 @@ function formatRelativeTime(dateString: string): string {
  */
 function CommentCard({ comment }: { comment: Comment }) {
   return (
-    <div
-      className={cn(
-        "rounded-lg border border-b-default bg-surface-raised/50 p-3 space-y-1.5"
-      )}
-    >
+    <Panel inset="md" className="space-y-1.5">
       {/* Author and timestamp */}
       <div className="flex items-center gap-2 text-sm">
         <span className="font-semibold text-t-secondary">{comment.author}</span>
@@ -50,7 +46,7 @@ function CommentCard({ comment }: { comment: Comment }) {
 
       {/* Comment text (Markdown) */}
       <MarkdownBody>{comment.text}</MarkdownBody>
-    </div>
+    </Panel>
   );
 }
 
