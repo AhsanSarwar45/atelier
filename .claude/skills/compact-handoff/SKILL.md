@@ -18,7 +18,7 @@ out) and drops raw file-dumps and error spew, *while keeping the thread*. This i
 the default. Do NOT start a fresh session here, because you would pay to re-discover
 everything and risk repeating dead ends.
 
-**Thrashing — same failed approaches, context full of noise? → fresh session, but write the handoff below first.**
+**Thrashing.** Same failed approaches, context full of noise? Start a fresh session, but write the handoff below first.
 A degraded context won't recover, and more turns make it worse. Reset, but never cold.
 
 **One step from done? → just finish it.** No ceremony.

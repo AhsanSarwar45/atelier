@@ -54,17 +54,17 @@ bisections and counts**. Convert every question into one of those.
 - **Quantity: count, never estimate.** If there are fewer than ~30, count them and
   give the exact number. "Several", "many", "a dozen or so" are all failures.
 - **Position: quarters, then eighths.** *"the widest point is at ~0.35 of the
-  height"* — halve the frame, halve again.
+  height"*. Halve the frame, then halve again.
 - **Colour: name hue, value and saturation separately.** "Warm grey, mid value, low
   saturation" beats "greyish". Judge value by squinting past the hue. Judge hue by
   comparing against a neutral in the same image. **Never judge a colour in
-  isolation** — simultaneous contrast will shift it. Compare it to a neighbour.
+  isolation.** Simultaneous contrast will shift it. Compare it to a neighbour.
 - **Two scales, always.** Downscale hard (or squint) for *macro* structure:
   silhouette, mass distribution, tonal balance. Zoom to native or above for *micro*:
   edges, texture, artefacts. A defect is usually invisible at one of the two.
 - **Look for what is absent.** The strongest findings are missing things: a tier
   that should exist, a gradient that should be there, a shadow with no occluder.
-  Absence never announces itself — you have to go looking for it deliberately.
+  Absence never announces itself. You have to go looking for it deliberately.
 
 ## The sequence
 
@@ -73,7 +73,7 @@ bisections and counts**. Convert every question into one of those.
 Before any detail: what is depicted, what is the framing and scale, which way is
 up, where is the light coming from, what is the background, what is the medium
 (photo / render / scan / diagram / screenshot). Note anything that will distort
-later readings — perspective, a wide lens, a crop, non-square pixels, a colour cast.
+later readings: perspective, a wide lens, a crop, non-square pixels, a colour cast.
 
 ### 2. Systematic sweep at native resolution
 
@@ -81,7 +81,7 @@ later readings — perspective, a wide lens, a crop, non-square pixels, a colour
 thumbnail, and thumbnails hide exactly the defects worth finding.
 
 Divide into tiles and visit **every** tile, in order. Not the interesting-looking
-ones — all of them, or you will only ever confirm what you already expected.
+ones. All of them, or you will only ever confirm what you already expected.
 
 ```bash
 magick in.png -crop 480x400+80+560 +repage -resize 300% tile.png
@@ -102,7 +102,7 @@ Walk this list explicitly. Skipping a row is a decision; make it a conscious one
 | **variation** | regular or irregular? density gradients? outliers? is variation itself patterned? |
 | **lighting** | light direction, hardness of shadows, bounce, specular behaviour, occlusion |
 | **material** | opaque/translucent/metallic, roughness cues, subsurface, wetness |
-| **edges** | sharp or soft, and *where* — is softness uniform or does it vary spatially? |
+| **edges** | sharp or soft, and *where*: is softness uniform or does it vary spatially? |
 | **artefacts** | compression, aliasing, banding, resampling, watermarks, JPEG rings |
 
 Not every row applies to every image. **Variation** is the one most often skipped
@@ -161,5 +161,5 @@ annotated overlay is for, and what
   ±5). Basal pair horizontal, not downturned."*
 - ✅ *"Highlight is clipped over ~2% of the frame (histogram); edges soften toward
   the corners, so the blur is not uniform."*
-- ❌ *"The fan is roughly 45° and 85°."* — no method, no uncertainty.
-- ❌ *"The colours look natural."* — a label, not an observation.
+- ❌ *"The fan is roughly 45° and 85°."* No method, no uncertainty.
+- ❌ *"The colours look natural."* A label, not an observation.
