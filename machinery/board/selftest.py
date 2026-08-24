@@ -6632,6 +6632,84 @@ def main():
           "outright, and a run that cannot affect them is not charged for them")
 
 
+    # A reader the account never let run at all: the whole of its answer was the
+    # account saying its own limit is reached. Fired again straight away it is
+    # told the same thing, and the job was then written up as one whose reader
+    # answers nothing — which sends the next session to fix a reader that was
+    # never broken (bw-aczr.7).
+    LIMIT_SAID = "You've hit your session limit \u00b7 resets 12:10am (Asia/Karachi)"
+
+    def handles(answers):
+        """What the run makes of what a reader said, with no reader run.
+
+        A reading is a whole session minutes long, so the answers go straight
+        into the run rather than being read off one.
+        """
+        rv = script("review")
+        wrote = []
+        rv.bd = lambda args, actor=None, must=True: wrote.append(" ".join(args)) or ""
+        try:
+            return wrote, "", rv.answered(list(answers), "g", "review-g",
+                                          "/nowhere/g.run")
+        except SystemExit as why:
+            return wrote, str(why), None
+
+    wrote, why, verdict = handles([LIMIT_SAID])
+    assert verdict is None and why, \
+        "a run the account never let read anything came back as though it had read"
+    assert "12:10am" in why, \
+        "the line the run ends on does not say when the account's limit is back, " \
+        "so whoever reads it cannot tell when firing again is worth anything: %s" % why
+    assert len(wrote) == 1 and wrote[0].startswith("update g --append-notes"), \
+        "an account with nothing left to spend wrote something other than one note " \
+        "onto the goal, so a reading that never happened filed findings or moved " \
+        "the job: %s" % wrote
+    assert "12:10am" in wrote[0], \
+        "the note quotes nothing of what the account said about coming back: %s" % wrote[0]
+    assert "stays shut" not in wrote[0], \
+        "the goal was told it stays shut over an account limit, which reads as a " \
+        "fault in the job or in the reader and is neither: %s" % wrote[0]
+
+    wrote, why, verdict = handles(["not a json block at all", "still not one"])
+    assert verdict is None and "nothing readable" in why, \
+        "a reader that answered twice in a shape nobody can read ended the run some " \
+        "other way: %s" % why
+    assert len(wrote) == 1 and "stays shut" in wrote[0], \
+        "the goal was not told that its reader answered twice and neither answer " \
+        "could be read: %s" % wrote
+
+    wrote, why, verdict = handles(['```json\n{"verdict": "read", "findings": []}\n```'])
+    assert verdict == {"verdict": "read", "findings": []} and not wrote, \
+        "an answer the board can read was not taken as the reading: %s / %s" \
+        % (verdict, wrote)
+
+    def fires_until(answer):
+        """How many times a reader is fired when every run answers this."""
+        rv = script("review")
+        fired = []
+        rv.run_reviewer = lambda prompt, actor, gid: (fired.append(gid)
+                                                      or (answer, ""))
+        here = tempfile.mkdtemp()
+        try:
+            return fired, rv.attempts("a prompt", "review-g", "g", here)
+        finally:
+            shutil.rmtree(here, ignore_errors=True)
+
+    fired, said = fires_until(LIMIT_SAID)
+    assert len(fired) == 1 and said == [LIMIT_SAID], \
+        "a reader turned away by the account's own limit was fired straight at it " \
+        "again, which spends the second attempt to be told the same thing: %s" % fired
+    fired, said = fires_until("no json block here")
+    assert len(fired) == inflight.ATTEMPTS, \
+        "a reader that answered in a shape nobody can read was not asked again: %s" \
+        % fired
+
+    print("ok: a reading the account's own limit stopped is not fired at again at "
+          "once, tells the goal when the limit is back and files nothing, and a "
+          "reader that answers twice in a shape nobody can read still leaves the "
+          "job shut")
+
+
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a
     # case that is red anyway says so in its own words before this reruns it.

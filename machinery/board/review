@@ -286,6 +286,113 @@ def parse(text):
     return None
 
 
+# What the account says instead of a reading, once its allowance is spent. Every
+# one of the 57 runs in the reader's own log directory that died this way is that
+# one sentence and nothing else: "You've hit your session limit · resets 9pm
+# (Asia/Karachi)". Read loosely all the same, because the wording belongs to the
+# account and not to us, and a shape nobody here has seen yet still has to stop
+# the retry.
+SPENT = re.compile(r"(?:hit|reached|exceeded)\b[^.\n]{0,40}?\blimit\b"
+                   r"|\b(?:session|usage|rate|quota|account)\s+limits?\b"
+                   r"|\blimits?\s+(?:reached|exceeded)\b", re.I)
+# When it says the allowance comes back. That is the one thing the note has to
+# carry: fired again before then, the next reader gets the same sentence.
+RESETS = re.compile(r"\bresets?\b[^.\n]*", re.I)
+# Longer than this and the answer is a reading rather than a refusal. Findings
+# quote the word "limit" all the time, and a whole reading thrown away over a
+# word inside it is the reading lost.
+SPENT_MAX = 400
+
+
+def limited(text):
+    """The account turning this reader away, in the account's own words, or nothing.
+
+    A run that ends here read no code at all, so firing the second attempt spends
+    the same minutes to be told the same thing, and the job is then written up as
+    one whose reader answers nothing — which sends somebody to fix a reader that
+    was never broken (bw-aczr.7).
+    """
+    said = (text or "").strip()
+    if not said or len(said) > SPENT_MAX or not SPENT.search(said):
+        return ""
+    return said.splitlines()[0].strip()
+
+
+def reset_at(said):
+    """When that answer says the allowance comes back, in its own words."""
+    when = RESETS.search(said or "")
+    return when.group(0).strip() if when else ""
+
+
+def attempts(prompt, actor, goal_id, here):
+    """Fire a reader at this job until it answers, and give back all it said.
+
+    Twice at most (board/inflight.py ATTEMPTS) — and once where the first answer
+    is the account saying it is out of allowance, because the second run cannot
+    be told anything else.
+    """
+    said = []
+    for attempt in range(1, inflight.ATTEMPTS + 1):
+        out, err = run_reviewer(prompt, actor, goal_id)
+        with open(os.path.join(here, "%d.log" % attempt), "w") as fh:
+            fh.write(out + "\n--- stderr ---\n" + err)
+        said.append(out)
+        if parse(out) or limited(out):
+            break
+        prompt += ("\n\nYour last answer carried no json block. Answer with the "
+                   "fenced json block described above and nothing else.\n")
+    return said
+
+
+# What the goal is told when no reading happened because the account had nothing
+# left to spend. It says the opposite of the note under it on purpose: there is
+# no fault here to send anybody after, and the job is left exactly where it was.
+LIMITED_NOTE = (
+    "No reading happened here. The account's own limit was reached, so the reader "
+    "was turned away before it read anything. What it said back was: %s. Nothing "
+    "is wrong with this job and nothing is wrong with the reader, so there is "
+    "nothing here for you to fix. Wait for that time and then fire another with "
+    "`%s %s --rerun`. The runs are in %s.")
+# And what it is told when a reader really did answer twice and neither answer
+# could be read.
+UNREADABLE_NOTE = (
+    "A reader was fired at this job twice and neither run answered in the shape "
+    "the board can read; the job stays shut. The runs are in %s. Fire another "
+    "with `%s %s --rerun`.")
+
+
+def answered(said, goal_id, actor, here):
+    """What the run makes of the reader's answers: a verdict, or the end of the run.
+
+    Handed the answers rather than firing a reader, so what a reader really said
+    can be put through this without one (board/selftest.py).
+
+    Three ends, and only one of them is a fault. An answer that parses is the
+    reading. An account with nothing left to spend is nobody's mistake, so the
+    goal is told that and left in its column with no findings filed. Anything
+    else is a reader that answered twice in a shape the board cannot read, and
+    that job stays shut.
+    """
+    for text in said:
+        got = parse(text)
+        if got:
+            return got
+    stopped = ""
+    for text in said:
+        stopped = stopped or limited(text)
+    if stopped:
+        bd(["update", goal_id, "--append-notes",
+            LIMITED_NOTE % (stopped, project.tool(DECL, "review"), goal_id, here)],
+           actor=actor, must=False)
+        when = reset_at(stopped)
+        sys.exit("%s was not read because the account's limit was reached. %s"
+                 % (goal_id, ("It %s." % when) if when else stopped))
+    bd(["update", goal_id, "--append-notes",
+        UNREADABLE_NOTE % (here, project.tool(DECL, "review"), goal_id)],
+       actor=actor, must=False)
+    sys.exit("reader produced nothing readable; %s stays gated" % goal_id)
+
+
 # A title that survived the repair below with nothing left of it. The substance is
 # on the card either way — `where` and `why` are written into its notes — so a
 # finding is never lost to a sentence the word list would not take.
@@ -491,23 +598,7 @@ def main():
     # the readings that have already happened and not of this one.
     prompt = ask(goal, named, diff, reading.final(goal))
     here = run_log(goal_id)
-    verdict = None
-    for attempt in range(1, inflight.ATTEMPTS + 1):
-        out, err = run_reviewer(prompt, actor, goal_id)
-        with open(os.path.join(here, "%d.log" % attempt), "w") as fh:
-            fh.write(out + "\n--- stderr ---\n" + err)
-        verdict = parse(out)
-        if verdict:
-            break
-        prompt += ("\n\nYour last answer carried no json block. Answer with the "
-                   "fenced json block described above and nothing else.\n")
-    if not verdict:
-        bd(["update", goal_id, "--append-notes",
-            "A reader was fired at this job twice and neither run answered in the "
-            "shape the board can read; the job stays shut. The runs are in %s. "
-            "Fire another with `%s %s --rerun`."
-            % (here, project.tool(DECL, "review"), goal_id)], actor=actor, must=False)
-        sys.exit("reader produced nothing readable; %s stays gated" % goal_id)
+    verdict = answered(attempts(prompt, actor, goal_id, here), goal_id, actor, here)
 
     made, turned = file_findings(goal_id, verdict.get("findings") or [])
     checked = verdict.get("checked") or []

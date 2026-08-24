@@ -51,6 +51,7 @@ TOUCH = "hooks/board-touch.py"
 PRIME = "hooks/board-prime.py"
 LAND = "board/land"
 READING = "board/reading.py"
+REVIEW = "board/review"
 JOIN = "join"
 DECL = "project.py"
 
@@ -642,6 +643,17 @@ FAULTS = [
          "- Every commit names its card; a commit that is not on main yet moves "
          "that card to\n  in_review, which is what that column means. A card "
          "closes only once a commit\n  naming it is on main.\n")),
+
+    # A reader the account never let run, and both halves of what that costs: the
+    # second attempt spent to be told the same sentence, and a job written up as
+    # one whose reader answers nothing when nothing about it is broken (bw-aczr.7).
+    ("a reader turned away by the account's own limit is fired straight at it again",
+     REVIEW,
+     lambda s: s.replace("        if parse(out) or limited(out):",
+                         "        if parse(out):")),
+    ("an account with nothing left to spend is written up as a reader that answers "
+     "nothing", REVIEW,
+     lambda s: s.replace("    if stopped:\n", "    if False:\n")),
 ]
 
 
