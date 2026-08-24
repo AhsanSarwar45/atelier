@@ -170,7 +170,14 @@ function DiffView({ path, before, after }: { path: string; before: string; after
     return cell;
   });
   return (
-    <div data-testid="diff-view" data-diff-path={path} data-diff-language={language ?? ''} className="mt-1.5 overflow-hidden rounded border border-border/50">
+    <Panel
+      tone="frame"
+      inset="none"
+      data-testid="diff-view"
+      data-diff-path={path}
+      data-diff-language={language ?? ''}
+      className="mt-1.5 overflow-hidden"
+    >
       <div className="flex items-center justify-between bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
         <span className="truncate">{path}</span>
         <span className="shrink-0">before → after</span>
@@ -203,7 +210,7 @@ function DiffView({ path, before, after }: { path: string; before: string; after
           </tbody>
         </table>
       </div>
-    </div>
+    </Panel>
   );
 }
 

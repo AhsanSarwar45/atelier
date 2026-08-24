@@ -9,6 +9,7 @@
 import * as React from 'react';
 
 import { cva, type VariantProps } from 'class-variance-authority';
+import { Slot as SlotPrimitive } from 'radix-ui';
 
 import { cn } from '@/lib/utils';
 
@@ -25,6 +26,12 @@ const panelVariants = cva('rounded-md border', {
       danger: 'border-danger/30 bg-danger/10',
       /** Sits above the page: opaque, and lifted off what it covers. */
       overlay: 'border-border/60 bg-background shadow-lg',
+      /**
+       * A border and nothing else, for a box whose contents paint themselves —
+       * a table of coloured rows, a chart. A fill here would sit behind those
+       * colours and flatten the difference between them (bw-dks8.10).
+       */
+      frame: 'border-border/60',
     },
     inset: {
       none: '',
@@ -39,9 +46,15 @@ export function Panel({
   className,
   tone,
   inset,
+  asChild = false,
   ...props
-}: React.ComponentProps<'div'> & VariantProps<typeof panelVariants>) {
-  return <div data-slot="panel" className={cn(panelVariants({ tone, inset }), className)} {...props} />;
+}: React.ComponentProps<'div'> & VariantProps<typeof panelVariants> & { asChild?: boolean }) {
+  // `asChild` is how a panel becomes something that is also a control: the
+  // clickable report card is one box, and a <button> wrapped in a <div> would
+  // be two — with the paint on the outer one and the click on the inner
+  // (bw-dks8.10).
+  const Comp = asChild ? SlotPrimitive.Slot : 'div';
+  return <Comp data-slot="panel" className={cn(panelVariants({ tone, inset }), className)} {...props} />;
 }
 
 export { panelVariants };

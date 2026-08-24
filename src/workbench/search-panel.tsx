@@ -14,10 +14,12 @@ import { useRouter } from 'next/navigation';
 import { X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Row } from '@/components/ui/row';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
 
-import { Overlay, overlayPanel } from './overlay';
+import { Overlay, overlayPanel } from '@/components/ui/overlay';
 
 export interface Match {
   sessionId: string;
@@ -67,17 +69,17 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
   }, [q]);
 
   return (
-    <Overlay testId="search-panel" onClose={onClose}>
+    <Overlay testId="search-panel" label="Search every conversation" onClose={onClose}>
       <div className={cn(overlayPanel, 'max-w-3xl')}>
         <div className="flex items-center gap-2 border-b border-border/60 p-3">
           {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
-          <input
+          <Input
             autoFocus
             data-testid="search-input"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search every conversation…"
-            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
+            className="min-w-0 flex-1"
           />
           <Button size="xs" variant="ghost" data-testid="search-close" aria-label="Close" onClick={onClose}>
             <X className="h-4 w-4" aria-hidden="true" />
@@ -91,12 +93,12 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
           {hits.map((h) => {
             const [before, hit, after] = split(h.sentence, h.match);
             return (
-              <button
+              <Row
                 key={`${h.sessionId}:${h.messageId}`}
-                type="button"
+                ruled
+                inset="lg"
                 data-testid="search-hit"
                 data-session-id={h.sessionId}
-                className="block w-full border-b border-border/40 px-4 py-3 text-left last:border-b-0 hover:bg-accent"
                 onClick={() => {
                   onClose();
                   router.push(
@@ -118,7 +120,7 @@ export function SearchPanel({ onClose }: { onClose: () => void }) {
                   <span className="truncate">· {h.title ?? 'Untitled chat'}</span>
                   <span className="ml-auto shrink-0 font-mono">{new Date(h.at).toLocaleString()}</span>
                 </div>
-              </button>
+              </Row>
             );
           })}
           {q.trim() && !hits.length && (

@@ -35,6 +35,7 @@ import { useReports } from '@/components/reports';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +44,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
+import { Row } from '@/components/ui/row';
 import { Textarea } from '@/components/ui/textarea';
 import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
@@ -193,14 +195,16 @@ function CommandMenu({
 }) {
   if (!matches.length) return null;
   return (
-    <div
-      data-testid="command-menu"
-      className="mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-lg"
-    >
+    <Panel tone="overlay" inset="none" data-testid="command-menu" className="mb-2 max-h-64 overflow-y-auto p-1">
       {matches.map((c, i) => (
-        <button
+        <Row
           key={`${c.kind}:${c.name}`}
-          type="button"
+          inset="sm"
+          radius="md"
+          // The one the arrow keys are on, which is not the one the mouse is
+          // over: both light up, and while he is arrowing through the list with
+          // the pointer resting on it he can see both answers.
+          selected={i === active}
           data-testid="command-option"
           data-command={c.name}
           data-kind={c.kind}
@@ -210,10 +214,7 @@ function CommandMenu({
             e.preventDefault();
             onPick(c);
           }}
-          className={cn(
-            'flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
-            i === active ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/60',
-          )}
+          className="flex items-baseline gap-2 text-sm"
         >
           <span className="shrink-0 font-mono">/{c.name}</span>
           {c.argumentHint && <span className="shrink-0 font-mono text-xs text-muted-foreground">{c.argumentHint}</span>}
@@ -223,50 +224,61 @@ function CommandMenu({
               skill
             </Badge>
           )}
-        </button>
+        </Row>
       ))}
-    </div>
+    </Panel>
   );
 }
 
-/** A picture at full size, over the chat. Escape or a click away closes it. */
+/**
+ * A picture at full size, over the chat. Escape or a click away closes it.
+ *
+ * The window is the library's, wearing its full-screen shape: the dim behind
+ * the picture, the way out on Escape and the page held still underneath are the
+ * same ones every other popup in the app gets, rather than a backdrop and a key
+ * listener this screen kept for itself (bw-dks8.10).
+ */
 function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () => void }) {
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, [onClose]);
-
   return (
-    <div
-      data-testid="picture-viewer"
-      role="dialog"
-      aria-label={image.alt || 'Picture'}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-6"
-      onClick={onClose}
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        data-testid="picture-viewer-image"
-        src={image.dataUrl}
-        alt={image.alt}
-        className="max-h-full max-w-full rounded shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      />
-      <Button
-        variant="ghost"
-        mode="icon"
-        size="sm"
-        aria-label="Close the picture"
-        data-testid="picture-viewer-close"
-        className="absolute right-4 top-4 text-white"
-        onClick={onClose}
+      <DialogContent
+        shape="screen"
+        hideClose
+        overlayClassName="bg-black/80"
+        aria-describedby={undefined}
+        aria-label={image.alt || 'Picture'}
+        data-testid="picture-viewer"
+        className="flex items-center justify-center p-2 sm:p-6"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
-        <X className="h-5 w-5" />
-      </Button>
-    </div>
+        <DialogTitle className="sr-only">{image.alt || 'Picture'}</DialogTitle>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          data-testid="picture-viewer-image"
+          src={image.dataUrl}
+          alt={image.alt}
+          className="max-h-full max-w-full rounded shadow-2xl"
+        />
+        <Button
+          variant="ghost"
+          mode="icon"
+          size="sm"
+          aria-label="Close the picture"
+          data-testid="picture-viewer-close"
+          className="absolute right-4 top-4 text-white"
+          onClick={onClose}
+        >
+          <X className="h-5 w-5" />
+        </Button>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -280,8 +292,10 @@ function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () =>
  */
 function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="outline"
+      size="sm"
+      radius="full"
       data-testid="back-to-now"
       data-shown={shown ? 'yes' : 'no'}
       data-missed={missed}
@@ -290,8 +304,7 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
       onClick={onClick}
       title={missed > 0 ? `${missed} more since you scrolled up — back to now` : 'Back to the newest message'}
       className={cn(
-        'absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full border border-border',
-        'bg-surface-raised px-3 py-1.5 text-muted-foreground shadow-lg transition-all hover:text-foreground',
+        'absolute bottom-4 right-4 z-10 shadow-lg transition-all',
         shown ? 'pointer-events-auto opacity-100' : 'pointer-events-none translate-y-2 opacity-0',
       )}
     >
@@ -301,7 +314,7 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
           {missed}
         </span>
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -1065,11 +1078,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             {heldLine(state)}
           </p>
         ) : (
-        <div
+        <Panel
+          tone="overlay"
+          inset="none"
           data-testid="composer-frame"
           className={cn(
-            'mx-auto w-full max-w-[110ch] rounded-2xl border bg-surface-raised px-4 py-3 shadow-sm transition-colors',
-            'border-border focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
+            'mx-auto w-full max-w-[110ch] px-4 py-3 shadow-sm transition-colors',
+            'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
           )}
         >
           {attached.length > 0 && (
@@ -1085,15 +1100,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                     onClick={() => setLooking(img)}
                     className="h-12 w-12 cursor-zoom-in rounded border border-border/60 object-cover"
                   />
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    mode="icon"
+                    size="xs"
+                    radius="full"
                     data-testid="attachment-remove"
                     aria-label={`Remove ${img.alt}`}
                     onClick={() => setAttached((all) => all.filter((_, at) => at !== i))}
-                    className="absolute -right-1.5 -top-1.5 rounded-full bg-background p-0.5 text-muted-foreground shadow hover:text-foreground"
+                    className="absolute -right-1.5 -top-1.5 h-5 w-5 shadow"
                   >
                     <X className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </span>
               ))}
             </div>
@@ -1267,7 +1285,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               </Button>
             )}
           </div>
-        </div>
+        </Panel>
         )}
       </div>
 

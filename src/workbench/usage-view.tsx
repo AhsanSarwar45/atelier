@@ -19,6 +19,7 @@ import { X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Panel } from '@/components/ui/panel';
 import { usePlanUsage } from '@/workbench/live';
 import {
 
@@ -36,7 +37,7 @@ import {
 
 import { cn } from '@/lib/utils';
 
-import { Overlay, overlayPanel } from './overlay';
+import { Overlay, overlayPanel } from '@/components/ui/overlay';
 
 /* ------------------------------------------------------------------ *
  * Drawing it.
@@ -94,7 +95,7 @@ function Names({ title, rows }: { title: string; rows: { name: string; pct: numb
 function Spending({ driving }: { driving: Driving }) {
   const span = driving.span === 'day' ? 'Last 24 hours' : 'Last 7 days';
   return (
-    <div data-testid="usage-driving" data-span={driving.span} className="rounded-lg border border-border/60 p-3">
+    <Panel inset="md" data-testid="usage-driving" data-span={driving.span}>
       <div className="flex items-baseline gap-2">
         <h3 className="text-sm font-semibold text-foreground">{span}</h3>
         <span className="ml-auto text-xs text-muted-foreground">
@@ -116,7 +117,7 @@ function Spending({ driving }: { driving: Driving }) {
         <Names title="Plugins" rows={driving.plugins} />
         <Names title="Servers" rows={driving.servers} />
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -126,7 +127,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
   const windows = [usage.session, usage.week, ...usage.perModel].filter((w): w is PlanWindow => w !== null);
 
   return (
-    <Overlay testId="usage-view" onClose={onClose}>
+    <Overlay testId="usage-view" label="Plan usage" onClose={onClose}>
       {/* Capped and scrolled inside, as the token panel is: an uncapped box
           runs off the bottom of the window the moment the account has enough
           models to list (bw-3ug7.14). */}
@@ -155,21 +156,21 @@ export function UsageView({ onClose }: { onClose: () => void }) {
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" data-testid="usage-scroll">
         {windows.length > 0 ? (
-          <div className="space-y-3 rounded-lg border border-border/60 p-3">
+          <Panel inset="md" className="space-y-3">
             {windows.map((w) => (
               <Window key={w.key} window={w} now={now} />
             ))}
-          </div>
+          </Panel>
         ) : (
-          <p className="rounded-lg border border-border/60 p-3 text-sm text-muted-foreground">
+          <Panel inset="md" className="text-sm text-muted-foreground">
             {/* An API key, Bedrock, Vertex — anywhere a claude.ai plan is not
                 what pays. Saying so is the answer; a row of zeroes is not. */}
             No plan allowance to report: this machine is not billing a claude.ai plan, or the kit is too old to say.
-          </p>
+          </Panel>
         )}
 
         {usage.credits && (
-          <div className="rounded-lg border border-border/60 p-3 text-sm" data-testid="usage-credits" data-enabled={usage.credits.enabled}>
+          <Panel inset="md" className="text-sm" data-testid="usage-credits" data-enabled={usage.credits.enabled}>
             <h3 className="text-sm font-semibold text-foreground">Extra usage credits</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               {usage.credits.enabled
@@ -180,7 +181,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
                   }`
                 : 'Off — work stops at the plan limit rather than spending past it.'}
             </p>
-          </div>
+          </Panel>
         )}
 
         {usage.driving.map((d) => (

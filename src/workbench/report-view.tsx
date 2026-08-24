@@ -18,6 +18,7 @@ import { FileText } from 'lucide-react';
 
 import { useReports } from '@/components/reports';
 import { Badge } from '@/components/ui/badge';
+import { Panel } from '@/components/ui/panel';
 import { addressWith } from '@/lib/address';
 import { cn } from '@/lib/utils';
 
@@ -74,13 +75,15 @@ export function ReportCard({ project, slug }: ReportRef) {
   const entry = reports.find((r) => r.project === project && r.slug === slug);
 
   return (
-    <button
-      type="button"
-      data-testid="report-inline"
-      data-report-slug={slug}
-      onClick={open}
-      className="block w-[640px] max-w-full overflow-hidden rounded-lg border border-border/60 bg-muted/20 text-left transition hover:border-primary/60"
+    // One box that is also the way through: the paint is the library's and the
+    // click is the button's, rather than a bordered <div> with a bare button
+    // inside it, which is two boxes the reader can only see one of (bw-dks8.10).
+    <Panel
+      asChild
+      inset="none"
+      className="block w-[640px] max-w-full overflow-hidden text-left transition hover:border-primary/60"
     >
+      <button type="button" data-testid="report-inline" data-report-slug={slug} onClick={open}>
       <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5 text-xs">
         <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="font-medium text-foreground">Manager report</span>
@@ -93,8 +96,9 @@ export function ReportCard({ project, slug }: ReportRef) {
       </div>
       <div className="px-3 py-2">
         <div className="truncate text-sm font-medium text-foreground">{entry?.title ?? slug}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">Click to read it under this project</div>
-      </div>
-    </button>
+          <div className="mt-0.5 text-xs text-muted-foreground">Click to read it under this project</div>
+        </div>
+      </button>
+    </Panel>
   );
 }

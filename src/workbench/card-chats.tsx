@@ -11,6 +11,8 @@ import { useEffect, useState } from 'react';
 
 import { MessagesSquare } from 'lucide-react';
 
+import { Panel } from '@/components/ui/panel';
+import { Row } from '@/components/ui/row';
 import { request } from '@/lib/api';
 import type { LinkedChat } from '@/workbench/protocol';
 
@@ -49,25 +51,25 @@ export function CardChats({ beadId, projectId, projectPath }: CardChatsProps) {
         Chats ({chats.length})
       </h3>
       <div className="mb-3 h-px bg-b-default" />
-      <div className="rounded-lg border border-b-default bg-surface-raised/50 p-3">
+      <Panel inset="md">
         <div className="space-y-1">
           {chats.map((c) => (
-            <a
-              key={c.sessionId}
-              data-testid="card-chat-link"
-              data-session-id={c.sessionId}
-              href={`/project?id=${projectId ?? c.projectId ?? ''}&chat=${c.sessionId}&tab=chat`}
-              className="block rounded px-2 py-1.5 text-sm transition hover:bg-accent"
-            >
-              <span className="text-foreground">{c.title ?? 'Untitled chat'}</span>
-              <span className="ml-2 font-mono text-xs text-muted-foreground">
-                {c.brand ?? 'chat'}
-                {c.lastActiveAt ? ` · ${new Date(c.lastActiveAt).toLocaleString()}` : ''}
-              </span>
-            </a>
+            <Row asChild key={c.sessionId} inset="sm" radius="md" className="text-sm">
+              <a
+                data-testid="card-chat-link"
+                data-session-id={c.sessionId}
+                href={`/project?id=${projectId ?? c.projectId ?? ''}&chat=${c.sessionId}&tab=chat`}
+              >
+                <span className="text-foreground">{c.title ?? 'Untitled chat'}</span>
+                <span className="ml-2 font-mono text-xs text-muted-foreground">
+                  {c.brand ?? 'chat'}
+                  {c.lastActiveAt ? ` · ${new Date(c.lastActiveAt).toLocaleString()}` : ''}
+                </span>
+              </a>
+            </Row>
           ))}
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }

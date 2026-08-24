@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { Row } from '@/components/ui/row';
 import * as api from '@/lib/api';
 import { ChatStateChip } from '@/workbench/chat-state-chip';
 import { isRunning, liveState, useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
@@ -82,12 +83,11 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
           className="absolute right-0 z-50 mt-1 w-96 overflow-hidden"
         >
           {waiting.map((s) => (
-            <button
+            <Row
               key={s.id}
-              type="button"
+              ruled
               data-testid="tray-row"
               data-session-id={s.id}
-              className="block w-full border-b border-border/40 px-3 py-2 text-left last:border-b-0 hover:bg-accent"
               onClick={() => {
                 setOpen(false);
                 router.push(chatHref(s));
@@ -102,7 +102,7 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
                   · {whatItWaitsFor(s)}
                 </span>
               </div>
-            </button>
+            </Row>
           ))}
         </Panel>
       )}

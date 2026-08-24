@@ -38,7 +38,7 @@ import { sendCommand } from '@/workbench/use-session';
 
 import { cn } from '@/lib/utils';
 
-import { Overlay, overlayPanel } from './overlay';
+import { Overlay, overlayPanel } from '@/components/ui/overlay';
 
 
 /**
@@ -152,7 +152,13 @@ export function AgentView({ row, items, sessionId, controls, mentions, onClose }
   const now = useNow(!isOver(row.state));
 
   return (
-    <Overlay testId="agent-view" data-agent={row.id} data-said={said.length} onClose={onClose}>
+    <Overlay
+      testId="agent-view"
+      label={row.what || KINDS[row.kind].label}
+      data-agent={row.id}
+      data-said={said.length}
+      onClose={onClose}
+    >
       {/* One shape every time it is opened, and only the conversation inside it
           moves. Sized to its content, a pane opened on a helper that has said one
           line is a toast, and it grows under the reader as the helper talks. */}

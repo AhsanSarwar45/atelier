@@ -81,9 +81,15 @@ const HELPER: SentAway = {
   relayed: [],
 };
 
+/**
+ * Escape as a browser delivers it: at whatever holds focus, travelling up
+ * through the page. The shell listens on the page, the way every other popup
+ * in the app does; a key fired at the window alone travels nowhere at all, in
+ * here or in a real browser (bw-dks8.10).
+ */
 const escape = () =>
   act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
   });
 
 const panels = [

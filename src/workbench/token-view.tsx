@@ -28,6 +28,7 @@ import { Gauge, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Panel } from '@/components/ui/panel';
 import { request } from '@/lib/api';
 import { reads, TIGHT } from '@/workbench/context-window';
 import type { Split, TaskSpend } from '@/workbench/token-picture';
@@ -35,7 +36,7 @@ import type { Inside, TokenPicture, Weight, WindowNow } from '@/workbench/window
 
 import { cn } from '@/lib/utils';
 
-import { Overlay, overlayPanel } from './overlay';
+import { Overlay, overlayPanel } from '@/components/ui/overlay';
 
 
 /* ------------------------------------------------------------------ *
@@ -176,10 +177,10 @@ const bandColour = (i: number, room: boolean): string => (room ? 'bg-muted' : BA
 
 function Card({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }) {
   return (
-    <section className="rounded-lg border border-border/60 p-3" data-testid={testId}>
+    <Panel inset="md" data-testid={testId}>
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       {children}
-    </section>
+    </Panel>
   );
 }
 
@@ -368,9 +369,9 @@ const pctWidth = (part: number, whole: number): number => (whole > 0 ? Math.min(
 /** Why half the picture is missing, in the words the sidecar sent. */
 function Missing({ note, testId }: { note: string; testId: string }) {
   return (
-    <p className="rounded-lg border border-border/60 p-3 text-sm text-muted-foreground" data-testid={testId}>
+    <Panel inset="md" className="text-sm text-muted-foreground" data-testid={testId}>
       {note}
-    </p>
+    </Panel>
   );
 }
 
@@ -394,7 +395,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
   }, [sessionId]);
 
   return (
-    <Overlay testId="token-view" onClose={onClose}>
+    <Overlay testId="token-view" label="Tokens" onClose={onClose}>
       {/* The panel stands where the screen ends and scrolls inside itself. It
           used to be one growing box with `overflow-y-auto` and no ceiling, so a
           long chat's picture ran off the bottom of the window with its last

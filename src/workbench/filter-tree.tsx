@@ -21,6 +21,7 @@ import { Check, ChevronRight, ListFilter, Minus } from 'lucide-react';
 import { ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Row } from '@/components/ui/row';
 import { cn } from '@/lib/utils';
 import {
   audienceKind,
@@ -191,15 +192,16 @@ export function KindFilter({ items, off, onChange }: TreeProps) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-2" data-testid="kind-filter-panel">
         <KindTree items={items} off={off} onChange={onChange} />
-        <button
-          type="button"
+        <Row
+          inset="sm"
+          radius="md"
           data-testid="show-every-kind"
           disabled={!filtered}
           onClick={() => onChange(new Set())}
-          className="mt-2 w-full rounded px-1 py-1 text-left text-xs text-t-tertiary hover:bg-surface-overlay hover:text-t-primary disabled:opacity-40 disabled:hover:bg-transparent"
+          className="mt-2 text-xs text-t-tertiary"
         >
           Show every kind
-        </button>
+        </Row>
       </PopoverContent>
     </Popover>
   );

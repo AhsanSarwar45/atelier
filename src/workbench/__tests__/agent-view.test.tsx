@@ -11,7 +11,7 @@
  * everything would look right on a chat with one helper and be useless on a
  * chat with four.
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
@@ -240,12 +240,14 @@ describe('the pane itself', () => {
     screen.getByTestId('agent-view').click();
     expect(shut).toHaveBeenCalledTimes(2);
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    // At whatever holds focus, which is where a browser puts a key press: the
+    // shell listens on the page rather than on the window (bw-dks8.10).
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     expect(shut).toHaveBeenCalledTimes(3);
 
     // And it stops listening on the way out.
     unmount();
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(shut).toHaveBeenCalledTimes(3);
   });
 });

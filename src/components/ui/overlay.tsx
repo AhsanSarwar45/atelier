@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 /**
- * The shell every hand-built panel wears.
+ * The shell every full-page panel wears: the dim behind it, and where it sits.
  *
  * There were five of these, each with the same three-line incantation copied
  * into it, and every one of them was built for a desktop window: a 2rem inset
@@ -17,21 +18,26 @@ import { cn } from '@/lib/utils';
  * the screen IS the panel. No inset, no rounding against an edge it is already
  * flush with, and a ceiling on its height so the body scrolls inside it rather
  * than running off the bottom.
+ *
+ * The dim, the way out on Escape, the held page underneath and the focus that
+ * stays inside the panel are the library dialog's, not this file's: it used to
+ * paint `bg-black/50` and listen for Escape itself, which is a second popup
+ * mechanism living alongside the one every other window in the app uses
+ * (bw-dks8.10). Nothing about it is workbench-specific, so it lives here, where
+ * the paint is supposed to live.
  */
-
-/** The dimmed page behind a panel, and where the panel sits on it. */
 export function Overlay({
   testId,
   label,
   className,
   onClose,
-  onBackdrop,
   children,
   ...rest
 }: {
   testId?: string;
+  /** What the panel is, for a reader who cannot see it. */
   label?: string;
-  /** Anything a caller needs on the backdrop itself: a darker dim, centring. */
+  /** Anything a caller needs on the sheet itself: centring, a tighter inset. */
   className?: string;
   /**
    * The way out, wired once for every panel: Escape closes it, and so does the
@@ -41,36 +47,39 @@ export function Overlay({
    * all (bw-81wt.18).
    */
   onClose?: () => void;
-  /** Only the page behind the panel, for a panel that wants Escape left alone. */
-  onBackdrop?: () => void;
   children: ReactNode;
 } & Record<`data-${string}`, string | number | undefined>) {
-  useEffect(() => {
-    if (!onClose) return;
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, [onClose]);
-
-  const backdrop = onBackdrop ?? onClose;
   return (
-    <div
-      data-testid={testId}
-      aria-label={label}
-      className={cn('fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-0 sm:p-8', className)}
-      onClick={
-        backdrop
-          ? (e) => {
-              if (e.target === e.currentTarget) backdrop();
-            }
-          : undefined
-      }
-      {...rest}
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose?.();
+      }}
     >
-      {children}
-    </div>
+      <DialogContent
+        shape="screen"
+        hideClose
+        // Half-dark, not the dialog's own near-black: what these panels cover is
+        // a conversation the reader is still reading round the edges of.
+        overlayClassName="bg-black/50"
+        aria-describedby={undefined}
+        data-testid={testId}
+        className={cn('flex items-start justify-center p-0 sm:p-8', className)}
+        onClick={
+          onClose
+            ? (e) => {
+                if (e.target === e.currentTarget) onClose();
+              }
+            : undefined
+        }
+        {...rest}
+      >
+        {/* Said only to a screen reader: every one of these panels draws its own
+            heading, and this is the one the window itself is announced by. */}
+        <DialogTitle className="sr-only">{label ?? 'Panel'}</DialogTitle>
+        {children}
+      </DialogContent>
+    </Dialog>
   );
 }
 

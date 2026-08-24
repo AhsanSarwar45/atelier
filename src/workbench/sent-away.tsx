@@ -30,6 +30,7 @@ import { Bot, Clock, Coins, Eye, Pause, Square, Terminal, Workflow } from 'lucid
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
+import { Row } from '@/components/ui/row';
 import { cn } from '@/lib/utils';
 import { forHowLong } from '@/workbench/elapsed';
 import type { SentAway } from '@/workbench/fold';
@@ -244,7 +245,7 @@ export function AgentSteering({
   );
 }
 
-function Row({
+function AgentRow({
   row,
   now,
   sessionId,
@@ -280,12 +281,12 @@ function Row({
           and a target the size of one word beside it is a target the reader
           misses. The padding lives here rather than on the box for the same
           reason — a click anywhere in the row is a click on the row. */}
-      <button
-        type="button"
+      <Row
+        inset="sm"
         data-testid="sent-away-open"
         title={row.what ? `Open ${row.what}` : `Open this ${kind}`}
         onClick={onOpen ? () => onOpen(row.id) : undefined}
-        className="flex w-full flex-col gap-1 px-2 py-1.5 text-left hover:bg-muted/40"
+        className="flex flex-col gap-1"
       >
       <div className="flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -340,7 +341,7 @@ function Row({
           {row.result}
         </p>
       )}
-      </button>
+      </Row>
       <AgentSteering row={row} sessionId={sessionId} controls={controls} />
     </Panel>
   );
@@ -370,7 +371,7 @@ export function SentAwayPanel({ agents, sessionId, controls, onOpen }: SentAwayP
       className="flex flex-col gap-1.5"
     >
       {agents.map((row) => (
-        <Row key={row.id} row={row} now={now} sessionId={sessionId} controls={controls} onOpen={onOpen} />
+        <AgentRow key={row.id} row={row} now={now} sessionId={sessionId} controls={controls} onOpen={onOpen} />
       ))}
     </div>
   );
