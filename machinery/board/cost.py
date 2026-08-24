@@ -61,6 +61,9 @@ FIRES = [
     ("landing-gated", "hooks/board-status-gate.py",
      "refused a close that said the work landed while a reading somebody is owed "
      "was still held shut"),
+    ("checks-unproved", "hooks/board-status-gate.py",
+     "refused a checks step whose card carried no note proving the suites ran "
+     "green over the tree standing in front of it"),
     ("turns-seen", "hooks/habit-reading.py",
      "one row per turn the reply gate looked at — the exact denominator the count "
      "above only estimates"),

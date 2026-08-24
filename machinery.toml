@@ -35,6 +35,12 @@ places = ["\\b(?:the )?(?:Todo|In Progress|Agent Review|Manager Review|Done|Canc
 # here is as often the server's as the screen's: `npm test` is vitest over the
 # front end, and the server carries its own cases under server/src/routes. Run
 # once a job, in front of the reader — never per edit and never in a commit hook.
+#
+# Nobody types this line by hand. `machinery/checks` takes it apart, runs the
+# suites the branch actually changed, and writes the note the close gate asks
+# for. `machinery/checks --all` runs the lot. The reader's own run takes it apart
+# the same way, so a suite that goes red in front of a reading becomes a piece of
+# the job rather than a sentence in a verdict.
 checks = "npm test && (cd server && cargo test) && machinery/check"
 
 [review]

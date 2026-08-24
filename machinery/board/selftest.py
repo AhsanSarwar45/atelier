@@ -98,6 +98,10 @@ REAL_STATE = (touch.bc.load, touch.bc.save)
 # cards a session is holding: several cases below stand a fixed one in front of
 # each, and the cases for the name itself need the real ones back.
 REAL_ACTOR = touch.bc.actor
+# The subprocess library as it really is. A case far below stands a pretend
+# board in front of `subprocess.run` for the whole process and leaves it there,
+# so the cases after it that run real commands take the real one from here.
+REAL_RUN = subprocess.run
 REAL_HELD = touch.bc.held
 status = hook("board-status-gate")
 reading = hook("habit-reading")
@@ -385,6 +389,10 @@ def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
     said = io.StringIO()
     rv.bd = lambda args, actor=None, must=True: json.dumps(goal)
     rv.changes = lambda shas, goal_id: ([], "")
+    # The reader runs this project's whole checks line before it fires (bw-aczr.4),
+    # which here would be minutes of npm and cargo inside a case about spawning.
+    # The case for the pre-run itself is further down and stubs the suites instead.
+    rv.ran_checks = lambda goal_id: None
     rv.run_log = lambda goal_id: where
     rv.run_reviewer = reads
     rv.reading.commits = lambda gid, root: list(shas)
@@ -7190,6 +7198,317 @@ def main():
           "reader that answers twice in a shape nobody can read still leaves the "
           "job shut")
 
+
+    # A case above stood a pretend board in front of `subprocess.run` for the whole
+    # process and never put it back, so anything asked through it down here is
+    # answered by that case's fixtures (bw-m7la). The cases below build real
+    # checkouts and run real commands in them, so the library goes back for the
+    # length of them and is left exactly as it was found.
+    pretending, subprocess.run = subprocess.run, REAL_RUN
+    try:
+        # The checks step, run by a tool instead of by hand (bw-aczr.4). Four things a
+        # session used to do itself: read what the branch changed, pick the suites that
+        # asks for, run them, and write it down in a shape the close gate would take.
+        CHECKS_TOOL = os.path.join(HOME, "checks")
+        DECLARED = ('name = "picked"\nprefix = "tst"\nlands_on = "main"\n'
+                    'checks = "npm test && (cd server && cargo test) && machinery/check"\n')
+
+        def branch_that_changed(files, says=DECLARED):
+            """A throwaway checkout whose branch changed exactly these files.
+
+            Real git, because what the tool reads is `git diff --name-only main...HEAD`
+            and a recorder standing in for that would pass whatever the picking did.
+            """
+            tmp = tempfile.mkdtemp(prefix="board-checks-")
+            scratch_project(tmp, says, on="main")
+            git_here = lambda *args: subprocess.run(
+                ["git", "-c", "user.email=t@t", "-c", "user.name=t"] + list(args),
+                cwd=tmp, capture_output=True, text=True, timeout=60)
+            git_here("add", "-A")
+            git_here("commit", "-q", "-m", "what this project is")
+            git_here("checkout", "-q", "-B", "mine")
+            for rel in files:
+                spot = os.path.join(tmp, rel)
+                os.makedirs(os.path.dirname(spot) or tmp, exist_ok=True)
+                with open(spot, "w") as fh:
+                    fh.write("a line\n")
+            git_here("add", "-A")
+            git_here("commit", "-q", "-m", "the work")
+            return tmp
+
+        def picks(files, *said):
+            """Which suites the tool would run for a branch that changed these files."""
+            tmp = branch_that_changed(files)
+            try:
+                out = subprocess.run([sys.executable, CHECKS_TOOL, "--dry"] + list(said),
+                                     cwd=tmp, capture_output=True, text=True, timeout=120)
+                assert out.returncode == 0, out.stdout + out.stderr
+                return out.stdout
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        inside = picks(["machinery/board/spine.py", ".claude/settings.json"])
+        assert "machinery-check" in inside, \
+            "a branch that changed the machinery would not run the machinery's own " \
+            "suite: %s" % inside
+        assert "npm-test" not in inside and "cargo-test" not in inside, \
+            "a branch that touched neither the screen nor the server still pays for " \
+            "npm and cargo, which is the four minutes this was built to stop: %s" % inside
+
+        outside = picks(["src/app/page.tsx", "server/src/main.rs"])
+        assert "npm-test" in outside and "cargo-test" in outside, \
+            "a branch that changed both the screen and the server runs neither suite: " \
+            "%s" % outside
+        assert "machinery-check" not in outside, \
+            "a branch that never touched the machinery runs its suite anyway: %s" % outside
+
+        nothing = picks(["README.md"])
+        assert "no suite would run" in nothing, \
+            "a branch that only changed a document was handed suites to run: %s" % nothing
+        whole = picks(["README.md"], "--all")
+        for name in ("npm-test", "cargo-test", "machinery-check"):
+            assert name in whole, \
+                "asked for every suite, the tool left %s out: %s" % (name, whole)
+
+        print("ok: the checks step runs the suites the branch actually changed, all of "
+              "them when asked, and says so before it runs any")
+
+
+        # What the tool writes on the card, which is the whole of what the close gate
+        # has to go on. The suites are two scripts that print what vitest and cargo
+        # print, because the case is about the line the gate reads and the real ones
+        # are minutes. The board is a script that writes down what it was asked.
+        def ran(*suites):
+            """(what the tool said, what it asked the board, what the note says, the tree)."""
+            tmp = branch_that_changed(["src/app/page.tsx"])
+            elsewhere = os.path.join(tmp, "bin")
+            asked = os.path.join(tmp, "asked.jsonl")
+            os.makedirs(elsewhere)
+            with open(os.path.join(elsewhere, "bd"), "w") as fh:
+                fh.write("#!/usr/bin/env python3\nimport json, sys\n"
+                         "open(%r, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                         "print('{}')\n" % asked)
+            os.chmod(os.path.join(elsewhere, "bd"), 0o755)
+            try:
+                out = subprocess.run(
+                    [sys.executable, CHECKS_TOOL, "tst-c.3"]
+                    + sum([["--suites", s] for s in suites], []),
+                    cwd=tmp, capture_output=True, text=True, timeout=300,
+                    env=dict(os.environ, PATH=elsewhere + os.pathsep + os.environ["PATH"],
+                             CLAUDE_CODE_TMPDIR=tmp))
+                rows = [json.loads(l) for l in open(asked)] if os.path.exists(asked) else []
+                wrote = next((r for r in rows if r[:2] == ["comments", "add"]), [])
+                tree = subprocess.run(["git", "write-tree"], cwd=tmp, capture_output=True,
+                                      text=True, timeout=60).stdout.strip()
+                return out, rows, (wrote[3] if len(wrote) > 3 else ""), tree
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        out, rows, wrote, tree = ran("npm-test=echo 'Tests  412 passed (412)'",
+                                     "cargo-test=echo 'test result: ok. 7 passed; 0 failed'")
+        assert out.returncode == 0, "green suites came back as a failure: %s" % (
+            out.stdout + out.stderr)
+        assert wrote, "the tool ran the suites and wrote nothing on the card: %s" % rows
+        head = wrote.splitlines()[0]
+        assert head == "checks: tree %s npm-test=412/0 cargo-test=7/0" % tree, \
+            "the note's first line is not the tree the suites ran over and what each " \
+            "one counted, so the gate has nothing to check it against: %r" % head
+        assert any(r[:1] == ["close"] for r in rows), \
+            "every suite was green and the tool left the step open: %s" % rows
+        closed = next(r for r in rows if r[:1] == ["close"])
+        assert bars.COMMAND.search(closed[closed.index("--reason") + 1]), \
+            "the reason the step closes on names nothing anyone could run, which the " \
+            "close gate's own bar for a step note refuses: %s" % closed
+
+        out, rows, wrote, tree = ran("npm-test=echo 'Tests  3 failed | 9 passed (12)' "
+                                     "&& echo 'src/a.test.ts broke here' && exit 1")
+        assert out.returncode == 1, \
+            "a red suite came back as a run that passed: %s" % (out.stdout + out.stderr)
+        assert wrote.splitlines()[0] == "checks: tree %s npm-test=9/3" % tree, \
+            "a suite that failed three cases was not written down as failing three: %r" \
+            % wrote.splitlines()[0]
+        assert "src/a.test.ts broke here" in wrote, \
+            "the note says a suite went red and does not say what it said, so the card " \
+            "sends whoever reads it back to run it again: %s" % wrote
+        assert not any(r[:1] == ["close"] for r in rows), \
+            "a red suite still closed the checks step: %s" % rows
+
+        print("ok: the checks tool writes the tree it ran over and every suite's count "
+              "onto the card, closes the step only when they are all green")
+
+
+        # And the other side of that note: the close gate reads it back and asks it
+        # about the tree standing in front of it now. The one failure a step's own
+        # words could never show is the suites going green and three more commits
+        # landing before the close.
+        CHECKS_STEP = {"id": "tst-c.3", "status": "in_progress", "issue_type": "task",
+                       "labels": ["step:checks", "of:tst-c", "no-code", "area:board",
+                                  "kind:chore"], "notes": ""}
+        # A close whose own words pass every bar the gate had before this one existed:
+        # long enough, something runnable in it, and a number. So the only thing left
+        # for a case below to turn on is what is written on the card.
+        CHECKS_CLOSE = ('bd close tst-c.3 --reason="ran `machinery/checks`, 412 cases '
+                        'green in the job\'s copy"')
+
+        def closing_checks(notes):
+            """What the gate says to that close, with these comments on the card.
+
+            A throwaway checkout with a board in it, because the gate asks git for the
+            tree standing where the command was typed and a recorder for that would
+            pass whatever the proof did.
+            """
+            tmp = tempfile.mkdtemp(prefix="board-checks-")
+            try:
+                scratch_project(tmp, 'name = "closing"\nlands_on = "main"\n', on="main")
+                os.makedirs(os.path.join(tmp, ".beads"), exist_ok=True)
+                for args in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t",
+                                             "commit", "-q", "-m", "base"]):
+                    subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
+                tree = subprocess.run(["git", "write-tree"], cwd=tmp, capture_output=True,
+                                      text=True, timeout=60).stdout.strip()
+
+                def recorder(args, root=None):
+                    if args[0] == "show":
+                        return True, json.dumps(CHECKS_STEP if args[1] == "tst-c.3"
+                                                else {"id": args[1], "labels": []})
+                    if args[0] == "comments":
+                        return True, json.dumps([{"text": t % {"tree": tree}}
+                                                 for t in notes])
+                    return True, "[]"
+
+                status.bc.bd = recorder
+                status.bc.reviewing = lambda: ""
+                status.page_stale = lambda cid, card, session, root: False
+                sys.stdin = io.StringIO(json.dumps(
+                    {"session_id": "selftest", "cwd": tmp,
+                     "tool_input": {"command": CHECKS_CLOSE}}))
+                out = io.StringIO()
+                keep, sys.stdout = sys.stdout, out
+                home = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+                try:
+                    status.main()
+                finally:
+                    sys.stdout = keep
+                    if home is not None:
+                        os.environ["CLAUDE_PROJECT_DIR"] = home
+                said = out.getvalue().strip()
+                return json.loads(said)["hookSpecificOutput"]["permissionDecisionReason"] \
+                    if said else ""
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+                pin()
+
+        GREEN_NOTE = "checks: tree %(tree)s npm-test=412/0 machinery-check=71/0"
+        said = closing_checks([])
+        assert "checks" in said and CHECKS_TOOL in said, \
+            "a checks step with nothing written on it closed on its own words, which is " \
+            "how every step of every job came to say the same thing: %r" % said
+        said = closing_checks(["checks: tree %s npm-test=412/0" % ("d" * 40)])
+        assert "tree changed since the checks ran" in said, \
+            "a note proving some other tree closed the step, so the suites went green, " \
+            "three more commits landed and the close still read green: %r" % said
+        said = closing_checks([GREEN_NOTE % {"tree": "%(tree)s"}])
+        assert said == "", \
+            "the tool wrote the note the gate asks for and the gate refused it anyway, " \
+            "which leaves the step with no way to close at all: %r" % said
+        said = closing_checks(["checks: tree %(tree)s npm-test=9/3"])
+        assert "red" in said, \
+            "a note that says a suite failed three cases closed the step: %r" % said
+
+        print("ok: a checks step closes on a note naming the tree standing in front of "
+              "it with every suite green, and on nothing else")
+
+
+        # The reader used to be sent at trees whose suites nobody had run since the
+        # middle of the work. So the whole declared line runs once in front of it, and
+        # a suite that is red there becomes a piece of the job rather than a sentence
+        # in a verdict nobody can act on.
+        def reader_checks(green):
+            """What the reader's own run of the line files, and what the reader is told.
+
+            The line is two scripts in a throwaway checkout: the real one is minutes of
+            npm and cargo, and this case is about what a red suite becomes.
+            """
+            rv = script("review")
+            tmp = tempfile.mkdtemp(prefix="board-reader-")
+            scratch_project(tmp, None, on="main")
+            for name, body in (("greensuite", "#!/bin/sh\necho 'every case held'\n"),
+                               ("redsuite", "#!/bin/sh\necho 'case 41 broke'\nexit 1\n")):
+                with open(os.path.join(tmp, name), "w") as fh:
+                    fh.write(body)
+                os.chmod(os.path.join(tmp, name), 0o755)
+            for args in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t",
+                                         "commit", "-q", "-m", "base"]):
+                subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
+            filed, prompts = [], []
+
+            def reads(prompt, actor, goal_id):
+                prompts.append(prompt)
+                raise Reached()
+
+            goal = dict(GOAL, status="in_progress", notes="")
+            rv.ROOT = tmp
+            was = rv.DECL.checks
+            rv.DECL.checks = "./greensuite" if green else "./greensuite && ./redsuite"
+            rv.bd = lambda args, actor=None, must=True: json.dumps(goal)
+            rv.changes = lambda shas, goal_id: ([], "")
+            rv.run_log = lambda goal_id: tmp
+            rv.run_reviewer = reads
+            rv.file_findings = lambda gid, rows: (filed.extend(rows), ([], []))[1]
+            rv.reading.commits = lambda gid, root: ["a1c0ffee"]
+            rv.reading.wrote = lambda gid, root: {"someone"}
+            keep_argv, sys.argv = sys.argv, ["review", "g"]
+            keep_out, sys.stdout = sys.stdout, io.StringIO()
+            keep_tmp = os.environ.get("CLAUDE_CODE_TMPDIR")
+            os.environ["CLAUDE_CODE_TMPDIR"] = tmp
+            os.environ[inflight.DETACHED] = "1"
+            inflight.clear("g")
+            try:
+                rv.main()
+            except Reached:
+                pass
+            finally:
+                rv.DECL.checks = was
+                sys.argv, sys.stdout = keep_argv, keep_out
+                os.environ.pop(inflight.DETACHED, None)
+                if keep_tmp is None:
+                    os.environ.pop("CLAUDE_CODE_TMPDIR", None)
+                else:
+                    os.environ["CLAUDE_CODE_TMPDIR"] = keep_tmp
+                inflight.clear("g")
+                shutil.rmtree(tmp, ignore_errors=True)
+            return filed, (prompts[0] if prompts else "")
+
+        filed, prompt = reader_checks(green=False)
+        assert len(filed) == 1, \
+            "a suite went red in front of the reader and the job was handed %d piece(s) " \
+            "of work about it: %s" % (len(filed), filed)
+        assert filed[0]["title"] == "redsuite is red on the tree the reader read", \
+            "the piece filed for a red suite does not name it: %s" % filed[0]
+        assert "case 41 broke" in filed[0]["why"], \
+            "the piece filed for a red suite does not carry what the suite said, so " \
+            "whoever picks it up starts by running it again: %s" % filed[0]
+        assert "redsuite" in filed[0]["fixed_when"] and "--all" in filed[0]["fixed_when"], \
+            "the piece does not say what would show it fixed: %s" % filed[0]
+        assert prompt, \
+            "one red suite cost the job its reading altogether, so a broken suite now " \
+            "hides everything else a reader would have found"
+        assert "redsuite" in prompt and "do not file it again" in prompt, \
+            "the reader was not told which suite went red or that it is already filed, " \
+            "so the same fault arrives twice: %s" % prompt
+
+        filed, prompt = reader_checks(green=True)
+        assert filed == [], \
+            "a green line still filed work onto the job: %s" % filed
+        assert "green" in prompt and "greensuite=ran ok" in prompt, \
+            "the reader is not told the line ran green over the tree it is reading: %s" \
+            % prompt
+
+        print("ok: the reader runs this project's own checks line first, files a red "
+              "suite as the job's own work, and reads the change either way")
+
+    finally:
+        subprocess.run = pretending
 
     # The suite under its own way out — the one thing the cases above cannot say
     # about themselves, and what the manager was handed as the escape. Last, so a

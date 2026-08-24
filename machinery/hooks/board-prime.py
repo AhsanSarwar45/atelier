@@ -65,8 +65,12 @@ first card is claimed by hand.
   container and cannot be claimed.
 - The checks step is the project's own checks command, run once over everything the
   job built and in front of the reader. Not per edit, and not from the commit hook,
-  which no longer runs it. Its note gives the exact command and the count it came
-  back with. A project that declares none says on the card what it ran instead.
+  which no longer runs it. One command does all of it from the job's copy,
+  `{checks}`: it reads what your branch changed, runs the suites those
+  changes ask for, writes the note naming the tree it ran over and every suite's
+  count, and closes the step. The close gate asks for that note and refuses a
+  step closed on words alone. A project that declares no checks command says on
+  the card what it ran instead.
 - The board keeps the order of the work and the notes
   (`bd update <id> --append-notes="..."`). Docs and comments may name a card and
   nothing else: no TODO lines, no handoff files, no plan-in-a-doc.
@@ -131,6 +135,7 @@ def main():
     sections.use(root)
     out = [RULES.format(
         name=name, pour=bc.tool(root, "job"), land=bc.tool(root, "land"),
+        checks=bc.tool(root, "checks", ""),
         areas=", ".join(sections.AREAS) or "none declared yet",
         steps=", ".join(("[%s]" % s) if spine.tier(s) != spine.MUST else s
                         for s in spine.ORDER))]

@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""The checks step, run for you: the suites your change touches, the note, the close.
+
+    machinery/checks            the suites this branch touches, then the note and the close
+    machinery/checks <card>     the same, against a checks step you name yourself
+    machinery/checks --all      every suite the project declares, whatever changed
+    machinery/checks --dry      say which suites it would run and why, and touch nothing
+
+The checks step was four things a session did by hand: read what the branch
+changed, decide which suites that asks for, run them, and write down what came
+back in a shape the close gate would take. The first two are a reading of `git
+diff`, the third is the project's own declared command, and the fourth is a
+sentence nobody could get right twice. So this does all four, and the gate on the
+other side now asks for the note this writes rather than for thirty characters of
+anything (bw-aczr.4).
+
+What it writes is one line the gate can check against the tree in front of it:
+
+    checks: tree <hash> npm-test=412/0 machinery-check=71/0
+
+The hash is `git write-tree` of the copy the suites ran in. A note for an older
+tree proves nothing about the code standing now, and that is the one failure a
+step's own words could never show: the suites were green, then three more commits
+landed, and the note still read green.
+
+⛔ The suites are the project's own, off `machinery.toml`. This picks among them
+and never invents one. A project whose declared line this cannot take apart runs
+the whole line as a single suite, which is the old behaviour and is still right.
+"""
+import argparse
+import importlib.machinery
+import importlib.util
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "board"))
+sys.path.insert(0, os.path.join(HERE, "hooks"))
+import board_common as bc  # noqa: E402
+import project  # noqa: E402
+import run as running  # noqa: E402
+
+ROOT = project.root(os.getcwd())
+# The copy the suites run in and the tree the note names. Every git question below
+# is asked here rather than at the project root: a job works in a worktree of its
+# own, and the checks that matter are the ones over what that worktree holds.
+HERE_TREE = os.getcwd()
+# A suite is minutes, not seconds. The board's own twenty seconds is right for a
+# hook and would kill a cargo build halfway.
+SUITE_TIMEOUT = 3600
+BD_TIMEOUT = 120
+GIT_TIMEOUT = 60
+# How much of a red suite goes onto the card. Enough to say which case broke and
+# where, short enough that a card stays readable.
+TAIL = 30
+# The label a checks step wears (board/spine.py).
+STEP = "step:checks"
+
+# What each suite is, and what asks for it. The pattern picks the suite out of the
+# project's declared line, so a project that runs none of these still gets its own
+# line run. The paths are what a change has to touch before the suite is worth the
+# minutes: a docs-only branch asks for nothing here, and used to pay for all three.
+KNOWN = [
+    ("cargo-test", re.compile(r"\bcargo\b"),
+     ("server/",)),
+    ("npm-test", re.compile(r"\b(?:npm|npx|yarn|pnpm|vitest|jest)\b"),
+     ("src/", "tests/", "package.json", "next.config.js", "vitest.config.",
+      "tsconfig")),
+    ("machinery-check", re.compile(r"(?:^|[/\s])check\b"),
+     ("machinery/", ".claude/")),
+]
+# Colour codes a suite writes when it thinks it has a terminal. They land in the
+# log either way and would break every count below.
+COLOUR = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# What each suite says it did. Vitest prints one Tests line, cargo prints one per
+# test binary, and the machinery's own suite prints a line per case it proved.
+VITEST = re.compile(r"^\s*Tests\s+(.*)$", re.M)
+CARGO = re.compile(r"test result:\s*\w+\.\s*(\d+)\s+passed;\s*(\d+)\s+failed")
+CASE = re.compile(r"^ok:", re.M)
+# The note's own first line, read back by hooks/board-status-gate.py. Both sides
+# read this file, so the shape is written down once.
+HEAD = re.compile(r"^checks: tree ([0-9a-f]{40})(.*)$", re.M)
+COUNT = re.compile(r"([^\s=]+)=(?:(\d+)/(\d+)|ran ok)")
+UNCOUNTED = "ran ok"
+
+
+def git(args, where=None, must=False):
+    try:
+        run = subprocess.run(["git"] + args, cwd=where or HERE_TREE,
+                             capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except Exception as died:
+        if must:
+            raise SystemExit("git %s: %s" % (args[0], died))
+        return ""
+    if run.returncode != 0:
+        if must:
+            raise SystemExit("git %s: %s%s" % (args[0], run.stdout or "", run.stderr or ""))
+        return ""
+    return (run.stdout or "").strip()
+
+
+def board(args):
+    """Run a board command and give back everything it said, refusals and all.
+
+    `board_common.bd` throws stderr away, and a comment the board turns down says
+    why only there. A run that swallowed that would write no note, close nothing
+    and say it was fine.
+    """
+    try:
+        run = subprocess.run(["bd"] + args, cwd=ROOT, capture_output=True,
+                             text=True, timeout=BD_TIMEOUT)
+    except Exception as died:
+        return False, str(died)
+    return run.returncode == 0, ((run.stdout or "") + (run.stderr or "")).strip()
+
+
+def me():
+    """The board name this session holds its cards under.
+
+    The same name hooks/board-actor.py stamps onto the session's own board
+    commands, so the note and the close arrive from the session that owns the
+    card rather than from a name every session on this machine shares.
+    """
+    return bc.actor(os.environ.get("CLAUDE_CODE_SESSION_ID"), HERE_TREE)
+
+
+def tree():
+    """The tree the suites just ran over, as a hash anyone can ask for again.
+
+    `git write-tree` names what a commit here would contain without touching the
+    working files or moving a ref, which is the same question machinery/check
+    already asks. The close gate asks for it again at the moment of the close, and
+    a different answer means the code moved after the suites were green.
+    """
+    return git(["write-tree"])
+
+
+def parts(line):
+    """The declared checks line, split into the commands it runs in order.
+
+    Split on `&&` outside brackets and outside quotes: `(cd server && cargo test)`
+    is one command, and splitting it naively hands `cargo test` a directory it was
+    never meant to run in.
+    """
+    out, depth, quote, cur, i = [], 0, "", "", 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            cur += ch
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote, cur = ch, cur + ch
+        elif ch in "([":
+            depth, cur = depth + 1, cur + ch
+        elif ch in ")]":
+            depth, cur = max(0, depth - 1), cur + ch
+        elif depth == 0 and line[i:i + 2] == "&&":
+            out.append(cur.strip())
+            cur, i = "", i + 2
+            continue
+        else:
+            cur += ch
+        i += 1
+    out.append(cur.strip())
+    return [p for p in out if p]
+
+
+def slug(cmd):
+    """A one-word name for a command this file does not recognise."""
+    words = [w for w in re.findall(r"[A-Za-z0-9_./-]+", cmd)
+             if w not in ("cd", "&&", "-", "--")][:2]
+    said = re.sub(r"[^A-Za-z0-9]+", "-", "-".join(words)).strip("-").lower()
+    return said or "checks"
+
+
+class Suite:
+    """One command of the declared line, and what asks for it.
+
+    `paths` empty means nothing here can say when it is not needed, so it always
+    runs. A suite this file recognises is asked for by what the branch touched.
+    """
+
+    def __init__(self, name, command, paths=()):
+        self.name = name
+        self.command = command
+        self.paths = tuple(paths)
+
+    def wanted(self, changed):
+        if not self.paths:
+            return "the project declares it and nothing here can say it is not needed"
+        hit = [f for f in changed if any(f.startswith(p) or p in f for p in self.paths)]
+        return ("%d file(s) under %s changed, starting with %s"
+                % (len(hit), " or ".join(self.paths), hit[0])) if hit else ""
+
+
+def suites(decl):
+    """Every suite this project's own declared line runs, in the order it runs them."""
+    out = []
+    for cmd in parts(decl.checks or ""):
+        found = next(((name, paths) for name, pattern, paths in KNOWN
+                      if pattern.search(cmd)), None)
+        if found:
+            out.append(Suite(found[0], cmd, found[1]))
+        else:
+            out.append(Suite(slug(cmd), cmd))
+    return out
+
+
+def told(said):
+    """The suites a `--suites name=command` switch asks for, in the order given.
+
+    Written for the cases, which cannot spend four minutes of cargo to find out
+    whether a note came out in the right shape. Given one, the declared line is
+    left alone and these run instead.
+    """
+    out = []
+    for one in said or []:
+        name, _, cmd = one.partition("=")
+        if name.strip() and cmd.strip():
+            out.append(Suite(name.strip(), cmd.strip()))
+    return out
+
+
+def changed(where, trunk):
+    """Every file this branch has changed against the line the work lands on."""
+    out = git(["diff", "--name-only", "%s...HEAD" % trunk], where)
+    return [f for f in out.splitlines() if f.strip()]
+
+
+def counted(name, out, ok):
+    """How many cases a suite proved and how many it did not, in its own words.
+
+    A suite that says nothing this can read is written down as having run and
+    passed. That is honest: the close gate asks whether any suite failed, and one
+    with no count to give still answers that question by its exit code.
+    """
+    text = COLOUR.sub("", out or "")
+    passed = failed = None
+    if name == "npm-test":
+        for line in VITEST.findall(text):
+            good = re.search(r"(\d+)\s+passed", line)
+            bad = re.search(r"(\d+)\s+failed", line)
+            passed = int(good.group(1)) if good else passed
+            failed = int(bad.group(1)) if bad else (0 if good else failed)
+    elif name == "cargo-test":
+        rows = CARGO.findall(text)
+        if rows:
+            passed = sum(int(p) for p, _ in rows)
+            failed = sum(int(f) for _, f in rows)
+    elif name == "machinery-check":
+        rows = CASE.findall(text)
+        if rows:
+            passed, failed = len(rows), 0
+    if passed is None:
+        return (None, None) if ok else (0, 1)
+    # A suite that came back red with nothing counted against it is still red.
+    # Written down as green, it would open the close gate on a failure.
+    return passed, max(failed or 0, 0 if ok else 1)
+
+
+def token(name, passed, failed):
+    return "%s=%s" % (name, UNCOUNTED if passed is None else "%d/%d" % (passed, failed))
+
+
+def green(text):
+    """Every suite the note names, and whether all of them passed.
+
+    The other side of `token`, and the reading hooks/board-status-gate.py does
+    when a checks step tries to close. Here so both sides read one shape.
+    """
+    head = HEAD.search(text or "")
+    if not head:
+        return "", [], []
+    rows = [(m.group(1), m.group(2), m.group(3)) for m in COUNT.finditer(head.group(2))]
+    red = [name for name, _, failed in rows if failed and int(failed) > 0]
+    return head.group(1), [name for name, _, _ in rows], red
+
+
+def runs_dir(cid):
+    """Where a run's logs go, beside where the reader puts its own (board/inflight.py)."""
+    where = os.path.join(os.environ.get("CLAUDE_CODE_TMPDIR") or "/tmp",
+                         "board-checks", cid)
+    os.makedirs(where, exist_ok=True)
+    return where
+
+
+def run_one(suite, where, log_dir):
+    """Run one suite in the job's copy and write down everything it said.
+
+    Through a shell, because the declared line is a shell line: `(cd server &&
+    cargo test)` is brackets and a change of directory before it is a command.
+    """
+    run = subprocess.run(["bash", "-c", suite.command], cwd=where,
+                         capture_output=True, text=True, timeout=SUITE_TIMEOUT)
+    out = (run.stdout or "") + (run.stderr or "")
+    log = os.path.join(log_dir, suite.name + ".log")
+    with open(log, "w") as fh:
+        fh.write("$ %s\n\n%s" % (suite.command, out))
+    passed, failed = counted(suite.name, out, run.returncode == 0)
+    return {"name": suite.name, "command": suite.command, "ok": run.returncode == 0,
+            "out": out, "log": log, "passed": passed, "failed": failed}
+
+
+def run_line(picked, where, log_dir):
+    """Run these suites in order and stop at the first one that goes red.
+
+    Stopping is the point: the suites after a red one are minutes spent on a tree
+    somebody is about to change anyway, and the first failure is the one to read.
+    """
+    rows = []
+    for suite in picked:
+        row = run_one(suite, where, log_dir)
+        rows.append(row)
+        if not row["ok"]:
+            break
+    return rows
+
+
+def note(hash_of_tree, rows, log_dir):
+    """What goes on the card: the line the gate reads, then where to look."""
+    said = ["checks: tree %s %s"
+            % (hash_of_tree,
+               " ".join(token(r["name"], r["passed"], r["failed"]) for r in rows))]
+    red = next((r for r in rows if not r["ok"]), None)
+    if red:
+        tail = "\n".join(COLOUR.sub("", red["out"]).rstrip().splitlines()[-TAIL:])
+        said.append("`%s` went red. The last %d lines of it:\n\n%s"
+                    % (red["command"], TAIL, tail))
+    said.append("The full output is in %s" % log_dir)
+    return "\n\n".join(said)
+
+
+def open_step(actor, session_id):
+    """The checks step this session is holding, if it is holding one.
+
+    Found the way board/land finds its card: ask the board what this session has
+    in progress and keep the one wearing the checks label. A session holding two
+    of them is a session working two jobs at once, and it has to say which.
+    """
+    mine = bc.held(actor, ROOT, session_id) or []
+    found = [cid for cid in mine
+             if STEP in ((running.card(cid, ROOT) or {}).get("labels") or [])]
+    if not found:
+        return "", ("no checks step is open under %s. Name the card, or close the "
+                    "step before it and let the run open this one." % actor)
+    if len(found) > 1:
+        return "", ("%s is holding %d checks steps at once (%s). Name the one this "
+                    "copy is for." % (actor, len(found), ", ".join(found)))
+    return found[0], ""
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("card", nargs="?", help="the checks step this run is for")
+    ap.add_argument("--all", action="store_true",
+                    help="run every suite the project declares, whatever changed")
+    ap.add_argument("--dry", action="store_true",
+                    help="say which suites it would run and why, and touch nothing")
+    ap.add_argument("--suites", action="append", metavar="NAME=COMMAND",
+                    help="run these instead of the declared line, for the cases")
+    a = ap.parse_args()
+
+    decl = project.of(ROOT)
+    every = told(a.suites) or suites(decl)
+    if not every:
+        sys.exit("%s declares no checks command, so there is nothing here to run. "
+                 "Run what holds a change in this project and write on the card "
+                 "what that was." % os.path.join(ROOT, project.DECLARATION))
+
+    # A stub line has no paths to ask about, so it runs whole. So does `--all`.
+    files = [] if a.suites else changed(HERE_TREE, decl.lands_on)
+    picked, why = [], {}
+    for suite in every:
+        want = "you asked for every suite" if (a.all or a.suites) else suite.wanted(files)
+        if want:
+            picked.append(suite)
+            why[suite.name] = want
+
+    if a.dry:
+        print("%d file(s) changed against %s" % (len(files), decl.lands_on))
+        if not picked:
+            print("no suite would run: nothing this branch changed asks for one. Say "
+                  "that on the card, or run `machinery/checks --all` to run them all.")
+            return
+        for suite in picked:
+            print("would run %-16s `%s`\n  because %s" % (suite.name, suite.command,
+                                                          why[suite.name]))
+        return
+
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    actor = me()
+    cid = a.card
+    if not cid:
+        cid, why_not = open_step(actor, session)
+        if not cid:
+            sys.exit(why_not)
+
+    if not picked:
+        sys.exit("nothing this branch changed asks for a suite, so none was run. Write "
+                 "that on %s yourself, or run `machinery/checks --all`." % cid)
+
+    log_dir = runs_dir(cid)
+    hash_of_tree = tree()
+    if not hash_of_tree:
+        sys.exit("git could not name the tree in %s, so nothing here could say which "
+                 "code the suites ran over. Fix that first." % HERE_TREE)
+
+    print("%s: running %s over tree %s"
+          % (cid, ", ".join(s.name for s in picked), hash_of_tree[:12]))
+    rows = run_line(picked, HERE_TREE, log_dir)
+    for row in rows:
+        print("  %-16s %s  %s" % (row["name"], "ok " if row["ok"] else "RED",
+                                  token(row["name"], row["passed"], row["failed"])))
+    body = note(hash_of_tree, rows, log_dir)
+    wrote, said = board(["comments", "add", cid, body, "--actor", actor])
+    if not wrote:
+        sys.exit("the suites ran but %s would not take the note, so the step cannot "
+                 "close on it: %s\n\n%s" % (cid, said, body))
+
+    red = next((r for r in rows if not r["ok"]), None)
+    if red:
+        print("\n%s is red. The note is on %s and the step stays open. Read %s"
+              % (red["name"], cid, red["log"]))
+        sys.exit(1)
+
+    # The head line and the command that wrote it. The close gate holds every step
+    # note to the same bar, which asks for something runnable, and the head line on
+    # its own carries no command at all: a run whose only suite was the machinery's
+    # own would be refused by the bar in front of the proof (board/spine.py).
+    reason = "%s. Run by `%s`, output in %s" \
+        % (body.splitlines()[0], project.tool(decl, "checks", ""), log_dir)
+    ok, said = board(["close", cid, "--reason", reason, "--actor", actor])
+    if not ok:
+        sys.exit("the suites are green and the note is on %s, but the board would not "
+                 "close it: %s" % (cid, said))
+    print("closed %s" % cid)
+    # The run is what opens the next position and hands it over, exactly as it does
+    # behind a close typed by hand (hooks/board-touch.py). This close is a
+    # subprocess of the session's own tool call, which that hook never sees, so
+    # nothing else here would move the job on (board/land does the same).
+    held_back = running.advance(cid, ROOT, actor, HERE_TREE)
+    if held_back:
+        print(held_back)
+
+
+if __name__ == "__main__":
+    main()

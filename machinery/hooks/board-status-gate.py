@@ -8,6 +8,8 @@ the fourth: a hand-written card can skip every field the shape requires, so the
 two tools that cannot are the only way in.
 """
 import datetime
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -777,6 +779,94 @@ def said(card, cid, cmd):
     return max((card.get("notes") or "").strip(), reason.strip(), key=len)
 
 
+def _checks_tool():
+    """The tool that runs the suites, loaded by path so both sides read one shape.
+
+    Loaded here rather than at the top of the file: this costs a git call as it
+    loads, and every Bash command in every session goes past this gate. Only a
+    checks step closing ever asks for it.
+    """
+    where = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                         "checks")
+    spec = importlib.util.spec_from_loader(
+        "machinery_checks", importlib.machinery.SourceFileLoader("machinery_checks",
+                                                                 where))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def comments(cid, root):
+    """Everything written onto a card as a comment, newest last.
+
+    None when the board could not answer, which is never the same as a card with
+    nothing written on it.
+    """
+    ok, out = bc.bd(["comments", cid, "--json"], root)
+    if not ok:
+        return None
+    try:
+        rows = json.loads(out or "[]") or []
+    except Exception:
+        return []
+    return [r.get("text") or "" for r in rows if isinstance(r, dict)]
+
+
+def checks_proof(cid, root, here):
+    """Why this checks step may not close yet, or "" when it may.
+
+    A checks step used to close on thirty characters and a digit, so "ran the
+    suites, all green" closed it and nobody could tell afterwards which suites, on
+    which code, or whether they were green. The tool writes one line naming the
+    tree it ran over and every suite with its counts, and this asks that line
+    about the tree standing here now (bw-aczr.4).
+    """
+    tool = bc.tool(root, "checks", "")
+    run_it = ("Run `%s` from the job's copy. It runs the suites your change "
+              "touches, writes this note and closes the step." % tool)
+    try:
+        shapes = _checks_tool()
+    except Exception as why:
+        return ("%s is the checks step and the tool that proves one would not load "
+                "(%s), so nothing here can say whether the suites ran. A check that "
+                "could not run is not a check that passed." % (cid, why))
+    now = git(["write-tree"], here)
+    if not now:
+        return ("%s is the checks step and git could not name the tree in %s, so "
+                "nothing can say which code the suites ran over. A check that could "
+                "not run is not a check that passed." % (cid, here))
+    written = comments(cid, root)
+    if written is None:
+        return ("%s is the checks step and the board would not say what is written on "
+                "it, so whether the suites ran is unknown. Try again, and if the board "
+                "is down that is the thing to fix first." % cid)
+    older = ""
+    for text in written:
+        hash_of_tree, named, red = shapes.green(text)
+        if not hash_of_tree:
+            continue
+        if hash_of_tree != now:
+            older = hash_of_tree
+            continue
+        if red:
+            return ("%s is the checks step and its note says %s came back red. A red "
+                    "suite is the step's answer, not a step that is done. Fix it, then "
+                    "run `%s` again." % (cid, " and ".join(red), tool))
+        if not named:
+            return ("%s is the checks step and its note names no suite at all, so it "
+                    "says nothing about what ran. %s" % (cid, run_it))
+        return ""
+    if older:
+        return ("%s is the checks step and the only note on it is for tree %s, while "
+                "%s stands at %s. The tree changed since the checks ran, so those "
+                "suites proved nothing about the code standing here. Run `%s` again."
+                % (cid, older[:12], here, now[:12], tool))
+    return ("%s is the checks step and nothing written on it proves the suites ran. "
+            "Thirty characters and a number used to close it, and nobody could tell "
+            "afterwards which suites ran, over which code, or whether they were "
+            "green. %s" % (cid, run_it))
+
+
 def main():
     data = json.load(sys.stdin)
     # What a shell was handed comes back onto the line as commands first. Every
@@ -954,6 +1044,12 @@ def main():
                             "under that card, and this step is clear."
                             % (cid, which, len(wrote), wrote[0])
                         )
+                        return
+                if which == "checks":
+                    why = checks_proof(cid, root, bc.where(data))
+                    if why:
+                        deny(why)
+                        tally("checks-unproved")
                         return
                 if which == "worktree" and "/worktrees/" not in bc.where(data):
                     deny(

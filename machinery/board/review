@@ -23,6 +23,8 @@ left to that reader, and a job read clean is not read again until something is
 written under it (bw-5e8).
 """
 import argparse
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -138,7 +140,85 @@ LAST = ("This is the second and last reading this job will ever get, and you are
         "what is actually wrong and leave nothing for a round that will not come.")
 
 
-def ask(goal, shas, diff, final=False):
+def checks_tool():
+    """The tool that runs this project's suites, loaded by path: a command with no
+    suffix cannot be imported by name."""
+    where = os.path.join(os.path.dirname(HERE), "checks")
+    spec = importlib.util.spec_from_loader(
+        "machinery_checks", importlib.machinery.SourceFileLoader("machinery_checks",
+                                                                 where))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def ran_checks(goal_id):
+    """Run this project's whole declared checks line over the tree about to be read.
+
+    A reader is sent at a job the moment its last piece closes, and it was sent at
+    trees whose suites nobody had run since the middle of the work. So the line runs
+    here, once, in front of the reader. That is where the checks step already puts
+    it, asked again at the one moment the whole job stands finished (bw-aczr.4).
+
+    None when the project declares no line, or when the tool that runs one will not
+    load. Neither is a fault of the job being read, and neither is worth stopping a
+    reading over.
+    """
+    try:
+        shapes = checks_tool()
+        every = shapes.suites(DECL)
+    except Exception:
+        return None
+    if not every:
+        return None
+    here = shapes.git(["write-tree"], ROOT)
+    log_dir = shapes.runs_dir(goal_id)
+    rows = shapes.run_line(every, ROOT, log_dir)
+    red = next((r for r in rows if not r["ok"]), None)
+    return {"tree": here, "rows": rows, "red": red, "log": log_dir,
+            "line": DECL.checks, "tool": project.tool(DECL, "checks", "")}
+
+
+def checks_finding(checked):
+    """A red suite, as the job's own work item.
+
+    Filed through the same route as anything the reader raises, because it IS a
+    finding: the change standing on this tree does not pass the project's own
+    checks, and the job cannot be delivered until it does.
+    """
+    red = checked["red"]
+    tail = "\n".join((red["out"] or "").rstrip().splitlines()[-30:])
+    return {
+        "title": "%s is red on the tree the reader read" % red["name"],
+        "where": red["log"],
+        "why": ("The project's own checks line was run over tree %s before this "
+                "reading, and `%s` came back red. The last 30 lines of it:\n\n%s"
+                % ((checked["tree"] or "unknown")[:12], red["command"], tail)),
+        "fixed_when": ("`%s --all` run in the job's copy prints %s with 0 failures"
+                       % (checked["tool"], red["name"])),
+    }
+
+
+def checks_line(checked):
+    """The one line the reader is told about the suites, before it reads anything."""
+    if not checked:
+        return ("Nobody ran this project's own checks line in front of you, because "
+                "the project declares none.")
+    if checked["red"]:
+        return ("This project's own checks line was run over this tree before you "
+                "were sent, and %s came back red. That is already filed as a piece "
+                "of this job, so do not file it again. Its output is in %s."
+                % (checked["red"]["name"], checked["log"]))
+    named = " ".join("%s=%s" % (r["name"],
+                                "ran ok" if r["passed"] is None
+                                else "%d/%d" % (r["passed"], r["failed"]))
+                     for r in checked["rows"])
+    return ("This project's own checks line was run over this tree before you were "
+            "sent and every suite came back green: tree %s, %s."
+            % ((checked["tree"] or "unknown")[:12], named or "nothing to run"))
+
+
+def ask(goal, shas, diff, final=False, checked=None):
     return """You are reviewing a change you did not write, for %(persona)s.
 You know nothing about who wrote it and it does not matter. %(round)s
 
@@ -148,6 +228,7 @@ itself by: %(proves)s.
 
 You are READ-ONLY. Do not edit any file. Do not run any build or any test —
 other sessions share this working tree and a build here would stall them.
+%(checks)s
 
 # The job under review
 %(what)s
@@ -193,7 +274,7 @@ Answer with one fenced json block and nothing after it:
 """ % {"root": ROOT, "what": goal.get("title", ""), "desc": goal.get("description", ""),
        "done": goal.get("acceptance_criteria") or goal.get("acceptance") or "",
        "persona": DECL.persona, "proves": sections.PROVES,
-       "round": LAST if final else FIRST,
+       "round": LAST if final else FIRST, "checks": checks_line(checked),
        "shas": "\n".join(shas) or "none found", "diff": diff or "no diff found"}
 
 
@@ -594,9 +675,17 @@ def main():
         # that spawned this copy redirected it to; it is the only one that knows.
         inflight.name(goal_id, os.getpid(), os.environ.get(inflight.CONSOLE))
     named, diff = changes(shas, goal_id)
+    # The project's own checks line, over the tree this reader is about to read.
+    # A suite that is red here is a fault in the change and belongs to the job, so
+    # it is filed the way anything the reader raises is filed — and the reader is
+    # still sent, told which suite went red, so one broken suite does not cost the
+    # job its reading (bw-aczr.4).
+    suites_ran = ran_checks(goal_id)
+    if suites_ran and suites_ran["red"]:
+        file_findings(goal_id, [checks_finding(suites_ran)])
     # Asked of the goal as it stands before this reading signs, so the count is of
     # the readings that have already happened and not of this one.
-    prompt = ask(goal, named, diff, reading.final(goal))
+    prompt = ask(goal, named, diff, reading.final(goal), suites_ran)
     here = run_log(goal_id)
     verdict = answered(attempts(prompt, actor, goal_id, here), goal_id, actor, here)
 

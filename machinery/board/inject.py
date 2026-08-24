@@ -52,6 +52,7 @@ PRIME = "hooks/board-prime.py"
 LAND = "board/land"
 READING = "board/reading.py"
 REVIEW = "board/review"
+CHECKS = "checks"
 JOIN = "join"
 DECL = "project.py"
 
@@ -699,6 +700,24 @@ FAULTS = [
          '    named = {l[len(bc.COPY):] for l in card.get("labels") or []\n'
          '             if l.startswith(bc.COPY)}\n',
          "    named = set()\n")),
+
+    # The checks step, proved rather than asserted (bw-aczr.4). Thirty characters
+    # and a digit used to close it, so "ran the suites, all green" closed it and
+    # nobody could tell afterwards which suites ran, over which code, or whether
+    # they were green.
+    ("a checks step closes on its own words again, with nothing proving the suites "
+     "ever ran", CLOSE,
+     lambda s: s.replace('    tool = bc.tool(root, "checks", "")\n',
+                         '    return ""\n'
+                         '    tool = bc.tool(root, "checks", "")\n')),
+
+    # And the half the gate reads: the note names the tree the suites ran over, so
+    # a run that went green before three more commits landed cannot pass for a run
+    # over the code standing now.
+    ("the checks note names something other than the tree the suites ran over",
+     CHECKS,
+     lambda s: s.replace('    return git(["write-tree"])\n',
+                         '    return "0" * 40\n')),
 ]
 
 
