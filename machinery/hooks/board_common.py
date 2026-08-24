@@ -609,8 +609,7 @@ def actor(session_id, cwd):
     A claim is exclusive per actor name, so two live sessions sharing a name
     would both believe they hold the same card.
     """
-    place = re.search(r"/worktrees/([^/]+)", cwd or "")
-    return "%s-%s" % (place.group(1) if place else "main", (session_id or "nosession")[:8])
+    return "%s-%s" % (project.tree(cwd)[1] or "main", (session_id or "nosession")[:8])
 
 
 def held_by(name, session_id):

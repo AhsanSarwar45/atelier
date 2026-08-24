@@ -94,7 +94,7 @@ STEPS = [
 # the order stored on its own goal — and a run whose next position the catalogue
 # cannot answer for is a job that stops moving. What each was, and where it went:
 #   worktree  still required, and the gates still hold it: a no-code step cannot
-#             close from outside `worktrees/<goal>`, and the landing reads the tree
+#             close from outside the job's own copy, and the landing reads the tree
 #             and branch being gone as its own fact
 #   clarify   what the pour asks for in `--what` and `--evidence`
 #   prove     what the pour asks for in `--evidence`
@@ -105,7 +105,7 @@ STEPS = [
 RETIRED = [
     ("worktree", "Worktree",
      "An isolated tree, so two jobs never edit the same file under each other.\n\n"
-     "## Acceptance Criteria\nThe tree is under `worktrees/`, this session is inside "
+     "## Acceptance Criteria\nThe job has a copy of its own, this session is inside "
      "it, and its branch was cut from main.",
      FACT, GONE),
     ("clarify", "Clarify",
