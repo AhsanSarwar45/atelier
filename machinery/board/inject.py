@@ -718,6 +718,13 @@ FAULTS = [
      CHECKS,
      lambda s: s.replace('    return git(["write-tree"])\n',
                          '    return "0" * 40\n')),
+
+    # A branch that touched a document and nothing else still owes the board a
+    # note it can prove. Without the prose check standing in, such a step never
+    # closes, and a session writes the note by hand again.
+    ("a branch that changed only a document is handed nothing to run", CHECKS,
+     lambda s: s.replace('        if os.path.exists(prose):\n',
+                         '        if False and os.path.exists(prose):\n')),
 ]
 
 

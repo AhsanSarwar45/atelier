@@ -255,6 +255,10 @@ def counted(name, out, ok):
         rows = CASE.findall(text)
         if rows:
             passed, failed = len(rows), 0
+    elif name == "voice-check":
+        said = re.search(r"(\d+)\s+files?,\s*(\d+)\s+failures?", text)
+        if said:
+            passed, failed = int(said.group(1)), int(said.group(2))
     if passed is None:
         return (None, None) if ok else (0, 1)
     # A suite that came back red with nothing counted against it is still red.
@@ -379,6 +383,18 @@ def main():
         if want:
             picked.append(suite)
             why[suite.name] = want
+
+    # A branch that touched none of the suites' paths, a document or a rule file,
+    # still has to close its checks step on a note the gate can prove. The prose
+    # check is what such a change can break, so it runs alone there, and the note
+    # carries the tree hash like any other. A project without one gets the old
+    # answer: nothing ran, say so on the card or ask for every suite.
+    if not picked and not (a.all or a.suites):
+        prose = os.path.join(ROOT, "machinery", "voice-check.py")
+        if os.path.exists(prose):
+            picked = [Suite("voice-check", "python3 machinery/voice-check.py")]
+            why["voice-check"] = ("nothing this branch changed asks for a declared "
+                                  "suite, so the prose check runs alone")
 
     if a.dry:
         print("%d file(s) changed against %s" % (len(files), decl.lands_on))

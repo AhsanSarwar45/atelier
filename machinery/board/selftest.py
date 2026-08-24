@@ -7213,17 +7213,23 @@ def main():
         DECLARED = ('name = "picked"\nprefix = "tst"\nlands_on = "main"\n'
                     'checks = "npm test && (cd server && cargo test) && machinery/check"\n')
 
-        def branch_that_changed(files, says=DECLARED):
+        def branch_that_changed(files, says=DECLARED, before=()):
             """A throwaway checkout whose branch changed exactly these files.
 
             Real git, because what the tool reads is `git diff --name-only main...HEAD`
             and a recorder standing in for that would pass whatever the picking did.
+            `before` are files the project had already, on main, before the branch.
             """
             tmp = tempfile.mkdtemp(prefix="board-checks-")
             scratch_project(tmp, says, on="main")
             git_here = lambda *args: subprocess.run(
                 ["git", "-c", "user.email=t@t", "-c", "user.name=t"] + list(args),
                 cwd=tmp, capture_output=True, text=True, timeout=60)
+            for rel in before:
+                spot = os.path.join(tmp, rel)
+                os.makedirs(os.path.dirname(spot) or tmp, exist_ok=True)
+                with open(spot, "w") as fh:
+                    fh.write("print('voice-check: 3 files, 0 failures')\n")
             git_here("add", "-A")
             git_here("commit", "-q", "-m", "what this project is")
             git_here("checkout", "-q", "-B", "mine")
@@ -7236,9 +7242,9 @@ def main():
             git_here("commit", "-q", "-m", "the work")
             return tmp
 
-        def picks(files, *said):
+        def picks(files, *said, before=()):
             """Which suites the tool would run for a branch that changed these files."""
-            tmp = branch_that_changed(files)
+            tmp = branch_that_changed(files, before=before)
             try:
                 out = subprocess.run([sys.executable, CHECKS_TOOL, "--dry"] + list(said),
                                      cwd=tmp, capture_output=True, text=True, timeout=120)
@@ -7265,13 +7271,21 @@ def main():
         nothing = picks(["README.md"])
         assert "no suite would run" in nothing, \
             "a branch that only changed a document was handed suites to run: %s" % nothing
+        prose = picks(["README.md"], before=["machinery/voice-check.py"])
+        assert "voice-check" in prose, \
+            "a branch that only changed a document, in a project with a prose check, " \
+            "was handed nothing to run, so its checks step can never close: %s" % prose
+        for name in ("npm-test", "cargo-test", "machinery-check"):
+            assert name not in prose, \
+                "a branch that only changed a document was handed %s: %s" % (name, prose)
         whole = picks(["README.md"], "--all")
         for name in ("npm-test", "cargo-test", "machinery-check"):
             assert name in whole, \
                 "asked for every suite, the tool left %s out: %s" % (name, whole)
 
-        print("ok: the checks step runs the suites the branch actually changed, all of "
-              "them when asked, and says so before it runs any")
+        print("ok: the checks step runs the suites the branch actually changed, the prose "
+              "check alone when a branch touched none of them, all of them when asked, "
+              "and says so before it runs any")
 
 
         # What the tool writes on the card, which is the whole of what the close gate
