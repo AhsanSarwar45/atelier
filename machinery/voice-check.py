@@ -101,6 +101,9 @@ def prose(path):
         text = "\n".join(re.findall(r'"""(.*?)"""', text, re.S))
     text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)   # frontmatter
     text = re.sub(r"```.*?```", " ", text, flags=re.S)          # fenced code
+    # A block another tool generates and stamps with its own hash is not ours to
+    # write, and an edit inside it is overwritten the next time that tool runs.
+    text = re.sub(r"<!-- BEGIN [A-Z ]+?v:.*?<!-- END [A-Z ]+? -->", " ", text, flags=re.S)
     text = re.sub(r"`[^`\n]*`", " ", text)                     # inline code
     return drop_label_dashes(text)
 

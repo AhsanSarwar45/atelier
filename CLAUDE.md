@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Atelier — visual Kanban board and multi-project dashboard for beads task tracking. Next.js 14 frontend with Rust/Axum backend. Real-time sync, epic support, 11 themes, GitOps, Dolt integration.
+Atelier is a visual Kanban board and multi-project dashboard for beads task tracking. Next.js 14 frontend with Rust/Axum backend. Real-time sync, epic support, 11 themes, GitOps, Dolt integration.
 
 ## Tech Stack
 
@@ -10,7 +10,7 @@ Atelier — visual Kanban board and multi-project dashboard for beads task track
 - **Backend**: Rust (Axum 0.7), rusqlite (bundled), mysql_async (Dolt), rust-embed
 - **Build**: `npm run build` → static export → `cargo build --release` (embeds frontend into binary)
 - **Testing**: Vitest (frontend), Rust built-in tests (backend)
-- **CI**: GitHub Actions — cross-platform builds (macOS arm64/x64, Linux x64, Windows x64)
+- **CI**: GitHub Actions, building for macOS arm64/x64, Linux x64 and Windows x64
 
 ## Your Identity
 
@@ -22,7 +22,7 @@ Atelier — visual Kanban board and multi-project dashboard for beads task track
 
 ## Workflow
 
-**Beads = single source of truth.** Every task, bug, tech debt, and follow-up goes into beads. Context gets compacted — beads persist. See `.claude/rules/beads-workflow.md` for when/how.
+**Beads = single source of truth.** Every task, bug, tech debt, and follow-up goes into beads. Context gets compacted. Beads persist. See `.claude/rules/beads-workflow.md` for when/how.
 
 ### Standalone (single task)
 
@@ -53,15 +53,15 @@ Use when: multiple files/domains, "first X then Y", DB + API + frontend.
 
 **Lead with evidence, not assumptions.**
 
-- Read the actual code — don't grep for keywords only
+- Read the actual code. Grepping for keywords is not enough
 - Identify specific file, function, line number
-- Understand root cause — don't guess
+- Find the root cause. Do not guess at it
 - Log findings to bead so the implementer has full context
 
 **Hard constraints:**
 - Never dispatch without reading the actual source file
 - Never create a bead with a vague description
-- No guessing at fixes — investigate more or ask
+- No guessing at fixes. Investigate further, or ask
 
 ## Bug Fixes & Follow-Up
 
@@ -100,12 +100,12 @@ The more specific the LEARNED comment, the more useful it is next time.
 - 11 themes implemented with CSS variables and persistence
 - Dolt direct SQL integration working
 - Windows compatibility fixed (multi-drive paths, validation)
-- GitHub Releases CI configured (`.github/workflows/release.yml`) — cross-platform binaries on tag push
+- GitHub Releases CI configured (`.github/workflows/release.yml`), building cross-platform binaries on a tag push
 - Listed in [beads community-tools.md](https://github.com/gastownhall/beads/blob/main/docs/community-tools.md)
 
 ## Distribution
 
-Single binary — frontend is embedded via rust-embed. No npm publish needed.
+Single binary. The frontend is embedded via rust-embed, so there is no npm publish.
 
 - Tag `v*` triggers GitHub Actions → builds for macOS arm64/x64, Linux x64, Windows x64
 - Users download binary from GitHub Releases, run it, open http://localhost:3008
@@ -113,7 +113,7 @@ Single binary — frontend is embedded via rust-embed. No npm publish needed.
 
 ## Git Notes
 
-- Upstream remote removed — fully independent from original repo
+- Upstream remote removed, so this is fully independent from the original repo
 - Tag named "main" was deleted (caused ambiguous ref errors with branch "main")
 - PR branches kept: feature/*, fix/* that were submitted to original repo
 
