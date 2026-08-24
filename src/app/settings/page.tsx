@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from "react";
 
+import { ArrowLeft, Trash2 } from "lucide-react";
+
 import { ColorPicker } from "@/components/color-picker";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { ReadFailed } from "@/components/ui/read-failed";
+import { Slider } from "@/components/ui/slider";
 import { getTags, createTag, deleteTag, type Tag } from "@/lib/db";
 import {
   applyFontSize,
@@ -96,27 +99,11 @@ export default function SettingsPage() {
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-b-default bg-surface-base/80 backdrop-blur-sm px-6 py-4">
         <div className="flex items-center gap-4">
-          <a
-            href="/"
-            aria-label="Go back to home"
-            className="rounded-md p-2 text-t-tertiary hover:bg-surface-overlay/50 hover:text-t-primary"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="m12 19-7-7 7-7" />
-              <path d="M19 12H5" />
-            </svg>
-          </a>
+          <Button asChild variant="ghost" mode="icon" size="sm" aria-label="Go back to home">
+            <a href="/">
+              <ArrowLeft className="size-5" aria-hidden="true" />
+            </a>
+          </Button>
           <h1 className="text-xl font-semibold text-t-primary">Settings</h1>
         </div>
       </header>
@@ -126,15 +113,15 @@ export default function SettingsPage() {
         {/* Theme Section */}
         <section className="mb-8">
           <h2 className="mb-4 text-lg font-medium text-t-primary">Theme</h2>
-          <div className="rounded-lg border border-b-default bg-surface-raised/50 p-4">
+          <Panel inset="md">
             <ThemeSwitcher />
-          </div>
+          </Panel>
         </section>
 
         {/* Typography Section */}
         <section className="mb-8">
           <h2 className="mb-4 text-lg font-medium text-t-primary">Typography</h2>
-          <div className="rounded-lg border border-b-default bg-surface-raised/50 p-4">
+          <Panel inset="md">
             <label
               htmlFor="font-size"
               className="block text-sm font-medium text-t-secondary"
@@ -142,14 +129,12 @@ export default function SettingsPage() {
               Font size
             </label>
             <div className="mt-2 flex items-center gap-3">
-              <input
+              <Slider
                 id="font-size"
-                type="range"
                 min={MIN_FONT_SIZE}
                 max={MAX_FONT_SIZE}
                 value={fontSize}
                 onChange={(e) => handleFontSizeChange(Number(e.target.value))}
-                className="h-2 flex-1 accent-t-primary"
                 aria-describedby="font-size-hint"
               />
               <Input
@@ -158,7 +143,7 @@ export default function SettingsPage() {
                 max={MAX_FONT_SIZE}
                 value={fontSize}
                 onChange={(e) => handleFontSizeChange(Number(e.target.value))}
-                className="w-20 border-b-strong bg-surface-overlay text-t-primary tabular-nums"
+                className="w-20 tabular-nums"
                 aria-label="Font size in pixels"
               />
               <span className="text-sm text-t-tertiary">px</span>
@@ -167,22 +152,17 @@ export default function SettingsPage() {
               <p id="font-size-hint" className="text-xs text-t-muted">
                 {MIN_FONT_SIZE}-{MAX_FONT_SIZE}
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-b-strong bg-transparent text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
-                onClick={handleResetFontSize}
-              >
+              <Button variant="outline" size="sm" onClick={handleResetFontSize}>
                 Reset
               </Button>
             </div>
-          </div>
+          </Panel>
         </section>
 
         {/* Tags Section */}
         <section className="mb-8">
           <h2 className="mb-4 text-lg font-medium text-t-primary">Tags</h2>
-          <div className="rounded-lg border border-b-default bg-surface-raised/50 p-4">
+          <Panel inset="md">
             <p className="text-sm text-t-tertiary">
               Manage your project tags here. Tags help organize and categorize your projects.
             </p>
@@ -211,30 +191,16 @@ export default function SettingsPage() {
                       />
                       <span className="text-sm font-medium text-t-secondary">{tag.name}</span>
                     </div>
-                    <button
+                    <Button
+                      variant="ghost"
+                      mode="icon"
+                      size="sm"
                       onClick={() => handleDeleteTag(tag.id)}
-                      className="rounded p-1 text-t-muted hover:bg-surface-overlay hover:text-t-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-t-tertiary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base"
                       title="Delete tag"
                       aria-label={`Delete tag ${tag.name}`}
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M3 6h18" />
-                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                        <line x1="10" x2="10" y1="11" y2="17" />
-                        <line x1="14" x2="14" y1="11" y2="17" />
-                      </svg>
-                    </button>
+                      <Trash2 className="size-4" aria-hidden="true" />
+                    </Button>
                   </Panel>
                 ))
               )}
@@ -249,7 +215,7 @@ export default function SettingsPage() {
                       onChange={(e) => setNewTagName(e.target.value)}
                       placeholder="Tag name…"
                       aria-label="Tag name"
-                      className="flex-1 border-b-strong bg-surface-overlay text-t-primary placeholder:text-t-muted"
+                      className="flex-1"
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
@@ -266,7 +232,6 @@ export default function SettingsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="border-b-strong bg-transparent text-t-tertiary hover:bg-surface-overlay hover:text-t-primary"
                       onClick={() => {
                         setIsAddingTag(false);
                         setNewTagName("");
@@ -277,7 +242,6 @@ export default function SettingsPage() {
                     </Button>
                     <Button
                       size="sm"
-                      className="bg-t-primary text-t-inverse hover:bg-t-primary"
                       onClick={handleCreateTag}
                       disabled={!newTagName.trim()}
                     >
@@ -291,21 +255,18 @@ export default function SettingsPage() {
             {/* Add Tag Button */}
             {!isAddingTag && (
               <div className="mt-4">
-                <button
-                  onClick={() => setIsAddingTag(true)}
-                  className="rounded-md bg-t-primary px-3 py-1.5 text-sm text-t-inverse hover:bg-t-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-t-tertiary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base"
-                >
+                <Button size="sm" onClick={() => setIsAddingTag(true)}>
                   Add Tag
-                </button>
+                </Button>
               </div>
             )}
-          </div>
+          </Panel>
         </section>
 
         {/* Data Section */}
         <section className="mb-8">
           <h2 className="mb-4 text-lg font-medium text-t-primary">Data</h2>
-          <div className="rounded-lg border border-b-default bg-surface-raised/50 p-4">
+          <Panel inset="md">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-medium text-danger">Clear Local Database</p>
@@ -317,7 +278,7 @@ export default function SettingsPage() {
                 Clear Data
               </Button>
             </div>
-          </div>
+          </Panel>
         </section>
       </main>
     </div>
