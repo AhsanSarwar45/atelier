@@ -314,7 +314,9 @@ export const EpicCard = memo(function EpicCard({
             <div className="flex items-center gap-2">
               <span className="text-xs text-t-muted font-mono shrink-0">{formatBeadId(epic.id)}</span>
               <span className="text-[13px] font-semibold text-t-primary truncate">{epic.title}</span>
-              <span className="text-[10px] font-semibold text-epic shrink-0">EPIC</span>
+              <Badge variant="epic" appearance="light" size="xs" className="theme-badge font-semibold shrink-0">
+                Epic
+              </Badge>
               <BeadTags bead={epic} className="shrink-0" />
             </div>
             {progressSection}
@@ -415,7 +417,11 @@ export const EpicCard = memo(function EpicCard({
               isBlocked={isBlockedBy(epic, statusById)}
               onNavigate={onNavigateToDependency}
             />
-            <Badge variant="outline" className="text-[10px] px-2 py-0.5 border-epic/30 text-epic bg-epic/20 font-semibold">EPIC</Badge>
+            {/* The library already has a name for what a job is coloured, and
+                the theme decides whether the word is shouted (bw-dks8.7). */}
+            <Badge variant="epic" appearance="light" size="xs" className="theme-badge font-semibold">
+              Epic
+            </Badge>
           </div>
         </div>
 
