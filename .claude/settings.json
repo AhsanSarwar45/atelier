@@ -35,10 +35,6 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/board-status-gate.py"
-          },
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/search-gate.py"
           }
         ]
       },
