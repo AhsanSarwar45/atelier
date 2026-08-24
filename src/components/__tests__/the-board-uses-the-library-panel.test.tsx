@@ -35,8 +35,8 @@ const column = (beads: Bead[]) =>
   ).container;
 
 const comments: Comment[] = [
-  { id: 'c1', author: 'someone', text: 'The first thing said', created_at: '2026-01-01T00:00:00Z' },
-  { id: 'c2', author: 'someone else', text: 'The second', created_at: '2026-01-02T00:00:00Z' },
+  { id: 'c1', issue_id: 'bead-1', author: 'someone', text: 'The first thing said', created_at: '2026-01-01T00:00:00Z' },
+  { id: 'c2', issue_id: 'bead-1', author: 'someone else', text: 'The second', created_at: '2026-01-02T00:00:00Z' },
 ];
 
 describe('the board draws its boxes with the library panel', () => {
@@ -49,7 +49,7 @@ describe('the board draws its boxes with the library panel', () => {
     const container = column([]);
     // The frame is a panel too and the words are inside it, so the box being
     // looked for is the innermost one that says them.
-    const empty = [...container.querySelectorAll('[data-slot="panel"]')].find(
+    const empty = Array.from(container.querySelectorAll('[data-slot="panel"]')).find(
       (el) => el.textContent?.includes('No cards') && !el.querySelector('[data-slot="panel"]'),
     );
     expect(empty, 'the words a column shows when it is empty are not in a panel').toBeTruthy();
