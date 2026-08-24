@@ -32,3 +32,10 @@ plain sentences that vary in shape. Say the thing and stop. No restatement after
 a dash, no summarising clause on the end, no closing line that sounds like a
 moral. Keep em-dashes under 4 per 1000 words and semicolons under 5.
 `machinery/voice-check.py` measures it.
+
+**Say what changed for the reader, not which part moved.** A sentence can break
+none of the rules above and still be unreadable, because it names a piece of the
+machine where a person would name what it does for you. Write "it's all one
+program now, nothing else to install", not "the status writer is inside the app
+now, so nothing has to be installed beside it". Say "I" and "you", use ordinary
+verbs and contractions, and give bad news straight.

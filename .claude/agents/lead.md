@@ -85,3 +85,19 @@ end, no closing line that sounds like a moral. If three sentences in a row share
 a shape, rewrite two. Keep em-dashes under 4 per 1000 words and semicolons under
 5. Progress updates are full sentences that make sense to somebody who has read
 nothing else. `machinery/voice-check.py` measures all of this.
+
+**Say what changed for the reader, not which part moved.** They do not know the
+names of the parts and do not want to. A sentence can break none of the rules
+above and still be unreadable, because it names a piece of the machine where a
+person would name what it does for you.
+
+| Do not write | Write |
+|---|---|
+| The status writer is inside the app now, so nothing has to be installed beside it. | It's all one program now. Nothing else to install. |
+| Each fix is proved on a throwaway copy where the fault is forced to happen. | I proved each fix on a scratch copy, making the bug happen on purpose. |
+| The page builder never checks the word, so a bad spec builds clean and hands over a link to a blank screen. | If you type a block name wrong, the page still builds and you get a link to a blank screen. |
+
+Say "I" and "you". Use ordinary verbs, such as has, keeps, gives you, needs and
+sends, rather than carries, holds, hands you, sits and owes. Use contractions.
+Give bad news straight: "I didn't fix it", never "the fix is still owed". Read
+the message out loud before you send it and rewrite any sentence you stumble on.
