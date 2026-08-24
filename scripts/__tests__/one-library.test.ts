@@ -108,6 +108,38 @@ describe("the one-library check", () => {
     expect(failed).toBe(false);
   });
 
+  it("leaves an edge down one side alone, because a message is not a card", () => {
+    const path = screen(
+      "bubble.tsx",
+      `export const A = () => (
+         <div className="rounded-lg border-l-2 border-primary/70 bg-primary/15 px-3 py-2">said</div>
+       );`,
+    );
+    const { said, failed } = run(path);
+    expect(said).toContain("0 hand-painted");
+    expect(failed).toBe(false);
+  });
+
+  it("leaves a picker the reader can never see alone", () => {
+    const path = screen(
+      "unseen-picker.tsx",
+      `export const A = () => <input type="file" className="hidden" onChange={take} />;`,
+    );
+    const { said, failed } = run(path);
+    expect(said).toContain("0 hand-painted");
+    expect(failed).toBe(false);
+  });
+
+  it("still names a picker the reader can see", () => {
+    const path = screen(
+      "seen-picker.tsx",
+      `export const A = () => <input value={q} className="w-full" onChange={set} />;`,
+    );
+    const { said, failed } = run(path);
+    expect(said).toContain("<Input>");
+    expect(failed).toBe(true);
+  });
+
   it("reads classes the screen builds up rather than spells out", () => {
     const path = screen(
       "built-up.tsx",

@@ -15,8 +15,11 @@ stand as a gate.
 
 It reads markup, not intent: a raw <button> with no paint at all is left alone
 (it is a click target, not a control), a circle is left alone because the
-library's cards and panels are rounded rectangles and a ring is a drawing, and
-everything under the library itself is exempt because that is where the paint
+library's cards and panels are rounded rectangles and a ring is a drawing, a box
+whose only edge runs down one side is left alone because that is a speaker's
+rail down a message and not a card face, a picker the reader can never see is
+left alone because there is nothing about it to look wrong, and everything under
+the library itself is exempt because that is where the paint
 is supposed to live. Any other
 exemption is named in EXEMPT below with its reason and printed in the summary,
 so a skipped file is never a silent one.
@@ -42,6 +45,30 @@ PAINT = re.compile(r"\b(bg-|border(\b|-)|rounded|shadow|ring-)")
 
 SURFACE_TAGS = {"div", "section", "aside", "li", "header", "footer", "nav"}
 PICKERS = {"select": "Select", "input": "Input", "textarea": "Textarea"}
+
+# A border that goes all the way round, which is what a card face has. A width
+# is what actually draws one: `border-l-2` is a rail down one side of a message
+# and `border-primary/70` on its own is a colour with nothing to colour.
+PERIMETER = re.compile(r"^border(-(?:[1-9]\d*|\[[^\]]*\]))?$")
+
+# Classes that mean the reader never sees this element at all. A file picker
+# behind a paperclip is a mechanism, not a control: there is nothing about it to
+# look wrong beside anything.
+UNSEEN = {"hidden", "sr-only"}
+
+
+def words(classes):
+    """The classes as bare words, with any `sm:`/`hover:` prefix taken off."""
+    return [word.rsplit(":", 1)[-1] for word in classes.split()]
+
+
+def boxed(classes):
+    """Does this element draw a border on all four sides?"""
+    return any(PERIMETER.match(word) for word in words(classes))
+
+
+def unseen(classes):
+    return any(word in UNSEEN for word in words(classes))
 
 # A JSX element opens with a lowercase name; an uppercase one is a component
 # already, which is the thing we want.
@@ -118,7 +145,7 @@ def offences_in(text):
         line = text.count("\n", 0, match.start()) + 1
         painted = bool(PAINT.search(classes))
 
-        if tag in PICKERS:
+        if tag in PICKERS and not unseen(classes) and 'type="hidden"' not in attrs:
             found.append((line, f"a plain <{tag}>, which is the browser's own control",
                           f"<{PICKERS[tag]}> from the library"))
         elif tag == "button" and painted:
@@ -129,7 +156,7 @@ def offences_in(text):
                           "the overlay <Dialog> or <Sheet> already draws"))
         elif (tag in SURFACE_TAGS and "rounded" in classes
                 and "rounded-full" not in classes
-                and re.search(r"\bborder(\b|-)", classes)):
+                and boxed(classes)):
             found.append((line, "a card or panel face painted by hand",
                           "<Card> or <Panel> from the library"))
     return found
