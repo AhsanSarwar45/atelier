@@ -384,10 +384,10 @@ FAULTS = [
     ("the refusal names the files but not the session holding them", GATE,
      lambda s: s.replace('            "who": ", ".join(sorted(theirs)),',
                          '            "who": "somebody",')),
-    ("the newest claim names the session, wherever it was made", GATE,
-     lambda s: s.replace("    return here if here in mine else "
-                         "(mine[0] if mine else here)",
-                         "    return mine[0] if mine else here")),
+    # "The newest claim names the session, wherever it was made" was a fault here
+    # while a session's name carried the tree it stood in. Since bw-aczr.2 a
+    # session has one name everywhere, so the name for this tree and the newest
+    # claim's name are the same string, and no case could tell them apart.
     # The checkout's own guard, and the one carve-out it makes (bw-7e8.8).
     ("the shape of a commit is a commit, whatever made the write", LANDING,
      lambda s: s.replace("    if commit_made_here(old, new, root) and "
