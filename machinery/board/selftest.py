@@ -6091,7 +6091,7 @@ def main():
         bogus = "fix(x): zz-1a2b something"
         here = gate_says("%s'%s'" % (commit, bogus))
         judged = gate_says("cd /nowhere-at-all && %s'%s'" % (commit, bogus))
-        assert "put one of those ids" in judged and judged == here \
+        assert "Put one of those ids" in judged and judged == here \
             and elsewhere not in judged, \
             "a commit opening with a move to a directory that does not exist was not " \
             "judged against the session's own checkout: %s" % (judged or "it was allowed")
