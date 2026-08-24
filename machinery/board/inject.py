@@ -553,8 +553,8 @@ FAULTS = [
                          '        steps="worktree, [clarify], work, [prove], '
                          'verify, review, land")]')),
     ("a session is refused the next piece of the very job its copy holds", CLOSE,
-     lambda s: s.replace("            if goal != skip and spent(goal, root):",
-                         "            if spent(goal, root):")),
+     lambda s: s.replace("            if not goal or goal == skip:\n",
+                         "            if not goal:\n")),
     ("a session is still told to write a refusal for every step it does not run",
      PRIME,
      lambda s: s.replace("  --steps <the optional ones it runs>`, which creates "
@@ -668,10 +668,12 @@ FAULTS = [
      "review column", PRIME,
      lambda s: s.replace(
          "- Every commit names its card, and a card closes only once a commit "
-         "naming it is on\n  main. A commit does not move anything on the board. "
-         "A job reaches the agents'\n  review column when its last piece has "
-         "closed and nobody is building it. That is\n  what the column means, "
-         "and the run puts it there itself.\n",
+         "naming it is on\n  main. That is why landing can close a work item for "
+         "you: it can see which\n  commits it added and which of your items they "
+         "name. A commit on its own moves\n  nothing on the board. A job reaches "
+         "the agents'\n  review column when its last piece has closed and nobody "
+         "is building it. That is\n  what the column means, and the run puts it "
+         "there itself.\n",
          "- Every commit names its card; a commit that is not on main yet moves "
          "that card to\n  in_review, which is what that column means. A card "
          "closes only once a commit\n  naming it is on main.\n")),
@@ -686,6 +688,17 @@ FAULTS = [
     ("an account with nothing left to spend is written up as a reader that answers "
      "nothing", REVIEW,
      lambda s: s.replace("    if stopped:\n", "    if False:\n")),
+
+    # One session, one board name, and the copy it works in written onto the card
+    # instead (bw-aczr.2). Read the copy back off the name and every card claimed
+    # since reads as claimed in the shared tree, so the copy is left on disk with
+    # a branch nobody goes back to.
+    ("the copy a claim wrote onto the card is never read, so the teardown goes by "
+     "the name the card is held under", CLOSE,
+     lambda s: s.replace(
+         '    named = {l[len(bc.COPY):] for l in card.get("labels") or []\n'
+         '             if l.startswith(bc.COPY)}\n',
+         "    named = set()\n")),
 ]
 
 

@@ -17,7 +17,10 @@ import spine  # noqa: E402
 
 RULES = """# Board — the only place work state lives
 
-Your board name: {name} (stamped onto your board commands for you).
+Your board name: {name} (stamped onto your board commands for you). It names
+your session and nothing else, so a card you claim in the shared tree still
+closes from your own copy, and the other way round. The copy you are working in
+goes onto the card itself, as a `copy:<folder>` label the claim adds for you.
 
 Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --reason="..."`.
 One claim covers the whole job, so closing a piece gives you whatever opens after
@@ -72,12 +75,17 @@ first card is claimed by hand.
   again after.
 - Merging is how a code step closes, once per step rather than once per job. One
   command from your own tree does all of it, `{land} <card>`, and it
-  gives the slot back even when the merge fails. By hand it is four commands:
+  gives the slot back even when the merge fails. It closes the work items whose
+  own commits it just put on main, then opens what comes next and gives it to
+  you, so the closes left to type are the steps and the goal. By hand it is four
+  commands:
   `git rebase main`, `bd merge-slot acquire`, `git merge --ff-only <branch>`,
   `bd merge-slot release`. A merge that is not a fast-forward is refused whoever
   holds the slot.
 - Every commit names its card, and a card closes only once a commit naming it is on
-  main. A commit does not move anything on the board. A job reaches the agents'
+  main. That is why landing can close a work item for you: it can see which
+  commits it added and which of your items they name. A commit on its own moves
+  nothing on the board. A job reaches the agents'
   review column when its last piece has closed and nobody is building it. That is
   what the column means, and the run puts it there itself.
 - You stop for one of three reasons and no others: your own work is finished,

@@ -603,23 +603,47 @@ def unreachable(cid, root):
     return [n for n in declared(cid, root) if not here(n, root)]
 
 
+# What a card says about the copy the work on it is being done in. The claim
+# writes it (hooks/board-actor.py, board/run.py `hand_over`); the teardown and
+# the next job's claim read it back.
+COPY = "copy:"
+
+
 def actor(session_id, cwd):
-    """Board identity of one session: where it works, which session it is.
+    """Board identity of one session: which session it is, and nothing else.
 
     A claim is exclusive per actor name, so two live sessions sharing a name
-    would both believe they hold the same card.
+    would both believe they hold the same card. A session id is unique, so the
+    session alone keeps them apart.
+
+    The folder used to open this name, and that is what made a card claimed in
+    the shared tree impossible to close from the job's copy: bd refuses a close
+    whose actor is not the assignee, and it refused 89 of them over 537 sessions.
+    So the copy is written on the card instead (`copy_label`). `cwd` is still
+    taken, because every caller has one and because it is what says which copy.
+    """
+    return "s-%s" % (session_id or "nosession")[:8]
+
+
+def copy_label(cwd):
+    """What the card is told about the copy this work is being done in.
+
+    The folder the copy sits in, which is the goal it was cut for, or `main` for
+    the checkout every session shares. On the card rather than in the name,
+    because a card outlives the directory a session happened to type from and the
+    name has to stay the same wherever the session stands (`actor`).
     """
     place = re.search(r"/worktrees/([^/]+)", cwd or "")
-    return "%s-%s" % (place.group(1) if place else "main", (session_id or "nosession")[:8])
+    return COPY + (place.group(1) if place else "main")
 
 
 def held_by(name, session_id):
     """Whether a board name recorded earlier belongs to this session.
 
-    A name carries the tree it was made in, and one session works in two: it takes
-    the merge slot inside its worktree and closes the teardown outside it, so the
-    trees differ where the session does not. Compared by name, such a session can
-    never recognise its own hold.
+    Its own name, and also the names it used before a name carried only the
+    session: `main-<sid>` and `<copy>-<sid>` are this session too, so a claim made
+    before the change is not orphaned by it. Compat, and the only thing keeping
+    the split here — it can go once no old-style claim is open.
     """
     return bool(name) and name.rsplit("-", 1)[-1] == (session_id or "nosession")[:8]
 
@@ -739,8 +763,43 @@ def machine_name(cwd=None):
         return os.environ.get("USER") or ""
 
 
-def held(actor_name, cwd=None):
-    """Cards this session holds in progress."""
+def holders(session_id, cwd=None):
+    """The cards this session holds, keyed by the name each is held under.
+
+    Keyed rather than flattened because bd refuses to heartbeat or close a claim
+    under any name but the one it was made with, and a session that was in flight
+    when the board name lost its folder holds cards under the old spelling as
+    well as the new (`held_by`). The keying goes once no old-style claim is open.
+
+    None when the board could not answer, which is never the same as no cards.
+    """
+    ok, out = bd(["list", "--status", "in_progress", "--brief", "--json"], cwd)
+    if not ok:
+        return None
+    try:
+        rows = json.loads(out or "[]") or []
+    except Exception:
+        return {}
+    got = {}
+    for row in rows:
+        who = (row or {}).get("assignee") or ""
+        if row.get("id") and held_by(who, session_id):
+            got.setdefault(who, []).append(row["id"])
+    return got
+
+
+def held(actor_name, cwd=None, session_id=None):
+    """Cards this session holds in progress.
+
+    `session_id` widens the question to every name this session has ever held a
+    card under, which is what keeps a claim made before the name lost its folder
+    from reading as somebody else's. Without it one exact name is asked after,
+    which is what `machine_name` needs: that name is nobody's session and matches
+    no session id at all.
+    """
+    if session_id:
+        got = holders(session_id, cwd)
+        return None if got is None else sorted(c for ids in got.values() for c in ids)
     ok, out = bd(["list", "--status", "in_progress", "--assignee", actor_name,
                   "--brief", "--json"], cwd)
     if not ok:

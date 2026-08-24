@@ -60,21 +60,33 @@ def registered():
     return sorted(out)
 
 
+# What a claim writes on the card to say which copy the work is in — the same
+# label hooks/board_common.py names, spelled here because this script stands on
+# its own with only `project` around it.
+COPY = "copy:"
+
+
 def worked_in():
     """The copies some card is being worked in, read off the board's own claims.
 
-    A board name opens with the tree it was claimed in (board_common.actor), so
-    this needs no session to be alive to answer — only a card to be open.
+    A claim writes the copy it was made in onto the card, so this needs no
+    session to be alive to answer — only a card to be open. A claim made before
+    the board name lost its folder says it in the name instead, which is the
+    second half below and goes once no old-style claim is open.
     """
     run = subprocess.run(["bd", "list", "--status", "in_progress", "--json"],
                          cwd=ROOT, capture_output=True, text=True)
     if run.returncode != 0:
         return None
     try:
-        rows = json.loads(run.stdout or "[]")
+        rows = json.loads(run.stdout or "[]") or []
     except Exception:
         return None
-    return {(r.get("assignee") or "").rsplit("-", 1)[0] for r in rows} - {"", "main"}
+    found = set()
+    for r in rows:
+        named = {l[len(COPY):] for l in r.get("labels") or [] if l.startswith(COPY)}
+        found |= named or {(r.get("assignee") or "").rsplit("-", 1)[0]}
+    return found - {"", "main", "s"}
 
 
 def removal(path, branch):

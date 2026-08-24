@@ -94,9 +94,11 @@ gate = hook("board-gate")
 # place of its state reader stands it in front of all of them. Kept from before
 # the first case runs, for the cases that write real state and read it back.
 REAL_STATE = (touch.bc.load, touch.bc.save)
-# The same for the name a session works under: several cases below stand a fixed
-# one in front of it, and the cases for the name itself need the real one back.
+# The same for the name a session works under, and for the reader that says which
+# cards a session is holding: several cases below stand a fixed one in front of
+# each, and the cases for the name itself need the real ones back.
 REAL_ACTOR = touch.bc.actor
+REAL_HELD = touch.bc.held
 status = hook("board-status-gate")
 reading = hook("habit-reading")
 runner = touch.run
@@ -6088,30 +6090,152 @@ def main():
         assert gate_says("cd %s/worktrees && %s'chore: nothing named here'" % (elsewhere, commit)) != "", \
             "a commit naming no card at all was let through by the path it was run from"
 
-        # The name a card is claimed under carries which copy the work is in,
-        # and both checks for an abandoned copy read the copy off that name. A
-        # session that reaches a copy by moving into it must be named for the
-        # copy, or the teardown closes without ever looking.
+        # A claim records which copy the work is being done in, and reads that
+        # off the directory the command runs in: a session reaches a copy by
+        # moving into it as often as by being started there. The name it is made
+        # under is the session and nothing else (bw-aczr.2).
+        blind = tempfile.mkdtemp(prefix="board-noboard-")
+        with open(os.path.join(blind, "bd"), "w") as fh:
+            fh.write("#!/usr/bin/env sh\necho '[]'\n")
+        os.chmod(os.path.join(blind, "bd"), 0o755)
+
         def stamped(cmd, cwd=ROOT):
+            """The command as the stamp rewrites it, with no board within reach.
+
+            A board answering nothing stands at the head of the PATH, so the one
+            question the stamp asks — which cards this session is already holding,
+            and under what name — never reaches the real one.
+            """
             out = subprocess.run(
                 [os.path.join(HOME, "hooks", "board-actor.py")],
                 input=json.dumps({"session_id": "abcd1234", "cwd": cwd,
                                   "tool_input": {"command": cmd}}),
-                capture_output=True, text=True).stdout
+                capture_output=True, text=True,
+                env=dict(os.environ,
+                         PATH=blind + os.pathsep + os.environ.get("PATH", ""))).stdout
             if not out.strip():
                 return cmd
             return json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"]
 
         copy = os.path.join(elsewhere, "worktrees", "any-copy")
         os.makedirs(copy, exist_ok=True)
-        said = stamped("cd %s && bd ready" % copy)
-        assert "--actor any-copy-" in said, \
-            "a command run inside a copy was stamped with the name of the tree it started in: %s" % said
+        said = stamped("cd %s && %s update %s-1a2b --claim"
+                       % (copy, "bd", other_prefix))
+        shutil.rmtree(blind, ignore_errors=True)
+        assert "--actor s-abcd1234" in said, \
+            "a board command was stamped with something other than the session " \
+            "that ran it: %s" % said
+        assert "--add-label copy:any-copy" in said, \
+            "a claim typed after a move into a copy recorded the tree the session " \
+            "started in, so the teardown looks its copies up by the wrong " \
+            "folder: %s" % said
 
         print("ok: a command is judged by the checkout it opens by moving into, an "
               "unrecognised path leaves it with the session's own, the move is never "
               "part of what the command says, the commit gate acts on all three, and "
-              "the name a board command is made under carries the copy it runs in")
+              "a claim records on the card the copy it was typed in")
+    # One session has one board name wherever it stands, and which copy the work
+    # is being done in goes onto the card as a label instead (bw-aczr.2). The name
+    # used to open with the folder, and a card claimed in the shared tree then
+    # could not be closed from the job's own copy at all: bd turns down a close
+    # whose actor is not the assignee, and it turned down 89 over 537 sessions.
+    stamper = hook("board-actor")
+    my_sid = "abcd1234-5555-6666-7777-888899990000"
+    my_name = "s-" + my_sid[:8]
+    my_copy = os.path.join(ROOT, "worktrees", "tst-new")
+
+    def stamp(cmd, cwd=ROOT, holds=None):
+        """The command as the stamp rewrites it, with the board holding `holds`.
+
+        `holds` is each name to the cards the board says are held under it, and it
+        is the only thing the stamp ever asks a board. It asks only for the compat
+        case: a card still held under the name this session claimed with before
+        the name lost its folder.
+        """
+        was = (stamper.bc.holders, stamper.bc.actor, stamper.bc.reviewing)
+        stamper.bc.holders = lambda sid, root=None: dict(holds or {})
+        stamper.bc.actor = REAL_ACTOR
+        stamper.bc.reviewing = lambda: ""
+        kept_in, sys.stdin = sys.stdin, io.StringIO(json.dumps(
+            {"session_id": my_sid, "cwd": cwd, "tool_input": {"command": cmd}}))
+        out = io.StringIO()
+        kept_out, sys.stdout = sys.stdout, out
+        try:
+            stamper.main()
+        finally:
+            sys.stdin, sys.stdout = kept_in, kept_out
+            stamper.bc.holders, stamper.bc.actor, stamper.bc.reviewing = was
+        said = out.getvalue().strip()
+        return json.loads(said)["hookSpecificOutput"]["updatedInput"]["command"] \
+            if said else cmd
+
+    claimed = stamp("%s update tst-new.1 --claim" % "bd")
+    assert ("%s --actor %s update" % ("bd", my_name)) in claimed, \
+        "a claim was made under something other than the session that made it: %s" \
+        % claimed
+    assert "--claim --add-label copy:main" in claimed, \
+        "a claim made in the shared tree did not record which copy the work is in, "\
+        "so the teardown has nothing to look its copies up by: %s" % claimed
+
+    # The whole point of it: the same card, closed from the job's own copy under
+    # the same name. The folder in the name was what made this impossible.
+    shut = stamp('%s close tst-new.1 --reason="done"' % "bd", cwd=my_copy)
+    assert ("%s --actor %s close" % ("bd", my_name)) in shut, \
+        "a card claimed in the shared tree is closed from the job's copy under a " \
+        "different name, which the board refuses outright: %s" % shut
+    assert "copy:" not in shut, \
+        "a close was given a copy label, which would say the work had moved: %s" % shut
+
+    # And a claim made inside the copy records the copy, under that same name.
+    inside = stamp("%s update tst-new.1 --claim" % "bd", cwd=my_copy)
+    assert ("--actor %s update" % my_name) in inside \
+        and "--add-label copy:tst-new" in inside, \
+        "a claim made in the job's own copy was made under another name, or did " \
+        "not record the copy: %s" % inside
+    twice = stamp("%s update tst-new.1 --claim --add-label copy:tst-new"
+                  % "bd", cwd=my_copy)
+    assert twice.count("copy:") == 1, \
+        "a claim already saying which copy it is in was given a second one: %s" % twice
+
+    # Compat: a card the board still holds under the name this session claimed
+    # with before the name lost its folder. The close has to be made under that
+    # name or the board turns it down. This goes once no old-style claim is open.
+    was_claimed = stamp('%s close tst-new.1 --reason="done"' % "bd",
+                        holds={"main-" + my_sid[:8]: ["tst-new.1"]})
+    assert ("--actor main-%s close" % my_sid[:8]) in was_claimed, \
+        "a card claimed before the board name lost its folder was closed under a " \
+        "name the board is not holding it under: %s" % was_claimed
+    other = stamp("%s update tst-new.2 --claim" % "bd",
+                  holds={"main-" + my_sid[:8]: ["tst-new.1"]})
+    assert ("--actor %s update" % my_name) in other, \
+        "one old claim renamed every board command the session goes on to make: " \
+        "%s" % other
+
+    # And that old name still reads as this session's own, so the gates that ask
+    # what it is holding do not take its own card for somebody else's.
+    was = (common.bd, common.held)
+    common.bd = lambda args, root=None: (True, json.dumps(
+        [{"id": "tst-new.1", "assignee": "main-" + my_sid[:8]},
+         {"id": "tst-new.2", "assignee": my_name},
+         {"id": "tst-new.3", "assignee": "s-99999999"}]))
+    common.held = REAL_HELD
+    try:
+        assert common.held(my_name, ROOT, my_sid) == ["tst-new.1", "tst-new.2"], \
+            "a card claimed before the board name lost its folder reads as " \
+            "somebody else's: %s" % common.held(my_name, ROOT, my_sid)
+        assert common.holders(my_sid, ROOT) == {
+            "main-" + my_sid[:8]: ["tst-new.1"], my_name: ["tst-new.2"]}, \
+            "the cards a session holds are not kept under the name each is held " \
+            "by, so a heartbeat goes out under a name the board refuses: %s" \
+            % common.holders(my_sid, ROOT)
+    finally:
+        common.bd, common.held = was
+
+    print("ok: one session works under one board name wherever it stands, a claim "
+          "writes the copy it was made in onto the card, a card claimed in the "
+          "shared tree closes from the job's own copy, and a card still held under "
+          "the name it was claimed with before is closed under that name")
+
     # Landing in one command, and the one thing worse than the four turns it
     # replaces: a slot nobody holds and nobody can take (mch-aa9).
     assert landed(merge_fails=False)["asked"] == ["acquire", "merge", "release"], \

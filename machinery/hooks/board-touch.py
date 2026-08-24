@@ -279,9 +279,13 @@ def main():
 
     if bc.now() - (state.get("last_beat") or 0) > BEAT_EVERY:
         state["last_beat"] = bc.now()
-        name = bc.actor(sid, data.get("cwd"))
-        mine = bc.held(name, root)
-        if mine:
+        # Under the name each card is actually held by, which is this session's
+        # own for everything claimed since the name lost its folder and the old
+        # spelling for anything claimed before: bd turns down a heartbeat whose
+        # actor is not the assignee, and a lease nobody refreshes is a card handed
+        # back under a session still working on it. The grouping goes once no
+        # old-style claim is open.
+        for name, mine in sorted((bc.holders(sid, root) or {}).items()):
             bc.bd(["heartbeat", "--actor", name] + mine, root)
 
     bc.save(sid, state)

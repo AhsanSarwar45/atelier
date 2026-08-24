@@ -4,6 +4,12 @@
 Claims are exclusive per actor name and bd defaults the name to the git user,
 which every session on this machine shares; without the stamp two sessions
 would both hold the same card.
+
+The name is the session and nothing else. Which copy the work is being done in
+is recorded on the card instead, as the `copy:` label this hook adds to a claim:
+a name that opened with the folder meant a card claimed in the shared tree could
+not be closed from the job's copy, and bd turned down 89 of those over 537
+sessions.
 """
 import json
 import re
@@ -14,24 +20,76 @@ import board_common as bc  # noqa: E402
 
 # `bd` at the start of the command or of a chained segment.
 BD_CALL = re.compile(r"(^|[;&|(]\s*|\bxargs\s+)bd(\s)", re.M)
+# A claim, which is where a card learns which copy it is being worked in.
+CLAIM = re.compile(r"\bbd\b[^|;&\n]*\bupdate\b[^|;&\n]*--claim(?![\w-])", re.M)
+# A line that moves a card the board may already hold under an older name.
+MOVES = re.compile(r"\bbd\b[^|;&\n]*\b(?:close|reopen|heartbeat|update)\b", re.M)
+
+
+def under(cmd, session_id, cwd):
+    """The name to stamp this line with.
+
+    This session's own (`board_common.actor`), except for a card the board still
+    holds under the name this session claimed with before the name lost its
+    folder: bd refuses a close or a heartbeat whose actor is not the assignee, so
+    those have to be made under the name they were claimed with. Compat, and the
+    only reason this asks the board anything — it can go once no old-style claim
+    is open.
+    """
+    fresh = bc.actor(session_id, cwd)
+    if not MOVES.search(cmd):
+        return fresh
+    root = bc.board_root(cwd)
+    named = re.compile(r"\b(?:%s)-[0-9a-z.-]{2,16}\b"
+                       % "|".join(re.escape(p) for p in bc.prefixes(root)))
+    ids = set(named.findall(cmd))
+    if not ids:
+        return fresh
+    for who, cards in sorted((bc.holders(session_id, root) or {}).items()):
+        if who != fresh and ids & set(cards):
+            return who
+    return fresh
+
+
+def with_copy(line, label):
+    """The same claim, saying which copy the work is being done in.
+
+    Written in beside `--claim` rather than at the end of the line: `--claim`
+    takes no value, and a line routinely carries a second command after this one
+    that the flag would otherwise land in.
+    """
+    if not CLAIM.search(line) or bc.COPY in line:
+        return line
+    return re.sub(r"--claim(?![\w-])", "--claim --add-label " + label, line, count=1)
 
 
 def main():
     data = json.load(sys.stdin)
     cmd = (data.get("tool_input") or {}).get("command") or ""
+    if bc.reviewing() or not BD_CALL.search(cmd):
+        return
+    lines = cmd.split("\n")
     # One stamp per line, so a second board command below the first is not left
     # running under the machine name every session shares.
-    if bc.reviewing() or not BD_CALL.search(cmd) \
-            or all("--actor" in line for line in cmd.splitlines()
-                   if BD_CALL.search(line)):
-        return
+    board = [l for l in lines if BD_CALL.search(l)]
     # The directory the command runs in, not the one the session was started in:
-    # the name carries which copy the work is being done in, and both checks for
-    # an abandoned copy read that copy off the name a card was claimed under.
-    name = bc.actor(data.get("session_id"), bc.where(data))
+    # that is the copy the claim records, and a session reaches a copy by moving
+    # into it as often as by being started there.
+    here = bc.where(data)
+    name = under(cmd, data.get("session_id"), here) \
+        if any("--actor" not in l for l in board) else ""
+    label = bc.copy_label(here)
     stamp = lambda m: "%sbd --actor %s%s" % (m.group(1), name, m.group(2))
-    stamped = "\n".join(line if "--actor" in line else BD_CALL.sub(stamp, line)
-                        for line in cmd.split("\n"))
+    out = []
+    for line in lines:
+        if BD_CALL.search(line):
+            if "--actor" not in line:
+                line = BD_CALL.sub(stamp, line)
+            line = with_copy(line, label)
+        out.append(line)
+    stamped = "\n".join(out)
+    if stamped == cmd:
+        return
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecisionReason": "board identity",

@@ -321,7 +321,7 @@ def main():
     turn = [e for e in state.get("edits") or [] if e.get("t", 0) > since]
     edited = [e["p"] for e in turn]
     made = [c["id"] for c in state.get("created") or [] if c.get("t", 0) > since]
-    mine = bc.held(name, root)
+    mine = bc.held(name, root, sid)
     # A turn the last refusal already sent back. Only the unfinished-work refusal
     # runs again: the five below catch a mistake, and a mistaken one must never
     # trap the session, so each still stands aside after saying its piece once.

@@ -1114,22 +1114,14 @@ def board_names(root):
 
 
 def board_name(sid, state, held, tree):
-    """What the board calls this session in the checkout its leftovers are in.
+    """What the board calls this session, in the name it holds its cards under.
 
-    Taken from a card it is holding rather than worked out from a rule: a name
-    carries the tree the session was standing in, and nothing a session records
-    about itself says which tree that was.
-
-    One session works in two of them at once, though — it takes the merge slot
-    inside its worktree and closes the teardown outside it — so its newest claim
-    is as likely as not to have been made somewhere other than where it left
-    these files. A refusal naming that one sends whoever reads it to a checkout
-    the files are not in, so the name belonging to THIS tree is preferred and the
-    newest is only what is left when the board holds nothing under it (bw-vb2.8).
-
-    The name for this tree is `board_common.actor`'s own rule, which is where the
-    fallback comes from too: a session with no card the board still holds is
-    named the way it would name itself standing here.
+    One session has one name wherever it stands (`board_common.actor`), so `tree`
+    no longer changes the answer. What a card it is holding still adds is the
+    compat case: a session that claimed before the name lost its folder holds
+    those cards under the old spelling, and a refusal naming the new one would
+    name a holder the board has never heard of. That half goes once no old-style
+    claim is open.
     """
     here = bc.actor(sid, tree)
     mine = [held[claim.get("id")] for claim in reversed(state.get("claims") or [])

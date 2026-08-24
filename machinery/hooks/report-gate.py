@@ -37,7 +37,8 @@ def main():
     # This session's own page, not any page anywhere: another session building
     # its own report is not this agent putting its question in writing.
     state = bc.load(data.get("session_id"))
-    mine = bc.held(bc.actor(data.get("session_id"), data.get("cwd")), root) or []
+    sid = data.get("session_id")
+    mine = bc.held(bc.actor(sid, data.get("cwd")), root, sid) or []
     cards = set().union(*(bc.page_names(c, {}) for c in mine)) if mine else None
     if bc.page_built(cards, bc.project_name(root)) > (state.get("last_stop") or 0):
         return

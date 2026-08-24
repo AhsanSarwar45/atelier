@@ -410,17 +410,34 @@ def waits_only_on_its_own_reading(cid, root):
     return reading_found
 
 
+def where_claimed(card, assignee=""):
+    """The copies this card's claim was made in.
+
+    What the claim wrote on the card (`board_common.copy_label`). `assignee` is
+    the compat half: a claim made before the board name lost its folder says
+    which copy in the name and nowhere else, and that half goes once no old-style
+    claim is open. The shared checkout is not a copy, and neither is the `s` a
+    session's own name now opens with.
+    """
+    named = {l[len(bc.COPY):] for l in card.get("labels") or []
+             if l.startswith(bc.COPY)}
+    if named:
+        return named - {"", "main"}
+    old = (assignee or card.get("assignee") or "").rsplit("-", 1)[0]
+    return {old} - {"", "main", "s"}
+
+
 def places(rows):
-    """The copy each card was claimed in: a board name opens with its tree."""
-    return {(r.get("assignee") or "").rsplit("-", 1)[0] for r in rows} - {"", "main"}
+    """Every copy these cards were claimed in."""
+    return set().union(*(where_claimed(r) for r in rows)) if rows else set()
 
 
 def owned_copies(cid, card, root):
     """The copies this job worked in that are still on disk, keyed by path.
 
     Asked of the board, not of a note: every step a session claimed carries the
-    name it claimed under, and that name opens with the copy it was standing in
-    (board_common.actor). A job that never left the main tree owns none.
+    copy it was claimed in (`where_claimed`). A job that never left the main tree
+    owns none.
     """
     goal = next((l[3:] for l in card.get("labels") or [] if l.startswith("of:")), cid)
     rows = rows_of(["list", "--json", "--limit", "0", "--status", "all",
@@ -472,8 +489,8 @@ def own_copy(goal, spots):
     """This job's own copy, in whichever of these checkouts already holds it.
 
     Named after the goal, which is how everything downstream finds it again: a
-    board name opens with the folder it was claimed in (`board_common.actor`), and
-    the teardown looks the copies up by that same name (`owned_copies`).
+    claim writes the folder it was made in onto the card (`board_common.copy_label`),
+    and the teardown looks the copies up by what those labels say (`owned_copies`).
 
     Asked of git rather than of the folder, for the reason `copies` gives: a
     directory somebody left behind by hand is not a checkout, and a checkout whose
@@ -490,8 +507,8 @@ def stood_in(here, root):
     """Which copy this session is typing from, and what to call the place.
 
     The name is the folder the copy sits in, which is the goal it was cut for —
-    the same reading `board_common.actor` takes to name a session and the
-    teardown takes to find the copies a job left behind.
+    the same reading a claim writes onto the card (`board_common.copy_label`) and
+    the teardown takes to find the copies a job left behind.
 
     Standing in some copy is not standing in this job's: a session sitting in
     one job's tree and claiming another's puts two jobs in one tree exactly as
@@ -558,8 +575,8 @@ def without_a_copy(cid, goal, root, here):
             "%s is a piece of %s, which makes code, and this session is standing in "
             "%s. That job already has a copy of its own, so the work belongs in it: "
             "two jobs editing one tree overwrite each other, and a claim made from "
-            "here is recorded under the name of the tree it was made in, which owns "
-            "nothing when the job is torn down.\n"
+            "here is recorded against this tree, which is not the one you take "
+            "down when the job ends.\n"
             "  cd %s\n"
             "Then claim it from there." % (cid, goal, stood, mine)
         )
@@ -664,21 +681,38 @@ def spent_copies(session, root, skip=None):
     moment its checks, its reader's findings, its record and its landing are
     claimed. Asked about its own job, this refusal tells a session to finish the
     job before starting it (bw-a6o.2.10).
+
+    Which copy a card was claimed in is read off the card (`where_claimed`), not
+    off the name it is held under: one session has one name wherever it stands
+    (`board_common.actor`).
     """
     sid = (session or "nosession")[:8]
-    out = {}
-    for path, branch in sorted(copies(root).items()):
-        name = os.path.basename(path)
+    live = {os.path.basename(path): (path, branch)
+            for path, branch in sorted(copies(root).items())}
+    # This session's own name, and — compat, until no old-style claim is open —
+    # the name it would have claimed under in each copy back when the name opened
+    # with the folder. Asked by name rather than read off the whole board: every
+    # step claimed in a copy is closed by the time this question matters, and
+    # `--status all` over a board is every card it has ever held.
+    asked = [bc.actor(session, root)] + ["%s-%s" % (name, sid) for name in sorted(live)]
+    out, judged = {}, {}
+    for who in asked:
         cards = rows_of(["list", "--json", "--limit", "0", "--status", "all",
-                         "--assignee", "%s-%s" % (name, sid)], root)
+                         "--assignee", who], root)
         if cards is UNREADABLE:
             return UNREADABLE
-        goals = {l[3:] for c in cards for l in c.get("labels") or []
-                 if l.startswith("of:")}
-        for goal in goals:
-            if goal != skip and spent(goal, root):
-                out[path] = (branch, goal)
-                break
+        for card in cards:
+            goal = next((l[3:] for l in card.get("labels") or []
+                         if l.startswith("of:")), None)
+            if not goal or goal == skip:
+                continue
+            for place in where_claimed(card, who):
+                if place not in live or live[place][0] in out:
+                    continue
+                if goal not in judged:
+                    judged[goal] = spent(goal, root)
+                if judged[goal]:
+                    out[live[place][0]] = (live[place][1], goal)
     return out
 
 
