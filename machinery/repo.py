@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Where the checked-out copy a script is standing in begins.
 
-Git marks a separate working copy with a `.git` FILE, and only the main checkout
-with a `.git` directory, so a search for the directory walks straight past the copy
-the caller is in and lands on the main tree — every gate then reads files belonging
-to whoever is working there. The search is for either kind of entry.
+Git marks a working copy under `worktrees/` with a `.git` FILE, and only the main
+checkout with a `.git` directory, so a search for the directory walks straight past
+the copy the caller is in and lands on the main tree — every gate then reads files
+belonging to whoever is working there. The search is for either kind of entry.
 
 The walk starts from where the caller is standing, because this file is shared by
 every project: a tool that walked up from its own path would measure the machinery

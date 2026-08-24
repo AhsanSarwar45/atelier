@@ -21,7 +21,6 @@ import board_common as bc  # noqa: E402
 import reading  # noqa: E402
 import run  # noqa: E402
 import sections  # noqa: E402
-import project  # noqa: E402
 import spine  # noqa: E402
 
 # Anchored twice over: at a command start, so a document that merely quotes one
@@ -213,9 +212,8 @@ def trees(root):
 
     A job is worked in a worktree, so most edits are made in one; git's own
     register is the list, since a worktree's files are ignored from the main
-    checkout and invisible to any question asked there. Longest first so a path
-    inside a copy is matched to the copy rather than to a checkout its path
-    happens to begin with.
+    checkout and invisible to any question asked there. Longest first because
+    the worktrees live under the main checkout, whose path is a prefix of theirs.
     """
     if ("trees", root) not in _ASKED:
         out = [line.split(" ", 1)[1].rstrip("/")
@@ -340,7 +338,7 @@ def copies(root):
     `.claude/worktrees/<name>`, so two copies share a name often enough, and a
     name-keyed answer hands out an `rm -rf` for the wrong one (cor-futg.17).
     """
-    main = project.checkout(root)
+    main = root.split("/worktrees/")[0].rstrip("/")
     found = {}
     for block in git(["worktree", "list", "--porcelain"], main).split("\n\n"):
         path = branch = ""
@@ -442,7 +440,7 @@ REMOVE = ("rm -rf %(path)s && git -C %(main)s worktree prune"
 
 
 def removal(path, branch, root):
-    main = project.checkout(root)
+    main = root.split("/worktrees/")[0].rstrip("/")
     return REMOVE % {"path": path, "main": main,
                      "branch": (" && git -C %s branch -d %s" % (main, branch)) if branch else ""}
 
@@ -451,21 +449,11 @@ def removal(path, branch, root):
 # A session reading this is standing in the shared tree or in somebody else's
 # copy, and a bare `worktree add` would be run in whichever of those it happens
 # to be — which is a copy of the wrong thing, or a copy inside a copy.
-CUT = "git -C %s worktree add %s -b %s"
+CUT = "git -C %s worktree add worktrees/%s -b %s"
 
 
 def cut(where, goal):
-    """The line that cuts this job its copy in that checkout.
-
-    Where the copy goes is that project's own answer (`machinery.toml`), spelled
-    the short way when it lands inside the checkout and in full when it does not:
-    a project whose copies sit off its search path is typing a path the `-C`
-    above says nothing about.
-    """
-    where = where.rstrip("/")
-    spot = os.path.join(project.of(where).trees_root, goal)
-    near = os.path.relpath(spot, where)
-    return CUT % (where, spot if near.startswith(os.pardir) else near, goal)
+    return CUT % (where.rstrip("/"), goal, goal)
 
 
 def copy_places(goal, root):
@@ -509,10 +497,10 @@ def stood_in(here, root):
     the shared checkout does, one directory further in (bw-1tgx.5). So the
     refusal has to be able to say which tree it is looking at.
     """
-    where, name = project.tree(here)
-    if not where:
+    got = re.search(r"^(.*?/worktrees/([^/]+))(?:/|$)", here or "")
+    if not got:
         return "", "%s — the checkout every session here shares" % root.rstrip("/")
-    return name, "%s, which was cut for %s" % (where, name)
+    return got.group(2), "%s, which was cut for %s" % (got.group(1), got.group(2))
 
 
 def makes_code(card):
@@ -932,11 +920,11 @@ def main():
                             % (cid, which, len(wrote), wrote[0])
                         )
                         return
-                if which == "worktree" and not project.tree(bc.where(data))[0]:
+                if which == "worktree" and "/worktrees/" not in bc.where(data):
                     deny(
                         "%s is the worktree step and this session is not standing in "
-                        "one. Cut this job a copy of its own and work there: two jobs "
-                        "editing one tree is what the step exists to stop." % cid
+                        "one. Cut it under worktrees/ and work there: two jobs editing "
+                        "one tree is what the step exists to stop." % cid
                     )
                     return
                 if which == "land":
@@ -951,7 +939,7 @@ def main():
                             "merged as it closed." % (cid, " and ".join(left))
                         )
                         return
-                    if project.tree(bc.where(data))[0]:
+                    if "/worktrees/" in bc.where(data):
                         deny(
                             "%s is the teardown and cannot be closed from inside the "
                             "tree it removes. Step out to the main tree, take the "

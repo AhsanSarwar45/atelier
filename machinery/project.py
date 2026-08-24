@@ -28,10 +28,6 @@ REGISTRY = os.path.join(HOME, "projects.toml")
 DECLARATION = "machinery.toml"
 # The branch a project calls main when its declaration does not say.
 DEFAULT_LANDS_ON = "main"
-# Where a project cuts a job its own copy when its declaration does not say.
-# Relative, so it lands inside the checkout — which is where every project here
-# started, and where one that has never thought about it stays.
-DEFAULT_TREES = "worktrees"
 # The lines an agent may not write to in a project that has said nothing about
 # itself. A checkout nobody has declared is the one most likely to be somebody
 # else's, so silence means protected. Manager's ruling, 2026-08-16.
@@ -53,7 +49,7 @@ MANAGER_REVIEW = "manager_review"   # waiting on the manager's own signature
 REVIEW_STATES = (AGENT_REVIEW, MANAGER_REVIEW)
 CUSTOM_KEY = "status.custom"        # where a board keeps the states it was told about
 
-_ROOTS, _DECLS, _TREES = {}, {}, {}
+_ROOTS, _DECLS = {}, {}
 
 
 def _git(args, cwd):
@@ -100,32 +96,8 @@ def checkout(path):
     if common:
         return os.path.dirname(common.rstrip("/")) or here
     # No git answer — the path is outside a repository, or git is not there.
-    # Nothing to read but the path itself; guessing at a spelling would answer
-    # with a directory that is not a checkout of anything.
-    return here
-
-
-def tree(path=None):
-    """The separate copy `path` is standing in, as (its root, its name).
-
-    ("", "") for the main checkout, and for a path in no repository at all.
-
-    Git's own answer, never the path's spelling. A copy may be cut anywhere —
-    inside the checkout, beside it, or on another disk — and every rule that
-    read `/worktrees/` out of a path stopped being true the day one was cut
-    somewhere else. The name is the folder the copy sits in, which is the goal
-    it was cut for: that is what a board name opens with and what the teardown
-    looks a copy up by.
-    """
-    here = os.path.abspath(path or os.getcwd())
-    if here in _TREES:
-        return _TREES[here]
-    walk = here if os.path.isdir(here) else (os.path.dirname(here) or "/")
-    top = _git(["rev-parse", "--show-toplevel"], walk).rstrip("/")
-    answer = ("", "") if not top or top == checkout(walk).rstrip("/") \
-        else (top, os.path.basename(top))
-    _TREES[here] = answer
-    return answer
+    # The spelling every project here uses is the last thing left to read.
+    return here.split("/worktrees/")[0].rstrip("/") or here
 
 
 def root(path=None):
@@ -164,12 +136,6 @@ class Declaration:
         self.places = list(data.get("places") or [])
         self.brand = (data.get("brand") or "").upper()
         self.lands_elsewhere = list(data.get("lands_elsewhere") or [])
-        # Where this project cuts a job its own copy. Relative is inside the
-        # checkout; an absolute path takes the copies off the project's own
-        # search path, which is the whole reason the field exists — 663,000
-        # files of build output sitting inside beads-web cost every recursive
-        # search 21 seconds against 5 milliseconds without them (bw-hitm).
-        self.trees = data.get("trees") or DEFAULT_TREES
         # Where this project's own quality-rule modules live, relative to its
         # root. Empty means `quality.py` runs with the shared measures only.
         self.rules = data.get("rules") or ""
@@ -209,12 +175,6 @@ class Declaration:
         if self.data_protected is not None:
             return frozenset(self.data_protected)
         return frozenset(DEFAULT_PROTECTED) | {self.lands_on}
-
-    @property
-    def trees_root(self):
-        """The directory this project cuts its copies in, absolute."""
-        said = os.path.expanduser(self.trees)
-        return said if os.path.isabs(said) else os.path.join(self.path, said)
 
     @property
     def place_re(self):

@@ -1821,20 +1821,6 @@ def teardown(tmp, answers=True, closed_only=True):
 REAL_SPINE = status.unfinished_spine
 
 
-def a_copy(tmp, spot):
-    """The path, as a real checkout of `tmp`.
-
-    Every gate asks git which copy a session is standing in rather than reading
-    the spelling of its path, so a case that types a claim from a copy has to
-    have cut one: a directory that is no checkout is nowhere a job can be worked
-    (bw-hitm).
-    """
-    if not os.path.isdir(spot):
-        subprocess.run(["git", "worktree", "add", spot, "-b", os.path.basename(spot)],
-                       cwd=tmp, capture_output=True)
-    return spot
-
-
 def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
              where=None):
     """What the gate says to a session claiming a new job's first step, while it
@@ -1888,11 +1874,10 @@ def next_job(tmp, work_left, order="worktree,work,land", half=False, same=False,
     status.bc.reviewing = lambda: ""
     # An earlier case stubs this out; here it is the thing under test.
     status.unfinished_spine = REAL_SPINE
-    spot = a_copy(tmp, where or os.path.join(
-        tmp, "worktrees", "tst-old" if same else "tst-new"))
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest",
-         "cwd": spot,
+         "cwd": where or os.path.join(tmp, "worktrees",
+                                      "tst-old" if same else "tst-new"),
          "tool_input": {"command": "bd update %s --claim"
                         % ("tst-old.9" if same else "tst-new.1")}}))
     out = io.StringIO()
@@ -1953,7 +1938,7 @@ def claim_of(tmp, deps):
     status.bc.reviewing = lambda: ""
     sys.stdin = io.StringIO(json.dumps(
         {"session_id": "selftest",
-         "cwd": a_copy(tmp, os.path.join(tmp, "worktrees", "tst-j")),
+         "cwd": os.path.join(tmp, "worktrees", "tst-j"),
          "tool_input": {"command": "bd update tst-j.1 --claim"}}))
     out = io.StringIO()
     keep, sys.stdout = sys.stdout, out
@@ -3377,15 +3362,9 @@ def main():
 
         # The same claim from the job's own copy is nobody's business but the
         # session's.
-        own = a_copy(tmp, os.path.join(tmp, "worktrees", "tst-new"))
-        inside = copy_first(tmp, own)
+        inside = copy_first(tmp, os.path.join(tmp, "worktrees", "tst-new"))
         assert inside == "", \
             "a claim made from the job's own copy was refused: %s" % inside
-
-        # And taken away again: every case below is about a job that has no copy,
-        # and one left standing answers them with a different refusal.
-        subprocess.run(["git", "worktree", "remove", own], cwd=tmp, capture_output=True)
-        subprocess.run(["git", "branch", "-D", "tst-new"], cwd=tmp, capture_output=True)
 
         # Somebody else's copy is not a copy of its own: two jobs in one tree is
         # the same hazard one directory further in, and the session is told to

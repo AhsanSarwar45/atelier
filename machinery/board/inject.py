@@ -7,7 +7,7 @@ coming back. This puts each one back and reports which cases wake up.
 
 Works on a clean export of the tree this script sits in, never on that tree
 itself, so a shared checkout is never left holding an injected fault. Work here
-is done in a copy of its own, so a fixed path would hand a session a
+is done in worktrees, so reading a fixed path instead would hand a session a
 verdict about somebody else's code. A fault whose patch no longer applies stops
 the run rather than reporting green: the code it was written against has moved,
 and a fault that cannot be injected proves nothing.
