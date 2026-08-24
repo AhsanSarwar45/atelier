@@ -69,6 +69,21 @@ BANNED = [
 ]
 
 
+# "**Term** — definition" at the head of a line is a list format, the same job a
+# colon does, and it is not the register this checks for. The dash that restates
+# a clause mid-sentence is. So the first dash on a label line is not counted.
+LABEL_DASH = re.compile(r"^\s*(?:[-*+]\s+|#+\s+|\d+[.)]\s+)?(?:\*\*)?[^—.!?\n]{1,45}(?:\*\*)?[:,]?\s*—")
+
+
+def drop_label_dashes(text):
+    out = []
+    for line in text.split("\n"):
+        if LABEL_DASH.match(line):
+            line = line.replace("—", "", 1)
+        out.append(line)
+    return "\n".join(out)
+
+
 def prose(path):
     """The words a reader takes as an example. For Python, only the docstrings."""
     text = open(path, encoding="utf-8", errors="replace").read()
@@ -77,7 +92,7 @@ def prose(path):
     text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)   # frontmatter
     text = re.sub(r"```.*?```", " ", text, flags=re.S)          # fenced code
     text = re.sub(r"`[^`\n]*`", " ", text)                     # inline code
-    return text
+    return drop_label_dashes(text)
 
 
 def files():
@@ -132,7 +147,7 @@ def chat(limit):
                     t = (b.get("text") or "").strip()
                     if t and not t.startswith("You've hit"):
                         parts.append(t)
-    text = "\n".join(parts)
+    text = drop_label_dashes("\n".join(parts))
     words = len(text.split()) or 1
     print("%d sessions, %d replies, %d words" % (len(paths), len(parts), words))
     print("  em-dashes per 1000 words: %.1f   (cap %.0f)" % (text.count("—") * 1000 / words, EM_DASH_PER_1K))

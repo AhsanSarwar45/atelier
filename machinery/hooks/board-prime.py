@@ -20,37 +20,38 @@ RULES = """# Board — the only place work state lives
 Your board name: {name} (stamped onto your board commands for you).
 
 Every time: `bd ready` -> `bd update <id> --claim` -> work -> `bd close <id> --reason="..."`.
-One claim carries the whole job: closing a piece hands you whatever opens after it —
-the next step, or the next work item nobody is holding — so nothing after the first
-card is claimed by hand.
+One claim carries the whole job. Closing a piece hands you whatever opens after it,
+either the next step or the next work item nobody is holding, so nothing after the
+first card is claimed by hand.
 
 - Changing code requires a claimed card. The stop gate refuses to finish a turn without one.
 - A fault you find goes one of two ways before the turn ends, never into your head alone.
-  Related — the same change would touch it, or it shares this job's cause — is a work item on
-  the current goal, fixed here and now:
+  A related fault is one the same change would touch, or one that shares this job's
+  cause. It becomes a work item on the current goal and is fixed here and now:
   `{pour} under <goal> --do "<what to do>|<how we know it is done>"`.
-  Separate — another system or another cause, or it would swell the job past its `--done` — is
-  its own card: `{pour} find "<what is wrong>" "<where it is, how it shows>"
+  A separate fault belongs to another system or another cause, or it would swell the
+  job past its `--done`. It gets its own card:
+  `{pour} find "<what is wrong>" "<where it is, how it shows>"
   --area <system> --kind <bug|feature|chore>`.
-  There is no third way, and the stop gate enforces it.
-- Every card carries both tags — `area:` for the system ({areas}), `kind:` for
-  bug/feature/chore.
+  Those are the only two routes, and the stop gate enforces it.
+- Every card carries both tags. `area:` names the system ({areas}). `kind:` is
+  bug, feature or chore.
   The pour tool requires them and the stop gate refuses a turn that made a card without them.
-- Cards are never written by hand; `bd create` is refused. A job opens with
+- Cards are never written by hand. `bd create` is refused. A job opens with
   `{pour} new --what … --evidence … --done … --area … --kind …
   --steps <the optional ones it runs>`, which creates the goal and its first step.
   Closing a step opens the next one and hands it to you, so a job never shows a step
-  nobody has thought about yet. A goal is not claimable: claim its step. Promote a
+  nobody has thought about yet. A goal is not claimable, so claim its step. Promote a
   find with `job new --source <id> …`.
 - The playbook IS the run of steps: {steps}. The bracketed ones
-  run only when `--steps` names them, and nothing is owed for the ones it does not.
+  run only when `--steps` names them. You owe nothing for the ones it does not name.
   The rest are mandatory. A speed claim in `--done` selects benchmark by itself and
-  cannot be dropped; a document named in `--done` or in `--record` selects record.
-- Every step is proved by one of three things, and the close gate knows which:
-  a commit naming THAT step on main; a note carrying its own evidence (a run with its
+  cannot be dropped. A document named in `--done` or in `--record` selects record.
+- Every step is proved by one of three things, and the close gate knows which.
+  A commit naming THAT step on main. A note carrying its own evidence: a run with its
   number, the exact command the checks step ran and the count it came back with, a
-  source, the manager's words, the review's points); or an outside fact —
-  you are standing in the worktree, the tree and branch are gone, the slot is free.
+  source, the manager's words, the review's points. Or an outside fact: you are
+  standing in the worktree, the tree and branch are gone, the slot is free.
   A step that declared it makes no code cannot close if this session edited the project
   while holding it.
 - The work items are the job's own children, not a card called Build:
@@ -58,31 +59,32 @@ card is claimed by hand.
   The run waits there for the last item to close. A card with open children is a
   container and cannot be claimed.
 - The checks step is the project's own checks command, run once over everything the
-  job built and in front of the reader — not per edit, and not from the commit hook,
+  job built and in front of the reader. Not per edit, and not from the commit hook,
   which no longer runs it. Its note carries the exact command and the count it came
   back with. A project that declares none says on the card what it ran instead.
 - The board carries the running order and the running notes
   (`bd update <id> --append-notes="..."`). Docs and comments may name a card and
   nothing else: no TODO lines, no handoff files, no plan-in-a-doc.
-- Your history compacts itself at 200k tokens; let it take the old transcript when a step
-  lands. The board and the tree carry the work state, and these rules arrive again after.
-- Merging is how a code step closes, once per step, not once per job. One
-  command from your own tree does the whole of it — `{land} <card>` — and it
-  gives the slot back even when the merge fails. By hand it is four:
+- Your history compacts itself at 200k tokens. Let it take the old transcript when a
+  step lands. The board and the tree carry the work state, and these rules arrive
+  again after.
+- Merging is how a code step closes, once per step rather than once per job. One
+  command from your own tree does all of it, `{land} <card>`, and it
+  gives the slot back even when the merge fails. By hand it is four commands:
   `git rebase main`, `bd merge-slot acquire`, `git merge --ff-only <branch>`,
   `bd merge-slot release`. A merge that is not a fast-forward is refused whoever
   holds the slot.
 - Every commit names its card, and a card closes only once a commit naming it is on
-  main. A commit does not move anything on the board: a job reaches the agents'
-  review column when its last piece has closed and nobody is building it, which is
-  what that column means, and the run puts it there itself.
-- You stop for one of three reasons and there is no fourth: your own work is finished,
+  main. A commit does not move anything on the board. A job reaches the agents'
+  review column when its last piece has closed and nobody is building it. That is
+  what the column means, and the run puts it there itself.
+- You stop for one of three reasons and no others: your own work is finished,
   you have put a question to the manager, or a helper you sent off is still running.
-  Reporting where you have got to and waiting is not one of them — the manager owns the
+  Reporting where you have got to and waiting is not one of them. The manager owns the
   result, not the running of the job. The stop gate sends you back to work otherwise.
-- A claim holds for five minutes and your own activity refreshes it; a session that
+- A claim holds for five minutes and your own activity refreshes it. A session that
   dies has its cards handed back automatically.
-- Run board commands on their own line, not chained behind another tool: that is
+- Run board commands on their own line, not chained behind another tool. That is
   what keeps your name on them.
 """
 

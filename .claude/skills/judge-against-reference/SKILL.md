@@ -19,7 +19,7 @@ memory. Side-by-side is memory comparison. **Overlay is difference detection.**
 **2. A scalar that does not cover the claim.** A residual, an RMSE, a histogram
 delta — each covers exactly one aspect. Reporting *"0.175 → 0.142, improving"*
 while the metric scores only the silhouette, and the defect is in the interior
-structure, is not a weak claim; it is a **false** one.
+structure, is not a weak claim. It is a **false** one.
 
 > ⛔ **Before quoting any metric, state what it is blind to.**
 > If you cannot say what it does not cover, you do not know what it measures.
@@ -34,20 +34,20 @@ reference" is a claim about every dimension in the table, not the one you looked
 
 The ground-truth artifact must exist, in the repo, at a known path, **first**.
 Writing a pipeline before opening the reference is how a whole subsystem gets built
-against an imagined target. If you do not have it, **ask** — that question is
+against an imagined target. If you do not have it, **ask**. That question is
 cheaper than any amount of work aimed at the wrong thing, and reference material is
 usually already in the repo under a `reference/` folder beside the outputs.
 
-### 1. Align — same scale, same origin, same orientation
+### 1. Align: same scale, same origin, same orientation
 
 An overlay of two differently-scaled images is worse than useless: the mismatch it
-shows is the scaling. Normalise on something both sides genuinely share — total
+shows is the scaling. Normalise on something both sides genuinely share, such as total
 height, a bounding box, a landmark, a known anchor point.
 
-Put the alignment in a script, not a one-off command; you will run it dozens of
+Put the alignment in a script, not a one-off command. You will run it dozens of
 times.
 
-### 2. Overlay — three ways, all of them
+### 2. Overlay: three ways, all of them
 
 Side-by-side is for the report, never for the judging.
 
@@ -68,11 +68,11 @@ magick ref.png -resize 10% -colors 8 -unique-colors txt:
 magick ref.png -colorspace gray -format '%[fx:minima] %[fx:mean] %[fx:maxima]\n' info:
 ```
 
-### 3. Tabulate BOTH sides — same rows, same units, every dimension
+### 3. Tabulate BOTH sides: same rows, same units, every dimension
 
-This step produces the actual finding. One table; a column for the reference, a
+This step produces the actual finding. One table, with a column for the reference and a
 column for ours, a column for the delta. Walk the full dimension list from
-[`read-image`](../read-image/SKILL.md) §3 — geometry, structure, silhouette, tone,
+[`read-image`](../read-image/SKILL.md) §3: geometry, structure, silhouette, tone,
 colour, texture, **variation**, lighting, material, edges.
 
 | dimension | reference | ours | Δ |
@@ -82,26 +82,26 @@ colour, texture, **variation**, lighting, material, edges.
 | aspect | 1.22 w:h (measured) | 1.7 w:h (probe) | +0.5 |
 | variation | irregular, patterned | uniform | **structural** |
 
-Reference values come from annotated overlays or explicit visual technique; ours
+Reference values come from annotated overlays or explicit visual technique. Ours
 comes from a probe in our own code, **never from the render**. `unmeasured` is a
-legitimate cell; an invented number is not.
+legitimate cell. An invented number is not.
 
 **Variation is the row most often skipped and most often where the answer is.**
-Real things are irregular in patterned ways; generated things are usually uniform,
+Real things are irregular in patterned ways. Generated things are usually uniform,
 or irregular in a way that reads as noise. A perfect match on every other row with
 this row wrong still looks fake.
 
 ### 4. Rank the mismatches, fix the largest
 
 The table gives an ordering for free. Work the biggest Δ, and prefer a **structural**
-mismatch (something categorically absent) over a numeric one — no amount of tuning
+mismatch (something categorically absent) over a numeric one, because no amount of tuning
 fixes a missing tier. Do not fix the thing you happen to have a theory about.
 
 ### 5. Re-render into the working tree, at the committed path
 
 The user judges the same file you do. After every change, regenerate the comparison
 image **where it lives**, so what is on disk is what you are talking about. Never
-report a conclusion from an output a later run has overwritten — check the mtime if
+report a conclusion from an output a later run has overwritten. Check the mtime if
 there is any doubt (`ls --time-style=full-iso`).
 
 Sweeps and ablations overwrite the output on every cell. When a sweep picks a
@@ -109,12 +109,12 @@ winner, **bake it into the source and re-render** before judging or reporting.
 
 ## Claiming
 
-- ✅ *"Basal member 0.06 → 0.25 of the whole (probe); reference visibly over half
+- ✅ *"Basal member 0.06 → 0.25 of the whole (probe). Reference visibly over half
   (unmeasured). Fan 23/50/85° → 29/61/90° against a reference 25/55/90°
   (protractor). Colour and variation not yet compared."*
-- ❌ *"Residual 0.117 → 0.101, closer to the reference."* — the residual scores the
-  silhouette; it cannot see the interior.
-- ❌ *"It matches now."* — a claim about every row; make it only with the table.
+- ❌ *"Residual 0.117 → 0.101, closer to the reference."* The residual scores the
+  silhouette and cannot see the interior.
+- ❌ *"It matches now."* That is a claim about every row. Make it only with the table.
 
 If the overlay shows the result got worse, say so plainly, with the overlay, before
 any of the numbers that went the other way.

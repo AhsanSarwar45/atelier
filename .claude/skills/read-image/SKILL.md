@@ -11,13 +11,13 @@ Looking at an image produces a **label** instantly and confidently: *"it's a map
 *"the reflection looks right"*, *"the gradient is smooth"*, *"roughly 45°"*.
 Observing produces **facts**, and costs a deliberate pass.
 
-The label arrives free, so it wins — and then it gets reported in the vocabulary of
+The label arrives free, so it wins. Then it gets reported in the vocabulary of
 observation. `~45°` reads identically whether it came from a bisection against a
 known anchor or from a vibe. The reader cannot tell, so the error survives and every
 decision downstream inherits it.
 
 **Recognition answers "what is this?". Almost every real question is "what exactly
-is it doing?" — and recognition cannot answer that.** It is a lookup against a
+is it doing?" Recognition cannot answer that.** It is a lookup against a
 category, so it returns the category's typical member, not the thing in front of
 you. That is why it feels certain and is often wrong in the details that matter.
 
@@ -33,7 +33,7 @@ Three legitimate provenances, in descending order of trust:
 | **annotated overlay** — grid, protractor, scale bar, sampled swatch | a reference we did not generate | `55° (protractor overlay)` |
 | **visual estimate by an explicit technique** — see below | quick reads, or nothing else is available | `~55° (bisected vs 45°/90°, ±5)` |
 
-**A fourth — an unqualified number with no method — is banned.** If you have not
+**A fourth kind is banned: an unqualified number with no method.** If you have not
 done one of the three, the honest output is `unmeasured`. That sentence is worth
 more than a figure that might be invented.
 
@@ -49,18 +49,18 @@ bisections and counts**. Convert every question into one of those.
   0°, 45°, 90° in the frame, decide which pair the line falls between, then halve:
   *"between 45 and 90, nearer 45 → ~60"*. Accurate to about ±5° and honest about it.
 - **Lengths and sizes: ratio to a feature in the same image.** *"the basal vein is
-  0.3× the midvein"* is reliable; *"the basal vein is 40 mm"* is not. Ratios survive
+  0.3× the midvein"* is reliable. *"The basal vein is 40 mm"* is not. Ratios survive
   scale, crop and resolution.
 - **Quantity: count, never estimate.** If there are fewer than ~30, count them and
   give the exact number. "Several", "many", "a dozen or so" are all failures.
 - **Position: quarters, then eighths.** *"the widest point is at ~0.35 of the
   height"* — halve the frame, halve again.
 - **Colour: name hue, value and saturation separately.** "Warm grey, mid value, low
-  saturation" beats "greyish". Judge value by squinting past the hue; judge hue by
+  saturation" beats "greyish". Judge value by squinting past the hue. Judge hue by
   comparing against a neutral in the same image. **Never judge a colour in
   isolation** — simultaneous contrast will shift it. Compare it to a neighbour.
-- **Two scales, always.** Downscale hard (or squint) for *macro* structure —
-  silhouette, mass distribution, tonal balance. Zoom to native or above for *micro* —
+- **Two scales, always.** Downscale hard (or squint) for *macro* structure:
+  silhouette, mass distribution, tonal balance. Zoom to native or above for *micro*:
   edges, texture, artefacts. A defect is usually invisible at one of the two.
 - **Look for what is absent.** The strongest findings are missing things: a tier
   that should exist, a gradient that should be there, a shadow with no occluder.
@@ -125,11 +125,11 @@ One row per object or property. Fill every cell or write `unmeasured`.
 ### 5. Only now form a hypothesis
 
 Everything above is observation. A cause proposed before the table is a cause
-proposed from the label — which is the failure this skill exists to stop.
+proposed from the label. That is the failure this skill exists to stop.
 
 ## Prefer the instrument where one exists
 
-If the artifact came out of **our own code**, the code already knows the answer —
+If the artifact came out of **our own code**, the code already knows the answer, so
 print it. A probe that dumps the real values beats any amount of squinting, is
 reproducible, and becomes a regression test later. Per
 [`CLAUDE.md`](../../../CLAUDE.md), the *second* manual inspection becomes a tool: if
@@ -151,14 +151,14 @@ magick in.png -resize 10% -colors 8 -unique-colors txt:
 magick in.png -canny 0x1+10%+30% out.png
 ```
 
-For a **reference we did not generate** there is no probe — that is what the
+For a **reference we did not generate** there is no probe. That is what the
 annotated overlay is for, and what
 [`judge-against-reference`](../judge-against-reference/SKILL.md) covers.
 
 ## Reporting
 
-- ✅ *"7 primaries (counted); divergence 25/55/90° per half (bisected vs anchors,
-  ±5); basal pair horizontal, not downturned."*
+- ✅ *"7 primaries (counted). Divergence 25/55/90° per half (bisected vs anchors,
+  ±5). Basal pair horizontal, not downturned."*
 - ✅ *"Highlight is clipped over ~2% of the frame (histogram); edges soften toward
   the corners, so the blur is not uniform."*
 - ❌ *"The fan is roughly 45° and 85°."* — no method, no uncertainty.
