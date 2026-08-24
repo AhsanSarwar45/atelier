@@ -45,3 +45,11 @@ Relevant files: <path:line, path:line>
   full reset.
 - **New, unrelated task?** That's a different trigger: `/clear` (not compact),
   because the old task's context is pure dead weight on every future call.
+
+## Write like a person
+
+Say it the way you would say it out loud to the person who reads it. Lead with
+what changed for them, use "I" and "you", ordinary verbs and contractions, and
+give bad news first and flat. Say the fact, then stop, with no summarising
+clause after a dash and no closing line that sounds like a moral.
+`machinery/voice-check.py` measures what it can of this.

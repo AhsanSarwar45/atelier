@@ -5,8 +5,9 @@ description: Build and publish the manager report page for a result — write th
 
 # Report — fill a page, never write one
 
-**When a page is owed**, along with the two triggers and what is exempt, is written in
-the shared report tools' own README, "When one is owed", and nowhere else.
+**When a page is needed**, along with the two triggers and what is exempt, is
+written in the shared report tools' own README, "When one is needed", and nowhere
+else.
 `report` is on your path and the tools are next to it (`dirname $(readlink -f
 $(which report))/..`), so the README is always one hop away.
 Both triggers are refused without a page: `bd close` while the page is behind
@@ -30,7 +31,7 @@ into a project's own repository.
    resolved against this repo first, so point at a picture where it already
    lives.
 3. **Build**, from this repo so its pictures resolve: `report <slug>`.
-   A refusal names the rule and the fix. Fix the spec, never the builder's
+   It refuses by naming the rule and the fix. Fix the spec, never the builder's
    output.
 4. **Reply in chat**: one line saying the result, then the link the build
    printed, **last in the message**, with nothing after it. A report is never
@@ -53,3 +54,11 @@ The rules are in the doc above. These are the calls it cannot make for you.
   the shared shelf of blocks. Never style one page by hand.
 - **Prove a rule you add.** A new gate gets a case in
   the report tools' own suite that goes red without it.
+
+## Write like a person
+
+Say it the way you would say it out loud to the person who reads it. Lead with
+what changed for them, use "I" and "you", ordinary verbs and contractions, and
+give bad news first and flat. Say the fact, then stop, with no summarising
+clause after a dash and no closing line that sounds like a moral.
+`machinery/voice-check.py` measures what it can of this.

@@ -28,3 +28,11 @@ whole context is the spec.
    claim it (`bd update <id> --claim`) and arm the acceptance check as a
    standing condition (`/goal <check>`). This session goes no further on the
    feature.
+
+## Write like a person
+
+Say it the way you would say it out loud to the person who reads it. Lead with
+what changed for them, use "I" and "you", ordinary verbs and contractions, and
+give bad news first and flat. Say the fact, then stop, with no summarising
+clause after a dash and no closing line that sounds like a moral.
+`machinery/voice-check.py` measures what it can of this.

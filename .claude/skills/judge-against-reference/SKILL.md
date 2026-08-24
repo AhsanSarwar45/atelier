@@ -118,3 +118,11 @@ winner, **bake it into the source and re-render** before judging or reporting.
 
 If the overlay shows the result got worse, say so plainly, with the overlay, before
 any of the numbers that went the other way.
+
+## Write like a person
+
+Say it the way you would say it out loud to the person who reads it. Lead with
+what changed for them, use "I" and "you", ordinary verbs and contractions, and
+give bad news first and flat. Say the fact, then stop, with no summarising
+clause after a dash and no closing line that sounds like a moral.
+`machinery/voice-check.py` measures what it can of this.

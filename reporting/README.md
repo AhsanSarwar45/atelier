@@ -3,7 +3,7 @@
 A report is how a result reaches the manager. It is built from a spec, never
 written by hand.
 
-## When one is owed
+## When one is needed
 
 Two triggers, and nothing else:
 
@@ -260,7 +260,7 @@ report cannot reach the cloud by being renamed or lightly edited.
 - One spec names its pictures at a session cache that no longer exists, which
   no rule can mend from here, because the files are gone, not moved. Filed as bw-3m1.
 - A next step's cost is checked for being there and not for being one of the
-  four words the reader draws, so a spec that writes a plain duration  builds clean and gives you a link to a blank screen. Filed as bw-6of0.
+  four words the reader draws, so a spec that writes a plain duration builds clean and gives you a link to a blank screen. Filed as bw-6of0.
 - The phrasebook is seeded from the terms one project used most. It is not a
   complete list of what a report should not say.
 - Charts are static pictures. No hover readouts, no live data.

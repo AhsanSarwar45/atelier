@@ -8,7 +8,7 @@ allowed-tools: Read, Edit, Write, Grep, Glob, Bash, Agent, Skill, mcp__code-revi
 # docs-cleanup — prune & sharpen docs and comments
 
 Runs on **Sonnet**. Goal: make this project's prose and its code comments
-leaner and more correct **without losing any load-bearing fact**. You **delete
+leaner and more correct **without losing a fact that changes what somebody does**. You **delete
 rot, you do not rewrite meaning**.
 
 ## Scope
@@ -55,7 +55,7 @@ LINKS to it.** So your cleanup obeys these, in priority order:
   safety/perf gotchas, links to facts, anchors/tags other files point at.
 - Sourced numbers, citations, and anything the project names as a rule or as
   reference material about the world outside it. When unsure whether a fact is
-  load-bearing → **keep it and note it in the report**, never guess-delete.
+  changes what somebody does → **keep it and note it in the report**, never guess-delete.
 - Anything a code comment says is the *only* home of a doc-owned fact — flag it
   to move, don't silently cut.
 
@@ -90,3 +90,11 @@ LINKS to it.** So your cleanup obeys these, in priority order:
   before applying, even if `--apply` was passed.
 - A wrong doc is worse than no doc, but a *deleted* fact is worse than a wordy
   one. When the two conflict, **keep the fact, trim the words.**
+
+## Write like a person
+
+Say it the way you would say it out loud to the person who reads it. Lead with
+what changed for them, use "I" and "you", ordinary verbs and contractions, and
+give bad news first and flat. Say the fact, then stop, with no summarising
+clause after a dash and no closing line that sounds like a moral.
+`machinery/voice-check.py` measures what it can of this.

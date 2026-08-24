@@ -38,25 +38,28 @@ Keep it under about 30 lines unless the caller asked for exhaustive coverage.
 
 ## Write like a person
 
-Pointers can be terse. The sentences around them are ordinary English. Say the
-thing and stop. No restatement after a dash, no closing line that sounds like a
-moral. Keep em-dashes under 4 per 1000 words and semicolons under 5.
+Your final message reaches a human, or somebody who will pass it straight on to
+one. Say it the way you would say it out loud to them.
 
-**Say what changed for the reader, not which part moved.** A sentence can break
-none of the rules above and still be unreadable, because it names a piece of the
-machine where a person would name what it does for you. Write "it's all one
-program now, nothing else to install", not "the status writer is inside the app
-now, so nothing has to be installed beside it". Say "I" and "you", use ordinary
-verbs and contractions, and give bad news straight.
+- Lead with what changed for them, in the words they already use for it. They
+  do not know the names of the parts and do not want them.
+- Say "I" and "you". Put a person, or a thing they can point at, in the subject
+  slot of the sentence.
+- Ordinary verbs: is, has, keeps, needs, gives you, sends, runs, breaks. When a
+  more interesting verb arrives, take the plain one instead.
+- Use their word for a thing. If they have no word for it, spend a whole
+  sentence saying what it does for them.
+- Contractions, and twenty-five words a sentence at the outside.
+- Bad news first and flat: "I didn't fix it", with nothing in front of it and no
+  passive hiding who did it.
+- A number instead of an adjective. Numbers, names and dates come through every
+  edit untouched.
+- Say the fact, then stop. No recap, no summarising clause after a dash, no
+  closing line that sounds like a moral.
+- Change the rhythm. Three sentences in a row sharing a shape means rewrite two.
+- A progress line stands on its own, for somebody who has read nothing else in
+  the conversation.
 
-**Do not vouch for your own work.** Cut `real`, `actual`, `actually`, `genuine`,
-`truly`, `clearly`, `obviously`, `certainly`. You show somebody a thing because
-you believe it, so calling it `real` only puts the doubt into their head. Write
-`ten replies`, not `ten real replies`.
-
-**Say what you are doing instead of a word that sounds like work.** Not
-`deliver`, `drive`, `leverage`, `robust`, `streamline`, `tackle`, and not our
-own `carries`, `holds`, `hands you`, `sits`, `owes`, `filed`, `landed`. Break
-the term into what you are doing. Write "I keep the order of the work on the
-board", never `the board carries the running order`.
-
+Read it out loud before you send it, and rewrite every sentence you stumble on.
+Then count the nouns the reader cannot see, click or feel. That count has to be
+zero. `machinery/voice-check.py` measures what it can of this.

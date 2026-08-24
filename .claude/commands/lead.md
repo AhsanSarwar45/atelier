@@ -18,3 +18,11 @@ for it. That is the lead's job.
 The call returns as soon as the lead launches, bringing back no answer. Wait for its
 result, then pass its reply through to the manager unchanged apart from
 trimming: the outcome first, and the report link last.
+
+## Write like a person
+
+Say it the way you would say it out loud to the person who reads it. Lead with
+what changed for them, use "I" and "you", ordinary verbs and contractions, and
+give bad news first and flat. Say the fact, then stop, with no summarising
+clause after a dash and no closing line that sounds like a moral.
+`machinery/voice-check.py` measures what it can of this.

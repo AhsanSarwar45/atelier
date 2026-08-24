@@ -136,7 +136,7 @@ def read_now(prompt_id):
         got = json.loads(run.stdout or "{}")
         said_back = answer(got.get("result") or "")
         if said_back is None:
-            raise ValueError("the reading answered nothing this can read")
+            raise ValueError("the review answered nothing this can read")
         out["habit"] = bool(said_back.get("habit"))
         out["what"] = str(said_back.get("what") or "")[:120]
         usage = got.get("usage") or {}

@@ -163,3 +163,11 @@ annotated overlay is for, and what
   the corners, so the blur is not uniform."*
 - ❌ *"The fan is roughly 45° and 85°."* No method, no uncertainty.
 - ❌ *"The colours look natural."* A label, not an observation.
+
+## Write like a person
+
+Say it the way you would say it out loud to the person who reads it. Lead with
+what changed for them, use "I" and "you", ordinary verbs and contractions, and
+give bad news first and flat. Say the fact, then stop, with no summarising
+clause after a dash and no closing line that sounds like a moral.
+`machinery/voice-check.py` measures what it can of this.

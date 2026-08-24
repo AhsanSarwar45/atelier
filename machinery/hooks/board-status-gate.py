@@ -59,7 +59,7 @@ UNREPORTED = bc.UNREPORTED
 # Said when a goal cannot close because nobody has read it. The reading has no card
 # of its own, so "close the steps" is the wrong instruction for that one.
 UNREAD = (
-    " The reading is not one of them, because it has no card. The board sends a "
+    " The review is not one of them, because it has no card. The board sends a "
     "reader when a job's last piece closes and it signs the goal itself. If that "
     "one died, "
     "`%s --rerun` sends another."
@@ -862,7 +862,7 @@ def main():
             if shut:
                 deny(
                     "%s is held shut by %s, and this close says the work landed. A "
-                    "gate is a reading somebody is owed. It opens when a reader that "
+                    "gate is a review somebody still has to do. It opens when a reader that "
                     "did not write the job has read it. Nothing else lands a job.\n\nIf this job is not being delivered at all, it has its "
                     "own route. That one resolves the gate in writing and marks the job "
                     "as never delivered, so the manager's board never counts it as "
@@ -936,13 +936,13 @@ def main():
                     if left:
                         deny(
                             "%s cannot land while %s of its own order is still open. "
-                            "Landing is the teardown, not the merge: every code step "
-                            "merged as it closed." % (cid, " and ".join(left))
+                            "Landing takes the copy down. It does not merge, because every "
+                            "code step merged as it closed." % (cid, " and ".join(left))
                         )
                         return
                     if "/worktrees/" in bc.where(data):
                         deny(
-                            "%s is the teardown and cannot be closed from inside the "
+                            "%s is the last step and cannot be closed from inside the "
                             "tree it removes. Step out to the main tree, take the "
                             "branch and the worktree away, then close it." % cid
                         )
@@ -956,9 +956,9 @@ def main():
                     mine = owned_copies(cid, card, root)
                     if mine is UNREADABLE:
                         deny(
-                            "%s is the teardown and the board could not say which "
+                            "%s is the last step and the board could not say which "
                             "copies this job worked in, so whether they are gone is "
-                            "unknown. A check that cannot run is not a check that "
+                            "unknown. If the check cannot run, it has not "
                             "passed. Try again; if the board is down, that is the "
                             "thing to fix first." % cid
                         )
@@ -967,7 +967,7 @@ def main():
                         loose = git(["status", "--porcelain"], path)
                         if loose:
                             deny(
-                                "%s is the teardown and %s still holds work nobody "
+                                "%s is the last step and %s still holds work nobody "
                                 "committed:\n%s\nDeal with those first. Commit them "
                                 "under a card, or put them on a branch of their own. "
                                 "Nothing here will delete them for you."
@@ -999,7 +999,7 @@ def main():
                 deny(
                     "%s cannot be ticked off while its page is behind the work. The "
                     "manager hears about finished work through the page, so writing it "
-                    "is part of finishing rather than a debt owed afterwards: "
+                    "is part of finishing rather than something you settle afterwards: "
                     "`report list` finds the one for this job, `report <slug>` brings it "
                     "up to date, and the link it prints is what goes to the manager, "
                     "last in the message so they do not scroll for it. Then close." % cid

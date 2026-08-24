@@ -80,7 +80,7 @@ UNREADABLE_REASON = (
     "This turn cannot be read, so there is no proving the manager typed "
     "`/lead`. A lead they did not ask for is exactly what this fence exists to "
     "stop (mch-1p2). If they did ask, the answer is for them to ask again. If "
-    "they did not, this is the refusal working."
+    "they did not, this fence is doing its job."
 )
 
 
