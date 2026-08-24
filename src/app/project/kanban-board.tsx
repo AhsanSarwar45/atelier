@@ -446,6 +446,13 @@ export default function KanbanBoard() {
               gap: 'var(--column-gap)',
               gridAutoFlow: 'column',
               gridAutoColumns: 'minmax(var(--column-min), 1fr)',
+              // The one row is the height of the board and no more. Left to
+              // itself a row is as tall as the tallest thing in it, so a column
+              // of five hundred cards made the row five hundred cards tall, the
+              // column with it, and the pane inside the column never had
+              // anything to scroll: every card past the first screenful was
+              // drawn below the window with no way to reach it (bw-57eg).
+              gridTemplateRows: 'minmax(0, 1fr)',
             }}
           >
             {COLUMNS.map(({ status, title }) => (
