@@ -29,6 +29,12 @@ import sys
 # The grep family, however it is spelled and wherever it is installed.
 GREP = re.compile(r"^(?:/\S*/)?(e|f|r)?grep$")
 
+# The token proxy, which stands in front of every Bash call on this computer
+# and renames a bare `grep` to `rtk grep` before anything else sees it. Its
+# own walk of a built copy of this project cost 7.93 s against ripgrep's
+# 0.011 s, so the renamed form is refused exactly like the plain one.
+PROXY = re.compile(r"^(?:/\S*/)?rtk$")
+
 # A flag that turns grep into a tree walk. Long forms, and short ones that may
 # arrive bundled with anything else (`-rn`, `-Rin`, `-rIl`).
 LONG = {"--recursive", "--dereference-recursive"}
@@ -77,6 +83,20 @@ def words(segment):
     return out
 
 
+def unproxied(tokens):
+    """The same command with the token proxy's name taken off the front.
+
+    `rtk grep -r x .` and `rtk proxy grep -r x .` are the proxy's two ways of
+    saying `grep -r x .`, and both walk the tree.
+    """
+    if tokens and PROXY.match(tokens[0]):
+        rest = tokens[1:]
+        if rest and rest[0] == "proxy":
+            rest = rest[1:]
+        return rest
+    return tokens
+
+
 def recursive(flags):
     """Whether these argument tokens turn grep into a tree walk."""
     for tok in flags:
@@ -113,6 +133,7 @@ def judge(tool, tool_input):
     command = (tool_input or {}).get("command") or ""
     for segment in BREAK.split(HEREDOC.sub("", command)):
         tokens = words(segment.strip().lstrip("("))
+        tokens = unproxied(tokens)
         if not tokens:
             continue
         name = GREP.match(tokens[0])
@@ -151,7 +172,12 @@ def selftest():
     check("an environment set in front of it",
           "LC_ALL=C grep -rn 'thing' .", True)
 
+    check("the proxy's renamed form", "rtk grep -rn 'thing' .", True)
+    check("the proxy's explicit passthrough", "rtk proxy grep -r thing .", True)
+
     check("grep reading a pipe", "cat x.ts | grep thing", False)
+    check("the proxy over one named file", "rtk grep -n thing src/x.ts", False)
+    check("the proxy over ripgrep", "rtk rg -n thing .", False)
     check("grep over one named file", "grep -n thing src/x.ts", False)
     check("counting matches in a pipe", "ls | grep -c thing", False)
     check("git's own search", "git grep -n thing", False)
@@ -168,12 +194,14 @@ def selftest():
          "grep -r --include=*.ts thing src", "rg --include=*.ts thing src")
     says("the rewrite of the recursive binary",
          "rgrep thing .", "rg thing .")
+    says("the rewrite of the proxy's renamed form",
+         "rtk grep -rn 'thing' .", "rg -n 'thing' .")
 
     if failed:
         for line in failed:
             print("FAILED  " + line)
         return 1
-    print("all 22 cases pass")
+    print("all 27 cases pass")
     return 0
 
 
