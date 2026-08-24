@@ -50,8 +50,8 @@ BANNED = [
      "A claim lasts five minutes. Your own activity refreshes it."),
     ("'not X, but Y' inversion",
      r"\bnot\s+[^.,;\n]{1,60},\s*(?:but|it is|that is)\b",
-     "It is not a warning, but a refusal.",
-     "It refuses. It does not warn."),
+     "It is not a warning, but a block.",
+     "It blocks you. It does not warn."),
     ("'there is no third way'",
      r"\bthere is no (?:second|third|fourth|other)\b",
      "There is no third way.",
@@ -106,8 +106,8 @@ BANNED = [
     ("machine handing, owing or wearing",
      r"\bhands\s+(?:you|it|the|its|itself|him|her|them|over)\b"
      r"|\bowe[sd]?\b|\bowing\b|\bwears\b",
-     "The gate hands the refusal to the agent.",
-     "The agent gets told no, and why."),
+     "The board hands you the next step.",
+     "The board gives you the next step."),
     ("machine sitting somewhere",
      r"\bsits?\s+(?:in|on|at|beside|above|below|under|inside|outside|next to)\b",
      "The check sits beside the build.",
@@ -167,10 +167,10 @@ BANNED = [
      "I got it wrong. The count is 87, not 115."),
 
     ("negative parallelism across two sentences",
-     r"(?:^|[.!?]\s+)(?:It|This|That|The\s+\w+)\s+(?:is|was)\s+not\s+"
+     r"(?:^|\n|[.!?]\s+)(?:It|This|That|The\s+\w+)\s+(?:is|was)\s+not\s+"
      r"[^.!?\n]{1,70}[.!?]\s+(?:It|This|That|The)\s+(?:is|was)\b",
-     "It is not a warning. It is a refusal.",
-     "It refuses. It does not warn."),
+     "It is not a suggestion. It is an order.",
+     "You have to do it."),
 
     ("self-authenticating jargon",
      r"\b(?:load-bearing|smoking gun|hand-?waving|the real tension"
@@ -397,6 +397,20 @@ def selftest():
             faults.append("%s: the bad example passed" % label)
         if check_text("case", filler + "\n" + better):
             faults.append("%s: the rewrite it suggests fails its own check" % label)
+
+    # The loop above asks whether ANY rule caught the example, so a rule whose own
+    # pattern misses its own example still reads green while a neighbour covers for
+    # it. Delete that rule and nothing says so. This asks each rule about its own
+    # example, which is the only version of the question a deletion can answer
+    # (bw-1f9o.15).
+    for label, pattern, was, _ in BANNED:
+        caught = [l for l, p, _w, _b in BANNED if re.search(p, filler + "\n" + was, re.I)]
+        if label not in caught:
+            faults.append("%s: its own bad example slips past its own rule" % label)
+        if [l for l in caught if l != label]:
+            faults.append("%s: another rule also catches its bad example (%s), so this "
+                          "one could stop working and the case would stay green"
+                          % (label, ", ".join(l for l in caught if l != label)))
     if not check_text("case", "A sentence and then a dash — a restatement. " * 30):
         faults.append("em-dash rate: a page of dashes passed")
     if not check_text("case", "A sentence and then a splice; a second clause. " * 30):
