@@ -54,8 +54,12 @@ def words():
 
 
 # A card carries its own id in a note often enough, and an id is not a word.
-def refuse(text, what):
-    """Exit with the rewrite to make, or return having found nothing.
+def refusal(text, what):
+    """The rewrite this line earns, or "" if the manager can read it.
+
+    Handed back rather than exited on, so a caller collecting everything wrong
+    with one command can put this beside the rest of it. `refuse` below is the
+    same answer with the exit still attached.
 
     A list that cannot be read refuses rather than waves through: a check that
     could not run is not a check that passed — the same rule the close gate
@@ -64,17 +68,24 @@ def refuse(text, what):
     try:
         found = problems(text)
     except Unreadable as exc:
-        sys.exit(
+        return (
             "%s cannot be checked for the words the manager reads: the shared word "
             "list would not load (%s). A check that could not run is not a check "
             "that passed — fix the list, or say why it is gone, before pouring."
             % (what, exc)
         )
     if not found:
-        return
-    sys.exit(
+        return ""
+    return (
         "%s is written in the words of whoever built the thing, and the manager has "
         "to be able to read it — his screen draws this line and every report page "
         "quotes it unedited. Rewrite it saying what the thing DOES:\n  %s"
         % (what, "\n  ".join(found))
     )
+
+
+def refuse(text, what):
+    """Exit with the rewrite to make, or return having found nothing."""
+    said = refusal(text, what)
+    if said:
+        sys.exit(said)
