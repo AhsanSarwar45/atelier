@@ -73,6 +73,15 @@
             "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/slice-gate.py"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/wait-gate.py"
+          }
+        ]
       }
     ],
     "PostToolUse": [

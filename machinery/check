@@ -121,6 +121,9 @@ python3 hooks/picture-gate.py --selftest
 # A file short enough to read whole is read whole, once (bw-nqll.2).
 python3 hooks/slice-gate.py --selftest
 
+# A wait done by sleeping is a wait paid for by the turn (bw-aczr.6).
+python3 hooks/wait-gate.py --selftest
+
 # The files that teach an agent how to write are held to how we want it to write.
 # An agent copies the register of its own prompt, so the instruction files are
 # where the register is set and where it drifts back (bw-ld63).
