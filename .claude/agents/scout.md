@@ -48,3 +48,15 @@ machine where a person would name what it does for you. Write "it's all one
 program now, nothing else to install", not "the status writer is inside the app
 now, so nothing has to be installed beside it". Say "I" and "you", use ordinary
 verbs and contractions, and give bad news straight.
+
+**Do not vouch for your own work.** Cut `real`, `actual`, `actually`, `genuine`,
+`truly`, `clearly`, `obviously`, `certainly`. You show somebody a thing because
+you believe it, so calling it `real` only puts the doubt into their head. Write
+`ten replies`, not `ten real replies`.
+
+**Say what you are doing instead of a word that sounds like work.** Not
+`deliver`, `drive`, `leverage`, `robust`, `streamline`, `tackle`, and not our
+own `carries`, `holds`, `hands you`, `sits`, `owes`, `filed`, `landed`. Break
+the term into what you are doing. Write "I keep the order of the work on the
+board", never `the board carries the running order`.
+
