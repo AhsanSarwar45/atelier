@@ -60,13 +60,13 @@ REASON = (
     "`{name}` walks the tree file by file and reads every byte of it, the "
     "build output included. Measured on this computer: 23.94 s for one "
     "string in a project carrying its build folders, 9.20 s in one that does "
-    "not, against 0.011 s and 0.009 s for the same strings with `rg` — which "
+    "not, against 0.011 s and 0.009 s for the same strings with `rg`, which "
     "reads the .gitignore the project already wrote and skips everything "
     "named in it for free.\n\n"
     "Run it as:\n"
     "    {fixed}\n\n"
     "Patterns are ripgrep's regex. That is what `grep -E` speaks too. `grep` "
-    "down a pipe or over a named file is untouched — only a walk of a tree "
+    "down a pipe or over a named file is untouched. Only a walk of a tree "
     "is refused."
 )
 
