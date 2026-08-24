@@ -4,11 +4,8 @@ import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 
 import { useSearchParams, useRouter } from "next/navigation";
 
-import { AgentsPanel } from "@/components/agents-panel";
 import { CreateBeadDialog } from "@/components/create-bead-dialog";
-import { ErrorBoundary } from "@/components/error-boundary";
 import { KanbanColumn } from "@/components/kanban-column";
-import { MemoryPanel } from "@/components/memory-panel";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
 import { useReportsByCard } from "@/components/reports";
 import { TabTools } from "@/components/shell";
@@ -22,7 +19,7 @@ import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
-import { cn, isDoltProject, projectDir } from "@/lib/utils";
+import { cn, projectDir } from "@/lib/utils";
 import { STATES, type Bead, type BeadStatus } from "@/types";
 
 import { useBoardCards } from "./board-cards";
@@ -77,18 +74,10 @@ export default function KanbanBoard() {
   // Issue type filter state ("all" or a specific issue type)
   const [typeFilter, setTypeFilter] = useState<IssueTypeFilter>("all");
 
-  // Dolt project detection and filesystem path resolution
-  const isDolt = isDoltProject(project?.path);
-  const isDoltOnly = isDolt && !project?.localPath;
+  // The folder a card's reports are read from
   const fsPath = projectDir(project);
 
   // Theme
-
-  // Memory panel state
-  const [isMemoryOpen, setIsMemoryOpen] = useState(false);
-
-  // Agents panel state
-  const [isAgentsOpen, setIsAgentsOpen] = useState(false);
 
   // Reports panel state
 
@@ -374,14 +363,6 @@ export default function KanbanBoard() {
           availableTags={availableTags}
           onClearFilters={clearFilters}
           hasActiveFilters={hasActiveFilters}
-          // Memory
-          isMemoryOpen={isMemoryOpen}
-          onMemoryToggle={() => setIsMemoryOpen((prev) => !prev)}
-          // Agents
-          isAgentsOpen={isAgentsOpen}
-          onAgentsToggle={() => setIsAgentsOpen((prev) => !prev)}
-          // Filesystem features require a real project path
-          hasProjectPath={!isDoltOnly}
           // Unknown status warning
           unknownStatusCount={unknownStatusBeads.length}
           unknownStatusNames={unknownStatusNames}
@@ -488,28 +469,6 @@ export default function KanbanBoard() {
 
       {/* No reports drawer: reports are a tab of this project, in the bar
           directly above this board (bw-7ks.21.14). */}
-
-      {/* Memory Panel (requires filesystem path) */}
-      <ErrorBoundary label="Memory Panel">
-      {fsPath && !isDoltOnly && (
-        <MemoryPanel
-          open={isMemoryOpen}
-          onOpenChange={setIsMemoryOpen}
-          projectPath={fsPath}
-        />
-      )}
-      </ErrorBoundary>
-
-      {/* Agents Panel (requires filesystem path) */}
-      <ErrorBoundary label="Agents Panel">
-      {fsPath && !isDoltOnly && (
-        <AgentsPanel
-          open={isAgentsOpen}
-          onOpenChange={setIsAgentsOpen}
-          projectPath={fsPath}
-        />
-      )}
-      </ErrorBoundary>
 
       {/* Create Bead Dialog */}
       {project?.path && (

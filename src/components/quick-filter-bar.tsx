@@ -3,7 +3,7 @@
 import * as React from 'react';
 import type { CSSProperties } from 'react';
 
-import { Search, X, ArrowUpDown, SlidersHorizontal, BrainCircuit, Bot, AlertTriangle, Plus, Shapes, Tag } from 'lucide-react';
+import { Search, X, ArrowUpDown, SlidersHorizontal, AlertTriangle, Plus, Shapes, Tag } from 'lucide-react';
 
 import { Toolbar } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -78,17 +78,6 @@ interface QuickFilterBarProps {
   onClearFilters: () => void;
   /** Whether any filters are active */
   hasActiveFilters: boolean;
-  /** Whether the memory panel is open */
-  isMemoryOpen?: boolean;
-  /** Callback to toggle memory panel */
-  onMemoryToggle?: () => void;
-  /** Whether the agents panel is open */
-  isAgentsOpen?: boolean;
-  /** Callback to toggle agents panel */
-  onAgentsToggle?: () => void;
-  /** Reports panel */
-  /** Whether the project has a filesystem path (not dolt-only) */
-  hasProjectPath?: boolean;
   /** Count of beads with truly unknown statuses */
   unknownStatusCount?: number;
   /** List of unknown status names for tooltip */
@@ -133,11 +122,6 @@ export function QuickFilterBar({
   availableTags,
   onClearFilters,
   hasActiveFilters,
-  isMemoryOpen,
-  onMemoryToggle,
-  isAgentsOpen,
-  onAgentsToggle,
-  hasProjectPath = true,
   unknownStatusCount = 0,
   unknownStatusNames = [],
   onNewBead,
@@ -166,8 +150,8 @@ export function QuickFilterBar({
     // Nothing on this row is allowed to be squeezed. A flex child shrinks by
     // default, so on a phone the eleven controls here did not overflow the row
     // — they compressed inside it, and a row that does not overflow does not
-    // scroll, which is how New, the filters, the agents and the memory ended
-    // up both invisible and unreachable at 390 wide (bw-81wt.4).
+    // scroll, which is how New and the filters ended up both invisible and
+    // unreachable at 390 wide (bw-81wt.4).
     <Toolbar label="Quick filters" className="[&>*]:shrink-0">
       {/* Search Input */}
       <div className="relative">
@@ -320,50 +304,6 @@ export function QuickFilterBar({
       >
         Today
       </button>
-
-      {/* Memory Toggle */}
-      {onMemoryToggle && (
-        <button
-          type="button"
-          onClick={hasProjectPath ? onMemoryToggle : undefined}
-          disabled={!hasProjectPath}
-          aria-pressed={isMemoryOpen}
-          title={hasProjectPath ? undefined : 'Requires project folder path'}
-          className={cn(
-            'h-8 px-3 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised',
-            !hasProjectPath
-              ? 'bg-surface-overlay/30 text-t-faint cursor-not-allowed'
-              : isMemoryOpen
-                ? 'bg-epic/20 text-epic'
-                : 'bg-surface-overlay/50 text-t-tertiary hover:text-t-secondary'
-          )}
-        >
-          <BrainCircuit className="size-4" aria-hidden="true" />
-          Memory
-        </button>
-      )}
-
-      {/* Agents Toggle */}
-      {onAgentsToggle && (
-        <button
-          type="button"
-          onClick={hasProjectPath ? onAgentsToggle : undefined}
-          disabled={!hasProjectPath}
-          aria-pressed={isAgentsOpen}
-          title={hasProjectPath ? undefined : 'Requires project folder path'}
-          className={cn(
-            'h-8 px-3 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-raised',
-            !hasProjectPath
-              ? 'bg-surface-overlay/30 text-t-faint cursor-not-allowed'
-              : isAgentsOpen
-                ? 'bg-blocked-accent/20 text-blocked-accent'
-                : 'bg-surface-overlay/50 text-t-tertiary hover:text-t-secondary'
-          )}
-        >
-          <Bot className="size-4" aria-hidden="true" />
-          Agents
-        </button>
-      )}
 
       {/* No Reports button: this bar is the board's own, and reports are a tab
           of the project in the bar above it (bw-7ks.21.14). */}

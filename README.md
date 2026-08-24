@@ -61,7 +61,6 @@ Full changelog with rationale: [docs/changelog.md](docs/changelog.md)
 - **Kanban board** — Open → In Progress → In Review → Closed with drag-to-update
 - **Epic support** — group tasks with visual progress bars, view subtasks
 - **GitOps** — create, view, and merge PRs from the board. CI status, merge conflicts, auto-close
-- **Memory panel** — browse, search, edit knowledge base entries
 - **11 themes** — Default Dark, Glassmorphism, Neo-Brutalist, Linear Minimal, Soft Light, Notion Warm, GitHub Clean, plus Catppuccin Latte, Frappe, Macchiato, and Mocha
 - **Dolt integration** — connect to Dolt databases directly, no filesystem path needed
 - **Real-time sync** — SSE file watcher for local projects, polling for Dolt

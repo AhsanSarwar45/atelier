@@ -23,8 +23,6 @@ import { expect, test, type APIRequestContext, type Page, type Request } from '@
 
 /** How many times one board load may ask for the cards. */
 const BEADS_ASKS = 1;
-/** How many times one board load may ask for the memory. */
-const MEMORY_ASKS = 1;
 /** A board that was read a moment ago answers again this fast. */
 const AGAIN_MS = 50;
 
@@ -85,7 +83,7 @@ function cards(page: Page) {
 test.describe('the board is read once, not once per part that asks', () => {
   test.describe.configure({ mode: 'default', timeout: 300_000 });
 
-  test('one board load asks for the cards once and the memory once', async ({ page, request }) => {
+  test('one board load asks for the cards once', async ({ page, request }) => {
     const project = await boardUnderTest(request);
 
     // Straight to the board: what the list of projects asks for on the way is
@@ -102,12 +100,10 @@ test.describe('the board is read once, not once per part that asks', () => {
     // A read of only what changed since a moment is not a read of the board:
     // it costs almost nothing and it is how the screen keeps up to date.
     const whole = asked.filter((u) => /\/api\/beads\?/.test(u) && mine(u) && !u.includes('updated_after'));
-    const memory = asked.filter((u) => /\/api\/memory\?/.test(u) && mine(u));
     // eslint-disable-next-line no-console
-    console.log(`one board load: ${whole.length} asks for the cards, ${memory.length} for the memory`);
+    console.log(`one board load: ${whole.length} asks for the cards`);
 
     expect(whole.length, `${whole.length} asks for the same cards`).toBeLessThanOrEqual(BEADS_ASKS);
-    expect(memory.length, `${memory.length} asks for the same memory`).toBeLessThanOrEqual(MEMORY_ASKS);
   });
 
   test('a board just read answers again without reading it', async ({ request }) => {

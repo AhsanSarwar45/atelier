@@ -390,9 +390,8 @@ test.describe('board', () => {
     await page.setViewportSize(PHONE);
     await openProject(page, 'board');
     // The tool row held 155 pixels of a 289-pixel strip and did not scroll, so
-    // New, the filters, the agents panel and the memory panel were invisible
-    // and unclickable on a phone.
-    for (const label of ['New', 'Filter options', 'Agents', 'Memory']) {
+    // New and the filters were invisible and unclickable on a phone.
+    for (const label of ['New', 'Filter options']) {
       const control = page.getByRole('button', { name: new RegExp(label, 'i') }).first();
       await expect(control, `${label} is not on the board's tool row`).toBeAttached();
       await control.scrollIntoViewIfNeeded();

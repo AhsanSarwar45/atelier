@@ -24,7 +24,7 @@ use axum::{
     http::{header, HeaderValue, Request, Response, StatusCode},
     middleware::{self, Next},
     response::IntoResponse,
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, patch, post},
     Router,
 };
 use rust_embed::{Embed, EmbeddedFile};
@@ -436,16 +436,6 @@ async fn serve(open_browser: bool) {
         .route("/api/git/worktree", delete(routes::worktree::delete_worktree))
         .route("/api/git/worktrees", get(routes::worktree::list_worktrees))
         // PR endpoints
-        // Agent endpoints
-        .route("/api/agents", get(routes::agents::list_agents))
-        .route("/api/agents/:filename", put(routes::agents::update_agent))
-        // Memory endpoints
-        .route(
-            "/api/memory",
-            get(routes::memory::list_memory)
-                .put(routes::memory::update_memory)
-                .delete(routes::memory::delete_memory),
-        )
         .route("/api/watch/beads", get(routes::watch_beads))
         // One connection for a whole window: the board, the helper's feed and
         // the open chat, each event tagged (routes/live.rs, bw-zkh4).

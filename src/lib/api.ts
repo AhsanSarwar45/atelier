@@ -6,7 +6,7 @@
 import { apiUrl } from '@/lib/api-base';
 import { onBoard, type WatchEvent } from '@/workbench/live-wire';
 import { BeadsResponseSchema, WorktreeStatusSchema } from '@/lib/api-schemas';
-import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, MemoryEntry, Agent, AgentModel, CachedCounts } from '@/types';
+import type { Project, Tag, Bead, WorktreeStatus, WorktreeEntry, CachedCounts } from '@/types';
 
 /**
  * Input for creating a new project
@@ -436,46 +436,6 @@ export const fs = {
     fetchApi<{ success: boolean }>('/api/fs/open-external', {
       method: 'POST',
       body: JSON.stringify(line == null ? { path, target } : { path, target, line }),
-    }),
-};
-
-/**
- * Memory API
- */
-export const memory = {
-  /** Fetch all memory entries */
-  list: (path: string) => fetchApi<MemoryEntry[]>(
-    `/api/memory?path=${encodeURIComponent(path)}`
-  ),
-
-  /** Create or upsert a memory entry (empty key = auto-generate) */
-  update: (path: string, key: string, content: string) =>
-    fetchApi<MemoryEntry>('/api/memory', {
-      method: 'PUT',
-      body: JSON.stringify({ path, key, content }),
-    }),
-
-  /** Delete a memory entry */
-  remove: (path: string, key: string) =>
-    fetchApi<{ success: boolean }>('/api/memory', {
-      method: 'DELETE',
-      body: JSON.stringify({ path, key }),
-    }),
-};
-
-/**
- * Agents API
- */
-export const agents = {
-  /** List all agents for a project */
-  list: (path: string) =>
-    fetchApi<Agent[]>(`/api/agents?path=${encodeURIComponent(path)}`),
-
-  /** Update an agent's model or tools configuration */
-  update: (filename: string, path: string, data: { model: AgentModel; all_tools: boolean }) =>
-    fetchApi<Agent>(`/api/agents/${encodeURIComponent(filename)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ path, ...data }),
     }),
 };
 

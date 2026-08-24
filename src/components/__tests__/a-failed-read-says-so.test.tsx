@@ -28,16 +28,8 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
-const useAgentsMock = vi.fn();
-vi.mock('@/hooks/use-agents', () => ({ useAgents: () => useAgentsMock() }));
-
-const useMemoryMock = vi.fn();
-vi.mock('@/hooks/use-memory', () => ({ useMemory: () => useMemoryMock() }));
-
 /* eslint-disable import/first, import/order */
-import { AgentsPanel } from '@/components/agents-panel';
 import { FolderBrowser } from '@/components/folder-browser';
-import { MemoryPanel } from '@/components/memory-panel';
 import { ReportsList } from '@/components/report/screen/reports-list';
 /* eslint-enable import/first, import/order */
 
@@ -110,54 +102,5 @@ describe('a folder that could not be read', () => {
     fsListMock.mockResolvedValue([]);
     fireEvent.click(tryAgain());
     await waitFor(() => expect(fsListMock.mock.calls.length).toBeGreaterThan(askedFirst));
-  });
-});
-
-describe('the agents panel', () => {
-  it('says the agents could not be read, and asks again', async () => {
-    const refresh = vi.fn();
-    useAgentsMock.mockReturnValue({
-      agents: [],
-      isLoading: false,
-      error: new Error('the server did not answer'),
-      updateAgent: vi.fn(),
-      refresh,
-    });
-
-    render(<AgentsPanel open onOpenChange={() => {}} projectPath="/work/atelier" />);
-
-    await screen.findByTestId('agents-error');
-    expect(screen.getByText(/the server did not answer/)).toBeInTheDocument();
-    nothingIsStillSpinning();
-
-    fireEvent.click(tryAgain());
-    expect(refresh).toHaveBeenCalled();
-  });
-});
-
-describe('the memory panel', () => {
-  it('says the memory could not be read, and asks again', async () => {
-    const refresh = vi.fn();
-    useMemoryMock.mockReturnValue({
-      entries: [],
-      isLoading: false,
-      error: new Error('the server did not answer'),
-      search: '',
-      setSearch: vi.fn(),
-      filteredEntries: [],
-      createEntry: vi.fn(),
-      editEntry: vi.fn(),
-      deleteEntry: vi.fn(),
-      refresh,
-    });
-
-    render(<MemoryPanel open onOpenChange={() => {}} projectPath="/work/atelier" />);
-
-    await screen.findByTestId('memory-error');
-    expect(screen.getByText(/the server did not answer/)).toBeInTheDocument();
-    nothingIsStillSpinning();
-
-    fireEvent.click(tryAgain());
-    expect(refresh).toHaveBeenCalled();
   });
 });
