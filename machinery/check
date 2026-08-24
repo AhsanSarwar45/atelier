@@ -120,4 +120,7 @@ python3 hooks/picture-gate.py --selftest
 # A file short enough to read whole is read whole, once (bw-nqll.2).
 python3 hooks/slice-gate.py --selftest
 
+# A search over a tree is run by the tool that reads the ignore list (bw-cp9o.1).
+python3 hooks/search-gate.py --selftest
+
 printf 'checked in %ss\n' "$((SECONDS - began))"
