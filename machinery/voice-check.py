@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Voice check — the instruction files must be written the way we want agents to write.
 
-An agent copies the register of its own prompt. Measured over 68 sessions, agent
-replies carried 11.1 em-dashes per 1000 words across 59,479 words, against 2.8 in
-the 8,476 words the manager typed back. Every file that teaches the voice sat above
-the same line. So the files are what this checks: cap the markers there and the
-output follows.
+An agent copies the register of its own prompt. Measured over 68 sessions, 637
+agent replies carried 14.2 em-dashes per 1000 words across 54,649 words, against
+1.3 in the 3,914 words the manager typed back over 135 turns. Every file that
+teaches the voice sat above the same line. So the files are what this checks: cap
+the markers there and the output follows.
 
     python3 machinery/voice-check.py              the instruction files, exit 1 on any failure
     python3 machinery/voice-check.py --selftest   put each fault back, and watch every rule go red
@@ -136,8 +136,43 @@ def check_text(name, text):
     return bad
 
 
+def turns(paths, side):
+    """The replies an agent wrote, or the turns the manager actually typed.
+
+    A session's record holds far more user-role entries than the manager ever
+    wrote: gate refusals, hook text and pasted output all arrive in that role. The
+    record marks the difference itself, so the manager's side counts only entries
+    it stamps as typed by a human, and an earlier count that did not was reading
+    our own gate messages back as his prose (bw-ld63.13).
+    """
+    out = []
+    for p in paths:
+        for line in open(p, encoding="utf-8", errors="replace"):
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("isSidechain"):
+                continue
+            if side == "agent":
+                if d.get("type") != "assistant":
+                    continue
+                for b in d.get("message", {}).get("content") or []:
+                    if isinstance(b, dict) and b.get("type") == "text":
+                        t = (b.get("text") or "").strip()
+                        if t and not t.startswith("You've hit"):
+                            out.append(t)
+            else:
+                if d.get("type") != "user" or (d.get("origin") or {}).get("kind") != "human":
+                    continue
+                c = d.get("message", {}).get("content")
+                if isinstance(c, str) and c.strip():
+                    out.append(c.strip())
+    return out
+
+
 def chat(limit):
-    """What the sessions actually wrote to the manager, newest first."""
+    """What the sessions actually wrote, both sides, newest first."""
     # Transcripts are filed under the main checkout, never under a worktree.
     main = re.sub(r"/worktrees/[^/]+$", "", ROOT)
     home = os.path.expanduser("~/.claude/projects/" + main.replace("/", "-"))
@@ -146,29 +181,19 @@ def chat(limit):
     if not paths:
         print("no session transcripts under %s" % home)
         return
-    parts = []
-    for p in paths:
-        for line in open(p, encoding="utf-8", errors="replace"):
-            try:
-                d = json.loads(line)
-            except ValueError:
-                continue
-            if d.get("isSidechain") or d.get("type") != "assistant":
-                continue
-            for b in d.get("message", {}).get("content") or []:
-                if isinstance(b, dict) and b.get("type") == "text":
-                    t = (b.get("text") or "").strip()
-                    if t and not t.startswith("You've hit"):
-                        parts.append(t)
-    text = drop_label_dashes("\n".join(parts))
-    words = len(text.split()) or 1
-    print("%d sessions, %d replies, %d words" % (len(paths), len(parts), words))
-    print("  em-dashes per 1000 words: %.1f   (cap %.0f)" % (text.count("—") * 1000 / words, EM_DASH_PER_1K))
-    print("  semicolons per 1000 words: %.1f  (cap %.0f)" % (text.count(";") * 1000 / words, SEMICOLON_PER_1K))
-    for label, pattern, _, _ in BANNED:
-        n = len(re.findall(pattern, text, re.I))
-        if n:
-            print("  %-34s %d" % (label, n))
+    print("%d sessions" % len(paths))
+    for side in ("agent", "manager"):
+        parts = turns(paths, side)
+        text = drop_label_dashes("\n".join(parts))
+        words = len(text.split()) or 1
+        print("  %-8s %5d turns, %6d words   em-dashes %.1f, semicolons %.1f per 1000 words"
+              % (side, len(parts), words,
+                 text.count("—") * 1000 / words, text.count(";") * 1000 / words))
+        if side == "agent":
+            for label, pattern, _, _ in BANNED:
+                n = len(re.findall(pattern, text, re.I))
+                if n:
+                    print("             %-34s %d" % (label, n))
 
 
 # The two halves of the label rule, each proved by the selftest: what a list format

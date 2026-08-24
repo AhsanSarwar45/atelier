@@ -51,8 +51,10 @@ these, in this file and in every other file that teaches an agent how to write:
 | `Now the two-clock split.` | `Next I split the two timers apart.` |
 
 Two numbers keep the register honest. Em-dashes stay at or under 4 per 1000
-words, and semicolons at or under 5. The manager's own writing runs at 3.2 and
-2.1. Agent chat was measured at 18.2 before this rule existed.
+words, and semicolons at or under 5. The manager's own typing runs at 1.3 and
+1.8. Agent chat measured 14.2 and 4.6 before this rule existed. Both numbers
+come from `python3 machinery/voice-check.py --chat`, so take them again rather
+than quoting these.
 
 **Progress lines are full sentences.** A one-line update mid-job has to make
 sense to somebody who has read nothing else in the conversation. `Now the foot
