@@ -15,13 +15,6 @@ brand = "ATELIER"
 # here is the upstream fork point and nobody ships from it.
 agent_merges = true
 
-# Where a job's own copy is cut — off this checkout on purpose. Each copy carries
-# a rebuilt `target/`, `node_modules/` and `.next/`, 663,000 files between them
-# against the 104,000 the project itself is, and every recursive search walked all
-# of it: one `grep -rn` cost 21 seconds here against 0.7 in a larger project, and
-# 5 milliseconds with the copies excluded (bw-hitm).
-trees = "~/dev/trees/beads-web"
-
 # The systems a card may belong to. `--area` accepts these and nothing else.
 # The last four belong to the machinery under `machinery/`, which used to be a
 # repository of its own and brought its own cards with it.
