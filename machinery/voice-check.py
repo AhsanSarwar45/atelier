@@ -71,10 +71,17 @@ BANNED = [
 ]
 
 
-# "**Term** — definition" at the head of a line is a list format, the same job a
-# colon does, and it is not the register this checks for. The dash that restates
-# a clause mid-sentence is. So the first dash on a label line is not counted.
-LABEL_DASH = re.compile(r"^\s*(?:[-*+]\s+|#+\s+|\d+[.)]\s+)?(?:\*\*)?[^—.!?\n]{1,45}(?:\*\*)?[:,]?\s*—")
+# "**Term** — definition" at the head of a line is a list format, doing the job a
+# colon does. The dash this checks for is the one that restates a clause inside a
+# sentence, so only a real label is exempt: a bold term, a heading's name, or a
+# one-word list entry. An earlier spelling let any short run of words count as a
+# label, which exempted every sentence whose wrapping happened to put a dash near
+# the start of a line, and passed files nobody had rewritten (bw-ld63.8).
+LABEL_DASH = re.compile(r"""^\s*(?:\|\s*)?(?:
+      (?:[-*+]\s+|\d+[.)]\s+)?\*\*[^*\n]{1,60}\*\*[:,]?\s*—   # **Term** — what it means
+    | \#+\s+[^\s—][^—\n]{0,45}—                                # # name — what it is
+    | [-*+]\s+(?:[^\s—*][^\s—]{0,45})?[:,]?\s*—                 # - term — what it means
+)""", re.X)
 
 
 def drop_label_dashes(text):
@@ -160,6 +167,24 @@ def chat(limit):
             print("  %-34s %d" % (label, n))
 
 
+# The two halves of the label rule, each proved by the selftest: what a list format
+# looks like, and what a sentence restating itself looks like when the line happens
+# to break in front of it.
+LABEL_EXEMPT = [
+    "- **Term** — what it means",
+    "1. **Step** — do the thing",
+    "# name — what it is",
+    "- code-reviewer — adversarial review with DEMO verification",
+    "-   — a label whose term was inline code and got stripped",
+]
+LABEL_COUNTED = [
+    "Absence never announces itself — you have to go looking for it deliberately.",
+    "- Read the actual code — don't grep for keywords only",
+    "Single binary — the frontend is embedded, so there is nothing to publish.",
+    "isolation** — simultaneous contrast will shift it.",
+]
+
+
 def selftest():
     """Put every fault back and watch its own rule go red.
 
@@ -180,6 +205,13 @@ def selftest():
     if not check_text("case", "A sentence and then a splice; a second clause. " * 30):
         faults.append("semicolon rate: a page of splices passed")
 
+    for line in LABEL_EXEMPT:
+        if "—" in drop_label_dashes(line):
+            faults.append("label exemption: a list label was counted as prose: %s" % line)
+    for line in LABEL_COUNTED:
+        if "—" not in drop_label_dashes(line):
+            faults.append("label exemption: a prose dash was let through as a label: %s" % line)
+
     style = os.path.join(ROOT, ".claude/output-styles/manager.md")
     if not os.path.isfile(style):
         faults.append("the manager style file is not where this expects it")
@@ -191,7 +223,8 @@ def selftest():
 
     for f in faults:
         print("  " + f)
-    print("voice-check --selftest: %d rules, %d faults" % (len(BANNED) + 3, len(faults)))
+    print("voice-check --selftest: %d rules, %d faults"
+          % (len(BANNED) + 3 + len(LABEL_EXEMPT) + len(LABEL_COUNTED), len(faults)))
     return 1 if faults else 0
 
 
