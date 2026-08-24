@@ -26,6 +26,7 @@ TARGETS = [
     ".claude/output-styles/*.md",
     ".claude/agents/*.md",
     ".claude/skills/*/SKILL.md",
+    ".claude/commands/*.md",
     "machinery/hooks/board-prime.py",
     "reporting/README.md",
 ]

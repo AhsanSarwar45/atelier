@@ -78,14 +78,14 @@ LINKS to it.** So your cleanup obeys these, in priority order:
 5. **Apply** (only if `--apply`): make edits with `Edit`. For moved facts,
    write to the owner first, then cut the copy and insert the link. Never leave
    a dangling `[[link]]`/anchor. Do not reformat untouched lines.
-6. **Verify** — after applying: `git diff --stat`; confirm no doc lost its only
-   copy of a fact; if any `docs/*.md` link anchors changed, grep for referers.
-   Report what changed and what you deliberately kept.
+6. **Verify** — after applying, run `git diff --stat`. Confirm no doc lost its
+   only copy of a fact. If any `docs/*.md` link anchors changed, grep for
+   referers. Report what changed and what you deliberately kept.
 
 ## Guardrails
 
 - **Working tree is SHARED** — never `git stash`/`checkout`/`reset` to A/B.
-  Edit in place; a WIP commit is the only rollback.
+  Edit in place. A WIP commit is the only rollback.
 - If the scope crosses >~15 files, do `--dry-run` first and surface the report
   before applying, even if `--apply` was passed.
 - A wrong doc is worse than no doc, but a *deleted* fact is worse than a wordy
