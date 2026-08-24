@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 
 import {
   ArrowLeft,
@@ -18,6 +18,15 @@ import { MarkdownBody } from "@/components/markdown-body";
 import { SubtaskList } from "@/components/subtask-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/ui/panel";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
 import {
@@ -44,6 +53,18 @@ const PRIORITY_OPTIONS = [
   { value: 4, label: "P4" },
 ] as const;
 
+/**
+ * The metadata row's pickers, worn thin.
+ *
+ * Four boxed triggers side by side are wider than a phone, and this row reads as
+ * a sentence of facts rather than a form. Only the box is dropped: the list that
+ * drops down is still the library's, which is the half a reader could tell apart
+ * from the rest of the app at a glance.
+ */
+const INLINE_PICKER =
+  "h-auto w-auto gap-1 border-0 bg-transparent p-0 text-sm text-t-tertiary shadow-none " +
+  "hover:text-t-secondary focus:ring-0 focus:ring-offset-0";
+
 export interface BeadDetailProps {
   bead: Bead;
   ticketNumber?: number;
@@ -58,8 +79,9 @@ export interface BeadDetailProps {
 }
 
 /**
- * How long a side panel takes to slide, in milliseconds.
+ * How long a side panel takes to slide out, in milliseconds.
  *
+ * The sheet's own closing duration, which it sets in src/components/ui/sheet.tsx.
  * The panel is mounted by whoever owns the address, so that owner has to keep it
  * alive for exactly this long after closing it or the slide out is cut off:
  * src/components/card-panel.tsx reads the same number.
@@ -82,34 +104,6 @@ export function BeadDetail({
   onChildClick,
   onUpdate,
 }: BeadDetailProps) {
-  /**
-   * Whether the panel has been told to move yet.
-   *
-   * The panel is mounted at the same moment it is asked to open, so binding the
-   * slide to `open` paints it already arrived and the browser has nothing to
-   * animate from — that is why this one appeared instantly while every other
-   * panel slid. Starting here at false parks it for the first paint, and the
-   * effect below lets it go on the next one.
-   */
-  const [slid, setSlid] = useState(false);
-  useEffect(() => {
-    if (!open) {
-      setSlid(false);
-      return;
-    }
-    setSlid(true);
-  }, [open]);
-
-  // Close on Escape key
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onOpenChange(false);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onOpenChange]);
-
   const isReadOnly = !projectPath;
   const isDolt = projectPath ? isDoltProject(projectPath) : false;
   const typeMeta = getIssueTypeMeta(bead.issue_type);
@@ -145,9 +139,9 @@ export function BeadDetail({
     }
   }, [bead.id, projectPath, isDolt, onUpdate]);
 
-  const handleStatusChange = useCallback(async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleStatusChange = useCallback(async (value: string) => {
     if (!projectPath) return;
-    const newStatus = e.target.value as BeadStatus;
+    const newStatus = value as BeadStatus;
     const write = SET_BY[newStatus];
     try {
       if (isDolt) {
@@ -165,9 +159,8 @@ export function BeadDetail({
     }
   }, [bead.id, projectPath, isDolt, onUpdate]);
 
-  const handleSaveIssueType = useCallback(async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleSaveIssueType = useCallback(async (newIssueType: string) => {
     if (!projectPath) return;
-    const newIssueType = e.target.value;
     try {
       await api.beads.update({ path: projectPath, id: bead.id, issue_type: newIssueType });
       onUpdate?.();
@@ -176,9 +169,9 @@ export function BeadDetail({
     }
   }, [bead.id, projectPath, onUpdate]);
 
-  const handleSavePriority = useCallback(async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleSavePriority = useCallback(async (value: string) => {
     if (!projectPath) return;
-    const newPriority = Number(e.target.value);
+    const newPriority = Number(value);
     try {
       await api.beads.update({ path: projectPath, id: bead.id, priority: newPriority });
       onUpdate?.();
@@ -224,25 +217,26 @@ export function BeadDetail({
 
   return (
     <>
-      {/* Overlay */}
-      <div
-        className={cn(
-          "fixed inset-0 z-50 bg-black/80 transition-opacity ease-in-out",
-          slid ? "opacity-100" : "opacity-0 pointer-events-none"
-        )}
-        style={{ transitionDuration: `${PANEL_SLIDE_MS}ms` }}
-        onClick={() => onOpenChange(false)}
-      />
-      {/* Slide-in panel */}
-      <div
-        data-testid="bead-detail"
-        data-bead-id={bead.id}
-        className={cn(
-          "fixed inset-y-0 right-0 z-50 w-full sm:max-w-lg md:max-w-xl overflow-y-auto bg-surface-base border-l border-b-default p-4 sm:p-6 shadow-lg transition-transform ease-in-out",
-          slid ? "translate-x-0" : "translate-x-full"
-        )}
-        style={{ transitionDuration: `${PANEL_SLIDE_MS}ms` }}
-      >
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        {/* The panel carries its own way out, so the sheet leaves out the cross
+            it would otherwise draw in the far corner (bw-81wt.6). The card's own
+            words are the heading; there is no separate line describing it. */}
+        <SheetContent
+          side="right"
+          hideClose
+          aria-describedby={undefined}
+          onOpenAutoFocus={(event) => {
+            // Left to itself the sheet lands on Back, which then wears a focus
+            // ring the instant the panel appears — a bright box around the way
+            // out, on a panel opened to read a card. The panel takes the focus
+            // instead, so Tab still walks into it rather than back to the board.
+            event.preventDefault();
+            (event.currentTarget as HTMLElement | null)?.focus();
+          }}
+          data-testid="bead-detail"
+          data-bead-id={bead.id}
+          className="w-full sm:max-w-lg md:max-w-xl overflow-y-auto bg-surface-base border-b-default p-4 sm:p-6"
+        >
           {/* The one way out. There used to be two — this and a cross in the
               far corner — which on a phone is two controls saying the same
               thing at opposite ends of a screen you hold in one hand. The
@@ -277,13 +271,13 @@ export function BeadDetail({
             </p>
 
             {/* Title */}
-            <h2 className="text-xl font-semibold leading-tight text-t-primary">
+            <SheetTitle className="text-xl font-semibold leading-tight text-t-primary">
               <EditableField
                 value={bead.title}
                 onSave={handleSaveTitle}
                 disabled={isReadOnly}
               />
-            </h2>
+            </SheetTitle>
 
             {/* Worktree path */}
             {bead.issue_type !== "epic" && hasWorktree && worktreeStatus?.worktree_path && (
@@ -305,16 +299,16 @@ export function BeadDetail({
               {isReadOnly ? (
                 <span>{typeMeta.label}</span>
               ) : (
-                <select
-                  value={bead.issue_type}
-                  onChange={handleSaveIssueType}
-                  aria-label="Issue type"
-                  className="bg-transparent border-none text-sm text-t-tertiary cursor-pointer hover:text-t-secondary focus:outline-none appearance-none"
-                >
-                  {ISSUE_TYPES.map((meta) => (
-                    <option key={meta.value} value={meta.value}>{meta.label}</option>
-                  ))}
-                </select>
+                <Select value={bead.issue_type} onValueChange={handleSaveIssueType}>
+                  <SelectTrigger aria-label="Issue type" className={INLINE_PICKER}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ISSUE_TYPES.map((meta) => (
+                      <SelectItem key={meta.value} value={meta.value}>{meta.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </span>
             <span className="text-t-faint" aria-hidden="true">•</span>
@@ -323,15 +317,16 @@ export function BeadDetail({
               {isReadOnly ? (
                 <span>{formatStatus(bead.status)}</span>
               ) : (
-                <select
-                  value={bead.status}
-                  onChange={handleStatusChange}
-                  className="bg-transparent border-none text-sm text-t-tertiary cursor-pointer hover:text-t-secondary focus:outline-none appearance-none"
-                >
-                  {STATES.map((s) => (
-                    <option key={s.id} value={s.id}>{s.label}</option>
-                  ))}
-                </select>
+                <Select value={bead.status} onValueChange={handleStatusChange}>
+                  <SelectTrigger aria-label="Status" className={INLINE_PICKER}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATES.map((state) => (
+                      <SelectItem key={state.id} value={state.id}>{state.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </span>
             <span className="text-t-faint" aria-hidden="true">•</span>
@@ -340,16 +335,16 @@ export function BeadDetail({
               {isReadOnly ? (
                 <span>P{bead.priority}</span>
               ) : (
-                <select
-                  value={bead.priority}
-                  onChange={handleSavePriority}
-                  aria-label="Priority"
-                  className="bg-transparent border-none text-sm text-t-tertiary cursor-pointer hover:text-t-secondary focus:outline-none appearance-none"
-                >
-                  {PRIORITY_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+                <Select value={String(bead.priority)} onValueChange={handleSavePriority}>
+                  <SelectTrigger aria-label="Priority" className={INLINE_PICKER}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRIORITY_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </span>
             <span className="text-t-faint" aria-hidden="true">•</span>
@@ -421,19 +416,15 @@ export function BeadDetail({
                 Related Tasks ({relatedTasks.length})
               </h3>
               <div className="h-px bg-b-default mb-3" />
-              <div className="rounded-lg border border-b-default bg-surface-raised/50 p-3">
+              <Panel inset="md">
                 <div className="space-y-1">
                   {relatedTasks.map((related) => (
-                    <button
+                    <Button
                       key={related.id}
+                      variant="ghost"
                       onClick={() => onChildClick(related)}
                       aria-label={`Open related task: ${related.title}`}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md",
-                        "hover:bg-b-default transition-colors text-left",
-                        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-t-tertiary",
-                        "group"
-                      )}
+                      className="group h-auto w-full justify-start gap-2 px-2 py-1.5 text-left font-normal"
                     >
                       <Circle
                         className={cn("size-2 flex-shrink-0 fill-current", getStatusDotColor(related.status))}
@@ -453,10 +444,10 @@ export function BeadDetail({
                       <Badge variant="outline" size="xs" className="flex-shrink-0">
                         {formatStatus(related.status)}
                       </Badge>
-                    </button>
+                    </Button>
                   ))}
                 </div>
-              </div>
+              </Panel>
             </div>
           )}
 
@@ -485,20 +476,20 @@ export function BeadDetail({
                 )}
               </div>
               <div className="h-px bg-b-default mb-3" />
-              <div className="rounded-lg border border-b-default bg-surface-raised/50 p-3">
+              <Panel inset="md">
                 <SubtaskList
                   childTasks={childTasks}
                   onChildClick={onChildClick}
                   isExpanded={true}
                 />
-              </div>
+              </Panel>
             </div>
           )}
 
           {/* Children slot for comments + timeline */}
           {children && <div className="mt-6">{children}</div>}
-
-      </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Add Subtask Dialog (for epics) */}
       {projectPath && isEpic && (

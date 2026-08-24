@@ -92,8 +92,10 @@ describe('the related list', () => {
     const finished = piece('other-1', 'closed');
     const abandoned = piece('other-2', 'cancelled');
     const bead = piece('job-2', 'open', { relates_to: [finished.id, abandoned.id] });
-    const { container } = draw(bead, [bead, finished, abandoned]);
-    const titles = Array.from(container.querySelectorAll('span'))
+    draw(bead, [bead, finished, abandoned]);
+    // The panel is the app's own sliding sheet, which draws itself at the top of
+    // the document rather than inside whatever rendered it.
+    const titles = Array.from(document.body.querySelectorAll('span'))
       .filter(s => /^piece other-/.test(s.textContent ?? ''));
     expect(titles.length).toBe(2);
     for (const t of titles) {
@@ -104,8 +106,8 @@ describe('the related list', () => {
   it('leaves work that is still standing undrawn as done', () => {
     const live = piece('other-3', 'in_progress');
     const bead = piece('job-3', 'open', { relates_to: [live.id] });
-    const { container } = draw(bead, [bead, live]);
-    const title = Array.from(container.querySelectorAll('span'))
+    draw(bead, [bead, live]);
+    const title = Array.from(document.body.querySelectorAll('span'))
       .find(s => s.textContent === 'piece other-3');
     expect(title?.className).not.toMatch(/line-through/);
   });
