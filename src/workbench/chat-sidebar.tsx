@@ -567,6 +567,12 @@ export function ChatSidebar({
                 label: row.activity,
                 since: row.busySince ? Date.parse(row.busySince) : null,
                 held: row.held ?? null,
+                // A chat he has never spoken in is not coming back from
+                // anywhere. Only a row the stream built for a chat made this
+                // second says that outright; a row off the list says nothing
+                // about it, and reads as spoken in, which is how every row read
+                // before the question was asked.
+                spokenIn: row.lastSpokeAt !== null,
               });
               return (
                 <div

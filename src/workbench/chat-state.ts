@@ -307,6 +307,8 @@ export function turnWorthSaying(step: number | null, turn: number | null): numbe
  * that has since died would otherwise draw that dead process's last word.
  */
 const OWN_WORD: Record<SessionState, string> = {
+  // Read only for a chat that has something to come back to; one nobody has
+  // spoken in yet never reaches this row ({@link standing}).
   starting: 'Coming back',
   idle: 'Ready',
   thinking: 'Thinking',
@@ -378,6 +380,14 @@ export function counting(state: SessionState): boolean {
 export interface ChatStateInput {
   /** The state our own driver last published for this chat. */
   state: SessionState;
+  /**
+   * Whether anything has ever been said in this chat.
+   *
+   * Only `starting` needs it, and {@link standing} says why. Absent reads as
+   * yes, so a caller that has no way of knowing — and every caller written
+   * before the question was asked — reads a chat exactly as it always did.
+   */
+  spokenIn?: boolean;
   /** The word it published with it, if any. */
   label?: string | null;
   /** When that state began, ms since the epoch, for the loud seconds count. */
@@ -395,6 +405,25 @@ export interface ChatStateInput {
    * retry is waiting. Drawn beside the word, never in place of it.
    */
   detail?: string | null;
+}
+
+/**
+ * Which of our own states a chat is really in.
+ *
+ * One word, `starting`, is published for two different things: a conversation
+ * being woken with everything already said in it, and a chat that has just been
+ * made and never asked anything. Only the first is coming back from somewhere.
+ * The second has no turn to watch, so its clock counted from the moment it was
+ * created — a spinner reading `Starting 0s` over a blank chat, and a row beside
+ * it saying `Coming back 6s` from a chat that had never been anywhere.
+ *
+ * So a chat nothing has been said in stands where it is, and the word, the
+ * mark, whether the mark moves and both clocks all follow from that. Decided
+ * here for the reason everything else is: four screens draw this and they must
+ * not disagree about which of the two a chat is.
+ */
+function standing(input: ChatStateInput): SessionState {
+  return input.state === 'starting' && input.spokenIn === false ? 'idle' : input.state;
 }
 
 /**
@@ -433,12 +462,13 @@ export function chatState(input: ChatStateInput): ChatState {
     };
   }
 
-  const word = input.label && input.label.length > 0 ? input.label : OWN_WORD[input.state];
-  const working = OWN_WORKING.has(input.state);
+  const state = standing(input);
+  const word = input.label && input.label.length > 0 ? input.label : OWN_WORD[state];
+  const working = OWN_WORKING.has(state);
   return {
     working,
-    waiting: input.state === 'waiting_permission',
-    doing: OWN_DOING[input.state],
+    waiting: state === 'waiting_permission',
+    doing: OWN_DOING[state],
     word: word ?? '',
     detail: input.detail ?? null,
     // Our own driver publishes its state every second; nothing here is inferred.
@@ -446,10 +476,10 @@ export function chatState(input: ChatStateInput): ChatState {
     // Off the state and never off the word: the driver names its own states, so
     // the word can be anything it likes while the standing behind it is one of
     // ten we know (bw-ja9l.12).
-    mark: OWN_MARK[input.state],
-    since: working || input.state === 'waiting_permission' ? (input.since ?? null) : null,
+    mark: OWN_MARK[state],
+    since: working || state === 'waiting_permission' ? (input.since ?? null) : null,
     turnSince:
-      working || input.state === 'waiting_permission'
+      working || state === 'waiting_permission'
         ? turnWorthSaying(input.since ?? null, input.turnSince ?? null)
         : null,
     external: null,

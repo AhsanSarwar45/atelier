@@ -656,6 +656,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     since: busySince,
     turnSince,
     held: held ? (holder ?? { id: externalId ?? '', holder: 'program', doing: 'unknown', since: null }) : null,
+    // Whether anything has ever been said in this one. Only the stream knows —
+    // the fold's own first reading is `starting` for a chat being woken and for
+    // a chat made a second ago alike — so without a row from it we do not know,
+    // and a chat we do not know about is read exactly as it always was.
+    spokenIn: live ? live.lastSpokeAt !== null : true,
   });
 
   // The call in flight, whoever is making it: our own driver's, or — since the

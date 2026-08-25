@@ -418,6 +418,32 @@ describe('the whole vocabulary for what a chat is doing', () => {
     }
   });
 
+  it('a chat nothing has been said in yet is standing there, not coming back', () => {
+    // `starting` is published for two different things: a conversation being
+    // woken with everything already said in it, and a chat made a second ago
+    // that has never been asked anything. Only the first is coming back from
+    // anywhere. The second drew a spinner reading `Starting 0s` over a blank
+    // chat and a row beside it counting up from the moment it was created.
+    const read = chatState({ state: 'starting', label: '', since: 5_000, spokenIn: false });
+    expect(read.working, 'a chat nobody has spoken in claimed to owe an answer').toBe(false);
+    expect(read.doing, 'it claimed to be doing something').toBe('idle');
+    expect(read.mark, 'it wore a moving mark').toBe(DOING_MARK.idle);
+    expect(read.since, 'it left a clock running').toBeNull();
+    expect(read.turnSince, 'it left the quiet clock running too').toBeNull();
+    expect(read.word, 'it said it was coming back from somewhere').toBe('Ready');
+  });
+
+  it('a chat being woken with something already in it still says so', () => {
+    // The other half of the same word, and the reason the reading is not simply
+    // taken off `starting`: this one has a conversation behind it and is worth
+    // watching.
+    const read = chatState({ state: 'starting', label: '', since: 5_000, spokenIn: true });
+    expect([read.working, read.since, read.word]).toEqual([true, 5_000, 'Coming back']);
+    // And a caller with no way of knowing reads it exactly as it always did.
+    const unasked = chatState({ state: 'starting', label: '', since: 5_000 });
+    expect([unasked.working, unasked.since, unasked.word]).toEqual([true, 5_000, 'Coming back']);
+  });
+
   it('every state of ours that is at rest reads as idle, and counts nothing', () => {
     for (const state of ['idle', 'stopped', 'errored', 'ended', 'dormant'] as const) {
       const read = chatState({ state, since: 5_000 });

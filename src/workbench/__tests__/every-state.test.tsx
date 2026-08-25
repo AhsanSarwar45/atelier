@@ -117,6 +117,20 @@ describe('a chat of ours, nobody else in it', () => {
     });
   }
 
+  it('starting: a chat nothing has been said in draws no chip clock and no line', () => {
+    // The state is published for two different things — a conversation being
+    // woken, and a chat made a second ago that has never been asked anything —
+    // and only the first is coming back from anywhere. The second drew
+    // `Starting 0s` under a blank chat and `Coming back 6s` on the row beside
+    // it, counting from the moment the chat came into being.
+    const read = chatState({ state: 'starting', label: '', since: BEGAN, spokenIn: false });
+    expect(read.word).toBe('Ready');
+    expect(read.working).toBe(false);
+    expect(read.since, 'the row left a clock running').toBeNull();
+    expect(mark(read)).toEqual({ word: 'Ready', moving: false });
+    expect(body(read), 'the foot of the chat drew a turn that was never in flight').toBeNull();
+  });
+
   it('thinking: the driver\'s own word beats the state\'s, on the row as in the bar', () => {
     const read = chatState({ state: 'thinking', label: 'Pulling the branch apart', since: BEGAN });
     expect(read.word).toBe('Pulling the branch apart');
