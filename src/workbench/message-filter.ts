@@ -256,7 +256,9 @@ export function treeOf(items: TranscriptItem[]): KindNode[] {
   // retries is one row with an 8 on it, and a count of 8 beside a switch that
   // removes one row would be a lie about what turning it off costs.
   const tally = new Map<KindId, number>();
-  for (const row of drawnRows(items)) {
+  // Work the chat sent away is not in the conversation at all (see `showing`),
+  // so it is not in what turning a switch off would cost him either.
+  for (const row of drawnRows(items.filter((item) => !sentAway(item)))) {
     const id = row.row === 'machine' ? statusOf(row.audience, row.family, row.kind) : kindOf(row.item);
     tally.set(id, (tally.get(id) ?? 0) + 1);
   }
@@ -412,19 +414,70 @@ export const EVERYTHING: ReadonlySet<KindId> = new Set<KindId>();
 export const QUIET: ReadonlySet<KindId> = new Set<KindId>(OFF_BY_DEFAULT.map(audienceKind));
 
 /**
- * The rows this conversation draws. Everything a sent-off agent produced goes
- * with the call that sent it — its commands, its sentences and its thinking:
- * hiding the call and leaving the work it spawned standing loose in the
- * transcript would read as the agent doing that work itself (bw-7ks.22.2).
+ * Whether a row a helper produced is worth the manager's own transcript.
+ *
+ * One thing is: a failure. A helper going wrong is what he must not have to
+ * click to find out about — the same judgement the machine side of the filter
+ * already makes, where an agent that FAILED is his news and the same agent
+ * finishing quietly is not (see QUIET).
+ *
+ * A question is the other, and it never reaches this test: a question was never
+ * one of the kinds that nest under the call that sent them, precisely so that a
+ * helper stopped on a permission prompt cannot be filtered into silence.
+ *
+ * Everything else it did — its commands, its sentences, its thinking — is on
+ * its own card in the rail and in the conversation opened from it.
+ */
+function worthHisTranscript(item: TranscriptItem): boolean {
+  return item.kind === 'tool' && item.status === 'failed';
+}
+
+/**
+ * Whether this row is work the chat sent away rather than the chat's own.
+ *
+ * The one test behind both halves of the reader's transcript: what is drawn in
+ * it, and what the counts beside the switches say drawing costs. They read the
+ * same rows or the count is a lie about a price (bw-qdim.12).
+ */
+export function sentAway(item: TranscriptItem): boolean {
+  // Coalesced rather than tested against null alone: the kit leaves the field
+  // off a call the chat made itself, so a row of his own arrives carrying
+  // `undefined` where the type promises `null`, and a strict test reads every
+  // one of them as a helper's.
+  const parent =
+    item.kind === 'tool' || item.kind === 'message' || item.kind === 'thinking' ? (item.parentId ?? null) : null;
+  return parent !== null && !worthHisTranscript(item);
+}
+
+/**
+ * The rows this conversation draws.
+ *
+ * Work the chat sent away is NOT in it. The transcript is the manager's own
+ * turn, and a helper's every command, sentence and thought drawn inline buried
+ * that turn: one scout reading a directory put thirty rows between the question
+ * he asked and the answer he was waiting for (the manager's screenshot,
+ * 2026-08-25). None of it is lost — the card in the rail says what the helper is
+ * doing this second, and the conversation opened from that card is the whole of
+ * it (§8.2.7). What stays inline is what he has to act on: {@link
+ * worthHisTranscript}.
+ *
+ * The call that sent the helper off stays too, of course: it is the chat's own
+ * row, not the helper's, and hiding it would leave the work unaccounted for.
+ *
+ * Where a kind he switched off IS the call that sent one, everything under it
+ * goes with it — hiding the call and leaving the work it spawned standing loose
+ * would read as the agent doing that work itself (bw-7ks.22.2).
  */
 export function showing(items: TranscriptItem[], off: ReadonlySet<KindId>): TranscriptItem[] {
-  if (off.size === 0) return items;
   const gone = new Set<string>();
   const kept: TranscriptItem[] = [];
   for (const item of items) {
     const sentBy =
       item.kind === 'tool' || item.kind === 'message' || item.kind === 'thinking' ? item.parentId : null;
-    const hidden = upward(kindOf(item)).some((id) => off.has(id)) || (sentBy !== null && gone.has(sentBy));
+    const hidden =
+      upward(kindOf(item)).some((id) => off.has(id)) ||
+      (sentBy !== null && gone.has(sentBy)) ||
+      sentAway(item);
     if (hidden) gone.add(item.id);
     else kept.push(item);
   }
