@@ -1,10 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-
-import { configDir } from './fixture-record';
 
 /**
  * The reader chooses which kinds of message a conversation draws.
@@ -133,54 +130,61 @@ const commandRows = (page: Page) =>
  */
 const topRows = (page: Page) => page.getByTestId('tool-row');
 
-/**
- * A hook on this run's own kit, so a chat that has said nothing still has the
- * machine talking in it.
- *
- * What the owner's chats have and a bare instance does not: his kit fires hooks
- * the moment a chat starts, and their lines are the rows that were being called
- * switched off. One echo is enough — the check is that they are HIDDEN and
- * unremarked, not what they say.
- */
-function aHookOnEveryChat(): () => void {
-  const dir = configDir();
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, 'settings.json');
-  writeFileSync(
-    path,
-    JSON.stringify({
-      hooks: {
-        SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo a hook said something' }] }],
-      },
-    }) + '\n',
-  );
-  return () => rmSync(path, { force: true });
-}
+/** A folder of this run's own, so nothing here is written into anyone's work. */
+const FIXTURE = join(__dirname, '..', '.workbench-run-filter');
+
+/** Where the hook goes: a layer above the owner's settings, touching no file of his. */
+const HOOKED = join(FIXTURE, '.claude', 'settings.json');
+
+/** One line from the machine the moment a chat starts. What it says does not matter. */
+const HOOK = {
+  hooks: {
+    SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo a hook said something' }] }],
+  },
+};
 
 /**
- * Somewhere to start a chat: whatever the instance already lists, or a
- * throwaway of this run's own where it lists none — which is what the isolated
- * stack gives, its data folder being a minute old. One it made, it takes away.
+ * Somewhere to start a chat, with the machine already talking in it.
+ *
+ * Two things this case needs that a bare instance has not got: a project at all
+ * — the isolated stack lists none, its data folder being a minute old — and a
+ * hook, because the rows that were being called switched off are what the
+ * owner's own hooks say the moment a chat starts.
+ *
+ * Both are made here, never borrowed. The hook lives in this fixture's own
+ * `.claude/settings.json`, which is the idiom chat-settings.spec.ts already
+ * uses; put in the shared `~/.claude/settings.json` instead it would overwrite
+ * the real settings of the machine running the case and then delete them
+ * outright, which is what this file's own documented command does — no
+ * CLAUDE_CONFIG_DIR, so the fallback is the owner's own directory (bw-aqpc.4).
+ * Borrowing a listed project would put the hook in his work instead, which is
+ * the same fault wearing a different coat.
  */
-async function somewhereToChat(
+async function aChatWithNothingSaidInIt(
   request: APIRequestContext,
 ): Promise<{ project: Project; done: () => Promise<void> }> {
+  rmSync(FIXTURE, { recursive: true, force: true });
+  mkdirSync(join(FIXTURE, '.claude'), { recursive: true });
+  writeFileSync(HOOKED, `${JSON.stringify(HOOK, null, 2)}\n`, 'utf8');
+  execFileSync('git', ['init', '-q', '.'], { cwd: FIXTURE, stdio: 'pipe' });
+
   const api = backend();
   const listed = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
-  if (listed.length > 0) return { project: pickProject(listed), done: async () => {} };
+  const already = listed.find((p) => p.path === FIXTURE);
+  let project = already;
+  if (!project) {
+    const made = await request.post(`${api}/api/projects`, {
+      data: { name: 'A chat with nothing said in it', path: FIXTURE },
+    });
+    expect(made.ok(), 'the instance refused a project of this run’s own').toBe(true);
+    project = { ...((await made.json()) as Project), path: FIXTURE };
+  }
 
-  const dir = mkdtempSync(join(tmpdir(), 'atelier-nothing-said-'));
-  execFileSync('git', ['init', '-q', '.'], { cwd: dir, stdio: 'pipe' });
-  const made = await request.post(`${api}/api/projects`, {
-    data: { name: 'A chat with nothing said in it', path: dir },
-  });
-  expect(made.ok(), 'the instance refused a project of this run’s own').toBe(true);
-  const project = { ...((await made.json()) as Project), path: dir };
   return {
     project,
     done: async () => {
-      await request.delete(`${api}/api/projects/${project.id}`);
-      rmSync(dir, { recursive: true, force: true });
+      await request.delete(`${api}/api/projects/${project!.id}`);
+      rmSync(FIXTURE, { recursive: true, force: true });
     },
   };
 }
@@ -350,8 +354,7 @@ test.describe('choosing which kinds of message show', () => {
     // lines and the quiet start hides those before he has touched anything, so
     // the notice was speaking for the app's own choice as if it were his
     // (bw-aqpc).
-    const { project, done } = await somewhereToChat(request);
-    const noHook = aHookOnEveryChat();
+    const { project, done } = await aChatWithNothingSaidInIt(request);
     try {
       await page.goto(`/project?id=${project.id}&tab=chat`);
       await page.getByTestId('new-chat').click();
@@ -369,7 +372,6 @@ test.describe('choosing which kinds of message show', () => {
 
       await expect(page.getByTestId('nothing-showing')).toHaveCount(0);
     } finally {
-      noHook();
       await done();
     }
   });
