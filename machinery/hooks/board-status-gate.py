@@ -689,8 +689,11 @@ def spent_copies(session, root, skip=None):
     (`board_common.actor`).
     """
     sid = (session or "nosession")[:8]
-    live = {os.path.basename(path): (path, branch)
-            for path, branch in sorted(copies(root).items())}
+    # Every live copy under each folder name, because the card says only the
+    # folder (`copy_label`) and two copies can share a name (`copies`).
+    live = {}
+    for path, branch in sorted(copies(root).items()):
+        live.setdefault(os.path.basename(path), []).append((path, branch))
     # This session's own name, and — compat, until no old-style claim is open —
     # the name it would have claimed under in each copy back when the name opened
     # with the folder. Asked by name rather than read off the whole board: every
@@ -709,13 +712,28 @@ def spent_copies(session, root, skip=None):
             if not goal or goal == skip:
                 continue
             for place in where_claimed(card, who):
-                if place not in live or live[place][0] in out:
+                path, branch = one_copy(live.get(place) or [], goal)
+                if not path or path in out:
                     continue
                 if goal not in judged:
                     judged[goal] = spent(goal, root)
                 if judged[goal]:
-                    out[live[place][0]] = (live[place][1], goal)
+                    out[path] = (branch, goal)
     return out
+
+
+def one_copy(found, goal):
+    """Which of the copies under one folder name is this job's, or none.
+
+    A lone one is it. Of two sharing the name, the one standing on the job's own
+    branch is it, and when neither does nothing here can say which, so neither is
+    named: a removal printed for the wrong one is worse than a refusal that never
+    fires (bw-aczr.17).
+    """
+    if len(found) == 1:
+        return found[0]
+    on_branch = [(p, b) for p, b in found if b == goal]
+    return on_branch[0] if len(on_branch) == 1 else ("", "")
 
 
 def spent(goal, root):
@@ -809,7 +827,12 @@ def comments(cid, root):
         rows = json.loads(out or "[]") or []
     except Exception:
         return []
-    return [r.get("text") or "" for r in rows if isinstance(r, dict)]
+    rows = [r for r in rows if isinstance(r, dict)]
+    # Newest last by the board's own clock, not by the order the answer came in:
+    # nothing promises that order, and a step judged on the wrong note is a step
+    # closed on stale suites (bw-aczr.18). A row with no time keeps its place.
+    rows.sort(key=lambda r: str(r.get("created_at") or ""))
+    return [r.get("text") or "" for r in rows]
 
 
 def checks_proof(cid, root, here):

@@ -50,7 +50,9 @@ ROOT = project.root(os.getcwd())
 HERE_TREE = os.getcwd()
 # A suite is minutes, not seconds. The board's own twenty seconds is right for a
 # hook and would kill a cargo build halfway.
-SUITE_TIMEOUT = 3600
+# An hour, unless a case asks for less: the cases prove what a hung suite becomes
+# and cannot wait an hour to do it (bw-aczr.13).
+SUITE_TIMEOUT = float(os.environ.get("MACHINERY_SUITE_TIMEOUT") or 3600)
 BD_TIMEOUT = 120
 GIT_TIMEOUT = 60
 # How much of a red suite goes onto the card. Enough to say which case broke and
@@ -262,11 +264,14 @@ def counted(name, out, ok):
     text = COLOUR.sub("", out or "")
     passed = failed = None
     if name == "npm-test":
+        # Added up over every summary line, not the last one kept: a line that
+        # runs vitest twice prints two, and the note counted one (bw-aczr.21).
         for line in VITEST.findall(text):
             good = re.search(r"(\d+)\s+passed", line)
             bad = re.search(r"(\d+)\s+failed", line)
-            passed = int(good.group(1)) if good else passed
-            failed = int(bad.group(1)) if bad else (0 if good else failed)
+            if good or bad:
+                passed = (passed or 0) + (int(good.group(1)) if good else 0)
+                failed = (failed or 0) + (int(bad.group(1)) if bad else 0)
     elif name == "cargo-test":
         rows = CARGO.findall(text)
         if rows:
@@ -313,20 +318,41 @@ def runs_dir(cid):
     return where
 
 
+def with_flag(command, flag):
+    """The command with a flag on its end, inside its brackets when it has them.
+
+    `(cd machinery && ./check)` is one command with a directory change in front of
+    it, and a flag pasted after the closing bracket is handed to the bracket, which
+    the shell refuses, and not to the check (bw-aczr.20).
+    """
+    stripped = command.rstrip()
+    if stripped.endswith(")"):
+        return stripped[:-1].rstrip() + " " + flag + ")"
+    return stripped + " " + flag
+
+
 def run_one(suite, where, log_dir):
     """Run one suite in the job's copy and write down everything it said.
 
     Through a shell, because the declared line is a shell line: `(cd server &&
     cargo test)` is brackets and a change of directory before it is a command.
     """
-    run = subprocess.run(["bash", "-c", suite.command], cwd=where,
-                         capture_output=True, text=True, timeout=SUITE_TIMEOUT)
-    out = (run.stdout or "") + (run.stderr or "")
+    try:
+        run = subprocess.run(["bash", "-c", suite.command], cwd=where,
+                             capture_output=True, text=True, timeout=SUITE_TIMEOUT)
+        out, ok = (run.stdout or "") + (run.stderr or ""), run.returncode == 0
+    except subprocess.TimeoutExpired as hung:
+        # A suite that ran past the hour is a red suite, written down as one: left
+        # uncaught this killed the tool before any note was written (bw-aczr.13).
+        out = "".join(part.decode(errors="replace") if isinstance(part, bytes)
+                      else (part or "") for part in (hung.stdout, hung.stderr))
+        out += "\n%s ran past %d seconds and was stopped\n" % (suite.name, SUITE_TIMEOUT)
+        ok = False
     log = os.path.join(log_dir, suite.name + ".log")
     with open(log, "w") as fh:
         fh.write("$ %s\n\n%s" % (suite.command, out))
-    passed, failed = counted(suite.name, out, run.returncode == 0)
-    return {"name": suite.name, "command": suite.command, "ok": run.returncode == 0,
+    passed, failed = counted(suite.name, out, ok)
+    return {"name": suite.name, "command": suite.command, "ok": ok,
             "out": out, "log": log, "passed": passed, "failed": failed}
 
 
@@ -426,7 +452,7 @@ def main():
     for suite in picked:
         if (landed and suite.name == "machinery-check"
                 and "--faults" not in suite.command and "--no-faults" not in suite.command):
-            suite.command += " --faults"
+            suite.command = with_flag(suite.command, "--faults")
             why[suite.name] += ", and the branch already landed, so the fault sweep " \
                                "is asked for outright"
 

@@ -129,7 +129,13 @@ def job_of(cid):
     step and a work item both carry that label, and a goal carries none because
     there is nothing above it to name.
     """
-    card = running.card(cid, ROOT) or {}
+    card = running.card(cid, ROOT)
+    if card is None:
+        # Not a card with no label: read as one, a board hiccup landed against the
+        # card's own id and closed nothing, with nothing said (bw-aczr.16).
+        sys.exit("the board did not answer for %s, so nothing can say which job this "
+                 "landing is for. Try again, and if the board is down that is the "
+                 "thing to fix first." % cid)
     return next((l[3:] for l in card.get("labels") or [] if l.startswith("of:")), cid)
 
 

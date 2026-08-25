@@ -24,6 +24,8 @@ BD_CALL = re.compile(r"(^|[;&|(]\s*|\bxargs\s+)bd(\s)", re.M)
 CLAIM = re.compile(r"\bbd\b[^|;&\n]*\bupdate\b[^|;&\n]*--claim(?![\w-])", re.M)
 # A line that moves a card the board may already hold under an older name.
 MOVES = re.compile(r"\bbd\b[^|;&\n]*\b(?:close|reopen|heartbeat|update)\b", re.M)
+# Where a board line stops naming cards and starts explaining itself.
+PROSE = re.compile(r"\s--?(?:reason|notes|append-notes|description|title|d|m)\b")
 
 
 def under(cmd, session_id, cwd):
@@ -42,7 +44,10 @@ def under(cmd, session_id, cwd):
     root = bc.board_root(cwd)
     named = re.compile(r"\b(?:%s)-[0-9a-z.-]{2,16}\b"
                        % "|".join(re.escape(p) for p in bc.prefixes(root)))
-    ids = set(named.findall(cmd))
+    # Only the ids the line moves, not the ones its reason mentions: a close whose
+    # reason named an older card still held under a compat name was stamped with
+    # that stale name, and the board refused it (bw-aczr.15).
+    ids = set(named.findall(PROSE.split(cmd, 1)[0]))
     if not ids:
         return fresh
     for who, cards in sorted((bc.holders(session_id, root) or {}).items()):
@@ -69,21 +74,19 @@ def main():
     if bc.reviewing() or not BD_CALL.search(cmd):
         return
     lines = cmd.split("\n")
-    # One stamp per line, so a second board command below the first is not left
-    # running under the machine name every session shares.
-    board = [l for l in lines if BD_CALL.search(l)]
     # The directory the command runs in, not the one the session was started in:
     # that is the copy the claim records, and a session reaches a copy by moving
     # into it as often as by being started there.
     here = bc.where(data)
-    name = under(cmd, data.get("session_id"), here) \
-        if any("--actor" not in l for l in board) else ""
     label = bc.copy_label(here)
-    stamp = lambda m: "%sbd --actor %s%s" % (m.group(1), name, m.group(2))
     out = []
     for line in lines:
         if BD_CALL.search(line):
             if "--actor" not in line:
+                # Named line by line: one line closing a card held under a compat
+                # name must not rename the line under it (bw-aczr.15).
+                name = under(line, data.get("session_id"), here)
+                stamp = lambda m, n=name: "%sbd --actor %s%s" % (m.group(1), n, m.group(2))
                 line = BD_CALL.sub(stamp, line)
             line = with_copy(line, label)
         out.append(line)

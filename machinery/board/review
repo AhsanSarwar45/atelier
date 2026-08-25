@@ -372,7 +372,13 @@ def parse(text):
 # one sentence and nothing else: "You've hit your session limit · resets 9pm
 # (Asia/Karachi)". Read loosely all the same, because the wording belongs to the
 # account and not to us, and a shape nobody here has seen yet still has to stop
-# the retry.
+# the retry. The loose second branch matches "rate limit" wherever it stands, and
+# that is deliberate (bw-aczr.19): it is only ever asked of an answer under
+# SPENT_MAX characters that did not parse, since a reading always parses first,
+# in `attempts` and in `answered`. The cost of taking such an answer for the
+# account's refusal is one rerun by hand, while the cost of missing a refusal in
+# a wording nobody has seen is a second reader fired to be told the same thing
+# and the job written up as broken (bw-aczr.7).
 SPENT = re.compile(r"(?:hit|reached|exceeded)\b[^.\n]{0,40}?\blimit\b"
                    r"|\b(?:session|usage|rate|quota|account)\s+limits?\b"
                    r"|\blimits?\s+(?:reached|exceeded)\b", re.I)
@@ -685,7 +691,19 @@ def main():
     # it is filed the way anything the reader raises is filed — and the reader is
     # still sent, told which suite went red, so one broken suite does not cost the
     # job its reading (bw-aczr.4).
-    suites_ran = ran_checks(goal_id)
+    try:
+        suites_ran = ran_checks(goal_id)
+    except Exception as why:
+        # The line breaking, as against a suite on it going red, is not a fault of
+        # the job, and left uncaught it killed the reader before it read or wrote
+        # anything, so the job stood shut with no note saying why (bw-aczr.14).
+        suites_ran = None
+        bd(["update", goal_id, "--append-notes",
+            "The project's checks line could not be run before this reading (%s: %s), "
+            "so the reader read a tree whose suites nobody has run. The reading went "
+            "ahead; run the project's checks tool with --all in the job's copy to see "
+            "the suites' answer." % (type(why).__name__, why)],
+           actor=actor, must=False)
     if suites_ran and suites_ran["red"]:
         file_findings(goal_id, [checks_finding(suites_ran)])
     # Asked of the goal as it stands before this reading signs, so the count is of

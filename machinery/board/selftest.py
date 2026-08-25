@@ -3485,6 +3485,28 @@ def main():
         assert "nothing left to build in it" in labelled and "tst-old" in labelled, \
             "the abandoned copy was not found from the `copy:` label the claim " \
             "wrote onto the card: %s" % (labelled or "ALLOWED")
+        # Two copies under one folder name, which the card cannot tell apart: the
+        # one on the job's own branch is it, and with neither on it no removal is
+        # printed for either (bw-aczr.17).
+        twin = os.path.join(tmp, ".claude", "worktrees", "second")
+        g = lambda *a: subprocess.run(["git"] + list(a), cwd=tmp, capture_output=True,
+                                      text=True, timeout=60)
+        for branch in ("tst-old", "someone-elses"):
+            g("worktree", "add", "-q", twin, "-b", branch)
+            try:
+                twinned = next_job(tmp, work_left=False, by_label=True)
+            finally:
+                g("worktree", "remove", "--force", twin)
+                g("branch", "-D", branch)
+            if branch == "tst-old":
+                assert ".claude/worktrees/second" in twinned and "/worktrees/second" \
+                    not in twinned.replace(".claude/worktrees/second", ""), \
+                    "of two copies named alike, the refusal named the one on some " \
+                    "other branch, or both: %s" % (twinned or "ALLOWED")
+            else:
+                assert twinned == "", \
+                    "of two copies named alike with neither on the job's branch, a " \
+                    "removal was printed for one of them anyway: %s" % twinned
 
         part = next_job(tmp, work_left=True, half=True)
         assert part == "", \
@@ -6228,6 +6250,21 @@ def main():
     assert ("--actor %s update" % my_name) in other, \
         "one old claim renamed every board command the session goes on to make: " \
         "%s" % other
+    # The card a reason mentions is not the card the line closes: one old card
+    # named in a reason renamed the close of a card held under the new name, and
+    # the board refused it. And two lines are named one at a time (bw-aczr.15).
+    mentioned = stamp('%s close tst-new.2 --reason="follows on from tst-new.1"' % "bd",
+                      holds={"main-" + my_sid[:8]: ["tst-new.1"]})
+    assert ("--actor %s close" % my_name) in mentioned, \
+        "a close whose reason mentions a card held under the old name was made under " \
+        "that name, which the board refuses for the card it closes: %s" % mentioned
+    both = stamp('%s close tst-new.1 --reason="done"\n%s close tst-new.2 --reason="done"'
+                 % ("bd", "bd"), holds={"main-" + my_sid[:8]: ["tst-new.1"]})
+    first, second = both.split("\n")
+    assert ("--actor main-%s close" % my_sid[:8]) in first \
+        and ("--actor %s close" % my_name) in second, \
+        "two closes on one command were both made under one name, so one of them " \
+        "is refused whichever name that was: %s" % both
 
     # And that old name still reads as this session's own, so the gates that ask
     # what it is holding do not take its own card for somebody else's.
@@ -6252,7 +6289,8 @@ def main():
     print("ok: one session works under one board name wherever it stands, a claim "
           "writes the copy it was made in onto the card, a card claimed in the "
           "shared tree closes from the job's own copy, and a card still held under "
-          "the name it was claimed with before is closed under that name")
+          "the name it was claimed with before is closed under that name, by the "
+          "card each line closes and not by the ones its reason mentions")
 
     # Landing in one command, and the one thing worse than the four turns it
     # replaces: a slot nobody holds and nobody can take (mch-aa9).
@@ -6351,6 +6389,20 @@ def main():
     assert a_child["closed"] == [], \
         "a landing closed tst-j.1 on a commit naming only its child tst-j.1.2, " \
         "because the dot after the id read as the end of it: %s" % a_child["closed"]
+    # A board that did not answer is not a card with no `of:` label: read as one,
+    # the landing went against the card's own id and closed nothing (bw-aczr.16).
+    land = script("land")
+    was_card, land.running.card = land.running.card, lambda cid, root: None
+    said = ""
+    try:
+        land.job_of("tst-j.3")
+    except SystemExit as stop:
+        said = str(stop)
+    finally:
+        land.running.card = was_card
+    assert "did not answer" in said, \
+        "the board was down and the landing read that as a card that is its own " \
+        "job, or said something else: %r" % said
     assert landing_closes(commits=[JOB_COMMITS[0]])["closed"] == ["tst-j.1"], \
         "a landing closed an item no commit of it named, or missed one it did"
     assert landing_closes(commits=[JOB_COMMITS[0]])["still_open"] == ["tst-j.2"], \
@@ -7267,9 +7319,9 @@ def main():
                 git_here("merge", "-q", "--ff-only", "mine")
             return tmp
 
-        def picks(files, *said, before=(), landed=""):
+        def picks(files, *said, before=(), landed="", says=DECLARED):
             """Which suites the tool would run for a branch that changed these files."""
-            tmp = branch_that_changed(files, before=before, landed=landed)
+            tmp = branch_that_changed(files, says=says, before=before, landed=landed)
             try:
                 out = subprocess.run([sys.executable, CHECKS_TOOL, "--dry"] + list(said),
                                      cwd=tmp, capture_output=True, text=True, timeout=120)
@@ -7310,6 +7362,14 @@ def main():
             "sweep: %s" % after
         assert "npm-test" not in after, \
             "a landed job that never touched the screen was handed npm: %s" % after
+        # A suite declared inside brackets is one command with a directory change
+        # in front of it, and its flag has to land inside the brackets (bw-aczr.20).
+        bracket = picks(["machinery/board/spine.py"], "tst-c.3", landed="tst-c.1",
+                        says=DECLARED.replace("machinery/check",
+                                              "(cd machinery && ./check)"))
+        assert "./check --faults)" in bracket and ") --faults" not in bracket, \
+            "a machinery suite declared inside brackets was handed the fault sweep's " \
+            "flag outside them, which the shell refuses: %s" % bracket
         whole = picks(["README.md"], "--all")
         for name in ("npm-test", "cargo-test", "machinery-check"):
             assert name in whole, \
@@ -7317,15 +7377,20 @@ def main():
 
         print("ok: the checks step runs the suites the branch actually changed, the prose "
               "check alone when a branch touched none of them, all of them when asked, "
-              "and says so before it runs any")
+              "says so before it runs any, and hands a bracketed suite its flag inside "
+              "the brackets")
 
 
         # What the tool writes on the card, which is the whole of what the close gate
         # has to go on. The suites are two scripts that print what vitest and cargo
         # print, because the case is about the line the gate reads and the real ones
         # are minutes. The board is a script that writes down what it was asked.
-        def ran(*suites):
-            """(what the tool said, what it asked the board, what the note says, the tree)."""
+        def ran(*suites, **extra):
+            """(what the tool said, what it asked the board, what the note says, the tree).
+
+            `extra` goes into the tool's environment, for the case that cannot wait
+            an hour to see what a hung suite becomes.
+            """
             tmp = branch_that_changed(["src/app/page.tsx"])
             elsewhere = os.path.join(tmp, "bin")
             asked = os.path.join(tmp, "asked.jsonl")
@@ -7341,7 +7406,7 @@ def main():
                     + sum([["--suites", s] for s in suites], []),
                     cwd=tmp, capture_output=True, text=True, timeout=300,
                     env=dict(os.environ, PATH=elsewhere + os.pathsep + os.environ["PATH"],
-                             CLAUDE_CODE_TMPDIR=tmp))
+                             CLAUDE_CODE_TMPDIR=tmp, **extra))
                 rows = [json.loads(l) for l in open(asked)] if os.path.exists(asked) else []
                 wrote = next((r for r in rows if r[:2] == ["comments", "add"]), [])
                 tree = subprocess.run(["git", "write-tree"], cwd=tmp, capture_output=True,
@@ -7379,6 +7444,25 @@ def main():
         assert not any(r[:1] == ["close"] for r in rows), \
             "a red suite still closed the checks step: %s" % rows
 
+        # A suite that hung used to kill the tool an hour in with nothing written, so
+        # the step read as never run (bw-aczr.13); and a line that ran vitest twice
+        # printed two summaries, of which the note kept the last (bw-aczr.21).
+        out, rows, wrote, tree = ran("npm-test=sleep 3", MACHINERY_SUITE_TIMEOUT="1")
+        assert out.returncode == 1 and "Traceback" not in out.stderr, \
+            "a suite that ran past its time killed the tool instead of being written " \
+            "down as red: %s" % (out.stdout + out.stderr)
+        assert wrote.splitlines()[0] == "checks: tree %s npm-test=0/1" % tree \
+            and "ran past 1 seconds" in wrote, \
+            "a suite stopped for running past its time was not written down as a red " \
+            "suite that says so: %r" % wrote
+        assert not any(r[:1] == ["close"] for r in rows), \
+            "a suite stopped for running too long still closed the step: %s" % rows
+        out, rows, wrote, tree = ran("npm-test=echo 'Tests  400 passed (400)' "
+                                     "&& echo 'Tests  12 passed (12)'")
+        assert wrote.splitlines()[0] == "checks: tree %s npm-test=412/0" % tree, \
+            "a line that ran vitest twice was written down with the second run's " \
+            "count alone: %r" % wrote.splitlines()[0]
+
         # A board that will not answer used to read as a session holding nothing,
         # which sent whoever ran the tool to name a card that was open all along.
         tmp = branch_that_changed(["src/app/page.tsx"])
@@ -7403,8 +7487,10 @@ def main():
             "checks step: %s" % down.stderr
 
         print("ok: the checks tool writes the tree it ran over and every suite's count "
-              "onto the card, closes the step only when they are all green, and says "
-              "when the board would not answer instead of calling that no step")
+              "onto the card, adds up a suite that printed two counts, writes a suite "
+              "stopped for running too long down as red, closes the step only when "
+              "they are all green, and says when the board would not answer instead "
+              "of calling that no step")
 
 
         # And the other side of that note: the close gate reads it back and asks it
@@ -7425,7 +7511,8 @@ def main():
 
             A throwaway checkout with a board in it, because the gate asks git for the
             tree standing where the command was typed and a recorder for that would
-            pass whatever the proof did.
+            pass whatever the proof did. A note is its text, or `(text, created_at)`
+            for the case about the board's clock.
             """
             tmp = tempfile.mkdtemp(prefix="board-checks-")
             try:
@@ -7442,8 +7529,11 @@ def main():
                         return True, json.dumps(CHECKS_STEP if args[1] == "tst-c.3"
                                                 else {"id": args[1], "labels": []})
                     if args[0] == "comments":
-                        return True, json.dumps([{"text": t % {"tree": tree}}
-                                                 for t in notes])
+                        return True, json.dumps([
+                            dict({"text": (t[0] if isinstance(t, tuple) else t)
+                                  % {"tree": tree}},
+                                 **({"created_at": t[1]} if isinstance(t, tuple) else {}))
+                            for t in notes])
                     return True, "[]"
 
                 status.bc.bd = recorder
@@ -7493,20 +7583,31 @@ def main():
         assert "red" in said, \
             "the suites went green, ran again on the same tree and went red, and the " \
             "gate judged the older note and let the step close: %r" % said
+        # Newest by the board's own clock, not by the order the rows came back in,
+        # which nothing promises (bw-aczr.18).
+        said = closing_checks([(GREEN_NOTE, "2026-08-25T10:00:00Z"),
+                               ("checks: tree %(tree)s npm-test=9/3",
+                                "2026-08-25T09:00:00Z")])
+        assert said == "", \
+            "the newer note was green and the gate judged the older red one because " \
+            "the board handed that one back last: %r" % said
 
         print("ok: a checks step closes on a note naming the tree standing in front of "
-              "it with every suite green, and on nothing else")
+              "it with every suite green, newest by the board's clock, and on nothing "
+              "else")
 
 
         # The reader used to be sent at trees whose suites nobody had run since the
         # middle of the work. So the whole declared line runs once in front of it, and
         # a suite that is red there becomes a piece of the job rather than a sentence
         # in a verdict nobody can act on.
-        def reader_checks(green):
-            """What the reader's own run of the line files, and what the reader is told.
+        def reader_checks(green, broken=False):
+            """What the reader's own run of the line files, what the reader is told,
+            and what was asked of the board.
 
             The line is two scripts in a throwaway checkout: the real one is minutes of
-            npm and cargo, and this case is about what a red suite becomes.
+            npm and cargo, and this case is about what a red suite becomes. `broken`
+            is a line that will not run at all, which is not the same thing.
             """
             rv = script("review")
             tmp = tempfile.mkdtemp(prefix="board-reader-")
@@ -7519,17 +7620,23 @@ def main():
             for args in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t",
                                          "commit", "-q", "-m", "base"]):
                 subprocess.run(["git"] + args, cwd=tmp, capture_output=True, timeout=60)
-            filed, prompts = [], []
+            filed, prompts, asked = [], [], []
 
             def reads(prompt, actor, goal_id):
                 prompts.append(prompt)
                 raise Reached()
 
+            def breaks(goal_id):
+                raise OSError("the checks tool would not run")
+
             goal = dict(GOAL, status="in_progress", notes="")
             rv.ROOT = tmp
             was = rv.DECL.checks
             rv.DECL.checks = "./greensuite" if green else "./greensuite && ./redsuite"
-            rv.bd = lambda args, actor=None, must=True: json.dumps(goal)
+            rv.bd = lambda args, actor=None, must=True: (asked.append(args),
+                                                         json.dumps(goal))[1]
+            if broken:
+                rv.ran_checks = breaks
             rv.changes = lambda shas, goal_id: ([], "")
             rv.run_log = lambda goal_id: tmp
             rv.run_reviewer = reads
@@ -7556,9 +7663,9 @@ def main():
                     os.environ["CLAUDE_CODE_TMPDIR"] = keep_tmp
                 inflight.clear("g")
                 shutil.rmtree(tmp, ignore_errors=True)
-            return filed, (prompts[0] if prompts else "")
+            return filed, (prompts[0] if prompts else ""), asked
 
-        filed, prompt = reader_checks(green=False)
+        filed, prompt, _ = reader_checks(green=False)
         assert len(filed) == 1, \
             "a suite went red in front of the reader and the job was handed %d piece(s) " \
             "of work about it: %s" % (len(filed), filed)
@@ -7576,15 +7683,29 @@ def main():
             "the reader was not told which suite went red or that it is already filed, " \
             "so the same fault arrives twice: %s" % prompt
 
-        filed, prompt = reader_checks(green=True)
+        filed, prompt, _ = reader_checks(green=True)
         assert filed == [], \
             "a green line still filed work onto the job: %s" % filed
         assert "green" in prompt and "greensuite=ran ok" in prompt, \
             "the reader is not told the line ran green over the tree it is reading: %s" \
             % prompt
 
+        # The line breaking is not a suite going red: it used to kill the reader
+        # before it read anything, and the job stood shut with no note (bw-aczr.14).
+        filed, prompt, asked = reader_checks(green=True, broken=True)
+        assert prompt, \
+            "the checks line broke in front of the reader and the job lost its " \
+            "reading altogether, with nothing on the card to say why"
+        assert filed == [], \
+            "a checks line that would not run was filed as the job's own fault: %s" % filed
+        noted = [a for a in asked if a[:2] == ["update", "g"] and "--append-notes" in a]
+        assert noted and "could not be run" in noted[0][-1] and "OSError" in noted[0][-1], \
+            "the checks line broke in front of the reader and the goal was not told " \
+            "what broke: %s" % asked
+
         print("ok: the reader runs this project's own checks line first, files a red "
-              "suite as the job's own work, and reads the change either way")
+              "suite as the job's own work, reads the change either way, and says on "
+              "the goal when the line itself would not run")
 
     finally:
         subprocess.run = pretending

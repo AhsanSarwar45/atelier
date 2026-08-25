@@ -53,6 +53,7 @@ LAND = "board/land"
 READING = "board/reading.py"
 REVIEW = "board/review"
 CHECKS = "checks"
+ACTOR = "hooks/board-actor.py"
 JOIN = "join"
 DECL = "project.py"
 
@@ -748,6 +749,35 @@ FAULTS = [
     ("a board that did not answer reads as a session holding nothing", CHECKS,
      lambda s: s.replace('    mine = bc.held(actor, ROOT, session_id)\n',
                          '    mine = bc.held(actor, ROOT, session_id) or []\n')),
+    ("a suite that ran past its hour kills the tool with nothing written", CHECKS,
+     lambda s: s.replace('    except subprocess.TimeoutExpired as hung:\n',
+                         '    except subprocess.TimeoutExpired as hung:\n        raise\n')),
+    ("the last of two vitest summaries is the one the note counts", CHECKS,
+     lambda s: s.replace(
+         '                passed = (passed or 0) + (int(good.group(1)) if good else 0)\n',
+         '                passed = int(good.group(1)) if good else passed\n')),
+    ("the fault sweep's flag lands outside a bracketed command", CHECKS,
+     lambda s: s.replace('            suite.command = with_flag(suite.command, "--faults")\n',
+                         '            suite.command += " --faults"\n')),
+    ("a checks line that breaks kills the reader before it reads", REVIEW,
+     lambda s: s.replace('        suites_ran = None\n        bd(["update", goal_id, "--append-notes",\n',
+                         '        raise\n        bd(["update", goal_id, "--append-notes",\n')),
+    ("a close is named by every card its reason mentions", ACTOR,
+     lambda s: s.replace('    ids = set(named.findall(PROSE.split(cmd, 1)[0]))\n',
+                         '    ids = set(named.findall(cmd))\n')),
+    ("one line's compat name stamps every line under it", ACTOR,
+     lambda s: s.replace('                name = under(line, data.get("session_id"), here)\n',
+                         '                name = under(cmd, data.get("session_id"), here)\n')),
+    ("a board that did not answer reads as a card with no job", LAND,
+     lambda s: s.replace('    card = running.card(cid, ROOT)\n    if card is None:\n',
+                         '    card = running.card(cid, ROOT) or {}\n    if card is None:\n')),
+    ("the board's rows are judged in the order they came back", CLOSE,
+     lambda s: s.replace('    rows.sort(key=lambda r: str(r.get("created_at") or ""))\n',
+                         '    pass\n')),
+    ("of two copies sharing a name, the last is the job's", CLOSE,
+     lambda s: s.replace('    on_branch = [(p, b) for p, b in found if b == goal]\n'
+                         '    return on_branch[0] if len(on_branch) == 1 else ("", "")\n',
+                         '    return found[-1]\n')),
 ]
 
 
