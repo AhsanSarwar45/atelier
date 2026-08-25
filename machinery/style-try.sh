@@ -26,8 +26,9 @@ PY
 )")
 fi
 
-OUT=$(mktemp -d)
-trap 'rm -rf "$OUT"' EXIT
+RUNS="${STYLE_TRY_RUNS:-$HOME/.cache/atelier/style-runs}"
+OUT="$RUNS/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$OUT"
 
 declare -a TASKS=(
 "Run no tools. You just finished this work; report it to your manager in chat. You cached the test fixture load and the suite went from 46 seconds to 8. Two tests still fail on Windows because of a path separator. You also noticed the CI pins an old Node version, which you did not fix."
@@ -41,9 +42,11 @@ for i in "${!TASKS[@]}"; do
   for s in "${STYLES[@]}"; do
     # No tools. These are writing tests, and a test agent that can reach the
     # board files real cards off a made-up scenario. One did: bw-n6wq, cancelled.
-    timeout 240 claude -p --settings "{\"outputStyle\":\"$s\"}" \
-      --disallowedTools "Bash,Edit,Write,Read,Glob,Grep,Agent,Task,NotebookEdit,WebFetch,WebSearch" \
-      "${TASKS[$i]}" \
+    # The task goes in on stdin: --disallowedTools keeps eating words after it,
+    # so a prompt written after the flag is read as a list of tool names.
+    printf '%s' "${TASKS[$i]}" | timeout 240 claude -p \
+      --settings "{\"outputStyle\":\"$s\"}" \
+      --disallowedTools Bash Edit Write Read Glob Grep Agent Task NotebookEdit WebFetch WebSearch \
       > "$OUT/$i.$s.txt" 2>&1 &
   done
 done
@@ -56,4 +59,19 @@ for i in "${!TASKS[@]}"; do
     cat "$OUT/$i.$s.txt"
   done
 done
+
+# Where the replies sit between real recorded conversation and academic prose,
+# on Biber's (1988) published scale. See style-score.py.
+printf '\n\033[1m\u2550\u2550\u2550\u2550 how it reads \u2550\u2550\u2550\u2550\033[0m\n'
+mkdir -p "$OUT/score"
+for s in "${STYLES[@]}"; do cat "$OUT"/*."$s".txt > "$OUT/score/$s.txt"; done
+# Real conversation and academic prose go in alongside, so the scale is visible.
+cp "$(dirname "$0")/style-controls/"CONTROL-*.txt "$OUT/score/"
+"$(dirname "$0")/style-score.py" "$OUT/score"
+printf '  replies kept in %s\n' "$OUT"
+
+# The three habits the manager named by hand. A guardrail, never the metric:
+# it says whether a rewrite moved those habits, not whether it sounds human.
+for s in "${STYLES[@]}"; do cp "$OUT/score/$s.txt" "$OUT/all.$s"; done
+"$(dirname "$0")/style-count.py" "$OUT" "${STYLES[@]}"
 printf '\n'
