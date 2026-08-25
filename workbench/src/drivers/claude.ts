@@ -30,6 +30,7 @@ import {
 import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
+import { rawTitle, toolTitle, whileItRuns } from '../../../src/workbench/said-what-it-ran.ts';
 import { fullness, WINDOW, windowNamed } from '../../../src/workbench/context-window.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
@@ -724,17 +725,6 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
   }
 }
 
-/** One line naming what a tool call is about to do, for the feed and the card. */
-export function toolTitle(name: string, input: Record<string, unknown>): string {
-  const p = (input.file_path ?? input.path ?? input.notebook_path) as string | undefined;
-  if (p) return `${name} ${p.split('/').slice(-2).join('/')}`;
-  const cmd = input.command as string | undefined;
-  if (cmd) return `${name} ${cmd.slice(0, 60)}`;
-  const pattern = (input.pattern ?? input.query) as string | undefined;
-  if (pattern) return `${name} ${pattern.slice(0, 60)}`;
-  return name;
-}
-
 export class ClaudeDriver implements Driver {
   private emit!: (e: DriverEvent) => void;
   private q: ReturnType<typeof query> | null = null;
@@ -1408,17 +1398,24 @@ export class ClaudeDriver implements Driver {
         this.agentAsking.set(askId, asker.agentId);
         this.agentState(asker.agentId, 'waiting');
       }
+      // Cut where the call's own arguments and its output are cut. The card
+      // for a Write carries the whole file, one method away from the cap
+      // bw-1u1.33 put on the same bytes — and every chat in the asking mode
+      // is the ones that pays it. The kit is still ANSWERED with the whole
+      // input: `this.asks` above keeps it (bw-1u1.42).
+      //
+      const shown = trimInput(input);
       this.emit({
         type: 'ask.permission',
         askId,
         toolName,
-        // Cut where the call's own arguments and its output are cut. The card
-        // for a Write carries the whole file, one method away from the cap
-        // bw-1u1.33 put on the same bytes — and every chat in the asking mode
-        // is the ones that pays it. The kit is still ANSWERED with the whole
-        // input: `this.asks` above keeps it (bw-1u1.42).
-        input: trimInput(input),
-        title: toolTitle(toolName, input),
+        input: shown,
+        // The one place that does NOT get the English sentence. A reader being
+        // asked whether to allow something is entitled to the literal text that
+        // will run: `rm -rf dist` and `rm -rf /` are one sentence and two very
+        // different commands, and a summary is exactly the wrong thing on the
+        // screen where the detail decides the answer (bw-7ks.24.6).
+        title: rawTitle(toolName, shown),
         options: [
           { id: 'allow_once', label: 'Allow once', kind: 'allow_once' },
           { id: 'allow_always', label: 'Allow always', kind: 'allow_always' },
@@ -1884,20 +1881,26 @@ export class ClaudeDriver implements Driver {
               this.parentOfCall.set(String(b.id), sentBy);
             }
             this.liveTools.set(b.id, b.name);
+            // Trimmed for the row and for the log; the whole of it still goes
+            // to the diff and the checklist below (bw-1u1.33). The title is
+            // said off the trimmed copy on purpose — the browser has only that
+            // copy, and the two have to arrive at the same sentence from it
+            // (bw-7ks.24.6).
+            const shown = trimInput(input);
             this.emit({
               type: 'tool.started',
               toolCallId: b.id,
               name: b.name,
-              // Trimmed for the row and for the log; the whole of it still goes
-              // to the diff, the checklist and the title below (bw-1u1.33).
-              input: trimInput(input),
-              title: toolTitle(b.name, input),
+              input: shown,
+              title: toolTitle(b.name, shown),
               // Subagent attribution rides on the MESSAGE, not the block.
               parentToolCallId: m.parent_tool_use_id ?? null,
             });
             this.emitDiff(b.id, b.name, input);
             this.applyChecklistCall(b.id, b.name, input);
-            this.emit({ type: 'session.state', state: 'running_tool', label: toolTitle(b.name, input) });
+            // The line under the last message is read WHILE this runs, so it says
+            // "Running the tests" rather than the row's own past tense.
+            this.emit({ type: 'session.state', state: 'running_tool', label: whileItRuns(toolTitle(b.name, shown)) });
           }
         }
         break;

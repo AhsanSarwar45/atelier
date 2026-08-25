@@ -362,6 +362,23 @@ export type PastEntry =
  */
 export const KEPT = 4000;
 
+/**
+ * How much of a command's own text is kept, which is far more than the rest.
+ *
+ * Every other body on a row is there to be read, and a reader who wants the
+ * remaining fifty kilobytes of a printout does not want them here. A command is
+ * different: it is what the row's SENTENCE is made of, so a delete sitting past
+ * the cut is a delete nothing downstream can name, on either side.
+ *
+ * Measured over the 69,017 commands in this machine's own record: 497 run past
+ * `KEPT`, 351 of those would be said differently from the cut than from the
+ * whole, and 7 lose the fact that they delete something. Cutting the head and
+ * the tail instead saves 1 of those 7 — the deletes sit in the middle of long
+ * scripts. At 20,000 characters none are lost, and one command in 69,017 is
+ * still longer than this (bw-7ks.24.6).
+ */
+export const COMMAND_KEPT = 20_000;
+
 /** Cut to `KEPT`, saying how much was left out rather than trailing off. */
 export function cut(text: string, kept = KEPT): string {
   return text.length > kept ? `${text.slice(0, kept)}\n… and ${text.length - kept} more characters` : text;
@@ -378,13 +395,13 @@ export function cut(text: string, kept = KEPT): string {
  * `depth` is a guard against a value that refers to itself, nothing more.
  */
 export function trimInput(input: Record<string, unknown>, depth = 4): Record<string, unknown> {
-  const small = (value: unknown, left: number): unknown => {
-    if (typeof value === 'string') return cut(value);
+  const small = (value: unknown, left: number, under: string): unknown => {
+    if (typeof value === 'string') return cut(value, under === 'command' ? COMMAND_KEPT : KEPT);
     if (left <= 0 || value === null || typeof value !== 'object') return value;
-    if (Array.isArray(value)) return value.map((v) => small(v, left - 1));
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, small(v, left - 1)]));
+    if (Array.isArray(value)) return value.map((v) => small(v, left - 1, under));
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, small(v, left - 1, k)]));
   };
-  return small(input, depth) as Record<string, unknown>;
+  return small(input, depth, '') as Record<string, unknown>;
 }
 
 /**

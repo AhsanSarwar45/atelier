@@ -151,7 +151,10 @@ describe('a chat a terminal is working in', () => {
 
     const started = of(chat.id, 'tool.started');
     expect(started.map((e) => (e as unknown as { toolCallId: string }).toolCallId)).toEqual([CALL]);
-    expect((started[0] as unknown as { title: string }).title).toContain('npm test');
+    // In English rather than in shell, which is the whole of bw-7ks.24. The
+    // row settles into the past tense; the line under it says `Running the
+    // tests` while it is still going.
+    expect((started[0] as unknown as { title: string }).title).toBe('Ran the tests');
     // Nothing came back yet, so nothing says it is over.
     expect(of(chat.id, 'tool.completed')).toEqual([]);
 

@@ -30,6 +30,8 @@ import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
 import { PictureGrid } from '@/workbench/picture-grid';
+import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
+import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
 import { ReportCard } from '@/workbench/report-view';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
@@ -368,6 +370,19 @@ export const ToolRow = memo(function ToolRow({
   const asked = shell ? String(item.input.command) : whatItWasAsked(item.input);
   const tongue = languagesOf(item.name, item.input);
   const hasBody = asked !== '' || Boolean(item.output?.trim());
+  // What the call did, said in English behind a mark for the kind of thing it
+  // was. A command no rule knows keeps the words it was typed in, and that is
+  // the only shell text left on a closed row (bw-7ks.24).
+  const ran = whatItRan(item.name, item.input);
+  const Mark = ran && markOfRan(ran.kind);
+  // A chain that deletes something is red whatever else it mostly did: the
+  // sentence names the delete, and the mark must not say `test` in amber while
+  // it does (bw-7ks.24.2).
+  const mark = ran && (ran.grave ? colourOfBand('deleting') : lookOfRan(ran.kind).mark);
+  // The sentences are written for a finished row, so they are in the past. A
+  // row with a spinner on it has not finished, and "Ran the tests" beside a
+  // spinner says the opposite of the spinner (bw-7ks.24.6).
+  const says = ran && (item.status === 'running' ? whileItRuns(ran.said) : ran.said);
 
   return (
     <div
@@ -377,6 +392,9 @@ export const ToolRow = memo(function ToolRow({
       data-tool-id={item.id}
       data-tool-status={item.status}
       data-tool-name={item.name}
+      data-ran-kind={ran?.kind}
+      data-ran-band={ran ? lookOfRan(ran.kind).band : undefined}
+      data-grave={ran?.grave ? 'yes' : undefined}
       data-open={open}
       className={cn(nested && SENT_OFF)}
     >
@@ -392,13 +410,14 @@ export const ToolRow = memo(function ToolRow({
           {hasBody && (
             <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} />
           )}
+          {Mark && <Mark data-testid="tool-mark" className={cn('h-3 w-3 shrink-0', mark)} />}
           {/* The row's own line is where the reader sees an address most often
               — every command an agent runs opens with the folder it ran in — so
               the chips are here too, not only in the command behind the click.
               A span inside a button is fine; the conversation's own listener
               stops a chip's click reaching the toggle (bw-khe.13). */}
           <span className="truncate">
-            <Chipped text={item.title} />
+            <Chipped text={says ?? item.title} />
           </span>
           {/* How long it has been running, while it is running: a call that takes a
               minute must not look the same as one that took none. */}

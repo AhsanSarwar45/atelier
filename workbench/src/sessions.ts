@@ -28,7 +28,8 @@ import { HOLDER_WORD } from '../../src/workbench/chat-state.ts';
 import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
 import { type Split, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
-import { ClaudeDriver, toolTitle } from './drivers/claude.ts';
+import { ClaudeDriver } from './drivers/claude.ts';
+import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
 import { type HelperPast, helperNamed, helpersNow, helpersOf } from './helper-records.ts';
@@ -782,12 +783,15 @@ export class Sessions {
    * see the command in between (bw-jaoz.5).
    */
   private announce(sessionId: string, entry: Extract<PastEntry, { kind: 'call' }>, parent: string | null = null): void {
+    // Trimmed once, and named off the trimmed copy, so a chat read back out of
+    // the record says what a chat watched live says (bw-7ks.24.6).
+    const shown = trimInput(entry.input);
     this.publish(sessionId, {
       type: 'tool.started',
       toolCallId: entry.id,
       name: entry.name,
-      input: trimInput(entry.input),
-      title: toolTitle(entry.name, entry.input),
+      input: shown,
+      title: toolTitle(entry.name, shown),
       parentToolCallId: parent,
     });
     // A change is read off the same arguments the live watcher reads it off, so

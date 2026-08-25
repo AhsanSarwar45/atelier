@@ -77,6 +77,7 @@ import { ContextChip, TokenView } from '@/workbench/token-view';
 import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
+import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { workingLine } from '@/workbench/working-line';
 
 /** Where the "show me everything" switch is remembered between visits. */
@@ -653,7 +654,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // The call in flight, whoever is making it: our own driver's, or — since the
   // record's tail is drawn as it is written (bw-jaoz.5) — the holder's.
   const inFlight = view.items.find((it) => it.kind === 'tool' && it.status === 'running');
-  const running = inFlight?.kind === 'tool' ? inFlight : null;
+  // Said in the present, because this line is what a reader watches while the
+  // command runs, and said off the same arguments the row above it reads — so
+  // the two name the same thing in the same words (bw-7ks.24.6).
+  const running =
+    inFlight?.kind === 'tool'
+      ? {
+          title: whileItRuns(whatItRan(inFlight.name, inFlight.input)?.said ?? inFlight.title),
+          seconds: inFlight.seconds,
+        }
+      : null;
   /** The turn under the last message, in the words of whoever owes it. */
   const atWork = workingLine({
     busy,
