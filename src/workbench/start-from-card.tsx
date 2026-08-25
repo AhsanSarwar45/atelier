@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import type { Bead } from '@/types';
 import { sendCommand } from '@/workbench/use-session';
+import type { Brand } from '@/workbench/protocol';
 
 /**
  * What the agent is told. Plain prose rather than a dump of fields: the card's
@@ -41,12 +42,20 @@ interface StartFromCardProps {
 export function StartFromCard({ bead, projectId, projectPath }: StartFromCardProps) {
   const [starting, setStarting] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [brand, setBrand] = useState<Brand>('claude');
   const router = useRouter();
 
   if (!projectId || !projectPath) return null;
 
   return (
     <div className="mt-6">
+      <div className="mb-2 flex gap-2" role="group" aria-label="Coding agent">
+        {(['claude', 'codex'] as const).map((choice) => (
+          <Button key={choice} size="sm" variant={brand === choice ? 'primary' : 'secondary'} onClick={() => setBrand(choice)}>
+            {choice === 'claude' ? 'Claude' : 'Codex'}
+          </Button>
+        ))}
+      </div>
       <Button
         size="sm"
         variant="primary"
@@ -61,7 +70,7 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
               type: 'session.start',
               projectId,
               projectPath,
-              brand: 'claude',
+              brand,
               brief: { beadId: bead.id, text: briefFor(bead) },
             });
             router.push(
@@ -74,7 +83,7 @@ export function StartFromCard({ bead, projectId, projectPath }: StartFromCardPro
           }
         }}
       >
-        {starting ? 'Starting…' : 'Start chat'}
+        {starting ? 'Starting…' : `Start ${brand === 'claude' ? 'Claude' : 'Codex'} chat`}
       </Button>
       {failed && (
         <p data-testid="start-chat-error" className="mt-2 text-xs text-destructive">

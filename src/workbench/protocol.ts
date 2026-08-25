@@ -590,6 +590,8 @@ export interface RestoreRow {
  */
 export interface SessionFacts {
   sessionId: string;
+  /** The immutable coding-agent implementation that owns this conversation. */
+  brand: Brand;
   /**
    * The brand's own id for this conversation, which is what says whether the
    * chat on the screen is one of the ones a live process is holding — the

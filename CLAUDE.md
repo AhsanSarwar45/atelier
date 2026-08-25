@@ -24,6 +24,15 @@ Atelier is a visual Kanban board and multi-project dashboard for beads task trac
 
 **Beads = single source of truth.** Every task, bug, tech debt, and follow-up goes into beads. Context gets compacted. Beads persist. See `.claude/rules/beads-workflow.md` for when/how.
 
+### Required lifecycle
+
+- There is one shared Beads board. Worktrees isolate code; they do not create separate boards.
+- Claim the bead before editing and work only in `worktrees/<bead-id>`.
+- Tested but uncommitted work remains `in_progress`.
+- Commit the work with the bead ID, merge that commit into the main line, and only then advance it to agent review or close its code step.
+- Review/land steps follow the job spine. Do not call `bd close`, set a done/review status, or describe work as complete before its merge and review prerequisites hold.
+- The hooks are enforcement, not the source of permission. A command being technically accepted does not waive this lifecycle.
+
 ### Standalone (single task)
 
 1. **Investigate** — Read relevant files. Identify specific file:line.

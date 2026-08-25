@@ -40,6 +40,7 @@ const kit = vi.hoisted(() => ({
   index: [] as { sessionId: string; lastModified: number; summary?: string; cwd?: string; gitBranch?: string }[],
 }));
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ listSessions: () => Promise.resolve(kit.index) }));
+vi.mock('../drivers/codex.ts', () => ({ listCodexThreads: () => Promise.resolve([]) }));
 
 const PROJECT = { id: 'p1', path: '/home/me/project' };
 /** The kit's id for a chat begun in a terminal; the app has no row for it. */

@@ -762,7 +762,7 @@ def open_gates(cid, root):
     not need (cor-0fhq).
     """
     rows = rows_of(["gate", "list", cid, "--json"], root)
-    if rows is UNREADABLE:
+    if rows is UNREADABLE or not rows:
         return []
     return [r["id"] for r in rows if r.get("id") and r.get("status") != "closed"]
 

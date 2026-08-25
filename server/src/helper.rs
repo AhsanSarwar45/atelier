@@ -165,7 +165,9 @@ mod tests {
             names.iter().any(|n| n == "src/server.ts"),
             "the helper's entry is not in this build; it carries {names:?}"
         );
-        assert!(names.iter().any(|n| n == "src/drivers/claude.ts"), "the driver is not carried");
+        for driver in ["src/drivers/claude.ts", "src/drivers/codex.ts", "src/drivers/index.ts"] {
+            assert!(names.iter().any(|n| n == driver), "{driver} is not carried");
+        }
     }
 
     #[test]

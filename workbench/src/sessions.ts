@@ -28,7 +28,8 @@ import { HOLDER_WORD } from '../../src/workbench/chat-state.ts';
 import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
 import { type Split, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
-import { ClaudeDriver } from './drivers/claude.ts';
+import { createDriver, defaultPermissionMode } from './drivers/index.ts';
+import { readCodexThread } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -213,14 +214,13 @@ export class Sessions {
     permissionMode?: string;
     brief?: { beadId: string; text: string };
   }): Promise<SessionSummary> {
-    if (params.brand !== 'claude') {
-      throw new Error(`No driver for brand "${params.brand}" yet — see docs/agent-workbench.md §3.2`);
-    }
     const now = new Date().toISOString();
     // What HE has already said a chat opens on, rather than what this app used
     // to invent: the mode and the model out of his own settings, and the app's
     // fallback only where his settings say nothing (bw-7ks.23, owner-settings.ts).
-    const owner = readOwnerSettings(params.projectPath);
+    const owner = params.brand === 'claude'
+      ? readOwnerSettings(params.projectPath)
+      : { model: null, permissionMode: null };
     const summary: SessionSummary = {
       id: randomUUID(),
       brand: params.brand,
@@ -229,7 +229,7 @@ export class Sessions {
       projectPath: params.projectPath,
       cwd: params.projectPath,
       model: params.model ?? owner.model ?? null,
-      permissionMode: params.permissionMode ?? owner.permissionMode ?? DEFAULT_PERMISSION_MODE,
+      permissionMode: params.permissionMode ?? owner.permissionMode ?? defaultPermissionMode(params.brand),
       title: null,
       state: 'starting',
       createdAt: now,
@@ -304,7 +304,7 @@ export class Sessions {
     // time the brand's own index gives it, so reading it does not reorder the
     // list.
     const seen = params.externalId
-      ? (await knownSessions(params.projectPath)).find((k) => k.externalId === params.externalId)
+      ? (await knownSessions(params.projectPath)).find((k) => k.brand === params.brand && k.externalId === params.externalId)
       : undefined;
     const summary: SessionSummary = {
       id: randomUUID(),
@@ -317,7 +317,9 @@ export class Sessions {
       // A chat begun in a terminal runs in whatever mode that terminal is in,
       // and it says so itself the moment this app takes it over. Until it does,
       // his own settings are the better guess than a literal (bw-7ks.23).
-      permissionMode: readOwnerSettings(params.projectPath).permissionMode ?? DEFAULT_PERMISSION_MODE,
+      permissionMode: params.brand === 'claude'
+        ? readOwnerSettings(params.projectPath).permissionMode ?? DEFAULT_PERMISSION_MODE
+        : defaultPermissionMode(params.brand),
       title: seen?.name ?? null,
       state: 'dormant',
       createdAt: new Date().toISOString(),
@@ -371,7 +373,9 @@ export class Sessions {
         // Same as a chat this app started: his settings answer it, not a
         // literal in here (bw-7ks.23). A row the app already knows keeps the
         // mode it was left in — that is the `existing` branch above.
-        permissionMode: readOwnerSettings(params.projectPath).permissionMode ?? DEFAULT_PERMISSION_MODE,
+        permissionMode: params.brand === 'claude'
+          ? readOwnerSettings(params.projectPath).permissionMode ?? DEFAULT_PERMISSION_MODE
+          : defaultPermissionMode(params.brand),
         title: null,
         state: 'starting',
         createdAt: now,
@@ -498,6 +502,28 @@ export class Sessions {
   /** One reading of a chat's record, with nothing else reading the same one. */
   private async importOnce(summary: SessionSummary, live = false): Promise<ReadSoFar> {
     if (!summary.externalId) return NOTHING_READ;
+    if (summary.brand === 'codex') {
+      if (this.store.importedBy(summary.id) !== null) return NOTHING_READ;
+      try {
+        const thread = await readCodexThread(summary.externalId, summary.cwd);
+        for (const turn of thread.turns ?? []) {
+          for (const item of turn.items ?? []) {
+            if (item.type !== 'userMessage' && item.type !== 'agentMessage') continue;
+            const role = item.type === 'userMessage' ? 'user' : 'assistant';
+            const text = item.type === 'userMessage'
+              ? (item.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n')
+              : item.text;
+            this.publish(summary.id, { type: 'message.started', messageId: item.id, role });
+            if (text) this.publish(summary.id, { type: 'text.delta', messageId: item.id, text });
+            this.publish(summary.id, { type: 'message.completed', messageId: item.id });
+          }
+        }
+        this.store.markImported(summary.id, IMPORT_RECIPE);
+      } catch {
+        // A missing or concurrently-written thread leaves the existing log alone.
+      }
+      return NOTHING_READ;
+    }
     // Said plainly on the row, not inferred from the cards it happens to have
     // touched: a chat that touched none failed that test forever, so every click
     // read the whole conversation off the disk again and re-ran the card scan,
@@ -1286,7 +1312,7 @@ export class Sessions {
     // through the record's byte count, so a later open carrying on from that
     // byte would draw them a second time (bw-uiyz.19).
     this.store.forgetFollowed(summary.id);
-    const driver = new ClaudeDriver();
+    const driver = createDriver(summary.brand);
     this.drivers.set(summary.id, driver);
     this.linkers.set(
       summary.id,
@@ -1382,7 +1408,7 @@ export class Sessions {
     }
     if (what.model !== undefined) {
       await driver.setModel(what.model);
-      this.store.updateSession(sessionId, { model: what.model });
+      this.store.updateSession(sessionId, { model: what.model === BRAND_DEFAULT_MODEL ? null : what.model });
     }
     const now = this.store.getSession(sessionId);
     this.publish(sessionId, {
@@ -1390,7 +1416,7 @@ export class Sessions {
       permissionMode: now?.permissionMode ?? null,
       model: now?.model ?? null,
     });
-    if (now) {
+    if (now?.brand === 'claude') {
       writeOwnerSetting(now.projectPath, {
         permissionMode: what.mode,
         // The picker's top row is the brand's own default, not a model anybody

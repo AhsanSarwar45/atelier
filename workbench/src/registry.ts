@@ -24,8 +24,10 @@ import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts
 import { holdsNow, runningNow } from './running.ts';
 import { lastSpokeAt } from './spoken.ts';
 import type { Store } from './store.ts';
+import { listCodexThreads } from './drivers/codex.ts';
 
 interface KnownSession {
+  brand: 'claude' | 'codex';
   externalId: string;
   lastActiveAt: string;
   /** What Claude calls this conversation: its title, or the first thing asked. */
@@ -42,6 +44,7 @@ interface KnownSession {
  * screens ask for.
  */
 export async function knownSessions(projectPath: string | null, everything = false): Promise<KnownSession[]> {
+  const claude = async (): Promise<KnownSession[]> => {
   try {
     // `includeProgrammatic: false` is the filter the terminal's own /resume
     // picker uses: it withholds the chats an agent started to do a piece of
@@ -53,6 +56,7 @@ export async function knownSessions(projectPath: string | null, everything = fal
         : { includeProgrammatic: everything },
     );
     return found.map((s) => ({
+      brand: 'claude' as const,
       externalId: s.sessionId,
       lastActiveAt: new Date(s.lastModified).toISOString(),
       name: s.customTitle ?? s.summary ?? s.firstPrompt ?? null,
@@ -63,6 +67,23 @@ export async function knownSessions(projectPath: string | null, everything = fal
     // No index, or a version that cannot be read: the app's own rows still list.
     return [];
   }
+  };
+  const codex = async (): Promise<KnownSession[]> => {
+    try {
+      return (await listCodexThreads(projectPath, everything)).map((thread) => ({
+        brand: 'codex' as const,
+        externalId: thread.id,
+        lastActiveAt: new Date(Number(thread.updatedAt) * 1000).toISOString(),
+        name: thread.name ?? thread.preview ?? null,
+        cwd: thread.cwd ?? null,
+        branch: thread.gitInfo?.branch ?? null,
+      }));
+    } catch {
+      return [];
+    }
+  };
+  const [claudeSessions, codexThreads] = await Promise.all([claude(), codex()]);
+  return [...claudeSessions, ...codexThreads];
 }
 
 /**
@@ -96,8 +117,9 @@ export async function restoreList(
   // A chat with nothing said in it is not an offer either: those are the ones
   // that opened and were never typed into (docs/agent-workbench.md §6.3.1).
   const mine = everything ? all : all.filter((s) => s.title !== null || store.messageCount(s.id) > 0);
-  const known = new Map((await knownSessions(project?.path ?? null, everything)).map((s) => [s.externalId, s]));
-  const claimed = new Set(mine.map((s) => s.externalId).filter((x): x is string => !!x));
+  const sessionKey = (brand: string, id: string) => `${brand}:${id}`;
+  const known = new Map((await knownSessions(project?.path ?? null, everything)).map((s) => [sessionKey(s.brand, s.externalId), s]));
+  const claimed = new Set(mine.flatMap((s) => s.externalId ? [sessionKey(s.brand, s.externalId)] : []));
   // Who is actually working, which the session index cannot say: it carries the
   // conversation file's mtime and nothing about processes, and mtime was
   // measured useless for this — one working chat went 488 seconds without
@@ -112,8 +134,12 @@ export async function restoreList(
   // looks at a file's length plus whatever each record has gained since the
   // last one — never a scan of a conversation (bw-zhs9, bw-uiyz).
   const spoken = new Map<string, string | null>();
+  const claudeIds = [
+    ...mine.filter((s) => s.brand === 'claude').map((s) => s.externalId),
+    ...[...known.values()].filter((s) => s.brand === 'claude').map((s) => s.externalId),
+  ];
   await Promise.all(
-    [...new Set([...mine.map((s) => s.externalId), ...known.keys()])]
+    [...new Set(claudeIds)]
       .filter((id): id is string => id !== null)
       .map(async (id) => void spoken.set(id, await lastSpokeAt(id))),
   );
@@ -121,7 +147,7 @@ export async function restoreList(
   const rows: RestoreRow[] = mine.map((s) => {
     // The name Claude holds wins over the opening line we cut down ourselves:
     // it is the one the owner sees everywhere else this conversation appears.
-    const seen = s.externalId ? known.get(s.externalId) : undefined;
+    const seen = s.externalId ? known.get(sessionKey(s.brand, s.externalId)) : undefined;
     const active = laterOf(s.lastActiveAt, seen?.lastActiveAt);
     return {
       sessionId: s.id,
@@ -154,11 +180,11 @@ export async function restoreList(
   });
 
   for (const s of known.values()) {
-    if (claimed.has(s.externalId)) continue;
+    if (claimed.has(sessionKey(s.brand, s.externalId))) continue;
     rows.push({
       sessionId: null,
       externalId: s.externalId,
-      brand: 'claude',
+      brand: s.brand,
       title: s.name,
       lastActiveAt: s.lastActiveAt,
       // Nothing of ours ever saw this chat being typed into, so the record is

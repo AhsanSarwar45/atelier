@@ -43,6 +43,7 @@ import {
 import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
 import { heldElsewhere } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
+import { BrandIcon } from '@/workbench/brand-icon';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -577,6 +578,7 @@ export function ChatSidebar({
                   // comes back on.
                   data-external-id={row.externalId ?? ''}
                   data-origin={row.origin}
+                  data-brand={row.brand}
                   data-state={row.state}
                   // Somebody is working in this conversation right now, in a
                   // terminal or under another host. Not the same fact as
@@ -604,6 +606,7 @@ export function ChatSidebar({
                       beside it — the two boxes are the same height, so centring
                       them is what puts the clock on the name's own line. */}
                   <div className="flex items-center gap-2">
+                    <BrandIcon brand={row.brand} className="text-muted-foreground" />
                     <button
                       type="button"
                       data-testid="row-name"

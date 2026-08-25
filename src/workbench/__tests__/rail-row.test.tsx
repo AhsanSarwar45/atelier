@@ -152,6 +152,16 @@ describe('a row on the restore rail', () => {
     expect(held().getAttribute('data-folder')).toBe('project');
   });
 
+  it('keeps the coding-agent brand visible on every session row', async () => {
+    list = [row({ sessionId: 'codex-chat', brand: 'codex', title: 'Codex work' })];
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    expect(rows()[0].getAttribute('data-brand')).toBe('codex');
+    expect(rows()[0].querySelector('[aria-label="Codex"]')).not.toBeNull();
+  });
+
   it('says the word, what it is on and the clock, and cuts only the middle', async () => {
     // The manager's own line, off the running copy: a search worth reading at
     // both ends, in a rail 288px wide (bw-gnzl).

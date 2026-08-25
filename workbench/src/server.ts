@@ -374,6 +374,7 @@ const server = createServer((req, res) => {
         const cwd = seen?.cwd ?? s.cwd;
         json(res, 200, {
           sessionId,
+          brand: s.brand,
           externalId: s.externalId,
           // Said here as well as on the stream, because the writing box must
           // refuse from the first frame it draws (protocol.ts, SessionFacts).

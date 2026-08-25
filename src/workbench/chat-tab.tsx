@@ -65,7 +65,7 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
+import type { Brand, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere } from '@/workbench/running';
@@ -78,6 +78,7 @@ import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
+import { BrandIcon, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 
 /** Where the "show me everything" switch is remembered between visits. */
@@ -369,6 +370,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   );
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [newBrand, setNewBrand] = useState<Brand>('claude');
   /** What went wrong the last time he changed the mode or the model. */
   const [steerError, setSteerError] = useState<string | null>(null);
   /** Why the last thing he wrote did not go, if it did not go. */
@@ -382,7 +384,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         type: 'session.start',
         projectId,
         projectPath,
-        brand: 'claude',
+        brand: newBrand,
       });
       open(s.id);
     } catch (e) {
@@ -390,7 +392,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     } finally {
       setStarting(false);
     }
-  }, [projectId, projectPath, open]);
+  }, [projectId, projectPath, open, newBrand]);
   const view = useSession(sessionId);
   const facts = useSessionFacts(sessionId);
   // What the board knows plus what this chat has been seen doing since.
@@ -601,6 +603,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // chat's own facts are a board query away and the box must refuse from the
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
+  const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
   const externalId = live?.externalId ?? facts?.externalId ?? null;
   const held = heldElsewhere(view.state, externalId, elsewhere, facts?.runningElsewhere);
   // What that program is doing, from the stream while it is connected and from
@@ -887,9 +890,22 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     return shell(
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">No chat open for this project.</p>
+        <div className="flex items-center gap-2" role="group" aria-label="Coding agent">
+          {(['claude', 'codex'] as const).map((brand) => (
+            <Button
+              key={brand}
+              variant={newBrand === brand ? 'primary' : 'secondary'}
+              onClick={() => setNewBrand(brand)}
+              disabled={starting}
+              data-testid={`agent-${brand}`}
+            >
+              {brand === 'claude' ? 'Claude' : 'Codex'}
+            </Button>
+          ))}
+        </div>
         <Button variant="primary" onClick={() => void start()} disabled={starting} data-testid="new-chat">
           {starting ? null : <Plus data-testid="new-chat-empty-plus" aria-hidden="true" />}
-          {starting ? 'Starting…' : 'New Chat'}
+          {starting ? 'Starting…' : `New ${newBrand === 'claude' ? 'Claude' : 'Codex'} chat`}
         </Button>
         {startError && <p className="max-w-lg text-center text-sm text-red-500">{startError}</p>}
       </div>,
@@ -919,6 +935,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           'gap-y-1',
         )}
       >
+        <span className="flex shrink-0 items-center gap-1.5" data-testid="session-brand" data-brand={sessionBrand} title={`Coding agent — ${brandName(sessionBrand)}`}>
+          <BrandIcon brand={sessionBrand} />
+          <span className="sr-only">{brandName(sessionBrand)}</span>
+        </span>
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
             at: the messages arrive as that program works. So the line says what
