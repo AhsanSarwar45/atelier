@@ -4,9 +4,10 @@ import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import { readFileSync, readdirSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, readSync, readdirSync } from 'node:fs';
 
 import type { AgentControl, AgentState } from '../../../src/workbench/protocol.ts';
+import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 
 type Bag = Record<string, any>;
@@ -53,36 +54,64 @@ export function codexAgentDefinitions(cwd: string): { name: string; description:
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** A short-lived app-server request for discovery and read-only history. */
+/** One shared read-only app-server per working directory. Starting Codex is
+ * expensive; opening one chat used to start it once for history and again for
+ * usage, while the registry started a third copy. */
+class CodexReader {
+  private child: ChildProcessWithoutNullStreams;
+  private pending = new Map<number, Pending>();
+  private nextId = 2;
+  private ready: Promise<void>;
+
+  constructor(cwd: string) {
+    this.child = spawn(process.env.CODEX_PATH || 'codex', ['app-server', '--stdio'], { cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    // The helper owns this cache, but test/CLI consumers must still be able to
+    // exit naturally after their request has settled.
+    this.child.unref();
+    (this.child.stdin as any).unref?.();
+    (this.child.stdout as any).unref?.();
+    (this.child.stderr as any).unref?.();
+    this.child.once('error', (error) => this.fail(error));
+    this.child.once('exit', () => this.fail(new Error('Codex app-server exited')));
+    createInterface({ input: this.child.stdout }).on('line', (line) => this.receive(line));
+    this.ready = new Promise((resolve, reject) => {
+      this.pending.set(1, { resolve: () => { this.write({ jsonrpc: '2.0', method: 'initialized', params: {} }); resolve(); }, reject });
+      this.write({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+        clientInfo: { name: 'beads-workbench-reader', title: 'Beads Workbench', version: '0.1.0' }, capabilities: { experimentalApi: true },
+      } });
+    });
+  }
+
+  async call(method: string, params: Bag): Promise<any> {
+    await this.ready;
+    return await new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Codex ${method} timed out`)); }, 15_000);
+      this.pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+      this.write({ jsonrpc: '2.0', id, method, params });
+    });
+  }
+
+  private write(message: Bag): void { this.child.stdin.write(`${JSON.stringify(message)}\n`); }
+  private receive(line: string): void {
+    let message: Bag;
+    try { message = JSON.parse(line); } catch { return; }
+    if (typeof message.id !== 'number') return;
+    const pending = this.pending.get(message.id);
+    if (!pending) return;
+    this.pending.delete(message.id);
+    message.error ? pending.reject(new Error(message.error.message || 'Codex request failed')) : pending.resolve(message.result);
+  }
+  private fail(error: Error): void { for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); }
+}
+
+const readers = new Map<string, CodexReader>();
 export function codexRequest(method: string, params: Bag, cwd = process.cwd()): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.env.CODEX_PATH || 'codex', ['app-server', '--stdio'], {
-      cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let initialized = false;
-    const timer = setTimeout(() => finish(new Error(`Codex ${method} timed out`)), 15_000);
-    const finish = (error: Error | null, value?: any) => {
-      clearTimeout(timer);
-      child.kill('SIGTERM');
-      error ? reject(error) : resolve(value);
-    };
-    child.once('error', finish);
-    createInterface({ input: child.stdout }).on('line', (line) => {
-      let message: Bag;
-      try { message = JSON.parse(line); } catch { return; }
-      if (message.id === 1 && !initialized) {
-        if (message.error) return finish(new Error(message.error.message || 'Codex initialization failed'));
-        initialized = true;
-        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })}\n`);
-        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method, params })}\n`);
-      } else if (message.id === 2) {
-        finish(message.error ? new Error(message.error.message || `Codex ${method} failed`) : null, message.result);
-      }
-    });
-    child.stdin.write(`${JSON.stringify({
-      jsonrpc: '2.0', id: 1, method: 'initialize',
-      params: { clientInfo: { name: 'beads-workbench', title: 'Beads Workbench', version: '0.1.0' }, capabilities: { experimentalApi: true } },
-    })}\n`);
+  let reader = readers.get(cwd);
+  if (!reader) { reader = new CodexReader(cwd); readers.set(cwd, reader); }
+  return reader.call(method, params).catch((error) => {
+    if (readers.get(cwd) === reader) readers.delete(cwd);
+    throw error;
   });
 }
 
@@ -120,6 +149,86 @@ export async function readCodexThreadUsage(threadId: string, cwd: string): Promi
   }), { input: 0, output: 0, total: 0 });
 }
 
+/** Latest turn settings are persisted in the rollout even though thread/read
+ * omits them. Tail only: large chats must still open promptly. */
+export function codexThreadSettings(thread: Bag): { model: string; permissionMode: string } {
+  const fallback = { model: 'default', permissionMode: 'on-request' };
+  if (typeof thread.path !== 'string') return fallback;
+  let fd: number | null = null;
+  try {
+    fd = openSync(thread.path, 'r');
+    const size = fstatSync(fd).size;
+    // A single command result can be several megabytes; the turn_context just
+    // before it still owns the badges for the current turn.
+    const length = Math.min(size, 8 * 1024 * 1024);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let row: Bag;
+      try { row = JSON.parse(lines[i]); } catch { continue; }
+      const payload = row.payload ?? row;
+      if ((row.type ?? payload.type) !== 'turn_context') continue;
+      return {
+        model: payload.model || fallback.model,
+        permissionMode: MODES.includes(payload.approval_policy) ? payload.approval_policy : fallback.permissionMode,
+      };
+    }
+  } catch {} finally { if (fd !== null) closeSync(fd); }
+  return fallback;
+}
+
+export function codexThreadUsageFromRollout(thread: Bag): { input: number; output: number; total: number; contextUsed: number; contextWindow: number } | null {
+  if (typeof thread.path !== 'string') return null;
+  let fd: number | null = null;
+  try {
+    fd = openSync(thread.path, 'r');
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, 512 * 1024);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let row: Bag;
+      try { row = JSON.parse(lines[i]); } catch { continue; }
+      const payload = row.payload ?? row;
+      if (payload.type !== 'token_count' || !payload.info?.total_token_usage) continue;
+      const total = payload.info.total_token_usage;
+      const last = payload.info.last_token_usage ?? {};
+      return {
+        input: Number(total.input_tokens ?? 0), output: Number(total.output_tokens ?? 0), total: Number(total.total_tokens ?? 0),
+        contextUsed: Number(last.total_tokens ?? 0), contextWindow: Number(payload.info.model_context_window ?? 0),
+      };
+    }
+  } catch {} finally { if (fd !== null) closeSync(fd); }
+  return null;
+}
+
+export async function codexMenu(cwd: string): Promise<Bag> {
+  const [modelResult, skillResult] = await Promise.allSettled([
+    codexRequest('model/list', { includeHidden: false }, cwd),
+    codexRequest('skills/list', { cwds: [cwd], forceReload: false }, cwd),
+  ]);
+  const models = modelResult.status === 'fulfilled' ? modelResult.value.data ?? [] : [];
+  const entries = skillResult.status === 'fulfilled' ? skillResult.value.data ?? [] : [];
+  const skills = entries.flatMap((entry: Bag) => entry.skills ?? []).filter((skill: Bag) => skill.enabled !== false);
+  return {
+    commands: [
+      { name: 'compact', description: 'Compact this conversation now', kind: 'command' },
+      { name: 'review', description: 'Review uncommitted changes, or follow the supplied instructions', argumentHint: '[instructions]', kind: 'command' },
+      { name: 'status', description: 'Show this Codex thread and its background commands', kind: 'command' },
+      { name: 'usage', description: 'Show Codex account allowance and reset times', kind: 'command' },
+      { name: 'model', description: 'Use the model picker below', kind: 'command' },
+      { name: 'permissions', description: 'Use the permission picker below', kind: 'command' },
+      ...skills.map((skill: Bag) => ({ name: skill.name, description: skill.description || skill.shortDescription || '', kind: 'skill' })),
+    ],
+    skills: skills.map((skill: Bag) => skill.name),
+    models: [{ value: 'default', displayName: 'Default', description: 'Use the Codex default model' }, ...models.map((m: Bag) => ({ value: m.model, displayName: m.displayName, description: m.description }))],
+    permissionModes: MODES, agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
+    skillPaths: Object.fromEntries(skills.map((skill: Bag) => [skill.name, skill.path])),
+  };
+}
+
 /** Translate persisted Codex turns through the same WBP item translator as live traffic. */
 export function replayCodexThread(thread: Bag, emit: (event: DriverEvent) => void): void {
   const driver = new CodexDriver();
@@ -149,6 +258,10 @@ export function replayCodexThread(thread: Bag, emit: (event: DriverEvent) => voi
         if (text) driver.emit({ type: 'thinking.delta', messageId: item.id, text });
       } else if (item.type === 'plan') {
         driver.emit({ type: 'note', noteId: item.id, rank: 'note', kind: 'plan', text: item.text, body: null });
+      } else if (item.type === 'agentMessage') {
+        // Persisted messages are complete already. Opening first would turn a
+        // genuinely empty app-server item into a blank transcript row.
+        driver.itemCompleted(item);
       } else {
         driver.itemStarted(item);
         if (item.status !== 'inProgress') driver.itemCompleted(item);
@@ -286,34 +399,10 @@ export class CodexDriver implements Driver {
   }
 
   private async menu(): Promise<void> {
-    let models: Bag[] = [];
-    let skills: Bag[] = [];
-    try { models = (await this.call('model/list', { includeHidden: false })).data ?? []; } catch {}
-    try {
-      const entries = (await this.call('skills/list', { cwds: [this.cwd], forceReload: false })).data ?? [];
-      skills = entries.flatMap((entry: Bag) => entry.skills ?? []).filter((skill: Bag) => skill.enabled !== false);
-    } catch {}
-    this.skills = new Map(skills.map((skill) => [skill.name, skill.path]));
-    const commands = [
-      { name: 'compact', description: 'Compact this conversation now', kind: 'command' as const },
-      { name: 'review', description: 'Review uncommitted changes, or follow the supplied instructions', argumentHint: '[instructions]', kind: 'command' as const },
-      { name: 'status', description: 'Show this Codex thread and its background commands', kind: 'command' as const },
-      { name: 'usage', description: 'Show Codex account allowance and reset times', kind: 'command' as const },
-      { name: 'model', description: 'Use the model picker below', kind: 'command' as const },
-      { name: 'permissions', description: 'Use the permission picker below', kind: 'command' as const },
-      ...skills.map((skill) => ({ name: skill.name, description: skill.description || skill.shortDescription || '', kind: 'skill' as const })),
-    ];
-    this.emit({
-      type: 'session.menu',
-      commands,
-      skills: skills.map((skill) => skill.name),
-      models: [
-        { value: 'default', displayName: 'Default', description: 'Use the Codex default model' },
-        ...models.map((m) => ({ value: m.model, displayName: m.displayName, description: m.description })),
-      ],
-      permissionModes: MODES, agentControls: this.agentControls(),
-      agentDefinitions: codexAgentDefinitions(this.cwd),
-    });
+    const menu = await codexMenu(this.cwd);
+    this.skills = new Map(Object.entries(menu.skillPaths ?? {}));
+    const { skillPaths: _skillPaths, ...shown } = menu;
+    this.emit({ type: 'session.menu', ...shown } as DriverEvent);
   }
 
   /** Codex exposes subagent threads; an active child turn can be interrupted exactly. */
@@ -658,8 +747,10 @@ export class CodexDriver implements Driver {
       this.collab(item, false);
       return;
     }
+    const action = (item.commandActions ?? [])[0] ?? {};
+    const commandName = action.type === 'read' ? 'Read' : action.type === 'listFiles' ? 'Glob' : action.type === 'search' ? 'Grep' : 'Bash';
     const names: Bag = {
-      commandExecution: 'Shell', fileChange: 'Edit', mcpToolCall: `${item.server}/${item.tool}`,
+      commandExecution: commandName, fileChange: 'Edit', mcpToolCall: `${item.server}/${item.tool}`,
       dynamicToolCall: item.tool, webSearch: 'Web search', imageView: 'View image', sleep: 'Wait', imageGeneration: 'Generate image',
     };
     const name = names[item.type];
@@ -670,8 +761,8 @@ export class CodexDriver implements Driver {
     this.tools.set(item.id, name);
     this.emit({
       type: 'tool.started', toolCallId: item.id, name,
-      input: item.arguments ?? { command: item.command, changes: item.changes, query: item.query, path: item.path, durationMs: item.durationMs },
-      title: item.command || item.query || item.path || name, parentToolCallId: null,
+      input: item.arguments ?? { command: item.command, changes: item.changes, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path, durationMs: item.durationMs },
+      title: toolTitle(name, item.arguments ?? { command: item.command, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path }), parentToolCallId: null,
     });
     this.emit({ type: 'session.state', state: 'running_tool', label: name });
     if (item.type === 'fileChange') {
@@ -683,6 +774,7 @@ export class CodexDriver implements Driver {
     if (!item) return;
     if (item.type === 'agentMessage') {
       const opened = this.messages.has(item.id);
+      if (!opened && !String(item.text ?? '').trim()) return;
       this.openMessage(item.id);
       if (!opened && item.text) this.emit({ type: 'text.delta', messageId: item.id, text: item.text });
       this.emit({ type: 'message.completed', messageId: item.id });

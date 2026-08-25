@@ -18,7 +18,7 @@
  * Design: docs/agent-workbench.md §6.3.
  */
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, readSync, readdirSync } from 'node:fs';
 
 import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
@@ -37,6 +37,24 @@ interface KnownSession {
   branch: string | null;
   running: boolean;
   lastSpokeAt: string | null;
+}
+
+/** Codex has no Claude-style marker files. Its app-server reports terminal
+ * threads as notLoaded, so recognize the thread id carried by active Codex
+ * commands and shell snapshots in the process table. */
+export function runningCodexThreads(): Set<string> {
+  const found = new Set<string>();
+  if (process.platform !== 'linux') return found;
+  let pids: string[] = [];
+  try { pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name)); } catch { return found; }
+  const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+  for (const pid of pids) {
+    let command = '';
+    try { command = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' '); } catch { continue; }
+    if (!/codex|\.codex\/shell_snapshots/i.test(command)) continue;
+    for (const id of command.match(uuid) ?? []) found.add(id.toLowerCase());
+  }
+  return found;
 }
 
 /** Last actual user message in a Codex rollout, without reading the whole file. */
@@ -103,6 +121,7 @@ export async function knownSessions(projectPath: string | null, everything = fal
   };
   const codex = async (): Promise<KnownSession[]> => {
     try {
+      const running = runningCodexThreads();
       return (await listCodexThreads(projectPath, everything)).map((thread) => ({
         brand: 'codex' as const,
         externalId: thread.id,
@@ -110,7 +129,7 @@ export async function knownSessions(projectPath: string | null, everything = fal
         name: thread.name ?? thread.preview ?? null,
         cwd: thread.cwd ?? null,
         branch: thread.gitInfo?.branch ?? null,
-        running: thread.status?.type === 'active',
+        running: thread.status?.type === 'active' || running.has(String(thread.id).toLowerCase()),
         lastSpokeAt: codexLastSpokeAt(thread.path),
       }));
     } catch {

@@ -29,7 +29,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { NOTHING, type Split, type TaskSpend, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
 import { createDriver, defaultPermissionMode } from './drivers/index.ts';
-import { readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
+import { codexMenu, codexThreadSettings, codexThreadUsageFromRollout, readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -46,7 +46,7 @@ import {
   saysWhatItRuns,
   type RecordLine,
 } from './record-tail.ts';
-import { knownSessions } from './registry.ts';
+import { knownSessions, runningCodexThreads } from './registry.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
 
@@ -531,18 +531,31 @@ export class Sessions {
     if (!summary.externalId) return NOTHING_READ;
     if (summary.brand === 'codex') {
       try {
-        const thread = await readCodexThread(summary.externalId, summary.cwd);
+        const [thread, usage, menu] = await Promise.all([
+          readCodexThread(summary.externalId, summary.cwd),
+          readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null),
+          codexMenu(summary.cwd).catch(() => null),
+        ]);
+        if (menu) {
+          const { skillPaths: _skillPaths, ...shown } = menu;
+          this.publish(summary.id, { type: 'session.menu', ...shown } as DriverEvent);
+        }
+        const settings = codexThreadSettings(thread);
+        this.publish(summary.id, { type: 'session.pinned', model: settings.model, permissionMode: settings.permissionMode });
         const importedAt = this.store.importedAt(summary.id);
         const changedAt = Number(thread.updatedAt) * 1000;
-        if (importedAt && Number.isFinite(changedAt) && changedAt <= Date.parse(importedAt)) return NOTHING_READ;
-        if (this.store.importedBy(summary.id) !== null) {
-          this.publish(summary.id, { type: 'transcript.reset' });
-          this.store.forgetImported(summary.id);
+        if (!importedAt || !Number.isFinite(changedAt) || changedAt > Date.parse(importedAt)) {
+          if (this.store.importedBy(summary.id) !== null) {
+            this.publish(summary.id, { type: 'transcript.reset' });
+            this.store.forgetImported(summary.id);
+          }
+          replayCodexThread(thread, (event) => this.publish(summary.id, event));
+          this.store.markImported(summary.id, IMPORT_RECIPE);
         }
-        replayCodexThread(thread, (event) => this.publish(summary.id, event));
-        const usage = await readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null);
-        if (usage) this.publish(summary.id, { type: 'cost', cost: { kind: 'tokens', ...usage } });
-        this.store.markImported(summary.id, IMPORT_RECIPE);
+        const recordedUsage = codexThreadUsageFromRollout(thread);
+        const spend = usage ?? recordedUsage;
+        if (spend) this.publish(summary.id, { type: 'cost', cost: { kind: 'tokens', input: spend.input, output: spend.output, total: spend.total } });
+        if (recordedUsage?.contextWindow) this.publish(summary.id, { type: 'context', used: recordedUsage.contextUsed, window: recordedUsage.contextWindow });
       } catch {
         // A missing or concurrently-written thread leaves the existing log alone.
       }
@@ -935,11 +948,13 @@ export class Sessions {
    * may not be only as good as that stream (bw-dmxj.12).
    */
   private refuseIfHeld(conversation: string | null | undefined): void {
-    if (conversation && runningNow(true).has(conversation)) throw new Error(HELD_ELSEWHERE);
+    if (conversation && (runningNow(true).has(conversation) || runningCodexThreads().has(conversation.toLowerCase()))) throw new Error(HELD_ELSEWHERE);
   }
 
   private heldElsewhere(summary: SessionSummary): boolean {
-    return summary.externalId !== null && runningNow(true).has(summary.externalId);
+    return summary.externalId !== null && (summary.brand === 'codex'
+      ? runningCodexThreads().has(summary.externalId.toLowerCase())
+      : runningNow(true).has(summary.externalId));
   }
 
   /**
@@ -974,6 +989,23 @@ export class Sessions {
     const externalId = summary.externalId;
     if (externalId === null) return;
     if (this.followers.has(summary.id) || this.drivers.has(summary.id)) return;
+    if (summary.brand === 'codex') {
+      let reading = false;
+      const look = async (): Promise<void> => {
+        if (reading || this.drivers.has(summary.id)) return;
+        reading = true;
+        try {
+          const working = runningCodexThreads().has(externalId.toLowerCase());
+          this.publish(summary.id, { type: 'session.state', state: working ? 'thinking' : 'idle', label: working ? 'Working elsewhere' : 'Ready' });
+          await this.importPast(summary, working);
+        } finally { reading = false; }
+      };
+      const beat = setInterval(() => void look(), FOLLOW_BEAT_MS);
+      beat.unref?.();
+      this.followers.set(summary.id, () => clearInterval(beat));
+      void look();
+      return;
+    }
     const path = findRecord(externalId);
     if (path === null) return; // No record on this machine to follow.
 
