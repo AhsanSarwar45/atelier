@@ -26,6 +26,7 @@ landed, and the note still read green.
 ⛔ The suites are the project's own, off `machinery.toml`. This picks among them
 and never invents one. A project whose declared line this cannot take apart runs
 the whole line as a single suite, which is the old behaviour and is still right.
+Machinery does not add a suite that grades Machinery itself.
 """
 import argparse
 import importlib.machinery
