@@ -1405,6 +1405,58 @@ export class Sessions {
   }
 
   /**
+   * Ends the chat itself, and keeps every word of it.
+   *
+   * The opposite of `stop` above, not a louder version of it: that one cuts the
+   * answer in flight so the chat can be typed into again, and this one takes the
+   * agent away for good. Nothing is deleted — the row stays in the list, reads
+   * `Ended`, and opens again on a click like any sleeping chat (the manager,
+   * 2026-08-25).
+   *
+   * `require` is deliberately not used. Most of the list has no driver attached,
+   * and a chat that is merely asleep is exactly the one somebody tidies away;
+   * refusing those would leave the control drawn on rows it could not act on.
+   * The state is published either way, and publishing it is what writes `ended`
+   * onto the row — see `publish`, which already knows that falling asleep and
+   * ending are not activity and must not move the row up the list.
+   */
+  async close(sessionId: string): Promise<void> {
+    const summary = this.store.getSession(sessionId);
+    if (!summary) throw new Error(`no session ${sessionId}`);
+    // Already over. Said a second time it would put another `session.state` in
+    // the record and another frame on every stream, for nothing that changed.
+    if (summary.state === 'ended') return;
+
+    const driver = this.drivers.get(sessionId);
+    // Let go first, and whatever the teardown does: a driver that fails to shut
+    // down is still one this app must stop speaking to, or a chat whose agent
+    // is wedged could never be ended at all.
+    this.drivers.delete(sessionId);
+    this.linkers.delete(sessionId);
+    this.unfollow(sessionId);
+
+    let failed: string | null = null;
+    try {
+      await driver?.close();
+    } catch (err) {
+      failed = err instanceof Error ? err.message : String(err);
+    }
+    if (failed !== null) {
+      // Written into the chat's own record rather than thrown back at the
+      // screen. The chat IS ended — this app has let go of it — so a refusal
+      // would say the opposite of what happened. What it actually cost is that
+      // the brand's own process may still be standing, and that belongs in the
+      // conversation it belongs to.
+      this.publish(sessionId, {
+        type: 'error',
+        message: `the agent did not shut down cleanly: ${failed}`,
+        fatal: false,
+      });
+    }
+    this.publish(sessionId, { type: 'session.state', state: 'ended', label: 'Ended' });
+  }
+
+  /**
    * Ends ONE piece of sent-off work. The chat keeps its turn and everything
    * else it sent away keeps running (docs/agent-workbench.md §8.2.7).
    */

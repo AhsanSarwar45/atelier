@@ -254,6 +254,10 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       await sessions.stop(cmd.sessionId);
       json(res, 200, { ok: true });
       return;
+    case 'session.close':
+      await sessions.close(cmd.sessionId);
+      json(res, 200, { ok: true });
+      return;
     case 'agent.stop':
       await sessions.stopAgent(cmd.sessionId, cmd.agentId);
       json(res, 200, { ok: true });

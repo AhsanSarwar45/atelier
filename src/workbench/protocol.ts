@@ -459,6 +459,15 @@ export type WbpCommand =
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
   | { type: 'session.stop'; sessionId: string }
   /**
+   * End the chat itself: the agent is torn down and the row is marked `ended`.
+   *
+   * Nothing is deleted. The conversation stays in the list, stays readable, and
+   * opens again on a click like any sleeping chat (the manager, 2026-08-25).
+   * `session.stop` above is the other thing entirely — it cuts the answer in
+   * flight and leaves the agent standing.
+   */
+  | { type: 'session.close'; sessionId: string }
+  /**
    * Steering ONE piece of sent-off work, never the chat it belongs to
    * (docs/agent-workbench.md §8.2.7). `agentId` is the row's own id.
    *

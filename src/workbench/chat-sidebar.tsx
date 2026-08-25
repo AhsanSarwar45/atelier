@@ -11,12 +11,17 @@
  * needs to know, and neither is drawn: the chat's own bar names the folder and
  * its branch the moment the row is clicked, and a rail this narrow reads better
  * without a second copy of it or a wall of ids (the manager, 2026-08-23).
+ *
+ * A row is also where a chat is ended, because ending one is tidying and
+ * tidying is done over a list rather than one chat at a time (the manager,
+ * 2026-08-25). Ending keeps it: the agent goes, the row stays and reads
+ * `Ended`, and the conversation is still there to open.
  */
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, Loader2, Plus, Search, X } from 'lucide-react';
+import { Bot, Loader2, Plus, Power, Search, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -322,6 +327,7 @@ export function ChatSidebar({
     settled.current = rows.map(rowKey);
   }, [rows]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [ending, setEnding] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -412,6 +418,40 @@ export function ChatSidebar({
       })();
     },
     [projectId, projectPath, load, onOpen],
+  );
+
+  /**
+   * Ends a chat: the agent is torn down and the row is marked `ended`.
+   *
+   * Nothing is deleted and nothing is hidden, so this needs no confirming — the
+   * row it acts on stays exactly where it is, still carrying every word said in
+   * it, and a click opens it again (the manager, 2026-08-25).
+   *
+   * Only ever a chat this app has a row for. The list also carries chats begun
+   * in a terminal that we have never opened, and those have no id of ours and
+   * no state of ours to end; the control is not drawn on them.
+   */
+  const end = useCallback(
+    (row: RestoreRow) => {
+      const sessionId = row.sessionId;
+      if (!sessionId) return;
+      setEnding(rowKey(row));
+      setFailed(null);
+      void (async () => {
+        try {
+          await sendCommand({ type: 'session.close', sessionId });
+          // Asked again for the same reason opening asks: the row's own state
+          // is what the list was handed, and nothing else would move it off
+          // whatever it said before the click.
+          await load();
+        } catch (e) {
+          setFailed(e instanceof Error ? e.message : String(e));
+        } finally {
+          setEnding(null);
+        }
+      })();
+    },
+    [load],
   );
 
   // A screenful, then more as it is pulled: a project with hundreds of chats
@@ -554,7 +594,7 @@ export function ChatSidebar({
                   // on one of those two lines, because a rail this narrow turns
                   // a third row into a wall of half-sentences.
                   className={cn(
-                    'px-3 py-2 text-sm',
+                    'group/row px-3 py-2 text-sm',
                     row.sessionId && row.sessionId === openSessionId && 'bg-accent',
                   )}
                 >
@@ -573,6 +613,38 @@ export function ChatSidebar({
                     >
                       {row.title ?? 'Untitled chat'}
                     </button>
+                    {/*
+                      Kept off the rail until the reader is on the row. A 288px
+                      list is already two lines of small type per chat, and a
+                      button drawn on every one of forty rows is forty things to
+                      read past to find the name — the same reason the pill is
+                      not drawn on a sleeping row. Focus brings it back for a
+                      reader who never hovers anything.
+
+                      Not on a chat somebody else is holding: a chat being typed
+                      at in a terminal has no driver of ours to tear down, so
+                      marking it ended from here would say it had stopped while
+                      it went on working (registry.ts, runningElsewhere).
+                    */}
+                    {row.sessionId && row.state !== 'ended' && !row.runningElsewhere && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        mode="icon"
+                        size="xs"
+                        data-testid="row-end"
+                        aria-label={`End ${row.title ?? 'Untitled chat'}`}
+                        title="End this chat. It stays in the list."
+                        disabled={ending === key}
+                        className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          end(row);
+                        }}
+                      >
+                        <Power className="size-3.5" aria-hidden="true" />
+                      </Button>
+                    )}
                     <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                       {clockTime(whenHeSpoke(row))}
                     </span>
@@ -593,19 +665,33 @@ export function ChatSidebar({
                     because most of the list is asleep and a pill on every one of
                     them is a pill on none (bw-96is).
                   */}
-                  {(busy === key || state.working || state.waiting || live || state.external) && (
+                  {/*
+                    An ended chat is the one asleep row that does say something.
+                    The rule below it — most of the list is asleep, so a pill on
+                    every one of them is a pill on none — is what makes this the
+                    exception rather than a breach of it: ending is something the
+                    owner did on purpose, to a handful of rows, and the whole
+                    point of doing it is to see afterwards that it took.
+                  */}
+                  {(busy === key ||
+                    ending === key ||
+                    state.mark === 'ended' ||
+                    state.working ||
+                    state.waiting ||
+                    live ||
+                    state.external) && (
                     <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
-                      {busy === key ? (
+                      {busy === key || ending === key ? (
                         <Badge
                           variant="warning"
                           appearance="light"
                           size="sm"
                           shape="circle"
                           data-testid="row-pill"
-                          data-pill="opening"
+                          data-pill={busy === key ? 'opening' : 'ending'}
                           className="shrink-0"
                         >
-                          opening
+                          {busy === key ? 'opening' : 'ending'}
                         </Badge>
                       ) : (
                         // The chip refuses to shrink everywhere else, which is
