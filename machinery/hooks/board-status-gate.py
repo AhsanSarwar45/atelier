@@ -840,7 +840,7 @@ def checks_proof(cid, root, here):
         return ("%s is the checks step and the board would not say what is written on "
                 "it, so whether the suites ran is unknown. Try again, and if the board "
                 "is down that is the thing to fix first." % cid)
-    older = ""
+    older, newest = "", None
     for text in written:
         hash_of_tree, named, red = shapes.green(text)
         if not hash_of_tree:
@@ -848,6 +848,12 @@ def checks_proof(cid, root, here):
         if hash_of_tree != now:
             older = hash_of_tree
             continue
+        # The newest note for this tree is the one that counts: the suites may
+        # have gone red and been run again on the same code, and the older note
+        # is then only history (bw-aczr.11).
+        newest = (named, red)
+    if newest:
+        named, red = newest
         if red:
             return ("%s is the checks step and its note says %s came back red. A red "
                     "suite is the step's answer, not a step that is done. Fix it, then "

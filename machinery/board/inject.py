@@ -346,8 +346,12 @@ FAULTS = [
                          "            if any(l.startswith(\"step:\") "
                          "for l in r.get(\"labels\") or [])")),
     ("an item's name is looked for anywhere in the message", LAND,
-     lambda s: s.replace('    named = re.compile(r"\\b%s\\b" % re.escape(item_id))',
+     lambda s: s.replace('    named = re.compile(r"\\b%s\\b(?!\\.\\d)" % re.escape(item_id))',
                          "    named = re.compile(re.escape(item_id))")),
+    ("a dot after an item's name ends it, so a commit naming a child names the parent",
+     LAND,
+     lambda s: s.replace('    named = re.compile(r"\\b%s\\b(?!\\.\\d)" % re.escape(item_id))',
+                         '    named = re.compile(r"\\b%s\\b" % re.escape(item_id))')),
     ("a landing closes what it merged and leaves the run standing there", LAND,
      lambda s: s.replace("    said = running.advance(closed[-1][0], ROOT, actor, "
                          "HERE_TREE)", '    said = ""')),
@@ -717,6 +721,9 @@ FAULTS = [
      lambda s: s.replace('    tool = bc.tool(root, "checks", "")\n',
                          '    return ""\n'
                          '    tool = bc.tool(root, "checks", "")\n')),
+    ("the first note for the tree standing here is judged, not the newest", CLOSE,
+     lambda s: s.replace('        newest = (named, red)\n',
+                         '        newest = newest or (named, red)\n')),
 
     # And the half the gate reads: the note names the tree the suites ran over, so
     # a run that went green before three more commits landed cannot pass for a run
@@ -738,6 +745,9 @@ FAULTS = [
     ("a branch that changed only a document is handed nothing to run", CHECKS,
      lambda s: s.replace('        if os.path.exists(prose):\n',
                          '        if False and os.path.exists(prose):\n')),
+    ("a board that did not answer reads as a session holding nothing", CHECKS,
+     lambda s: s.replace('    mine = bc.held(actor, ROOT, session_id)\n',
+                         '    mine = bc.held(actor, ROOT, session_id) or []\n')),
 ]
 
 

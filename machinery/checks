@@ -366,7 +366,13 @@ def open_step(actor, session_id):
     in progress and keep the one wearing the checks label. A session holding two
     of them is a session working two jobs at once, and it has to say which.
     """
-    mine = bc.held(actor, ROOT, session_id) or []
+    mine = bc.held(actor, ROOT, session_id)
+    if mine is None:
+        # Not the same as holding nothing: that answer sends whoever ran this to
+        # name a card that may be open all along (bw-aczr.12).
+        return "", ("the board did not answer when asked what %s holds, so whether a "
+                    "checks step is open is unknown. Try again, and if the board is "
+                    "down that is the thing to fix first." % actor)
     found = [cid for cid in mine
              if STEP in ((running.card(cid, ROOT) or {}).get("labels") or [])]
     if not found:

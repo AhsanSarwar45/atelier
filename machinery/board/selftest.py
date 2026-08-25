@@ -6347,6 +6347,10 @@ def main():
     lookalike = landing_closes(commits=[("one", "fix(board): tst-j.11 another item")])
     assert lookalike["closed"] == [], \
         "a landing closed tst-j.1 on a commit naming tst-j.11: %s" % lookalike["closed"]
+    a_child = landing_closes(commits=[("one", "fix(board): tst-j.1.2 a piece of it")])
+    assert a_child["closed"] == [], \
+        "a landing closed tst-j.1 on a commit naming only its child tst-j.1.2, " \
+        "because the dot after the id read as the end of it: %s" % a_child["closed"]
     assert landing_closes(commits=[JOB_COMMITS[0]])["closed"] == ["tst-j.1"], \
         "a landing closed an item no commit of it named, or missed one it did"
     assert landing_closes(commits=[JOB_COMMITS[0]])["still_open"] == ["tst-j.2"], \
@@ -7375,8 +7379,32 @@ def main():
         assert not any(r[:1] == ["close"] for r in rows), \
             "a red suite still closed the checks step: %s" % rows
 
+        # A board that will not answer used to read as a session holding nothing,
+        # which sent whoever ran the tool to name a card that was open all along.
+        tmp = branch_that_changed(["src/app/page.tsx"])
+        elsewhere = os.path.join(tmp, "bin")
+        os.makedirs(elsewhere)
+        with open(os.path.join(elsewhere, "bd"), "w") as fh:
+            fh.write("#!/bin/sh\necho 'dolt: connection refused' >&2\nexit 1\n")
+        os.chmod(os.path.join(elsewhere, "bd"), 0o755)
+        try:
+            down = subprocess.run(
+                [sys.executable, CHECKS_TOOL], cwd=tmp, capture_output=True, text=True,
+                timeout=120,
+                env=dict(os.environ, PATH=elsewhere + os.pathsep + os.environ["PATH"],
+                         CLAUDE_CODE_TMPDIR=tmp, CLAUDE_CODE_SESSION_ID="tst-down"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        assert down.returncode != 0 and "did not answer" in down.stderr, \
+            "the board was down and the tool did not say so: %s" % (
+                down.stdout + down.stderr)
+        assert "no checks step is open" not in down.stderr, \
+            "the board was down and the tool read that as this session holding no " \
+            "checks step: %s" % down.stderr
+
         print("ok: the checks tool writes the tree it ran over and every suite's count "
-              "onto the card, closes the step only when they are all green")
+              "onto the card, closes the step only when they are all green, and says "
+              "when the board would not answer instead of calling that no step")
 
 
         # And the other side of that note: the close gate reads it back and asks it
@@ -7456,6 +7484,15 @@ def main():
         said = closing_checks(["checks: tree %(tree)s npm-test=9/3"])
         assert "red" in said, \
             "a note that says a suite failed three cases closed the step: %r" % said
+        # Two notes for the same tree: the newest is the answer, whichever way round.
+        said = closing_checks(["checks: tree %(tree)s npm-test=9/3", GREEN_NOTE])
+        assert said == "", \
+            "the suites went red, ran again on the same tree and went green, and the " \
+            "gate judged the older note and refused the close: %r" % said
+        said = closing_checks([GREEN_NOTE, "checks: tree %(tree)s npm-test=9/3"])
+        assert "red" in said, \
+            "the suites went green, ran again on the same tree and went red, and the " \
+            "gate judged the older note and let the step close: %r" % said
 
         print("ok: a checks step closes on a note naming the tree standing in front of "
               "it with every suite green, and on nothing else")

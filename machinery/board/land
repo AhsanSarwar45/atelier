@@ -170,7 +170,9 @@ def carried_by(item_id, made):
     On a word boundary, the way every other reader of a message reads an id: a
     commit naming `x-j.31` does not land `x-j.3`.
     """
-    named = re.compile(r"\b%s\b" % re.escape(item_id))
+    # A dot is a word boundary, so without the lookahead a commit naming only a
+    # child item (tst-j.1.2) read as naming its parent (tst-j.1) too (bw-aczr.10).
+    named = re.compile(r"\b%s\b(?!\.\d)" % re.escape(item_id))
     return next((c for c in made if named.search(c[2])), None)
 
 
