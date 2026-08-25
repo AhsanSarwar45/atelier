@@ -1,9 +1,9 @@
 /**
- * The two things about agents that follow the owner around every screen: what
- * is waiting on him, and what is running.
+ * The one thing about agents that follows the owner around every screen: what
+ * is waiting on him.
  *
- * They ride in the shell's first bar, which is on every screen, so both are on
- * the project list, the board and the chat alike. Both read the one live store
+ * It rides in the shell's first bar, which is on every screen, so it is on the
+ * project list, the board and the chat alike. It reads the one live store
  * (`live.ts`) — no view here opens a connection of its own.
  */
 'use client';
@@ -17,8 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
 import * as api from '@/lib/api';
-import { ChatStateChip } from '@/workbench/chat-state-chip';
-import { isRunning, liveState, useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
+import { useLiveSessions, waitsOnYou, type LiveSession } from '@/workbench/live';
 
 /** Project ids to their names, fetched once — the tray names a project, not a path. */
 function useProjectNames(): Map<string, string> {
@@ -110,51 +109,16 @@ function WaitingTray({ names }: { names: Map<string, string> }) {
   );
 }
 
-function GlanceStrip({ names }: { names: Map<string, string> }) {
-  const router = useRouter();
-  const running = useLiveSessions().filter(isRunning);
-  if (!running.length) return null;
-
-  // One line, in a bar: what does not fit is clipped rather than pushing the
-  // bar taller and taking the room the work is standing in.
-  return (
-    <div data-testid="glance-strip" className="flex min-w-0 items-center gap-x-4 overflow-hidden">
-      {running.map((s) => (
-        <button
-          key={s.id}
-          type="button"
-          data-testid="glance-row"
-          data-session-id={s.id}
-          className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground"
-          onClick={() => router.push(chatHref(s))}
-        >
-          <span className="shrink-0 font-medium">{names.get(s.projectId) ?? s.brand}</span>
-          <span className="max-w-[24ch] truncate">{s.title ?? 'Untitled chat'}</span>
-          {/* The mark carries the spinner, the verb and the seconds, off the
-              page's one clock — the dot, the word and the count this row kept
-              itself were three ways of saying the same thing, and one of them
-              was a beat of its own (bw-96is). */}
-          <ChatStateChip state={liveState(s)} size="inline" testId="glance-activity" className="max-w-[28ch]" />
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /**
- * What follows the owner, drawn inline in the shell's first bar: the strip of
- * chats running now, then the tray of chats waiting on him. Both take no room
- * at all when there is nothing to say.
+ * What follows the owner, drawn inline in the shell's first bar: the tray of
+ * chats waiting on him. It takes no room at all when there is nothing to say.
  */
 export function WorkbenchStatus() {
   const names = useProjectNames();
-  const live = useLiveSessions();
-  const waiting = live.filter(waitsOnYou).length;
-  const running = live.filter(isRunning).length;
+  const waiting = useLiveSessions().filter(waitsOnYou).length;
 
   return (
     <div data-testid="workbench-globals" className="flex min-w-0 flex-1 items-center justify-end gap-3">
-      {running > 0 && <GlanceStrip names={names} />}
       {waiting > 0 && <WaitingTray names={names} />}
     </div>
   );
