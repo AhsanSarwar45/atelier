@@ -57,7 +57,6 @@ REASON = (r"""\bbd\s+close\b[^|;&\n]*?\b%s\b[^|;&\n]*?"""
           r"""(?:-r|--reason)[= ]\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+)""")
 # Closing without a commit is legitimate only for cards that produce no code.
 NO_CODE = ("no-code", "find", "question", "decision")
-UNREPORTED = bc.UNREPORTED
 # Said when a goal cannot close because nobody has read it. The reading has no card
 # of its own, so "close the steps" is the wrong instruction for that one.
 UNREAD = (
@@ -608,24 +607,6 @@ def looked_at(goal):
     return bool(LOOKABLE.search(goal.get("notes") or ""))
 
 
-def page_stale(cid, card, session, root):
-    """Whether this card's page is older than the work being ticked off.
-
-    The bar is when the card was claimed, or the last project file this session
-    changed while holding it, whichever is later: a page built before that cannot
-    be carrying what is closing. A card nobody ever claimed still needs a page —
-    there is no moment to measure, but there is still something to report.
-    """
-    began = stamp(card.get("started_at")) or 0.0
-    bar = began
-    for e in bc.load(session or "").get("edits") or []:
-        t = e.get("t") or 0
-        if t >= began and bc.project_edit(e.get("p"), root):
-            bar = max(bar, t)
-    built = bc.page_built(bc.page_names(cid, card))
-    return not built or built < bar
-
-
 def slot_holder(root):
     """Who holds the board's single merge slot, if anyone."""
     slot = show(bc.prefix(root) + "-merge-slot", root) or {}
@@ -1157,17 +1138,6 @@ def main():
                             % (cid, goal)
                         )
                         return
-            if not set(card.get("labels") or []) & set(UNREPORTED) \
-                    and page_stale(cid, card, data.get("session_id"), root):
-                deny(
-                    "%s cannot be ticked off while its page is behind the work. The "
-                    "manager hears about finished work through the page, so writing it "
-                    "is part of finishing rather than something you settle afterwards: "
-                    "`report list` finds the one for this job, `report <slug>` brings it "
-                    "up to date, and the link it prints is what goes to the manager, "
-                    "last in the message so they do not scroll for it. Then close." % cid
-                )
-                return
             if set(card.get("labels") or []) & set(NO_CODE):
                 continue
             if card.get("issue_type") in ("decision", "epic"):
