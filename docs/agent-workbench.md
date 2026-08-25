@@ -1011,20 +1011,35 @@ other screen draws about a chat as well, from one reading rather than four
 #### 8.2.3 Steering the chat, and the settings a chat opens on (bw-f1q, bw-7ks.23)
 
 Constraint: the mode, the model, the skills and the commands are chosen from the
-writing box, and they act on the chat that is open. The mode and the model are
-not this app's to invent: a chat opens on what the owner's own settings already
-say, and picking one in the box changes those settings rather than that one chat.
+writing box, and they act on the chat that is open and nothing else. The mode and
+the model are not this app's to invent: a NEW chat opens on what the owner's own
+settings already say. Those settings are read and never written (bw-7ojj).
 
 - **Permission mode** and **model** are pickers on the composer's own row. They
   send `session.mode` / `session.model`, which call the kit's
   `setPermissionMode` / `setModel` on the live session; the change comes back as
   an event, so every window watching that chat agrees and the header's pinned
-  mode is never a guess. The same command then writes the pick into the owner's
-  settings, so the chat after it opens on it too.
+  mode is never a guess. The pick is stored against that chat and goes no
+  further. It used to be written into the owner's settings as well, so the next
+  chat opened on it, and the manager asked for that to stop: "every new chat
+  should start on the plain default, whatever I picked last." It was also doing
+  harm nobody asked for. The file it reached for first is his own global one,
+  which every terminal on the machine reads, so a pick made here changed what
+  his next terminal started on; and a chat with no model of its own is attached
+  with none, which is how the kit is asked to work one out — out of that same
+  moving file. So every chat begun in a terminal and every chat he had never
+  picked in took on his latest pick the first time he typed into it, and froze
+  there (bw-7ojj).
 - **`/`** at the start of the box opens the command and skill menu (§7),
   filtered as he types, arrow keys and Enter to pick.
 - A **picture** — one waiting in the tray or one already sent — opens at full
   size over the chat when clicked, and closes on Escape or a click away.
+
+A chat that has a past is resumed on the model that past was answering on, read
+from its own record (`record-tail.ts`, `runningIn`) and written onto its row the
+first time. Nothing is resolved from the settings for a chat that has ever been
+answered in. A chat that has never been answered in has nothing to freeze, so
+the kit works that one out as before.
 
 The mode a session is pinned to is still stored per session and re-pinned on
 resume (§3.1); a live change updates that store, so it survives the chat going

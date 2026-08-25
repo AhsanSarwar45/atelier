@@ -34,7 +34,7 @@ import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
 import { type HelperPast, helperNamed, helpersNow, helpersOf } from './helper-records.ts';
-import { readOwnerSettings, writeOwnerSetting } from './owner-settings.ts';
+import { readOwnerSettings } from './owner-settings.ts';
 import { spokenAsEvents } from './reading-back.ts';
 import {
   allLines,
@@ -390,11 +390,38 @@ export class Sessions {
     this.publish(summary.id, { type: 'session.state', state: 'starting', label: 'Coming back' });
 
     const resumeId = params.externalId ?? summary.externalId ?? undefined;
+    // What it was running, before anything is asked of the kit. Handing it no
+    // model is how the kit is told to work one out, and it works it out of the
+    // owner's settings file — so a chat begun in a terminal, or one he never
+    // picked a model in, took on whatever was last picked anywhere else and
+    // then froze there without saying so (bw-7ojj). Its own record already
+    // knows, so it is asked first and the answer is kept.
+    const on = summary.model ?? (await this.modelItWasOn(resumeId));
+    if (on && on !== summary.model) this.store.updateSession(summary.id, { model: on });
     // What was said before this app ever saw the chat, so opening it is not a
     // blank screen (docs/agent-workbench.md §6.3.2).
     await this.importPast({ ...summary, externalId: resumeId ?? null });
-    await this.attach(summary, summary.model ?? undefined, resumeId);
-    return { ...summary, state: 'starting' };
+    await this.attach({ ...summary, model: on }, on ?? undefined, resumeId);
+    return { ...summary, model: on, state: 'starting' };
+  }
+
+  /**
+   * The model a chat was last answering on, out of its own record.
+   *
+   * `null` for a chat with no record and for one that has never answered — a
+   * conversation nobody has said anything in yet was on nothing, and the kit
+   * resolving that one from his settings is the right answer rather than the
+   * fault above.
+   */
+  private async modelItWasOn(externalId: string | undefined): Promise<string | null> {
+    if (!externalId) return null;
+    const path = findRecord(externalId);
+    if (!path) return null;
+    // Never fatal: a record being written this instant, or one moved out from
+    // under us, costs the chat its remembered model and nothing more.
+    return runningIn(path)
+      .then((r) => r.model)
+      .catch(() => null);
   }
 
   /**
@@ -1386,19 +1413,22 @@ export class Sessions {
   }
 
   /**
-   * Changes what the OPEN chat is pinned to, and keeps the choice: the mode is
-   * re-pinned on every resume (§3.1), so a change made here has to outlive the
-   * chat going to sleep — and, since bw-7ks.23, the chat itself. A setting he
-   * picks is a setting he has changed, so it goes back into the file he keeps
-   * it in and every chat opened afterwards starts there (owner-settings.ts).
+   * Changes what the OPEN chat is pinned to, and keeps the choice against that
+   * chat: the mode and the model are both re-pinned on every resume (§3.1), so
+   * a change made here has to outlive the chat going to sleep.
    *
-   * Only what HE picks. A mode the tool changes by itself mid-turn arrives as a
-   * status and is stored against that one chat (see the `session.pinned` arm of
-   * `absorb`); it never touches his settings, because nobody chose it.
+   * It acts on this chat and stops there. It used to write the pick back into
+   * the owner's own settings so the next chat opened on it, and he asked for
+   * that to stop: "every new chat should start on the plain default, whatever I
+   * picked last" (bw-7ojj). Two things were wrong with it. A chat he had left
+   * on one model quietly took on his latest pick the moment he typed into it,
+   * because a chat with no model of its own asks the kit to resolve one and the
+   * kit reads that same file. And the file it reached for first is his own
+   * global one, the one every terminal on the machine reads, so picking a model
+   * in a chat here changed what his next terminal started on.
    *
-   * The chat is changed first and the file second, so a file that refuses the
-   * write — a company-wide setting overriding it — still leaves the open chat
-   * in the mode he asked for, with the reason on the screen beside it.
+   * His settings are still READ — a brand new chat opens on what they say
+   * (`start`) — and nothing in the app writes to them any more.
    */
   async pin(sessionId: string, what: { mode?: string; model?: string }): Promise<void> {
     const driver = this.require(sessionId);
@@ -1416,14 +1446,6 @@ export class Sessions {
       permissionMode: now?.permissionMode ?? null,
       model: now?.model ?? null,
     });
-    if (now?.brand === 'claude') {
-      writeOwnerSetting(now.projectPath, {
-        permissionMode: what.mode,
-        // The picker's top row is the brand's own default, not a model anybody
-        // could name in a settings file. Picking it takes the key out.
-        model: what.model === BRAND_DEFAULT_MODEL ? null : what.model,
-      });
-    }
   }
 
   async stop(sessionId: string): Promise<void> {
@@ -1584,12 +1606,19 @@ export class Sessions {
       this.store.rememberBeadLink(sessionId, full.beadId, full.via);
     } else if (full.type === 'report.available') {
       this.store.rememberReportLink(sessionId, full.project, full.slug);
-    } else if (full.type === 'session.pinned' && full.permissionMode !== null) {
+    } else if (full.type === 'session.pinned') {
       // The mode is re-pinned on every resume from what is stored (§3.1), so a
       // mode the tool changed by itself — approving a plan ends plan mode — has
       // to be written down here or the chat wakes up back in the old one
       // (bw-1u1.43).
-      this.store.updateSession(sessionId, { permissionMode: full.permissionMode });
+      if (full.permissionMode !== null) {
+        this.store.updateSession(sessionId, { permissionMode: full.permissionMode });
+      }
+      // And the model for the same reason. This event is also how a chat this
+      // app does not drive says what it is running, read from its own record by
+      // the follower — which the app knew and threw away, so the chat came back
+      // with no model of its own and had one resolved for it (bw-7ojj).
+      if (full.model !== null) this.store.updateSession(sessionId, { model: full.model });
     }
 
     // What was said and what it cost, folded out of the log as it goes by, so

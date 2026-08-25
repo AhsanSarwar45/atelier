@@ -1,19 +1,22 @@
 /**
  * @vitest-environment node
  *
- * The whole way through: what the app hands the kit when a chat starts, and
- * what lands in his settings when he picks something in the header (bw-7ks.23).
+ * The whole way through: what the app hands the kit when a chat starts
+ * (bw-7ks.23).
  *
  * The unit above this one — the-owners-own-settings.test.ts — proves which file
- * wins and which file a change goes to. These prove the two ends are actually
- * wired to it: that a chat is STARTED on what those files say rather than on the
- * literal this app used to invent (bw-b1o1), and that a picked mode is not left
- * inside the one chat that picked it.
+ * wins. These prove the reading end is actually wired to it: that a chat is
+ * STARTED on what those files say rather than on the literal this app used to
+ * invent (bw-b1o1).
+ *
+ * The writing end is gone. A pick used to land in his settings so the next chat
+ * opened on it, and he asked for that to stop; what happens instead is pinned in
+ * a-chat-keeps-its-own-model.test.ts (bw-7ojj).
  *
  * The driver is stubbed at its own seam — the one call that would launch a real
  * agent process — so what is asserted is the options the app hands it.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,7 +37,6 @@ let sessions: Sessions;
 let handed: StartOptions[];
 
 const his = () => join(config, 'settings.json');
-const settings = () => JSON.parse(readFileSync(his(), 'utf8')) as { model?: string; permissions?: { defaultMode?: string } };
 
 const startOne = () =>
   sessions.start({ projectId: 'p1', projectPath: project, brand: 'claude' as const });
@@ -93,29 +95,5 @@ describe('a chat the app starts', () => {
     expect(handed[0]?.permissionMode).toBe('default');
     expect(handed[0]?.model).toBeUndefined();
     expect(chat.model).toBeNull();
-  });
-});
-
-describe('a setting he picks in the header', () => {
-  it('is kept, so the NEXT chat opens on it too', async () => {
-    writeFileSync(his(), JSON.stringify({ permissions: { defaultMode: 'default' } }), 'utf8');
-    const first = await startOne();
-
-    await sessions.pin(first.id, { mode: 'bypassPermissions' });
-
-    expect(settings().permissions?.defaultMode).toBe('bypassPermissions');
-    const second = await startOne();
-    expect(handed[1]?.permissionMode).toBe('bypassPermissions');
-    expect(second.permissionMode).toBe('bypassPermissions');
-  });
-
-  it('keeps a model the same way, and clears it when he picks the brand default', async () => {
-    const chat = await startOne();
-
-    await sessions.pin(chat.id, { model: 'sonnet' });
-    expect(settings().model).toBe('sonnet');
-
-    await sessions.pin(chat.id, { model: 'default' });
-    expect(settings().model).toBeUndefined();
   });
 });
