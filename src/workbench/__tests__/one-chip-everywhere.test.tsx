@@ -99,3 +99,60 @@ describe('how long a chat has been working, on the chip', () => {
     expect(screen.getByTestId('chat-state').textContent).toBe('Idle');
   });
 });
+
+/**
+ * What the chat is on, when it is longer than the line it has.
+ *
+ * The manager, 2026-08-25, photographing the list down the side: "ing for
+ * NothingShowing|KindFilter in workbench/chat-". Both ends of it gone, because
+ * the browser only ever cuts at the end and everything else on that line
+ * refused to give way. What he asked for was a cut in the middle, with the mark
+ * and the counter always on screen (bw-gnzl).
+ */
+describe('what a chat is on, when it runs longer than the line', () => {
+  /** The clause itself, off a chip carrying that detail and nothing unusual. */
+  function clauseOn(detail: string): HTMLElement {
+    render(<ChatStateChip state={{ ...working(NOW), detail }} testId="chip" />);
+    return screen.getByTestId('chip').querySelector('[data-testid="chat-state-detail"]')!;
+  }
+
+  it('cuts in the middle, and pins the end of the path', () => {
+    const pieces = Array.from(clauseOn('for NothingShowing|KindFilter in workbench/chat-sidebar.tsx').children);
+    expect(pieces).toHaveLength(2);
+    expect(pieces[0].textContent).toBe('· for NothingShowing|KindFilter in workbench');
+    expect(pieces[1].textContent, 'the file being searched went over the edge').toBe('/chat-sidebar.tsx');
+  });
+
+  it('pins the last word where there is no path in it', () => {
+    const pieces = Array.from(clauseOn('waiting on the five-hour limit to lift').children);
+    expect(pieces).toHaveLength(2);
+    expect(pieces[1].textContent, 'the space at the seam was thrown away with it').toBe(' lift');
+  });
+
+  it('leaves a short one whole, in one piece', () => {
+    const clause = clauseOn('auto');
+    expect(clause.children, 'a clause that already fits was split for nothing').toHaveLength(1);
+    expect(clause.textContent).toBe('· auto');
+  });
+
+  it('loses nothing on the way: the two halves are what came in', () => {
+    const said = 'for NothingShowing|KindFilter in workbench/chat-sidebar.tsx';
+    expect(clauseOn(said).textContent).toBe(`· ${said}`);
+  });
+
+  it('leaves the one piece that gives way as the only one that can', () => {
+    render(<ChatStateChip state={{ ...working(NOW), detail: 'for a name in a folder/deep/inside.tsx' }} testId="chip" />);
+    const chip = screen.getByTestId('chip');
+
+    // The mark, the word and the counter hold their room whatever happens to
+    // the line; the head of the clause is the whole of what shrinks. That is
+    // what stops the chip overflowing an edge that hides whatever crosses it.
+    const classes = (el: Element) => el.getAttribute('class') ?? '';
+    expect(classes(chip.querySelector('[data-testid="chat-state-mark"]')!)).toContain('shrink-0');
+    expect(classes(chip.querySelector('[data-testid="chat-state-count"]')!)).toContain('shrink-0');
+    const clause = chip.querySelector('[data-testid="chat-state-detail"]')!;
+    expect(classes(clause)).toContain('min-w-0');
+    expect(classes(clause.children[0])).toContain('truncate');
+    expect(classes(clause.children[1])).toContain('shrink-0');
+  });
+});

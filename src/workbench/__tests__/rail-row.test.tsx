@@ -8,10 +8,14 @@
  * badge saying somebody else is in there does not hold a word, a clause and a
  * clock.
  *
- * So: two lines, the folder carried rather than drawn, and no detail clause in
- * the rail. The clause is not deleted — it is kept where there is room for it,
- * which is the chat's own bar, and the last case here holds that half in place
- * so the cure does not quietly become "nobody says which one it is at all".
+ * So: two lines, and the folder carried rather than drawn.
+ *
+ * The clause went with them, and came back. Dropping it was right only while
+ * the one cut available was the browser's, at the end; the manager's own
+ * picture of 2026-08-25 shows what that width does to a long one — "ing for
+ * NothingShowing|KindFilter in workbench/chat-", with both ends gone. It is cut
+ * in the middle now, so 288px carries what it is on and what it is on is worth
+ * reading (bw-gnzl).
  */
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,14 +45,14 @@ class FakeStream {
 
 
   /** The helper naming who is in a chat, and what that chat is doing. */
-  saysWhoIsWorking(holds: { id: string; doing: string; detail?: string }[]): void {
+  saysWhoIsWorking(holds: { id: string; doing: string; detail?: string; since?: number }[]): void {
     this.onmessage?.(tagged('workbench', JSON.stringify({
         kind: 'running',
         holds: holds.map((h) => ({
           id: h.id,
           holder: 'terminal',
           doing: h.doing,
-          since: null,
+          since: h.since ?? null,
           detail: h.detail ?? null,
         })),
       })));
@@ -89,11 +93,15 @@ async function freshSidebar() {
   return (await import('@/workbench/chat-sidebar')).ChatSidebar;
 }
 
-async function railWithAWorkingChat() {
+async function railWithAWorkingChat(on: { detail?: string; since?: number } = {}) {
   const ChatSidebar = await freshSidebar();
   render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
   await waitFor(() => expect(rows()).toHaveLength(2));
-  act(() => opened[0].saysWhoIsWorking([{ id: HELD, doing: 'summarising', detail: 'auto' }]));
+  act(() =>
+    opened[0].saysWhoIsWorking([
+      { id: HELD, doing: 'summarising', detail: on.detail ?? 'auto', since: on.since },
+    ]),
+  );
   await waitFor(() => expect(screen.queryByTestId('row-pill')).not.toBeNull());
 }
 
@@ -144,23 +152,40 @@ describe('a row on the restore rail', () => {
     expect(held().getAttribute('data-folder')).toBe('project');
   });
 
-  it('says the word and the clock, and leaves the clause to the chat bar', async () => {
-    await railWithAWorkingChat();
+  it('says the word, what it is on and the clock, and cuts only the middle', async () => {
+    // The manager's own line, off the running copy: a search worth reading at
+    // both ends, in a rail 288px wide (bw-gnzl).
+    await railWithAWorkingChat({
+      detail: 'for NothingShowing|KindFilter in workbench/chat-sidebar.tsx',
+      since: Date.now() - 74_000,
+    });
 
     const pill = screen.getByTestId('row-pill');
     expect(pill.getAttribute('data-word')).toBe('Summarising');
-    expect(
-      pill.querySelector('[data-testid="chat-state-detail"]'),
-      'the rail is 288px wide and drew "· auto" into it anyway',
-    ).toBeNull();
-    // The chip that stays is the whole chip, not a stub: the word is still there
-    // to be read.
+
+    const clause = pill.querySelector('[data-testid="chat-state-detail"]');
+    expect(clause, 'the rail stopped saying what the chat is on at all').not.toBeNull();
+
+    // Two pieces, and the pinned one carries the end of the path. What the
+    // browser cuts is between them.
+    const pieces = Array.from(clause!.children).map((c) => c.textContent);
+    expect(pieces).toHaveLength(2);
+    expect(pieces[0]).toMatch(/^· for NothingShowing/);
+    expect(pieces[1], 'the end of the path went over the edge again').toBe('/chat-sidebar.tsx');
+
+    // And the three that never give way are all still on the line.
+    expect(pill.querySelector('[data-testid="chat-state-mark"]'), 'the mark was pushed off the front').not.toBeNull();
     expect(pill.textContent).toMatch(/Summarising/);
+    expect(
+      pill.querySelector('[data-testid="chat-state-count"]'),
+      'how long it has been at it was pushed off the end',
+    ).not.toBeNull();
   });
 
-  it('keeps the clause on the chat own bar, where there is room for it', () => {
-    // Same size of chip, same reading — only the caller differs. The cure for a
-    // narrow rail must not travel to the screen that has the width.
+  it('draws the same clause on the chat own bar, from the same chip', () => {
+    // Same size of chip, same reading — only the caller differs. Neither screen
+    // has a switch for this any more: the cut is in the chip, so a rail and a
+    // bar cannot drift apart over it.
     render(
       <ChatStateChip
         state={{
@@ -183,5 +208,7 @@ describe('a row on the restore rail', () => {
       screen.getByTestId('session-state-chip').querySelector('[data-testid="chat-state-detail"]'),
       'which compaction it is stopped being said anywhere at all',
     ).not.toBeNull();
+    // Short enough to stand whole: nothing is split that did not need splitting.
+    expect(screen.getByTestId('session-state-chip').textContent).toContain('· auto');
   });
 });

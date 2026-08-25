@@ -614,13 +614,15 @@ export function ChatSidebar({
                         // when the rail is genuinely too narrow for it
                         // (bw-jaoz.14.14).
                         //
-                        // Without its detail clause: 288px minus the badge for
-                        // whoever holds the chat leaves room for the word and
-                        // the clock, and "· auto" or "· 3 helpers" was arriving
-                        // truncated to a stub of itself. The clause is kept
-                        // where there is room for it — the chat's own bar
-                        // (the manager, 2026-08-23).
-                        <ChatStateChip state={state} detail={false} testId="row-pill" className="min-w-0 shrink" />
+                        // With its detail clause, which the reader wants here
+                        // (the manager, 2026-08-25). It was dropped on the
+                        // grounds that 288px leaves room for a stub and no
+                        // more, and that was true while the only cut available
+                        // was the browser's, at the end. The clause is cut in
+                        // the middle now, so what arrives at this width is both
+                        // ends of it rather than four letters of the front
+                        // (chat-state-chip.tsx, splitDetail; bw-gnzl).
+                        <ChatStateChip state={state} testId="row-pill" className="min-w-0 shrink" />
                       )}
                       {state.external && (
                         <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />

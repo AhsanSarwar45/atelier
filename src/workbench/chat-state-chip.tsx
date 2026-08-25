@@ -128,6 +128,61 @@ function seconds(since: number | null, now: number): string {
 }
 
 /**
+ * Short enough that splitting it buys nothing: any line with room for the word
+ * has room for this whole.
+ */
+const WHOLE = 20;
+
+/**
+ * The most a pinned tail may take. Past this it is not the end of a line, it is
+ * a second line, and it would push the word and the counter off the front the
+ * way the whole clause used to.
+ */
+const TAIL_MOST = 22;
+
+/** And the least it keeps when there is no seam worth cutting at. */
+const TAIL_LEAST = 12;
+
+/**
+ * The detail, split where the ellipsis should fall.
+ *
+ * The manager, 2026-08-25, photographing the list: "ing for
+ * NothingShowing|KindFilter in workbench/chat-". Both ends of what the chat was
+ * doing were gone — the front because the mark and the word were pushed off the
+ * line, the back because the browser only ever cuts at the end. What he asked
+ * for is a cut in the middle, with the mark and the counter always on screen.
+ *
+ * So the clause is drawn as two pieces rather than one: a head that gives way,
+ * and a tail that does not. The browser's own ellipsis then lands where the head
+ * is cut, which is the middle of the string, and both ends read —
+ * "Searching for Nothing…/chat-sidebar.tsx". Nothing here is measured: no
+ * observer, no text metrics, no second pass. A list of forty rows costs what
+ * forty rows cost before, which is the whole reason it is done this way and not
+ * by asking the browser how wide the line came out.
+ *
+ * The seam is chosen so what survives on the right is worth reading — the last
+ * part of a path, or the last word — and so any space at the seam rides in the
+ * tail, where `whitespace-pre` keeps it. A space left at the end of the head is
+ * at the end of its own line box, and the browser throws those away, which
+ * would glue the two halves together the moment there was room for both.
+ *
+ * Returns the tail empty when there is nothing to gain, and head + tail is
+ * always exactly what came in.
+ */
+export function splitDetail(text: string): [head: string, tail: string] {
+  if (text.length <= WHOLE) return [text, ''];
+
+  const slash = text.lastIndexOf('/');
+  if (slash > 0 && text.length - slash <= TAIL_MOST) return [text.slice(0, slash), text.slice(slash)];
+
+  const word = text.lastIndexOf(' ', text.length - 2);
+  if (word > 0 && text.length - word <= TAIL_MOST) return [text.slice(0, word), text.slice(word)];
+
+  const cut = text.length - TAIL_LEAST;
+  return [text.slice(0, cut), text.slice(cut)];
+}
+
+/**
  * The chip.
  *
  * `size` says whether it is a chip of its own — a row in the list, the open
@@ -142,16 +197,11 @@ function seconds(since: number | null, now: number): string {
 export function ChatStateChip({
   state,
   size = 'chip',
-  detail = true,
   testId = 'chat-state',
   className,
 }: {
   state: ChatState;
   size?: 'chip' | 'inline';
-  // Whether there is room for what this particular one is on. Asked for, never
-  // guessed from the size: the rail and the chat's own bar draw the same size
-  // of chip, and only one of them is 288px wide (the manager, 2026-08-23).
-  detail?: boolean;
   testId?: string;
   className?: string;
 }) {
@@ -161,6 +211,10 @@ export function ChatStateChip({
   // silently dropped the one clock that matters most — how long a chat has been
   // stopped waiting for somebody to approve something (bw-jaoz.14.3).
   const count = seconds(state.since, now);
+  // Split before anything is drawn rather than inside the markup: what the two
+  // halves are is a reading of the string, and the markup below is only where
+  // they go (bw-gnzl).
+  const [said, ended] = state.detail ? splitDetail(state.detail) : ['', ''];
   // Nothing is known and nothing is claimed: the external badge beside this is
   // the whole of what the screen can honestly say.
   if (!state.word) return null;
@@ -180,17 +234,28 @@ export function ChatStateChip({
           cut short and still leave a true line (bw-jaoz.14.14). */}
       <span className="shrink-0">{state.word}</span>
       {/* What this particular one is — the time a limit lifts, how many helpers
-          are out. Quieter than the word, and cut short rather than wrapping:
-          "Retrying" alone leaves the reader watching a chat that says nothing
-          about when it comes back (bw-jaoz.14.8). Where the caller says there
-          is no room for it, it is dropped whole rather than truncated to a
-          stub — "· au…" tells the reader less than nothing. */}
-      {detail && state.detail && (
-        <span data-testid="chat-state-detail" className="truncate opacity-70">
-          · {state.detail}
+          are out, the path being searched. Quieter than the word, and cut short
+          rather than wrapping: "Retrying" alone leaves the reader watching a
+          chat that says nothing about when it comes back (bw-jaoz.14.8).
+
+          It is the only thing on this line that gives way, and it gives way in
+          the middle. The head shrinks and the browser cuts it; the tail is
+          pinned, so the end of the path or the last word survives a rail too
+          narrow for the rest (splitDetail, bw-gnzl). That is also what keeps
+          the mark and the counter on screen: with a child that can shrink, the
+          chip fits itself to the line instead of overflowing an edge that hides
+          whatever crosses it. */}
+      {state.detail && (
+        <span data-testid="chat-state-detail" className="flex min-w-0 items-center opacity-70">
+          <span className="truncate">· {said}</span>
+          {ended && <span className="shrink-0 whitespace-pre">{ended}</span>}
         </span>
       )}
-      {count && <span className="shrink-0 font-mono tabular-nums opacity-70">{count}</span>}
+      {count && (
+        <span data-testid="chat-state-count" className="shrink-0 font-mono tabular-nums opacity-70">
+          {count}
+        </span>
+      )}
     </>
   );
 
