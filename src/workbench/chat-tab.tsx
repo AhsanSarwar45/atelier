@@ -52,6 +52,7 @@ import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
+import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
@@ -472,8 +473,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       },
     };
   }, [knownCards, byName, projectId, projectPath, where, disk]);
-  const [draft, setDraft] = useState('');
-  const [attached, setAttached] = useState<ImagePayload[]>([]);
+  // Both are held against THIS chat's id, out where the tab bar cannot reach
+  // them: leaving the chat for the board takes this whole screen down, and
+  // switching chats does not take it down at all (src/workbench/drafts.ts).
+  const [draft, setDraft] = useUnsentLine(sessionId ?? '');
+  const [attached, setAttached] = useUnsentPictures(sessionId ?? '');
   /** The picture being looked at, from the tray or from a message. */
   const [looking, setLooking] = useState<ImagePayload | null>(null);
   /** Which sent-off agent's own conversation is open, by the call that sent it. */
