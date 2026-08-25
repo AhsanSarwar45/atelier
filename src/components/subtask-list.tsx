@@ -91,13 +91,13 @@ export function SubtaskList({
                 "finished" and drawing dropped work like live work made the
                 one list of pieces disagree with the count above it. */}
             <p className={cn(
-              "text-xs font-medium group-hover:underline",
+              "truncate text-xs font-medium group-hover:underline",
               standing(child.status) ? "text-t-secondary" : "line-through text-t-muted"
             )}>
               {truncate(child.title, 50)}
             </p>
             {child.description && (
-              <p className="text-[10px] text-t-muted mt-0.5">
+              <p className="truncate text-[10px] text-t-muted mt-0.5">
                 {truncate(child.description, 60)}
               </p>
             )}
