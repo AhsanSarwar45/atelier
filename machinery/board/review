@@ -636,7 +636,12 @@ def main():
     # one already out lands on the goal either way (bw-5e8.4). The copy this run
     # hands off to is the exception — the claim it finds held is its own parent's.
     mine = inflight.take(goal_id)
-    if not mine and not os.environ.get(inflight.DETACHED):
+    # The flag is this copy's alone, so it comes out of the environment here: left
+    # in, the checks line and the reading this copy spawns are each told they are
+    # the copy too, and a suite run under a reader fired its own hand-off case
+    # inline (bw-aczr.9).
+    detached = bool(os.environ.pop(inflight.DETACHED, None))
+    if not mine and not detached:
         where = inflight.console(goal_id)
         print("%s already has a reader out%s; the verdict goes onto the goal itself"
               % (goal_id, (", writing to " + where) if where else ""))
@@ -660,7 +665,7 @@ def main():
     # not one to read, rather than hearing it from a run they cannot see. The
     # reading itself is minutes long, so it happens in a copy of this script and
     # this run ends.
-    if not os.environ.get(inflight.DETACHED):
+    if not detached:
         hand_off(goal_id, a.rerun)
         global HANDED
         HANDED = True

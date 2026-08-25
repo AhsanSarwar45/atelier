@@ -689,6 +689,13 @@ FAULTS = [
     ("an account with nothing left to spend is written up as a reader that answers "
      "nothing", REVIEW,
      lambda s: s.replace("    if stopped:\n", "    if False:\n")),
+    # The flag that tells a copy it is the copy, left in the environment for
+    # everything the copy runs, so a suite run under a reader fires its own
+    # hand-off case inline (bw-aczr.9).
+    ("the copy's own flag stays in the environment for the checks line and the "
+     "reading it spawns", REVIEW,
+     lambda s: s.replace("    detached = bool(os.environ.pop(inflight.DETACHED, None))",
+                         "    detached = bool(os.environ.get(inflight.DETACHED))")),
 
     # One session, one board name, and the copy it works in written onto the card
     # instead (bw-aczr.2). Read the copy back off the name and every card claimed

@@ -353,7 +353,8 @@ BUSY_LOG = "/nowhere/g.already.run/run.log"
 COPY_LOG = "/nowhere/g.copy.run/run.log"
 
 
-def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
+def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",),
+              saw=None):
     """What a reading fired by hand does: spawn a copy of itself, or read.
 
     Fired by hand it used to do the reading in the caller's own shell, and the
@@ -383,6 +384,8 @@ def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
 
     def reads(prompt, actor, goal_id):
         read.append(goal_id)
+        if saw is not None:
+            saw.append(inflight.DETACHED in os.environ)
         raise Reached()
 
     where = tempfile.mkdtemp()
@@ -400,6 +403,12 @@ def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
     keep_popen, subprocess.Popen = subprocess.Popen, Copy
     keep_argv, sys.argv = sys.argv, ["review", "g"] + (["--rerun"] if rerun else [])
     keep_out, sys.stdout = sys.stdout, said
+    # The suite runs under the reader too, and a reader's environment carries the
+    # copy's flag and run directory; a case about firing by hand must see neither
+    # (bw-aczr.9).
+    inherited = {k: os.environ.pop(k) for k in
+                 (inflight.DETACHED, inflight.RUN_DIR, inflight.CONSOLE)
+                 if k in os.environ}
     if detached:
         os.environ[inflight.DETACHED] = "1"
         os.environ[inflight.CONSOLE] = COPY_LOG
@@ -416,6 +425,7 @@ def hands_off(detached, rerun=True, busy=None, notes="", shas=("a1c0ffee",)):
         sys.argv, sys.stdout = keep_argv, keep_out
         os.environ.pop(inflight.DETACHED, None)
         os.environ.pop(inflight.CONSOLE, None)
+        os.environ.update(inherited)
         console = inflight.console("g")
         inflight.clear("g")
         shutil.rmtree(where, ignore_errors=True)
@@ -6632,10 +6642,15 @@ def main():
         "and the reading is never done by anyone"
     assert "run.log" in said, \
         "a hand-fired reading gave the shell back without saying where its run went"
-    spawned, read, said, named = hands_off(detached=True)
+    seen = []
+    spawned, read, said, named = hands_off(detached=True, saw=seen)
     assert not spawned and read == ["g"], \
         "the copy handed the reading on instead of doing it, which is a reader that " \
         "never arrives"
+    assert seen == [False], \
+        "the copy left its own flag in the environment, so the checks line and the " \
+        "reading it spawns are each told they are the copy too, and a suite run " \
+        "under a reader fires its hand-off case inline"
     # The copy names the claim itself wherever it finds no claim to inherit, and a
     # name is only half of what a later firing needs: without the console beside
     # it, whoever fires next is told the job is being read and nothing more.
