@@ -190,7 +190,7 @@ describe('the pane itself', () => {
       seconds: 2,
       startedAt: Date.now() - 30_000,
     };
-    const { unmount } = render(<SentAwayPanel agents={[row]} sessionId="chat-1" controls={[]} />);
+    const { unmount } = render(<SentAwayPanel items={[]} agents={[row]} sessionId="chat-1" controls={[]} />);
     const onTheRow = screen.getByTestId('sent-away-for').textContent;
     unmount();
 
@@ -211,7 +211,7 @@ describe('the pane itself', () => {
         seconds: 2,
         startedAt: Date.now() - 30_000,
       };
-      render(<SentAwayPanel agents={[row]} sessionId="chat-1" controls={[]} />);
+      render(<SentAwayPanel items={[]} agents={[row]} sessionId="chat-1" controls={[]} />);
       act(() => {
         vi.advanceTimersByTime(500);
       });

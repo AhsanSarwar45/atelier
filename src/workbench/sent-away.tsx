@@ -27,13 +27,14 @@ import { useEffect, useState } from 'react';
 
 import { Bot, Clock, Coins, Eye, Pause, Square, Terminal, Workflow } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Row } from '@/components/ui/row';
 import { cn } from '@/lib/utils';
+import { helperState } from '@/workbench/chat-state';
+import { ChatStateChip } from '@/workbench/chat-state-chip';
 import { forHowLong } from '@/workbench/elapsed';
-import type { SentAway } from '@/workbench/fold';
+import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl, AgentKind, AgentState } from '@/workbench/protocol';
 import { isOver } from '@/workbench/protocol';
 import { sendCommand } from '@/workbench/use-session';
@@ -247,19 +248,20 @@ export function AgentSteering({
 
 function AgentRow({
   row,
+  items,
   now,
   sessionId,
   controls,
   onOpen,
 }: {
   row: SentAway;
+  items: readonly TranscriptItem[];
   now: number;
   sessionId: string;
   controls: AgentControl[];
   onOpen?: (id: string) => void;
 }) {
   const { label: kind, Icon } = KINDS[row.kind];
-  const state = STATES[row.state];
   const model = modelNamed(row.model);
   const over = isOver(row.state);
 
@@ -296,9 +298,6 @@ function AgentRow({
         <span data-testid="sent-away-what" className="min-w-0 flex-1 truncate" title={row.what}>
           {row.what || kind}
         </span>
-        <Badge variant={state.variant} appearance="light" size="xs" data-testid="sent-away-state" className="shrink-0">
-          {state.label}
-        </Badge>
       </div>
 
       {/* The three numbers, in the order they are asked for: which model, how
@@ -329,13 +328,20 @@ function AgentRow({
         )}
       </div>
 
-      {/* Its own last line while it works, its answer once it is done. Never
-          both: the present tense of a thing that has finished is a lie. */}
-      {!over && row.doing && (
-        <p data-testid="sent-away-doing" className="line-clamp-2 text-[11px] italic text-muted-foreground">
-          {row.doing}
-        </p>
-      )}
+      {/* Where it stands and what it is on, in the one mark the reader already
+          knows from the chat's own line and from the row in the list. It is the
+          whole of what this card says about the helper's own work now that the
+          transcript no longer draws that work inline — so it settles rather
+          than vanishing when the helper finishes, and it reads its own rows
+          rather than the kit's half-minute progress (bw-pukk.2). */}
+      <ChatStateChip
+        state={helperState(row, items)}
+        size="inline"
+        testId="sent-away-state"
+        className="text-[11px]"
+      />
+      {/* Its answer once it is done. Never beside the present tense of a thing
+          that has finished, which is why the mark above settles first. */}
       {over && row.result && (
         <p data-testid="sent-away-result" className="line-clamp-2 text-[11px] text-muted-foreground" title={row.result}>
           {row.result}
@@ -349,6 +355,12 @@ function AgentRow({
 
 export interface SentAwayPanelProps {
   agents: SentAway[];
+  /**
+   * The conversation's own rows, which is where a helper's live line is read
+   * from: its rows carry the call that sent it, and they arrive as they happen
+   * rather than twice a minute (see {@link helperState}).
+   */
+  items: readonly TranscriptItem[];
   /** Whose chat these belong to; the steering acts on it. */
   sessionId: string;
   /** Which steering controls this chat's brand has. None is a real answer. */
@@ -357,7 +369,7 @@ export interface SentAwayPanelProps {
   onOpen?: (id: string) => void;
 }
 
-export function SentAwayPanel({ agents, sessionId, controls, onOpen }: SentAwayPanelProps) {
+export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: SentAwayPanelProps) {
   const now = useNow(agents.some((a) => !isOver(a.state)));
 
   if (agents.length === 0) return null;
@@ -371,7 +383,15 @@ export function SentAwayPanel({ agents, sessionId, controls, onOpen }: SentAwayP
       className="flex flex-col gap-1.5"
     >
       {agents.map((row) => (
-        <AgentRow key={row.id} row={row} now={now} sessionId={sessionId} controls={controls} onOpen={onOpen} />
+        <AgentRow
+          key={row.id}
+          row={row}
+          items={items}
+          now={now}
+          sessionId={sessionId}
+          controls={controls}
+          onOpen={onOpen}
+        />
       ))}
     </div>
   );

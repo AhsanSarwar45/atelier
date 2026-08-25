@@ -54,6 +54,7 @@ function sections(): string[] {
 const rail = (agents: SentAway[], cards: string[], reports: { project: string; slug: string; title: string }[]) =>
   render(
     <ChatRightRail
+      items={[]}
       projectId="beads-web"
       cards={cards}
       reports={reports}

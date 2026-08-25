@@ -26,7 +26,12 @@
  * Pure, and here rather than in a component, because four screens draw it and
  * the whole point is that they cannot disagree.
  */
-import type { SessionState } from '@/workbench/protocol';
+import type { SentAway, TranscriptItem } from '@/workbench/fold';
+import type { AgentState, SessionState } from '@/workbench/protocol';
+// Spelled the long way on purpose: this file is one the chat's own server
+// reads, and Node has no aliases (bw-jaoz.5). A type import beside it may keep
+// the short spelling — it is erased before Node ever sees it.
+import { isOver } from './protocol.ts';
 
 /** Which kind of program is holding a conversation of somebody else's. */
 export type Holder = 'terminal' | 'program';
@@ -449,6 +454,79 @@ export function chatState(input: ChatStateInput): ChatState {
         : null,
     external: null,
   };
+}
+
+/**
+ * Where a helper stands, said in the chat's own words.
+ *
+ * A helper has a vocabulary of its own — running, waiting, parked, done,
+ * failed, stopped — and the reader is not owed a second one. Each is spoken
+ * here as one of ours, so the mark on a helper's card is the mark he already
+ * knows from the chat's own line and from the row in the list.
+ *
+ * `parked` is the only one that needs a word of its own: it is still running,
+ * so it wears the running mark, and "Working" would not say the thing that is
+ * true about it.
+ */
+const HELPER_STANDS: Record<AgentState, { state: SessionState; label: string | null }> = {
+  running: { state: 'running_tool', label: null },
+  waiting: { state: 'waiting_permission', label: null },
+  parked: { state: 'running_tool', label: 'Parked' },
+  done: { state: 'idle', label: 'Done' },
+  failed: { state: 'errored', label: null },
+  stopped: { state: 'stopped', label: null },
+};
+
+/** The last thing this helper produced, or null before it has produced one. */
+function itsLastRow(row: SentAway, items: readonly TranscriptItem[]): TranscriptItem | null {
+  // The call that sent it off is the join key everywhere, not the id the kit
+  // gave the agent: that is what its rows carry (fold.ts, `parentId`).
+  const key = row.toolCallId ?? row.id;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if ('parentId' in item && item.parentId === key) return item;
+  }
+  return null;
+}
+
+/**
+ * What one helper is doing this second, for the card that stands in for it.
+ *
+ * Read from the helper's own rows rather than from the progress the kit sends
+ * about it. The kit reports about twice a minute, so a card drawn from
+ * {@link SentAway.doing} alone goes on saying "Reading the router" for half a
+ * minute after the router was read. Its rows arrive as they happen, and now
+ * that they are no longer drawn in the manager's transcript they are exactly
+ * what the card is for.
+ *
+ * No seconds: `since` is left null on purpose, because the card counts its own
+ * clock beside this, and two counts of one thing that disagree by a second is
+ * a fault this app has already fixed once (bw-jaoz.6).
+ *
+ * A helper that has finished settles rather than going blank — Done, Failed,
+ * Stopped — because a card whose line empties reads as a card that has lost
+ * track of its own work.
+ */
+export function helperState(row: SentAway, items: readonly TranscriptItem[]): ChatState {
+  const { state, label } = HELPER_STANDS[row.state];
+  // Over is over, and waiting is his turn: neither reading is improved by
+  // whatever row happened to arrive last.
+  if (isOver(row.state)) return chatState({ state, label, since: null });
+  if (row.state === 'waiting') return chatState({ state, label, since: null, detail: row.doing });
+
+  const last = itsLastRow(row, items);
+  if (last?.kind === 'tool' && last.status === 'running') {
+    // Its own present-tense line where the kit has sent one for this call, the
+    // call's own title otherwise. Never the bare name of the tool: the title is
+    // what the transcript would have drawn, and this card stands in for it.
+    return chatState({ state: 'running_tool', label, since: null, detail: last.summary ?? last.title });
+  }
+  if (last?.kind === 'thinking' && !last.done) return chatState({ state: 'thinking', label, since: null });
+  if (last?.kind === 'message' && last.role === 'assistant' && !last.done) {
+    return chatState({ state: 'streaming', label, since: null });
+  }
+  // Nothing of its own to read yet, or a moment between rows: the kit's last word.
+  return chatState({ state, label, since: null, detail: row.doing });
 }
 
 /**

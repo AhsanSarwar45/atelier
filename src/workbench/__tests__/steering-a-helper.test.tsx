@@ -86,7 +86,7 @@ describe('the controls on a row', () => {
   it('draws none at all for a brand that has none', () => {
     // Hidden, not faked: a button that cannot do the thing written on it is
     // worse than no button.
-    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={[]} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={aChatWith()} sessionId="chat-1" controls={[]} onOpen={() => {}} />);
 
     expect(screen.queryByTestId('sent-away-steer')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sent-away-stop')).not.toBeInTheDocument();
@@ -100,14 +100,14 @@ describe('the controls on a row', () => {
     // trimming, and a chat that cannot say what it can steer can steer nothing
     // (bw-7ks.22.31).
     const view = asView({ menu: { agentControls: null } } as never);
-    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={view.menu.agentControls} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={aChatWith()} sessionId="chat-1" controls={view.menu.agentControls} onOpen={() => {}} />);
 
     expect(screen.getByTestId('sent-away-open')).toBeInTheDocument();
     expect(screen.queryByTestId('sent-away-steer')).not.toBeInTheDocument();
   });
 
   it('draws only the ones the brand named', () => {
-    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={['stop']} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={aChatWith()} sessionId="chat-1" controls={['stop']} onOpen={() => {}} />);
 
     expect(screen.getByTestId('sent-away-stop')).toBeInTheDocument();
     expect(screen.queryByTestId('sent-away-park')).not.toBeInTheDocument();
@@ -129,7 +129,7 @@ describe('the controls on a row', () => {
       }),
     ]);
 
-    render(<SentAwayPanel agents={done} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={done} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
 
     expect(screen.queryByTestId('sent-away-steer')).not.toBeInTheDocument();
   });
@@ -137,14 +137,14 @@ describe('the controls on a row', () => {
   it('and no park on one already running in the background', () => {
     const parked = aChatWith([said({ type: 'agent.progress', agentId: 'task-1', seconds: 5, tokens: 100, calls: 1, state: 'parked' })]);
 
-    render(<SentAwayPanel agents={parked} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={parked} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
 
     expect(screen.getByTestId('sent-away-stop')).toBeInTheDocument();
     expect(screen.queryByTestId('sent-away-park')).not.toBeInTheDocument();
   });
 
   it('asks about that one agent, not about the chat', async () => {
-    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('sent-away-park'));
@@ -164,7 +164,7 @@ describe('the controls on a row', () => {
     // life either way, so without this line a refused stop reads exactly like a
     // stop that worked and the reader walks off believing it is over.
     refusing('the chat is not answering');
-    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('sent-away-stop'));
@@ -179,7 +179,7 @@ describe('the controls on a row', () => {
 
   it('says which one did not land, and forgets it on the next try', async () => {
     refusing('the chat is not answering');
-    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
+    render(<SentAwayPanel items={[]} agents={aChatWith()} sessionId="chat-1" controls={['stop', 'park']} onOpen={() => {}} />);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('sent-away-park'));
@@ -202,7 +202,7 @@ describe('the controls on a row', () => {
     // The row is one big button and the controls sit next to it, not inside it:
     // nested, every click on Stop would also open the pane.
     const opened: string[] = [];
-    render(<SentAwayPanel agents={aChatWith()} sessionId="chat-1" controls={['stop']} onOpen={(id) => opened.push(id)} />);
+    render(<SentAwayPanel items={[]} agents={aChatWith()} sessionId="chat-1" controls={['stop']} onOpen={(id) => opened.push(id)} />);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('sent-away-stop'));

@@ -213,14 +213,14 @@ describe('the panel', () => {
 
   function drawn() {
     const agents = foldAll(sentAway()).agents;
-    render(<SentAwayPanel agents={agents} sessionId="chat-1" controls={[]} />);
+    render(<SentAwayPanel items={[]} agents={agents} sessionId="chat-1" controls={[]} />);
     return Object.fromEntries(
       screen.getAllByTestId('sent-away-row').map((el) => [el.getAttribute('data-agent')!, el]),
     );
   }
 
   it('draws nothing at all when the chat has sent nothing away', () => {
-    const { container } = render(<SentAwayPanel agents={[]} sessionId="chat-1" controls={[]} />);
+    const { container } = render(<SentAwayPanel items={[]} agents={[]} sessionId="chat-1" controls={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -248,7 +248,12 @@ describe('the panel', () => {
     expect(helper.querySelector('[data-testid="sent-away-for"]')).toHaveTextContent('1m 30s');
     expect(helper.querySelector('[data-testid="sent-away-spend"]')).toHaveTextContent('20k');
     expect(helper.querySelector('[data-testid="sent-away-calls"]')).toHaveTextContent('9 calls');
-    expect(helper.querySelector('[data-testid="sent-away-doing"]')).toHaveTextContent('Reading the router');
+    // What it is doing is the chat's own mark now — the same chip the chat's
+    // own line and the row in the list wear — rather than a line of italics
+    // this panel drew for itself (bw-pukk.2).
+    const mark = helper.querySelector('[data-testid="sent-away-state"]')!;
+    expect(mark).toHaveAttribute('data-word', 'Working');
+    expect(mark).toHaveTextContent('Reading the router');
   });
 
   it('counts its own seconds between the kit’s reports', () => {
@@ -269,9 +274,12 @@ describe('the panel', () => {
     const rows = drawn();
     const run = rows['run-1']!;
     expect(run).toHaveAttribute('data-state', 'done');
-    expect(run.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('done');
+    expect(run.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'Done');
     expect(run.querySelector('[data-testid="sent-away-result"]')).toHaveTextContent('Three findings, one real.');
-    expect(run.querySelector('[data-testid="sent-away-doing"]'), 'a finished row is still saying what it is doing').toBeNull();
+    expect(
+      run.querySelector('[data-testid="sent-away-state"]'),
+      'a finished row is still saying what it is doing',
+    ).not.toHaveTextContent('Judging findings');
 
     // And its clock has stopped: what it took is what it took.
     expect(run.querySelector('[data-testid="sent-away-for"]')).toHaveTextContent('45s');
@@ -283,8 +291,8 @@ describe('the panel', () => {
 
   it('says which of them are waiting on you', () => {
     const rows = drawn();
-    expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('parked');
-    expect(rows['task-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveTextContent('running');
+    expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'Parked');
+    expect(rows['task-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'Working');
   });
 
   /**
@@ -295,7 +303,7 @@ describe('the panel', () => {
   it('hands back which one was clicked, wherever on the row the click landed', () => {
     const opened: string[] = [];
     const view = foldAll(sentAway());
-    render(<SentAwayPanel agents={view.agents} sessionId="chat-1" controls={[]} onOpen={(id) => opened.push(id)} />);
+    render(<SentAwayPanel items={[]} agents={view.agents} sessionId="chat-1" controls={[]} onOpen={(id) => opened.push(id)} />);
 
     const row = screen.getByTestId('sent-away-panel').querySelector('[data-agent="task-1"]')!;
     (row.querySelector('[data-testid="sent-away-open"]') as HTMLElement).click();

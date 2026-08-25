@@ -857,6 +857,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           cards={cards}
           reports={ours}
           agents={view.agents}
+          items={view.items}
           sessionId={sessionId}
           agentControls={view.menu.agentControls}
           onOpenAgent={setOpenAgent}

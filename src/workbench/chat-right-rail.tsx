@@ -38,7 +38,7 @@ import { BeadChip } from '@/components/bead-chip-row';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
-import type { SentAway } from '@/workbench/fold';
+import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
 import { SentAwayPanel } from '@/workbench/sent-away';
@@ -93,6 +93,8 @@ export interface ChatRightRailProps {
   reports: { project: string; slug: string; title: string }[];
   /** Everything it handed to something else, oldest first (§8.2.7). */
   agents: SentAway[];
+  /** The conversation's own rows; a helper's card reads its live line from them. */
+  items: readonly TranscriptItem[];
   /** Whose chat these belong to; the steering on a row acts on it. */
   sessionId: string;
   /** Which steering controls this chat's brand has for them. None is a real answer. */
@@ -113,6 +115,7 @@ export function ChatRightRail({
   cards,
   reports,
   agents,
+  items,
   sessionId,
   agentControls,
   onOpenAgent,
@@ -180,7 +183,13 @@ export function ChatRightRail({
               this rail to look at (§8.2.7). */}
           {agents.length > 0 && (
             <Section title="Sent away">
-              <SentAwayPanel agents={agents} sessionId={sessionId} controls={agentControls} onOpen={onOpenAgent} />
+              <SentAwayPanel
+                agents={agents}
+                items={items}
+                sessionId={sessionId}
+                controls={agentControls}
+                onOpen={onOpenAgent}
+              />
             </Section>
           )}
 
