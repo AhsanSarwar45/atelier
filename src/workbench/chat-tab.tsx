@@ -53,7 +53,7 @@ import { cn } from '@/lib/utils';
 import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
-import { ChatStateChip, ExternalBadge } from '@/workbench/chat-state-chip';
+import { ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
 import { useKnownCards } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
@@ -931,7 +931,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           data-state={held ? 'held' : view.state}
           className={cn('flex shrink-0 items-center', CHIP_GAP)}
         >
-          <ChatStateChip state={state} testId="session-state-chip" />
+          {/* No activity chip here: what the agent is doing now is already the
+              live line at the foot of the transcript, and the same state is on
+              the chat's row in the list beside it. Only the badge naming
+              another program holding this chat stays — nothing else says it. */}
           {state.external && <ExternalBadge holder={state.external.holder} />}
         </span>
         {/* The one thing on this line allowed to give way when the line runs
