@@ -37,7 +37,20 @@ impl Started {
     /// Run the program the way a person does: no arguments, its own port, and
     /// a home folder of this test's own.
     fn against(home: &Path, data: &Path, port: u16) -> Self {
-        let mut running = Command::new(env!("CARGO_BIN_EXE_atelier"))
+        let mut program = Command::new(env!("CARGO_BIN_EXE_atelier"));
+        // A shell the running copy started carries ATELIER_DATA_DIR and
+        // ATELIER_PORT, and each beats what this test hands over: the folder
+        // (identity.rs) and the port (main.rs). Inherited, the start below
+        // looks at the owner's own data folder, finds his copy already
+        // holding that port, and says so rather than wiring anything up. The
+        // whole family goes, not the two that were seen doing it, so this
+        // stays isolated as more of them are added.
+        for (name, _) in std::env::vars() {
+            if name.starts_with("ATELIER_") {
+                program.env_remove(name);
+            }
+        }
+        let mut running = program
             .env("CLAUDE_CONFIG_DIR", home)
             .env("XDG_DATA_HOME", data)
             .env("BEADS_WEB_HOST", "127.0.0.1")
