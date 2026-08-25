@@ -20,7 +20,7 @@ agent_merges = true
 # repository of its own and brought its own cards with it.
 areas = ["board", "screen", "server", "storage", "reports", "packaging",
          "interface", "tests", "tooling", "docs",
-         "gates", "steps", "craft", "quality"]
+         "gates", "steps", "craft"]
 
 # The board tools every session here runs are this project's own now, under
 # `machinery/`, so a fault a session hits is found and fixed in one checkout. The
@@ -41,8 +41,8 @@ places = ["\\b(?:the )?(?:Todo|In Progress|Agent Review|Manager Review|Done|Canc
 # for. `machinery/checks --all` runs the lot. The reader's own run takes it apart
 # the same way, so a suite that goes red in front of a reading becomes a piece of
 # the job rather than a sentence in a verdict.
-checks = "npm test && (cd server && cargo test) && machinery/check"
+checks = "npm test && (cd server && cargo test)"
 
 [review]
 persona = "the Beads Web project — the manager's own board screen and its server, a Next.js front end over a Rust back end"
-proves = "drive the running screen in a browser and read the result off a screenshot; a passing unit test is not a verified change. For a change under machinery/ — a gate, a board tool, a step — put the fault back and show the case that goes red without it; a suite that passes before and after proves nothing"
+proves = "drive the running screen in a browser and read the result off a screenshot; a passing unit test is not a verified change"

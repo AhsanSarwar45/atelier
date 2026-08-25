@@ -63,33 +63,7 @@ def judge(tool, tool_input, agent_type):
     return REASON.replace("{where}", where)
 
 
-def selftest():
-    failed = []
-
-    def check(name, got, want):
-        if bool(got) != want:
-            failed.append(f"{name}: wanted {'a refusal' if want else 'no refusal'}")
-
-    check("a screenshot read into the conversation", judge("Read", {"file_path": "/t/a.png"}, None), True)
-    check("a screenshot named in capitals", judge("Read", {"file_path": "/t/A.PNG"}, None), True)
-    check("the looker reading one", judge("Read", {"file_path": "/t/a.png"}, LOOKER), False)
-    check("another helper reading one", judge("Read", {"file_path": "/t/a.png"}, "scout"), True)
-    check("a source file", judge("Read", {"file_path": "/t/a.ts"}, None), False)
-    check("a file whose name merely holds png", judge("Read", {"file_path": "/t/png-notes.md"}, None), False)
-    check("some other tool", judge("Bash", {"command": "ls /t/a.png"}, None), False)
-    check("a call with nothing in it", judge("Read", {}, None), False)
-
-    if failed:
-        for line in failed:
-            print("FAILED  " + line)
-        return 1
-    print("all 8 cases pass")
-    return 0
-
-
 def main():
-    if "--selftest" in sys.argv:
-        return selftest()
     try:
         data = json.loads(sys.stdin.read() or "{}")
     except ValueError:

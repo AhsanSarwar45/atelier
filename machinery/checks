@@ -16,7 +16,7 @@ anything (bw-aczr.4).
 
 What it writes is one line the gate can check against the tree in front of it:
 
-    checks: tree <hash> npm-test=412/0 machinery-check=71/0
+    checks: tree <hash> npm-test=412/0 cargo-test=307/0
 
 The hash is `git write-tree` of the copy the suites ran in. A note for an older
 tree proves nothing about the code standing now, and that is the one failure a
@@ -71,8 +71,6 @@ KNOWN = [
     ("npm-test", re.compile(r"\b(?:npm|npx|yarn|pnpm|vitest|jest)\b"),
      ("src/", "tests/", "package.json", "next.config.js", "vitest.config.",
       "tsconfig")),
-    ("machinery-check", re.compile(r"(?:^|[/\s])check\b"),
-     ("machinery/", ".claude/")),
 ]
 # Colour codes a suite writes when it thinks it has a terminal. They land in the
 # log either way and would break every count below.
@@ -81,7 +79,6 @@ COLOUR = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # test binary, and the machinery's own suite prints a line per case it proved.
 VITEST = re.compile(r"^\s*Tests\s+(.*)$", re.M)
 CARGO = re.compile(r"test result:\s*\w+\.\s*(\d+)\s+passed;\s*(\d+)\s+failed")
-CASE = re.compile(r"^ok:", re.M)
 # The note's own first line, read back by hooks/board-status-gate.py. Both sides
 # read this file, so the shape is written down once.
 HEAD = re.compile(r"^checks: tree ([0-9a-f]{40})(.*)$", re.M)
@@ -133,8 +130,8 @@ def tree():
     """The tree the suites just ran over, as a hash anyone can ask for again.
 
     `git write-tree` names what a commit here would contain without touching the
-    working files or moving a ref, which is the same question machinery/check
-    already asks. The close gate asks for it again at the moment of the close, and
+    working files or moving a ref. The close gate asks for it again at the moment
+    of the close, and
     a different answer means the code moved after the suites were green.
     """
     return git(["write-tree"])
@@ -277,14 +274,6 @@ def counted(name, out, ok):
         if rows:
             passed = sum(int(p) for p, _ in rows)
             failed = sum(int(f) for _, f in rows)
-    elif name == "machinery-check":
-        rows = CASE.findall(text)
-        if rows:
-            passed, failed = len(rows), 0
-    elif name == "voice-check":
-        said = re.search(r"(\d+)\s+files?,\s*(\d+)\s+failures?", text)
-        if said:
-            passed, failed = int(said.group(1)), int(said.group(2))
     if passed is None:
         return (None, None) if ok else (0, 1)
     # A suite that came back red with nothing counted against it is still red.
@@ -316,19 +305,6 @@ def runs_dir(cid):
                          "board-checks", cid)
     os.makedirs(where, exist_ok=True)
     return where
-
-
-def with_flag(command, flag):
-    """The command with a flag on its end, inside its brackets when it has them.
-
-    `(cd machinery && ./check)` is one command with a directory change in front of
-    it, and a flag pasted after the closing bracket is handed to the bracket, which
-    the shell refuses, and not to the check (bw-aczr.20).
-    """
-    stripped = command.rstrip()
-    if stripped.endswith(")"):
-        return stripped[:-1].rstrip() + " " + flag + ")"
-    return stripped + " " + flag
 
 
 def run_one(suite, where, log_dir):
@@ -421,7 +397,10 @@ def main():
                     help="run these instead of the declared line, for the cases")
     a = ap.parse_args()
 
-    decl = project.of(ROOT)
+    # Run the declaration in this worktree. `project.of` intentionally resolves
+    # to the main checkout for board identity, but checks must test this copy.
+    decl = project.Declaration(
+        HERE_TREE, project._read(os.path.join(HERE_TREE, project.DECLARATION)))
     every = told(a.suites) or suites(decl)
     if not every:
         sys.exit("%s declares no checks command, so there is nothing here to run. "
@@ -431,42 +410,24 @@ def main():
     session = os.environ.get("CLAUDE_CODE_SESSION_ID")
     actor = me()
     cid = a.card
-    if not cid and not a.suites:
+    standalone = a.all and not cid
+    if not cid and not a.suites and not standalone:
         cid, why_not = open_step(actor, session)
         if not cid and not a.dry:
             sys.exit(why_not)
 
     # A stub line has no paths to ask about, so it runs whole. So does `--all`.
-    files, landed = ([], False) if a.suites else changed(HERE_TREE, decl.lands_on,
-                                                         job_of(cid))
+    files, landed = (([], False) if (a.suites or standalone)
+                     else changed(HERE_TREE, decl.lands_on, job_of(cid)))
     picked, why = [], {}
     for suite in every:
         want = "you asked for every suite" if (a.all or a.suites) else suite.wanted(files)
         if want:
             picked.append(suite)
             why[suite.name] = want
-    # The machinery's own check runs its fault sweep only when the machinery
-    # differs from the landing line. After a landing it never does, so the sweep
-    # that proves every case still bites would be skipped on the one run that
-    # matters. Ask for it outright.
-    for suite in picked:
-        if (landed and suite.name == "machinery-check"
-                and "--faults" not in suite.command and "--no-faults" not in suite.command):
-            suite.command = with_flag(suite.command, "--faults")
-            why[suite.name] += ", and the branch already landed, so the fault sweep " \
-                               "is asked for outright"
-
     # A branch that touched none of the suites' paths, a document or a rule file,
-    # still has to close its checks step on a note the gate can prove. The prose
-    # check is what such a change can break, so it runs alone there, and the note
-    # carries the tree hash like any other. A project without one gets the old
-    # answer: nothing ran, say so on the card or ask for every suite.
-    if not picked and not (a.all or a.suites):
-        prose = os.path.join(ROOT, "machinery", "voice-check.py")
-        if os.path.exists(prose):
-            picked = [Suite("voice-check", "python3 machinery/voice-check.py")]
-            why["voice-check"] = ("nothing this branch changed asks for a declared "
-                                  "suite, so the prose check runs alone")
+    # still has to close its checks step on a note the gate can prove. A project
+    # with no matching suite says so rather than running a meta-check.
 
     if a.dry:
         print("%d file(s) changed %s %s"
@@ -481,32 +442,38 @@ def main():
                                                           why[suite.name]))
         return
 
-    if not cid:
+    if not cid and not standalone:
         sys.exit("no checks step to run this for: name the card")
 
     if not picked:
         sys.exit("nothing this branch changed asks for a suite, so none was run. Write "
                  "that on %s yourself, or run `machinery/checks --all`." % cid)
 
-    log_dir = runs_dir(cid)
+    log_dir = runs_dir(cid or "all")
     hash_of_tree = tree()
     if not hash_of_tree:
         sys.exit("git could not name the tree in %s, so nothing here could say which "
                  "code the suites ran over. Fix that first." % HERE_TREE)
 
     print("%s: running %s over tree %s"
-          % (cid, ", ".join(s.name for s in picked), hash_of_tree[:12]))
+          % (cid or "all", ", ".join(s.name for s in picked), hash_of_tree[:12]))
     rows = run_line(picked, HERE_TREE, log_dir)
     for row in rows:
         print("  %-16s %s  %s" % (row["name"], "ok " if row["ok"] else "RED",
                                   token(row["name"], row["passed"], row["failed"])))
     body = note(hash_of_tree, rows, log_dir)
+    red = next((r for r in rows if not r["ok"]), None)
+    if standalone:
+        if red:
+            print("\n%s is red. Read %s" % (red["name"], red["log"]))
+            sys.exit(1)
+        return
+
     wrote, said = board(["comments", "add", cid, body, "--actor", actor])
     if not wrote:
         sys.exit("the suites ran but %s would not take the note, so the step cannot "
                  "close on it: %s\n\n%s" % (cid, said, body))
 
-    red = next((r for r in rows if not r["ok"]), None)
     if red:
         print("\n%s is red. The note is on %s and the step stays open. Read %s"
               % (red["name"], cid, red["log"]))

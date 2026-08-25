@@ -6,8 +6,7 @@ card of its own (board/spine.py), so the goal carries the signature. This
 file is the only place that says what a signature is worth — the run, the close
 gate and the reader all ask here rather than each parsing the same note.
 
-Everything that decides is a function of a goal card and a list of commits, so
-board/selftest.py exercises it without touching a board.
+Everything that decides is a function of a goal card and a list of commits.
 See docs/board.md#4b-review-is-done-by-someone-who-did-not-write-the-change.
 """
 import json

@@ -452,7 +452,7 @@ def answered(said, goal_id, actor, here):
     """What the run makes of the reader's answers: a verdict, or the end of the run.
 
     Handed the answers rather than firing a reader, so what a reader really said
-    can be put through this without one (board/selftest.py).
+    can be put through this without firing a reader.
 
     Three ends, and only one of them is a fault. An answer that parses is the
     reading. An account with nothing left to spend is nobody's mistake, so the

@@ -27,9 +27,6 @@ brand = "EXAMPLE"
 # Other registered projects a job here may say its change lands in
 # (`lands:<name>` on the goal).
 lands_elsewhere = []
-# Where this project's own quality-rule modules live, relative to its root.
-# Empty runs `quality.py` with the shared measures only.
-rules = ""
 # The one command this project's checks step runs — its tests, its compile gate,
 # whatever it holds a change to. A job runs it once, in front of the reader,
 # against everything the job built; nothing here belongs in a commit hook. Left

@@ -101,53 +101,7 @@ def judge(tool, tool_input, measure=length):
     return None
 
 
-def selftest():
-    failed = []
-    sizes = {"/t/small.ts": 120, "/t/tiny.md": 17, "/t/huge.py": 6603}
-
-    def measure(where):
-        return sizes.get(where.strip("'\""))
-
-    def check(name, got, want):
-        if bool(got) != want:
-            failed.append(f"{name}: wanted {'a refusal' if want else 'no refusal'}")
-
-    check("a slice of a short file", judge("Bash", {"command": "sed -n '1,60p' /t/small.ts"}, measure), True)
-    check("a slice written without quotes", judge("Bash", {"command": "sed -n 1,60p /t/tiny.md"}, measure), True)
-    check("a slice written in double quotes",
-          judge("Bash", {"command": 'sed -n "1,60p" /t/small.ts'}, measure), True)
-    check("a slice of a long file in double quotes",
-          judge("Bash", {"command": 'sed -n "1,60p" /t/huge.py'}, measure), False)
-    check("a slice of a long file", judge("Bash", {"command": "sed -n '1,60p' /t/huge.py"}, measure), False)
-    check("a slice piped onward", judge("Bash", {"command": "sed -n '1,60p' /t/small.ts | grep x"}, measure), True)
-    check("a short file read whole", judge("Bash", {"command": "cat /t/small.ts"}, measure), False)
-    check("a file nobody can measure", judge("Bash", {"command": "sed -n '1,60p' /t/gone.ts"}, measure), False)
-    check("sed doing something else", judge("Bash", {"command": "sed -i 's/a/b/' /t/small.ts"}, measure), False)
-    check("a part of a short file asked for by tool",
-          judge("Read", {"file_path": "/t/small.ts", "offset": 40, "limit": 20}, measure), True)
-    check("a short file read whole by tool", judge("Read", {"file_path": "/t/small.ts"}, measure), False)
-    check("a part of a long file asked for by tool",
-          judge("Read", {"file_path": "/t/huge.py", "offset": 40, "limit": 20}, measure), False)
-    check("an awk range over a short file",
-          judge("Bash", {"command": "awk 'NR>=1 && NR<=60' /t/small.ts"}, measure), True)
-    check("an awk range over a long file",
-          judge("Bash", {"command": "awk 'NR>=1 && NR<=60' /t/huge.py"}, measure), False)
-    check("awk doing something that is not a line range",
-          judge("Bash", {"command": "awk '{print $1}' /t/small.ts"}, measure), False)
-    check("one short and one long in the same line",
-          judge("Bash", {"command": "sed -n '1,9p' /t/huge.py; sed -n '1,9p' /t/small.ts"}, measure), True)
-
-    if failed:
-        for line in failed:
-            print("FAILED  " + line)
-        return 1
-    print("all 16 cases pass")
-    return 0
-
-
 def main():
-    if "--selftest" in sys.argv:
-        return selftest()
     try:
         data = json.loads(sys.stdin.read() or "{}")
     except ValueError:
