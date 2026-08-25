@@ -184,7 +184,7 @@ describe('the controls on a row', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('sent-away-park'));
     });
-    expect(screen.getByTestId('sent-away-steer-error').textContent).toContain('Not parked');
+    expect(screen.getByTestId('sent-away-steer-error').textContent).toContain('Not sent to the background');
 
     // A second attempt that works clears it, rather than leaving a complaint
     // about something that has since happened.

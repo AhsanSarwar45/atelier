@@ -246,7 +246,7 @@ export type WbpEvent = EventBase &
         calls: number;
         doing?: string;
         model?: string;
-        /** Set when the kit says this row is now running elsewhere, or parked. */
+        /** Set when the kit says this row is now running elsewhere, or is now in the background. */
         state?: AgentState;
       }
     /**
@@ -408,8 +408,9 @@ export function isOver(state: AgentState): boolean {
  * (docs/agent-workbench.md §8.2.7).
  *
  * `stop` and `park` are the brand's own controls and are exact: one ends that
- * agent alone, the other hands the turn back and lets it run on. `say` is a
- * relay and nothing more — the typed words go to the chat that sent the agent,
+ * agent alone, the other sends it to the background and hands the turn back —
+ * drawn as Background, since nobody reading the row calls it parking. `say` is
+ * a relay and nothing more — the typed words go to the chat that sent the agent,
  * naming which agent they are for, because that is the only road either brand
  * offers into one that is already running.
  */

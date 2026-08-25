@@ -242,6 +242,7 @@ describe('the panel', () => {
     const helper = rows['task-1']!;
     expect(helper).toHaveAttribute('data-state', 'running');
     expect(helper.querySelector('[data-testid="sent-away-kind"]')).toHaveTextContent('helper');
+    expect(helper.querySelector('[data-testid="sent-away-agent-type"]')).toHaveTextContent('general-purpose');
     expect(helper.querySelector('[data-testid="sent-away-what"]')).toHaveTextContent('find the callers');
     expect(helper.querySelector('[data-testid="sent-away-model"]')).toHaveTextContent('opus-4-5');
     // The kit's own count, which is ahead of the row's: it knows about pauses.
@@ -254,6 +255,11 @@ describe('the panel', () => {
     const mark = helper.querySelector('[data-testid="sent-away-state"]')!;
     expect(mark).toHaveAttribute('data-word', 'Working');
     expect(mark).toHaveTextContent('Reading the router');
+  });
+
+  it('draws no agent definition, not even a placeholder, when the kit never named one', () => {
+    const rows = drawn();
+    expect(rows['bash-1']!.querySelector('[data-testid="sent-away-agent-type"]')).toBeNull();
   });
 
   it('counts its own seconds between the kit’s reports', () => {
@@ -291,7 +297,7 @@ describe('the panel', () => {
 
   it('says which of them are waiting on you', () => {
     const rows = drawn();
-    expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'Parked');
+    expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'In background');
     expect(rows['task-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'Working');
   });
 

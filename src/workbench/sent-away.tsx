@@ -25,7 +25,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { Bot, Clock, Coins, Eye, Pause, Square, Terminal, Workflow } from 'lucide-react';
+import { Bot, Clock, Coins, Eye, SendToBack, Square, Terminal, Workflow } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
@@ -61,7 +61,7 @@ export const KINDS: Record<AgentKind, { label: string; Icon: typeof Bot }> = {
 export const STATES: Record<AgentState, { label: string; variant: 'secondary' | 'warning' | 'destructive' | 'success' }> = {
   running: { label: 'running', variant: 'secondary' },
   waiting: { label: 'waiting on you', variant: 'warning' },
-  parked: { label: 'parked', variant: 'secondary' },
+  parked: { label: 'in background', variant: 'secondary' },
   done: { label: 'done', variant: 'success' },
   failed: { label: 'failed', variant: 'destructive' },
   stopped: { label: 'stopped', variant: 'secondary' },
@@ -164,15 +164,17 @@ export function useNow(live: boolean): number {
 
 /**
  * The two exact controls on one running row (docs/agent-workbench.md §8.2.7):
- * stop it, or park it and let it run on. Both are the brand's own.
+ * stop it, or send it to the background and let it run on. Both are the
+ * brand's own.
  *
  * Only what the brand actually has. A control the driver did not name is not
  * drawn — a button that cannot do the thing written on it is worse than no
  * button (decision 13) — and a chat nobody is driving names none of them, which
  * is the truth: there is nothing there to steer with.
  *
- * Nothing is drawn once the work is over, and park goes once it is parked:
- * there is no parking a thing that is already in the background.
+ * Nothing is drawn once the work is over, and the background control goes once
+ * it is already there: there is no backgrounding a thing that is already in
+ * the background.
  *
  * A click that does not land says so. The button coming back to life is what
  * success looks like, so a refused stop that only re-enabled the button would
@@ -191,8 +193,8 @@ export function AgentSteering({
   const [busy, setBusy] = useState<AgentControl | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const canStop = controls.includes('stop');
-  const canPark = controls.includes('park') && row.state !== 'parked';
-  if (isOver(row.state) || (!canStop && !canPark)) return null;
+  const canBackground = controls.includes('park') && row.state !== 'parked';
+  if (isOver(row.state) || (!canStop && !canBackground)) return null;
 
   const act = (what: 'stop' | 'park'): void => {
     setBusy(what);
@@ -202,7 +204,9 @@ export function AgentSteering({
     // state, and a button waiting for it would never come back from a refusal.
     void sendCommand({ type: what === 'stop' ? 'agent.stop' : 'agent.park', sessionId, agentId: row.id })
       .catch((e: unknown) =>
-        setRefused(`${what === 'stop' ? 'Not stopped' : 'Not parked'}. ${e instanceof Error ? e.message : String(e)}`),
+        setRefused(
+          `${what === 'stop' ? 'Not stopped' : 'Not sent to the background'}. ${e instanceof Error ? e.message : String(e)}`,
+        ),
       )
       .finally(() => setBusy(null));
   };
@@ -210,7 +214,7 @@ export function AgentSteering({
   return (
     <div className="border-t border-border/60">
       <div data-testid="sent-away-steer" className="flex items-center gap-1 px-2 py-1">
-        {canPark && (
+        {canBackground && (
           <Button
             size="xs"
             variant="ghost"
@@ -219,8 +223,8 @@ export function AgentSteering({
             title="Let it run on in the background and take the turn back"
             onClick={() => act('park')}
           >
-            <Pause className="h-3 w-3" aria-hidden="true" />
-            Park
+            <SendToBack className="h-3 w-3" aria-hidden="true" />
+            Background
           </Button>
         )}
         {canStop && (
@@ -292,9 +296,30 @@ function AgentRow({
       >
       <div className="flex items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span data-testid="sent-away-kind" className="sr-only">
+        {/* What kind of thing this is, said in words rather than left to the
+            icon alone — a lucide glyph names nothing to a sighted reader who
+            has not learned the four of them by heart. */}
+        <span
+          data-testid="sent-away-kind"
+          className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+        >
           {kind}
         </span>
+        {/* Which agent definition the kit was asked for, when it said one —
+            null for a command or a watch, and for a helper the kit never
+            named, and drawn as nothing then rather than as a placeholder that
+            claims to know. Capped and truncated, its full name on the title,
+            the same bargain the model further down makes: this column is
+            narrow and a name like general-purpose does not fit it whole. */}
+        {row.agentType && (
+          <span
+            data-testid="sent-away-agent-type"
+            className="max-w-16 shrink-0 truncate text-[10px] font-medium text-foreground/80"
+            title={row.agentType}
+          >
+            {row.agentType}
+          </span>
+        )}
         <span data-testid="sent-away-what" className="min-w-0 flex-1 truncate" title={row.what}>
           {row.what || kind}
         </span>

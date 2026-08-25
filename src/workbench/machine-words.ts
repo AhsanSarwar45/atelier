@@ -453,7 +453,7 @@ export const WORDS: Record<string, KindWords> = {
     states: {
       pending: machine('is waiting to start'),
       running: machine('is running'),
-      paused: machine('is parked'),
+      paused: machine('is in the background'),
       completed: machine('has finished'),
       failed: machine('failed'),
       killed: machine('was stopped'),

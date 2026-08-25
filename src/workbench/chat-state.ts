@@ -471,7 +471,7 @@ export function chatState(input: ChatStateInput): ChatState {
 const HELPER_STANDS: Record<AgentState, { state: SessionState; label: string | null }> = {
   running: { state: 'running_tool', label: null },
   waiting: { state: 'waiting_permission', label: null },
-  parked: { state: 'running_tool', label: 'Parked' },
+  parked: { state: 'running_tool', label: 'In background' },
   done: { state: 'idle', label: 'Done' },
   failed: { state: 'errored', label: null },
   stopped: { state: 'stopped', label: null },
