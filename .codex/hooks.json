@@ -1,6 +1,7 @@
 {
   "hooks": {
     "PreToolUse": [
+      { "matcher": "spawn_agent", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/agent-fence.py\"" }] },
       {
         "matcher": "Bash|apply_patch|Edit|Write",
         "hooks": [
@@ -29,7 +30,12 @@
             "type": "command"
           }
         ]
-      }
+      },
+      { "matcher": "request_user_input", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/report-gate.py\"" }] },
+      { "matcher": "apply_patch|Edit|Write", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/plan-doc-lint.py\"" }] },
+      { "matcher": "view_image", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/picture-gate.py\"" }] },
+      { "matcher": "Bash|view_image", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/slice-gate.py\"" }] },
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/wait-gate.py\"" }] }
     ],
     "PostToolUse": [
       {
@@ -40,9 +46,21 @@
             "type": "command"
           },
           {
+            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/helper-proof.py\"",
+            "type": "command"
+          },
+          {
             "command": "python3 \"$(git rev-parse --show-toplevel)/workbench/hooks/session-doing.py\"",
             "type": "command"
           }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "command": "bd codex-hook UserPromptSubmit", "statusMessage": "Refreshing Beads context", "type": "command" },
+          { "command": "python3 \"$(git rev-parse --show-toplevel)/workbench/hooks/session-doing.py\"", "type": "command" }
         ]
       }
     ],

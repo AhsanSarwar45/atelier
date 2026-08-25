@@ -997,18 +997,35 @@ def standing(root):
 TOUCHING = ("Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|"
             "Agent|Task|Monitor|TaskCreate|SendMessage")
 WIRING = (
+    ("PreToolUse", "Agent|Skill", ("agent-fence.py",)),
+    ("PreToolUse", "Artifact", ("publish-gate.py",)),
     ("PreToolUse", "Bash|Edit|Write|MultiEdit|NotebookEdit", ("workflow-gate.py",)),
     ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
                             "board-status-gate.py")),
+    ("PreToolUse", "AskUserQuestion", ("report-gate.py",)),
+    ("PreToolUse", "Edit|Write|MultiEdit", ("plan-doc-lint.py",)),
+    ("PreToolUse", "Read", ("picture-gate.py",)),
+    ("PreToolUse", "Bash|Read", ("slice-gate.py",)),
+    ("PreToolUse", "Bash", ("wait-gate.py",)),
     ("PostToolUse", TOUCHING, ("board-touch.py",)),
-    ("SubagentStop", "", ("board-touch.py",)),
+    ("SubagentStop", "", ("board-touch.py", "helper-proof.py")),
+    ("UserPromptSubmit", "", ("habit-reading.py",)),
+    ("SessionStart", "", ("board-prime.py",)),
+    ("SessionEnd", "", ("board-push.py",)),
+    ("Stop", "", ("completion-gate.py", "board-gate.py")),
 )
 CODEX_WIRING = (
+    ("PreToolUse", "spawn_agent", ("agent-fence.py",)),
     ("PreToolUse", "Bash|apply_patch|Edit|Write", ("workflow-gate.py",)),
     ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
                             "board-status-gate.py")),
+    ("PreToolUse", "request_user_input", ("report-gate.py",)),
+    ("PreToolUse", "apply_patch|Edit|Write", ("plan-doc-lint.py",)),
+    ("PreToolUse", "view_image", ("picture-gate.py",)),
+    ("PreToolUse", "Bash|view_image", ("slice-gate.py",)),
+    ("PreToolUse", "Bash", ("wait-gate.py",)),
     ("PostToolUse", "Bash|apply_patch|Edit|Write", ("board-touch.py",)),
-    ("SubagentStop", "", ("board-touch.py",)),
+    ("SubagentStop", "", ("board-touch.py", "helper-proof.py")),
 )
 # The one gate that is not the machinery's own: it reads a report before it is
 # published, and the report tools are shared out of a home of their own.
