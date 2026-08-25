@@ -29,6 +29,12 @@
  * his own ruling for that case, so he sees the `rm` with his own eyes.
  *
  *   node scripts/chat-says-what-it-ran.mjs
+ *   node scripts/chat-says-what-it-ran.mjs --before
+ *
+ * `--before` answers the same three questions about the rows as they read
+ * BEFORE any of this: the tool's name and the first sixty characters of the
+ * command, which is what every row showed and what the job was opened to fix.
+ * It is the same replay over the same record, so the two runs are comparable.
  *
  * SESSIONS= points it at another folder of records. Nothing is written.
  */
@@ -46,7 +52,26 @@ import { join } from 'node:path';
 import './at-alias.mjs';
 
 const { trimInput } = await import('../src/workbench/imported-history.ts');
-const { whatItRan } = await import('../src/workbench/said-what-it-ran.ts');
+const { rawTitle, whatItRan } = await import('../src/workbench/said-what-it-ran.ts');
+
+/** Read the rows as they were before this job, for the number it claims. */
+const BEFORE = process.argv.includes('--before');
+
+/**
+ * What a row SHOWS for one call, and whether that is English.
+ *
+ * Both halves matter to the questions below. Coverage is the English half;
+ * whether a delete is hidden is read off whatever is shown, English or not,
+ * because a reader is warned either by a sentence that says so or by the raw
+ * `rm` he can see with his own eyes.
+ */
+function shownOnTheRow(name, input) {
+  if (!BEFORE) {
+    const ran = whatItRan(name, input);
+    if (ran) return { shown: ran.said, english: true };
+  }
+  return { shown: rawTitle(name, input), english: false };
+}
 
 /** How much of his record has to be named for this to be worth having at all. */
 const NAMED_FLOOR = 80;
@@ -178,7 +203,6 @@ let shell = 0;
 let shellNamed = 0;
 let deletes = 0;
 let hidden = 0;
-let drawnRaw = 0;
 let nanos = 0n;
 /** A few of each fault, so a red run says what to go and look at. */
 const hiddenSample = [];
@@ -198,18 +222,18 @@ const waiting = [];
 function settle() {
   const said = new Array(waiting.length);
   const began = process.hrtime.bigint();
-  for (let i = 0; i < waiting.length; i += 1) said[i] = whatItRan(waiting[i].name, waiting[i].input);
+  for (let i = 0; i < waiting.length; i += 1) said[i] = shownOnTheRow(waiting[i].name, waiting[i].input);
   nanos += process.hrtime.bigint() - began;
 
   for (let i = 0; i < waiting.length; i += 1) {
     const held = waiting[i];
     const ran = said[i];
     calls += 1;
-    if (ran) callsNamed += 1;
+    if (ran.english) callsNamed += 1;
     if (held.command === null) continue;
 
     shell += 1;
-    if (ran) shellNamed += 1;
+    if (ran.english) shellNamed += 1;
     else {
       const head = (held.command.trim().split(/[\s;|&]/)[0] || '?').split('/').pop();
       unnamedHead.set(head, (unnamedHead.get(head) ?? 0) + 1);
@@ -217,13 +241,13 @@ function settle() {
 
     if (!held.throwsItAway) continue;
     deletes += 1;
-    // A command no rule knows draws as itself, and he sees the `rm` with his
-    // own eyes. Only a SENTENCE can hide one.
-    if (!ran) drawnRaw += 1;
-    else if (!SAYS_SO.test(ran.said)) {
+    // Read off what the row SHOWS, which is a sentence for a command a rule
+    // knows and the raw text for one it does not — where he sees the `rm` with
+    // his own eyes, so nothing is hidden either.
+    if (!SAYS_SO.test(ran.shown)) {
       hidden += 1;
       if (hiddenSample.length < 8) {
-        hiddenSample.push(`${JSON.stringify(held.command.slice(0, 120))} → ${JSON.stringify(ran.said)}`);
+        hiddenSample.push(`${JSON.stringify(held.command.slice(0, 120))} → ${JSON.stringify(ran.shown)}`);
       }
     }
   }
@@ -280,12 +304,14 @@ if (namedPct < NAMED_FLOOR) faults.push(`only ${namedPct.toFixed(1)}% named`);
 if (hidden > 0) faults.push(`${hidden} deletes hidden`);
 if (eachUs > EACH_US) faults.push(`${eachUs.toFixed(2)}us a command`);
 
-console.log(`${records.length} records, ${calls} tool calls, ${shell} shell commands\n`);
+console.log(
+  `${records.length} records, ${calls} tool calls, ${shell} shell commands — rows as they read ${BEFORE ? 'BEFORE this job' : 'now'}\n`,
+);
 console.log(
   `  ${mark(namedPct >= NAMED_FLOOR)} Named in English — ${shellNamed} of ${shell} commands (${namedPct.toFixed(1)}%, floor ${NAMED_FLOOR}%). Every call: ${callsNamed} of ${calls} (${calls === 0 ? '0.0' : ((100 * callsNamed) / calls).toFixed(1)}%).`,
 );
 console.log(
-  `  ${mark(hidden === 0)} A delete is never hidden — ${deletes} commands throw something away, ${hidden} say nothing about it (${drawnRaw} more draw as raw shell, where he can see it).`,
+  `  ${mark(hidden === 0)} A delete is never hidden — ${deletes} commands throw something away, ${hidden} show nothing about it on the row.`,
 );
 console.log(
   `  ${mark(eachUs <= EACH_US)} Costs nothing perceptible — ${eachUs.toFixed(2)}us a command, ${(Number(nanos) / 1e6).toFixed(0)}ms for the lot (ceiling ${EACH_US}us).`,
