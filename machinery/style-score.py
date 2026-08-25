@@ -123,7 +123,7 @@ def main(paths, words=None):
     by_id = {r["doc_id"]: r for r in feats}
 
     print(f"\n  every text cut to {cut} words so the numbers compare")
-    print(f"\n{'text':28} {'words':>6} {'Biber D1':>9}   closest published register")
+    print(f"\n{'text':28} {'words':>6} {'Biber D1':>9}   closest published text type")
     print(f"{'':28} {'':>6} {'':>9}   (+45 friends talking, +30 business talk, -20 academic)")
     for doc_id, text in docs:
         n = len(text.split())
