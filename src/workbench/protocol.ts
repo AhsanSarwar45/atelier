@@ -33,7 +33,6 @@ export type SessionState =
   | 'waiting_permission'
   | 'stopped'
   | 'errored'
-  | 'ended'
   /** Known, not running: nothing wakes it but a click. */
   | 'dormant';
 
@@ -51,7 +50,7 @@ export type SessionState =
  * moment (bw-jaoz.2). Here, so neither can ask it differently.
  */
 export function asleepHere(state: SessionState): boolean {
-  return state === 'dormant' || state === 'ended';
+  return state === 'dormant';
 }
 
 /** A button on a permission card. */

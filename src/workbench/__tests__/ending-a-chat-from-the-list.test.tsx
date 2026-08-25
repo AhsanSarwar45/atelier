@@ -1,15 +1,16 @@
 /**
- * Ending a chat from the list it is in (bw-cnxh).
+ * Closing a chat from the list it is in (bw-cnxh).
  *
  * The manager's ruling, 2026-08-25: the control goes on the row, not on the
- * open chat, because ending chats is tidying and tidying is done over a list.
- * So every case here is about the ROW — which rows offer it, what a click on it
- * asks for, and what the row says afterwards.
+ * open chat, because closing chats is tidying and tidying is done over a list.
+ * So every case here is about the ROW — which rows offer it, where on the row it
+ * is drawn, what a click on it asks for, and what the row says afterwards.
  *
- * Two of them guard rows that must NOT offer it, and they are the ones worth
- * having: a chat somebody is typing at in a terminal has no agent of ours to
- * tear down, and marking it ended from here would say it had stopped while it
- * went on working.
+ * The cases worth having are the ones about rows that must NOT offer it, and
+ * about the width it must not take. A chat somebody is typing at in a terminal
+ * has no agent of ours to tear down, and a control that holds its own width on
+ * every row cuts every name in the list short to reserve room for a button
+ * nobody can see (the manager, 2026-08-26).
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,7 +47,9 @@ function row(over: Partial<RestoreRow> = {}): RestoreRow {
     brand: 'claude',
     title: 'A chat',
     lastActiveAt: '2026-08-16T10:00:00.000Z',
-    state: 'dormant',
+    // Awake by default: an agent of ours is attached, which is the only kind of
+    // row there is anything here to close.
+    state: 'idle',
     origin: 'app',
     projectId: PROJECT,
     cwdHint: PATH,
@@ -60,7 +63,7 @@ function row(over: Partial<RestoreRow> = {}): RestoreRow {
 const rows = () => screen.queryAllByTestId('restore-row');
 const rowNamed = (title: string) =>
   rows().find((r) => within(r).queryByText(title) !== null)!;
-const endOn = (title: string) => within(rowNamed(title)).queryByTestId('row-end');
+const closeOn = (title: string) => within(rowNamed(title)).queryByTestId('row-close');
 
 async function draw() {
   vi.resetModules();
@@ -93,41 +96,83 @@ afterEach(() => {
 });
 
 describe('the control on a row', () => {
-  it('is on every chat this app has a row for', async () => {
+  it('is on a chat with an agent of ours attached', async () => {
     await draw();
 
-    expect(endOn('A chat of ours'), 'no way to end a chat from its own row').not.toBeNull();
+    expect(closeOn('A chat of ours'), 'no way to close a chat from its own row').not.toBeNull();
   });
 
   it('says what it does, for a reader who cannot see the icon', async () => {
     await draw();
 
-    expect(endOn('A chat of ours')!.getAttribute('aria-label')).toBe('End A chat of ours');
+    expect(closeOn('A chat of ours')!.getAttribute('aria-label')).toBe('Close A chat of ours');
   });
 
   it('is not on a chat somebody else is working in', async () => {
     // No agent of ours is attached to it, so there is nothing here to tear
-    // down. Marking it ended would say it had stopped while a terminal went on
-    // typing into it.
-    list = [row({ sessionId: 'theirs', title: 'Worked in a terminal', externalId: 'ext-1', runningElsewhere: true })];
+    // down. Closing it would call it asleep while a terminal went on typing
+    // into it.
+    list = [
+      row({ sessionId: 'theirs', title: 'Worked in a terminal', externalId: 'ext-1', runningElsewhere: true }),
+    ];
     await draw();
 
-    expect(endOn('Worked in a terminal')).toBeNull();
+    expect(closeOn('Worked in a terminal')).toBeNull();
   });
 
-  it('is not on a chat that has already ended', async () => {
-    list = [row({ sessionId: 'done', title: 'Ended last week', state: 'ended' })];
+  it('is not on a chat that is already asleep', async () => {
+    // Nothing to take away, so a control there would be a button that did
+    // nothing on the bulk of the list.
+    list = [row({ sessionId: 'done', title: 'Nobody is in this one', state: 'dormant' })];
     await draw();
 
-    expect(endOn('Ended last week')).toBeNull();
+    expect(closeOn('Nobody is in this one')).toBeNull();
   });
 
   it('is not on a chat begun elsewhere that this app has never opened', async () => {
-    // No id of ours, so no row of ours, so nothing to mark.
+    // No id of ours, so no row of ours, so nothing to close.
     list = [row({ sessionId: null, externalId: 'ext-2', title: 'Never opened here', origin: 'terminal' })];
     await draw();
 
-    expect(endOn('Never opened here')).toBeNull();
+    expect(closeOn('Never opened here')).toBeNull();
+  });
+});
+
+describe('where it is drawn', () => {
+  it('over the clock, so it holds no width of its own', async () => {
+    // The fault the manager sent it back for: a control standing in the line as
+    // its own item held a width and a gap on all forty rows, so every name in
+    // the list was cut short to reserve room for a button nobody could see.
+    // Drawn over the clock instead, the box is the clock's width whether the
+    // pointer is on the row or not. jsdom has no layout to measure, so what is
+    // asserted is the arrangement that makes the width constant: the control is
+    // taken out of the flow, inside the same box the clock sits in.
+    await draw();
+
+    const control = closeOn('A chat of ours')!;
+    expect(control.className).toContain('absolute');
+    const box = control.parentElement!;
+    expect(box.className).toContain('relative');
+    expect(box.textContent, 'the control is not sharing the clock’s box').toMatch(/\d/);
+  });
+
+  it('and the clock is only hidden while the pointer is on the row', async () => {
+    // Hidden by hover, not by removal: the clock keeps its width, which is what
+    // stops the row shifting under the pointer as the control appears.
+    await draw();
+
+    const clock = closeOn('A chat of ours')!.parentElement!.firstElementChild!;
+    expect(clock.textContent).toMatch(/\d/);
+    expect(clock.className).toContain('group-hover/row:opacity-0');
+  });
+
+  it('and a row with nothing to close still shows its clock', async () => {
+    // The plain case, which the arrangement above must not have cost: no
+    // control, no fading, just the time.
+    list = [row({ sessionId: 'done', title: 'Nobody is in this one', state: 'dormant' })];
+    await draw();
+
+    expect(rowNamed('Nobody is in this one').textContent).toMatch(/\d{1,2}:\d{2}/);
   });
 });
 
@@ -139,15 +184,15 @@ describe('clicking it', () => {
     ];
     await draw();
 
-    await act(async () => void fireEvent.click(endOn('Another chat')!));
+    await act(async () => void fireEvent.click(closeOn('Another chat')!));
 
     expect(asked).toEqual([{ type: 'session.close', sessionId: 'other' }]);
   });
 
-  it('does not open the chat it is ending', async () => {
+  it('does not open the chat it is closing', async () => {
     // The row's name is a button that opens it, and the control sits on the
-    // same line. A click that did both would end the chat and throw the reader
-    // into it.
+    // same line. A click that did both would close the chat and throw the
+    // reader into it.
     const opened: string[] = [];
     vi.resetModules();
     const { ChatSidebar } = await import('@/workbench/chat-sidebar');
@@ -156,7 +201,7 @@ describe('clicking it', () => {
     );
     await waitFor(() => expect(rows()).toHaveLength(1));
 
-    await act(async () => void fireEvent.click(endOn('A chat of ours')!));
+    await act(async () => void fireEvent.click(closeOn('A chat of ours')!));
 
     expect(opened).toEqual([]);
   });
@@ -165,7 +210,7 @@ describe('clicking it', () => {
     refuse = 'the helper is not running';
     await draw();
 
-    await act(async () => void fireEvent.click(endOn('A chat of ours')!));
+    await act(async () => void fireEvent.click(closeOn('A chat of ours')!));
 
     await waitFor(() => expect(screen.queryByTestId('restore-error')).not.toBeNull());
     expect(screen.getByTestId('restore-error').textContent).toMatch(/not running/);
@@ -173,28 +218,27 @@ describe('clicking it', () => {
 });
 
 describe('what the row says afterwards', () => {
-  it('reads Ended, where a sleeping chat says nothing at all', async () => {
-    // The whole point of ending one is seeing afterwards that it took. Most of
-    // the list is asleep and says nothing — this is the one asleep row that
-    // does, because the owner did it on purpose.
+  it('nothing — a closed chat reads exactly like every other sleeping one', async () => {
+    // The manager's ruling, 2026-08-26: closing a chat is closing the terminal
+    // it ran in, and this app has no way to tell such a chat from one whose
+    // agent simply went. A word on the row would claim a difference that is not
+    // there, and it would be the one sleeping row in the list wearing a pill.
     list = [
-      row({ sessionId: 'done', title: 'Ended last week', state: 'ended' }),
-      row({ sessionId: 'asleep', title: 'Nobody is in this one' }),
+      row({ sessionId: 'done', title: 'Closed a moment ago', state: 'dormant' }),
+      row({ sessionId: 'asleep', title: 'Nobody is in this one', state: 'dormant' }),
     ];
     await draw();
 
-    const pill = within(rowNamed('Ended last week')).queryByTestId('row-pill');
-    expect(pill, 'an ended chat looked exactly like a sleeping one').not.toBeNull();
-    expect(pill!.getAttribute('data-word')).toBe('Ended');
-
-    expect(
-      within(rowNamed('Nobody is in this one')).queryByTestId('row-pill'),
-      'a pill on every sleeping row is a pill on none',
-    ).toBeNull();
+    for (const title of ['Closed a moment ago', 'Nobody is in this one']) {
+      expect(
+        within(rowNamed(title)).queryByTestId('row-pill'),
+        `${title} wore a pill; a pill on every sleeping row is a pill on none`,
+      ).toBeNull();
+    }
   });
 
-  it('and says it is ending while the asking is in flight', async () => {
-    // Ending a chat kills a process, which is not instant. A row that said
+  it('but it does say it is closing while the asking is in flight', async () => {
+    // Closing a chat kills a process, which is not instant. A row that said
     // nothing in between would read as a click that did nothing, and invite a
     // second one — the same reason opening a chat says `opening`.
     let land = () => {};
@@ -208,10 +252,10 @@ describe('what the row says afterwards', () => {
     });
     await draw();
 
-    await act(async () => void fireEvent.click(endOn('A chat of ours')!));
+    await act(async () => void fireEvent.click(closeOn('A chat of ours')!));
 
     const pill = within(rowNamed('A chat of ours')).queryByTestId('row-pill');
-    expect(pill, 'the row said nothing while its chat was being ended').not.toBeNull();
+    expect(pill, 'the row said nothing while its chat was being closed').not.toBeNull();
     expect(pill!.getAttribute('data-pill')).toBe('ending');
 
     await act(async () => {

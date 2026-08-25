@@ -44,7 +44,6 @@ export function whatItWaitsFor(s: LiveSession): string {
   if (s.waitingFor) return s.waitingFor;
   if (s.state === 'waiting_permission') return 'permission to use a tool';
   if (s.state === 'errored') return 'it stopped with an error';
-  if (s.state === 'ended') return 'the conversation ended';
   return 'your turn';
 }
 

@@ -12,10 +12,12 @@
  * its branch the moment the row is clicked, and a rail this narrow reads better
  * without a second copy of it or a wall of ids (the manager, 2026-08-23).
  *
- * A row is also where a chat is ended, because ending one is tidying and
+ * A row is also where a chat is closed, because closing one is tidying and
  * tidying is done over a list rather than one chat at a time (the manager,
- * 2026-08-25). Ending keeps it: the agent goes, the row stays and reads
- * `Ended`, and the conversation is still there to open.
+ * 2026-08-25). Closing keeps it: the agent goes and the chat falls asleep,
+ * exactly as it would if the terminal it ran in were closed, so the row reads
+ * what every other sleeping row reads and opens again on a click (the manager,
+ * 2026-08-26).
  */
 'use client';
 
@@ -207,7 +209,7 @@ export function withLive(
     // A chat that is awake is always worth seeing, whatever it is called. One
     // that is asleep and not in the list is one the list deliberately left out
     // (docs/agent-workbench.md §6.3.1).
-    const awake = session.state !== 'dormant' && session.state !== 'ended';
+    const awake = session.state !== 'dormant';
     if (!known && !awake) continue;
     if (known) {
       merged[merged.indexOf(known)] = {
@@ -388,7 +390,7 @@ export function ChatSidebar({
     (row: RestoreRow) => {
       // A chat this app already knows is opened by its id alone: no round trip,
       // so the transcript starts drawing on the click.
-      if (row.sessionId && row.state !== 'dormant' && row.state !== 'ended') {
+      if (row.sessionId && row.state !== 'dormant') {
         onOpen(row.sessionId);
         return;
       }
@@ -561,7 +563,10 @@ export function ChatSidebar({
             </div>
             {group.rows.map((row) => {
               const key = rowKey(row);
-              const live = row.state !== 'dormant' && row.state !== 'ended';
+              const live = row.state !== 'dormant';
+              // Something of ours is attached and can be taken away. Anything
+              // else has nothing to close, so it is not offered one.
+              const closable = Boolean(row.sessionId) && live && !row.runningElsewhere;
               const state = chatState({
                 state: row.state,
                 label: row.activity,
@@ -623,39 +628,57 @@ export function ChatSidebar({
                       {row.title ?? 'Untitled chat'}
                     </button>
                     {/*
-                      Kept off the rail until the reader is on the row. A 288px
-                      list is already two lines of small type per chat, and a
-                      button drawn on every one of forty rows is forty things to
-                      read past to find the name — the same reason the pill is
-                      not drawn on a sleeping row. Focus brings it back for a
-                      reader who never hovers anything.
+                      The control is drawn OVER the clock, not beside it. Beside
+                      it, a button nobody could see still held its own width and
+                      its gap on all forty rows, so every name in the list was
+                      cut short to keep room for it (the manager, 2026-08-26).
+                      Over it, the name has the whole line, and nothing moves
+                      when the pointer arrives: this box is the clock's width
+                      either way. The clock is what it covers because the clock
+                      is the one thing on that end worth less than the control
+                      while the reader is on the row.
 
-                      Not on a chat somebody else is holding: a chat being typed
-                      at in a terminal has no driver of ours to tear down, so
-                      marking it ended from here would say it had stopped while
-                      it went on working (registry.ts, runningElsewhere).
+                      Kept off the rail until then: a 288px list is already two
+                      lines of small type per chat, and a button on every row is
+                      forty things to read past to find the name — the same
+                      reason the pill is not drawn on a sleeping row. Focus
+                      brings it back for a reader who never hovers anything.
+
+                      Only where there is an agent to take away. A sleeping chat
+                      has none, and a chat another program is driving has none
+                      of ours: closing that one from here would call it asleep
+                      while a terminal went on typing into it (registry.ts,
+                      runningElsewhere).
                     */}
-                    {row.sessionId && row.state !== 'ended' && !row.runningElsewhere && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        mode="icon"
-                        size="xs"
-                        data-testid="row-end"
-                        aria-label={`End ${row.title ?? 'Untitled chat'}`}
-                        title="End this chat. It stays in the list."
-                        disabled={ending === key}
-                        className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          end(row);
-                        }}
+                    <span className="relative flex shrink-0 items-center">
+                      <span
+                        className={cn(
+                          'font-mono text-[11px] text-muted-foreground',
+                          closable &&
+                            'transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0',
+                        )}
                       >
-                        <Power className="size-3.5" aria-hidden="true" />
-                      </Button>
-                    )}
-                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {clockTime(whenHeSpoke(row))}
+                        {clockTime(whenHeSpoke(row))}
+                      </span>
+                      {closable && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          mode="icon"
+                          size="xs"
+                          data-testid="row-close"
+                          aria-label={`Close ${row.title ?? 'Untitled chat'}`}
+                          title="Close this chat. It stays in the list."
+                          disabled={ending === key}
+                          className="absolute -right-1.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            end(row);
+                          }}
+                        >
+                          <Power className="size-3.5" aria-hidden="true" />
+                        </Button>
+                      )}
                     </span>
                   </div>
                   {/*
@@ -674,17 +697,8 @@ export function ChatSidebar({
                     because most of the list is asleep and a pill on every one of
                     them is a pill on none (bw-96is).
                   */}
-                  {/*
-                    An ended chat is the one asleep row that does say something.
-                    The rule below it — most of the list is asleep, so a pill on
-                    every one of them is a pill on none — is what makes this the
-                    exception rather than a breach of it: ending is something the
-                    owner did on purpose, to a handful of rows, and the whole
-                    point of doing it is to see afterwards that it took.
-                  */}
                   {(busy === key ||
                     ending === key ||
-                    state.mark === 'ended' ||
                     state.working ||
                     state.waiting ||
                     live ||

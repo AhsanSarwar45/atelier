@@ -19,7 +19,6 @@ import {
   Brain,
   CircleAlert,
   CircleCheck,
-  CircleDashed,
   CircleSlash,
   Hand,
   Loader2,
@@ -53,9 +52,9 @@ const HOLDER_ICON: Record<Holder, typeof Bot> = {
  * The mark for each standing a chat can be in.
  *
  * Only the two moving ones had a mark before, so a chat at rest was a bare word
- * on a line where every other chip carries one — and "Stopped", "Failed" and
- * "Ended" all read alike at a glance because the word was the whole of the
- * difference (bw-ja9l.12).
+ * on a line where every other chip carries one — and "Stopped" and "Failed"
+ * read alike at a glance because the word was the whole of the difference
+ * (bw-ja9l.12).
  */
 const MARK: Record<StateMark, typeof Bot> = {
   thinking: Brain,
@@ -70,7 +69,6 @@ const MARK: Record<StateMark, typeof Bot> = {
   asleep: Moon,
   stopped: CircleSlash,
   failed: CircleAlert,
-  ended: CircleDashed,
 };
 
 /**

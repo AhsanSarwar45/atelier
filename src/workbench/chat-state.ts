@@ -124,8 +124,7 @@ export type StateMark =
   | 'ready'
   | 'asleep'
   | 'stopped'
-  | 'failed'
-  | 'ended';
+  | 'failed';
 
 /**
  * The whole vocabulary for what a chat is doing this second, and the only list
@@ -317,7 +316,6 @@ const OWN_WORD: Record<SessionState, string> = {
   waiting_permission: 'Waiting for you',
   stopped: 'Stopped',
   errored: 'Failed',
-  ended: 'Ended',
   dormant: 'Asleep',
 };
 
@@ -331,7 +329,6 @@ const OWN_MARK: Record<SessionState, StateMark> = {
   waiting_permission: 'waiting',
   stopped: 'stopped',
   errored: 'failed',
-  ended: 'ended',
   dormant: 'asleep',
 };
 
@@ -354,7 +351,6 @@ const OWN_DOING: Record<SessionState, Doing> = {
   waiting_permission: 'waiting',
   stopped: 'idle',
   errored: 'idle',
-  ended: 'idle',
   dormant: 'idle',
 };
 

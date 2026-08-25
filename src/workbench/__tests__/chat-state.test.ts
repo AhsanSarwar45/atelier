@@ -39,7 +39,6 @@ const ALL: SessionState[] = [
   'waiting_permission',
   'stopped',
   'errored',
-  'ended',
   'dormant',
 ];
 
@@ -445,7 +444,7 @@ describe('the whole vocabulary for what a chat is doing', () => {
   });
 
   it('every state of ours that is at rest reads as idle, and counts nothing', () => {
-    for (const state of ['idle', 'stopped', 'errored', 'ended', 'dormant'] as const) {
+    for (const state of ['idle', 'stopped', 'errored', 'dormant'] as const) {
       const read = chatState({ state, since: 5_000 });
       expect(read.doing, `${state} claimed to be doing something`).toBe('idle');
       expect(read.since, `${state} left a clock running`).toBeNull();

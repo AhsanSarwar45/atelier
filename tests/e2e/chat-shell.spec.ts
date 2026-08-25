@@ -96,7 +96,7 @@ test.describe('the chat screen', () => {
 
     // A chat that is already attached opens by being clicked; a dormant one
     // would have to be woken, and nothing here wakes an agent.
-    const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"])');
+    const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"])');
     await ready.first().waitFor({ timeout: 10_000 }).catch(() => {});
     test.skip((await ready.count()) === 0, 'no chat is attached to open');
 
@@ -161,7 +161,7 @@ test.describe('the chat screen', () => {
     // Measured on the chat's own bar, because that is where a hued chip is
     // drawn now: the rail carries the folder as an attribute and spends its two
     // lines on the name and the state (the manager, 2026-08-23).
-    const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"]):not([data-state="ended"])');
+    const ready = page.locator('[data-testid="restore-row"]:not([data-state="dormant"])');
     await ready.first().waitFor({ timeout: 10_000 }).catch(() => {});
     test.skip((await ready.count()) === 0, 'no chat is attached to open');
     await ready.first().getByTestId('row-name').click();

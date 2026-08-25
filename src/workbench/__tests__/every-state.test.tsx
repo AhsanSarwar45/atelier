@@ -102,7 +102,6 @@ describe('a chat of ours, nobody else in it', () => {
     ['idle', 'Ready', false, false],
     ['stopped', 'Stopped', false, false],
     ['errored', 'Failed', false, false],
-    ['ended', 'Ended', false, false],
     ['dormant', 'Asleep', false, false],
   ];
 
@@ -167,9 +166,11 @@ describe('a chat of ours, nobody else in it', () => {
     expect(body(chatState({ state: 'idle' }))).toBeNull();
   });
 
-  it('a chat that ended: it says Ended and the body is still', () => {
-    const read = chatState({ state: 'ended' });
-    expect(read.word).toBe('Ended');
+  it('a chat that is asleep: it says Asleep and the body is still', () => {
+    // Where a closed chat lands. Closing one is closing the terminal it ran in
+    // (the manager, 2026-08-26), so it gets this word and no word of its own.
+    const read = chatState({ state: 'dormant' });
+    expect(read.word).toBe('Asleep');
     expect(read.working).toBe(false);
     expect(body(read)).toBeNull();
   });
@@ -190,14 +191,13 @@ describe('the mark beside the word', () => {
     'waiting_permission',
     'stopped',
     'errored',
-    'ended',
     'dormant',
   ];
 
   it('stands beside every state and not only the two that move', () => {
     // A chat at rest was a bare word in a pill, on a line where every chip
-    // beside it carries a mark. And "Stopped", "Failed" and "Ended" all looked
-    // alike until they were read (bw-ja9l.12).
+    // beside it carries a mark. And "Stopped", "Failed" and "Asleep" all
+    // looked alike until they were read (bw-ja9l.12).
     const seen = new Set<string>();
     for (const state of EVERY) {
       const read = chatState({ state, since: BEGAN });

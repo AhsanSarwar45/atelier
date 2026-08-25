@@ -7,16 +7,17 @@ import { join } from 'node:path';
 import { backend, command, openChatTab } from './fixture-held';
 
 /**
- * The two pictures for the manager's page — a chat list before an ending and
- * after one — taken on the running app (bw-cnxh, decision D4: the proof of this
- * one is the running app, not a passing test).
+ * The two pictures for the manager's page — a chat list with the pointer on a
+ * row, and the same list after that chat is closed — taken on the running app
+ * (bw-cnxh, decision D4: the proof of this one is the running app, not a
+ * passing test).
  *
  * A case like any other, and it runs with the rest: the pictures are its
  * by-product, so the page can be given new ones by re-running it rather than by
- * somebody driving the app by hand. It reads the same two facts the list case
- * next door reads, on a list with a second chat beside the one being ended —
- * which is what makes a picture worth looking at, because the reader can see
- * what an ended row says that a living one does not.
+ * somebody driving the app by hand. Two chats, so the reader can see the one
+ * being closed against a living one beside it — and can see that the control
+ * appears over the clock on the row under the pointer, taking nothing from the
+ * name on any of them.
  *
  *   scripts/workbench-e2e.sh tests/e2e/chat-close-shots.spec.ts
  */
@@ -37,7 +38,7 @@ async function aChat(request: APIRequestContext, project: { id: string; path: st
   return id;
 }
 
-test('the chat list, before an ending and after it', async ({ page, request }) => {
+test('the chat list, before a closing and after it', async ({ page, request }) => {
   test.setTimeout(300_000);
   const dir = join(OWN_PROJECT_DIR, `shots-${randomUUID().slice(0, 8)}`);
   mkdirSync(dir, { recursive: true });
@@ -56,10 +57,10 @@ test('the chat list, before an ending and after it', async ({ page, request }) =
     await row.hover();
     await list.screenshot({ path: join(SHOTS, 'close-before.png') });
 
-    await row.getByTestId('row-end').click();
-    await expect.poll(async () => row.getAttribute('data-state'), { timeout: 60_000 }).toBe('ended');
-    await expect(row.getByTestId('row-pill')).toHaveAttribute('data-word', 'Ended', { timeout: 30_000 });
+    await row.getByTestId('row-close').click();
+    await expect.poll(async () => row.getAttribute('data-state'), { timeout: 60_000 }).toBe('dormant');
     await page.mouse.move(0, 0);
+    await expect(row.getByTestId('row-pill')).toHaveCount(0, { timeout: 30_000 });
     await list.screenshot({ path: join(SHOTS, 'close-after.png') });
   } finally {
     await request.delete(`${backend()}/api/projects/${project.id}`);

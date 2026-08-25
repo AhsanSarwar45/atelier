@@ -40,7 +40,7 @@ function keyOf(row: RestoreRow): string {
 
 /** A chat this app has run before and is not running now. */
 function asleep(rows: RestoreRow[]): RestoreRow[] {
-  return rows.filter((r) => r.sessionId !== null && (r.state === 'dormant' || r.state === 'ended'));
+  return rows.filter((r) => r.sessionId !== null && r.state === 'dormant');
 }
 
 /** The first project the instance lists that has sleeping chats to open. */

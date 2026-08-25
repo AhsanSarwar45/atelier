@@ -86,7 +86,7 @@ export function liveState(s: LiveSession): ChatState {
  * the tray by deleting it here (protocol.ts, SessionState).
  */
 export function waitsOnYou(s: LiveSession): boolean {
-  return s.state === 'waiting_permission' || s.state === 'ended' || s.state === 'errored';
+  return s.state === 'waiting_permission' || s.state === 'errored';
 }
 
 /** Working right now: the glance strip's whole condition. */
@@ -264,7 +264,7 @@ function patch(id: string, change: Partial<LiveSession>): void {
  * (bw-4wcd.9).
  */
 export function movesTheClock(state: SessionState | undefined): boolean {
-  return state !== undefined && state !== 'dormant' && state !== 'ended';
+  return state !== undefined && state !== 'dormant';
 }
 
 function moves(id: string, next?: SessionState): boolean {

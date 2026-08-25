@@ -289,13 +289,9 @@ export class Sessions {
       // it, because this only ever spoke for the two states it was already
       // sure of (bw-m8o.17). It says what is true instead, and writes it down,
       // so the list says the same thing without the chat being opened.
-      const truth: SessionState = existing.state === 'ended' ? 'ended' : 'dormant';
+      const truth: SessionState = 'dormant';
       if (truth !== existing.state) this.store.updateSession(existing.id, { state: truth }, false);
-      this.publish(existing.id, {
-        type: 'session.state',
-        state: truth,
-        label: truth === 'ended' ? 'Ended' : 'Asleep',
-      });
+      this.publish(existing.id, { type: 'session.state', state: truth, label: 'Asleep' });
       this.follow(existing, read);
       return { ...existing, state: truth };
     }
@@ -1482,27 +1478,45 @@ export class Sessions {
   }
 
   /**
-   * Ends the chat itself, and keeps every word of it.
+   * Closes the chat: the agent goes, and every word of it stays.
    *
-   * The opposite of `stop` above, not a louder version of it: that one cuts the
-   * answer in flight so the chat can be typed into again, and this one takes the
-   * agent away for good. Nothing is deleted — the row stays in the list, reads
-   * `Ended`, and opens again on a click like any sleeping chat (the manager,
-   * 2026-08-25).
+   * The same thing that happens when the terminal a chat runs in is closed, or
+   * the agent in it is interrupted to death — the chat falls asleep (the
+   * manager, 2026-08-26). It is not a louder `stop`: that one cuts the answer
+   * in flight and leaves the agent standing, and this one takes the agent
+   * away. Nothing is deleted and nothing is hidden. The row keeps its place,
+   * reads what every other sleeping row reads, and wakes on a click.
    *
-   * `require` is deliberately not used. Most of the list has no driver attached,
-   * and a chat that is merely asleep is exactly the one somebody tidies away;
-   * refusing those would leave the control drawn on rows it could not act on.
-   * The state is published either way, and publishing it is what writes `ended`
-   * onto the row — see `publish`, which already knows that falling asleep and
-   * ending are not activity and must not move the row up the list.
+   * There is no state of its own for it, and that is the point. A chat closed
+   * from here and a chat whose agent went by itself are the same chat: neither
+   * has an agent, and both start one when they are typed into. A word on one
+   * and not the other would name a difference this app does not have.
+   *
+   * `require` is deliberately not used: it would throw for the chat that has
+   * no driver, which is most of the list, and the answer for those is that
+   * there is nothing to take away rather than a refusal.
    */
   async close(sessionId: string): Promise<void> {
     const summary = this.store.getSession(sessionId);
     if (!summary) throw new Error(`no session ${sessionId}`);
-    // Already over. Said a second time it would put another `session.state` in
-    // the record and another frame on every stream, for nothing that changed.
-    if (summary.state === 'ended') return;
+    // The door itself, not the sign on it. The screen already keeps the control
+    // off a row another program is driving, but it learns that from a stream
+    // that can drop, and a dropped stream must not be all that stands between a
+    // click and a chat being called asleep while a terminal goes on typing into
+    // it (bw-cnxh.5). The open path takes this same answer from the directory
+    // at the moment of the attempt, and so does this one.
+    //
+    // Only where nothing of OURS is on it. A chat this app drives has a live
+    // Claude process on it too — our driver's own child, writing the same
+    // marker in the same directory a terminal writes — so asking this question
+    // unconditionally would refuse to close precisely the chats the control is
+    // drawn on. "Somebody else has it" is not the same question as "a live
+    // process is on it", and this is the first one (registry.ts, bw-jaoz.2).
+    if (!this.drivers.has(sessionId)) this.refuseIfHeld(summary.externalId);
+    // Nothing to take away. A chat that is already asleep is the bulk of the
+    // list, and saying it again would put another `session.state` in the record
+    // and another frame on every stream watching, for nothing that changed.
+    if (summary.state === 'dormant' && !this.drivers.has(sessionId)) return;
 
     const driver = this.drivers.get(sessionId);
     // Let go first, and whatever the teardown does: a driver that fails to shut
@@ -1520,7 +1534,7 @@ export class Sessions {
     }
     if (failed !== null) {
       // Written into the chat's own record rather than thrown back at the
-      // screen. The chat IS ended — this app has let go of it — so a refusal
+      // screen. The chat IS closed — this app has let go of it — so a refusal
       // would say the opposite of what happened. What it actually cost is that
       // the brand's own process may still be standing, and that belongs in the
       // conversation it belongs to.
@@ -1530,7 +1544,10 @@ export class Sessions {
         fatal: false,
       });
     }
-    this.publish(sessionId, { type: 'session.state', state: 'ended', label: 'Ended' });
+    // Asleep, in the same words a chat gets when its agent goes by itself.
+    // `publish` already knows falling asleep is not activity, so the row keeps
+    // its place rather than climbing over the ones being worked in.
+    this.publish(sessionId, { type: 'session.state', state: 'dormant', label: 'Asleep' });
   }
 
   /**
@@ -1695,7 +1712,7 @@ export class Sessions {
     if (full.type === 'session.state') {
       // Falling asleep, or being read while asleep, is not activity: the row
       // keeps its place in the list (docs/designs/app-shell.md §1.9).
-      const asleep = full.state === 'dormant' || full.state === 'ended';
+      const asleep = full.state === 'dormant';
       this.store.updateSession(sessionId, { state: full.state as SessionState }, !asleep);
       this.labels.set(sessionId, full.label);
     } else if (full.type === 'session.started') {

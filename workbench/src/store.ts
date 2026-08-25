@@ -421,9 +421,15 @@ export class Store {
   /**
    * On boot nothing is running, whatever the last write claimed. A row saying
    * `streaming` after a restart would promise a process that does not exist.
+   *
+   * Every row that is not already asleep, with nothing held back. A build that
+   * shipped for one day wrote `ended` onto chats the owner closed, and that
+   * word is gone (bw-cnxh.10); the rows carrying it are healed here rather
+   * than by a migration, because this already runs on every start and the
+   * answer it gives them is the true one.
    */
   markAllDormant(): void {
-    this.db.prepare("UPDATE session SET state = 'dormant' WHERE state NOT IN ('ended','dormant')").run();
+    this.db.prepare("UPDATE session SET state = 'dormant' WHERE state != 'dormant'").run();
   }
 
   rememberBeadLink(sessionId: string, beadId: string, via: string): void {

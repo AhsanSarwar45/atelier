@@ -593,7 +593,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   const busy = isBusy(view.state);
   /** No agent attached: it is drawn, and the first message is what wakes it. */
-  const asleep = view.state === 'dormant' || view.state === 'ended';
+  const asleep = view.state === 'dormant';
 
   /**
    * Another program on this machine is driving this very conversation: what it

@@ -47,7 +47,7 @@ describe('where the seconds on a working chat count from', () => {
   });
 
   it('counts nothing at all once the chat has stopped working', () => {
-    for (const state of ['idle', 'stopped', 'errored', 'ended', 'dormant'] as SessionState[]) {
+    for (const state of ['idle', 'stopped', 'errored', 'dormant'] as SessionState[]) {
       expect(countingFrom(had(), { state, label: '', at: LATER }), `${state} left a count running`).toBeNull();
     }
   });

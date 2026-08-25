@@ -20,7 +20,6 @@ import { tagged } from './tagged';
 describe('a chat’s own clock', () => {
   it('does not move for a chat that is asleep', () => {
     expect(movesTheClock('dormant')).toBe(false);
-    expect(movesTheClock('ended')).toBe(false);
   });
 
   it('moves for every state that means the agent is at work', () => {

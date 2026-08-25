@@ -304,7 +304,7 @@ test.describe('how long the app takes to appear', () => {
     const q = new URLSearchParams({ project: project.id, path: project.path });
     const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as RestoreRow[];
     const asleep = rows
-      .filter((r) => r.sessionId !== null && (r.state === 'dormant' || r.state === 'ended'))
+      .filter((r) => r.sessionId !== null && r.state === 'dormant')
       .map((row) => ({ row, said: saidBytes(row.externalId) }))
       .sort((a, b) => b.said - a.said);
     expect(asleep.length, 'the instance has no chat to open').toBeGreaterThan(0);

@@ -235,7 +235,6 @@ describe('when the writing box is not the reader’s to type in', () => {
 
   it('says so for a chat asleep here that a live process is holding', () => {
     expect(heldElsewhere('dormant', OURS, new Set([OURS]))).toBe(true);
-    expect(heldElsewhere('ended', OURS, new Set([OURS]))).toBe(true);
   });
 
   /**

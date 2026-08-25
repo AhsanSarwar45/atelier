@@ -134,7 +134,7 @@ test.describe('steering the chat you are in', () => {
       sessionId: string | null;
       state: string;
     }[];
-    const asleep = rows.find((r) => r.sessionId && (r.state === 'dormant' || r.state === 'ended'));
+    const asleep = rows.find((r) => r.sessionId && r.state === 'dormant');
     test.skip(!asleep, 'no sleeping chat on this instance');
 
     await page.goto(`/project?id=${project.id}&tab=chat&chat=${asleep!.sessionId}`);
