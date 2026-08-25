@@ -1,4 +1,10 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { configDir } from './fixture-record';
 
 /**
  * The reader chooses which kinds of message a conversation draws.
@@ -126,6 +132,61 @@ const commandRows = (page: Page) =>
  * switch and nothing else.
  */
 const topRows = (page: Page) => page.getByTestId('tool-row');
+
+/**
+ * A hook on this run's own kit, so a chat that has said nothing still has the
+ * machine talking in it.
+ *
+ * What the owner's chats have and a bare instance does not: his kit fires hooks
+ * the moment a chat starts, and their lines are the rows that were being called
+ * switched off. One echo is enough — the check is that they are HIDDEN and
+ * unremarked, not what they say.
+ */
+function aHookOnEveryChat(): () => void {
+  const dir = configDir();
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, 'settings.json');
+  writeFileSync(
+    path,
+    JSON.stringify({
+      hooks: {
+        SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo a hook said something' }] }],
+      },
+    }) + '\n',
+  );
+  return () => rmSync(path, { force: true });
+}
+
+/**
+ * Somewhere to start a chat: whatever the instance already lists, or a
+ * throwaway of this run's own where it lists none — which is what the isolated
+ * stack gives, its data folder being a minute old. One it made, it takes away.
+ */
+async function somewhereToChat(
+  request: APIRequestContext,
+): Promise<{ project: Project; done: () => Promise<void> }> {
+  const api = backend();
+  const listed = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
+  if (listed.length > 0) return { project: pickProject(listed), done: async () => {} };
+
+  const dir = mkdtempSync(join(tmpdir(), 'atelier-nothing-said-'));
+  execFileSync('git', ['init', '-q', '.'], { cwd: dir, stdio: 'pipe' });
+  const made = await request.post(`${api}/api/projects`, {
+    data: { name: 'A chat with nothing said in it', path: dir },
+  });
+  expect(made.ok(), 'the instance refused a project of this run’s own').toBe(true);
+  const project = { ...((await made.json()) as Project), path: dir };
+  return {
+    project,
+    done: async () => {
+      await request.delete(`${api}/api/projects/${project.id}`);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** The machine's own side of the status tree, which the quiet start switches off. */
+const MACHINE = 'status:machine';
 
 const line = (page: Page, kind: string) => page.locator(`[data-testid="kind-line"][data-kind="${kind}"]`);
 const switchOn = (page: Page, kind: string) => line(page, kind).getByTestId('kind-switch');
@@ -280,6 +341,37 @@ test.describe('choosing which kinds of message show', () => {
     await expect(page.getByTestId('nothing-showing')).toHaveCount(0);
     await expect(topRows(page).first()).toBeVisible();
     await expect(page.getByTestId('open-kind-filter')).toHaveAttribute('data-filtered', 'false');
+  });
+
+  test('a chat that has said nothing yet is not called switched off', async ({ page, request }) => {
+    // The fault the owner reported: every new chat opened on a centred notice
+    // saying all of its rows were switched off, over a button offering to undo
+    // a default he never chose. Its only rows are the machine's own start-up
+    // lines and the quiet start hides those before he has touched anything, so
+    // the notice was speaking for the app's own choice as if it were his
+    // (bw-aqpc).
+    const { project, done } = await somewhereToChat(request);
+    const noHook = aHookOnEveryChat();
+    try {
+      await page.goto(`/project?id=${project.id}&tab=chat`);
+      await page.getByTestId('new-chat').click();
+      await page.getByTestId('chat-tab').waitFor({ timeout: OPEN_MS });
+
+      // Nothing is typed into it. What it holds is the machine's own, switched
+      // off and counted — which is what stops this passing on a chat that has
+      // no rows at all.
+      await openTheFilter(page);
+      await expect(line(page, MACHINE)).toHaveAttribute('data-state', 'off');
+      await expect
+        .poll(async () => Number(await line(page, MACHINE).getAttribute('data-count')), { timeout: 30_000 })
+        .toBeGreaterThan(0);
+      await page.keyboard.press('Escape');
+
+      await expect(page.getByTestId('nothing-showing')).toHaveCount(0);
+    } finally {
+      noHook();
+      await done();
+    }
   });
 
   test('the choice survives a reload', async ({ page, request }) => {

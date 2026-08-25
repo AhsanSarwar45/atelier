@@ -65,7 +65,7 @@ import { askableIn, pathsIn, type Rooted } from '@/workbench/paths';
 import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
-import { EVERYTHING, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
+import { EVERYTHING, hisDoing, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
@@ -1069,7 +1069,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             typed moves it without a row being added, and the reader watching
             the end must stay at the end through both. */}
         <div ref={contentRef} data-testid="transcript-rows" className="flex flex-col gap-3">
-        {rows.length === 0 && view.items.length > 0 && (
+        {/* Only when what is hidden is his own doing: a chat that has said
+            nothing yet holds the machine's own start-up lines and nothing else,
+            and the quiet start hides those for him (bw-aqpc). */}
+        {rows.length === 0 && hisDoing(view.items, offKinds) && (
           <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
         <DrawnTranscript

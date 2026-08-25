@@ -18,6 +18,7 @@ import {
   STATUS,
   THINKING,
   flip,
+  hisDoing,
   kindOf,
   remember,
   remembered,
@@ -412,5 +413,42 @@ describe('what a count is counting', () => {
     const tree = treeOf(items);
     expect(find(tree, COMMANDS).count).toBe(3);
     expect(find(tree, 'you').count).toBe(1);
+  });
+});
+
+describe('when nothing is left standing', () => {
+  it('says nothing to a reader who has switched nothing off', () => {
+    // A chat that has only just opened holds the machine's own start-up lines
+    // and nothing else, and the quiet start hides those for him. Told he had
+    // switched every row off, he was being accused of filtering a conversation
+    // he had not read a word of (bw-aqpc).
+    const items = [filed(), filed()];
+    expect(showing(items, remembered())).toHaveLength(0);
+    expect(hisDoing(items, remembered())).toBe(false);
+  });
+
+  it('speaks the moment he switches his last kind off himself', () => {
+    const items = conversation();
+    let off = flipped(EVERYTHING, items, 'you');
+    off = flipped(off, items, AGENT);
+    expect(showing(items, off)).toHaveLength(0);
+    expect(hisDoing(items, off)).toBe(true);
+  });
+
+  it('speaks for a kind he switched off on top of the quiet start', () => {
+    // His own line and a machine line: the machine's went by default, his went
+    // because he said so, and what is left is an empty window he made.
+    const items = [said('user', 'go'), filed()];
+    const off = flipped(remembered(), items, 'you');
+    expect(showing(items, off)).toHaveLength(0);
+    expect(hisDoing(items, off)).toBe(true);
+  });
+
+  it('stays quiet for a row hidden by the group the quiet start switched off', () => {
+    // Switched off by his own hand this time, which is the same entry the app
+    // writes for him: there is nothing to tell apart, and nothing to say.
+    const items = [filed(), stopped()];
+    const off = flipped(EVERYTHING, items, audienceKind('machine'));
+    expect(hisDoing(items, off)).toBe(false);
   });
 });

@@ -431,6 +431,29 @@ export function showing(items: TranscriptItem[], off: ReadonlySet<KindId>): Tran
   return kept;
 }
 
+/**
+ * Whether the reader is looking at a conversation HE switched off.
+ *
+ * `NothingShowing` was written for one reader: the one who switched his last
+ * kind off and cannot tell a filtered conversation from a broken one. A chat
+ * that has only just opened is not him. Its first rows are the machine's own
+ * start-up lines and the quiet start hides those before he has touched
+ * anything, so every new chat greeted him with "all 2 rows here are switched
+ * off" and a button offering to undo a default he never chose (bw-aqpc).
+ *
+ * So the notice answers to the switches HE turned off, and a row hidden by
+ * nothing but the quiet start raises none. Measured against `QUIET` itself
+ * rather than against whether anything has been remembered: a reader who hands
+ * the machine's side back and switches Replies off instead is filtering again,
+ * and the entry he added is his however the rest of the set reads. The one
+ * thing this cannot tell apart is the machine's side switched off by his own
+ * hand, which is the same entry the app writes for him — and it is not worth
+ * telling apart, because the answer either way is the one he already has.
+ */
+export function hisDoing(items: TranscriptItem[], off: ReadonlySet<KindId>): boolean {
+  return items.some((item) => upward(kindOf(item)).some((id) => off.has(id) && !QUIET.has(id)));
+}
+
 /** What the reader switched off last time, or the quiet start if he never has. */
 export function remembered(): Set<KindId> {
   if (typeof localStorage === 'undefined') return new Set(QUIET);
