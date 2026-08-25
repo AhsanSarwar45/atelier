@@ -26,7 +26,16 @@ MUTATING_SHELL = re.compile(
     r")",
     re.I | re.M,
 )
-WORKTREE = re.compile(r"(?:^|/)worktrees/([^/]+)(?:/|$)")
+WORKTREE = re.compile(r"(?:^|/)worktrees/([^/\s]+)(?:/|\s|$)")
+RECOVERY_FILES = {
+    ".codex/hooks.json",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "machinery/hooks/workflow-gate.py",
+    "machinery/workflow-policy.md",
+}
 
 
 def deny(reason):
@@ -43,7 +52,19 @@ def mutates(data):
         return True
     if tool != "Bash":
         return False
-    command = (data.get("tool_input") or {}).get("command") or ""
+    supplied = data.get("tool_input") or {}
+    command = supplied.get("command", "") if isinstance(supplied, dict) else str(supplied)
+    # These bootstrap operations must work before a ticket worktree exists.
+    if re.match(r"^\s*bd\s+create\b", command, re.I):
+        return False
+    if re.match(r"^\s*bd\s+update\s+\S+\s+--claim(?:\s|$)", command, re.I):
+        return False
+    # Landing necessarily runs from the main checkout. Other hooks verify the
+    # merge slot and lifecycle; this gate only requires the safe fast-forward
+    # form and a ticket-shaped source branch.
+    if re.match(r"^\s*git\s+merge\s+--ff-only\s+[A-Za-z0-9_.-]+\s*$",
+                command, re.I):
+        return False
     return bool(MUTATING_SHELL.search(command))
 
 
@@ -82,7 +103,28 @@ def reason(data):
     """Return a refusal for a mutating call, or None when it may proceed."""
     if not mutates(data):
         return None
-    cwd = data.get("cwd") or os.getcwd()
+    supplied = data.get("tool_input") or {}
+    if isinstance(supplied, dict):
+        cwd = supplied.get("workdir") or data.get("cwd") or os.getcwd()
+        patch = (supplied.get("patch") or supplied.get("input") or
+                 supplied.get("command") or "")
+    else:
+        cwd = data.get("cwd") or os.getcwd()
+        patch = str(supplied)
+    # A broken workflow gate must never be able to prevent its own repair.
+    # Changes through this escape hatch are limited to tracked policy/config
+    # files, so the resulting Git diff is the audit record.
+    if (data.get("tool_name") in EDIT_TOOLS and
+            isinstance(patch, str)):
+        edited = re.findall(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$",
+                            patch, re.M)
+        normalized = {next((part for part in RECOVERY_FILES
+                            if path.endswith(part)), path) for path in edited}
+        if edited and normalized.issubset(RECOVERY_FILES):
+            return None
+    targets = WORKTREE.findall(patch) if isinstance(patch, str) else []
+    if targets:
+        cwd = os.path.join(os.path.realpath(data.get("cwd") or os.getcwd()), "worktrees", targets[0])
     match = WORKTREE.search(os.path.realpath(cwd))
     if not match:
         return ("Repository changes require a dedicated ticket worktree. Claim a "
@@ -93,11 +135,17 @@ def reason(data):
         return ("This worktree is not backed by a readable Beads issue named %s. "
                 "Restore the board connection or use the claimed issue worktree."
                 % issue)
-    if card.get("status") != "in_progress" or not card.get("assignee"):
-        return ("Beads issue %s must be claimed and in_progress before this "
-                "worktree may be changed." % issue)
+    children = None
+    active = card.get("status") == "in_progress" and card.get("assignee")
     if card.get("issue_type") == "epic":
         children = children_for(issue, cwd)
+        active = active or bool(children and any(
+            child.get("status") == "in_progress" and child.get("assignee")
+            for child in children))
+    if not active:
+        return ("Beads issue %s, or one of its epic children, must be claimed "
+                "and in_progress before this worktree may be changed." % issue)
+    if card.get("issue_type") == "epic":
         if children is None:
             return ("The child beads for epic %s could not be read. Restore the "
                     "board connection before implementing from this epic." % issue)
