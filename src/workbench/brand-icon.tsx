@@ -13,4 +13,3 @@ export function BrandIcon({ brand, className }: { brand: Brand; className?: stri
   const Icon = brand === 'codex' ? SquareCode : Bot;
   return <Icon className={cn('size-4 shrink-0', className)} aria-label={brandName(brand)} />;
 }
-

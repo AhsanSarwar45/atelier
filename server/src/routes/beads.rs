@@ -16,9 +16,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::process::Command;
+use tokio::io::AsyncWriteExt;
 
 use super::validate_path_security;
 use crate::db::{CachedCounts, Database};
@@ -1086,6 +1088,57 @@ pub struct UpdateBeadRequest {
     pub remove_label: Option<String>,
 }
 
+fn lifecycle_status(status: Option<&str>) -> bool {
+    matches!(status, Some("inreview" | "in_review" | "manager_review" | "closed"))
+}
+
+async fn lifecycle_denial(project: &Path, id: &str, status: &str) -> Option<String> {
+    let local = project.join("machinery").join("hooks").join("board-status-gate.py");
+    let installed = crate::identity::rules_dir()
+        .map(|p| p.join("machinery").join("hooks").join("board-status-gate.py"));
+    let Some(gate) = std::iter::once(local).chain(installed).find(|p| p.is_file()) else {
+        return Some("Atelier cannot verify this lifecycle transition on this host; run project setup here first".to_string());
+    };
+    let input = serde_json::json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": format!("bd update {} --status {}", id, status)},
+        "cwd": project,
+        "session_id": "atelier-api"
+    });
+    let mut child = match Command::new("python3")
+        .arg(gate).current_dir(project).stdin(Stdio::piped())
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+    {
+        Ok(child) => child,
+        Err(e) => return Some(format!("Atelier could not run its lifecycle gate: {e}")),
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Err(e) = stdin.write_all(input.to_string().as_bytes()).await {
+            return Some(format!("Atelier could not ask its lifecycle gate: {e}"));
+        }
+    }
+    let output = match tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Some(format!("Atelier's lifecycle gate failed: {e}")),
+        Err(_) => return Some("Atelier's lifecycle gate timed out".to_string()),
+    };
+    if !output.status.success() {
+        return Some(format!("Atelier's lifecycle gate failed: {}",
+                            String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let answer: serde_json::Value = match serde_json::from_str(text.trim()) {
+        Ok(answer) => answer,
+        Err(_) if text.trim().is_empty() => return None,
+        Err(_) => return Some("Atelier's lifecycle gate returned an unreadable answer".to_string()),
+    };
+    answer.pointer("/hookSpecificOutput/permissionDecision")
+        .and_then(|v| v.as_str()).filter(|v| *v == "deny")
+        .map(|_| answer.pointer("/hookSpecificOutput/permissionDecisionReason")
+             .and_then(|v| v.as_str()).unwrap_or("The lifecycle gate rejected this transition")
+             .to_string())
+}
+
 /// PATCH /api/beads/update
 ///
 /// Updates a bead's fields. For `dolt://` paths, updates via Dolt SQL.
@@ -1134,6 +1187,15 @@ async fn update_bead(
         }
     }
 
+    if lifecycle_status(req.status.as_deref()) && req.path.starts_with(DOLT_PATH_PREFIX) {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "Atelier cannot verify commit and merge prerequisites from a board-only Dolt address; update through the project on the host that owns its checkout"
+            })),
+        );
+    }
+
     // Dolt-only path: update via SQL
     if let Some(db_name) = req.path.strip_prefix(DOLT_PATH_PREFIX) {
         if !dolt_manager.is_available() && !dolt_manager.check_server().await {
@@ -1170,6 +1232,11 @@ async fn update_bead(
     let project_path = std::path::PathBuf::from(&req.path);
     if let Err(e) = validate_path_security(&project_path) {
         return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e })));
+    }
+    if let Some(status) = req.status.as_deref().filter(|_| lifecycle_status(req.status.as_deref())) {
+        if let Some(reason) = lifecycle_denial(&project_path, &req.id, status).await {
+            return (StatusCode::CONFLICT, Json(serde_json::json!({ "error": reason })));
+        }
     }
 
     // Build bd update args
