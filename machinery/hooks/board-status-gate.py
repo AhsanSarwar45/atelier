@@ -975,13 +975,17 @@ def main():
                 )
                 return
             if reading and "job" not in (card.get("labels") or []):
-                deny(
-                    "%s is a piece of work, and a piece is never read on its own: it is "
-                    "open, being worked, or closed. Its job goes to Agent Review once "
-                    "every piece under it has closed, and the board puts it there "
-                    "itself. Leave this one where it is." % cid
-                )
-                return
+                names = landing_names(cid, card, root)
+                proved = [where for where, branch in bc.landings(root, cid)
+                          if any(git(["log", branch, "--grep", name, "--max-count", "1",
+                                      "--format=%H"], where) for name in names)]
+                if not proved:
+                    deny(
+                        "%s cannot enter Agent Review: no commit naming it has reached "
+                        "the main line. Review begins after merge, never as a substitute "
+                        "for it." % cid
+                    )
+                    return
 
     if CLOSE.search(bare):
         if FORCE.search(bare):
