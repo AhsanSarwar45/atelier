@@ -503,8 +503,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [rightOpen, flipRight] = useRightRail();
   /** The ways in that live in this tab, each a full-screen panel. */
   const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | null>(null);
-  /** The ACCOUNT'S allowance — the same figure in every chat, not this one's (bw-malh). */
-  const plan = usePlanUsage();
   /**
    * Whether the list also holds the chats an agent started for another chat.
    * Off unless he says otherwise, and remembered, because it is a way of
@@ -608,6 +606,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
+  /** The selected provider account's allowance, never the other provider's. */
+  const plan = usePlanUsage(sessionBrand);
   const externalId = live?.externalId ?? facts?.externalId ?? null;
   const held = heldElsewhere(view.state, externalId, elsewhere, facts?.runningElsewhere);
   // What that program is doing, from the stream while it is connected and from
@@ -787,7 +787,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </TabTrail>
 
       {showing === 'search' && <SearchPanel onClose={() => setShowing(null)} />}
-      {showing === 'usage' && <UsageView onClose={() => setShowing(null)} />}
+      {showing === 'usage' && <UsageView brand={sessionBrand} onClose={() => setShowing(null)} />}
       {showing === 'tokens' && sessionId && (
         <TokenView sessionId={sessionId} onClose={() => setShowing(null)} />
       )}
@@ -1293,6 +1293,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 );
               }}
             />
+            {view.menu.agentDefinitions.length > 0 && (
+              <Badge
+                variant="secondary"
+                appearance="light"
+                size="sm"
+                title={view.menu.agentDefinitions.map((agent) => `${agent.name}${agent.description ? ` — ${agent.description}` : ''}`).join('\n')}
+                data-testid="agent-definitions"
+              >
+                {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
+              </Badge>
+            )}
             <span className="ml-auto" />
             {busy ? (
               <Button

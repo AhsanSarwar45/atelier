@@ -18,6 +18,7 @@
  * Design: docs/agent-workbench.md §6.3.
  */
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 
 import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
@@ -34,6 +35,36 @@ interface KnownSession {
   name: string | null;
   cwd: string | null;
   branch: string | null;
+  running: boolean;
+  lastSpokeAt: string | null;
+}
+
+/** Last actual user message in a Codex rollout, without reading the whole file. */
+function codexLastSpokeAt(path: unknown): string | null {
+  if (typeof path !== 'string' || !path) return null;
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, 512 * 1024);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    if (size > length) lines.shift();
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let row: any;
+      try { row = JSON.parse(lines[i]); } catch { continue; }
+      const payload = row.payload ?? row;
+      if (payload.role !== 'user' || (payload.type && payload.type !== 'message')) continue;
+      const at = row.timestamp ?? payload.timestamp;
+      if (typeof at === 'string' && !Number.isNaN(Date.parse(at))) return new Date(at).toISOString();
+    }
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+  return null;
 }
 
 /**
@@ -62,6 +93,8 @@ export async function knownSessions(projectPath: string | null, everything = fal
       name: s.customTitle ?? s.summary ?? s.firstPrompt ?? null,
       cwd: s.cwd ?? null,
       branch: s.gitBranch ?? null,
+      running: false,
+      lastSpokeAt: null,
     }));
   } catch {
     // No index, or a version that cannot be read: the app's own rows still list.
@@ -77,6 +110,8 @@ export async function knownSessions(projectPath: string | null, everything = fal
         name: thread.name ?? thread.preview ?? null,
         cwd: thread.cwd ?? null,
         branch: thread.gitInfo?.branch ?? null,
+        running: thread.status?.type === 'active',
+        lastSpokeAt: codexLastSpokeAt(thread.path),
       }));
     } catch {
       return [];
@@ -159,7 +194,7 @@ export async function restoreList(
       // worked on elsewhere is exactly the one that matters most here, so the
       // later of the two wins (bw-dmxj.4).
       lastActiveAt: active,
-      lastSpokeAt: spokeAt(s.lastSpokeAt, (s.externalId ? spoken.get(s.externalId) : null) ?? null, active),
+      lastSpokeAt: spokeAt(s.lastSpokeAt, seen?.brand === 'codex' ? seen.lastSpokeAt : (s.externalId ? spoken.get(s.externalId) : null) ?? null, active),
       state: s.state,
       origin: s.origin,
       projectId: s.projectId,
@@ -174,7 +209,7 @@ export async function restoreList(
       // the chat's own line has always applied and this row did not: one chat
       // drew "external" here and "Ready" in the bar above it at the same moment
       // (bw-jaoz.2).
-      runningElsewhere: !!s.externalId && asleepHere(s.state) && running.has(s.externalId),
+      runningElsewhere: !!s.externalId && asleepHere(s.state) && (seen?.brand === 'codex' ? seen.running : running.has(s.externalId)),
       held: (s.externalId && asleepHere(s.state) ? holds.get(s.externalId) : null) ?? null,
     };
   });
@@ -189,7 +224,7 @@ export async function restoreList(
       lastActiveAt: s.lastActiveAt,
       // Nothing of ours ever saw this chat being typed into, so the record is
       // the only place the answer is written down.
-      lastSpokeAt: spokeAt(null, spoken.get(s.externalId) ?? null, s.lastActiveAt),
+      lastSpokeAt: spokeAt(null, s.brand === 'codex' ? s.lastSpokeAt : spoken.get(s.externalId) ?? null, s.lastActiveAt),
       state: 'dormant',
       origin: 'terminal',
       projectId: project?.id ?? null,
@@ -202,7 +237,7 @@ export async function restoreList(
       // The row this whole signal exists for: a chat the owner is typing at in
       // a terminal is `dormant` here, because nothing of ours is attached to
       // it, and until now it was drawn identically to one that died last week.
-      runningElsewhere: running.has(s.externalId),
+      runningElsewhere: s.brand === 'codex' ? s.running : running.has(s.externalId),
       held: holds.get(s.externalId) ?? null,
     });
   }

@@ -20,6 +20,7 @@ import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/utils';
 import type { Doing } from '@/workbench/chat-state';
@@ -51,6 +52,10 @@ export const PermissionCard = memo(function PermissionCard({
   title,
   toolName,
   options,
+  question,
+  allowText,
+  secret,
+  href,
   chosen,
   sentBy,
   askedBy,
@@ -60,18 +65,23 @@ export const PermissionCard = memo(function PermissionCard({
   title: string;
   toolName: string;
   options: AskOption[];
+  question?: boolean;
+  allowText?: boolean;
+  secret?: boolean;
+  href?: string;
   chosen: string | null;
   sentBy?: string | null;
   askedBy?: string | null;
 }) {
   const [pending, setPending] = useState<string | null>(null);
+  const [answer, setAnswer] = useState('');
   // What it says about who is asking. A brief where the row had one, and the
   // plain fact where it did not: either way the reader is told this is not the
   // agent they are talking to.
   const raisedBy = sentBy ? askedBy || 'an agent this chat sent off' : null;
 
   if (chosen) {
-    const answered = chosen === 'deny' ? 'Denied' : 'Allowed';
+    const answered = question ? 'Answered' : chosen === 'deny' ? 'Denied' : 'Allowed';
     return (
       <Panel
         data-testid="permission-card"
@@ -105,8 +115,9 @@ export const PermissionCard = memo(function PermissionCard({
           Asked by {raisedBy}
         </div>
       )}
-      <div className="text-sm font-medium text-foreground">Allow {toolName}?</div>
+      <div className="text-sm font-medium text-foreground">{question ? toolName : `Allow ${toolName}?`}</div>
       <div className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{title}</div>
+      {href && <a href={href} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs text-primary underline">Open {href}</a>}
       <div className="mt-3 flex flex-wrap gap-2">
         {options.map((o) => (
           <Button
@@ -125,6 +136,29 @@ export const PermissionCard = memo(function PermissionCard({
             {o.label}
           </Button>
         ))}
+        {allowText && (
+          <form
+            className="flex min-w-64 flex-1 gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!answer.trim() || pending !== null) return;
+              setPending('text');
+              void sendCommand({ type: 'ask.answer', sessionId, askId, optionId: 'text', value: answer }).catch(() =>
+                setPending(null),
+              );
+            }}
+          >
+            <Input
+              type={secret ? 'password' : 'text'}
+              value={answer}
+              onChange={(event) => setAnswer(event.target.value)}
+              disabled={pending !== null}
+              aria-label="Answer"
+              className="min-w-0 flex-1"
+            />
+            <Button type="submit" size="sm" disabled={!answer.trim() || pending !== null}>Answer</Button>
+          </form>
+        )}
       </div>
     </Panel>
   );
@@ -816,6 +850,10 @@ export const TranscriptRow = memo(function TranscriptRow({
           title={item.title}
           toolName={item.toolName}
           options={item.options}
+          question={item.question}
+          allowText={item.allowText}
+          secret={item.secret}
+          href={item.href}
           chosen={item.chosen}
           sentBy={item.parentId}
           askedBy={item.askedBy}

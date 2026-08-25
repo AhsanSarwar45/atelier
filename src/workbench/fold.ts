@@ -20,10 +20,12 @@
  */
 import type {
   AgentControl,
+  AgentDefinition,
   AgentKind,
   AgentState,
   AskOption,
   Audience,
+  Brand,
   CommandInfo,
   Cost,
   ImagePayload,
@@ -113,6 +115,10 @@ export interface TranscriptAsk {
   toolName: string;
   title: string;
   options: AskOption[];
+  question?: boolean;
+  allowText?: boolean;
+  secret?: boolean;
+  href?: string;
   chosen: string | null;
   /**
    * The call that sent the agent which raised this question, or null when the
@@ -208,6 +214,7 @@ function briefOf(agents: SentAway[], sentBy: string | null): string | null {
 }
 
 export interface SessionView {
+  brand: Brand | null;
   items: TranscriptItem[];
   state: SessionState;
   stateLabel: string;
@@ -238,14 +245,16 @@ export interface SessionMenu {
   skills: string[];
   models: ModelChoice[];
   permissionModes: string[];
+  agentDefinitions: AgentDefinition[];
   /** Which steering controls this session's brand has for the work it sent away. */
   agentControls: AgentControl[];
 }
 
-const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], permissionModes: [], agentControls: [] };
+const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], permissionModes: [], agentDefinitions: [], agentControls: [] };
 
 /** A chat with nothing drawn yet. Exported so the fold can be checked on its own. */
 export const EMPTY: SessionView = {
+  brand: null,
   items: [],
   state: 'starting',
   stateLabel: 'Starting',
@@ -285,6 +294,7 @@ function menuOf(sent: Partial<SessionMenu>): SessionMenu {
     skills: list(sent.skills, NO_MENU.skills),
     models: list(sent.models, NO_MENU.models),
     permissionModes: list(sent.permissionModes, NO_MENU.permissionModes),
+    agentDefinitions: list(sent.agentDefinitions, NO_MENU.agentDefinitions),
     agentControls: list(sent.agentControls, NO_MENU.agentControls),
   };
 }
@@ -323,6 +333,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
 
   switch (e.type) {
     case 'session.started':
+      next.brand = e.brand;
       next.permissionMode = e.permissionMode || null;
       next.model = e.model;
       return next;
@@ -500,6 +511,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.agents = view.agents.map((a) => (a.id === e.agentId ? { ...a, relayed: [...a.relayed, e.text] } : a));
       return next;
 
+    case 'agent.identified':
+      next.agents = view.agents.map((a) => a.id === e.agentId ? { ...a, agentType: e.agentType } : a);
+      return next;
+
     case 'agent.finished':
       next.agents = view.agents.map((a) =>
         a.id === e.agentId
@@ -559,6 +574,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           toolName: e.toolName,
           title: e.title,
           options: e.options,
+          question: e.question,
+          allowText: e.allowText,
+          secret: e.secret,
+          href: e.href,
           chosen: null,
           parentId: e.parentToolCallId ?? null,
           askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
@@ -666,6 +685,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
 
     switch (e.type) {
       case 'session.started':
+        view.brand = e.brand;
         view.permissionMode = e.permissionMode || null;
         view.model = e.model;
         break;
@@ -830,6 +850,12 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         break;
       }
 
+      case 'agent.identified': {
+        const at = agentAt.get(e.agentId);
+        if (at !== undefined) agents[at]!.agentType = e.agentType;
+        break;
+      }
+
       case 'agent.finished': {
         const at = agentAt.get(e.agentId);
         if (at !== undefined) {
@@ -888,6 +914,10 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           toolName: e.toolName,
           title: e.title,
           options: e.options,
+          question: e.question,
+          allowText: e.allowText,
+          secret: e.secret,
+          href: e.href,
           chosen: null,
           parentId: e.parentToolCallId ?? null,
           askedBy: briefOf(agents, e.parentToolCallId ?? null),

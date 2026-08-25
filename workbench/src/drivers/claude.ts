@@ -1488,6 +1488,7 @@ export class ClaudeDriver implements Driver {
       skills: this.skills,
       models: this.models,
       permissionModes: [...CLAUDE_PERMISSION_MODES],
+      agentDefinitions: [],
       agentControls: this.agentControls(),
     });
   }

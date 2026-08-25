@@ -1,6 +1,14 @@
 Atelier uses one shared Beads board. A worktree isolates code; it does not create another board.
 
 - Create or claim the bead before changing code.
+- Classify scope before implementation. Work with three or more independently
+  verifiable outcomes, or work spanning multiple product/system areas, is an
+  epic: create at least two child execution beads that name those outcomes.
+  A single bead is for one atomic outcome, not a container for an evolving
+  programme of work.
+- Do not implement directly from an undecomposed epic. Its children are the
+  durable progress record; keep their statuses current as each area starts,
+  reaches review, and lands.
 - Make code changes only in the dedicated `worktrees/<bead-id>` checkout.
 - Tests do not complete a bead. Tested but uncommitted work stays `in_progress`.
 - Commit with the bead ID and merge that commit into the declared main line before advancing to agent review or closing the code step.

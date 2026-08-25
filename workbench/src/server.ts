@@ -16,6 +16,7 @@ import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { watchOutside } from './outside.ts';
 import { planUsage, watchUsage } from './plan-usage.ts';
+import { codexUsage, watchCodexUsage } from './codex-usage.ts';
 import { knownSessions, restoreList } from './registry.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { holdsNow, rememberSummaryRuns, runningNow } from './running.ts';
@@ -202,7 +203,8 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   // next beat — and one that opens before there is any hears it the moment
   // there is one. Saying it here as well sent every stream the same frame twice
   // (bw-dmoe.6).
-  const unwatchUsage = watchUsage((usage) => write({ kind: 'usage', usage }));
+  const unwatchUsage = watchUsage((usage) => write({ kind: 'usage', brand: 'claude', usage }));
+  const unwatchCodexUsage = watchCodexUsage((usage) => write({ kind: 'usage', brand: 'codex', usage }));
   const unsubscribe = sessions.watch((e) => write({ kind: 'event', event: e }));
   const unopen = sessions.watchOpen((s) => write({ kind: 'opened', session: { ...s, activity: '', beads: [] } }));
   const unwatchRunning = watchRunning((holds) => write({ kind: 'running', holds }));
@@ -220,6 +222,7 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
     unwatchRunning();
     unwatchOutside();
     unwatchUsage();
+    unwatchCodexUsage();
   };
   req.on('close', done);
   req.on('error', done);
@@ -237,7 +240,7 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       json(res, 200, { ok: true });
       return;
     case 'ask.answer':
-      sessions.answer(cmd.sessionId, cmd.askId, cmd.optionId);
+      sessions.answer(cmd.sessionId, cmd.askId, cmd.optionId, cmd.value);
       json(res, 200, { ok: true });
       return;
     case 'session.open': {
@@ -322,7 +325,7 @@ const server = createServer((req, res) => {
         // The account's allowance, not this chat's. The pages themselves are
         // pushed it down /watch and never ask; this answers a first paint and
         // the tools that ask from a terminal (bw-malh, bw-dmoe).
-        json(res, 200, await planUsage());
+        json(res, 200, url.searchParams.get('brand') === 'codex' ? await codexUsage() : await planUsage());
       } else if (path === '/tokens' && req.method === 'GET') {
         // This chat's own two numbers, unlike /usage above, which is the
         // account's: what fills the window now, and what the task has spent
@@ -369,7 +372,7 @@ const server = createServer((req, res) => {
         const sessionId = decodeURIComponent(path.slice('/session/'.length));
         const s = store.getSession(sessionId);
         if (!s) return json(res, 404, { error: `no session ${sessionId}` });
-        const seen = (await knownSessions(s.projectPath)).find((k) => k.externalId === s.externalId);
+        const seen = (await knownSessions(s.projectPath)).find((k) => k.brand === s.brand && k.externalId === s.externalId);
         const beads = await cardsForOpen(store, sessionId, s.cwd);
         const cwd = seen?.cwd ?? s.cwd;
         json(res, 200, {
@@ -378,7 +381,7 @@ const server = createServer((req, res) => {
           externalId: s.externalId,
           // Said here as well as on the stream, because the writing box must
           // refuse from the first frame it draws (protocol.ts, SessionFacts).
-          runningElsewhere: s.externalId !== null && runningNow(true).has(s.externalId),
+          runningElsewhere: s.externalId !== null && (s.brand === 'codex' ? seen?.running === true : runningNow(true).has(s.externalId)),
           // And what that program is doing, so the chat draws a moving mark
           // from its first frame rather than a beat later (bw-96is).
           held: s.externalId === null ? null : (holdsNow(true).find((h) => h.id === s.externalId) ?? null),

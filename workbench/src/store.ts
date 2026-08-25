@@ -273,6 +273,11 @@ export class Store {
     return r.imported_at ? 0 : null;
   }
 
+  importedAt(id: string): string | null {
+    const row = this.db.prepare('SELECT imported_at FROM session WHERE id = ?').get(id) as { imported_at: string | null } | undefined;
+    return row?.imported_at ?? null;
+  }
+
   markImported(id: string, recipe: number): void {
     // The mark and the byte are set together, and the byte is cleared: a whole
     // record has just been read, so any byte an older follower stopped at is

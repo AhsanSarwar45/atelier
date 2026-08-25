@@ -187,7 +187,7 @@ const heardOutside = new Map<string, number>();
  * from the one being worked in (bw-dmoe). Nothing known until the stream
  * speaks, which the chip draws as no chip at all rather than as a zero.
  */
-let usage: PlanUsage = NOTHING_KNOWN;
+const usage = new Map<Brand, PlanUsage>([['claude', NOTHING_KNOWN], ['codex', NOTHING_KNOWN]]);
 
 /** A project starts being counted for the moment something asks about it. */
 function countFor(project: string): number {
@@ -314,7 +314,7 @@ function noteMismatch(now: boolean): void {
 
 function absorb(frame: WatchFrame): void {
   if (frame.kind === 'usage') {
-    usage = frame.usage;
+    usage.set(frame.brand ?? 'claude', frame.usage);
     listeners.forEach((fn) => fn());
     return;
   }
@@ -533,10 +533,10 @@ export function useLiveSessions(): LiveSession[] {
  * the same number, and the silent one moves while the other spends. No screen
  * asks for it and no chat's traffic decides how fresh it is (bw-dmoe).
  */
-export function usePlanUsage(): PlanUsage {
+export function usePlanUsage(brand: Brand = 'claude'): PlanUsage {
   return useSyncExternalStore(
     subscribe,
-    () => usage,
+    () => usage.get(brand) ?? NOTHING_KNOWN,
     () => NOTHING_KNOWN,
   );
 }

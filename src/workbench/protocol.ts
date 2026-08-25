@@ -58,7 +58,7 @@ export function asleepHere(state: SessionState): boolean {
 export interface AskOption {
   id: string;
   label: string;
-  kind: 'allow_once' | 'allow_always' | 'deny';
+  kind: 'allow_once' | 'allow_always' | 'deny' | 'answer';
 }
 
 /**
@@ -105,6 +105,12 @@ export interface ModelChoice {
   description?: string;
 }
 
+export interface AgentDefinition {
+  name: string;
+  description: string;
+  source: 'project' | 'user';
+}
+
 /** Fields every event carries. `seq` is per-session and monotone. */
 interface EventBase {
   seq: number;
@@ -129,6 +135,7 @@ export type WbpEvent = EventBase &
         skills: string[];
         models: ModelChoice[];
         permissionModes: string[];
+        agentDefinitions?: AgentDefinition[];
         /**
          * Which of the three steering controls this session's brand actually
          * has (docs/agent-workbench.md §8.2.7). A control that is not named
@@ -269,6 +276,7 @@ export type WbpEvent = EventBase &
      * took.
      */
     | { type: 'agent.relayed'; agentId: string; text: string }
+    | { type: 'agent.identified'; agentId: string; agentType: string }
     | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }
@@ -290,6 +298,10 @@ export type WbpEvent = EventBase &
         input: Record<string, unknown>;
         title: string;
         options: AskOption[];
+        question?: boolean;
+        allowText?: boolean;
+        secret?: boolean;
+        href?: string;
         parentToolCallId?: string;
       }
     | { type: 'ask.resolved'; askId: string; chosen: string }
@@ -456,7 +468,7 @@ export type WbpCommand =
       brief?: Brief;
     }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
-  | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string }
+  | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string; value?: string }
   | { type: 'session.stop'; sessionId: string }
   /**
    * End the chat itself: the agent is torn down and the row is marked `ended`.
@@ -672,7 +684,7 @@ export type WatchFrame =
    * and says it to every page at the same moment, so a chat sitting silent
    * shows the same number as the one being worked in (plan-usage.ts, bw-dmoe).
    */
-  | { kind: 'usage'; usage: PlanUsage }
+  | { kind: 'usage'; brand?: Brand; usage: PlanUsage }
   | { kind: 'event'; event: WbpEvent };
 
 /** A chat that touched a card, as the card's own side of the join lists it. */

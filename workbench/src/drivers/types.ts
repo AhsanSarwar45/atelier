@@ -33,7 +33,7 @@ export interface StartOptions {
 }
 
 /** What the driver hands back when the human answers a permission card. */
-export type PermissionAnswer = 'allow_once' | 'allow_always' | 'deny';
+export type PermissionAnswer = 'allow_once' | 'allow_always' | 'deny' | string;
 
 export interface Driver {
   /** Begin the session. Resolves once the channel is open, not when the turn ends. */
@@ -41,7 +41,7 @@ export interface Driver {
   /** Queue a user turn. */
   send(input: PromptInput): Promise<void>;
   /** Answer an outstanding permission card. */
-  answer(askId: string, choice: PermissionAnswer): void;
+  answer(askId: string, choice: PermissionAnswer, value?: string): void;
   /** Change what the RUNNING session is pinned to (docs/agent-workbench.md §8.2.3). */
   setMode(mode: string): Promise<void>;
   setModel(model: string): Promise<void>;

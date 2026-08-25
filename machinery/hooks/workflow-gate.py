@@ -67,6 +67,17 @@ def card_for(issue, cwd):
         return None
 
 
+def children_for(issue, cwd):
+    ok, out = run(["bd", "children", issue, "--json"], cwd)
+    if not ok:
+        return None
+    try:
+        children = json.loads(out)
+        return children if isinstance(children, list) else None
+    except (ValueError, TypeError):
+        return None
+
+
 def reason(data):
     """Return a refusal for a mutating call, or None when it may proceed."""
     if not mutates(data):
@@ -85,6 +96,15 @@ def reason(data):
     if card.get("status") != "in_progress" or not card.get("assignee"):
         return ("Beads issue %s must be claimed and in_progress before this "
                 "worktree may be changed." % issue)
+    if card.get("issue_type") == "epic":
+        children = children_for(issue, cwd)
+        if children is None:
+            return ("The child beads for epic %s could not be read. Restore the "
+                    "board connection before implementing from this epic." % issue)
+        if len(children) < 2:
+            return ("Epic %s is not decomposed. Create at least two child beads "
+                    "for its independently verifiable outcomes before changing "
+                    "implementation files." % issue)
     return None
 
 

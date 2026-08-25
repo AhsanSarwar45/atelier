@@ -26,10 +26,10 @@ import {
 } from '../../src/workbench/imported-history.ts';
 import { HOLDER_WORD } from '../../src/workbench/chat-state.ts';
 import { latest, type Recorded, windowNamed } from '../../src/workbench/context-window.ts';
-import { type Split, taskSpend } from '../../src/workbench/token-picture.ts';
+import { NOTHING, type Split, type TaskSpend, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
 import { createDriver, defaultPermissionMode } from './drivers/index.ts';
-import { readCodexThread } from './drivers/codex.ts';
+import { readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -530,21 +530,18 @@ export class Sessions {
   private async importOnce(summary: SessionSummary, live = false): Promise<ReadSoFar> {
     if (!summary.externalId) return NOTHING_READ;
     if (summary.brand === 'codex') {
-      if (this.store.importedBy(summary.id) !== null) return NOTHING_READ;
       try {
         const thread = await readCodexThread(summary.externalId, summary.cwd);
-        for (const turn of thread.turns ?? []) {
-          for (const item of turn.items ?? []) {
-            if (item.type !== 'userMessage' && item.type !== 'agentMessage') continue;
-            const role = item.type === 'userMessage' ? 'user' : 'assistant';
-            const text = item.type === 'userMessage'
-              ? (item.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => part.text).join('\n')
-              : item.text;
-            this.publish(summary.id, { type: 'message.started', messageId: item.id, role });
-            if (text) this.publish(summary.id, { type: 'text.delta', messageId: item.id, text });
-            this.publish(summary.id, { type: 'message.completed', messageId: item.id });
-          }
+        const importedAt = this.store.importedAt(summary.id);
+        const changedAt = Number(thread.updatedAt) * 1000;
+        if (importedAt && Number.isFinite(changedAt) && changedAt <= Date.parse(importedAt)) return NOTHING_READ;
+        if (this.store.importedBy(summary.id) !== null) {
+          this.publish(summary.id, { type: 'transcript.reset' });
+          this.store.forgetImported(summary.id);
         }
+        replayCodexThread(thread, (event) => this.publish(summary.id, event));
+        const usage = await readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null);
+        if (usage) this.publish(summary.id, { type: 'cost', cost: { kind: 'tokens', ...usage } });
         this.store.markImported(summary.id, IMPORT_RECIPE);
       } catch {
         // A missing or concurrently-written thread leaves the existing log alone.
@@ -1408,8 +1405,8 @@ export class Sessions {
     await driver.send({ text, images });
   }
 
-  answer(sessionId: string, askId: string, optionId: string): void {
-    this.require(sessionId).answer(askId, optionId as PermissionAnswer);
+  answer(sessionId: string, askId: string, optionId: string, value?: string): void {
+    this.require(sessionId).answer(askId, optionId as PermissionAnswer, value);
   }
 
   /**
@@ -1571,6 +1568,28 @@ export class Sessions {
     }
 
     const summary = this.store.getSession(sessionId);
+    if (summary?.brand === 'codex') {
+      const events = this.store.eventsSince(sessionId, 0);
+      const cost = [...events].reverse().find((event) => event.type === 'cost' && event.cost.kind === 'tokens');
+      if (!cost || cost.type !== 'cost' || cost.cost.kind !== 'tokens') {
+        return { window, windowNote, spent: null, spentNote: 'Codex has not reported token usage for this chat yet.' };
+      }
+      const own: Split = {
+        input: cost.cost.input, cacheWrite: 0, cacheRead: 0, output: cost.cost.output,
+        thinking: 0, total: cost.cost.total,
+      };
+      const turns = events.filter((event) => event.type === 'message.completed' && events.some(
+        (start) => start.type === 'message.started' && start.messageId === event.messageId && start.role === 'assistant',
+      )).length;
+      const spent: TaskSpend = {
+        own, helpers: NOTHING, total: own, turns,
+        toolCalls: events.filter((event) => event.type === 'tool.started').length,
+        forgettings: events.filter((event) => event.type === 'note' && (event.kind === 'thread/compacted' || event.kind === 'compact')).length,
+        helperCount: events.filter((event) => event.type === 'agent.started').length,
+        models: [{ model: summary.model ?? 'unnamed', spend: own, turns }],
+      };
+      return { window, windowNote, spent, spentNote: null };
+    }
     const record = summary?.externalId ? findRecord(summary.externalId) : null;
     if (record === null) {
       return { window, windowNote, spent: null, spentNote: 'This chat has no record on disk yet.' };

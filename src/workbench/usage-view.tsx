@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { usePlanUsage } from '@/workbench/live';
+import type { Brand } from '@/workbench/protocol';
 import {
 
   clockReads,
@@ -121,8 +122,8 @@ function Spending({ driving }: { driving: Driving }) {
   );
 }
 
-export function UsageView({ onClose }: { onClose: () => void }) {
-  const usage = usePlanUsage();
+export function UsageView({ brand = 'claude', onClose }: { brand?: Brand; onClose: () => void }) {
+  const usage = usePlanUsage(brand);
   const now = new Date();
   const windows = [usage.session, usage.week, ...usage.perModel].filter((w): w is PlanWindow => w !== null);
 
@@ -163,9 +164,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
           </Panel>
         ) : (
           <Panel inset="md" className="text-sm text-muted-foreground">
-            {/* An API key, Bedrock, Vertex — anywhere a claude.ai plan is not
-                what pays. Saying so is the answer; a row of zeroes is not. */}
-            No plan allowance to report: this machine is not billing a claude.ai plan, or the kit is too old to say.
+            No plan allowance to report: this account may use API billing, or the agent did not provide allowance data.
           </Panel>
         )}
 
@@ -174,7 +173,7 @@ export function UsageView({ onClose }: { onClose: () => void }) {
             <h3 className="text-sm font-semibold text-foreground">Extra usage credits</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               {usage.credits.enabled
-                ? `${percentReads(usage.credits.percent)} used${
+                ? `${usage.credits.percent === null ? 'Available' : `${percentReads(usage.credits.percent)} used`}${
                     usage.credits.limit !== null
                       ? ` · ${usage.credits.currency ?? ''}${usage.credits.used ?? 0} of ${usage.credits.currency ?? ''}${usage.credits.limit}`
                       : ''
