@@ -153,6 +153,21 @@ describe('what a chat is on, when it runs longer than the line', () => {
     const clause = chip.querySelector('[data-testid="chat-state-detail"]')!;
     expect(classes(clause)).toContain('min-w-0');
     expect(classes(clause.children[0])).toContain('truncate');
-    expect(classes(clause.children[1])).toContain('shrink-0');
+    // Nearly pinned rather than pinned: a tail that cannot give way at all is a
+    // fixed width the rest of the line must find room for, and it was the head
+    // that went to nothing when it could not.
+    expect(classes(clause.children[1])).toContain('shrink-[0.12]');
+    // And clipped, so a tail with nowhere left to go cannot be drawn over the
+    // counter beside it.
+    expect(classes(clause)).toContain('overflow-hidden');
+  });
+
+  it('packs the chip to its front, so nothing that will not fit goes off it', () => {
+    render(<ChatStateChip state={{ ...working(NOW), detail: 'for a name in a folder/deep/inside.tsx' }} testId="chip" />);
+    // The whole of the both-ends cut the manager photographed: a centred box
+    // spreads what will not fit over BOTH its edges, so the mark went off the
+    // front and the counter off the back, and the row's `overflow-hidden` hid
+    // them. Packed to the start, an overflow can only ever go off the end.
+    expect(screen.getByTestId('chip').getAttribute('class') ?? '').toContain('justify-start');
   });
 });

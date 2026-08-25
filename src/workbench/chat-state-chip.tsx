@@ -246,9 +246,22 @@ export function ChatStateChip({
           chip fits itself to the line instead of overflowing an edge that hides
           whatever crosses it. */}
       {state.detail && (
-        <span data-testid="chat-state-detail" className="flex min-w-0 items-center opacity-70">
+        <span
+          data-testid="chat-state-detail"
+          // `overflow-hidden` because the tail does not give way: on a rail too
+          // narrow for both halves the head shrinks to nothing and the tail
+          // carries on past the box, and with nothing clipping it, it was drawn
+          // straight over the counter beside it.
+          className="flex min-w-0 items-center overflow-hidden opacity-70"
+        >
           <span className="truncate">· {said}</span>
-          {ended && <span className="shrink-0 whitespace-pre">{ended}</span>}
+          {/* Nearly pinned, not pinned. A tail that cannot give way at all is
+              a fixed width the rest of the line has to find room for, and when
+              it could not, the head went to nothing and the end of the clause
+              was all that was left. A shrink factor this small means the head
+              gives up nine tenths of whatever is missing and the tail a tenth,
+              so both ends of the clause survive a rail too narrow for it. */}
+          {ended && <span className="min-w-0 shrink-[0.12] overflow-hidden whitespace-pre">{ended}</span>}
         </span>
       )}
       {count && (
@@ -295,7 +308,13 @@ export function ChatStateChip({
       data-working={state.working ? 'yes' : 'no'}
       data-word={state.word}
       className={cn(
-        'shrink-0 gap-1.5',
+        // `justify-start`, against the chip's own `justify-center`: a centred
+        // box spreads whatever will not fit over BOTH its edges, so the moment
+        // the line ran long the mark went off the front and the counter off the
+        // back, and the row wrapper's `overflow-hidden` hid both. Packed to the
+        // start, anything that will not fit can only go off the end — and with
+        // the clause able to shrink, nothing does.
+        'shrink-0 justify-start gap-1.5',
         atRest && 'border-[color-mix(in_srgb,currentColor_30%,transparent)]',
         className,
       )}
