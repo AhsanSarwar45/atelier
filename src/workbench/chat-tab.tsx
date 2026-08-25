@@ -79,7 +79,7 @@ import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { BrandIcon, brandName } from '@/workbench/brand-icon';
+import { ProviderBadge } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 
 /** Where the "show me everything" switch is remembered between visits. */
@@ -655,7 +655,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     label: view.stateLabel,
     since: busySince,
     turnSince,
-    held: held ? (holder ?? { id: externalId ?? '', holder: 'program', doing: 'unknown', since: null }) : null,
+    held: held
+      ? (holder ?? {
+          id: externalId ?? '',
+          holder: facts?.origin === 'terminal' ? 'terminal' : 'program',
+          doing: 'working',
+          since: null,
+        })
+      : null,
     // Whether anything has ever been said in this one. Only the stream knows —
     // the fold's own first reading is `starting` for a chat being woken and for
     // a chat made a second ago alike — so without a row from it we do not know,
@@ -945,10 +952,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           'gap-y-1',
         )}
       >
-        <span className="flex shrink-0 items-center gap-1.5" data-testid="session-brand" data-brand={sessionBrand} title={`Coding agent — ${brandName(sessionBrand)}`}>
-          <BrandIcon brand={sessionBrand} />
-          <span className="sr-only">{brandName(sessionBrand)}</span>
-        </span>
+        <ProviderBadge brand={sessionBrand} />
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
             at: the messages arrive as that program works. So the line says what
@@ -965,7 +969,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               live line at the foot of the transcript, and the same state is on
               the chat's row in the list beside it. Only the badge naming
               another program holding this chat stays — nothing else says it. */}
-          {state.external && <ExternalBadge holder={state.external.holder} />}
+          {(state.external || facts?.origin === 'terminal') && (
+            <ExternalBadge holder={state.external?.holder ?? 'terminal'} />
+          )}
         </span>
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode

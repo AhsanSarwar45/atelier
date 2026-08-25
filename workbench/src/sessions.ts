@@ -7,6 +7,7 @@
  */
 import { getSessionInfo, getSessionMessages, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
 
 import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 import { BRAND_DEFAULT_MODEL, DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
@@ -29,7 +30,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { NOTHING, type Split, type TaskSpend, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
 import { createDriver, defaultPermissionMode } from './drivers/index.ts';
-import { codexMenu, codexThreadSettings, codexThreadUsageFromRollout, readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
+import { codexMenu, codexRolloutLine, codexRolloutPath, CodexDriver, readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -42,6 +43,7 @@ import {
   linePlace,
   recordSize,
   RecordTail,
+  LineTail,
   runningIn,
   saysWhatItRuns,
   type RecordLine,
@@ -527,31 +529,35 @@ export class Sessions {
     if (!summary.externalId) return NOTHING_READ;
     if (summary.brand === 'codex') {
       try {
-        const [thread, usage, menu] = await Promise.all([
-          readCodexThread(summary.externalId, summary.cwd),
-          readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null),
-          codexMenu(summary.cwd).catch(() => null),
-        ]);
+        const path = codexRolloutPath(summary.externalId);
+        const menu = await codexMenu(summary.cwd).catch(() => null);
         if (menu) {
           const { skillPaths: _skillPaths, ...shown } = menu;
           this.publish(summary.id, { type: 'session.menu', ...shown } as DriverEvent);
         }
-        const settings = codexThreadSettings(thread);
-        this.publish(summary.id, { type: 'session.pinned', model: settings.model, permissionMode: settings.permissionMode });
-        const importedAt = this.store.importedAt(summary.id);
-        const changedAt = Number(thread.updatedAt) * 1000;
-        if (!importedAt || !Number.isFinite(changedAt) || changedAt > Date.parse(importedAt)) {
+        if (path) {
+          const size = statSync(path).size;
+          const followed = this.store.followedTo(summary.id);
+          if (followed === null || followed.at > size) {
           if (this.store.importedBy(summary.id) !== null) {
             this.publish(summary.id, { type: 'transcript.reset' });
             this.store.forgetImported(summary.id);
           }
-          replayCodexThread(thread, (event) => this.publish(summary.id, event));
+            const driver = new CodexDriver();
+            for (const line of readFileSync(path, 'utf8').split('\n')) codexRolloutLine(line, driver, (event) => this.publish(summary.id, event));
           this.store.markImported(summary.id, IMPORT_RECIPE);
+            this.store.rememberFollowed(summary.id, size, 0, IMPORT_RECIPE);
+            return { at: size, through: null, carry: [], drawn: 0 };
+          }
+          // The existing transcript is already in the event log. Let the
+          // byte follower append only what arrived while nobody was looking.
+          return { at: followed.at, through: null, carry: [], drawn: 0 };
         }
-        const recordedUsage = codexThreadUsageFromRollout(thread);
-        const spend = usage ?? recordedUsage;
-        if (spend) this.publish(summary.id, { type: 'cost', cost: { kind: 'tokens', input: spend.input, output: spend.output, total: spend.total } });
-        if (recordedUsage?.contextWindow) this.publish(summary.id, { type: 'context', used: recordedUsage.contextUsed, window: recordedUsage.contextWindow });
+        // Discovery normally cached the rollout path. Keep a compatibility
+        // fallback for app-server builds that omit it.
+        const [thread, usage] = await Promise.all([readCodexThread(summary.externalId, summary.cwd), readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null)]);
+        replayCodexThread(thread, (event) => this.publish(summary.id, event));
+        if (usage) this.publish(summary.id, { type: 'cost', cost: { kind: 'tokens', ...usage } });
       } catch {
         // A missing or concurrently-written thread leaves the existing log alone.
       }
@@ -986,14 +992,20 @@ export class Sessions {
     if (externalId === null) return;
     if (this.followers.has(summary.id) || this.drivers.has(summary.id)) return;
     if (summary.brand === 'codex') {
+      const path = codexRolloutPath(externalId);
+      if (!path) return;
+      const tail = new LineTail(path);
+      const placed = read.at === null ? tail.toEnd() : Promise.resolve(tail.seek(read.at));
+      const driver = new CodexDriver();
       let reading = false;
       const look = async (): Promise<void> => {
         if (reading || this.drivers.has(summary.id)) return;
         reading = true;
         try {
-          const working = runningCodexThreads().has(externalId.toLowerCase());
-          this.publish(summary.id, { type: 'session.state', state: working ? 'thinking' : 'idle', label: working ? 'Working elsewhere' : 'Ready' });
-          await this.importPast(summary, working);
+          await placed;
+          const grown = await tail.grown();
+          for (const line of grown.lines) codexRolloutLine(line, driver, (event) => this.publish(summary.id, event));
+          this.store.rememberFollowed(summary.id, tail.throughLine, 0, IMPORT_RECIPE);
         } finally { reading = false; }
       };
       const beat = setInterval(() => void look(), FOLLOW_BEAT_MS);

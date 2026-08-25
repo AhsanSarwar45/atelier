@@ -362,7 +362,16 @@ export async function linePlace(
  * make a whole line yet, so a line caught half-written is read whole on the
  * next look instead of being dropped.
  */
-export class RecordTail {
+export interface LineGrowth {
+  lines: string[];
+  rewritten: boolean;
+  read: number;
+}
+
+/** Provider-neutral byte-offset JSONL source. Claude and Codex each interpret
+ * their own rows, but file growth, partial UTF-8 lines, and rewrite detection
+ * are one lifecycle mechanism. */
+export class LineTail {
   private at = 0;
   private partial = '';
   private readonly decoder = new StringDecoder('utf8');
@@ -408,19 +417,19 @@ export class RecordTail {
   }
 
   /** What has arrived since the last look. */
-  async grown(): Promise<Grown> {
+  async grown(): Promise<LineGrowth> {
     let size: number;
     try {
       size = (await stat(this.path)).size;
     } catch {
-      return { fresh: [], running: { ...SAYS_NOTHING }, rewritten: false, read: 0 };
+      return { lines: [], rewritten: false, read: 0 };
     }
     if (size < this.at) {
       this.at = size;
       this.partial = '';
-      return { fresh: [], running: { ...SAYS_NOTHING }, rewritten: true, read: 0 };
+      return { lines: [], rewritten: true, read: 0 };
     }
-    if (size === this.at) return { fresh: [], running: { ...SAYS_NOTHING }, rewritten: false, read: 0 };
+    if (size === this.at) return { lines: [], rewritten: false, read: 0 };
 
     const length = size - this.at;
     const buffer = Buffer.allocUnsafe(length);
@@ -439,17 +448,33 @@ export class RecordTail {
     // line is still being written. Either way it waits for the next look.
     this.partial = lines.pop() ?? '';
 
+    return { lines, rewritten: false, read: got };
+  }
+}
+
+export class RecordTail {
+  private readonly tail: LineTail;
+  readonly path: string;
+
+  constructor(path: string) { this.path = path; this.tail = new LineTail(path); }
+  get position(): number { return this.tail.position; }
+  get throughLine(): number { return this.tail.throughLine; }
+  seek(at: number): void { this.tail.seek(at); }
+  async toEnd(): Promise<void> { await this.tail.toEnd(); }
+
+  async grown(): Promise<Grown> {
+    const growth = await this.tail.grown();
     const fresh: RecordLine[] = [];
     // Every line, not only the conversation: the mode a terminal is switched to
     // is written on a line of its own, which is not conversation and is the
     // only place that fact exists (bw-ja9l.2).
     const running: Running = { ...SAYS_NOTHING };
-    for (const line of lines) {
+    for (const line of growth.lines) {
       sipRunning(line, running);
       const said = readLine(line);
       if (said) fresh.push(said);
     }
-    return { fresh, running, rewritten: false, read: got };
+    return { fresh, running, rewritten: growth.rewritten, read: growth.read };
   }
 }
 

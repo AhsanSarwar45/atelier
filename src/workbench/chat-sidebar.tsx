@@ -571,7 +571,12 @@ export function ChatSidebar({
                 state: row.state,
                 label: row.activity,
                 since: row.busySince ? Date.parse(row.busySince) : null,
-                held: row.held ?? null,
+                held: row.held ?? (row.runningElsewhere ? {
+                  id: row.externalId ?? '',
+                  holder: row.origin === 'terminal' ? 'terminal' : 'program',
+                  doing: 'working',
+                  since: null,
+                } : null),
                 // A chat he has never spoken in is not coming back from
                 // anywhere. Only a row the stream built for a chat made this
                 // second says that outright; a row off the list says nothing
@@ -702,7 +707,8 @@ export function ChatSidebar({
                     state.working ||
                     state.waiting ||
                     live ||
-                    state.external) && (
+                    state.external ||
+                    row.origin === 'terminal') && (
                     <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
                       {busy === key || ending === key ? (
                         <Badge
@@ -733,8 +739,8 @@ export function ChatSidebar({
                         // (chat-state-chip.tsx, splitDetail; bw-gnzl).
                         <ChatStateChip state={state} testId="row-pill" className="min-w-0 shrink" />
                       )}
-                      {state.external && (
-                        <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />
+                      {(state.external || row.origin === 'terminal') && (
+                        <ExternalBadge holder={state.external?.holder ?? 'terminal'} className="ml-auto shrink-0" />
                       )}
                     </div>
                   )}

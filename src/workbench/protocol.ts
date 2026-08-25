@@ -602,6 +602,8 @@ export interface RestoreRow {
  */
 export interface SessionFacts {
   sessionId: string;
+  /** Where the conversation was originally created; immutable across resumes. */
+  origin: 'app' | 'terminal';
   /** The immutable coding-agent implementation that owns this conversation. */
   brand: Brand;
   /**

@@ -18,7 +18,7 @@
  * Design: docs/agent-workbench.md §6.3.
  */
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
-import { closeSync, fstatSync, openSync, readFileSync, readSync, readdirSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, readlinkSync, readSync, readdirSync } from 'node:fs';
 
 import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
@@ -40,8 +40,8 @@ interface KnownSession {
 }
 
 /** Codex has no Claude-style marker files. Its app-server reports terminal
- * threads as notLoaded, so recognize the thread id carried by active Codex
- * commands and shell snapshots in the process table. */
+ * threads as notLoaded, so recognize both ids carried by active commands and
+ * rollout files held open by a Codex process. */
 export function runningCodexThreads(): Set<string> {
   const found = new Set<string>();
   if (process.platform !== 'linux') return found;
@@ -51,8 +51,18 @@ export function runningCodexThreads(): Set<string> {
   for (const pid of pids) {
     let command = '';
     try { command = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' '); } catch { continue; }
-    if (!/codex|\.codex\/shell_snapshots/i.test(command)) continue;
+    if (!/codex/i.test(command)) continue;
     for (const id of command.match(uuid) ?? []) found.add(id.toLowerCase());
+    try {
+      for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+        let target = '';
+        try { target = readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; }
+        if (!/\.codex\/sessions|rollout-/i.test(target)) continue;
+        for (const id of target.match(uuid) ?? []) found.add(id.toLowerCase());
+      }
+    } catch {
+      // Processes can exit or deny fd inspection between the two reads.
+    }
   }
   return found;
 }

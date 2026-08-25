@@ -375,9 +375,9 @@ export class Store {
     this.forgetFollowed(id);
   }
 
-  getSession(id: string): SessionSummary | undefined {
+  getSession(id: string): (SessionSummary & { origin: 'app' | 'terminal' }) | undefined {
     const r = this.db.prepare('SELECT * FROM session WHERE id = ?').get(id) as Record<string, string> | undefined;
-    return r ? rowToSummary(r) : undefined;
+    return r ? { ...rowToSummary(r), origin: r.origin === 'terminal' ? 'terminal' : 'app' } : undefined;
   }
 
   /**

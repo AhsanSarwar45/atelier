@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { WbpEvent } from '../../../src/workbench/protocol';
-import { CodexDriver, codexThreadSettings, codexThreadUsageFromRollout, replayCodexThread } from '../drivers/codex';
+import { CodexDriver, codexRolloutLine, codexThreadSettings, codexThreadUsageFromRollout, replayCodexThread } from '../drivers/codex';
 
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
 
@@ -45,5 +45,17 @@ describe('Codex live-runtime regressions', () => {
     ] }] }, (event) => events.push(event));
     expect(events).not.toContainEqual(expect.objectContaining({ messageId: 'empty' }));
     expect(events).toContainEqual(expect.objectContaining({ type: 'text.delta', messageId: 'answer', text: 'Visible' }));
+  });
+
+  it('translates only newly appended rollout lines', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver();
+    codexRolloutLine(JSON.stringify({ type: 'response_item', payload: {
+      type: 'custom_tool_call', id: 'item', call_id: 'new', name: 'exec', input: 'const r = await tools.exec_command({cmd:"npm test"})',
+    } }), driver, (event) => events.push(event));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'transcript.reset' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'tool.started', toolCallId: 'new', title: 'Ran the tests' }));
+    codexRolloutLine(JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'new', output: 'passed' } }), driver, (event) => events.push(event));
+    expect(events.at(-1)).toMatchObject({ type: 'tool.completed', toolCallId: 'new', output: 'passed' });
   });
 });

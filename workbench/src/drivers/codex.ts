@@ -106,6 +106,8 @@ class CodexReader {
 }
 
 const readers = new Map<string, CodexReader>();
+const rolloutPaths = new Map<string, string>();
+export function codexRolloutPath(threadId: string): string | null { return rolloutPaths.get(threadId) ?? null; }
 export function codexRequest(method: string, params: Bag, cwd = process.cwd()): Promise<any> {
   let reader = readers.get(cwd);
   if (!reader) { reader = new CodexReader(cwd); readers.set(cwd, reader); }
@@ -127,6 +129,7 @@ export async function listCodexThreads(cwd: string | null, everything = false): 
       ...(sourceKinds ? { sourceKinds } : {}),
     }, cwd ?? process.cwd());
     threads.push(...(result.data ?? []));
+    for (const thread of result.data ?? []) if (thread.id && thread.path) rolloutPaths.set(thread.id, thread.path);
     cursor = result.nextCursor ?? null;
   } while (cursor);
   if (!cwd) return threads;
@@ -267,6 +270,73 @@ export function replayCodexThread(thread: Bag, emit: (event: DriverEvent) => voi
         if (item.status !== 'inProgress') driver.itemCompleted(item);
       }
     }
+  }
+}
+
+/** Stateful diff of thread/read snapshots. External Codex sessions do not
+ * expose a subscribable app-server thread, so polling is unavoidable; replaying
+ * the snapshots is not. */
+function rolloutText(item: Bag): string {
+  return (item.content ?? []).map((part: Bag) => part.text ?? '').filter(Boolean).join('\n');
+}
+
+function commandFromToolInput(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  const found = /\bcmd\s*:\s*("(?:[^"\\]|\\.)*")/.exec(input);
+  if (!found) return input.slice(0, 500);
+  try { return JSON.parse(found[1]!); } catch { return input.slice(0, 500); }
+}
+
+/** Translate one newly appended Codex rollout row. This is deliberately a
+ * line-level API: callers own byte offsets and never ask app-server for prior
+ * turns. */
+export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event: DriverEvent) => void): void {
+  let row: Bag;
+  try { row = JSON.parse(line); } catch { return; }
+  driver.emit = emit;
+  const payload = row.payload ?? {};
+  if (row.type === 'turn_context') {
+    emit({ type: 'session.pinned', model: payload.model ?? 'default', permissionMode: MODES.includes(payload.approval_policy) ? payload.approval_policy : 'on-request' });
+    return;
+  }
+  if (row.type === 'event_msg' && payload.type === 'token_count' && payload.info) {
+    const total = payload.info.total_token_usage ?? {};
+    const last = payload.info.last_token_usage ?? {};
+    emit({ type: 'cost', cost: { kind: 'tokens', input: Number(total.input_tokens ?? 0), output: Number(total.output_tokens ?? 0), total: Number(total.total_tokens ?? 0) } });
+    if (payload.info.model_context_window) emit({ type: 'context', used: Number(last.total_tokens ?? 0), window: Number(payload.info.model_context_window) });
+    return;
+  }
+  if (row.type === 'event_msg' && payload.type === 'item_completed') {
+    const item = payload.item ?? {};
+    if (item.type === 'UserMessage') {
+      emit({ type: 'message.started', messageId: item.id, role: 'user' });
+      const text = rolloutText(item);
+      if (text) emit({ type: 'text.delta', messageId: item.id, text });
+      emit({ type: 'message.completed', messageId: item.id });
+    } else if (item.type === 'AgentMessage') {
+      driver.itemCompleted({ id: item.id, type: 'agentMessage', text: rolloutText(item) });
+    } else if (item.type === 'Reasoning') {
+      const text = [...(item.summary_text ?? []), ...(item.raw_content ?? [])].join('\n');
+      if (text) emit({ type: 'thinking.delta', messageId: item.id, text });
+    } else if (item.type === 'FileChange') {
+      const toolCallId = (driver as any).__rolloutApply ?? item.id;
+      for (const [path, change] of Object.entries(item.changes ?? {}) as [string, Bag][]) {
+        if (change.unified_diff) emit({ type: 'diff', toolCallId, path, ...patchSides(change.unified_diff) });
+      }
+    }
+    return;
+  }
+  if (row.type === 'response_item' && (payload.type === 'custom_tool_call' || payload.type === 'function_call')) {
+    const id = payload.call_id ?? payload.id;
+    const command = payload.name === 'exec' ? commandFromToolInput(payload.input) : payload.input;
+    const name = payload.name === 'exec' ? 'Bash' : payload.name === 'apply_patch' ? 'Edit' : payload.name === 'wait' ? 'Wait' : payload.name;
+    if (payload.name === 'apply_patch') (driver as any).__rolloutApply = id;
+    driver.itemStarted({ id, type: 'dynamicToolCall', tool: name, arguments: command ? { command } : { input: payload.input } });
+    return;
+  }
+  if (row.type === 'response_item' && (payload.type === 'custom_tool_call_output' || payload.type === 'function_call_output')) {
+    driver.itemCompleted({ id: payload.call_id, type: 'dynamicToolCall', status: 'completed', result: payload.output });
+    if ((driver as any).__rolloutApply === payload.call_id) (driver as any).__rolloutApply = null;
   }
 }
 

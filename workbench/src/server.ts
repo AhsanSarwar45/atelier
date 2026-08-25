@@ -377,6 +377,7 @@ const server = createServer((req, res) => {
         const cwd = seen?.cwd ?? s.cwd;
         json(res, 200, {
           sessionId,
+          origin: s.origin,
           brand: s.brand,
           externalId: s.externalId,
           // Said here as well as on the stream, because the writing box must
