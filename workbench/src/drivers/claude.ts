@@ -29,6 +29,7 @@ import {
 } from '../../../src/workbench/machine-words.ts';
 import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
+import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'max'].map((value) => ({
   value,
@@ -1888,6 +1889,9 @@ export class ClaudeDriver implements Driver {
           if (b.type !== 'text') return;
           for (const comparison of materializeComparisons(String(b.text ?? ''), this.cwd)) {
             this.emit({ type: 'image.compare', messageId: `${messageId}:${index}`, comparison });
+          }
+          for (const widget of widgetSpecs(String(b.text ?? ''))) {
+            this.emit({ type: 'widget', messageId: `${messageId}:${index}`, widget });
           }
         });
         // How full the conversation now is, which only the kit knows and only

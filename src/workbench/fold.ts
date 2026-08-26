@@ -38,6 +38,7 @@ import type {
   TodoItem,
   WbpEvent,
 } from './protocol';
+import type { ChatWidget } from './chat-widgets';
 // With its extension, which is not a style: this file is read two ways. The
 // browser's build resolves it either way; the sidecar is Node running the
 // TypeScript as it stands, and Node resolves the exact filename or nothing —
@@ -53,6 +54,7 @@ export interface TranscriptMessage {
   text: string;
   images: ImagePayload[];
   comparisons?: ImageComparison[];
+  widgets?: ChatWidget[];
   done: boolean;
   /** Set when a sent-off agent said this — the row nests under the call that sent it. */
   parentId: string | null;
@@ -367,6 +369,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           text: '',
           images: [],
           comparisons: [],
+          widgets: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
         },
@@ -383,6 +386,14 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.items = items.map((it) =>
         it.kind === 'message' && it.id === e.messageId
           ? { ...it, comparisons: [...(it.comparisons ?? []), e.comparison] }
+          : it,
+      );
+      return next;
+
+    case 'widget':
+      next.items = items.map((it) =>
+        it.kind === 'message' && it.id === e.messageId
+          ? { ...it, widgets: [...(it.widgets ?? []), e.widget] }
           : it,
       );
       return next;
@@ -718,6 +729,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           text: '',
           images: [],
           comparisons: [],
+          widgets: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
         });
@@ -737,6 +749,15 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         if (at !== undefined) {
           const it = items[at] as TranscriptMessage;
           it.comparisons = [...(it.comparisons ?? []), e.comparison];
+        }
+        break;
+      }
+
+      case 'widget': {
+        const at = messageAt.get(e.messageId);
+        if (at !== undefined) {
+          const it = items[at] as TranscriptMessage;
+          it.widgets = [...(it.widgets ?? []), e.widget];
         }
         break;
       }

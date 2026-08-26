@@ -16,6 +16,7 @@
 /** Brands we can drive. One string per driver. */
 import type { HeldChat } from './chat-state';
 import type { PlanUsage } from './plan-usage';
+import type { ChatWidget } from './chat-widgets';
 
 export type Brand = 'claude' | 'codex';
 
@@ -297,6 +298,7 @@ export type WbpEvent = EventBase &
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }
     | { type: 'image.compare'; messageId: string; comparison: ImageComparison }
+    | { type: 'widget'; messageId: string; widget: ChatWidget }
     /**
      * A tool is asking to run. `parentToolCallId` is set when a SENT-OFF agent
      * raised the question, and names the call that sent that agent — the same

@@ -8,6 +8,7 @@ import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, re
 
 import type { AgentControl, AgentState, CommandInfo } from '../../../src/workbench/protocol.ts';
 import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
+import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 import { commandExecution, offeredSlashCommand } from './slash-commands.ts';
@@ -1072,6 +1073,7 @@ export class CodexDriver implements Driver {
       for (const comparison of materializeComparisons(String(item.text ?? ''), this.cwd)) {
         this.emit({ type: 'image.compare', messageId: item.id, comparison });
       }
+      for (const widget of widgetSpecs(String(item.text ?? ''))) this.emit({ type: 'widget', messageId: item.id, widget });
       this.completedMessages.add(item.id);
       return;
     }
