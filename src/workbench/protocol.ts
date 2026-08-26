@@ -467,7 +467,7 @@ export type WbpCommand =
       permissionMode?: string;
       brief?: Brief;
     }
-  | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[] }
+  | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; takeover?: boolean }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string; value?: string }
   | { type: 'session.stop'; sessionId: string }
   /**

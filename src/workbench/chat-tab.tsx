@@ -69,7 +69,7 @@ import { EVERYTHING, hisDoing, remember, remembered, showing as stillShowing, ty
 import type { Brand, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
-import { canCompose, heldElsewhere, sessionOwnership } from '@/workbench/running';
+import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
@@ -747,7 +747,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setAttached([]);
     setSendError(null);
     try {
-      await sendCommand({ type: 'prompt.send', sessionId, text, images });
+      await sendCommand({ type: 'prompt.send', sessionId, text, images, takeover: ownership.kind === 'elsewhere' });
     } catch (e) {
       // The server can refuse this: another program took the conversation over
       // between the box unlocking and the send, or the screen's own copy of who
@@ -1176,11 +1176,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             comes back by itself when they let go, because the stream this is
             read from does (bw-96is). The line's words are the reading's, so it
             cannot contradict the mark at the top of the pane (bw-96is.9). */}
-        {!canCompose(ownership) ? (
-          <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-1 text-xs text-muted-foreground">
-            {heldLine(state)}
-          </p>
-        ) : (
         <Panel
           tone="overlay"
           inset="none"
@@ -1190,6 +1185,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             'focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30',
           )}
         >
+          {ownership.kind === 'elsewhere' && (
+            <p data-testid="held-elsewhere" className="mb-2 text-xs text-info">
+              {heldLine(state)} Sending here will stop that holder and move the chat into Atelier.
+            </p>
+          )}
           {attached.length > 0 && (
             <div data-testid="attachment-tray" className="mb-2 flex flex-wrap gap-2">
               {attached.map((img, i) => (
@@ -1384,7 +1384,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 variant="primary"
                 mode="icon"
                 size="sm"
-                aria-label="Send"
+                aria-label={ownership.kind === 'elsewhere' ? 'Take over and send' : 'Send'}
                 data-testid="send-button"
                 className="rounded-full"
                 onClick={() => void submit()}
@@ -1400,7 +1400,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             )}
           </div>
         </Panel>
-        )}
       </div>
 
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}

@@ -16,7 +16,7 @@ try {
   await page.goto(`${app}/project?id=${encodeURIComponent(project)}&tab=chat&chat=${encodeURIComponent(session)}`);
   await page.locator('[data-testid="transcript"]').waitFor({ timeout: 30_000 });
   try {
-    await page.locator('[data-testid="chat-external"]').first().waitFor({ timeout: 10_000 });
+  await page.locator('[data-testid="chat-external"]').first().waitFor({ timeout: 10_000 });
   } catch (error) {
     const diagnostic = await page.evaluate(() => ({
       url: location.href,
@@ -29,10 +29,12 @@ try {
     throw new Error(`External badge missing: ${JSON.stringify({ ...diagnostic, ownershipFrames })}\n${error}`);
   }
   await page.locator('[data-testid="held-elsewhere"]').waitFor();
-  if (await page.locator('[data-testid="composer-frame"]').count()) throw new Error('externally held chat still offers a composer');
+  await page.locator('[data-testid="composer-frame"]').waitFor();
+  const sendLabel = await page.locator('[data-testid="send-button"]').getAttribute('aria-label');
+  if (sendLabel !== 'Take over and send') throw new Error(`external composer does not offer takeover: ${sendLabel}`);
   const model = (await page.locator('[data-testid="chat-model-chip"]').first().innerText()).trim();
   if (/^gpt[-_]/i.test(model) || model.includes('-')) throw new Error(`raw model id is visible: ${model}`);
-  console.log(`External badge shown; composer withheld; model shown as "${model}"`);
+  console.log(`External badge shown; takeover composer offered; model shown as "${model}"`);
 } finally {
   await browser.close();
 }

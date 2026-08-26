@@ -12,14 +12,14 @@ describe.each(['claude', 'codex'])('%s chat ownership', () => {
   it('is read-only only while another live process holds the session', () => {
     const ownership = sessionOwnership('dormant', 'provider-session', true);
     expect(ownership).toEqual({ kind: 'elsewhere', externalId: 'provider-session' });
-    expect(canCompose(ownership)).toBe(false);
+    expect(canCompose(ownership)).toBe(true);
   });
 
   it('keeps followed live activity external while another process owns it', () => {
     for (const state of ['starting', 'idle', 'thinking', 'streaming', 'running_tool', 'waiting_permission'] as const) {
       const ownership = sessionOwnership(state, 'provider-session', true);
       expect(ownership, state).toEqual({ kind: 'elsewhere', externalId: 'provider-session' });
-      expect(canCompose(ownership), state).toBe(false);
+      expect(canCompose(ownership), state).toBe(true);
     }
   });
 });

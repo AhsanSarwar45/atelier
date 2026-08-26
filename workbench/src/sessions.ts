@@ -68,7 +68,7 @@ export function boundedEvent<T extends DriverEvent | WbpEvent>(event: T): T {
   if (event.type === 'agent.finished') return { ...event, result: cut(event.result) } as T;
   return event;
 }
-import { knownSessions, providerHoldsNow } from './registry.ts';
+import { knownSessions, providerHolderPids, providerHoldsNow } from './registry.ts';
 import type { Store } from './store.ts';
 
 type Subscriber = (e: WbpEvent) => void;
@@ -1440,10 +1440,11 @@ export class Sessions {
     });
   }
 
-  async send(sessionId: string, text: string, images: ImagePayload[] = []): Promise<void> {
+  async send(sessionId: string, text: string, images: ImagePayload[] = [], takeover = false): Promise<void> {
     // Sending is what wakes a chat that was opened for reading. Nothing else
     // does, so a link into a sleeping conversation is a working one the moment
     // he types (docs/designs/app-shell.md §1.9).
+    if (takeover) await this.takeOver(sessionId);
     if (!this.drivers.has(sessionId)) {
       const row = this.store.getSession(sessionId);
       if (!row) throw new Error(`session ${sessionId} is not running`);
@@ -1484,6 +1485,26 @@ export class Sessions {
     this.store.markSpoke(sessionId);
 
     await driver.send({ text, images });
+  }
+
+  /** Stop the other local holder before attaching this app to the same thread. */
+  private async takeOver(sessionId: string): Promise<void> {
+    const row = this.store.getSession(sessionId);
+    if (!row?.externalId) return;
+    const ours = this.processForExternal(row.externalId);
+    const other = Array.from(providerHolderPids(row.externalId)).filter((pid) => pid !== ours);
+    for (const pid of other) {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* It released between the read and the signal. */ }
+    }
+    const until = Date.now() + 3_000;
+    while (Date.now() < until) {
+      const alive = other.filter((pid) => {
+        try { process.kill(pid, 0); return true; } catch { return false; }
+      });
+      if (alive.length === 0) return;
+      await new Promise((wake) => setTimeout(wake, 50));
+    }
+    throw new Error('The other program did not release this chat, so Atelier did not start a second agent.');
   }
 
   answer(sessionId: string, askId: string, optionId: string, value?: string): void {

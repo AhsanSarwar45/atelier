@@ -88,6 +88,16 @@ export function codexThreadProcesses(): Map<string, Set<number>> {
   return found;
 }
 
+/** OS processes currently holding a provider conversation. */
+export function providerHolderPids(externalId: string): Set<number> {
+  const wanted = externalId.toLowerCase();
+  const codex = codexThreadProcesses().get(wanted);
+  if (codex) return new Set(codex);
+  return new Set(readMarkers()
+    .filter((marker) => marker.sessionId.toLowerCase() === wanted)
+    .map((marker) => marker.pid));
+}
+
 /** Honest activity from the bounded tail of a Codex rollout. */
 export function codexDoingFromLines(lines: string[]): HeldDoing {
   const rows = lines.flatMap((line) => {

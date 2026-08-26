@@ -60,9 +60,10 @@ export function sessionOwnership(
   return { kind: 'unheld', externalId: externalId ?? null };
 }
 
-/** Whether the shared composer may accept a message in this ownership state. */
+/** Whether the shared composer may accept a message. An external chat accepts
+ * a draft too; sending it performs the explicit ownership transfer. */
 export function canCompose(ownership: SessionOwnership): boolean {
-  return ownership.kind !== 'elsewhere';
+  return ownership.kind === 'atelier' || ownership.kind === 'unheld' || ownership.kind === 'elsewhere';
 }
 
 /**
