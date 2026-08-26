@@ -404,8 +404,22 @@ export function ChatSidebar({
     (row: RestoreRow) => {
       // A chat this app already knows is opened by its id alone: no round trip,
       // so the transcript starts drawing on the click.
-      if (row.sessionId && row.state !== 'dormant') {
+      if (row.sessionId) {
         onOpen(row.sessionId);
+        // Navigation never waits for housekeeping. The chat stream catches the
+        // transcript up; this read only resets stale stored state and starts a
+        // provider-record follower when one is needed.
+        if (row.state === 'dormant') void sendCommand({
+          type: 'session.open',
+          sessionId: row.sessionId,
+          externalId: row.externalId ?? undefined,
+          brand: row.brand,
+          projectId,
+          projectPath,
+          title: row.title,
+          cwd: row.cwdHint,
+          lastActiveAt: row.lastActiveAt,
+        }).then(() => load()).catch((e: unknown) => setFailed(e instanceof Error ? e.message : String(e)));
         return;
       }
       const key = rowKey(row);

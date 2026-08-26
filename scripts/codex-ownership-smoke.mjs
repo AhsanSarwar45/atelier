@@ -34,7 +34,16 @@ try {
   if (sendLabel !== 'Take over and send') throw new Error(`external composer does not offer takeover: ${sendLabel}`);
   const model = (await page.locator('[data-testid="chat-model-chip"]').first().innerText()).trim();
   if (/^gpt[-_]/i.test(model) || model.includes('-')) throw new Error(`raw model id is visible: ${model}`);
-  console.log(`External badge shown; takeover composer offered; model shown as "${model}"`);
+  const commands = await page.locator('[data-testid="tool-row"]').evaluateAll((rows) => rows.map((row) => ({
+    kind: row.getAttribute('data-ran-kind'),
+    icon: Boolean(row.querySelector('[data-testid="tool-mark"]')),
+    text: row.querySelector('[data-testid="tool-toggle"]')?.textContent?.trim() ?? '',
+  })));
+  const recognized = commands.filter((command) => command.kind);
+  if (recognized.length && recognized.some((command) => !command.icon)) {
+    throw new Error(`recognized commands without icons: ${JSON.stringify(recognized.filter((command) => !command.icon))}`);
+  }
+  console.log(`External badge shown; takeover composer offered; model shown as "${model}"; ${recognized.length}/${commands.length} visible commands categorized with icons`);
 } finally {
   await browser.close();
 }

@@ -17,6 +17,7 @@ import { useMemo, useSyncExternalStore } from 'react';
 
 import { chatState, counting, type ChatState, type HeldChat } from '@/workbench/chat-state';
 import { onWorkbench } from '@/workbench/live-wire';
+import { cacheSessionEvent } from '@/workbench/use-session';
 import { NOTHING_KNOWN, type PlanUsage } from '@/workbench/plan-usage';
 import type { Brand, SessionState, SessionSummary, WatchFrame } from '@/workbench/protocol';
 
@@ -373,6 +374,7 @@ function absorb(frame: WatchFrame): void {
     return;
   }
   const e = frame.event;
+  cacheSessionEvent(e);
   // A session started while we were watching is not in the snapshot; it joins
   // the list on the first event that says what it is.
   if (e.type === 'session.started' && !sessions.some((s) => s.id === e.sessionId)) {

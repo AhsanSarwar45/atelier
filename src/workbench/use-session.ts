@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { request } from '@/lib/api';
 import { onChat } from '@/workbench/live-wire';
@@ -83,18 +83,26 @@ export async function sendCommand<T = unknown>(cmd: WbpCommand): Promise<T> {
  * begun in a terminal carries them the first time it is opened, not only after
  * this app has watched it work.
  */
+const sessionFactsCache = new Map<string, SessionFacts>();
+
 export function useSessionFacts(sessionId: string | null): SessionFacts | null {
-  const [facts, setFacts] = useState<SessionFacts | null>(null);
+  const factsCache = sessionFactsCache;
+  const [facts, setFacts] = useState<SessionFacts | null>(() => sessionId ? factsCache.get(sessionId) ?? null : null);
 
   useEffect(() => {
     // Cleared first, so the line never names the chat before this one.
-    setFacts(null);
+    setFacts(sessionId ? factsCache.get(sessionId) ?? null : null);
     if (!sessionId) return;
+    if (factsCache.has(sessionId)) return;
     let live = true;
     void (async () => {
       try {
         const res = await request(`/api/workbench/session/${encodeURIComponent(sessionId)}`);
-        if (live && res.ok) setFacts((await res.json()) as SessionFacts);
+        if (live && res.ok) {
+          const found = (await res.json()) as SessionFacts;
+          factsCache.set(sessionId, found);
+          setFacts(found);
+        }
       } catch {
         // The header falls back to what the stream itself carries.
       }
@@ -109,36 +117,92 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
 
 export type LoadedSessionView = SessionView & { loadOlder: (() => Promise<void>) | null };
 
-export function useSession(sessionId: string | null): LoadedSessionView {
-  // What has been drawn and which chat it was drawn from are one value. Held
-  // apart, a second chat folds onto the first chat's messages and its own
-  // opening events are skipped as already seen (docs/agent-workbench.md §4.1).
-  const [drawn, setDrawn] = useState<{ id: string | null; view: SessionView }>({ id: null, view: EMPTY });
+interface CachedSession {
+  view: SessionView;
+  listeners: Set<() => void>;
+  loadingOlder: boolean;
+  touched: number;
+}
 
-  // The last event drawn, kept where the reconnection can read it. A stream
-  // that drops is opened again from here: asking from zero would send the whole
-  // conversation a second time, and fold it onto itself.
-  const seen = useRef(0);
-  const loadingOlder = useRef(false);
+const SESSION_CACHE_LIMIT = 10;
+const READ_AHEAD_ROWS = 400;
+const cachedSessions = new Map<string, CachedSession>();
+
+function cached(id: string): CachedSession {
+  let entry = cachedSessions.get(id);
+  if (!entry) {
+    entry = { view: EMPTY, listeners: new Set(), loadingOlder: false, touched: Date.now() };
+    cachedSessions.set(id, entry);
+    if (cachedSessions.size > SESSION_CACHE_LIMIT) {
+      const oldest = Array.from(cachedSessions.entries())
+        .filter(([key]) => key !== id)
+        .sort((a, b) => a[1].touched - b[1].touched)[0];
+      if (oldest) cachedSessions.delete(oldest[0]);
+    }
+  }
+  entry.touched = Date.now();
+  return entry;
+}
+
+function publishCached(id: string, view: SessionView): void {
+  const entry = cached(id);
+  entry.view = view;
+  entry.listeners.forEach((listener) => listener());
+}
+
+/** The app-wide feed keeps chats already opened current while another tab is
+ * visible, so switching back needs no catch-up reconstruction. */
+export function cacheSessionEvent(event: WbpEvent): void {
+  const entry = cachedSessions.get(event.sessionId);
+  if (!entry || event.seq <= entry.view.lastSeq) return;
+  publishCached(event.sessionId, reduce(entry.view, event));
+}
+
+async function loadHistory(id: string, targetRows = READ_AHEAD_ROWS): Promise<void> {
+  const entry = cached(id);
+  if (entry.loadingOlder) return;
+  entry.loadingOlder = true;
+  try {
+    while (entry.view.hasOlder && entry.view.historyCursor !== null && entry.view.items.length < targetRows) {
+      const before = entry.view.historyCursor;
+      const res = await request(`/api/workbench/history?session=${encodeURIComponent(id)}&before=${before}`);
+      if (!res.ok) return;
+      const page = (await res.json()) as { items: SessionView['items']; cursor: number | null; hasOlder: boolean };
+      const existing = new Set(entry.view.items.map((item) => `${item.kind}:${item.id}`));
+      publishCached(id, {
+        ...entry.view,
+        items: [...page.items.filter((item) => !existing.has(`${item.kind}:${item.id}`)), ...entry.view.items],
+        historyCursor: page.cursor,
+        hasOlder: page.hasOlder,
+      });
+      if (page.cursor === before) return;
+    }
+  } finally {
+    entry.loadingOlder = false;
+  }
+}
+
+export function useSession(sessionId: string | null): LoadedSessionView {
+  const view = useSyncExternalStore(
+    (listener) => {
+      if (!sessionId) return () => {};
+      const entry = cached(sessionId);
+      entry.listeners.add(listener);
+      return () => entry.listeners.delete(listener);
+    },
+    () => sessionId ? cached(sessionId).view : EMPTY,
+    () => EMPTY,
+  );
 
   useEffect(() => {
-    setDrawn({ id: sessionId, view: EMPTY });
-    seen.current = 0;
     if (!sessionId) return;
-
-    const draw = (view: SessionView) => {
-      seen.current = view.lastSeq;
-      // Late events from the chat just left are dropped by the id, not by luck
-      // of ordering: the connection is told to stop on the way out, but a
-      // message already in flight still arrives.
-      setDrawn((d) => (d.id === sessionId ? { id: d.id, view } : d));
-    };
+    const entry = cached(sessionId);
 
     return onChat(sessionId, {
       // What the connection asks from when it is opened, or opened again after
       // a drop. Asking from zero would send the whole conversation a second
       // time, and fold it onto itself.
-      since: () => seen.current,
+      since: () => entry.view.lastSeq,
 
       // The newest conversation window as the sidecar built it. Older windows
       // are fetched only when the reader reaches the top.
@@ -147,7 +211,9 @@ export function useSession(sessionId: string | null): LoadedSessionView {
           // Filled against a blank chat rather than trusted: the sidecar is a
           // process that outlives this page, so it can be older than the screen
           // and simply not send a list the screen draws (bw-7ks.22.16).
-          draw(asView(JSON.parse(data) as Partial<SessionView>));
+          const opening = asView(JSON.parse(data) as Partial<SessionView>);
+          if (opening.lastSeq >= entry.view.lastSeq) publishCached(sessionId, opening);
+          void loadHistory(sessionId);
         } catch {
           // A frame this page cannot read leaves the transcript as it stands.
         }
@@ -160,50 +226,13 @@ export function useSession(sessionId: string | null): LoadedSessionView {
         } catch {
           return;
         }
-        setDrawn((d) => {
-          if (d.id !== sessionId) return d;
-          const view = reduce(d.view, event);
-          seen.current = view.lastSeq;
-          return { id: d.id, view };
-        });
+        if (event.seq > entry.view.lastSeq) publishCached(sessionId, reduce(entry.view, event));
       },
     });
   }, [sessionId]);
 
-  // Never the last chat's transcript under this chat's name, not even for the
-  // one paint between the id changing and the effect running.
-  const view = drawn.id === sessionId ? drawn.view : EMPTY;
   const loadOlder = sessionId && view.hasOlder && view.historyCursor !== null
-    ? async () => {
-        if (loadingOlder.current) return;
-        loadingOlder.current = true;
-        try {
-          const res = await request(
-            `/api/workbench/history?session=${encodeURIComponent(sessionId)}&before=${view.historyCursor}`,
-          );
-          if (!res.ok) return;
-          const page = (await res.json()) as {
-            items: SessionView['items'];
-            cursor: number | null;
-            hasOlder: boolean;
-          };
-          setDrawn((current) => {
-            if (current.id !== sessionId) return current;
-            const existing = new Set(current.view.items.map((item) => `${item.kind}:${item.id}`));
-            return {
-              id: current.id,
-              view: {
-                ...current.view,
-                items: [...page.items.filter((item) => !existing.has(`${item.kind}:${item.id}`)), ...current.view.items],
-                historyCursor: page.cursor,
-                hasOlder: page.hasOlder,
-              },
-            };
-          });
-        } finally {
-          loadingOlder.current = false;
-        }
-      }
+    ? () => loadHistory(sessionId, Math.max(READ_AHEAD_ROWS, view.items.length + 160))
     : null;
   return { ...view, loadOlder };
 }
