@@ -1143,6 +1143,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           onLook={setLooking}
           pane={pane}
           held={atTheEnd}
+          onOlder={view.loadOlder}
         />
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes

@@ -85,6 +85,9 @@ export interface TranscriptTool {
   /** What it was asked to do, and what it printed. Both open on the row's own click. */
   input: Record<string, unknown>;
   output: string | null;
+  /** The opening window carries the readable title, not the potentially huge
+   * body. The body is asked for only when this row is opened. */
+  detailsDeferred?: boolean;
 }
 
 /**
@@ -238,6 +241,9 @@ export interface SessionView {
   thinkingTokens: number;
   error: string | null;
   lastSeq: number;
+  /** Seq immediately before the oldest loaded transcript window. */
+  historyCursor: number | null;
+  hasOlder: boolean;
 }
 
 export interface SessionMenu {
@@ -269,6 +275,8 @@ export const EMPTY: SessionView = {
   thinkingTokens: 0,
   error: null,
   lastSeq: 0,
+  historyCursor: null,
+  hasOlder: false,
 };
 
 /** A list off the wire, or the blank one when the sender never sent it. */

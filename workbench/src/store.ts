@@ -552,6 +552,112 @@ export class Store {
       .all(sessionId, since) as { json: string }[];
     return rows.map((r) => JSON.parse(r.json) as WbpEvent);
   }
+
+  /**
+   * A bounded slice of transcript events, newest window first.
+   *
+   * Row anchors are deliberately provider-neutral WBP types. The query starts
+   * at the oldest selected anchor, so all deltas/completions belonging to the
+   * selected rows are present without walking anything older.
+   */
+  transcriptWindow(sessionId: string, before: number | null, limit = 40): {
+    events: WbpEvent[];
+    cursor: number | null;
+    hasOlder: boolean;
+    newestSeq: number;
+  } {
+    const ceiling = before ?? Number.MAX_SAFE_INTEGER;
+    const newest = this.db
+      .prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM event WHERE session_id = ? AND seq < ?')
+      .get(sessionId, ceiling) as { seq: number };
+    const reset = this.db
+      .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM event WHERE session_id = ? AND type = 'transcript.reset' AND seq < ?")
+      .get(sessionId, ceiling) as { seq: number };
+    const anchors = this.db
+      .prepare(
+        `SELECT seq FROM event
+          WHERE session_id = ? AND seq > ? AND seq < ?
+            AND type IN ('message.started','tool.started','note','report.available','ask.permission','notice')
+          ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(sessionId, reset.seq, ceiling, limit) as { seq: number }[];
+    const start = anchors.length ? anchors[anchors.length - 1]!.seq : Math.max(reset.seq + 1, newest.seq);
+    const rows = this.db
+      .prepare('SELECT json FROM event WHERE session_id = ? AND seq >= ? AND seq < ? ORDER BY seq')
+      .all(sessionId, start, ceiling) as { json: string }[];
+    const older = this.db
+      .prepare(
+        `SELECT 1 AS yes FROM event
+          WHERE session_id = ? AND seq > ? AND seq < ?
+            AND type IN ('message.started','tool.started','note','report.available','ask.permission','notice')
+          LIMIT 1`,
+      )
+      .get(sessionId, reset.seq, start) as { yes: number } | undefined;
+    return {
+      events: rows.map((r) => JSON.parse(r.json) as WbpEvent),
+      cursor: older ? start : null,
+      hasOlder: !!older,
+      newestSeq: newest.seq,
+    };
+  }
+
+  /** Latest non-transcript facts needed for an honest first paint. */
+  sessionFactsEvents(sessionId: string): WbpEvent[] {
+    const types = ['session.started', 'session.state', 'session.menu', 'session.pinned', 'cost', 'context', 'todo', 'thinking.progress', 'error'];
+    const read = this.db.prepare('SELECT json FROM event WHERE session_id = ? AND type = ? ORDER BY seq DESC LIMIT 1');
+    const latest = types
+      .map((type) => read.get(sessionId, type) as { json: string } | undefined)
+      .filter((row): row is { json: string } => !!row)
+      .map((row) => JSON.parse(row.json) as WbpEvent)
+      .sort((a, b) => a.seq - b.seq);
+    // Sent-away work is not transcript history: it is the live/finished agent
+    // panel. Keep every lifecycle edge, but only the newest moving progress row
+    // per agent, so a long-running helper cannot make chat-open proportional to
+    // the number of times it reported its clock.
+    const agents = this.db
+      .prepare(
+        `SELECT json FROM (
+           SELECT seq, json FROM event
+            WHERE session_id = ? AND type IN ('agent.started','agent.finished','agent.identified','agent.relayed')
+           UNION ALL
+           SELECT seq, json FROM (
+             SELECT seq, json,
+                    ROW_NUMBER() OVER (PARTITION BY json_extract(json, '$.agentId') ORDER BY seq DESC) AS place
+               FROM event WHERE session_id = ? AND type = 'agent.progress'
+           ) WHERE place = 1
+         ) ORDER BY seq`,
+      )
+      .all(sessionId, sessionId) as { json: string }[];
+    return [...latest, ...agents.map((row) => JSON.parse(row.json) as WbpEvent)].sort((a, b) => a.seq - b.seq);
+  }
+
+  /** The large fields for one tool row, fetched only after its disclosure opens. */
+  toolDetails(sessionId: string, toolCallId: string): {
+    input: Record<string, unknown>;
+    output: string | null;
+    diff: { path: string; before: string; after: string } | null;
+  } | null {
+    const rows = this.db
+      .prepare(
+        `SELECT json FROM event
+          WHERE session_id = ?
+            AND type IN ('tool.started','tool.completed','diff')
+            AND json_extract(json, '$.toolCallId') = ?
+          ORDER BY seq`,
+      )
+      .all(sessionId, toolCallId) as { json: string }[];
+    if (!rows.length) return null;
+    let input: Record<string, unknown> = {};
+    let output: string | null = null;
+    let diff: { path: string; before: string; after: string } | null = null;
+    for (const row of rows) {
+      const event = JSON.parse(row.json) as WbpEvent;
+      if (event.type === 'tool.started') input = event.input;
+      else if (event.type === 'tool.completed') output = event.output;
+      else if (event.type === 'diff') diff = { path: event.path, before: event.before, after: event.after };
+    }
+    return { input, output, diff };
+  }
 }
 
 function rowToSummary(r: Record<string, unknown>): SessionSummary {

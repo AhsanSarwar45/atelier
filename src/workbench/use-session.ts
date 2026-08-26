@@ -3,10 +3,9 @@
  * events into.
  *
  * The conversation itself — what an event does to it — lives in fold.ts, which
- * the sidecar runs too. Opening a chat is answered with the conversation
- * already built (one `snapshot` frame), and this only folds what has happened
- * since; a stream that drops is opened again from the last event drawn rather
- * than from the beginning of time (docs/agent-workbench.md §4).
+ * the sidecar runs too. Opening receives only the newest server-built window;
+ * older windows are prepended on demand, and this hook folds only the live tail.
+ * A dropped stream resumes from the last event drawn (docs/agent-workbench.md §4).
  *
  * The connection is not this file's: the chat is one tag on the one connection
  * the window holds, and the number of the last event drawn is what that
@@ -108,7 +107,9 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
   return facts;
 }
 
-export function useSession(sessionId: string | null): SessionView {
+export type LoadedSessionView = SessionView & { loadOlder: (() => Promise<void>) | null };
+
+export function useSession(sessionId: string | null): LoadedSessionView {
   // What has been drawn and which chat it was drawn from are one value. Held
   // apart, a second chat folds onto the first chat's messages and its own
   // opening events are skipped as already seen (docs/agent-workbench.md §4.1).
@@ -118,6 +119,7 @@ export function useSession(sessionId: string | null): SessionView {
   // that drops is opened again from here: asking from zero would send the whole
   // conversation a second time, and fold it onto itself.
   const seen = useRef(0);
+  const loadingOlder = useRef(false);
 
   useEffect(() => {
     setDrawn({ id: sessionId, view: EMPTY });
@@ -138,8 +140,8 @@ export function useSession(sessionId: string | null): SessionView {
       // time, and fold it onto itself.
       since: () => seen.current,
 
-      // The conversation as the sidecar built it — everything said before this
-      // browser asked, in one frame. Only the tail is folded here.
+      // The newest conversation window as the sidecar built it. Older windows
+      // are fetched only when the reader reaches the top.
       snapshot: (data) => {
         try {
           // Filled against a blank chat rather than trusted: the sidecar is a
@@ -170,7 +172,40 @@ export function useSession(sessionId: string | null): SessionView {
 
   // Never the last chat's transcript under this chat's name, not even for the
   // one paint between the id changing and the effect running.
-  return drawn.id === sessionId ? drawn.view : EMPTY;
+  const view = drawn.id === sessionId ? drawn.view : EMPTY;
+  const loadOlder = sessionId && view.hasOlder && view.historyCursor !== null
+    ? async () => {
+        if (loadingOlder.current) return;
+        loadingOlder.current = true;
+        try {
+          const res = await request(
+            `/api/workbench/history?session=${encodeURIComponent(sessionId)}&before=${view.historyCursor}`,
+          );
+          if (!res.ok) return;
+          const page = (await res.json()) as {
+            items: SessionView['items'];
+            cursor: number | null;
+            hasOlder: boolean;
+          };
+          setDrawn((current) => {
+            if (current.id !== sessionId) return current;
+            const existing = new Set(current.view.items.map((item) => `${item.kind}:${item.id}`));
+            return {
+              id: current.id,
+              view: {
+                ...current.view,
+                items: [...page.items.filter((item) => !existing.has(`${item.kind}:${item.id}`)), ...current.view.items],
+                historyCursor: page.cursor,
+                hasOlder: page.hasOlder,
+              },
+            };
+          });
+        } finally {
+          loadingOlder.current = false;
+        }
+      }
+    : null;
+  return { ...view, loadOlder };
 }
 
 /** True while the agent owes an answer — the Stop button's condition. */

@@ -40,9 +40,11 @@ interface DrawnTranscriptProps {
   pane: React.RefObject<HTMLElement | null>;
   /** Whether the end of the conversation is what the reader is watching. */
   held: boolean;
+  /** Fetches the preceding server window; null when the beginning is loaded. */
+  onOlder?: (() => Promise<void>) | null;
 }
 
-export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held }: DrawnTranscriptProps) {
+export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held, onOlder = null }: DrawnTranscriptProps) {
   const [shown, setShown] = useState(SCREENFUL);
   const head = useRef<HTMLDivElement | null>(null);
   /** How tall the pane's contents were when the last batch was asked for. */
@@ -65,15 +67,16 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held 
 
   useEffect(() => {
     const mark = head.current;
-    if (!mark || shown >= rows.length) return;
+    if (!mark) return;
     const watch = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting)) return;
       wasTall.current = pane.current?.scrollHeight ?? null;
-      setShown((n) => n + SCREENFUL);
+      if (shown < rows.length) setShown((n) => n + SCREENFUL);
+      else void onOlder?.();
     });
     watch.observe(mark);
     return () => watch.disconnect();
-  }, [shown, rows.length, pane]);
+  }, [shown, rows.length, pane, onOlder]);
 
   // Older messages arrive ABOVE where the reader is looking, which would slide
   // the words he is reading down the screen by however tall they are. Put back
@@ -90,7 +93,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held 
 
   return (
     <>
-      {count < rows.length && <div ref={head} data-testid="older-messages" />}
+      {(count < rows.length || onOlder) && <div ref={head} data-testid="older-messages" />}
       {window.map((drawnRow) =>
         // A machine line and one of the app's own asides are the same shape:
         // both are the chat talking about itself rather than someone in it, and

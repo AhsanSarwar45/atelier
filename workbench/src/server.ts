@@ -8,8 +8,7 @@
  * SSE down, POST up — the same shape server/src/routes/watch.rs already uses.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-
-import { foldAll } from '../../src/workbench/fold.ts';
+import { foldAll, reduce, type SessionView, type TranscriptTool } from '../../src/workbench/fold.ts';
 import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
@@ -47,6 +46,42 @@ const sessions = new Sessions(store);
 // enough of them have been watched from beginning to end (bw-jaoz.14.9).
 rememberSummaryRuns(summaryMemoryOf(store));
 
+const TRANSCRIPT_WINDOW = 40;
+
+/** Which event began a folded row. Used only when one message also produced a
+ * thinking row and a 40-anchor query therefore folded slightly more than 40
+ * rows: the cursor moves to the first row actually sent, so none are skipped. */
+function starts(event: ReturnType<Store['transcriptWindow']>['events'][number], item: SessionView['items'][number]): boolean {
+  if (item.kind === 'message') return event.type === 'message.started' && event.messageId === item.id;
+  if (item.kind === 'thinking') return event.type === 'message.started' && event.messageId === item.id;
+  if (item.kind === 'tool') return event.type === 'tool.started' && event.toolCallId === item.id;
+  if (item.kind === 'ask') return event.type === 'ask.permission' && event.askId === item.id;
+  if (item.kind === 'report') return event.type === 'report.available' && `${event.project}/${event.slug}` === item.id;
+  if (item.kind === 'note') return event.type === 'note' && event.noteId === item.id;
+  return event.type === 'notice' && `notice-${event.seq}` === item.id;
+}
+
+function transcriptPage(sessionId: string, before: number | null): {
+  items: SessionView['items']; cursor: number | null; hasOlder: boolean; newestSeq: number;
+} {
+  const page = store.transcriptWindow(sessionId, before, TRANSCRIPT_WINDOW);
+  const folded = foldAll(page.events.map(boundedEvent));
+  const visible = folded.items.slice(-TRANSCRIPT_WINDOW);
+  const truncated = visible.length < folded.items.length;
+  const first = visible[0];
+  const cursor = truncated && first
+    ? (page.events.find((event) => starts(event, first))?.seq ?? page.cursor)
+    : page.cursor;
+  return {
+    items: visible.map((item) => item.kind === 'tool'
+      ? { ...item, input: {}, output: null, diff: null, detailsDeferred: true } satisfies TranscriptTool
+      : item),
+    cursor,
+    hasOlder: page.hasOlder || truncated,
+    newestSeq: page.newestSeq,
+  };
+}
+
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) });
@@ -62,13 +97,11 @@ async function readBody(req: IncomingMessage): Promise<string> {
 /**
  * One session's stream: the conversation as it stands, then the live tail.
  *
- * A browser opening a chat is handed the folded conversation in one `snapshot`
- * frame rather than every event ever recorded. The log is not the conversation:
- * a chat whose record is re-read republishes the whole of it behind a
- * `transcript.reset`, so the longest chat on this machine carried three and
- * three quarter megabytes of which four hundredths were still on the screen.
- * Folding it here — once, in one pass — is what the browser would have done
- * with all of it anyway (bw-uiyz.4).
+ * A browser opening a chat is handed the newest transcript window in one
+ * `snapshot` frame. SQLite selects only that window; older windows are fetched
+ * on upward scroll and tool bodies on disclosure. Virtualising after a complete
+ * replay still paid to fold and transfer everything, which is why the longest
+ * Codex chat took seconds to show forty rows.
  *
  * A browser that reconnects passes the last seq it saw, and is sent only what
  * arrived since: no snapshot, because it is already drawing one.
@@ -93,24 +126,45 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: stri
     // hop in the chain not to sit on them.
     'x-accel-buffering': 'no',
   });
+  const send = (chunk: string) => res.write(chunk);
 
   const write = (e: unknown) => {
     const safe = boundedEvent(e as Parameters<typeof boundedEvent>[0]);
-    res.write(`id: ${(safe as { seq: number }).seq}\ndata: ${JSON.stringify(safe)}\n\n`);
+    send(`id: ${(safe as { seq: number }).seq}\ndata: ${JSON.stringify(safe)}\n\n`);
   };
 
   if (since === 0) {
-    const view = foldAll(sessions.replay(sessionId, 0).map((event) => boundedEvent(event)));
+    const page = transcriptPage(sessionId, null);
+    const facts = foldAll(store.sessionFactsEvents(sessionId).map(boundedEvent));
+    const view: SessionView = {
+      ...facts,
+      items: page.items,
+      state: facts.state,
+      stateLabel: facts.stateLabel,
+      menu: facts.menu,
+      model: facts.model,
+      permissionMode: facts.permissionMode,
+      cost: facts.cost,
+      context: facts.context,
+      todos: facts.todos,
+      agents: facts.agents,
+      beads: store.beadsForSession(sessionId),
+      thinkingTokens: facts.thinkingTokens,
+      error: facts.error,
+      lastSeq: page.newestSeq,
+      historyCursor: page.cursor,
+      hasOlder: page.hasOlder,
+    };
     // Named, so the browser tells the conversation apart from an event; the id
     // is what a reconnection resumes from, whether ours or the browser's own.
-    res.write(`id: ${view.lastSeq}\nevent: snapshot\ndata: ${JSON.stringify(view)}\n\n`);
+    send(`id: ${view.lastSeq}\nevent: snapshot\ndata: ${JSON.stringify(view)}\n\n`);
   } else {
     for (const e of sessions.replay(sessionId, since)) write(e);
   }
   const unsubscribe = sessions.subscribe(sessionId, write);
 
   // Keeps intermediaries from reaping an idle stream, same 30s cadence as watch.rs.
-  const beat = setInterval(() => res.write(': keep-alive\n\n'), 30_000);
+  const beat = setInterval(() => send(': keep-alive\n\n'), 30_000);
   const done = () => {
     clearInterval(beat);
     unsubscribe();
@@ -320,6 +374,22 @@ const server = createServer((req, res) => {
       } else if (path === '/search' && req.method === 'GET') {
         const q = (url.searchParams.get('q') ?? '').trim();
         json(res, 200, q ? sessions.found(q) : []);
+      } else if (path === '/history' && req.method === 'GET') {
+        const sessionId = url.searchParams.get('session');
+        const before = Number(url.searchParams.get('before'));
+        if (!sessionId || !Number.isFinite(before)) return json(res, 400, { error: 'session and before are required' });
+        const page = transcriptPage(sessionId, before);
+        json(res, 200, {
+          items: page.items,
+          cursor: page.cursor,
+          hasOlder: page.hasOlder,
+        });
+      } else if (path === '/tool' && req.method === 'GET') {
+        const sessionId = url.searchParams.get('session');
+        const toolCallId = url.searchParams.get('tool');
+        if (!sessionId || !toolCallId) return json(res, 400, { error: 'session and tool are required' });
+        const detail = store.toolDetails(sessionId, toolCallId);
+        json(res, detail ? 200 : 404, detail ?? { error: `no tool ${toolCallId}` });
       } else if (path === '/spend' && req.method === 'GET') {
         json(res, 200, store.spend());
       } else if (path === '/usage' && req.method === 'GET') {

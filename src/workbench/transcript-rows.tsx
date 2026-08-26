@@ -15,6 +15,8 @@
 
 import { memo, useContext, useEffect, useReducer, useState } from 'react';
 
+import { request } from '@/lib/api';
+
 import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
@@ -391,23 +393,27 @@ export const sentOff = (parentId: string | null | undefined): boolean => parentI
 export const ToolRow = memo(function ToolRow({
   item,
   nested,
+  sessionId = '',
 }: {
   item: Extract<TranscriptItem, { kind: 'tool' }>;
   nested: boolean;
+  sessionId?: string;
 }) {
   const [open, setOpen] = useOpen();
+  const [detail, setDetail] = useState<Pick<typeof item, 'input' | 'output' | 'diff'> | null>(null);
+  const shown = detail ? { ...item, ...detail } : item;
   const dot =
     item.status === 'running' ? 'bg-amber-400 animate-pulse' : item.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500';
   // A shell row's arguments ARE its command: written out as `key: value` it
   // read as a form rather than as the line that was run (bw-4wcd.2).
-  const shell = item.name === 'Bash' && typeof item.input.command === 'string';
-  const asked = shell ? String(item.input.command) : whatItWasAsked(item.input);
-  const tongue = languagesOf(item.name, item.input);
-  const hasBody = asked !== '' || Boolean(item.output?.trim());
+  const shell = shown.name === 'Bash' && typeof shown.input.command === 'string';
+  const asked = shell ? String(shown.input.command) : whatItWasAsked(shown.input);
+  const tongue = languagesOf(shown.name, shown.input);
+  const hasBody = item.detailsDeferred || asked !== '' || Boolean(shown.output?.trim());
   // What the call did, said in English behind a mark for the kind of thing it
   // was. A command no rule knows keeps the words it was typed in, and that is
   // the only shell text left on a closed row (bw-7ks.24).
-  const ran = whatItRan(item.name, item.input);
+  const ran = whatItRan(shown.name, shown.input);
   const Mark = ran && markOfRan(ran.kind);
   // A chain that deletes something is red whatever else it mostly did: the
   // sentence names the delete, and the mark must not say `test` in amber while
@@ -437,7 +443,17 @@ export const ToolRow = memo(function ToolRow({
           type="button"
           data-testid="tool-toggle"
           disabled={!hasBody}
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            const opening = !open;
+            setOpen(opening);
+            if (opening && item.detailsDeferred && !detail && sessionId) {
+              void request(
+                `/api/workbench/tool?session=${encodeURIComponent(sessionId)}&tool=${encodeURIComponent(item.id)}`,
+              ).then(async (res) => {
+                if (res.ok) setDetail((await res.json()) as Pick<typeof item, 'input' | 'output' | 'diff'>);
+              });
+            }
+          }}
           className="flex w-full items-center gap-2 text-left enabled:hover:text-foreground"
         >
           <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
@@ -473,11 +489,11 @@ export const ToolRow = memo(function ToolRow({
         {open && (
           <>
             <Body label={shell ? 'ran' : 'asked'} text={asked} testId="tool-input" language={tongue.asked} />
-            <Body label="printed" text={item.output ?? ''} testId="tool-output" language={tongue.printed} />
+            <Body label="printed" text={shown.output ?? ''} testId="tool-output" language={tongue.printed} />
           </>
         )}
       </Panel>
-      {item.diff && <DiffView path={item.diff.path} before={item.diff.before} after={item.diff.after} />}
+      {shown.diff && <DiffView path={shown.diff.path} before={shown.diff.before} after={shown.diff.after} />}
     </div>
   );
 });
@@ -837,7 +853,7 @@ export const TranscriptRow = memo(function TranscriptRow({
 }) {
   switch (item.kind) {
     case 'tool':
-      return <ToolRow item={item} nested={sentOff(item.parentId)} />;
+      return <ToolRow item={item} nested={sentOff(item.parentId)} sessionId={sessionId} />;
     case 'thinking':
       return <ThinkingBlock item={item} />;
     case 'report':
