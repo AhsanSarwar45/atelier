@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+/** @vitest-environment node */
+import { describe, expect, it, vi } from 'vitest';
 
-import { codexDoingFromLines } from '../registry.ts';
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ listSessions: vi.fn() }));
+
+import { codexDoingFromLines, latestCodexThreadsByPid } from '../registry.ts';
 
 const row = (type: string, item?: string) => JSON.stringify({
   type: 'event_msg',
@@ -8,6 +11,18 @@ const row = (type: string, item?: string) => JSON.stringify({
 });
 
 describe('external Codex activity', () => {
+  it('finds one current conversation for every live Codex process from newest-first logs', () => {
+    expect([...latestCodexThreadsByPid([
+      { process_uuid: 'pid:101:one', thread_id: 'CURRENT-A' },
+      { process_uuid: 'pid:101:one', thread_id: 'old-helper-a' },
+      { process_uuid: 'pid:202:two', thread_id: 'CURRENT-B' },
+      { process_uuid: 'not-a-process', thread_id: 'ignored' },
+    ])]).toEqual([
+      [101, 'current-a'],
+      [202, 'current-b'],
+    ]);
+  });
+
   it('is idle after a completed or aborted turn', () => {
     expect(codexDoingFromLines([row('task_started'), row('task_complete')])).toBe('idle');
     expect(codexDoingFromLines([row('task_started'), row('turn_aborted')])).toBe('idle');

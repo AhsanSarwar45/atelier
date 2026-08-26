@@ -18,7 +18,10 @@
  * Design: docs/agent-workbench.md §6.3.
  */
 import { listSessions } from '@anthropic-ai/claude-agent-sdk';
+import { DatabaseSync } from 'node:sqlite';
 import { closeSync, fstatSync, openSync, readFileSync, readlinkSync, readSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
@@ -44,6 +47,52 @@ interface KnownSession {
 
 const liveCodexPaths = new Map<string, string>();
 
+interface CodexProcessLog {
+  process_uuid: string;
+  thread_id: string;
+}
+
+/**
+ * The current conversation named by each still-running Codex CLI process.
+ *
+ * `codex resume` deliberately carries no conversation id in argv, and Codex
+ * closes its rollout descriptor whenever it is not writing. Its own log keeps
+ * the missing association as `pid:<os pid>:<process uuid>` plus `thread_id`.
+ * The newest named row for that process is therefore the durable answer; one
+ * process can mention older threads after spawning helpers, so taking every
+ * id it ever logged would mark dead conversations external forever.
+ */
+export function latestCodexThreadsByPid(rows: CodexProcessLog[]): Map<number, string> {
+  const found = new Map<number, string>();
+  for (const row of rows) {
+    const match = /^pid:(\d+):/.exec(row.process_uuid);
+    if (!match || !row.thread_id || found.has(Number(match[1]))) continue;
+    found.set(Number(match[1]), row.thread_id.toLowerCase());
+  }
+  return found;
+}
+
+function loggedCodexThreads(pids: number[]): Map<number, string> {
+  if (!pids.length) return new Map();
+  const path = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'logs_2.sqlite');
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(path, { readOnly: true });
+    const rows: CodexProcessLog[] = [];
+    const query = db.prepare(
+      `SELECT process_uuid, thread_id FROM logs
+       WHERE process_uuid GLOB ? AND thread_id IS NOT NULL AND thread_id != ''
+       ORDER BY ts DESC, ts_nanos DESC, id DESC`,
+    );
+    for (const pid of pids) rows.push(...query.all(`pid:${pid}:*`) as CodexProcessLog[]);
+    return latestCodexThreadsByPid(rows);
+  } catch {
+    return new Map();
+  } finally {
+    db?.close();
+  }
+}
+
 /** Codex has no Claude-style marker files. Its app-server reports terminal
  * threads as notLoaded, so recognize both ids carried by active commands and
  * rollout files held open by a Codex process. */
@@ -59,11 +108,14 @@ export function codexThreadProcesses(): Map<string, Set<number>> {
   let pids: string[] = [];
   try { pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name)); } catch { return found; }
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+  const terminalPids: number[] = [];
   for (const pid of pids) {
     let command = '';
     try { command = readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch { continue; }
     const argv = command.split('\0').filter(Boolean);
     if (argv[0]?.split('/').pop() !== 'codex') continue;
+    if (argv[1] === 'app-server') continue;
+    terminalPids.push(Number(pid));
     command = argv.join(' ');
     const ids = new Set((command.match(uuid) ?? []).map((id) => id.toLowerCase()));
     try {
@@ -85,6 +137,13 @@ export function codexThreadProcesses(): Map<string, Set<number>> {
       owners.add(Number(pid));
       found.set(id, owners);
     }
+  }
+  // A resumed terminal conversation normally has neither its id in argv nor
+  // its rollout open. Codex's own process log supplies that ordinary case.
+  for (const [pid, id] of loggedCodexThreads(terminalPids)) {
+    const owners = found.get(id) ?? new Set<number>();
+    owners.add(pid);
+    found.set(id, owners);
   }
   return found;
 }
