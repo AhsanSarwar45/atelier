@@ -1443,6 +1443,11 @@ export class Sessions {
       resume,
       emit: (e) => this.publish(summary.id, e),
     });
+    // Starting the provider may resolve settings that were absent from the row
+    // we entered with. Read that row again before publishing the final opening
+    // pins; otherwise this event becomes the newest session.pinned fact and a
+    // reconnect loses the provider-resolved value.
+    const started = this.store.getSession(summary.id) ?? summary;
     // What it is pinned to, said before the agent says anything: a session sends
     // no `init` until the first turn (docs/agent-workbench.md §7), and a chat
     // whose pickers read "Model" until he has typed is a chat that looks broken.
@@ -1450,7 +1455,7 @@ export class Sessions {
       type: 'session.pinned',
       permissionMode: summary.permissionMode,
       model: model ?? summary.model ?? null,
-      effort: summary.effort,
+      effort: started.effort,
     });
   }
 

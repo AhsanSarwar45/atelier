@@ -51,6 +51,9 @@ describe('the active effort shown by a chat', () => {
       });
 
       expect(store.getSession('chat')?.effort).toBe('high');
+      expect(store.sessionFactsEvents('chat').find((event) => event.type === 'session.pinned')).toMatchObject({
+        effort: 'high',
+      });
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }
