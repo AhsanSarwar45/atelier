@@ -5,6 +5,7 @@ import type { Mentions } from '@/components/markdown-body';
 import type { TranscriptMessage } from '@/workbench/fold';
 import type { ImageComparison, ImagePayload } from '@/workbench/protocol';
 import { TranscriptRow } from '@/workbench/transcript-rows';
+import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
 const mentions: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
 const image = (alt: string): ImagePayload => ({ mime: 'image/png', dataUrl: `data:image/png;base64,${alt}`, alt });
@@ -45,12 +46,7 @@ describe('structured image comparisons in chat', () => {
     render(<TranscriptRow item={message({ mode, before: image('Tall before'), after: image('Tall after') })} sessionId="chat" mentions={mentions} onLook={vi.fn()} />);
 
     const shown = screen.getByAltText('Tall after');
-    expect(shown).toHaveStyle({
-      width: 'auto',
-      height: 'auto',
-      maxWidth: '100%',
-      maxHeight: '24rem',
-    });
+    expect(shown).toHaveStyle(INLINE_MEDIA_BOUNDS);
     expect(shown).toHaveClass('object-contain');
   });
 });

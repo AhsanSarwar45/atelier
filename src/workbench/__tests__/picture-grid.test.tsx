@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ImagePayload } from '@/workbench/protocol';
 
 import { PictureGrid, acrossFor } from '../picture-grid';
+import { INLINE_MEDIA_BOUNDS } from '../media-bounds';
 
 /** A one-pixel PNG, small enough to write out here in full. */
 const PIXEL =
@@ -94,12 +95,7 @@ describe('a message’s pictures on the page', () => {
     const picture = drawn(1).thumbs[0]!;
     expect(picture.className).toContain('object-contain');
     expect(picture.className).not.toContain('aspect-');
-    expect(picture).toHaveStyle({
-      width: 'auto',
-      height: 'auto',
-      maxWidth: '100%',
-      maxHeight: '24rem',
-    });
+    expect(picture).toHaveStyle(INLINE_MEDIA_BOUNDS);
   });
 
   it('crops two or more to a common shape, because a ragged row reads as a mess', () => {

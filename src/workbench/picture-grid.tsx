@@ -12,6 +12,7 @@
  * that picture whole, which is what makes cropping a cell safe.
  */
 import type { ImagePayload } from '@/workbench/protocol';
+import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
 /**
  * How many pictures stand side by side, given how many the message holds.
@@ -40,9 +41,6 @@ const BLOCK = 'w-full max-w-[24rem]';
 /** What every thumbnail wears, however many of them there are. */
 const THUMB =
   'cursor-zoom-in rounded border border-border/60 transition-opacity hover:opacity-90';
-
-/** A lone portrait should never become a screen-height chat bubble. */
-const SINGLE_BOUNDS = { width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '24rem' } as const;
 
 export interface PictureGridProps {
   images: ImagePayload[];
@@ -84,7 +82,7 @@ export function PictureGrid({ images, onLook }: PictureGridProps): JSX.Element |
               ? `${THUMB} justify-self-start object-contain`
               : `${THUMB} aspect-[4/3] w-full object-cover`
           }
-          style={alone ? SINGLE_BOUNDS : undefined}
+          style={alone ? INLINE_MEDIA_BOUNDS : undefined}
         />
       ))}
     </div>

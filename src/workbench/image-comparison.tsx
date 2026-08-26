@@ -5,6 +5,7 @@ import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent }
 import { Badge } from '@/components/ui/badge';
 import { Panel } from '@/components/ui/panel';
 import type { ImageComparison, ImagePayload } from '@/workbench/protocol';
+import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
 export function ImageComparisonView({ comparison, onLook }: {
   comparison: ImageComparison;
@@ -29,7 +30,7 @@ export function ImageComparisonView({ comparison, onLook }: {
               alt={image.alt}
               onClick={() => onLook(image)}
               className="cursor-zoom-in rounded border border-border/60 object-contain"
-              style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '24rem' }}
+              style={INLINE_MEDIA_BOUNDS}
             />
             <figcaption className="mt-1 text-xs text-muted-foreground">{image.alt}</figcaption>
           </figure>
@@ -66,7 +67,7 @@ export function ImageComparisonView({ comparison, onLook }: {
         src={comparison.after.dataUrl}
         alt={comparison.after.alt}
         className="block object-contain"
-        style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '24rem' }}
+        style={INLINE_MEDIA_BOUNDS}
         draggable={false}
       />
       <div className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${pct}%` }}>
