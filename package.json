@@ -9,7 +9,7 @@
     "start": "next start -p 3007",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "server:dev": "cd server && cargo run",
+    "server:dev": "cd server && BEADS_WORKBENCH_ENTRY=../workbench/src/server.ts cargo run",
     "server:build": "cd server && cargo build --release",
     "dev:full": "concurrently \"npm run dev\" \"npm run server:dev\"",
     "prepare": "bash scripts/install-hooks.sh",
