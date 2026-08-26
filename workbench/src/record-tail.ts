@@ -48,12 +48,15 @@ export interface RecordLine {
    * person types (bw-ja9l.2).
    */
   permissionMode?: string;
+  /** The reasoning budget in force when this line was written. */
+  effort?: string;
+  payload?: unknown;
 }
 
 /**
  * What a chat is running, as its own record says it.
  *
- * Both facts are written down and neither reaches the app: the kit's reader
+ * These facts are written down and do not otherwise reach the app: the kit's reader
  * hands back conversation and nothing else, so a chat begun in a terminal drew
  * no model and no mode for its whole life. Null on a field means the record did
  * not say — never a guess, because the only guess to hand is this machine's own
@@ -64,10 +67,12 @@ export interface Running {
   permissionMode: string | null;
   /** The model that last answered in the conversation itself. */
   model: string | null;
+  /** The effort the conversation itself last recorded. */
+  effort: string | null;
 }
 
 /** Nothing said either way. */
-export const SAYS_NOTHING: Running = { permissionMode: null, model: null };
+export const SAYS_NOTHING: Running = { permissionMode: null, model: null, effort: null };
 
 /**
  * Saying what a chat is running, in an order that never unsays it.
@@ -102,10 +107,12 @@ export function saysWhatItRuns(publish: (running: Running) => void): {
       catchingUp && standing !== null ? standing : (mine ?? standing);
     const permissionMode = keep(found.permissionMode, shown.permissionMode);
     const model = keep(found.model, shown.model);
-    if (permissionMode === shown.permissionMode && model === shown.model) return;
+    const effort = keep(found.effort, shown.effort);
+    if (permissionMode === shown.permissionMode && model === shown.model && effort === shown.effort) return;
     shown.permissionMode = permissionMode;
     shown.model = model;
-    publish({ permissionMode, model });
+    shown.effort = effort;
+    publish({ permissionMode, model, effort });
   };
   return {
     beat: (found) => say(found, false),
@@ -232,11 +239,11 @@ export async function runningIn(path: string): Promise<Running> {
       // A window that does not reach the start of the file opens in the middle
       // of a line. That line belongs to the next, wider look.
       if (from > 0) lines.shift();
-      const found: Running = { permissionMode: null, model: null };
+      const found: Running = { ...SAYS_NOTHING };
       for (const line of lines) sipRunning(line, found);
       // The whole file has been read, so nothing more is coming; otherwise keep
       // widening until both are answered.
-      if (from === 0 || (found.permissionMode !== null && found.model !== null)) return found;
+      if (from === 0 || (found.permissionMode !== null && found.model !== null && found.effort !== null)) return found;
     }
   } finally {
     await handle.close();
@@ -546,6 +553,17 @@ function sipRunning(line: string, into: Running): void {
   if (row === null) return;
   if (typeof row.permissionMode === 'string' && row.permissionMode !== '') {
     into.permissionMode = row.permissionMode;
+  }
+  const payload = row.payload !== null && typeof row.payload === 'object'
+    ? row.payload as Record<string, unknown>
+    : null;
+  const config = payload?.config !== null && typeof payload?.config === 'object'
+    ? payload.config as Record<string, unknown>
+    : null;
+  // A helper's sidechain carries its own effort, not this chat's effort.
+  if (row.isSidechain !== true) {
+    const effort = row.effort ?? payload?.reasoning_effort ?? payload?.effort ?? config?.reasoning_effort;
+    if (typeof effort === 'string' && effort !== '') into.effort = effort;
   }
   if (row.type !== 'assistant' || row.isSidechain === true) return;
   const said = row.message;

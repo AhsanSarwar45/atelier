@@ -258,7 +258,27 @@ export function codexThreadUsageFromRollout(thread: Bag): { input: number; outpu
   return null;
 }
 
-export async function codexMenu(cwd: string): Promise<Bag> {
+export function codexEffortMenu(models: Bag[], activeModel?: string): { efforts: Bag[]; defaultEffort: string | null } {
+  const selected = models.find((model) => model.model === activeModel)
+    ?? models.find((model) => model.isDefault === true)
+    ?? models[0];
+  const offered = selected?.supportedReasoningEfforts ?? [];
+  const efforts = offered.flatMap((choice: Bag) => {
+    const value = choice.reasoningEffort ?? choice.effort;
+    return typeof value === 'string' && value ? [{
+      value,
+      displayName: value.replace(/(^|[-_])\w/g, (part: string) => part.replace(/[-_]/, '').toUpperCase()),
+      description: choice.description,
+    }] : [];
+  });
+  const stated = selected?.defaultReasoningEffort ?? selected?.defaultEffort;
+  const defaultEffort = typeof stated === 'string' && efforts.some((choice: Bag) => choice.value === stated)
+    ? stated
+    : (efforts[0]?.value ?? null);
+  return { efforts, defaultEffort };
+}
+
+export async function codexMenu(cwd: string, activeModel?: string): Promise<Bag> {
   const [modelResult, skillResult] = await Promise.allSettled([
     codexRequest('model/list', { includeHidden: false }, cwd),
     codexRequest('skills/list', { cwds: [cwd], forceReload: false }, cwd),
@@ -266,24 +286,14 @@ export async function codexMenu(cwd: string): Promise<Bag> {
   const models = modelResult.status === 'fulfilled' ? modelResult.value.data ?? [] : [];
   const entries = skillResult.status === 'fulfilled' ? skillResult.value.data ?? [] : [];
   const skills = entries.flatMap((entry: Bag) => entry.skills ?? []).filter((skill: Bag) => skill.enabled !== false);
-  const efforts = new Map<string, { value: string; displayName: string; description?: string }>();
-  for (const model of models) {
-    for (const offered of model.supportedReasoningEfforts ?? []) {
-      const value = offered.reasoningEffort ?? offered.effort;
-      if (typeof value === 'string' && value) efforts.set(value, {
-        value,
-        displayName: value.replace(/(^|[-_])\w/g, (part: string) => part.replace(/[-_]/, '').toUpperCase()),
-        description: offered.description,
-      });
-    }
-  }
+  const effortMenu = codexEffortMenu(models, activeModel);
   return {
     commands: [...CODEX_SLASH_COMMANDS, ...skills.map((skill: Bag) => ({
       name: skill.name, description: skill.description || skill.shortDescription || '', kind: 'skill', execution: 'skill',
     }))],
     skills: skills.map((skill: Bag) => skill.name),
     models: [{ value: 'default', displayName: 'Default', description: 'Use the Codex default model' }, ...models.map((m: Bag) => ({ value: m.model, displayName: m.displayName, description: m.description }))],
-    permissionModes: MODES, efforts: [...efforts.values()], agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
+    permissionModes: MODES, ...effortMenu, agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
     skillPaths: Object.fromEntries(skills.map((skill: Bag) => [skill.name, skill.path])),
   };
 }
@@ -448,6 +458,7 @@ export class CodexDriver implements Driver {
   private turnId: string | null = null;
   private model: string | undefined;
   private effort: string | undefined;
+  private resumed = false;
   private mode = 'on-request';
   private cwd = process.cwd();
   private skills = new Map<string, string>();
@@ -465,6 +476,7 @@ export class CodexDriver implements Driver {
     this.cwd = opts.cwd;
     this.model = opts.model === 'default' ? undefined : opts.model;
     this.effort = opts.effort;
+    this.resumed = Boolean(opts.resume);
     this.mode = MODES.includes(opts.permissionMode) ? opts.permissionMode : 'on-request';
     const executable = process.env.CODEX_PATH || 'codex';
     this.child = spawn(executable, ['app-server', '--stdio'], {
@@ -494,6 +506,9 @@ export class CodexDriver implements Driver {
     const opened = await this.call(request.method, request.params);
     this.threadId = opened.thread.id;
     this.model = opened.model || this.model;
+    const openedEffort = opened.reasoningEffort ?? opened.effort
+      ?? opened.thread?.reasoningEffort ?? opened.thread?.effort;
+    if (typeof openedEffort === 'string' && openedEffort) this.effort = openedEffort;
     this.emit({
       type: 'session.started', brand: 'codex', externalId: this.threadId,
       model: this.model ?? null, cwd: opened.cwd || opts.cwd, permissionMode: this.mode, effort: this.effort ?? null,
@@ -603,9 +618,13 @@ export class CodexDriver implements Driver {
   }
 
   private async menu(): Promise<void> {
-    const menu = await codexMenu(this.cwd);
+    const menu = await codexMenu(this.cwd, this.model);
     this.skills = new Map(Object.entries(menu.skillPaths ?? {}));
-    const { skillPaths: _skillPaths, ...shown } = menu;
+    if (!this.effort && !this.resumed && typeof menu.defaultEffort === 'string') {
+      this.effort = menu.defaultEffort;
+      this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort: this.effort });
+    }
+    const { skillPaths: _skillPaths, defaultEffort: _defaultEffort, ...shown } = menu;
     this.commands = shown.commands;
     this.emit({ type: 'session.menu', ...shown } as DriverEvent);
   }

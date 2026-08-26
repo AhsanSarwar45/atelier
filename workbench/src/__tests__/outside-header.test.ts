@@ -36,12 +36,13 @@ const modeLine = (mode: string) =>
   JSON.stringify({ type: 'permission-mode', permissionMode: mode, sessionId: 'sess' }) + '\n';
 
 /** A reply, carrying the model that wrote it. */
-const reply = (model: string, uuid: string, sidechain = false) =>
+const reply = (model: string, uuid: string, sidechain = false, effort?: string) =>
   JSON.stringify({
     type: 'assistant',
     uuid,
     sessionId: 'sess',
     ...(sidechain ? { isSidechain: true } : {}),
+    ...(effort ? { effort } : {}),
     message: { role: 'assistant', model, content: [{ type: 'text', text: 'ok' }] },
   }) + '\n';
 
@@ -83,6 +84,7 @@ describe('what a chat begun outside this app is running', () => {
     expect(await runningIn(path)).toEqual({
       permissionMode: 'bypassPermissions',
       model: 'claude-opus-5',
+      effort: null,
     });
   });
 
@@ -92,13 +94,14 @@ describe('what a chat begun outside this app is running', () => {
     // which describe this machine and not that terminal (bw-7ks.23).
     write(typed('u1'), noise(1), typed('u2'));
 
-    expect(await runningIn(path)).toEqual({ permissionMode: null, model: null });
+    expect(await runningIn(path)).toEqual({ permissionMode: null, model: null, effort: null });
   });
 
   it('says nothing about a record that is not there at all', async () => {
     expect(await runningIn(join(dir, 'projects', 'a-project', 'nobody.jsonl'))).toEqual({
       permissionMode: null,
       model: null,
+      effort: null,
     });
   });
 
@@ -116,6 +119,18 @@ describe('what a chat begun outside this app is running', () => {
     write(reply('claude-opus-5', 'a1'), reply('claude-haiku-4-5-20251001', 'h1', true));
 
     expect((await runningIn(path)).model).toBe('claude-opus-5');
+  });
+
+  it('reads the current chat effort and ignores a helper’s effort', async () => {
+    write(reply('claude-opus-5', 'a1', false, 'xhigh'), reply('claude-haiku-4-5', 'h1', true, 'low'));
+
+    expect((await runningIn(path)).effort).toBe('xhigh');
+  });
+
+  it('reads Codex reasoning effort from the current chat metadata', async () => {
+    write(JSON.stringify({ type: 'session_meta', payload: { reasoning_effort: 'high' } }) + '\n');
+
+    expect((await runningIn(path)).effort).toBe('high');
   });
 
   it('never reports the kit’s own word for a message with no model behind it', async () => {
@@ -139,6 +154,7 @@ describe('what a chat begun outside this app is running', () => {
     expect(await runningIn(path)).toEqual({
       permissionMode: 'acceptEdits',
       model: 'claude-fable-5',
+      effort: null,
     });
   });
 
@@ -148,7 +164,7 @@ describe('what a chat begun outside this app is running', () => {
     await tail.toEnd();
 
     // Nothing has arrived, so nothing is claimed either way.
-    expect((await tail.grown()).running).toEqual({ permissionMode: null, model: null });
+    expect((await tail.grown()).running).toEqual({ permissionMode: null, model: null, effort: null });
 
     // The terminal is switched. That writes a mode line and no conversation at
     // all, and the screen still has to follow it.
@@ -159,7 +175,7 @@ describe('what a chat begun outside this app is running', () => {
     const grown = await tail.grown();
 
     expect(grown.fresh).toEqual([]);
-    expect(grown.running).toEqual({ permissionMode: 'bypassPermissions', model: null });
+    expect(grown.running).toEqual({ permissionMode: 'bypassPermissions', model: null, effort: null });
   });
 });
 
@@ -192,22 +208,22 @@ describe('what the screen is told, when the two readers finish out of order', ()
     // The chat is opened. The catch-up read starts over a record that says
     // `default`, and takes its time: the whole file has to be read.
     const slow = new Promise<Running>((answer) => {
-      setTimeout(() => answer({ permissionMode: 'default', model: 'claude-opus-5' }), 5);
+      setTimeout(() => answer({ permissionMode: 'default', model: 'claude-opus-5', effort: 'high' }), 5);
     });
     void slow.then(runs.caughtUp);
 
     // Meanwhile the terminal is switched, and the first beat reads the one new
     // line and says so.
-    runs.beat({ permissionMode: 'bypassPermissions', model: null });
-    expect(said).toEqual([{ permissionMode: 'bypassPermissions', model: null }]);
+    runs.beat({ permissionMode: 'bypassPermissions', model: null, effort: null });
+    expect(said).toEqual([{ permissionMode: 'bypassPermissions', model: null, effort: null }]);
 
     await slow;
     await new Promise((wake) => setTimeout(wake, 0));
 
     // The catch-up filled the blank it could fill and left the mode alone.
     expect(said).toEqual([
-      { permissionMode: 'bypassPermissions', model: null },
-      { permissionMode: 'bypassPermissions', model: 'claude-opus-5' },
+      { permissionMode: 'bypassPermissions', model: null, effort: null },
+      { permissionMode: 'bypassPermissions', model: 'claude-opus-5', effort: 'high' },
     ]);
     expect(said.map((s) => s.permissionMode)).not.toContain('default');
   });
@@ -215,34 +231,34 @@ describe('what the screen is told, when the two readers finish out of order', ()
   it('still answers with the record as it stands when no beat got there first', () => {
     const { said, runs } = heard();
 
-    runs.caughtUp({ permissionMode: 'plan', model: 'claude-sonnet-5' });
+    runs.caughtUp({ permissionMode: 'plan', model: 'claude-sonnet-5', effort: 'medium' });
 
-    expect(said).toEqual([{ permissionMode: 'plan', model: 'claude-sonnet-5' }]);
+    expect(said).toEqual([{ permissionMode: 'plan', model: 'claude-sonnet-5', effort: 'medium' }]);
   });
 
   it('lets a beat overwrite anything, because its lines are the newer ones', () => {
     const { said, runs } = heard();
 
-    runs.caughtUp({ permissionMode: 'default', model: 'claude-opus-5' });
-    runs.beat({ permissionMode: 'bypassPermissions', model: null });
-    runs.beat({ permissionMode: null, model: 'claude-sonnet-5' });
+    runs.caughtUp({ permissionMode: 'default', model: 'claude-opus-5', effort: 'high' });
+    runs.beat({ permissionMode: 'bypassPermissions', model: null, effort: null });
+    runs.beat({ permissionMode: null, model: 'claude-sonnet-5', effort: 'xhigh' });
 
     expect(said).toEqual([
-      { permissionMode: 'default', model: 'claude-opus-5' },
-      { permissionMode: 'bypassPermissions', model: 'claude-opus-5' },
-      { permissionMode: 'bypassPermissions', model: 'claude-sonnet-5' },
+      { permissionMode: 'default', model: 'claude-opus-5', effort: 'high' },
+      { permissionMode: 'bypassPermissions', model: 'claude-opus-5', effort: 'high' },
+      { permissionMode: 'bypassPermissions', model: 'claude-sonnet-5', effort: 'xhigh' },
     ]);
   });
 
   it('says nothing at all when neither reader has anything to add', () => {
     const { said, runs } = heard();
 
-    runs.beat({ permissionMode: null, model: null });
-    runs.caughtUp({ permissionMode: null, model: null });
-    runs.beat({ permissionMode: 'plan', model: null });
+    runs.beat({ permissionMode: null, model: null, effort: null });
+    runs.caughtUp({ permissionMode: null, model: null, effort: null });
+    runs.beat({ permissionMode: 'plan', model: null, effort: null });
     // The same fact twice is one sentence, not two: the screen redraws on each.
-    runs.beat({ permissionMode: 'plan', model: null });
+    runs.beat({ permissionMode: 'plan', model: null, effort: null });
 
-    expect(said).toEqual([{ permissionMode: 'plan', model: null }]);
+    expect(said).toEqual([{ permissionMode: 'plan', model: null, effort: null }]);
   });
 });

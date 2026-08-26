@@ -1095,8 +1095,8 @@ export class Sessions {
      * fold. Said again whenever either changes, so a terminal switched into
      * another mode says so on the screen as it happens.
      */
-    const runs = saysWhatItRuns(({ permissionMode, model }) =>
-      this.publish(summary.id, { type: 'session.pinned', permissionMode, model }));
+    const runs = saysWhatItRuns(({ permissionMode, model, effort }) =>
+      this.publish(summary.id, { type: 'session.pinned', permissionMode, model, effort }));
     // Once as the watching starts, over the record as it already stands: a
     // terminal that has not changed mode since it opened writes nothing further
     // about it, so a reader waiting for the next line would wait for ever.
@@ -1772,6 +1772,7 @@ export class Sessions {
       // the follower — which the app knew and threw away, so the chat came back
       // with no model of its own and had one resolved for it (bw-7ojj).
       if (full.model !== null) this.store.updateSession(sessionId, { model: full.model });
+      if (full.effort != null) this.store.updateSession(sessionId, { effort: full.effort });
     }
 
     // What was said and what it cost, folded out of the log as it goes by, so
