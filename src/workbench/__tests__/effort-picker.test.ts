@@ -12,6 +12,7 @@ describe('the composer effort picker', () => {
     expect(block).toContain('view.menu.efforts.map');
     expect(block).toContain('value: effort.value');
     expect(block).toContain('label: effort.displayName');
+    expect(block).toContain('hint: effort.description');
   });
 
   it('pins the chosen effort to the chat whose composer owns the picker', () => {
