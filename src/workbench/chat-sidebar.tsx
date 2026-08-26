@@ -274,10 +274,13 @@ export function withLive(
         if (!r.externalId) return r;
         // A provider marker names the conversation, not the Atelier session.
         // Our own driver writes one too, and after an unclean exit that marker
-        // can outlive the driver. An Atelier row already has its truthful state
-        // from the session stream; only a row we have never opened needs the
-        // outside-process overlay (restore-status.ts, bw-zpyl.9).
-        if (r.sessionId !== null) return { ...r, runningElsewhere: false, held: null };
+        // can outlive the driver. An Atelier-owned row already has its truthful
+        // state from the session stream; a restored terminal row can also have
+        // a session id, but still needs the outside-process overlay
+        // (restore-status.ts, bw-zpyl.9).
+        if (r.sessionId !== null && r.origin === 'app') {
+          return { ...r, runningElsewhere: false, held: null };
+        }
         const theirs = heldElsewhere(r.state, r.externalId, running);
         return {
           ...r,

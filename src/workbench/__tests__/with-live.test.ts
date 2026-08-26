@@ -138,6 +138,19 @@ describe('the working mark keeps up', () => {
     expect(marked[0]!.held).toBeNull();
   });
 
+  it('keeps following an imported terminal session after it has a local id', () => {
+    const marked = withLive(
+      [row({ sessionId: 'imported', origin: 'terminal', state: 'dormant', externalId: 'x1' })],
+      [],
+      PROJECT,
+      new Set(['x1']),
+      new Map([['x1', { id: 'x1', holder: 'terminal' as const, doing: 'running' as const, detail: 'Bash', since: 1_000 }]]),
+    );
+
+    expect(marked[0]!.runningElsewhere).toBe(true);
+    expect(marked[0]!.held?.doing).toBe('running');
+  });
+
   it('and it goes when the work stops', () => {
     const marked = withLive([row({ externalId: 'x1', runningElsewhere: true })], [], PROJECT, new Set<string>());
     expect(marked[0]!.runningElsewhere).toBe(false);
