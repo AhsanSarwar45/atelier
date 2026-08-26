@@ -278,6 +278,10 @@ export function codexEffortMenu(models: Bag[], activeModel?: string): { efforts:
   return { efforts, defaultEffort };
 }
 
+export function codexResolvedEffort(current: string | undefined, fallback: string | null): string | undefined {
+  return current || fallback || undefined;
+}
+
 export async function codexMenu(cwd: string, activeModel?: string): Promise<Bag> {
   const [modelResult, skillResult] = await Promise.allSettled([
     codexRequest('model/list', { includeHidden: false }, cwd),
@@ -459,7 +463,6 @@ export class CodexDriver implements Driver {
   private turnId: string | null = null;
   private model: string | undefined;
   private effort: string | undefined;
-  private resumed = false;
   private mode = 'on-request';
   private cwd = process.cwd();
   private skills = new Map<string, string>();
@@ -477,7 +480,6 @@ export class CodexDriver implements Driver {
     this.cwd = opts.cwd;
     this.model = opts.model === 'default' ? undefined : opts.model;
     this.effort = opts.effort;
-    this.resumed = Boolean(opts.resume);
     this.mode = MODES.includes(opts.permissionMode) ? opts.permissionMode : 'on-request';
     const executable = process.env.CODEX_PATH || 'codex';
     this.child = spawn(executable, ['app-server', '--stdio'], {
@@ -634,8 +636,9 @@ export class CodexDriver implements Driver {
   private async menu(): Promise<void> {
     const menu = await codexMenu(this.cwd, this.model);
     this.skills = new Map(Object.entries(menu.skillPaths ?? {}));
-    if (!this.effort && !this.resumed && typeof menu.defaultEffort === 'string') {
-      this.effort = menu.defaultEffort;
+    const resolvedEffort = codexResolvedEffort(this.effort, menu.defaultEffort);
+    if (resolvedEffort !== this.effort) {
+      this.effort = resolvedEffort;
       this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort: this.effort });
     }
     const { skillPaths: _skillPaths, defaultEffort: _defaultEffort, ...shown } = menu;

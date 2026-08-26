@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({}));
 
 import type { SessionSummary } from '../../../src/workbench/protocol';
-import { codexEffortMenu } from '../drivers/codex';
+import { codexEffortMenu, codexResolvedEffort } from '../drivers/codex';
 import { Sessions } from '../sessions';
 import { Store } from '../store';
 
@@ -24,6 +24,14 @@ describe('the active effort shown by a chat', () => {
 
     expect(menu.defaultEffort).toBe('high');
     expect(menu.efforts.map((choice) => choice.value)).toEqual(['medium', 'high']);
+  });
+
+  it('fills a resumed Codex chat whose stored effort is unset', () => {
+    expect(codexResolvedEffort(undefined, 'high')).toBe('high');
+  });
+
+  it('keeps the effort already stored by a resumed Codex chat', () => {
+    expect(codexResolvedEffort('low', 'high')).toBe('low');
   });
 
   it('stores a provider-resolved default so waking the chat and its top badge keep it', () => {
