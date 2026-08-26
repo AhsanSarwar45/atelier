@@ -24,9 +24,10 @@ import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbe
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
 import { holdsNow, runningNow } from './running.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
+import type { HeldDoing } from '../../src/workbench/chat-state.ts';
 import { lastSpokeAt } from './spoken.ts';
 import type { Store } from './store.ts';
-import { listCodexThreads } from './drivers/codex.ts';
+import { codexRolloutPath, listCodexThreads } from './drivers/codex.ts';
 
 interface KnownSession {
   brand: 'claude' | 'codex';
@@ -39,6 +40,8 @@ interface KnownSession {
   running: boolean;
   lastSpokeAt: string | null;
 }
+
+const liveCodexPaths = new Map<string, string>();
 
 /** Codex has no Claude-style marker files. Its app-server reports terminal
  * threads as notLoaded, so recognize both ids carried by active commands and
@@ -57,15 +60,21 @@ export function codexThreadProcesses(): Map<string, Set<number>> {
   const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
   for (const pid of pids) {
     let command = '';
-    try { command = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' '); } catch { continue; }
-    if (!/codex/i.test(command)) continue;
+    try { command = readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch { continue; }
+    const argv = command.split('\0').filter(Boolean);
+    if (argv[0]?.split('/').pop() !== 'codex') continue;
+    command = argv.join(' ');
     const ids = new Set((command.match(uuid) ?? []).map((id) => id.toLowerCase()));
     try {
       for (const fd of readdirSync(`/proc/${pid}/fd`)) {
         let target = '';
         try { target = readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; }
         if (!/\.codex\/sessions|rollout-/i.test(target)) continue;
-        for (const id of target.match(uuid) ?? []) ids.add(id.toLowerCase());
+        for (const id of target.match(uuid) ?? []) {
+          const key = id.toLowerCase();
+          ids.add(key);
+          liveCodexPaths.set(key, target);
+        }
       }
     } catch {
       // Processes can exit or deny fd inspection between the two reads.
@@ -79,6 +88,51 @@ export function codexThreadProcesses(): Map<string, Set<number>> {
   return found;
 }
 
+/** Honest activity from the bounded tail of a Codex rollout. */
+export function codexDoingFromLines(lines: string[]): HeldDoing {
+  const rows = lines.flatMap((line) => {
+    try { return [JSON.parse(line) as any]; } catch { return []; }
+  });
+  let started = -1;
+  let ended = -1;
+  rows.forEach((row, at) => {
+    const type = row.payload?.type ?? row.type;
+    if (type === 'task_started') started = at;
+    if (type === 'task_complete' || type === 'turn_aborted') ended = at;
+  });
+  if (started < 0 || ended > started) return 'idle';
+  for (let at = rows.length - 1; at > started; at--) {
+    const row = rows[at]!;
+    const payload = row.payload ?? row;
+    const type = String(payload.type ?? row.type ?? '').toLowerCase();
+    const item = String(payload.item?.type ?? '').toLowerCase();
+    if (/approval|permission|request_user_input/.test(type) || /approval|permission/.test(item)) return 'waiting';
+    if (/compact|summary/.test(type) || /compact|summary/.test(item)) return 'summarising';
+    if (/custom_tool_call|function_call/.test(type) && !/_output$/.test(type)) return 'running';
+    if (/commandexecution|filechange/.test(item)) return 'running';
+    if (/agentmessage/.test(item) || type === 'message') return 'answering';
+    if (/reason/.test(type) || /reason/.test(item)) return 'thinking';
+  }
+  return 'working';
+}
+
+function codexDoing(id: string): HeldDoing {
+  const path = liveCodexPaths.get(id.toLowerCase()) ?? codexRolloutPath(id);
+  if (!path) return 'unknown';
+  try {
+    const fd = openSync(path, 'r');
+    try {
+      const size = fstatSync(fd).size;
+      const length = Math.min(size, 256 * 1024);
+      const buffer = Buffer.alloc(length);
+      readSync(fd, buffer, 0, length, size - length);
+      const lines = buffer.toString('utf8').split('\n');
+      if (size > length) lines.shift();
+      return codexDoingFromLines(lines);
+    } finally { closeSync(fd); }
+  } catch { return 'unknown'; }
+}
+
 /** One ownership snapshot for every provider. Claude contributes rich marker
  * state; Codex currently contributes its live thread lock. Keeping both on
  * this wire prevents the UI offering a composer that the send guard rejects. */
@@ -90,7 +144,7 @@ export function providerHoldsNow(fresh = false): HeldChat[] {
     holds.push({
       id,
       holder: 'terminal',
-      doing: 'working',
+      doing: codexDoing(id),
       detail: null,
       told: false,
       since: null,
