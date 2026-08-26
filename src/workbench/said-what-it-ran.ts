@@ -1139,10 +1139,35 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   return { text, kind, grave: false };
 }
 
+/**
+ * The command handed to a login shell by a provider launcher.
+ *
+ * Codex commandExecution items carry the faithful command as
+ * `/bin/bash -lc '…'`. The shell is transport, not the work. Reading it as an
+ * ordinary runner reduced `sed … SKILL.md && bd prime` to the misleading
+ * "Ran SKILL.md && bd prime" and reduced `rg --files -g Cargo.toml` to "Ran
+ * Cargo.toml". Unwrap only an explicit `c` option; an ordinary script file is
+ * still described as a script.
+ */
+function commandHandedToShell(command: string): string | null {
+  const argv = headOf(stripped(words(command)));
+  const head = named(argv[0] ?? '');
+  if (head !== 'bash' && head !== 'sh' && head !== 'zsh' && head !== 'dash') return null;
+  const at = argv.findIndex((word, i) => i > 0 && /^-[^-]*c/.test(word));
+  return at >= 0 ? (argv[at + 1] ?? null) : null;
+}
+
 /** One shell command, as a sentence. Null when no rule here can name it. */
-export function whatACommandDid(command: string): Ran | null {
+export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
   const text = command.trim();
   if (!text) return null;
+
+  // Provider launchers may nest (for example `env bash -lc …`), but malformed
+  // or adversarial input must not recurse forever.
+  if (shellDepth < 4) {
+    const handed = commandHandedToShell(text);
+    if (handed && handed.trim() !== text) return whatACommandDid(handed, shellDepth + 1);
+  }
 
   const stages: Stage[] = [];
   let missed = 0;

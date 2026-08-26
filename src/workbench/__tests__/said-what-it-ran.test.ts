@@ -79,6 +79,8 @@ const RULES: Array<[string, string]> = [
   ['bd merge-slot acquire', 'Took the merge slot'],
   ['bd merge-slot release', 'Gave the merge slot back'],
   ['bd remember "x"', 'Wrote a note to the board'],
+  ["/bin/bash -lc 'bd ready'", 'Listed the work that is ready'],
+  ["/bin/bash -lc 'sed -n \"1,240p\" .agents/skills/beads/SKILL.md && bd prime'", 'Read part of beads/SKILL.md, then read the board rules'],
   ['machinery/board/job new --what x', 'Opened a job'],
   ['machinery/board/job under bw-7ks.24 --do "what to do|how we know"', 'Added the work items'],
   ['machinery/board/land bw-7ks.24', 'Landed bw-7ks.24'],
@@ -169,6 +171,7 @@ const RULES: Array<[string, string]> = [
   ['rg "whatItRan" src', 'Searched for whatItRan in src'],
   ['rg --files', 'Listed the files'],
   ['rg --files -g "*.ts" -g "!*.test.ts"', 'Listed the files matching *.ts, !*.test.ts'],
+  ["/bin/bash -lc 'rg --files -g Cargo.toml'", 'Listed the files matching Cargo.toml'],
   ['grep -c foo a.txt b.txt c.txt', 'Searched for foo across 3 paths'],
   ['find . -name "*.test.ts"', 'Looked for *.test.ts'],
   ['find src -type f', 'Looked through src'],
@@ -327,7 +330,7 @@ describe('a delete is never hidden', () => {
   it('says so from inside a quoted script another command was handed', () => {
     // `sh -c '…'` is one word to anything reading the chain properly.
     const ran = whatACommandDid("bash -c 'cd /tmp && rm -rf x'");
-    expect(ran?.said).toBe('Ran shell: cd /tmp && rm -rf x, then deleted files');
+    expect(ran?.said).toBe('Deleted x in tmp');
     expect(ran?.grave).toBe(true);
   });
 

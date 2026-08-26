@@ -108,4 +108,21 @@ describe('Codex live-runtime regressions', () => {
       expect(events[0], id).toMatchObject({ type: 'tool.started', name: 'Bash', title });
     }
   });
+
+  it('unwraps the login shell used by native Codex command executions', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver();
+    driver.emit = (event) => events.push(event);
+    driver.itemStarted({
+      id: 'native-shell',
+      type: 'commandExecution',
+      command: "/bin/bash -lc 'sed -n \"1,240p\" .agents/skills/beads/SKILL.md && bd prime'",
+      commandActions: [{ type: 'unknown' }],
+    });
+    expect(events[0]).toMatchObject({
+      type: 'tool.started',
+      name: 'Bash',
+      title: 'Read part of beads/SKILL.md, then read the board rules',
+    });
+  });
 });
