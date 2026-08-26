@@ -48,6 +48,10 @@ describe('opening a chat that may have been read before', () => {
     expect(howToRead(chat({ readBy: IMPORT_RECIPE - 1, drawn: () => 400 }))).toBe('read-it');
   });
 
+  it('reads a Codex chat again after the reply-message recipe changed', () => {
+    expect(howToRead(chat({ readBy: 8, drawn: () => 1, drivenHere: () => false }))).toBe('read-it');
+  });
+
   it('reads one read by the very first reading there was', () => {
     expect(howToRead(chat({ readBy: 1 }))).toBe('read-it');
   });

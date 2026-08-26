@@ -37,14 +37,16 @@ export const IMPORTED_MESSAGES = 200;
  * chat read back has the rows and the conversations a chat watched live has
  * (bw-7ks.22.7). 8 says what the chat spent, counting its own turns and the
  * whole of every agent it sent off — a chat nothing here is driving reported no
- * spend at all before it (bw-7ks.22.8). Raise it whenever the reading would produce a different
- * transcript from the same record: every chat read in by a lower one is read
- * again on its next open.
+ * spend at all before it (bw-7ks.22.8). 9 reads Codex replies recorded in the
+ * rollout's message rows, which reading 8 left out while still drawing the
+ * commands around them (bw-mohs.5). Raise it whenever the reading would produce
+ * a different transcript from the same record: every chat read in by a lower
+ * one is read again on its next open.
  *
  * It lives beside the reading it numbers, so raising the reading and raising
  * the number are one edit in one file (bw-khe.11).
  */
-export const IMPORT_RECIPE = 8;
+export const IMPORT_RECIPE = 9;
 
 /** What opening a chat does about a past it may or may not have read already. */
 export type ReadingChoice =
