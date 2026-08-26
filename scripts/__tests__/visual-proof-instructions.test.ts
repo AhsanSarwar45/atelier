@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 
 const policy = readFileSync('machinery/workflow-policy.md', 'utf8');
 const agents = readFileSync('AGENTS.md', 'utf8');
+const claude = readFileSync('CLAUDE.md', 'utf8');
 const claudeStyle = readFileSync('.claude/output-styles/manager.md', 'utf8');
 
 describe('visual proof instructions', () => {
   it.each([
     ['shared provider policy', policy],
     ['current Codex instructions', agents],
+    ['current Claude instructions', claude],
     ['Claude manager style', claudeStyle],
   ])('%s requires comparisons for changes and an image for new visuals', (_name, instructions) => {
     expect(instructions).toMatch(/every visual change/i);

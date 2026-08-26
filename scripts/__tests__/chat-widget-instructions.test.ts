@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const instructions = [
   readFileSync('machinery/workflow-policy.md', 'utf8'),
   readFileSync('AGENTS.md', 'utf8'),
+  readFileSync('CLAUDE.md', 'utf8'),
   readFileSync('.claude/output-styles/manager.md', 'utf8'),
 ];
 
