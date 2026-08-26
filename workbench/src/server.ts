@@ -18,6 +18,7 @@ import { watchOutside } from './outside.ts';
 import { planUsage, watchUsage } from './plan-usage.ts';
 import { codexUsage, watchCodexUsage } from './codex-usage.ts';
 import { codexThreadProcesses, knownSessions, providerHoldsNow, restoreList } from './registry.ts';
+import { withOutsideHolds } from '../../src/workbench/restore-status.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { rememberSummaryRuns } from './running.ts';
 import { boundedEvent, Sessions } from './sessions.ts';
@@ -497,11 +498,7 @@ const server = createServer((req, res) => {
         const projectPath = url.searchParams.get('path');
         const everything = url.searchParams.get('all') === '1';
         const rows = await restoreList(store, id && projectPath ? { id, path: projectPath } : null, everything);
-        const outside = new Map(outsideHoldsNow(true).map((hold) => [hold.id.toLowerCase(), hold]));
-        json(res, 200, rows.map((row) => {
-          const held = row.externalId ? outside.get(row.externalId.toLowerCase()) ?? null : null;
-          return { ...row, runningElsewhere: held !== null, held };
-        }));
+        json(res, 200, withOutsideHolds(rows, outsideHoldsNow(true)));
       } else if (path === '/sessions' && req.method === 'GET') {
         json(res, 200, sessions ? store.listSessions(url.searchParams.get('project') ?? undefined) : []);
       } else if (path === '/command' && req.method === 'POST') {
