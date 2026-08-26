@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: vi.fn() }));
 
-import type { CommandInfo } from '../../../src/workbench/protocol.ts';
 import { ClaudeDriver } from '../drivers/claude.ts';
 import { CODEX_SLASH_COMMANDS, CodexDriver } from '../drivers/codex.ts';
 import { advertisedSlashCommands, commandExecution, offeredSlashCommand, slashInvocation } from '../drivers/slash-commands.ts';
@@ -14,12 +13,8 @@ describe('the provider-neutral slash-command contract', () => {
     expect(slashInvocation('/nested/name')).toBeNull();
   });
 
-  it('rejects unknown and explicitly unavailable commands instead of prompting the model', () => {
+  it('rejects unknown commands instead of prompting the model', () => {
     expect(() => offeredSlashCommand('/typo', CODEX_SLASH_COMMANDS)).toThrow('/typo is not available');
-    const unavailable: CommandInfo[] = [{
-      name: 'terminal', description: '', kind: 'command', execution: 'native', unavailableReason: 'requires a terminal',
-    }];
-    expect(() => offeredSlashCommand('/terminal', unavailable)).toThrow('/terminal is unavailable: requires a terminal');
   });
 
   it('normalizes old menu records while current providers declare execution explicitly', () => {
@@ -50,7 +45,9 @@ describe('every advertised Codex command', () => {
           : '';
     await driver.send({ text: `/${command.name}${argument ? ` ${argument}` : ''}`, images: [] });
 
-    if (command.execution === 'native') expect(calls.length).toBeGreaterThan(0);
+    if (command.name === 'model') expect(driver.model).toBe('gpt-test');
+    else if (command.name === 'permissions') expect(driver.mode).toBe('never');
+    else if (command.execution === 'native') expect(calls.length).toBeGreaterThan(0);
     else expect(events.some((event) => event.type === 'note')).toBe(true);
   });
 
@@ -74,6 +71,21 @@ describe('Claude command discovery uses the same contract', () => {
       { name: 'compact', description: 'Compact', argumentHint: undefined, kind: 'command', execution: 'native' },
       { name: 'beads', description: 'Track work', argumentHint: undefined, kind: 'skill', execution: 'skill' },
     ]);
+  });
+
+  it('executes every real discovered command through Claude', async () => {
+    const commands = advertisedSlashCommands([
+      { name: 'compact', description: 'Compact' },
+      { name: 'beads', description: 'Track work' },
+    ], ['beads']);
+    for (const command of commands) {
+      const driver = new ClaudeDriver() as any;
+      driver.commands = commands;
+      driver.menuReady = Promise.resolve();
+      driver.emit = () => {};
+      await driver.send({ text: `/${command.name}`, images: [] });
+      expect(driver.inbox).toEqual([{ text: `/${command.name}`, images: [] }]);
+    }
   });
 
   it('rejects an unadvertised command before it reaches Claude', async () => {

@@ -45,7 +45,6 @@ export function offeredSlashCommand(text: string, commands: readonly CommandInfo
   if (!invocation) return null;
   const command = commands.find((candidate) => candidate.name === invocation.name);
   if (!command) throw new Error(`/${invocation.name} is not available in this ${commands.length ? 'session' : 'provider'}.`);
-  if (command.unavailableReason) throw new Error(`/${command.name} is unavailable: ${command.unavailableReason}`);
   return { invocation, command };
 }
 

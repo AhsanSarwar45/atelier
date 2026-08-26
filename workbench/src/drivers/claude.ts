@@ -1734,7 +1734,7 @@ export class ClaudeDriver implements Driver {
           });
           // Only when nothing is in flight: see `awaitingAnswer`.
           if (!this.awaitingAnswer) this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
-          void this.publishMenu(m);
+          this.menuReady = this.publishMenu(m);
         } else if (m.subtype === 'commands_changed') {
           // Skills found as the agent moves around: the kit says to replace
           // the list, not to merge it.

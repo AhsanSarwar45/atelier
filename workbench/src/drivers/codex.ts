@@ -22,8 +22,8 @@ export const CODEX_SLASH_COMMANDS: CommandInfo[] = [
   { name: 'review', description: 'Review uncommitted changes, or follow the supplied instructions', argumentHint: '[instructions]', kind: 'command', execution: 'native' },
   { name: 'status', description: 'Show this Codex thread and its background commands', kind: 'command', execution: 'native' },
   { name: 'usage', description: 'Show Codex account allowance and reset times', kind: 'command', execution: 'native' },
-  { name: 'model', description: 'Show or change the model', argumentHint: '[model]', kind: 'command', execution: 'ui' },
-  { name: 'permissions', description: 'Show or change the permission mode', argumentHint: '[mode]', kind: 'command', execution: 'ui' },
+  { name: 'model', description: 'Show or change the model', argumentHint: '[model]', kind: 'command', execution: 'native' },
+  { name: 'permissions', description: 'Show or change the permission mode', argumentHint: '[mode]', kind: 'command', execution: 'native' },
 ];
 const decision = (choice: PermissionAnswer) =>
   choice === 'allow_once' ? 'accept' : choice === 'allow_always' ? 'acceptForSession' : 'decline';

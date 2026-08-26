@@ -98,7 +98,6 @@ export interface CommandInfo {
   /** How this provider executes the entry selected from the shared menu. */
   execution?: 'native' | 'skill' | 'ui';
   /** Present only when discovery found an entry this surface cannot execute. */
-  unavailableReason?: string;
 }
 
 /** One model this session could be switched to, as the brand names it. */
