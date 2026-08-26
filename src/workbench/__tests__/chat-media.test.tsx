@@ -40,4 +40,17 @@ describe('structured image comparisons in chat', () => {
     fireEvent.click(screen.getByAltText('After'));
     expect(look).toHaveBeenCalledWith(expect.objectContaining({ alt: 'After' }));
   });
+
+  it.each(['wipe', 'side_by_side'] as const)('bounds portrait images in %s comparisons without cropping them', (mode) => {
+    render(<TranscriptRow item={message({ mode, before: image('Tall before'), after: image('Tall after') })} sessionId="chat" mentions={mentions} onLook={vi.fn()} />);
+
+    const shown = screen.getByAltText('Tall after');
+    expect(shown).toHaveStyle({
+      width: 'auto',
+      height: 'auto',
+      maxWidth: '100%',
+      maxHeight: '24rem',
+    });
+    expect(shown).toHaveClass('object-contain');
+  });
 });

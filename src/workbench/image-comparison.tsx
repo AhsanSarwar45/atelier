@@ -22,9 +22,15 @@ export function ImageComparisonView({ comparison, onLook }: {
     return (
       <div data-testid="image-comparison" data-mode="side_by_side" className="mb-2 grid max-w-2xl grid-cols-2 gap-2">
         {[comparison.before, comparison.after].map((image) => (
-          <figure key={image.dataUrl} className="min-w-0">
+          <figure key={image.dataUrl} className="flex min-w-0 flex-col items-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={image.dataUrl} alt={image.alt} onClick={() => onLook(image)} className="aspect-[4/3] w-full cursor-zoom-in rounded border border-border/60 object-cover" />
+            <img
+              src={image.dataUrl}
+              alt={image.alt}
+              onClick={() => onLook(image)}
+              className="cursor-zoom-in rounded border border-border/60 object-contain"
+              style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '24rem' }}
+            />
             <figcaption className="mt-1 text-xs text-muted-foreground">{image.alt}</figcaption>
           </figure>
         ))}
@@ -33,7 +39,7 @@ export function ImageComparisonView({ comparison, onLook }: {
   }
 
   return (
-    <Panel tone="frame" inset="none" className="mb-2 max-w-2xl overflow-hidden">
+    <Panel tone="frame" inset="none" className="mb-2 inline-block max-w-2xl overflow-hidden align-top">
     <div
       ref={frame}
       data-testid="image-comparison"
@@ -44,7 +50,7 @@ export function ImageComparisonView({ comparison, onLook }: {
       aria-valuemax={100}
       aria-valuenow={Math.round(pct)}
       tabIndex={0}
-      className="relative select-none overflow-hidden"
+      className="relative inline-block max-w-full select-none overflow-hidden align-top"
       style={{ touchAction: 'none' }}
       onPointerDown={(event) => { dragging.current = true; frame.current?.setPointerCapture?.(event.pointerId); place(event); }}
       onPointerMove={(event) => { if (dragging.current) place(event); }}
@@ -56,7 +62,13 @@ export function ImageComparisonView({ comparison, onLook }: {
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={comparison.after.dataUrl} alt={comparison.after.alt} className="block w-full" draggable={false} />
+      <img
+        src={comparison.after.dataUrl}
+        alt={comparison.after.alt}
+        className="block object-contain"
+        style={{ width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '24rem' }}
+        draggable={false}
+      />
       <div className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${pct}%` }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={comparison.before.dataUrl} alt={comparison.before.alt} className="absolute left-0 top-0 h-full w-auto max-w-none" draggable={false} />
