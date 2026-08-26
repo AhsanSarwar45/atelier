@@ -96,8 +96,7 @@ export interface CommandInfo {
   argumentHint?: string;
   kind: 'command' | 'skill';
   /** How this provider executes the entry selected from the shared menu. */
-  execution?: 'native' | 'skill' | 'ui';
-  /** Present only when discovery found an entry this surface cannot execute. */
+  execution?: 'native' | 'skill';
 }
 
 /** One model this session could be switched to, as the brand names it. */

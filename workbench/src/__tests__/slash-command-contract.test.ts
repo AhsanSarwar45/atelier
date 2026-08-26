@@ -58,6 +58,13 @@ describe('every advertised Codex command', () => {
     driver.call = async () => { throw new Error('must not call provider'); };
     await expect(driver.send({ text: '/does-not-exist', images: [] })).rejects.toThrow('not available');
   });
+
+  it('rejects an invalid native command argument during pre-persistence validation', async () => {
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'thread';
+    await expect(driver.validate({ text: '/permissions bogus', images: [] }))
+      .rejects.toThrow('does not support approval policy "bogus"');
+  });
 });
 
 describe('Claude command discovery uses the same contract', () => {

@@ -521,16 +521,7 @@ export class CodexDriver implements Driver {
 
   async send(input: PromptInput): Promise<void> {
     if (!this.threadId) throw new Error('Codex thread is not open');
-    // `skills/changed` and tests may refresh the executable paths before the
-    // next menu event. Resolve from both stores so discovery and dispatch
-    // cannot briefly disagree.
-    const commands = [...this.commands];
-    for (const name of this.skills.keys()) {
-      if (!commands.some((command) => command.name === name)) {
-        commands.push({ name, description: '', kind: 'skill', execution: 'skill' });
-      }
-    }
-    const offered = offeredSlashCommand(input.text, commands);
+    const offered = this.offered(input);
     if (offered && commandExecution(offered.command) !== 'skill') {
       return await this.special(offered.invocation.name, offered.invocation.argument);
     }
@@ -562,13 +553,24 @@ export class CodexDriver implements Driver {
 
   async validate(input: PromptInput): Promise<void> {
     if (!this.threadId) throw new Error('Codex thread is not open');
+    const offered = this.offered(input);
+    if (offered?.invocation.name === 'permissions' && offered.invocation.argument
+      && !MODES.includes(offered.invocation.argument)) {
+      throw new Error(`Codex does not support approval policy "${offered.invocation.argument}"`);
+    }
+  }
+
+  /** One resolution path shared by pre-persistence validation and dispatch. */
+  private offered(input: PromptInput) {
+    // `skills/changed` may refresh executable paths before the next menu event.
+    // Resolve both stores once so validation and dispatch cannot disagree.
     const commands = [...this.commands];
     for (const name of this.skills.keys()) {
       if (!commands.some((command) => command.name === name)) {
         commands.push({ name, description: '', kind: 'skill', execution: 'skill' });
       }
     }
-    offeredSlashCommand(input.text, commands);
+    return offeredSlashCommand(input.text, commands);
   }
 
   answer(askId: string, choice: PermissionAnswer, value?: string): void {
