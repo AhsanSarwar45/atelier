@@ -41,6 +41,9 @@ const BLOCK = 'w-full max-w-[24rem]';
 const THUMB =
   'cursor-zoom-in rounded border border-border/60 transition-opacity hover:opacity-90';
 
+/** A lone portrait should never become a screen-height chat bubble. */
+const SINGLE_BOUNDS = { width: 'auto', height: 'auto', maxWidth: '100%', maxHeight: '24rem' } as const;
+
 export interface PictureGridProps {
   images: ImagePayload[];
   /** Open one whole, over the chat. */
@@ -78,9 +81,10 @@ export function PictureGrid({ images, onLook }: PictureGridProps): JSX.Element |
           // click away regardless.
           className={
             alone
-              ? `${THUMB} max-h-48 w-auto justify-self-start object-contain`
+              ? `${THUMB} justify-self-start object-contain`
               : `${THUMB} aspect-[4/3] w-full object-cover`
           }
+          style={alone ? SINGLE_BOUNDS : undefined}
         />
       ))}
     </div>

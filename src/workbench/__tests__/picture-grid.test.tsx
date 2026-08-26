@@ -91,8 +91,15 @@ describe('a message’s pictures on the page', () => {
   });
 
   it('lets a lone picture keep its own shape and crops the rest to line up', () => {
-    expect(drawn(1).thumbs[0]!.className).toContain('object-contain');
-    expect(drawn(1).thumbs[0]!.className).not.toContain('aspect-');
+    const picture = drawn(1).thumbs[0]!;
+    expect(picture.className).toContain('object-contain');
+    expect(picture.className).not.toContain('aspect-');
+    expect(picture).toHaveStyle({
+      width: 'auto',
+      height: 'auto',
+      maxWidth: '100%',
+      maxHeight: '24rem',
+    });
   });
 
   it('crops two or more to a common shape, because a ragged row reads as a mess', () => {
