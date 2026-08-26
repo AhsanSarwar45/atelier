@@ -11,6 +11,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { foldAll, reduce, type SessionView, type TranscriptTool } from '../../src/workbench/fold.ts';
 import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
+import { whatItRan } from '../../src/workbench/said-what-it-ran.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { watchOutside } from './outside.ts';
@@ -85,9 +86,19 @@ function transcriptPage(sessionId: string, before: number | null): {
     ? (page.events.find((event) => starts(event, first))?.seq ?? page.cursor)
     : page.cursor;
   return {
-    items: visible.map((item) => item.kind === 'tool'
-      ? { ...item, input: {}, output: null, diff: null, detailsDeferred: true } satisfies TranscriptTool
-      : item),
+    items: visible.map((item) => {
+      if (item.kind !== 'tool') return item;
+      const ran = whatItRan(item.name, item.input);
+      return {
+        ...item,
+        input: {},
+        output: null,
+        diff: null,
+        detailsDeferred: true,
+        ranKind: ran?.kind,
+        ranGrave: ran?.grave,
+      } satisfies TranscriptTool;
+    }),
     cursor,
     hasOlder: page.hasOlder || truncated,
     newestSeq: page.newestSeq,

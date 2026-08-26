@@ -981,7 +981,11 @@ function runSaid(argv: string[], tongue: string): string | null {
   }
   const script = object(argv, 1);
   if (!script || script === '-') return `Ran a ${tongue} script`;
-  return `Ran ${brief(leaf(script))}`;
+  const file = leaf(script);
+  if (/codex-ownership-smoke\.mjs$/.test(file)) return 'Checked Codex ownership in the browser';
+  if (/chat-(?:open-cost|opens-fast|typing-cost)\.mjs$/.test(file)) return 'Measured chat performance in the browser';
+  if (/\.mjs$/.test(file) && /(?:smoke|browser|chat)/.test(file)) return `Ran the ${brief(file.replace(/\.mjs$/, '').replaceAll('-', ' '))} browser check`;
+  return `Ran ${brief(file)}`;
 }
 
 // ---------------------------------------------------------------------------

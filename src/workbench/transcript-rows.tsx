@@ -414,11 +414,13 @@ export const ToolRow = memo(function ToolRow({
   // was. A command no rule knows keeps the words it was typed in, and that is
   // the only shell text left on a closed row (bw-7ks.24).
   const ran = whatItRan(shown.name, shown.input);
-  const Mark = ran && markOfRan(ran.kind);
+  const ranKind = ran?.kind ?? item.ranKind;
+  const ranGrave = ran?.grave ?? item.ranGrave ?? false;
+  const Mark = ranKind && markOfRan(ranKind);
   // A chain that deletes something is red whatever else it mostly did: the
   // sentence names the delete, and the mark must not say `test` in amber while
   // it does (bw-7ks.24.2).
-  const mark = ran && (ran.grave ? colourOfBand('deleting') : lookOfRan(ran.kind).mark);
+  const mark = ranKind && (ranGrave ? colourOfBand('deleting') : lookOfRan(ranKind).mark);
   // The sentences are written for a finished row, so they are in the past. A
   // row with a spinner on it has not finished, and "Ran the tests" beside a
   // spinner says the opposite of the spinner (bw-7ks.24.6).
@@ -432,9 +434,9 @@ export const ToolRow = memo(function ToolRow({
       data-tool-id={item.id}
       data-tool-status={item.status}
       data-tool-name={item.name}
-      data-ran-kind={ran?.kind}
-      data-ran-band={ran ? lookOfRan(ran.kind).band : undefined}
-      data-grave={ran?.grave ? 'yes' : undefined}
+      data-ran-kind={ranKind}
+      data-ran-band={ranKind ? lookOfRan(ranKind).band : undefined}
+      data-grave={ranGrave ? 'yes' : undefined}
       data-open={open}
       className={cn(nested && SENT_OFF)}
     >

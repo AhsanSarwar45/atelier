@@ -79,6 +79,17 @@ describe('the row says it in English', () => {
 });
 
 describe('the mark says what kind of thing it was', () => {
+  it('survives while the opening window defers the command body', () => {
+    const item = {
+      ...call('Bash', {}, 'Built the app'),
+      detailsDeferred: true,
+      ranKind: 'build' as const,
+    };
+    render(<ToolRow item={item} nested={false} sessionId="s" />);
+    expect(screen.getByTestId('tool-mark')).toBeInTheDocument();
+    expect(screen.getByTestId('tool-row')).toHaveAttribute('data-ran-kind', 'build');
+  });
+
   it('draws a different mark for a different kind', () => {
     const { unmount } = shell('rg -n "hello" src');
     const looking = screen.getByTestId('tool-mark').outerHTML;

@@ -88,6 +88,10 @@ export interface TranscriptTool {
   /** The opening window carries the readable title, not the potentially huge
    * body. The body is asked for only when this row is opened. */
   detailsDeferred?: boolean;
+  /** Classification survives deferred tool bodies so the collapsed row keeps
+   * the same category, colour and icon as a live row. */
+  ranKind?: import('@/workbench/said-what-it-ran').RanKind;
+  ranGrave?: boolean;
 }
 
 /**
