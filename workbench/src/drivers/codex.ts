@@ -102,6 +102,10 @@ class CodexReader {
     this.pending.delete(message.id);
     message.error ? pending.reject(new Error(message.error.message || 'Codex request failed')) : pending.resolve(message.result);
   }
+  close(): void {
+    this.child.kill('SIGTERM');
+    this.fail(new Error('Codex reader closed'));
+  }
   private fail(error: Error): void { for (const pending of this.pending.values()) pending.reject(error); this.pending.clear(); }
 }
 
@@ -113,6 +117,7 @@ export function codexRequest(method: string, params: Bag, cwd = process.cwd()): 
   if (!reader) { reader = new CodexReader(cwd); readers.set(cwd, reader); }
   return reader.call(method, params).catch((error) => {
     if (readers.get(cwd) === reader) readers.delete(cwd);
+    reader.close();
     throw error;
   });
 }
@@ -282,9 +287,32 @@ function rolloutText(item: Bag): string {
 
 function commandFromToolInput(input: unknown): string {
   if (typeof input !== 'string') return '';
-  const found = /\bcmd\s*:\s*("(?:[^"\\]|\\.)*")/.exec(input);
+  const found = /(?:\bcmd|"cmd")\s*:\s*("(?:[^"\\]|\\.)*")/.exec(input);
   if (!found) return input.slice(0, 500);
   try { return JSON.parse(found[1]!); } catch { return input.slice(0, 500); }
+}
+
+function rolloutTool(name: string, input: unknown): { name: string; arguments: Bag } {
+  const text = typeof input === 'string' ? input : JSON.stringify(input ?? {});
+  if (name === 'apply_patch' || /tools\.apply_patch\s*\(|\*\*\* Begin Patch/.test(text)) {
+    const patch = text.replaceAll('\\n', '\n');
+    const paths = [...patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((hit) => hit[1]);
+    return { name: 'Edit', arguments: paths.length ? { file_path: paths[0], files: paths } : {} };
+  }
+  if (/tools\.view_image\s*\(/.test(text)) {
+    const path = /path\s*:\s*"([^"]+)"/.exec(text)?.[1];
+    return { name: 'Read', arguments: path ? { file_path: path } : {} };
+  }
+  if (name === 'exec' || name === 'exec_command') {
+    if (/tools\.write_stdin\s*\(/.test(text)) return { name: 'Wait', arguments: {} };
+    if (/tools\.web__run\s*\(/.test(text)) {
+      const query = /(?:"q"|q)\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text)?.[1];
+      return { name: /\b(?:open|click|find|screenshot)\s*:/.test(text) ? 'WebFetch' : 'WebSearch', arguments: query ? { query } : {} };
+    }
+    return { name: 'Bash', arguments: { command: commandFromToolInput(input) } };
+  }
+  if (name === 'wait') return { name: 'Wait', arguments: {} };
+  return { name, arguments: typeof input === 'object' && input ? input as Bag : { input } };
 }
 
 /** Translate one newly appended Codex rollout row. This is deliberately a
@@ -295,6 +323,14 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
   try { row = JSON.parse(line); } catch { return; }
   driver.emit = emit;
   const payload = row.payload ?? {};
+  if (row.type === 'event_msg' && payload.type === 'task_started') {
+    emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
+    return;
+  }
+  if (row.type === 'event_msg' && (payload.type === 'task_complete' || payload.type === 'turn_aborted')) {
+    emit({ type: 'session.state', state: 'dormant', label: 'Asleep' });
+    return;
+  }
   if (row.type === 'turn_context') {
     emit({ type: 'session.pinned', model: payload.model ?? 'default', permissionMode: MODES.includes(payload.approval_policy) ? payload.approval_policy : 'on-request' });
     return;
@@ -328,10 +364,9 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
   }
   if (row.type === 'response_item' && (payload.type === 'custom_tool_call' || payload.type === 'function_call')) {
     const id = payload.call_id ?? payload.id;
-    const command = payload.name === 'exec' ? commandFromToolInput(payload.input) : payload.input;
-    const name = payload.name === 'exec' ? 'Bash' : payload.name === 'apply_patch' ? 'Edit' : payload.name === 'wait' ? 'Wait' : payload.name;
-    if (payload.name === 'apply_patch') (driver as any).__rolloutApply = id;
-    driver.itemStarted({ id, type: 'dynamicToolCall', tool: name, arguments: command ? { command } : { input: payload.input } });
+    const tool = rolloutTool(payload.name, payload.input);
+    if (tool.name === 'Edit') (driver as any).__rolloutApply = id;
+    driver.itemStarted({ id, type: 'dynamicToolCall', tool: tool.name, arguments: tool.arguments });
     return;
   }
   if (row.type === 'response_item' && (payload.type === 'custom_tool_call_output' || payload.type === 'function_call_output')) {
@@ -446,6 +481,7 @@ export class CodexDriver implements Driver {
   }
 
   async interrupt(): Promise<void> {
+    this.resolveAsks('deny');
     if (this.threadId && this.turnId) await this.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
   }
 
@@ -462,10 +498,19 @@ export class CodexDriver implements Driver {
   }
 
   async close(): Promise<void> {
+    this.resolveAsks('deny');
     this.child?.kill('SIGTERM');
     this.child = null;
     for (const pending of this.pending.values()) pending.reject(new Error('Codex app-server closed'));
     this.pending.clear();
+  }
+
+  private resolveAsks(choice: PermissionAnswer): void {
+    for (const [askId, ask] of this.asks) {
+      ask.answer(choice);
+      this.emit({ type: 'ask.resolved', askId, chosen: choice });
+    }
+    this.asks.clear();
   }
 
   private async menu(): Promise<void> {

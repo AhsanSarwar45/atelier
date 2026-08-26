@@ -406,12 +406,15 @@ export function ChatSidebar({
             brand: row.brand,
             projectId,
             projectPath,
+            title: row.title,
+            cwd: row.cwdHint,
+            lastActiveAt: row.lastActiveAt,
           });
           // The list is asked again, so the row now carries the id it was just
           // given: without that it keeps reporting it has no chat, is never
           // highlighted as the open one, and invites a second click (bw-m8o.12).
-          await load();
           onOpen(s.id);
+          void load();
         } catch (e) {
           // An open that fails silently leaves a row that looks merely slow.
           setFailed(e instanceof Error ? e.message : String(e));

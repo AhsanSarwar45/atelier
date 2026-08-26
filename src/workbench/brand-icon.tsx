@@ -2,6 +2,7 @@
 
 import type { Brand } from '@/workbench/protocol';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 
 export function brandName(brand: Brand): string {
   return brand === 'codex' ? 'Codex' : 'Claude';
@@ -20,9 +21,12 @@ export function BrandIcon({ brand, className }: { brand: Brand; className?: stri
 
 export function ProviderBadge({ brand, className }: { brand: Brand; className?: string }) {
   return (
-    <span
+    <Badge
+      appearance="light"
+      size="sm"
+      shape="circle"
       className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium',
+        'shrink-0 gap-1.5',
         brand === 'codex'
           ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
           : 'border-orange-500/35 bg-orange-500/10 text-orange-700 dark:text-orange-300',
@@ -34,6 +38,6 @@ export function ProviderBadge({ brand, className }: { brand: Brand; className?: 
     >
       <BrandIcon brand={brand} className="size-3.5" />
       {brandName(brand)}
-    </span>
+    </Badge>
   );
 }

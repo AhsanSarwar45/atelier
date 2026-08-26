@@ -58,4 +58,39 @@ describe('Codex live-runtime regressions', () => {
     codexRolloutLine(JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'new', output: 'passed' } }), driver, (event) => events.push(event));
     expect(events.at(-1)).toMatchObject({ type: 'tool.completed', toolCallId: 'new', output: 'passed' });
   });
+
+  it('settles an external turn and unwraps orchestration patches as edits', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver();
+    const emit = (event: BareEvent) => events.push(event);
+    codexRolloutLine(JSON.stringify({ type: 'event_msg', payload: { type: 'task_started' } }), driver, emit);
+    codexRolloutLine(JSON.stringify({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'patch', name: 'exec',
+      input: 'const patch = "*** Begin Patch\\n*** Update File: /repo/src/a.ts\\n*** End Patch"; await tools.apply_patch(patch)',
+    } }), driver, emit);
+    codexRolloutLine(JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete' } }), driver, emit);
+
+    expect(events).toContainEqual(expect.objectContaining({ type: 'session.state', state: 'thinking' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'tool.started', name: 'Edit' }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'tool.started', name: 'Bash' }));
+    expect(events.at(-1)).toMatchObject({ type: 'session.state', state: 'dormant' });
+  });
+
+  it('translates every orchestration call observed in Codex rollouts', () => {
+    const calls = [
+      ['shell', 'const r = await tools.exec_command({cmd:"npm test"})', 'Bash', 'Ran the tests'],
+      ['patch', 'const p = "*** Begin Patch\\n*** Update File: /repo/a.ts\\n*** End Patch"; await tools.apply_patch(p)', 'Edit', 'Changed repo/a.ts'],
+      ['poll', 'await tools.write_stdin({session_id:12,chars:""})', 'Wait', 'Wait'],
+      ['search', 'await tools.web__run({search_query:[{q:"Codex docs"}]})', 'WebSearch', 'Searched the web for Codex docs'],
+      ['open', 'await tools.web__run({open:[{ref_id:"page"}]})', 'WebFetch', 'Fetched a page'],
+      ['image', 'await tools.view_image({path:"/tmp/screen.png"})', 'Read', 'Read tmp/screen.png'],
+    ] as const;
+    for (const [id, input, name, title] of calls) {
+      const events: BareEvent[] = [];
+      codexRolloutLine(JSON.stringify({ type: 'response_item', payload: {
+        type: 'custom_tool_call', call_id: id, name: 'exec', input,
+      } }), new CodexDriver(), (event) => events.push(event));
+      expect(events[0], id).toMatchObject({ type: 'tool.started', name, title });
+    }
+  });
 });

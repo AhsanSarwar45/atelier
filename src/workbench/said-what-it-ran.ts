@@ -694,6 +694,25 @@ const HEADS: Record<string, Rule> = {
       return `Read the ${brief(sub)} report`;
     },
   },
+  checks: {
+    kind: 'test',
+    say: (a) => has(a, '--help') ? 'Read the project check options' : 'Ran the project checks',
+  },
+
+  // Coding-agent CLIs. These are ordinary commands whichever provider issued
+  // them; keeping them here gives Claude and Codex the same sentence.
+  codex: {
+    kind: 'run',
+    say: (a) => {
+      if (has(a, '--version')) return 'Checked the Codex version';
+      if (a[1] !== 'app-server') return `Ran Codex ${brief(a[1] ?? '')}`.trim();
+      if (a.includes('generate-json-schema')) return 'Generated the Codex protocol schema';
+      if (a.includes('generate-ts')) return 'Generated the Codex protocol types';
+      if (has(a, '--help')) return 'Read the Codex app-server options';
+      if (has(a, '--stdio')) return 'Started the Codex app server';
+      return 'Ran the Codex app server';
+    },
+  },
 
   // Version control.
   git: {

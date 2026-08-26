@@ -266,6 +266,9 @@ export class Sessions {
     brand: Brand;
     projectId: string;
     projectPath: string;
+    title?: string | null;
+    cwd?: string | null;
+    lastActiveAt?: string;
   }): Promise<SessionSummary> {
     // By our id when the app ran it, and otherwise by the brand's own id: a
     // conversation begun in a terminal already has a row after the first click,
@@ -283,7 +286,6 @@ export class Sessions {
       // ago that was, and reading it again is the only way to be level with the
       // conversation the reader is being shown.
       const live = this.heldElsewhere(existing);
-      const read = await this.importPast(existing, live);
       // Nothing of ours is driving this chat — the branch above returned if
       // one were — so a stored state that means an agent owes an answer is a
       // leftover from a process that has since gone. Such a chat drew "Coming
@@ -294,23 +296,22 @@ export class Sessions {
       const truth: SessionState = 'dormant';
       if (truth !== existing.state) this.store.updateSession(existing.id, { state: truth }, false);
       this.publish(existing.id, { type: 'session.state', state: truth, label: 'Asleep' });
-      this.follow(existing, read);
+      void this.importPast(existing, live)
+        .then((read) => this.follow(existing, read))
+        .catch(() => {});
       return { ...existing, state: truth };
     }
 
     // A conversation begun in a terminal, seen for the first time. It keeps the
     // time the brand's own index gives it, so reading it does not reorder the
     // list.
-    const seen = params.externalId
-      ? (await knownSessions(params.projectPath)).find((k) => k.brand === params.brand && k.externalId === params.externalId)
-      : undefined;
     const summary: SessionSummary = {
       id: randomUUID(),
       brand: params.brand,
       externalId: params.externalId ?? null,
       projectId: params.projectId,
       projectPath: params.projectPath,
-      cwd: seen?.cwd ?? params.projectPath,
+      cwd: params.cwd ?? params.projectPath,
       model: null,
       // A chat begun in a terminal runs in whatever mode that terminal is in,
       // and it says so itself the moment this app takes it over. Until it does,
@@ -318,17 +319,18 @@ export class Sessions {
       permissionMode: params.brand === 'claude'
         ? readOwnerSettings(params.projectPath).permissionMode ?? DEFAULT_PERMISSION_MODE
         : defaultPermissionMode(params.brand),
-      title: seen?.name ?? null,
+      title: params.title ?? null,
       state: 'dormant',
       createdAt: new Date().toISOString(),
-      lastActiveAt: seen?.lastActiveAt ?? new Date().toISOString(),
+      lastActiveAt: params.lastActiveAt ?? new Date().toISOString(),
     };
     this.store.createSession({ ...summary, origin: 'terminal' });
     this.openings.forEach((fn) => fn(summary));
     const live = this.heldElsewhere(summary);
-    const read = await this.importPast(summary, live);
     this.publish(summary.id, { type: 'session.state', state: 'dormant', label: 'Asleep' });
-    this.follow(summary, read);
+    void this.importPast(summary, live)
+      .then((read) => this.follow(summary, read))
+      .catch(() => {});
     return summary;
   }
 
@@ -530,11 +532,10 @@ export class Sessions {
     if (summary.brand === 'codex') {
       try {
         const path = codexRolloutPath(summary.externalId);
-        const menu = await codexMenu(summary.cwd).catch(() => null);
-        if (menu) {
+        void codexMenu(summary.cwd).then((menu) => {
           const { skillPaths: _skillPaths, ...shown } = menu;
           this.publish(summary.id, { type: 'session.menu', ...shown } as DriverEvent);
-        }
+        }).catch(() => {});
         if (path) {
           const size = statSync(path).size;
           const followed = this.store.followedTo(summary.id);

@@ -64,6 +64,23 @@ describe('Codex subagents on the common workbench protocol', () => {
 });
 
 describe('Codex app-server requests', () => {
+  it('denies and clears outstanding questions before interrupting a turn', async () => {
+    const events: BareEvent[] = [];
+    const answered: string[] = [];
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'thread';
+    driver.turnId = 'turn';
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.asks.set('approval', { answer: (choice: string) => answered.push(choice) });
+    driver.call = vi.fn().mockResolvedValue({});
+
+    await driver.interrupt();
+
+    expect(answered).toEqual(['deny']);
+    expect(driver.asks.size).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'ask.resolved', askId: 'approval', chosen: 'deny' }));
+  });
+
   it('collects every ordinary user question and returns the protocol answer map', () => {
     const events: BareEvent[] = [];
     const writes: any[] = [];

@@ -17,7 +17,7 @@ EDIT_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 MUTATING_SHELL = re.compile(
     r"(?:^|[;&|]\s*)(?:"
     r"apply_patch|"
-    r"(?:git\s+(?:[^;&|\n]+\s+)?(?:add|am|branch|checkout|cherry-pick|clean|commit|"
+    r"(?:git\s+(?:[^;&|\n]+\s+)?(?:add|am|checkout|cherry-pick|clean|commit|"
     r"merge|mv|rebase|reset|restore|revert|rm|switch|update-ref))|"
     r"(?:bd\s+(?:[^;&|\n]+\s+)?(?:close|create|defer|dep|reopen|supersede|update))|"
     r"(?:cp|install|mkdir|mv|rm|touch|truncate)\b|"
@@ -65,6 +65,11 @@ def mutates(data):
     if re.match(r"^\s*git\s+merge\s+--ff-only\s+[A-Za-z0-9_.-]+\s*$",
                 command, re.I):
         return False
+    branch = re.search(r"(?:^|[;&|]\s*)git\s+(?:-C\s+\S+\s+)?branch\b([^;&|\n]*)",
+                       command, re.I)
+    if branch and re.search(r"(?:^|\s)(?:-[dDmMcC]|--delete|--move|--copy)(?:\s|$)|\s+[A-Za-z0-9_.][A-Za-z0-9_.-]*\s*$",
+                            branch.group(1)):
+        return True
     return bool(MUTATING_SHELL.search(command))
 
 
@@ -81,6 +86,18 @@ def card_for(issue, cwd):
     ok, out = run(["bd", "show", issue, "--json"], cwd)
     if not ok:
         return None
+
+
+def checked_out_for(issue, cwd):
+    """Recovery proof available without the board: registered tree + branch."""
+    ok, branch = run(["git", "branch", "--show-current"], cwd)
+    if not ok or branch != issue:
+        return False
+    ok, trees = run(["git", "worktree", "list", "--porcelain"], cwd)
+    return ok and os.path.realpath(cwd) in {
+        os.path.realpath(line.removeprefix("worktree "))
+        for line in trees.splitlines() if line.startswith("worktree ")
+    }
     try:
         card = json.loads(out)
         return card[0] if isinstance(card, list) else card
@@ -89,7 +106,7 @@ def card_for(issue, cwd):
 
 
 def children_for(issue, cwd):
-    ok, out = run(["bd", "children", issue, "--json"], cwd)
+    ok, out = run(["bd", "list", "--parent", issue, "--json"], cwd)
     if not ok:
         return None
     try:
@@ -132,8 +149,13 @@ def reason(data):
     issue = match.group(1)
     card = card_for(issue, cwd)
     if not card:
-        return ("This worktree is not backed by a readable Beads issue named %s. "
-                "Restore the board connection or use the claimed issue worktree."
+        # A board outage must not deadlock work already isolated and named. The
+        # Git registration and exact branch name are the offline proof; status
+        # transitions remain protected by the independent lifecycle gate.
+        if checked_out_for(issue, cwd):
+            return None
+        return ("This worktree is not backed by a readable Beads issue named %s, "
+                "and Git cannot prove this is its registered matching branch."
                 % issue)
     children = None
     active = card.get("status") == "in_progress" and card.get("assignee")

@@ -505,6 +505,9 @@ export type WbpCommand =
       brand: Brand;
       projectId: string;
       projectPath: string;
+      title?: string | null;
+      cwd?: string | null;
+      lastActiveAt?: string;
     }
   | {
       type: 'session.resume';
