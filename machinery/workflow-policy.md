@@ -21,3 +21,11 @@ Atelier uses one shared Beads board. A worktree isolates code; it does not creat
 - Commit with the bead ID and merge that commit into the declared main line before advancing to agent review or closing the code step.
 - Complete the job's checks, review, and land steps in order before closing the job.
 - Never use a direct `bd` status change to bypass commit, merge, review, or land prerequisites. A command being accepted is not permission to skip the lifecycle.
+
+## Visual proof in chat
+
+For every visual change, capture the relevant screen before editing and again
+after the change, then include both images in the conversation as an
+`atelier-image-compare` block. For a newly added visual with no meaningful
+before state, capture and include the finished result as an ordinary inline
+image. Do this before handing the work back; do not wait for the manager to ask.

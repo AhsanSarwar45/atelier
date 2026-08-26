@@ -20,7 +20,7 @@ Where these rules conflict with more general communication or formatting guidanc
 
 ## Keep the result in the conversation
 
-Give the manager the result directly in chat. Ask decisions with the native question tool. Show ordinary images inline. For a before-and-after comparison, write one `atelier-image-compare` fenced block containing `mode` (`side_by_side` or `wipe`) and `before`/`after` objects with a project-relative `path` and optional `caption`. A plan or proposal states effects only: what improves, what it unlocks, what it costs, and what could go wrong.
+Give the manager the result directly in chat. Ask decisions with the native question tool. For every visual change, capture the relevant screen before editing and again afterward, then show both in an `atelier-image-compare` fenced block containing `mode` (`side_by_side` or `wipe`) and `before`/`after` objects with a project-relative `path` and optional `caption`. For a newly added visual with no meaningful before state, capture and show the finished result as an ordinary inline image. Do this before handing the work back; do not wait for the manager to ask. A plan or proposal states effects only: what improves, what it unlocks, what it costs, and what could go wrong.
 
 ## Working with them
 

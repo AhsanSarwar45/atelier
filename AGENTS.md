@@ -58,4 +58,12 @@ The lifecycle gates are authoritative. Tests alone do not finish work, and a
 direct status change never replaces commit, independent review, landing, or
 closure.
 
+## Visual proof in chat
+
+For every visual change, capture the relevant screen before editing and again
+after the change, then include both images in the conversation as an
+`atelier-image-compare` block. For a newly added visual with no meaningful
+before state, capture and include the finished result as an ordinary inline
+image. Do this before handing the work back; do not wait for the manager to ask.
+
 <!-- END ATELIER WORKFLOW -->
