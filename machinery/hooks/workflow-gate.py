@@ -9,6 +9,7 @@ protect both without importing either provider's interaction style.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -36,6 +37,42 @@ RECOVERY_FILES = {
     "machinery/hooks/workflow-gate.py",
     "machinery/workflow-policy.md",
 }
+
+
+def copy_to_cut(command):
+    """The root and card named by the exact copy-creation command, or None."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if len(words) != 8 or words[:2] != ["git", "-C"] or words[3:5] != ["worktree", "add"] or words[6] != "-b":
+        return None
+    root, target, issue = words[2], words[5], words[7]
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", issue):
+        return None
+    expected = {os.path.join("worktrees", issue), os.path.join(root, "worktrees", issue)}
+    return (root, issue) if target in expected else None
+
+
+def copy_to_remove(command):
+    """The root, path and card named by the exact finished-copy teardown."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if len(words) != 16:
+        return None
+    path, root = words[2], words[6]
+    if words[:2] != ["rm", "-rf"] or words[3:7] != ["&&", "git", "-C", root]:
+        return None
+    if words[7:10] != ["worktree", "prune", "&&"] or words[10:13] != ["git", "-C", root]:
+        return None
+    if words[13:15] != ["branch", "-d"]:
+        return None
+    issue = words[15]
+    if path != os.path.join(root, "worktrees", issue) or not re.fullmatch(r"[A-Za-z0-9_.-]+", issue):
+        return None
+    return root, path, issue
 
 
 def deny(reason):
@@ -125,8 +162,6 @@ def children_for(issue, cwd):
 
 def reason(data):
     """Return a refusal for a mutating call, or None when it may proceed."""
-    if not mutates(data):
-        return None
     supplied = data.get("tool_input") or {}
     if isinstance(supplied, dict):
         cwd = supplied.get("workdir") or data.get("cwd") or os.getcwd()
@@ -135,6 +170,19 @@ def reason(data):
     else:
         cwd = data.get("cwd") or os.getcwd()
         patch = str(supplied)
+    command = supplied.get("command", "") if isinstance(supplied, dict) else str(supplied)
+
+    # A copy is cut before its first child can be claimed. Validate the exact
+    # root, folder, branch and readable card here instead of mistaking the
+    # command's `add` for the unrelated staging command.
+    cutting = copy_to_cut(command)
+    if cutting:
+        root, issue = cutting
+        if card_for(issue, root):
+            return None
+        return "The separate copy names no readable Beads issue %s." % issue
+    if not mutates(data):
+        return None
     # A broken workflow gate must never be able to prevent its own repair.
     # Changes through this escape hatch are limited to tracked policy/config
     # files, so the resulting Git diff is the audit record.
@@ -171,6 +219,21 @@ def reason(data):
         active = active or bool(children and any(
             child.get("status") == "in_progress" and child.get("assignee")
             for child in children))
+    removing = copy_to_remove(command)
+    if removing:
+        _, path, removing_issue = removing
+        if removing_issue != issue or not checked_out_for(issue, path):
+            return "The separate copy being removed is not the registered copy for %s." % issue
+        if active:
+            return "Beads issue %s still has active work, so its separate copy stays." % issue
+        if card.get("issue_type") == "epic":
+            if children is None:
+                return "The child beads for epic %s could not be read." % issue
+            if any(child.get("status") != "closed" for child in children):
+                return "Beads issue %s still has unfinished children, so its separate copy stays." % issue
+        elif card.get("status") != "closed":
+            return "Beads issue %s is not finished, so its separate copy stays." % issue
+        return None
     if not active:
         return ("Beads issue %s, or one of its epic children, must be claimed "
                 "and in_progress before this worktree may be changed." % issue)
