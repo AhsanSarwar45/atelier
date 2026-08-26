@@ -112,6 +112,22 @@ interface ChatTabProps {
   openSessionId?: string | null;
 }
 
+/** A prompt remains editable only until the agent puts anything of its own after it. */
+interface RecallablePrompt {
+  text: string;
+  images: ImagePayload[];
+  itemsBeforeSend: Set<string>;
+}
+
+/** Whether the agent has begun answering since a prompt was submitted. */
+export function agentRespondedSince(items: TranscriptItem[], before: Set<string>): boolean {
+  return items.some(
+    (item) =>
+      !before.has(item.id) &&
+      (item.kind === 'thinking' || item.kind === 'tool' || (item.kind === 'message' && item.role === 'assistant')),
+  );
+}
+
 /**
  * One picker on the composer's row. What it lists is what the session itself
  * announced it can do, so it is never a list of guesses (§7).
@@ -574,6 +590,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const pane = useRef<HTMLDivElement>(null);
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  /** The POST being accepted; Escape waits for it before sending Stop. */
+  const sending = useRef<Promise<unknown> | null>(null);
+  const [recallable, setRecallable] = useState<RecallablePrompt | null>(null);
 
   /**
    * Where the reader is in the conversation, and whether the newest words are
@@ -616,6 +635,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const busy = isBusy(view.state);
   /** No agent attached: it is drawn, and the first message is what wakes it. */
   const asleep = view.state === 'dormant';
+
+  // Claude and Codex expose different first signs of life (thinking, a tool,
+  // or assistant text). Any of them makes the prompt history, not a draft.
+  useEffect(() => setRecallable(null), [sessionId]);
+  useEffect(() => {
+    if (recallable && agentRespondedSince(view.items, recallable.itemsBeforeSend)) {
+      setRecallable(null);
+    }
+  }, [recallable, view.items]);
 
   /**
    * Another program on this machine is driving this very conversation: what it
@@ -744,11 +772,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     const text = draft.trim();
     if (!text || !sessionId) return;
     const images = attached;
+    setRecallable({ text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) });
     setDraft('');
     setAttached([]);
     setSendError(null);
     try {
-      await sendCommand({ type: 'prompt.send', sessionId, text, images, takeover: ownership.kind === 'elsewhere' });
+      const sent = sendCommand({ type: 'prompt.send', sessionId, text, images, takeover: ownership.kind === 'elsewhere' });
+      sending.current = sent;
+      await sent;
     } catch (e) {
       // The server can refuse this: another program took the conversation over
       // between the box unlocking and the send, or the screen's own copy of who
@@ -756,7 +787,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       // it goes back in the box he wrote it in rather than into the void.
       setDraft(draft);
       setAttached(images);
+      setRecallable(null);
       setSendError(e instanceof Error ? e.message : String(e));
+    } finally {
+      sending.current = null;
+    }
+  }
+
+  /** Stop an unanswered turn and put its exact input back under the cursor. */
+  async function recallLastPrompt() {
+    if (!recallable || !sessionId) return;
+    const pending = recallable;
+    setRecallable(null);
+    setDraft(pending.text);
+    setAttached(pending.images);
+    setSendError(null);
+    typing.current?.focus();
+    try {
+      await sending.current;
+      await sendCommand({ type: 'session.stop', sessionId });
+    } catch (e) {
+      setSendError(`Prompt restored, but the turn could not be stopped. ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1283,6 +1334,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   setShut(true);
                   return;
                 }
+              }
+              if (e.key === 'Escape' && recallable) {
+                e.preventDefault();
+                void recallLastPrompt();
+                return;
               }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();

@@ -15,12 +15,36 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { chatState } from '@/workbench/chat-state';
+import { agentRespondedSince } from '@/workbench/chat-tab';
 import type { ChatState } from '@/workbench/chat-state';
+import type { Brand } from '@/workbench/protocol';
+import type { TranscriptItem } from '@/workbench/use-session';
 import { WorkingLine } from '@/workbench/transcript-rows';
 import { workingLine } from '@/workbench/working-line';
 
 /** A fixed instant, so a count a case asserts is the count it set. */
 const NOW = 1_787_138_400_000;
+
+describe.each<Brand>(['claude', 'codex'])('recalling an unanswered %s prompt', (brand) => {
+  const before = new Set(['older-answer']);
+
+  it('keeps the prompt recallable when only its user echo has arrived', () => {
+    const items: TranscriptItem[] = [
+      { kind: 'message', id: 'older-answer', role: 'assistant', text: 'Earlier', images: [], done: true, parentId: null },
+      { kind: 'message', id: `${brand}-prompt`, role: 'user', text: 'Let me edit this', images: [], done: true, parentId: null },
+    ];
+
+    expect(agentRespondedSince(items, before)).toBe(false);
+  });
+
+  it.each([
+    ['assistant text', { kind: 'message', id: `${brand}-answer`, role: 'assistant', text: '', images: [], done: false, parentId: null }],
+    ['thinking', { kind: 'thinking', id: `${brand}-thinking`, text: '', done: false, parentId: null }],
+    ['a tool', { kind: 'tool', id: `${brand}-tool` }],
+  ] as const)('stops offering recall after %s begins', (_label, response) => {
+    expect(agentRespondedSince([response as TranscriptItem], before)).toBe(true);
+  });
+});
 
 /** What the chip draws for a chat a terminal holds and is working in. */
 const HELD_WORKING: ChatState = {
