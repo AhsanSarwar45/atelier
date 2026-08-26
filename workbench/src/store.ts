@@ -156,21 +156,39 @@ export class Store {
   constructor(path = defaultDbPath()) {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    // A replacement helper can begin while the old process is finishing its
+    // last write. With SQLite's default timeout of zero that ordinary overlap
+    // escapes as "database is locked" and leaves every chat request failing
+    // until the helper is restarted. Wait through the handoff instead.
+    this.db.exec('PRAGMA busy_timeout = 10000');
     this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec('PRAGMA synchronous = NORMAL');
     this.migrate();
   }
 
   private migrate(): void {
-    this.db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)');
-    const row = this.db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
-    let version = row?.version ?? 0;
-    if (row === undefined) this.db.prepare('INSERT INTO schema_version VALUES (0)').run();
-    for (let i = version; i < MIGRATIONS.length; i++) {
-      this.db.exec(MIGRATIONS[i]!);
-      version = i + 1;
+    // One helper owns schema inspection and changes as a unit. Without the
+    // immediate transaction, two replacements can both observe version N and
+    // race the same ALTER after the first lock clears.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)');
+      const row = this.db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
+      let version = row?.version ?? 0;
+      if (row === undefined) this.db.prepare('INSERT INTO schema_version VALUES (0)').run();
+      for (let i = version; i < MIGRATIONS.length; i++) {
+        this.db.exec(MIGRATIONS[i]!);
+        version = i + 1;
+      }
+      this.db.prepare('UPDATE schema_version SET version = ?').run(version);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch { /* The failed statement may already have ended it. */ }
+      throw error;
     }
-    this.db.prepare('UPDATE schema_version SET version = ?').run(version);
   }
+
+  close(): void { this.db.close(); }
 
   /**
    * One finished summarising run, written down as it ended.
