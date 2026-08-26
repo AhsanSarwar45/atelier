@@ -83,6 +83,13 @@ export interface ImagePayload {
   alt: string;
 }
 
+/** A pair the agent asks the conversation to hold together for inspection. */
+export interface ImageComparison {
+  mode: 'side_by_side' | 'wipe';
+  before: ImagePayload;
+  after: ImagePayload;
+}
+
 /**
  * One entry in the writing box's `/` menu: a command the install has, or a skill
  * it can run. Both are typed the same way, so both are listed the same way
@@ -289,6 +296,7 @@ export type WbpEvent = EventBase &
     | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }
+    | { type: 'image.compare'; messageId: string; comparison: ImageComparison }
     /**
      * A tool is asking to run. `parentToolCallId` is set when a SENT-OFF agent
      * raised the question, and names the call that sent that agent — the same

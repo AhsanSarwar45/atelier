@@ -30,6 +30,7 @@ import type {
   Cost,
   EffortChoice,
   ImagePayload,
+  ImageComparison,
   MachineFamily,
   ModelChoice,
   NoteRank,
@@ -51,6 +52,7 @@ export interface TranscriptMessage {
   role: 'user' | 'assistant';
   text: string;
   images: ImagePayload[];
+  comparisons?: ImageComparison[];
   done: boolean;
   /** Set when a sent-off agent said this — the row nests under the call that sent it. */
   parentId: string | null;
@@ -372,6 +374,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           role: e.role,
           text: '',
           images: [],
+          comparisons: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
         },
@@ -381,6 +384,14 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'image':
       next.items = items.map((it) =>
         it.kind === 'message' && it.id === e.messageId ? { ...it, images: [...it.images, e.image] } : it,
+      );
+      return next;
+
+    case 'image.compare':
+      next.items = items.map((it) =>
+        it.kind === 'message' && it.id === e.messageId
+          ? { ...it, comparisons: [...(it.comparisons ?? []), e.comparison] }
+          : it,
       );
       return next;
 
@@ -724,6 +735,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           role: e.role,
           text: '',
           images: [],
+          comparisons: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
         });
@@ -734,6 +746,15 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         if (at !== undefined) {
           const it = items[at] as TranscriptMessage;
           it.images = [...it.images, e.image];
+        }
+        break;
+      }
+
+      case 'image.compare': {
+        const at = messageAt.get(e.messageId);
+        if (at !== undefined) {
+          const it = items[at] as TranscriptMessage;
+          it.comparisons = [...(it.comparisons ?? []), e.comparison];
         }
         break;
       }

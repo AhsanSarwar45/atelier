@@ -33,6 +33,8 @@ import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
 import { PictureGrid } from '@/workbench/picture-grid';
+import { ImageComparisonView } from '@/workbench/image-comparison';
+import { withoutComparisonSpecs } from '@/workbench/chat-media';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
@@ -828,8 +830,11 @@ const MessageRow = memo(function MessageRow({
       )}
     >
       <PictureGrid images={item.images} onLook={onLook} />
+      {(item.comparisons ?? []).map((comparison, index) => (
+        <ImageComparisonView key={index} comparison={comparison} onLook={onLook} />
+      ))}
       <MarkdownBody className="text-sm" mentions={mentions}>
-        {item.text}
+        {item.comparisons?.length ? withoutComparisonSpecs(item.text) : item.text}
       </MarkdownBody>
     </div>
   );

@@ -28,6 +28,7 @@ import {
   workerStopped,
 } from '../../../src/workbench/machine-words.ts';
 import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
+import { materializeComparisons } from '../materialize-chat-media.ts';
 
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'max'].map((value) => ({
   value,
@@ -749,6 +750,7 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
 
 export class ClaudeDriver implements Driver {
   private emit!: (e: DriverEvent) => void;
+  private cwd = process.cwd();
   private q: ReturnType<typeof query> | null = null;
   /** Turns queued by the browser, handed to the SDK as an async iterable. */
   private inbox: PromptInput[] = [];
@@ -1283,6 +1285,7 @@ export class ClaudeDriver implements Driver {
   async start(opts: StartOptions): Promise<void> {
     this.effort = opts.effort ?? null;
     this.emit = opts.emit;
+    this.cwd = opts.cwd;
     this.mode = opts.permissionMode ?? '';
 
     const self = this;
@@ -1881,6 +1884,12 @@ export class ClaudeDriver implements Driver {
             this.emit({ type: 'message.completed', messageId: id });
           });
         }
+        (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
+          if (b.type !== 'text') return;
+          for (const comparison of materializeComparisons(String(b.text ?? ''), this.cwd)) {
+            this.emit({ type: 'image.compare', messageId: `${messageId}:${index}`, comparison });
+          }
+        });
         // How full the conversation now is, which only the kit knows and only
         // says here (bw-4wcd.4). A helper's own usage is not this conversation's:
         // reading it here would make the gauge jump to whatever the last
