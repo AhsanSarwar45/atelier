@@ -30,7 +30,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { NOTHING, type Split, type TaskSpend, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
 import { createDriver, defaultPermissionMode } from './drivers/index.ts';
-import { codexMenu, codexRolloutLine, codexRolloutPath, CodexDriver, readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
+import { codexMenu, codexRolloutLine, codexRolloutPath, codexSnapshotCanSeed, CodexDriver, readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -598,9 +598,16 @@ export class Sessions {
           return { at: followed.at, through: null, carry: [], drawn: 0 };
         }
         // Discovery normally cached the rollout path. Keep a compatibility
-        // fallback for app-server builds that omit it.
+        // fallback for app-server builds that omit it. `thread/read` returns a
+        // complete snapshot. Once this transcript has any history, appending
+        // that snapshot would put all of its old messages after the commands
+        // already standing in the event log.
+        if (!codexSnapshotCanSeed(this.store.importedBy(summary.id), this.store.messageCount(summary.id))) {
+          return NOTHING_READ;
+        }
         const [thread, usage] = await Promise.all([readCodexThread(summary.externalId, summary.cwd), readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null)]);
         replayCodexThread(thread, (event) => this.publish(summary.id, event));
+        this.store.markImported(summary.id, IMPORT_RECIPE);
         if (usage) this.publish(summary.id, { type: 'cost', cost: { kind: 'tokens', ...usage } });
       } catch {
         // A missing or concurrently-written thread leaves the existing log alone.

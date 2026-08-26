@@ -347,6 +347,17 @@ export function replayCodexThread(thread: Bag, emit: (event: DriverEvent) => voi
   }
 }
 
+/**
+ * `thread/read` is a whole Codex snapshot, not a tail. It can seed a transcript
+ * when discovery cannot find the rollout, but it must never be appended below
+ * rows already drawn from either the rollout or a live driver. Snapshot item
+ * ids are not stable aliases of rollout ids, so row-level deduplication cannot
+ * repair that merge after the fact (bw-jknr.1).
+ */
+export function codexSnapshotCanSeed(importedBy: number | null, drawn: number): boolean {
+  return importedBy === null && drawn === 0;
+}
+
 /** Stateful diff of thread/read snapshots. External Codex sessions do not
  * expose a subscribable app-server thread, so polling is unavoidable; replaying
  * the snapshots is not. */

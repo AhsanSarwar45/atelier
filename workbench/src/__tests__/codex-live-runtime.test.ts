@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { WbpEvent } from '../../../src/workbench/protocol';
-import { CodexDriver, codexRolloutLine, codexThreadSettings, codexThreadUsageFromRollout, replayCodexThread } from '../drivers/codex';
+import { foldAll } from '../../../src/workbench/fold';
+import { CodexDriver, codexRolloutLine, codexSnapshotCanSeed, codexThreadSettings, codexThreadUsageFromRollout, replayCodexThread } from '../drivers/codex';
 
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
 
@@ -91,6 +92,32 @@ describe('Codex live-runtime regressions', () => {
     expect(events.filter((event) => event.type === 'message.completed')).toEqual([
       { type: 'message.completed', messageId: 'reply' },
     ]);
+  });
+
+  it('does not append a complete Codex snapshot below an existing command timeline', () => {
+    const existing = [
+      { type: 'message.started', messageId: 'live-commentary', role: 'assistant' },
+      { type: 'text.delta', messageId: 'live-commentary', text: 'I will inspect it.' },
+      { type: 'message.completed', messageId: 'live-commentary' },
+      { type: 'tool.started', toolCallId: 'live-command', name: 'Bash', input: {}, title: 'Inspected it', parentToolCallId: null },
+      { type: 'tool.completed', toolCallId: 'live-command', ok: true, output: 'done' },
+    ] as unknown as BareEvent[];
+    const snapshot = { turns: [{ items: [
+      { id: 'item-1', type: 'agentMessage', text: 'I will inspect it.' },
+      { id: 'item-2', type: 'commandExecution', command: 'rg thing', status: 'completed', exitCode: 0 },
+      { id: 'item-3', type: 'agentMessage', text: 'It is fixed.' },
+    ] }] };
+
+    const replayed = [...existing];
+    if (codexSnapshotCanSeed(9, 1)) replayCodexThread(snapshot, (event) => replayed.push(event));
+    const rows = foldAll(replayed.map((event, index) => ({
+      ...event, seq: index + 1, sessionId: 'external', at: new Date(0).toISOString(),
+    })) as WbpEvent[]).items;
+
+    expect(rows.map((row) => row.id)).toEqual(['live-commentary', 'live-command']);
+    expect(rows.filter((row) => row.kind === 'message')).toHaveLength(1);
+    expect(codexSnapshotCanSeed(null, 0)).toBe(true);
+    expect(codexSnapshotCanSeed(null, 1)).toBe(false);
   });
 
   it('settles an external turn and unwraps orchestration patches as edits', () => {
