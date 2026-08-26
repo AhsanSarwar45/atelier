@@ -971,7 +971,14 @@ function searchSaid(argv: string[], from: number): string | null {
 
 /** `node x.mjs`, `python3 -c "…"` — what a runner was pointed at. */
 function runSaid(argv: string[], tongue: string): string | null {
-  if (has(argv, '-c') || has(argv, '-e') || has(argv, '--eval')) return `Ran a ${tongue} one-liner`;
+  const inlineAt = argv.findIndex((word) => word === '-c' || word === '-e' || word === '--eval');
+  if (inlineAt >= 0) {
+    const code = argv[inlineAt + 1];
+    // `one-liner` says how the program was passed, not what ran. Keep enough
+    // of the actual program to make the row useful while still bounding
+    // generated scripts and avoiding the runner's flags.
+    return code ? `Ran ${tongue}: ${brief(code, 52)}` : `Ran a ${tongue} script`;
+  }
   const script = object(argv, 1);
   if (!script || script === '-') return `Ran a ${tongue} script`;
   return `Ran ${brief(leaf(script))}`;

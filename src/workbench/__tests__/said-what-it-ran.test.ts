@@ -178,9 +178,9 @@ const RULES: Array<[string, string]> = [
 
   // Running.
   ['node scripts/gate.mjs', 'Ran gate.mjs'],
-  ['node -e "console.log(1)"', 'Ran a Node one-liner'],
+  ['node -e "console.log(1)"', 'Ran Node: console.log(1)'],
   ['python3 scripts/x.py', 'Ran x.py'],
-  ['python3 -c "print(1)"', 'Ran a Python one-liner'],
+  ['python3 -c "print(1)"', 'Ran Python: print(1)'],
   ['bash scripts/e2e.sh', 'Ran e2e.sh'],
 
   // The network.
@@ -319,7 +319,7 @@ describe('a delete is never hidden', () => {
   it('says so from inside a quoted script another command was handed', () => {
     // `sh -c '…'` is one word to anything reading the chain properly.
     const ran = whatACommandDid("bash -c 'cd /tmp && rm -rf x'");
-    expect(ran?.said).toBe('Ran a shell one-liner, then deleted files');
+    expect(ran?.said).toBe('Ran shell: cd /tmp && rm -rf x, then deleted files');
     expect(ran?.grave).toBe(true);
   });
 
@@ -340,7 +340,7 @@ describe('a delete is never hidden', () => {
     // places the backstop read a command as starting. It read this as the
     // tests and a one-liner, and said nothing about the rm (bw-7ks.24.8).
     const ran = whatACommandDid('npm test && sh -c "rm -rf x"');
-    expect(ran?.said).toBe('Ran the tests, then ran a shell one-liner, then deleted files');
+    expect(ran?.said).toBe('Ran the tests, then ran shell: rm -rf x, then deleted files');
     expect(ran?.grave).toBe(true);
   });
 

@@ -86,6 +86,11 @@ def card_for(issue, cwd):
     ok, out = run(["bd", "show", issue, "--json"], cwd)
     if not ok:
         return None
+    try:
+        card = json.loads(out)
+        return card[0] if isinstance(card, list) else card
+    except (ValueError, TypeError, IndexError):
+        return None
 
 
 def checked_out_for(issue, cwd):
@@ -98,11 +103,6 @@ def checked_out_for(issue, cwd):
         os.path.realpath(line.removeprefix("worktree "))
         for line in trees.splitlines() if line.startswith("worktree ")
     }
-    try:
-        card = json.loads(out)
-        return card[0] if isinstance(card, list) else card
-    except (ValueError, TypeError, IndexError):
-        return None
 
 
 def children_for(issue, cwd):
