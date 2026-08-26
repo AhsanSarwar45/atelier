@@ -121,8 +121,21 @@ describe('the list keeps up', () => {
  */
 describe('the working mark keeps up', () => {
   it('a chat that starts being worked in is marked, without the list being asked again', () => {
-    const marked = withLive([row({ externalId: 'x1' })], [], PROJECT, new Set(['x1']));
+    const marked = withLive([row({ sessionId: null, externalId: 'x1' })], [], PROJECT, new Set(['x1']));
     expect(marked[0]!.runningElsewhere).toBe(true);
+  });
+
+  it('does not put a stale outside command back on a closed Atelier session', () => {
+    const marked = withLive(
+      [row({ sessionId: 's1', state: 'dormant', externalId: 'x1' })],
+      [],
+      PROJECT,
+      new Set(['x1']),
+      new Map([['x1', { id: 'x1', holder: 'program' as const, doing: 'running' as const, detail: 'Bash', since: 1_000 }]]),
+    );
+
+    expect(marked[0]!.runningElsewhere).toBe(false);
+    expect(marked[0]!.held).toBeNull();
   });
 
   it('and it goes when the work stops', () => {
@@ -132,11 +145,11 @@ describe('the working mark keeps up', () => {
 
   it('a chat that starts being worked in climbs over one with a newer date', () => {
     const rows = [
-      row({ sessionId: 's1', externalId: 'x1', lastActiveAt: '2026-08-16T09:00:00.000Z' }),
+      row({ sessionId: null, externalId: 'x1', lastActiveAt: '2026-08-16T09:00:00.000Z' }),
       row({ sessionId: 's2', externalId: 'x2', lastActiveAt: '2026-08-16T12:00:00.000Z' }),
     ];
-    expect(withLive(rows, [], PROJECT, new Set<string>()).map((r) => r.sessionId)).toEqual(['s2', 's1']);
-    expect(withLive(rows, [], PROJECT, new Set(['x1'])).map((r) => r.sessionId)).toEqual(['s1', 's2']);
+    expect(withLive(rows, [], PROJECT, new Set<string>()).map((r) => r.externalId ?? r.sessionId)).toEqual(['x2', 'x1']);
+    expect(withLive(rows, [], PROJECT, new Set(['x1'])).map((r) => r.externalId ?? r.sessionId)).toEqual(['x1', 'x2']);
   });
 
   // Until the stream has spoken there is nothing to apply, and the list has
@@ -169,7 +182,7 @@ describe('the working mark keeps up', () => {
 
   it('and still says so for a chat nothing of ours is on', () => {
     const merged = withLive(
-      [row({ externalId: 'x1' })],
+      [row({ sessionId: null, externalId: 'x1' })],
       [],
       PROJECT,
       new Set(['x1']),

@@ -102,6 +102,13 @@ describe('the control on a row', () => {
     expect(closeOn('A chat of ours'), 'no way to close a chat from its own row').not.toBeNull();
   });
 
+  it('and an attached chat between turns says Idle', async () => {
+    await draw();
+
+    const pill = within(rowNamed('A chat of ours')).getByTestId('row-pill');
+    expect(pill).toHaveTextContent('Idle');
+  });
+
   it('says what it does, for a reader who cannot see the icon', async () => {
     await draw();
 

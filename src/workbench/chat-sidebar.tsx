@@ -272,6 +272,12 @@ export function withLive(
   const marked = running
     ? merged.map((r) => {
         if (!r.externalId) return r;
+        // A provider marker names the conversation, not the Atelier session.
+        // Our own driver writes one too, and after an unclean exit that marker
+        // can outlive the driver. An Atelier row already has its truthful state
+        // from the session stream; only a row we have never opened needs the
+        // outside-process overlay (restore-status.ts, bw-zpyl.9).
+        if (r.sessionId !== null) return { ...r, runningElsewhere: false, held: null };
         const theirs = heldElsewhere(r.state, r.externalId, running);
         return {
           ...r,
@@ -659,6 +665,12 @@ export function ChatSidebar({
                 // before the question was asked.
                 spokenIn: row.lastSpokeAt !== null,
               });
+              // In the restore list this is activity, not availability. A row
+              // with our agent attached (the close control proves it) and no
+              // turn in flight is idle. The shared reader calls that standing
+              // "Ready" elsewhere; on this row the manager asked for the
+              // literal current activity: Idle (bw-zpyl.10).
+              const rowState = closable && row.state === 'idle' ? { ...state, word: 'Idle' } : state;
               return (
                 <div
                   key={key}
@@ -779,6 +791,7 @@ export function ChatSidebar({
                   */}
                   {(busy === key ||
                     ending === key ||
+                    closable ||
                     state.working ||
                     state.waiting ||
                     ownership.kind === 'elsewhere') && (
@@ -810,7 +823,7 @@ export function ChatSidebar({
                         // the middle now, so what arrives at this width is both
                         // ends of it rather than four letters of the front
                         // (chat-state-chip.tsx, splitDetail; bw-gnzl).
-                        <ChatStateChip state={state} testId="row-pill" className="min-w-0 shrink" />
+                        <ChatStateChip state={rowState} testId="row-pill" className="min-w-0 shrink" />
                       )}
                       {ownership.kind === 'elsewhere' && state.external && (
                         <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />
