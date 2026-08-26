@@ -60,4 +60,20 @@ describe('provider-neutral effort', () => {
       rmSync(folder, { recursive: true, force: true });
     }
   });
+
+  it('stores older session shapes that have no effort field', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'atelier-effort-legacy-'));
+    try {
+      const store = new Store(join(folder, 'workbench.db'));
+      const summary: SessionSummary = {
+        id: 'legacy', brand: 'claude', externalId: null, projectId: 'p', projectPath: '/p', cwd: '/p',
+        model: null, permissionMode: 'default', title: null, state: 'idle',
+        createdAt: '2026-08-26T00:00:00.000Z', lastActiveAt: '2026-08-26T00:00:00.000Z',
+      };
+      store.createSession({ ...summary, origin: 'imported' });
+      expect(store.getSession('legacy')?.effort).toBeNull();
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
 });

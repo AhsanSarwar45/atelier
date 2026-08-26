@@ -208,7 +208,7 @@ export class Store {
       )
       .run(
         s.id, s.brand, s.externalId, s.projectId, s.projectPath, s.cwd, s.model,
-        s.permissionMode, s.effort, s.title, s.state, s.origin, s.createdAt, s.lastActiveAt,
+        s.permissionMode, s.effort ?? null, s.title, s.state, s.origin, s.createdAt, s.lastActiveAt,
       );
   }
 
