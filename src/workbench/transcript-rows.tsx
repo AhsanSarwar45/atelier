@@ -38,7 +38,6 @@ import { withoutComparisonSpecs } from '@/workbench/chat-media';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
-import { ReportCard } from '@/workbench/report-view';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
 
@@ -863,8 +862,6 @@ export const TranscriptRow = memo(function TranscriptRow({
       return <ToolRow item={item} nested={sentOff(item.parentId)} sessionId={sessionId} />;
     case 'thinking':
       return <ThinkingBlock item={item} />;
-    case 'report':
-      return <ReportCard project={item.project} slug={item.slug} />;
     case 'ask':
       return (
         <PermissionCard

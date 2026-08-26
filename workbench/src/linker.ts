@@ -9,7 +9,7 @@
  * them becomes a link.
  */
 import type { DriverEvent } from './drivers/types.ts';
-import { candidatesFrom, reportFrom } from '../../src/workbench/link-rules.ts';
+import { candidatesFrom } from '../../src/workbench/link-rules.ts';
 import { issueExists, recordTranscriptLink } from './bd.ts';
 
 export class Linker {
@@ -19,7 +19,6 @@ export class Linker {
   /** Verdicts already reached this session, so `bd` is asked once per token. */
   private verdicts = new Map<string, boolean>();
   private linked = new Set<string>();
-  private reported = new Set<string>();
   /** Serialises the bd calls so one busy turn cannot fork a process storm. */
   private queue: Promise<void> = Promise.resolve();
 
@@ -31,15 +30,6 @@ export class Linker {
 
   /** Feed every tool call here. Returns immediately; the board is written behind it. */
   observe(name: string, input: Record<string, unknown>): void {
-    const report = reportFrom(name, input);
-    if (report) {
-      const key = `${report.project}/${report.slug}`;
-      if (!this.reported.has(key)) {
-        this.reported.add(key);
-        this.emit({ type: 'report.available', project: report.project, slug: report.slug });
-      }
-    }
-
     const candidates = candidatesFrom(name, input).filter((id) => !this.linked.has(id));
     if (!candidates.length) return;
     this.queue = this.queue.then(() => this.confirmAndRecord(candidates)).catch(() => {});

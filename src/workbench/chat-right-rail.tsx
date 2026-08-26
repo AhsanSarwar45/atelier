@@ -40,7 +40,6 @@ import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import type { AgentControl } from '@/workbench/protocol';
-import { ReportChip } from '@/workbench/report-view';
 import { SentAwayPanel } from '@/workbench/sent-away';
 
 /** Where the rail's open-or-shut is remembered between visits. */
@@ -89,8 +88,6 @@ export interface ChatRightRailProps {
   projectId: string | null;
   /** Every card this chat has touched, in the order it touched them. */
   cards: string[];
-  /** The reports this chat's work produced. */
-  reports: { project: string; slug: string; title: string }[];
   /** Everything it handed to something else, oldest first (§8.2.7). */
   agents: SentAway[];
   /** The conversation's own rows; a helper's card reads its live line from them. */
@@ -113,7 +110,6 @@ export interface ChatRightRailProps {
 export function ChatRightRail({
   projectId,
   cards,
-  reports,
   agents,
   items,
   sessionId,
@@ -123,7 +119,7 @@ export function ChatRightRail({
   onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
-  const empty = cards.length === 0 && reports.length === 0 && agents.length === 0;
+  const empty = cards.length === 0 && agents.length === 0;
   return (
     <div
       data-testid="chat-right-rail"
@@ -178,7 +174,7 @@ export function ChatRightRail({
             </Button>
           </div>
           {/* First in the column because it is the only part of it that moves.
-              Cards and reports are a record and will still be there; a helper
+              Cards are a record and will still be there; a helper
               that has been going four minutes is the thing the reader opened
               this rail to look at (§8.2.7). */}
           {agents.length > 0 && (
@@ -208,16 +204,6 @@ export function ChatRightRail({
                     size="sm"
                     title={jobTitle(job)}
                   />
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {reports.length > 0 && (
-            <Section title="Reports it produced">
-              <div className="flex flex-wrap gap-1" data-testid="rail-reports">
-                {reports.map((r) => (
-                  <ReportChip key={`${r.project}/${r.slug}`} project={r.project} slug={r.slug} title={r.title} />
                 ))}
               </div>
             </Section>

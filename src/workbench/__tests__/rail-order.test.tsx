@@ -51,13 +51,12 @@ function sections(): string[] {
     .map((h) => h.textContent ?? '');
 }
 
-const rail = (agents: SentAway[], cards: string[], reports: { project: string; slug: string; title: string }[]) =>
+const rail = (agents: SentAway[], cards: string[]) =>
   render(
     <ChatRightRail
       items={[]}
       projectId="beads-web"
       cards={cards}
-      reports={reports}
       agents={agents}
       sessionId="chat-1"
       agentControls={['stop']}
@@ -69,20 +68,20 @@ const rail = (agents: SentAway[], cards: string[], reports: { project: string; s
 
 describe('what the rail holds, in order', () => {
   it('puts the only moving part at the top', () => {
-    rail(oneAgent(), ['bw-uiyz.1'], [{ project: 'beads-web', slug: 'a-report', title: 'A report' }]);
+    rail(oneAgent(), ['bw-uiyz.1']);
 
-    expect(sections()).toEqual(['Sent away', 'Cards it has touched', 'Reports it produced']);
+    expect(sections()).toEqual(['Sent away', 'Cards it has touched']);
   });
 
   it('keeps that order when a section has nothing in it', () => {
     // A missing section is missing, not blank: the ones that are there keep
     // their places rather than shuffling up into a fixed slot.
-    rail(oneAgent(), [], [{ project: 'beads-web', slug: 'a-report', title: 'A report' }]);
-    expect(sections()).toEqual(['Sent away', 'Reports it produced']);
+    rail(oneAgent(), []);
+    expect(sections()).toEqual(['Sent away']);
   });
 
   it('says so plainly when the chat has touched nothing at all', () => {
-    rail([], [], []);
+    rail([], []);
     expect(sections()).toEqual([]);
     expect(screen.getByTestId('rail-empty')).toBeInTheDocument();
   });

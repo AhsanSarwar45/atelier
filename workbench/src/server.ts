@@ -71,7 +71,6 @@ function starts(event: ReturnType<Store['transcriptWindow']>['events'][number], 
   if (item.kind === 'thinking') return event.type === 'message.started' && event.messageId === item.id;
   if (item.kind === 'tool') return event.type === 'tool.started' && event.toolCallId === item.id;
   if (item.kind === 'ask') return event.type === 'ask.permission' && event.askId === item.id;
-  if (item.kind === 'report') return event.type === 'report.available' && `${event.project}/${event.slug}` === item.id;
   if (item.kind === 'note') return event.type === 'note' && event.noteId === item.id;
   return event.type === 'notice' && `notice-${event.seq}` === item.id;
 }

@@ -36,7 +36,7 @@ function said(e: Said<WbpEvent>): WbpEvent {
 }
 
 /** Words, drawn as they are: none of this is about what makes a card a link. */
-const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null, report: () => null };
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
 
 /**
  * A chat that says something of its own, runs a command of its own, and sends

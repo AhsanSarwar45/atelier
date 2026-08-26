@@ -1775,8 +1775,6 @@ export class Sessions {
       this.linkers.get(sessionId)?.observe(full.name, full.input);
     } else if (full.type === 'link.bead') {
       this.store.rememberBeadLink(sessionId, full.beadId, full.via);
-    } else if (full.type === 'report.available') {
-      this.store.rememberReportLink(sessionId, full.project, full.slug);
     } else if (full.type === 'session.pinned') {
       // The mode is re-pinned on every resume from what is stored (§3.1), so a
       // mode the tool changed by itself — approving a plan ends plan mode — has

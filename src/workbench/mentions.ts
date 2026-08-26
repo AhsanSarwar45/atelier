@@ -36,7 +36,6 @@ import { pathsIn, type OnDisk, type PathPiece, type Rooted } from '@/workbench/p
 export type Piece =
   | { kind: 'text'; text: string }
   | { kind: 'card'; id: string }
-  | { kind: 'report'; slug: string }
   | PathPiece;
 
 /**
@@ -49,7 +48,6 @@ const TOKEN = /[a-z0-9]+(?:[-.][a-z0-9]+)+/g;
 /** What the caller knows to exist. Either may say no to everything. */
 export interface Existing {
   card(id: string): boolean;
-  report(slug: string): boolean;
 }
 
 /**
@@ -66,10 +64,9 @@ export function mentionsIn(text: string, existing: Existing): Piece[] {
 
   while ((m = scan.exec(text)) !== null) {
     const token = m[0];
-    const kind = existing.card(token) ? 'card' : existing.report(token) ? 'report' : null;
-    if (!kind) continue;
+    if (!existing.card(token)) continue;
     if (m.index > from) pieces.push({ kind: 'text', text: text.slice(from, m.index) });
-    pieces.push(kind === 'card' ? { kind: 'card', id: token } : { kind: 'report', slug: token });
+    pieces.push({ kind: 'card', id: token });
     from = m.index + token.length;
   }
 
@@ -112,10 +109,7 @@ export function openableIn(text: string, existing: Existing, where: Rooted, disk
  * address, and card ids repeat across boards. Null when the address names no
  * project — one written inside the app, which can only mean this one.
  */
-export type Addressed = { project: string | null } & (
-  | { kind: 'card'; id: string }
-  | { kind: 'report'; slug: string }
-);
+export type Addressed = { project: string | null; kind: 'card'; id: string };
 
 /**
  * The machine an address has to be on to be one of ours.
@@ -170,8 +164,7 @@ export function addressedBy(href: string): Addressed | null {
   const project = url.searchParams.get('id');
   const card = url.searchParams.get('card') ?? url.searchParams.get(OLD_CARD);
   if (card) return { kind: 'card', id: card, project };
-  const report = url.searchParams.get('report');
-  return report ? { kind: 'report', slug: report, project } : null;
+  return null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -259,11 +252,11 @@ function marker(piece: Exclude<Piece, { kind: 'text' }>): HastNode {
       children: [{ type: 'text', value: piece.raw }],
     };
   }
-  const name = piece.kind === 'card' ? piece.id : piece.slug;
+  const name = piece.id;
   return {
     type: 'element',
     tagName: 'span',
-    properties: piece.kind === 'card' ? { 'data-card-mention': name } : { 'data-report-mention': name },
+    properties: { 'data-card-mention': name },
     children: [{ type: 'text', value: name }],
   };
 }
@@ -279,7 +272,7 @@ function filesFrom(pieces: Piece[]): Piece[] {
       out.push(piece);
       continue;
     }
-    const text = piece.kind === 'text' ? piece.text : piece.kind === 'card' ? piece.id : piece.slug;
+    const text = piece.kind === 'text' ? piece.text : piece.id;
     const last = out[out.length - 1];
     if (last && last.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + text };
     else out.push({ kind: 'text', text });

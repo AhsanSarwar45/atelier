@@ -1,5 +1,5 @@
 /**
- * A card or a report named in a message is something you can click — and
+ * A card named in a message is something you can click — and
  * nothing else is.
  *
  * The trap this guards is English: `follow-up`, `read-only`, `fast-forward` and
@@ -12,10 +12,9 @@ import { addressedBy, mentionsIn, rehypeMentions, type Existing } from '@/workbe
 
 const BOARD: Existing = {
   card: (id) => ['bw-4wcd', 'bw-4wcd.3', 'bw-1u1'].includes(id),
-  report: (slug) => slug === 'chat-interface-work',
 };
 
-const NOTHING: Existing = { card: () => false, report: () => false };
+const NOTHING: Existing = { card: () => false };
 
 describe('what a message names', () => {
   it('makes a chip of a card that is on the board', () => {
@@ -23,13 +22,6 @@ describe('what a message names', () => {
       { kind: 'text', text: 'landed ' },
       { kind: 'card', id: 'bw-4wcd.3' },
       { kind: 'text', text: ' today' },
-    ]);
-  });
-
-  it('makes a chip of a report this project has', () => {
-    expect(mentionsIn('see chat-interface-work', BOARD)).toEqual([
-      { kind: 'text', text: 'see ' },
-      { kind: 'report', slug: 'chat-interface-work' },
     ]);
   });
 
@@ -107,25 +99,9 @@ describe('the rewriting step', () => {
   });
 });
 
-/**
- * An agent hands a report over as the whole address, port and all — the way it
- * would hand it to somebody outside the app. That is a link long before any of
- * the rewriting above is asked anything, so the address itself has to say what
- * it names (bw-8fh2.2).
- */
 describe('an address written out in full', () => {
   /** What an address that names no project at all comes back as. */
   const HERE_CARD = { kind: 'card', id: 'bw-1u1', project: null };
-
-  it('names the report it carries', () => {
-    const written =
-      'http://127.0.0.1:3008/project?id=7ec315b6-f66e-421e-84ae-a28088bdf16b&tab=reports&report=agents-you-cannot-see';
-    expect(addressedBy(written)).toEqual({
-      kind: 'report',
-      slug: 'agents-you-cannot-see',
-      project: '7ec315b6-f66e-421e-84ae-a28088bdf16b',
-    });
-  });
 
   it('names the card it carries, however the address spells it', () => {
     expect(addressedBy('http://localhost:3008/project?id=p&card=bw-1u1')).toEqual({
@@ -136,7 +112,7 @@ describe('an address written out in full', () => {
     expect(addressedBy('/project?id=p&bead=bw-1u1')).toEqual({ kind: 'card', id: 'bw-1u1', project: 'p' });
   });
 
-  it('gives the card when an address carries both, because its panel is what opens', () => {
+  it('gives the card even when an address carries retired parameters', () => {
     expect(addressedBy('/project?tab=reports&report=a-report&card=bw-1u1')).toEqual({
       kind: 'card',
       id: 'bw-1u1',

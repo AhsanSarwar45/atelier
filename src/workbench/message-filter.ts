@@ -60,7 +60,6 @@ export const THINKING = 'thinking';
 export const COMMANDS = 'commands';
 export const STATUS = 'status';
 export const QUESTIONS = 'questions';
-export const REPORTS = 'reports';
 
 /** The tool's own name, as the agent reported it. */
 export const toolKind = (name: string): KindId => `tool:${name}`;
@@ -111,7 +110,6 @@ const LABELS: Record<string, string> = {
   [COMMANDS]: 'Commands',
   [STATUS]: 'Status lines',
   [QUESTIONS]: 'Questions',
-  [REPORTS]: 'Reports',
 };
 
 /** What each audience is called on screen. The switch the reader reaches for. */
@@ -223,8 +221,6 @@ export function kindOf(item: TranscriptItem): KindId {
       return toolKind(item.name);
     case 'ask':
       return QUESTIONS;
-    case 'report':
-      return REPORTS;
     // Never reached: a note and a notice both draw as machine lines and were
     // answered above. Kept so the switch stays exhaustive over the kinds.
     case 'note':
@@ -245,7 +241,7 @@ export interface KindNode {
 /** How the switch reads: fully on, fully off, or on in part. */
 export type SwitchState = 'on' | 'off' | 'half';
 
-const UNDER_AGENT = [REPLIES, THINKING, COMMANDS, STATUS, QUESTIONS, REPORTS];
+const UNDER_AGENT = [REPLIES, THINKING, COMMANDS, STATUS, QUESTIONS];
 
 /**
  * The tree for one conversation: the fixed kinds always, and under commands

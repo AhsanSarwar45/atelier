@@ -1,7 +1,7 @@
 /**
  * The project screen when the project itself could not be read.
  *
- * Everything under the tabs — the board, the reports, the card panel — is
+ * Everything under the tabs — the board and card panel — is
  * mounted only once the project is in hand, so a failed read left the reader
  * looking at a row of tabs over an empty body: no word about what happened, and
  * nothing to press (bw-zkh4). The tabs are still there; what fills the body now
@@ -13,18 +13,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const useProjectMock = vi.fn();
 vi.mock('@/hooks/use-project', () => ({ useProject: () => useProjectMock() }));
 
-vi.mock('@/components/reports', () => ({
-  useReports: () => ({ reports: [], isLoading: false, error: null, reload: vi.fn() }),
-  useReportsByCard: () => new Map(),
-  CardReportLink: () => null,
-}));
-
 // The tabs' contents are the point of the other tests, not of this one; what is
 // being asked here is what the screen puts in front of the reader when there is
 // no project for any of them to draw.
 vi.mock('@/workbench/chat-tab', () => ({ default: () => <div data-testid="chat-tab" /> }));
 vi.mock('@/app/project/kanban-board', () => ({ default: () => <div data-testid="board" /> }));
-vi.mock('@/app/project/report-tab', () => ({ default: () => <div data-testid="report-tab" /> }));
 vi.mock('@/app/project/board-cards', () => ({
   BoardCards: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useBoardCards: () => ({ beads: [], ticketNumbers: new Map(), isLoading: false, error: null, refresh: vi.fn() }),

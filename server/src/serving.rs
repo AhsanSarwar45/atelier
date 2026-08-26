@@ -125,7 +125,6 @@ mod tests {
             "/api/health",
             "/api/beads",
             "/api/projects",
-            "/api/reports/spec",
             "/api/workbench/chats",
             "/api",
         ] {

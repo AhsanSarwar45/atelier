@@ -47,7 +47,7 @@ vi.mock('@/workbench/colouring', async (real) => {
 
 const HELD = 200;
 
-const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id, report: (slug) => slug };
+const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
 const LOOK = (_image: ImagePayload) => {};
 
 /** One event without the envelope the wire wraps it in. */

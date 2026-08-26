@@ -17,7 +17,7 @@ import type { ImagePayload } from '@/workbench/protocol';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import type { TranscriptItem } from '@/workbench/use-session';
 
-const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id, report: (slug) => slug };
+const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
 const LOOK = (_image: ImagePayload) => {};
 
 /** One message, said by whoever, from wherever. */

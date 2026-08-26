@@ -76,13 +76,11 @@ Constraint: everything a reader could arrive at is in the address, and every
 move he makes by hand is pushed onto the history. One shape, on one route:
 
 ```
-/project?id=<project>&tab=chat|board|reports&chat=<sessionId>&card=<cardId>
-                     &report=<slug>&section=<anchor>
+/project?id=<project>&tab=chat|board&chat=<sessionId>&card=<cardId>
 ```
 
-`tab` is which part is mounted, `chat` is the conversation drawn in it, `card` is
-the card panel over the top of any of them, and `report`/`section` are the report
-being read and the part of it a link points at (§1.10). Nothing that a link could carry is held in
+`tab` is which part is mounted, `chat` is the conversation drawn in it, and `card` is
+the card panel over the top of either. Nothing that a link could carry is held in
 a component's own state: a screen that keeps its own copy answers the address on
 the first paint and then quietly disagrees with it, which is what made Back do
 nothing and made an open chat unlinkable.
@@ -130,57 +128,17 @@ A row must not move for being read: `last_active_at` is stamped by every
 `updateSession`, so opening may write nothing to the session row. That stamp is
 what sent a clicked chat to the top of the list.
 
-### 1.10 A report is a place under its project (bw-7ks.21)
+### 1.10 Images and comparisons stay in chat (bw-pc1z)
 
-Constraint: a report opens inside the shell — the same two bars, as a third tab
-beside Board and Chat — and nowhere in the app is a report drawn in a frame. The
-app reads what a report says as plain facts and draws every part of it with the
-components the rest of the screen is made from, so a report wears the theme the
-reader picked and scrolls the way everything else scrolls.
+Constraint: agent-produced images are part of the conversation, not a reason to
+leave it. Ordinary images draw inline and open at full size. A before-and-after
+pair is written as a compact `atelier-image-compare` block naming two files
+inside the project and a `side_by_side` or `wipe` mode. The sidecar validates
+and materializes both files; the browser replaces the block with the native
+comparison widget. Paths outside the project are refused.
 
-One address, whoever opens it:
-
-```
-/project?id=<project>&tab=reports&report=<slug>&section=<part>
-```
-
-A card on the board, a chip on a chat's line and a report an agent drops into a
-conversation all push that one address, so a report has one place and Back is
-wherever the reader came from. The drawer over half the board and the box over
-the chat are both gone with the two iframes they held; the report tools' own
-self-contained page survives as one thing only — what the builder prints for a
-reader with no app in front of him.
-
-Three shapes, decided by the width of the window and held by
-`tests/e2e/report-screen.spec.ts`:
-
-| Window | Contents | The report | The links |
-|---|---|---|---|
-| 1440 | pinned at the window's left edge | reading column | a rail on the right |
-| 1150 | pinned at the window's left edge | reading column | under the contents |
-| 800 | a strip across the top | the full width beneath | in that same strip |
-
-Constraint: the reading column never exceeds 780px, and nothing inside a report
-may push it sideways — a wide table scrolls inside its own strip rather than
-carrying the column with it.
-
-Where the words come from: the report tools write out what a report says as
-plain facts beside the built page, and the server hands those over at
-`/api/reports/spec?project=&slug=&path=`. A report is filed under the name of
-its project's own folder, and that basename is the only thing tying a report to
-a project — which is why a report filed under a name no project's folder carries
-cannot be opened from inside the app at all, and why a test that fixtures one
-files it the same way.
-
-Opening is instant: the server answers from the facts it built last time and
-rebuilds behind the reader (0.0006 s against 7.5 s for a real run, bw-7ks.21.9),
-and two readers arriving together share one run.
-
-Two things the screen is for beyond reading. A report ending in a question is
-counted as waiting on the manager — on the list of projects and inside the
-project — for exactly as long as the board still holds open the card that
-question names. And clicking an answer posts it as his own words onto that card
-and into the chat that worked it, so nothing is copied by hand.
+Questions use the provider's native question card. There is no Reports tab,
+report page, report API, waiting badge, or separate report-delivery workflow.
 
 ### 1.11 A chat draws only the kinds asked for (bw-qdim)
 
@@ -188,7 +146,7 @@ Constraint: a busy chat is mostly the agent's own working — files read, comman
 run, quiet notes about itself — and what it SAID is a handful of rows buried in
 it. The chat's toolbar carries one control over all of it, opening a tree of
 switches: you and the agent at the top; the agent's replies, thinking, commands,
-status lines, questions and reports beneath it; under commands one entry for
+status lines and questions beneath it; under commands one entry for
 every tool this conversation actually used, and under status lines one for every
 family of machine line it holds (bw-jkh2.14).
 

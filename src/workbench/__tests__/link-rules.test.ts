@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { candidatesFrom, reportFrom } from '@/workbench/link-rules';
+import { candidatesFrom } from '@/workbench/link-rules';
 
 /**
  * The rule these guard is deliberately mean: a chip for a card the chat never
@@ -42,29 +42,5 @@ describe('what counts as touching a card', () => {
   it('wants the whole stem, not an id buried in a longer name', () => {
     expect(candidatesFrom('Edit', { file_path: '/p/docs/notes-about-bw-7ks.md' })).toEqual([]);
     expect(candidatesFrom('Edit', { file_path: '/p/src/notes.txt' })).toEqual([]);
-  });
-});
-
-describe('spotting a report', () => {
-  it('recognises a spec being written where the data folder keeps them', () => {
-    expect(
-      reportFrom('Write', { file_path: '/h/.local/share/kanban-ui/reports/beads-web/my-slug.report.json' }),
-    ).toEqual({
-      project: 'beads-web',
-      slug: 'my-slug',
-    });
-  });
-
-  it('still recognises one written where they used to live', () => {
-    expect(reportFrom('Write', { file_path: '/h/reporting/pages/beads-web/my-slug.report.json' })).toEqual({
-      project: 'beads-web',
-      slug: 'my-slug',
-    });
-  });
-
-  it('ignores the built page and anything else', () => {
-    expect(reportFrom('Write', { file_path: '/h/reporting/pages/x/y.html' })).toBeNull();
-    expect(reportFrom('Write', { file_path: '/p/notes.json' })).toBeNull();
-    expect(reportFrom('Read', { file_path: '/h/reporting/pages/x/y.report.json' })).toBeNull();
   });
 });

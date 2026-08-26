@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { Badge } from '@/components/ui/badge';
+import { Panel } from '@/components/ui/panel';
 import type { ImageComparison, ImagePayload } from '@/workbench/protocol';
 
 export function ImageComparisonView({ comparison, onLook }: {
@@ -32,6 +33,7 @@ export function ImageComparisonView({ comparison, onLook }: {
   }
 
   return (
+    <Panel tone="frame" inset="none" className="mb-2 max-w-2xl overflow-hidden">
     <div
       ref={frame}
       data-testid="image-comparison"
@@ -42,7 +44,7 @@ export function ImageComparisonView({ comparison, onLook }: {
       aria-valuemax={100}
       aria-valuenow={Math.round(pct)}
       tabIndex={0}
-      className="relative mb-2 max-w-2xl select-none overflow-hidden rounded border border-border/60"
+      className="relative select-none overflow-hidden"
       style={{ touchAction: 'none' }}
       onPointerDown={(event) => { dragging.current = true; frame.current?.setPointerCapture?.(event.pointerId); place(event); }}
       onPointerMove={(event) => { if (dragging.current) place(event); }}
@@ -63,5 +65,6 @@ export function ImageComparisonView({ comparison, onLook }: {
       <Badge variant="outline" size="xs" className="absolute bottom-2 left-2 bg-background">{comparison.before.alt}</Badge>
       <Badge variant="outline" size="xs" className="absolute bottom-2 right-2 bg-background">{comparison.after.alt}</Badge>
     </div>
+    </Panel>
   );
 }

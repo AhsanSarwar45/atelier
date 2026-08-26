@@ -34,12 +34,6 @@ vi.mock('@/lib/db', () => ({
   deleteTag: vi.fn(),
 }));
 
-vi.mock('@/components/reports', () => ({
-  useReports: () => ({ reports: [], isLoading: false, error: null, reload: vi.fn() }),
-  useReportsByCard: () => new Map(),
-  CardReportLink: () => null,
-}));
-
 // The shell opens the window's one connection through the status chip, and the
 // question here is what a screen draws — not what it is connected to.
 vi.mock('@/workbench/globals', () => ({ WorkbenchStatus: () => null }));

@@ -6,7 +6,7 @@ import type { TranscriptMessage } from '@/workbench/fold';
 import type { ImageComparison, ImagePayload } from '@/workbench/protocol';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 
-const mentions: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null, report: () => null };
+const mentions: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
 const image = (alt: string): ImagePayload => ({ mime: 'image/png', dataUrl: `data:image/png;base64,${alt}`, alt });
 const spec = `\`\`\`atelier-image-compare
 {"mode":"wipe","before":{"path":"before.png","caption":"Old"},"after":{"path":"after.png","caption":"New"}}

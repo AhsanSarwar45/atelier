@@ -2,7 +2,7 @@
 """Stop hook — refuses to finish a turn while the board is behind the work, and
 then while the work itself is unfinished.
 
-Six refusals, in the order they matter: the board must be reachable at all; a
+Five refusals, in the order they matter: the board must be reachable at all; a
 habit the manager pointed at this turn must have a card naming what produced it —
 poured this turn or already standing — before anything he said gets answered; code changed in this turn must belong to a
 card this session held when it changed it (`bc.unowned` — the held set at the
@@ -12,18 +12,16 @@ recorded, as a work item of this job or as a job of its own; a card this session
 made must say how anyone would know it is done; and last, the job it is running
 must be finished or waiting on somebody (`carry_on`, docs/board.md#4f-when-a-session-may-stop).
 
-The first five buy a single retry each, given up the moment `stop_hook_active`
+The first four buy a single retry each, given up the moment `stop_hook_active`
 says one already fired: they catch a mistake in what was recorded, and a refusal
 that should not have fired must cost one extra reply, never a wedged session. The
 last one is the point of the gate rather than a guard against a slip, so it keeps
 refusing to `PUSH_LIMIT`.
 """
-import glob
 import json
 import os
 import re
 import sys
-import urllib.parse
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 import board_common as bc  # noqa: E402
@@ -67,26 +65,6 @@ CARRY_ON = (
     "him. docs/board.md#4f-when-a-session-may-stop"
 )
 
-# The link a report build prints, however the board screen was reachable
-# (reporting/tools/build.py): the screen's own address while it is up, the file
-# itself when it is not. Both name the project's folder and the page's slug,
-# which is what finds the spec the page was built from.
-#
-# The file itself is recognised by its scheme and by the two folders at the end
-# of it, never by the name of the folder they sit in: where this machine keeps
-# its pages is a setting (REPORTS_DIR), and a gate that only knew the default
-# name pushed a real handover back to work on any machine that changed it.
-LINK = re.compile(r"/api/reports/page(?:\?(?P<query>\S+))?"
-                  r"|file://\S*?/(?P<project>[^/\s]+)/(?P<slug>[^/\s]+)\.html")
-HANDOVER = (
-    "You ticked off %s this turn, and this reply does not end on the link to its "
-    "page. Finished work reaches the manager as a page: `report list` finds the one "
-    "for this job, `report <slug>` prints its link, and the link goes LAST in the "
-    "message. That is the manager's standing instruction, so they do not have to "
-    "scroll back up to find the link they are meant to click."
-)
-
-
 # Seconds a reading still running is waited for. It is fired the moment his message
 # arrives (hooks/habit-reading.py) and takes 5-8s, so a turn of any length
 # has long since paid for it; this covers a turn that ended almost immediately.
@@ -119,51 +97,15 @@ def tally(name):
         pass
 
 
-def handed_over(message):
-    """Whether the reply ends on the link, which is where the manager reads it."""
-    lines = [l for l in (message or "").strip().splitlines() if l.strip()]
-    return bool(lines) and bool(LINK.search(lines[-1]))
-
-
-def spec_behind(message):
-    """The report spec the reply hands over, or "".
-
-    The last line only: his standing instruction puts the link there with
-    nothing after it (reporting/README.md), so a link quoted mid-message is not
-    a handover. Which project the page belongs to is read off the link when it
-    says, and looked for under every project when it does not — a slug is
-    unique across them in practice, and a page found under the wrong name is
-    still a page the manager was handed.
-    """
-    lines = [l for l in (message or "").strip().splitlines() if l.strip()]
-    hit = LINK.search(lines[-1]) if lines else None
-    if not hit:
-        return ""
-    project, slug = hit.group("project"), hit.group("slug")
-    if hit.group("query"):
-        asked = urllib.parse.parse_qs(hit.group("query").rstrip(">)]\"'"))
-        project = (asked.get("project") or [project])[0]
-        slug = (asked.get("slug") or [slug])[0]
-    if not slug:
-        return ""
-    found = sorted(glob.glob(os.path.join(
-        bc.specs_dir(), project or "*", slug + ".report.json")))
-    return found[0] if found else ""
-
-
-def asked_him(state, since, message):
+def asked_him(state, since, _message):
     """Whether this turn put a question to the manager.
 
-    Two ways in, and they are one act. The tool that asks him is recorded as it
-    is used; and his own rule sends every question through the page carrying it
-    before it reaches him (reporting/README.md), so a reply ending on the link
-    to a page with a question standing on it has asked him as surely as the tool
-    would. Neither is read off the wording of the reply — one is the tool call,
-    the other is a file the session had to build before the link existed.
+    The native question tool is recorded as it is used. The wording of the
+    reply is not evidence that the session is waiting on an answer.
     """
     if (state.get("asked") or 0) > since:
         return True
-    return bc.page_asking(spec_behind(message))
+    return False
 
 
 def rows(ids, root):
@@ -390,12 +332,6 @@ def main():
                 % (", ".join(mine), QUIET_LIMIT, mine[0], mine[0])
             )
             return
-
-    ticked = [c["id"] for c in state.get("closed") or [] if c.get("t", 0) > since]
-    if ticked and not helper_busy(state, since) \
-            and not handed_over(data.get("last_assistant_message")):
-        block(HANDOVER % ", ".join(sorted(set(ticked))[:4]))
-        return
 
     found = DISCOVERY.search(data.get("last_assistant_message") or "")
     if found and not made:

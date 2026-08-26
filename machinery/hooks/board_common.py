@@ -4,12 +4,10 @@
 State is machine-local, never in the repo: the working tree is shared by every
 session and worktree, so session bookkeeping written there would collide.
 """
-import glob
 import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import time
@@ -938,96 +936,6 @@ def _app_home(name, windows_and_mac):
     return os.path.expanduser(home)
 
 
-def page_asking(spec):
-    """Whether the page built from this spec is waiting on an answer.
-
-    A spec either carries the manager's own questions or says in so many words
-    that nothing is waiting on him (reporting/README.md, slot 2). A spec that
-    cannot be read is not a question: a gate that cannot see the page must not
-    end a turn on a question that may not be there.
-    """
-    if not spec:
-        return False
-    try:
-        with open(spec) as fh:
-            return bool(((json.load(fh) or {}).get("actions") or {}).get("questions"))
-    except Exception:
-        return False
-
-
-def reports_dir():
-    """Where the shared report tools live. `report` on the path is a link into
-    them, so the location is read from there rather than written down again; the
-    machinery's own settings answer for a machine that has no such link."""
-    exe = shutil.which("report")
-    if exe:
-        return os.path.dirname(os.path.dirname(os.path.realpath(exe)))
-    return project.reports_dir()
-
-
-# Cards on which nothing was finished, so no page is owed and no link with it:
-# something merely noticed, a question put to the manager, a ruling he made.
-# Read by the close gate and by the turn gate, which must agree or a card is
-# refused a page by one and a link by the other.
-UNREPORTED = ("find", "question", "decision")
-
-
-def project_name(root):
-    """The name this project's reports are filed under.
-
-    Asked of the report tools rather than worked out here: a worktree is named
-    after its branch, and only they know that the answer is the main checkout.
-    """
-    try:
-        out = subprocess.run(
-            ["python3", os.path.join(reports_dir(), "tools/project.py")],
-            capture_output=True, text=True, cwd=root, timeout=10,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return os.path.basename(root.rstrip("/"))
-
-
-def page_built(cards, project=None):
-    """When a page carrying one of these cards was last written, or 0 for never.
-    `cards` of None asks about any page; `project` narrows it to one project's own.
-
-    The clock is the SPEC, because that is the file an agent writes. The board
-    screen rebuilds the page every time someone opens it, so reading the built
-    page would let a glance from the manager clear the refusal. The built page
-    still has to exist and to be no older than the spec: that is what says the
-    words were not merely typed but put through the builder.
-    """
-    when = 0.0
-    where = os.path.join(reports_dir(), "pages", project or "*", "*.report.json")
-    for spec in glob.glob(where):
-        try:
-            if cards is not None:
-                with open(spec) as fh:
-                    if ((json.load(fh) or {}).get("status") or {}).get("card") not in cards:
-                        continue
-            written = os.path.getmtime(spec)
-            if os.path.getmtime(spec[: -len(".report.json")] + ".html") < written:
-                continue
-            when = max(when, written)
-        except Exception:
-            continue
-    return when
-
-
-def page_names(cid, card):
-    """The cards a page may be about and still be this one's page.
-
-    One page per piece of work, not per step: a step is carried by its job's page
-    and a job by the goal above it, so a page names any of them.
-    """
-    names = {cid}
-    goal = next((l[3:] for l in card.get("labels") or [] if l.startswith("of:")), None)
-    if goal:
-        names.add(goal)
-    while "." in cid:
-        cid = cid.rsplit(".", 1)[0]
-        names.add(cid)
-    return names
+# Cards on which nothing was implemented: something merely noticed, a question
+# put to the manager, or a ruling the manager made.
+NO_FINISHED_WORK = ("find", "question", "decision")

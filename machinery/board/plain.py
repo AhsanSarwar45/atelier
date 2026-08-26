@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """The words a card may reach the manager in.
 
-His screen draws a card's title and the report builder pulls it onto a page
-unedited, so a title is manager-facing prose and answers to the same list every
-report answers to. That list is not copied here: two copies drift, and then the
-board and the page disagree about the same word.
+His screen draws a card's title unedited, so a title is manager-facing prose.
+The shared word list is kept in one place so checks cannot drift.
 
 ⛔ Only the manager-facing line is checked — a card's title. The evidence and
 the success criteria are required to name files, commands and numbers, which is
@@ -23,8 +21,8 @@ class Unreadable(Exception):
 
 
 def _jargon():
-    """The report builder's own check, from wherever the shared tools live."""
-    tools = os.path.join(bc.reports_dir(), "tools")
+    """Load the shared manager-language check."""
+    tools = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "..", "reporting", "tools"))
     if tools not in sys.path:
         sys.path.insert(0, tools)
     try:
@@ -78,8 +76,8 @@ def refusal(text, what):
         return ""
     return (
         "%s is written in the words of whoever built the thing, and the manager has "
-        "to be able to read it — his screen draws this line and every report page "
-        "quotes it unedited. Rewrite it saying what the thing DOES:\n  %s"
+        "to be able to read it — his screen draws this line unedited. Rewrite it "
+        "saying what the thing DOES:\n  %s"
         % (what, "\n  ".join(found))
     )
 

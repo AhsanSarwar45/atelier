@@ -92,14 +92,6 @@ describe('a chat read in from its record', () => {
     expect(read).toEqual(watched);
   });
 
-  it('brings the report the chat wrote', async () => {
-    expect(await eventsFrom(fromRecord)).toContainEqual({
-      type: 'report.available',
-      project: 'beads-web',
-      slug: 'a-chat-brings-its-links',
-    });
-  });
-
   it('brings the ticket the chat worked on', async () => {
     expect(await eventsFrom(fromRecord)).toContainEqual({
       type: 'link.bead',
@@ -125,10 +117,4 @@ describe('a chat read in from its record', () => {
     expect(said).toEqual([]);
   });
 
-  it('says a report named twice in the record once', async () => {
-    const said = await eventsFrom((link) =>
-      linkPast([turn(WROTE_REPORT), turn(WROTE_REPORT)], (name, input) => link.observe(name, input)),
-    );
-    expect(said.filter((e) => e.type === 'report.available')).toHaveLength(1);
-  });
 });

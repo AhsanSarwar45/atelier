@@ -4,7 +4,6 @@
   "hooks": {
     "PreToolUse": [
       { "matcher": "Agent|Skill", "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/machinery/hooks/agent-fence.py" }] },
-      { "matcher": "Artifact", "hooks": [{ "type": "command", "command": "$CLAUDE_PROJECT_DIR/reporting/tools/publish-gate.py" }] },
       {
         "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [

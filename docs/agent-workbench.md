@@ -930,7 +930,7 @@ named-instruction mechanism, and the honest Codex answer to "custom commands".
 un-reindented. `src/components/ui/tabs.tsx` already exists in the repo and has
 no importers — it is wired in, not written.
 
-No third tab: reports live inside the chat and inside the card (decision 10).
+No third tab. Results, questions, images and comparisons stay in the chat.
 
 ### 8.2 The chat tab
 
@@ -947,7 +947,7 @@ No third tab: reports live inside the chat and inside the card (decision 10).
   `/` opens the typed-command menu, Stop replaces Send while a turn runs.
 - **Right rail** — the chat's own second column, collapsible and remembered:
   the cards this chat has touched (clicking one opens it on the Board tab), the
-  reports it produced, every agent it sent off, and what the work cost
+  every agent it sent off, and what the work cost
   (§8.2.6).
 
 #### 8.2.1 The open chat's own line
@@ -2247,25 +2247,15 @@ dollars-per-day chart for Claude and a tokens-per-day chart for Codex. They are
 never added together and no price is ever applied to a token count
 (decision 12).
 
-### 8.5 Reports named in a chat
+### 8.5 Agent images and comparisons
 
-A report in a chat is a way through to it, never a viewer of its own
-(bw-7ks.21.15). The chip on the chat's line and the card a `report.available`
-event drops into the stream both push the report's own address under this
-project — `/project?id=…&tab=reports&report=<slug>` — where the app draws the
-report out of its own parts (`src/app/project/report-tab.tsx`). One report, one
-place, one address, and no page held in a frame anywhere in the chat.
-
-The card in the stream carries what decides whether to stop and read it: the
-report's title, and a mark when a question on it is waiting on the manager's
-answer. Both come from the one shared answer to "what reports are there"
-(`useReports()` in `src/components/reports.tsx`, which goes through `apiUrl()`
-like every other call in the app).
-
-The self-contained page the report tools build (`GET
-/api/reports/page?project=&slug=&path=`) still exists: it is what the builder
-prints a link to for a reader with no app in front of him. Nothing in the app
-sends anybody to it.
+Claude image blocks and Codex `imageView`/`imageGeneration` items become the
+same `image` event and draw inline in the transcript. For comparisons, an
+assistant writes a fenced `atelier-image-compare` object with two
+project-relative paths, captions, and either `side_by_side` or `wipe`. The
+sidecar refuses files outside the conversation's project, turns accepted files
+into durable image payloads, and emits `image.compare`; the raw object is hidden
+only when the widget exists.
 
 ### 8.6 Shared state
 

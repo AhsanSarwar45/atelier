@@ -31,7 +31,6 @@ export {
   type TranscriptMessage,
   type TranscriptNote,
   type TranscriptNotice,
-  type TranscriptReport,
   type TranscriptThinking,
   type TranscriptTool,
 } from '@/workbench/fold';

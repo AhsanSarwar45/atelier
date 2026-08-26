@@ -28,7 +28,6 @@ const WRITING_TOOLS = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
  * `pages/` is the folder they lived in while they were still inside a checkout,
  * and it is still matched so an older report opened from an old copy is found.
  */
-const REPORT_SPEC = /(?:^|\/)(?:reports|pages)\/([^/]+)\/([^/]+)\.report\.json$/;
 
 /**
  * A `bd` invocation, as a command word rather than a substring of one, so
@@ -88,14 +87,4 @@ export function candidatesFrom(name: string, input: Record<string, unknown>): st
     ids.push(...idsFromPath(input.file_path));
   }
   return unique(ids);
-}
-
-/** A report spec the agent created or changed. */
-export function reportFrom(
-  name: string,
-  input: Record<string, unknown>,
-): { project: string; slug: string } | null {
-  if (WRITING_TOOLS.indexOf(name) < 0 || typeof input.file_path !== "string") return null;
-  const m = REPORT_SPEC.exec(input.file_path);
-  return m ? { project: m[1]!, slug: m[2]! } : null;
 }

@@ -184,8 +184,8 @@ mod tests {
 
     #[test]
     fn the_data_directory_question_is_still_answerable() {
-        // The report tools run from a shell and ask the program where the
-        // data is rather than working the per-platform paths out again.
+        // Helpers can ask the program where the data is rather than working
+        // the per-platform paths out again.
         assert_eq!(ask(&["--data-dir"]), Ask::DataDir);
     }
 

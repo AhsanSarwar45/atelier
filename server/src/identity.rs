@@ -112,21 +112,6 @@ pub fn settings_db() -> Option<PathBuf> {
     data_dir().map(|dir| dir.join("settings.db"))
 }
 
-/// Where report specs and their built pages live.
-///
-/// `REPORTS_DIR` overrides it, for tests.
-pub fn reports_dir() -> Option<PathBuf> {
-    resolve_dir(std::env::var("REPORTS_DIR").ok(), data_dir(), "reports")
-}
-
-/// Where the tools that make a report live.
-///
-/// The product carries them and lays them down here, so this never points into
-/// anyone's checkout. `REPORT_TOOLS_DIR` overrides it, for tests.
-pub fn tools_dir() -> Option<PathBuf> {
-    resolve_dir(std::env::var("REPORT_TOOLS_DIR").ok(), data_dir(), "tools")
-}
-
 /// Where the chat helper lives.
 ///
 /// The product carries it and lays it down here, so a copy installed on a
@@ -267,28 +252,6 @@ mod tests {
     }
 
     #[test]
-    fn reports_dir_and_tools_dir_sit_side_by_side_under_the_data_directory() {
-        let data = PathBuf::from("/somewhere/data");
-        assert_eq!(
-            resolve_dir(None, Some(data.clone()), "reports"),
-            Some(data.join("reports"))
-        );
-        assert_eq!(
-            resolve_dir(None, Some(data.clone()), "tools"),
-            Some(data.join("tools"))
-        );
-    }
-
-    #[test]
-    fn reports_dir_is_nothing_when_the_computer_names_no_home() {
-        // The old code read HOME directly and fell back to an empty string, so
-        // with HOME unset — the usual state on Windows — it resolved a relative
-        // path against whatever directory the program was started in.
-        assert_eq!(resolve_dir(None, None, "reports"), None);
-        assert_eq!(resolve_dir(None, None, "tools"), None);
-    }
-
-    #[test]
     fn the_data_folder_can_be_moved_off_the_disk_it_defaults_to() {
         // A registered service inherits no shell and is handed this in its own
         // definition, so a check can register a copy that touches none of the
@@ -307,19 +270,4 @@ mod tests {
         assert_eq!(resolve_data_dir(None), data_dir());
     }
 
-    #[test]
-    fn reports_dir_takes_the_override_when_one_is_set() {
-        assert_eq!(
-            resolve_dir(Some("/elsewhere".to_string()), Some(PathBuf::from("/data")), "reports"),
-            Some(PathBuf::from("/elsewhere"))
-        );
-    }
-
-    #[test]
-    fn reports_dir_ignores_an_empty_override() {
-        assert_eq!(
-            resolve_dir(Some("  ".to_string()), Some(PathBuf::from("/data")), "reports"),
-            Some(PathBuf::from("/data/reports"))
-        );
-    }
 }

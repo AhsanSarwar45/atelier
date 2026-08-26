@@ -29,7 +29,6 @@ const column = (beads: Bead[]) =>
       beads={beads}
       allBeads={beads}
       statusById={new Map()}
-      reportFor={new Map()}
       onSelectBead={vi.fn()}
     />,
   ).container;

@@ -12,7 +12,6 @@ mod helper;
 mod identity;
 mod laid_down;
 mod reachable;
-mod report_tools;
 mod routes;
 mod rules;
 mod serving;
@@ -190,9 +189,8 @@ async fn main() {
         // (bw-sxdg.1).
         command_line::Ask::Where => print!("{}", whereabouts()),
         // Where this computer keeps this program's data, printed and nothing
-        // else. The report command runs from a shell and needs the same answer
-        // this program uses; asking the program is what stops it working the
-        // three per-platform paths out a second time in bash (bw-pqt.24).
+        // else. External helpers can ask the program instead of duplicating
+        // the platform-specific path rules.
         command_line::Ask::DataDir => match identity::data_dir() {
             Some(dir) => println!("{}", dir.display()),
             None => {
@@ -277,8 +275,8 @@ async fn serve(open_browser: bool) {
     // The door is taken first, before a line of the rest of it runs.
     //
     // It used to be taken last. A reader whose computer was already serving
-    // watched five healthy lines go by — the database, the report tools, the
-    // tracker, the chat helper laid down and its sidecar started — and then
+    // watched several healthy lines go by — the database, the tracker, the
+    // chat helper laid down and its sidecar started — and then
     // the program died on a bind error with a debugger hint, having started a
     // helper it then abandoned. Nothing it had said was untrue and none of it
     // was the point (bw-8um.3.10.2).
@@ -341,14 +339,6 @@ async fn serve(open_browser: bool) {
         db::Database::new().expect("Failed to initialize database"),
     );
     info!("Database initialized");
-
-    // The tools that make a report travel inside the product; this lays them
-    // down beside the reports. A copy that cannot write there still serves the
-    // board, so this warns rather than stopping.
-    match report_tools::install() {
-        Ok(()) => info!("Report tools ready"),
-        Err(e) => tracing::warn!("Report tools not laid down, so no report can be made: {}", e),
-    }
 
     // Initialize Dolt connection manager
     let dolt_manager = Arc::new(dolt::DoltManager::new());
@@ -428,7 +418,6 @@ async fn serve(open_browser: bool) {
         .route("/api/fs/roots", get(routes::fs::fs_roots))
         .route("/api/fs/open-external", post(routes::fs::open_external))
         .route("/api/bd/command", post(routes::cli::bd_command))
-        .nest("/api", routes::reports::router().with_state(database.clone()))
         .route("/api/git/branch-status", get(routes::git::branch_status))
         // Worktree endpoints
         .route("/api/git/worktree-status", get(routes::worktree::worktree_status))

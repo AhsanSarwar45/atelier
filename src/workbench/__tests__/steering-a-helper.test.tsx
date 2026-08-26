@@ -34,7 +34,7 @@ function said(e: Said<WbpEvent>): WbpEvent {
 }
 
 /** Words, drawn as they are: the pane is not what makes a card a link. */
-const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null, report: () => null };
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
 
 /** One helper still running, and whatever else the chat has heard about it. */
 function aChatWith(more: WbpEvent[] = []): SentAway[] {

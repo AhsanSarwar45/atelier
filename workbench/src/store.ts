@@ -57,20 +57,13 @@ const MIGRATIONS: string[] = [
    CREATE INDEX event_by_session ON event(session_id, seq);`,
 
   // A read cache only. The record of who touched what lives on the board, in
-  // bd's provenance log; these two tables must always be rebuildable from it.
+  // bd's provenance log; this table must always be rebuildable from it.
   `CREATE TABLE bead_link (
      session_id TEXT NOT NULL,
      bead_id TEXT NOT NULL,
      via TEXT NOT NULL,
      first_seen_at TEXT NOT NULL,
      PRIMARY KEY (session_id, bead_id)
-   );
-   CREATE TABLE report_link (
-     session_id TEXT NOT NULL,
-     project TEXT NOT NULL,
-     slug TEXT NOT NULL,
-     at TEXT NOT NULL,
-     PRIMARY KEY (session_id, project, slug)
    );`,
 
   // What was said, and what it cost. Both are folded from the event log rather
@@ -461,12 +454,6 @@ export class Store {
       .run(sessionId, beadId, via, new Date().toISOString());
   }
 
-  rememberReportLink(sessionId: string, project: string, slug: string): void {
-    this.db
-      .prepare('INSERT OR IGNORE INTO report_link (session_id, project, slug, at) VALUES (?,?,?,?)')
-      .run(sessionId, project, slug, new Date().toISOString());
-  }
-
   beadsForSession(sessionId: string): string[] {
     return (
       this.db.prepare('SELECT bead_id FROM bead_link WHERE session_id = ? ORDER BY first_seen_at').all(sessionId) as {
@@ -600,7 +587,7 @@ export class Store {
       .prepare(
         `SELECT seq FROM event
           WHERE session_id = ? AND seq > ? AND seq < ?
-            AND type IN ('message.started','tool.started','note','report.available','ask.permission','notice')
+            AND type IN ('message.started','tool.started','note','ask.permission','notice')
           ORDER BY seq DESC LIMIT ?`,
       )
       .all(sessionId, reset.seq, ceiling, limit) as { seq: number }[];
@@ -612,7 +599,7 @@ export class Store {
       .prepare(
         `SELECT 1 AS yes FROM event
           WHERE session_id = ? AND seq > ? AND seq < ?
-            AND type IN ('message.started','tool.started','note','report.available','ask.permission','notice')
+            AND type IN ('message.started','tool.started','note','ask.permission','notice')
           LIMIT 1`,
       )
       .get(sessionId, reset.seq, start) as { yes: number } | undefined;

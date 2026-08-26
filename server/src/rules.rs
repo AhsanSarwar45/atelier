@@ -111,13 +111,6 @@ fn runnable(_dir: &Path, _files: &crate::laid_down::Carried) {}
 /// help screen to keep in step with the first.
 pub fn init(rest: &[String]) -> Result<i32, String> {
     let dir = install()?;
-    // The gates a project is wired to include the one that reads a report
-    // before it is published, and that one lives with the report tools. A
-    // project joined without them is wired to a gate that is not there.
-    if let Err(e) = crate::report_tools::install() {
-        eprintln!("the report tools could not be laid down: {e}");
-    }
-
     // The board screen keeps its list of projects in a database it makes on
     // first run, and joining puts a row in it. Made here rather than left to
     // the first run, so setting a project up leaves it on the screen instead of
@@ -195,15 +188,10 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     run_python(&args, &[])
 }
 
-/// The two folders a gate can be in: the machinery's own, and the report
-/// tools', which keep the one gate that reads a report.
 fn gate_places(name: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(dir) = crate::identity::rules_dir() {
         out.push(dir.join(MACHINERY).join("hooks").join(name));
-    }
-    if let Some(dir) = crate::identity::tools_dir() {
-        out.push(dir.join(name));
     }
     out
 }
@@ -316,8 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_is_looked_for_under_the_rules_before_the_report_tools() {
-        // The machinery owns all but one of them, so the common case is first.
+    fn a_gate_is_looked_for_under_the_rules() {
         let places = gate_places("board-gate.py");
         assert!(!places.is_empty());
         assert!(places[0].to_string_lossy().contains("machinery"));

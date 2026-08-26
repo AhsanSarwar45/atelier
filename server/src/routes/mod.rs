@@ -10,7 +10,6 @@ pub mod fs;
 pub mod git;
 pub mod live;
 pub mod projects;
-pub mod reports;
 pub mod version;
 pub mod watch;
 pub mod workbench;

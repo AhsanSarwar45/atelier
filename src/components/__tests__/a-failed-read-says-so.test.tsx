@@ -30,7 +30,6 @@ vi.mock('@/lib/api', () => ({
 
 /* eslint-disable import/first, import/order */
 import { FolderBrowser } from '@/components/folder-browser';
-import { ReportsList } from '@/components/report/screen/reports-list';
 /* eslint-enable import/first, import/order */
 
 /** The button every one of these has to end up drawing. */
@@ -52,36 +51,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-});
-
-describe('the list of reports', () => {
-  it('says the list could not be read rather than that there are none', async () => {
-    requestMock.mockResolvedValue({ ok: false, status: 500 });
-
-    render(<ReportsList projectPath="/work/atelier" onOpen={() => {}} />);
-
-    await screen.findByTestId('reports-list-error');
-    expect(screen.getByText(/could not be read/i)).toBeInTheDocument();
-    // The lie this replaced: an unread list drawn as an empty one.
-    expect(screen.queryByTestId('reports-list-empty')).not.toBeInTheDocument();
-    expect(tryAgain()).toBeInTheDocument();
-    nothingIsStillSpinning();
-  });
-
-  it('asks the server again when the reader presses Try again', async () => {
-    requestMock.mockResolvedValue({ ok: false, status: 500 });
-
-    render(<ReportsList projectPath="/work/atelier" onOpen={() => {}} />);
-    await screen.findByTestId('reports-list-error');
-    const askedFirst = requestMock.mock.calls.length;
-
-    requestMock.mockResolvedValue({ ok: true, json: async () => [] });
-    fireEvent.click(tryAgain());
-
-    // A cached failure would have answered without the server hearing anything.
-    await waitFor(() => expect(requestMock.mock.calls.length).toBeGreaterThan(askedFirst));
-    await screen.findByTestId('reports-list-empty');
-  });
 });
 
 describe('a folder that could not be read', () => {

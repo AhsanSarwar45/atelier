@@ -7,7 +7,6 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { CreateBeadDialog } from "@/components/create-bead-dialog";
 import { KanbanColumn } from "@/components/kanban-column";
 import { QuickFilterBar } from "@/components/quick-filter-bar";
-import { useReportsByCard } from "@/components/reports";
 import { TabTools } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { ReadFailed } from "@/components/ui/read-failed";
@@ -19,7 +18,7 @@ import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
-import { cn, projectDir } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { STATES, type Bead, type BeadStatus } from "@/types";
 
 import { useBoardCards } from "./board-cards";
@@ -73,9 +72,6 @@ export default function KanbanBoard() {
 
   // Issue type filter state ("all" or a specific issue type)
   const [typeFilter, setTypeFilter] = useState<IssueTypeFilter>("all");
-
-  // The folder a card's reports are read from
-  const fsPath = projectDir(project);
 
   // Theme
 
@@ -168,12 +164,6 @@ export default function KanbanBoard() {
     () => new Map(beads.map(b => [b.id, b.status] as const)),
     [beads],
   );
-
-  /**
-   * The report each card carries, looked up once for the whole board rather
-   * than once per card.
-   */
-  const reportFor = useReportsByCard();
 
   /**
    * Detect beads with truly unknown statuses for the warning indicator.
@@ -445,14 +435,12 @@ export default function KanbanBoard() {
                 beads={filteredBeadsByStatus[status] || []}
                 allBeads={beads}
                 statusById={statusById}
-                reportFor={reportFor}
                 selectedBeadId={selectedId}
                 ticketNumbers={ticketNumbers}
                 onSelectBead={openBead}
                 onChildClick={openBead}
                 onNavigateToDependency={navigateToBead}
                 projectPath={project?.path}
-                fsPath={fsPath}
                 onUpdate={refreshBeads}
               />
               </div>

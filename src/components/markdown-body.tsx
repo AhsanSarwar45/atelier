@@ -25,7 +25,6 @@ export interface Mentions {
   /** The text, split into plain words and the things in it that open. */
   split: (text: string) => Piece[];
   card: (id: string) => ReactNode;
-  report: (slug: string) => ReactNode;
   /** A file named in the words, drawn as the reader wrote it (bw-khe.13). */
   path?: (absolute: string, raw: string, line: number | null) => ReactNode;
   /**
@@ -116,8 +115,6 @@ export function MarkdownBody({
             const marks = props as Record<string, string | undefined>;
             const card = marks['data-card-mention'];
             if (card && mentions) return <>{mentions.card(card)}</>;
-            const report = marks['data-report-mention'];
-            if (report && mentions) return <>{mentions.report(report)}</>;
             const path = marks['data-path-mention'];
             if (path && mentions?.path) {
               const line = marks['data-path-line'];

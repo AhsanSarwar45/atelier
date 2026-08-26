@@ -155,19 +155,11 @@ export interface TranscriptNotice {
   audience?: Audience;
 }
 
-export interface TranscriptReport {
-  kind: 'report';
-  id: string;
-  project: string;
-  slug: string;
-}
-
 export type TranscriptItem =
   | TranscriptMessage
   | TranscriptThinking
   | TranscriptTool
   | TranscriptAsk
-  | TranscriptReport
   | TranscriptNote
   | TranscriptNotice;
 
@@ -586,14 +578,6 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.beads = view.beads.includes(e.beadId) ? view.beads : [...view.beads, e.beadId];
       return next;
 
-    case 'report.available': {
-      const id = `${e.project}/${e.slug}`;
-      next.items = items.some((it) => it.kind === 'report' && it.id === id)
-        ? items
-        : [...items, { kind: 'report', id, project: e.project, slug: e.slug }];
-      return next;
-    }
-
     case 'ask.permission':
       next.items = [
         ...items,
@@ -689,7 +673,6 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
   const thinkingAt = new Map<string, number>();
   const toolAt = new Map<string, number>();
   const askAt = new Map<string, number>();
-  const reportSeen = new Set<string>();
   const beads: string[] = [];
   const beadSeen = new Set<string>();
   const agents: SentAway[] = [];
@@ -703,7 +686,6 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
     thinkingAt.clear();
     toolAt.clear();
     askAt.clear();
-    reportSeen.clear();
     beads.length = 0;
     beadSeen.clear();
     agents.length = 0;
@@ -937,15 +919,6 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           beads.push(e.beadId);
         }
         break;
-
-      case 'report.available': {
-        const id = `${e.project}/${e.slug}`;
-        if (!reportSeen.has(id)) {
-          reportSeen.add(id);
-          items.push({ kind: 'report', id, project: e.project, slug: e.slug });
-        }
-        break;
-      }
 
       case 'ask.permission':
         askAt.set(e.askId, items.length);

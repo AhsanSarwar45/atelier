@@ -79,7 +79,7 @@ export function Shell({
         >
           {/* Before the tabs, not inside `tab-tools`: a tab that opens a drawer
               beside the transcript wants its handle first on the row, ahead of
-              Chat/Board/Reports, not mixed in with its own toolbar. */}
+              Chat/Board, not mixed in with its own toolbar. */}
           <div data-testid="tab-lead" ref={setLead} className="flex shrink-0 items-center gap-2" />
           {tabs}
           {/* `grow` off its own content width, not `flex-1` off zero: that is

@@ -90,8 +90,6 @@ function aWholeChat(turns: number): WbpEvent[] {
   for (let i = 0; i < turns; i += 1) log.push(...turn(i));
   log.push(
     said({ type: 'notice', text: 'the agent stopped' }),
-    said({ type: 'report.available', project: 'beads-web', slug: 'a-report' }),
-    said({ type: 'report.available', project: 'beads-web', slug: 'a-report' }),
     said({ type: 'ask.permission', askId: 'a1', toolName: 'Bash', input: {}, title: 'rm -rf', options: [] }),
     said({ type: 'ask.resolved', askId: 'a1', chosen: 'no' }),
     said({ type: 'todo', items: [{ id: '1', text: 'one', status: 'pending' }] }),

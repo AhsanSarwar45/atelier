@@ -246,9 +246,9 @@ def main():
                 # Asked once and kept: the answer below is the same card, and a
                 # hook that asks the board twice for one thing pays twice.
                 answer = run.card(cid, root) or {}
-                # The same exemption the close gate applies: nothing was finished
-                # on these, so neither gate asks for a page or a link.
-                if not set(answer.get("labels") or []) & set(bc.UNREPORTED):
+                # Nothing was finished on these, so they do not enter the list
+                # of completed implementation work for the session.
+                if not set(answer.get("labels") or []) & set(bc.NO_FINISHED_WORK):
                     state["closed"] = (state.get("closed") or [])[-200:] + [
                         {"id": cid, "t": bc.now()}
                     ]

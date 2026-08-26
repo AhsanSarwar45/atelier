@@ -32,7 +32,6 @@ import {
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { type Mentions } from '@/components/markdown-body';
-import { useReports } from '@/components/reports';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -69,7 +68,6 @@ import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunning
 import { EVERYTHING, hisDoing, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
 import type { Brand, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
-import { ReportChip } from '@/workbench/report-view';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
@@ -425,20 +423,11 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const facts = useSessionFacts(sessionId);
   // What the board knows plus what this chat has been seen doing since.
   const cards = Array.from(new Set([...(facts?.beads ?? []), ...view.beads]));
-  // A report names the card it belongs to, so the reports of this chat's cards
-  // are this chat's reports — true for a chat this app never watched work. A
-  // report belongs to the goal while a chat works that goal's steps, so a step
-  // counts as its goal here: `cor-qrnj.43` finds the report on `cor-qrnj`.
-  const { reports } = useReports();
-  const owned = new Set(cards.flatMap((id) => [id, id.split('.')[0]!]));
-  const ours = reports.filter((r) => r.card !== null && owned.has(r.card));
-
-  // A card or a report the agent NAMED in its own words opens from where it is
+  // A card the agent NAMED in its own words opens from where it is
   // written. Only ones that exist: English is full of hyphenated words shaped
   // like a card id, so the board's own list and the reports this project has
-  // are what decide (bw-4wcd.3, src/workbench/mentions.ts).
+  // is what decides (bw-4wcd.3, src/workbench/mentions.ts).
   const knownCards = useKnownCards(projectPath);
-  const byName = useMemo(() => new Map(reports.map((r) => [r.slug, r])), [reports]);
 
   // A file the agent named opens from where it is written, the same way. Only
   // ones that are really there: `and/or` and `24/7` are shaped like addresses
@@ -465,27 +454,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     const card = (id: string) => (
       <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />
     );
-    const report = (slug: string) => {
-      const found = byName.get(slug);
-      if (!found) return slug;
-      return <ReportChip project={found.project} slug={found.slug} title={found.title} className="mx-0.5" />;
-    };
     return {
       split: (text) =>
         openableIn(
           text,
-          { card: (id) => knownCards.has(id), report: (slug) => byName.has(slug) },
+          { card: (id) => knownCards.has(id) },
           where,
           disk,
         ),
       path: (absolute, raw, line) => <PathChip absolute={absolute} raw={raw} line={line} />,
       card,
-      report,
-      // The very same two chips, from an address written out in full. It is how
-      // an agent hands over a report it has just written, and it was the one
-      // thing in a message that stayed raw blue text (bw-8fh2.2). Only ours,
-      // and only when the thing it names really is on this project — anything
-      // else stays the link it was.
       //
       // An address that asks for a DIFFERENT project stays a link too, however
       // familiar its id looks: card ids repeat across boards, and a chip drawn
@@ -495,11 +473,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         const named = addressedBy(href);
         if (!named) return null;
         if (named.project && named.project !== projectId) return null;
-        if (named.kind === 'card') return knownCards.has(named.id) ? card(named.id) : null;
-        return byName.has(named.slug) ? report(named.slug) : null;
+        return knownCards.has(named.id) ? card(named.id) : null;
       },
     };
-  }, [knownCards, byName, projectId, projectPath, where, disk]);
+  }, [knownCards, projectId, where, disk]);
   // Both are held against THIS chat's id, out where the tab bar cannot reach
   // them: leaving the chat for the board takes this whole screen down, and
   // switching chats does not take it down at all (src/workbench/drafts.ts).
@@ -971,7 +948,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         <ChatRightRail
           projectId={projectId}
           cards={cards}
-          reports={ours}
           agents={view.agents}
           items={view.items}
           sessionId={sessionId}

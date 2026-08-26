@@ -55,7 +55,7 @@ const drawn = async (node: React.ReactElement) => {
 vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) })));
 
 /** Words drawn as themselves: nothing here is about how a message is marked up. */
-const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null, report: () => null };
+const PLAINLY: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
 
 /**
  * One finished helper, written out here rather than folded from a log.
