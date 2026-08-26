@@ -30,7 +30,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { NOTHING, type Split, type TaskSpend, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
 import { createDriver, defaultPermissionMode } from './drivers/index.ts';
-import { codexMenu, codexRolloutLine, codexRolloutPath, codexSnapshotCanSeed, CodexDriver, readCodexThread, readCodexThreadUsage, replayCodexThread } from './drivers/codex.ts';
+import { codexMenu, codexRolloutLine, codexRolloutPath, CodexDriver, readCodexThread, readCodexThreadUsage, seedCodexSnapshot } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
@@ -602,11 +602,13 @@ export class Sessions {
         // complete snapshot. Once this transcript has any history, appending
         // that snapshot would put all of its old messages after the commands
         // already standing in the event log.
-        if (!codexSnapshotCanSeed(this.store.importedBy(summary.id), this.store.messageCount(summary.id))) {
-          return NOTHING_READ;
-        }
         const [thread, usage] = await Promise.all([readCodexThread(summary.externalId, summary.cwd), readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null)]);
-        replayCodexThread(thread, (event) => this.publish(summary.id, event));
+        const seeded = seedCodexSnapshot(thread, {
+          importedBy: this.store.importedBy(summary.id),
+          drawn: this.store.messageCount(summary.id),
+          drivenHere: this.store.wasDrivenHere(summary.id),
+        }, (event) => this.publish(summary.id, event));
+        if (!seeded) return NOTHING_READ;
         this.store.markImported(summary.id, IMPORT_RECIPE);
         if (usage) this.publish(summary.id, { type: 'cost', cost: { kind: 'tokens', ...usage } });
       } catch {

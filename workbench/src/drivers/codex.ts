@@ -354,8 +354,14 @@ export function replayCodexThread(thread: Bag, emit: (event: DriverEvent) => voi
  * ids are not stable aliases of rollout ids, so row-level deduplication cannot
  * repair that merge after the fact (bw-jknr.1).
  */
-export function codexSnapshotCanSeed(importedBy: number | null, drawn: number): boolean {
-  return importedBy === null && drawn === 0;
+export function seedCodexSnapshot(
+  thread: Bag,
+  state: { importedBy: number | null; drawn: number; drivenHere: boolean },
+  emit: (event: DriverEvent) => void,
+): boolean {
+  if (state.importedBy !== null || state.drawn > 0 || state.drivenHere) return false;
+  replayCodexThread(thread, emit);
+  return true;
 }
 
 /** Stateful diff of thread/read snapshots. External Codex sessions do not

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import type { WbpEvent } from '../../../src/workbench/protocol';
 import { foldAll } from '../../../src/workbench/fold';
-import { CodexDriver, codexRolloutLine, codexSnapshotCanSeed, codexThreadSettings, codexThreadUsageFromRollout, replayCodexThread } from '../drivers/codex';
+import { CodexDriver, codexRolloutLine, codexThreadSettings, codexThreadUsageFromRollout, replayCodexThread, seedCodexSnapshot } from '../drivers/codex';
 
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
 
@@ -109,15 +109,20 @@ describe('Codex live-runtime regressions', () => {
     ] }] };
 
     const replayed = [...existing];
-    if (codexSnapshotCanSeed(9, 1)) replayCodexThread(snapshot, (event) => replayed.push(event));
+    expect(seedCodexSnapshot(snapshot, { importedBy: 9, drawn: 1, drivenHere: true }, (event) => replayed.push(event))).toBe(false);
     const rows = foldAll(replayed.map((event, index) => ({
       ...event, seq: index + 1, sessionId: 'external', at: new Date(0).toISOString(),
     })) as WbpEvent[]).items;
 
     expect(rows.map((row) => row.id)).toEqual(['live-commentary', 'live-command']);
     expect(rows.filter((row) => row.kind === 'message')).toHaveLength(1);
-    expect(codexSnapshotCanSeed(null, 0)).toBe(true);
-    expect(codexSnapshotCanSeed(null, 1)).toBe(false);
+    const commandsOnly = [...existing.slice(3)];
+    expect(seedCodexSnapshot(snapshot, { importedBy: null, drawn: 0, drivenHere: true }, (event) => commandsOnly.push(event))).toBe(false);
+    expect(commandsOnly.map((event) => 'toolCallId' in event ? event.toolCallId : null)).toEqual(['live-command', 'live-command']);
+
+    const empty: BareEvent[] = [];
+    expect(seedCodexSnapshot(snapshot, { importedBy: null, drawn: 0, drivenHere: false }, (event) => empty.push(event))).toBe(true);
+    expect(empty.some((event) => event.type === 'text.delta')).toBe(true);
   });
 
   it('settles an external turn and unwraps orchestration patches as edits', () => {
