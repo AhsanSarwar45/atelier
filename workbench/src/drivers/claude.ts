@@ -1571,13 +1571,17 @@ export class ClaudeDriver implements Driver {
   }
 
   async send(input: PromptInput): Promise<void> {
-    await this.menuReady;
-    offeredSlashCommand(input.text, this.commands);
+    await this.validate(input);
     this.inbox.push(input);
     this.wake?.();
     this.wake = null;
     this.awaitingAnswer = true;
     this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
+  }
+
+  async validate(input: PromptInput): Promise<void> {
+    await this.menuReady;
+    offeredSlashCommand(input.text, this.commands);
   }
 
   /**

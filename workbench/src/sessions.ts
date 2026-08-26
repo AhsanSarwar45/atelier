@@ -1474,6 +1474,10 @@ export class Sessions {
       });
     }
     const driver = this.require(sessionId);
+    // A rejected command remains in the composer. Validate before writing the
+    // user turn so the saved transcript cannot contain a question the agent
+    // was deliberately never sent.
+    await driver.validate?.({ text, images });
     // The user's own turn belongs in the transcript before the agent answers it.
     const messageId = randomUUID();
     this.publish(sessionId, { type: 'message.started', messageId, role: 'user' });

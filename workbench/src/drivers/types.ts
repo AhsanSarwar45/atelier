@@ -41,6 +41,8 @@ export interface Driver {
   processId?(): number | null;
   /** Begin the session. Resolves once the channel is open, not when the turn ends. */
   start(opts: StartOptions): Promise<void>;
+  /** Reject a turn before the runtime persists it, when discovery proves it cannot run. */
+  validate?(input: PromptInput): Promise<void>;
   /** Queue a user turn. */
   send(input: PromptInput): Promise<void>;
   /** Answer an outstanding permission card. */

@@ -560,6 +560,17 @@ export class CodexDriver implements Driver {
     }
   }
 
+  async validate(input: PromptInput): Promise<void> {
+    if (!this.threadId) throw new Error('Codex thread is not open');
+    const commands = [...this.commands];
+    for (const name of this.skills.keys()) {
+      if (!commands.some((command) => command.name === name)) {
+        commands.push({ name, description: '', kind: 'skill', execution: 'skill' });
+      }
+    }
+    offeredSlashCommand(input.text, commands);
+  }
+
   answer(askId: string, choice: PermissionAnswer, value?: string): void {
     const ask = this.asks.get(askId);
     if (!ask) return;
