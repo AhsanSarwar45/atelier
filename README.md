@@ -303,10 +303,15 @@ The Next.js dev server (port 3007) serves the frontend with hot-reload; the Rust
 
    ```bash
    npm run dev              # Terminal 1 — frontend on http://localhost:3007
-   cd server && cargo run   # Terminal 2 — backend/API on http://localhost:3008
+   npm run server:dev       # Terminal 2 — backend/API + this checkout's helper
    ```
 
 5. Open **http://localhost:3007**. Frontend edits hot-reload; API requests go to the backend on :3008.
+
+`server:dev` sets `BEADS_WORKBENCH_ENTRY` to this checkout's
+`workbench/src/server.ts`. That gives the development backend its own helper
+process and makes helper edits visible after restarting the development
+backend. Packaged builds continue to run the helper embedded in their binary.
 
 > The `.env.local` / `NEXT_PUBLIC_BACKEND_URL` step is **dev-only**. Remove it (or leave it unset) for a release build, where frontend and backend share one origin.
 
