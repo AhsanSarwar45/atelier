@@ -135,6 +135,21 @@ afterEach(() => {
 });
 
 describe('a chat begun in another tool', () => {
+  it('reconciles an existing chat stranded on Starting when its row is opened', async () => {
+    list = [row({ sessionId: 'stranded', externalId: 'outside-1', state: 'starting' })];
+    const openedChat = vi.fn();
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={openedChat} />);
+
+    await screen.findByTestId('row-name');
+    screen.getByTestId('row-name').click();
+
+    expect(openedChat).toHaveBeenCalledWith('stranded');
+    await waitFor(() => expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) =>
+      init?.method === 'POST' && JSON.parse(String(init.body)).type === 'session.open',
+    )).toBe(true));
+  });
+
   it('is neither external nor asleep once no other process holds it', async () => {
     list = [row({ origin: 'terminal', externalId: 'outside-1', runningElsewhere: false })];
     const ChatSidebar = await freshSidebar();

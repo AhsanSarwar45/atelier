@@ -411,7 +411,11 @@ export function ChatSidebar({
         // Navigation never waits for housekeeping. The chat stream catches the
         // transcript up; this read only resets stale stored state and starts a
         // provider-record follower when one is needed.
-        if (row.state === 'dormant') void sendCommand({
+        // Every existing row is reconciled, including one left in `starting`
+        // by a process that vanished. Restricting this to `dormant` made that
+        // transitional word permanent: the local navigation opened its stale
+        // log, while the one read that corrects stale state was never sent.
+        void sendCommand({
           type: 'session.open',
           sessionId: row.sessionId,
           externalId: row.externalId ?? undefined,
