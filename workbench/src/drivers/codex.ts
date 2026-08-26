@@ -6,9 +6,10 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
-import type { AgentControl, AgentState } from '../../../src/workbench/protocol.ts';
+import type { AgentControl, AgentState, CommandInfo } from '../../../src/workbench/protocol.ts';
 import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
+import { commandExecution, offeredSlashCommand } from './slash-commands.ts';
 
 type Bag = Record<string, any>;
 type Pending = { resolve: (value: any) => void; reject: (reason: Error) => void };
@@ -16,6 +17,14 @@ type PendingAsk = { answer: (choice: string, value?: string) => void };
 
 const MODES = ['untrusted', 'on-request', 'never'];
 const BEADS_SANDBOX_CONFIG = { sandbox_workspace_write: { network_access: true } };
+export const CODEX_SLASH_COMMANDS: CommandInfo[] = [
+  { name: 'compact', description: 'Compact this conversation now', kind: 'command', execution: 'native' },
+  { name: 'review', description: 'Review uncommitted changes, or follow the supplied instructions', argumentHint: '[instructions]', kind: 'command', execution: 'native' },
+  { name: 'status', description: 'Show this Codex thread and its background commands', kind: 'command', execution: 'native' },
+  { name: 'usage', description: 'Show Codex account allowance and reset times', kind: 'command', execution: 'native' },
+  { name: 'model', description: 'Show or change the model', argumentHint: '[model]', kind: 'command', execution: 'ui' },
+  { name: 'permissions', description: 'Show or change the permission mode', argumentHint: '[mode]', kind: 'command', execution: 'ui' },
+];
 const decision = (choice: PermissionAnswer) =>
   choice === 'allow_once' ? 'accept' : choice === 'allow_always' ? 'acceptForSession' : 'decline';
 
@@ -269,15 +278,9 @@ export async function codexMenu(cwd: string): Promise<Bag> {
     }
   }
   return {
-    commands: [
-      { name: 'compact', description: 'Compact this conversation now', kind: 'command' },
-      { name: 'review', description: 'Review uncommitted changes, or follow the supplied instructions', argumentHint: '[instructions]', kind: 'command' },
-      { name: 'status', description: 'Show this Codex thread and its background commands', kind: 'command' },
-      { name: 'usage', description: 'Show Codex account allowance and reset times', kind: 'command' },
-      { name: 'model', description: 'Use the model picker below', kind: 'command' },
-      { name: 'permissions', description: 'Use the permission picker below', kind: 'command' },
-      ...skills.map((skill: Bag) => ({ name: skill.name, description: skill.description || skill.shortDescription || '', kind: 'skill' })),
-    ],
+    commands: [...CODEX_SLASH_COMMANDS, ...skills.map((skill: Bag) => ({
+      name: skill.name, description: skill.description || skill.shortDescription || '', kind: 'skill', execution: 'skill',
+    }))],
     skills: skills.map((skill: Bag) => skill.name),
     models: [{ value: 'default', displayName: 'Default', description: 'Use the Codex default model' }, ...models.map((m: Bag) => ({ value: m.model, displayName: m.displayName, description: m.description }))],
     permissionModes: MODES, efforts: [...efforts.values()], agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
@@ -448,6 +451,7 @@ export class CodexDriver implements Driver {
   private mode = 'on-request';
   private cwd = process.cwd();
   private skills = new Map<string, string>();
+  private commands: CommandInfo[] = [...CODEX_SLASH_COMMANDS];
   private lastUsage: Bag | null = null;
   private contextWindow: number | null = null;
   private imageDirs = new Set<string>();
@@ -501,12 +505,22 @@ export class CodexDriver implements Driver {
 
   async send(input: PromptInput): Promise<void> {
     if (!this.threadId) throw new Error('Codex thread is not open');
-    const special = /^\/(compact|review|status|usage|model|permissions)(?:\s+(.*))?$/s.exec(input.text.trim());
-    if (special) return await this.special(special[1], special[2]?.trim() ?? '');
-    const skill = /^\/(\S+)(.*)$/s.exec(input.text);
-    const skillPath = skill ? this.skills.get(skill[1]) : undefined;
+    // `skills/changed` and tests may refresh the executable paths before the
+    // next menu event. Resolve from both stores so discovery and dispatch
+    // cannot briefly disagree.
+    const commands = [...this.commands];
+    for (const name of this.skills.keys()) {
+      if (!commands.some((command) => command.name === name)) {
+        commands.push({ name, description: '', kind: 'skill', execution: 'skill' });
+      }
+    }
+    const offered = offeredSlashCommand(input.text, commands);
+    if (offered && commandExecution(offered.command) !== 'skill') {
+      return await this.special(offered.invocation.name, offered.invocation.argument);
+    }
+    const skillPath = offered ? this.skills.get(offered.invocation.name) : undefined;
     const content: Bag[] = skillPath
-      ? [{ type: 'skill', name: skill![1], path: skillPath }, ...(skill![2].trim() ? [{ type: 'text', text: skill![2].trim(), text_elements: [] }] : [])]
+      ? [{ type: 'skill', name: offered!.invocation.name, path: skillPath }, ...(offered!.invocation.argument ? [{ type: 'text', text: offered!.invocation.argument, text_elements: [] }] : [])]
       : [{ type: 'text', text: input.text, text_elements: [] }];
     let imageDir: string | null = null;
     if (input.images.length) {
@@ -592,6 +606,7 @@ export class CodexDriver implements Driver {
     const menu = await codexMenu(this.cwd);
     this.skills = new Map(Object.entries(menu.skillPaths ?? {}));
     const { skillPaths: _skillPaths, ...shown } = menu;
+    this.commands = shown.commands;
     this.emit({ type: 'session.menu', ...shown } as DriverEvent);
   }
 
@@ -640,8 +655,14 @@ export class CodexDriver implements Driver {
       await this.call('review/start', { threadId: this.threadId, target, delivery: 'inline' });
       return;
     }
-    if (name === 'model' || name === 'permissions') {
-      this.note(name, `Use the ${name === 'model' ? 'model' : 'permission'} picker below the composer.`, 'note');
+    if (name === 'model') {
+      if (argument) await this.setModel(argument);
+      this.note(name, argument ? `Model changed to ${argument}.` : 'Use the model picker below the composer, or type /model followed by a model name.', 'note');
+      return;
+    }
+    if (name === 'permissions') {
+      if (argument) await this.setMode(argument);
+      this.note(name, argument ? `Permission mode changed to ${argument}.` : 'Use the permission picker below the composer, or type /permissions followed by a mode.', 'note');
       return;
     }
     if (name === 'usage') {

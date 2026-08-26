@@ -38,6 +38,7 @@ import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench
 import { rawTitle, toolTitle, whileItRuns } from '../../../src/workbench/said-what-it-ran.ts';
 import { fullness, WINDOW, windowNamed } from '../../../src/workbench/context-window.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
+import { advertisedSlashCommands, offeredSlashCommand } from './slash-commands.ts';
 
 /**
  * This build has no `TodoWrite`. Its checklist is the TaskCreate/TaskGet/
@@ -746,6 +747,9 @@ export class ClaudeDriver implements Driver {
   private todos: TodoItem[] = [];
   /** The skills this install has, kept so a pushed command list can be re-sent with them. */
   private skills: string[] = [];
+  /** The exact executable surface last advertised to the browser. */
+  private commands: CommandInfo[] = [];
+  private menuReady: Promise<void> = Promise.resolve();
   /**
    * The models and the terminal-only names from the last full menu.
    *
@@ -1380,7 +1384,7 @@ export class ClaudeDriver implements Driver {
     // supportedCommands/supportedModels answer in 0.7s on a silent one. Waiting
     // for `init` would leave a fresh chat with no menus until he had already
     // typed something (bw-f1q).
-    void this.publishMenu(null);
+    this.menuReady = this.publishMenu(null);
   }
 
   /**
@@ -1473,23 +1477,10 @@ export class ClaudeDriver implements Driver {
 
   /** Folds one list of commands into the menu event, skills and models included. */
   private emitMenu(commands: { name: string; description: string; argumentHint?: string }[]): void {
-    const skills = new Set(this.skills);
-    const items: CommandInfo[] = commands
-      // A command whose whole point is the terminal it was typed in cannot work
-      // from a browser, so it is not offered here (§7).
-      .filter((c) => !this.terminalOnly.has(c.name))
-      .map((c) => ({
-        name: c.name,
-        description: c.description,
-        argumentHint: c.argumentHint,
-        kind: skills.has(c.name) ? ('skill' as const) : ('command' as const),
-      }));
-    // A skill the command list did not mention is still typeable.
-    for (const skill of this.skills) {
-      if (!items.some((i) => i.name === skill)) {
-        items.push({ name: skill, description: '', kind: 'skill' });
-      }
-    }
+    // A command whose whole point is the terminal it was typed in cannot work
+    // from a browser, so it is not offered here (§7).
+    const items = advertisedSlashCommands(commands, this.skills, this.terminalOnly);
+    this.commands = items;
     this.emit({
       type: 'session.menu',
       commands: items,
@@ -1580,6 +1571,8 @@ export class ClaudeDriver implements Driver {
   }
 
   async send(input: PromptInput): Promise<void> {
+    await this.menuReady;
+    offeredSlashCommand(input.text, this.commands);
     this.inbox.push(input);
     this.wake?.();
     this.wake = null;
