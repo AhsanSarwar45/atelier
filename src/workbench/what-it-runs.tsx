@@ -20,13 +20,13 @@
  */
 'use client';
 
-import { Cpu, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff } from 'lucide-react';
+import { Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
-import { BRAND_DEFAULT_MODEL, type ModelChoice } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, type EffortChoice, type ModelChoice } from '@/workbench/protocol';
 
 /** The brand's own word for a chat nobody has pinned a model to. */
 const BRAND_DEFAULT_LABEL = 'Default model';
@@ -200,12 +200,16 @@ export function WhatItRuns({
   model,
   permissionMode,
   models,
+  effort,
+  efforts = [],
   className,
 }: {
   model: string | null;
   permissionMode: string | null;
   /** The picker's own list, empty for a chat nothing here is driving. */
   models: ModelChoice[];
+  effort?: string | null;
+  efforts?: EffortChoice[];
   className?: string;
 }) {
   const mode = modeWords(permissionMode);
@@ -214,12 +218,16 @@ export function WhatItRuns({
   // saying so is the same fact the picker's top row carries. A chat it does not
   // drive has nothing to say until its record answers.
   const modelLabel = named ?? (models.length ? BRAND_DEFAULT_LABEL : null);
+  const effortLabel = effort
+    ? efforts.find((choice) => choice.value === effort)?.displayName ?? inWords(effort)
+    : null;
 
   return (
     <span
       data-testid="session-meta"
       data-model={model ?? ''}
       data-mode={permissionMode ?? ''}
+      data-effort={effort ?? ''}
       // `min-w-0 shrink truncate` is the whole reason this group exists: left at
       // its full width the chips inside shrank under their own words and what
       // the chat was running printed straight across the folder chip beside it,
@@ -275,6 +283,21 @@ export function WhatItRuns({
         >
           <mode.Mark className="size-3 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate">{mode.label}</span>
+        </Badge>
+      )}
+      {effortLabel && (
+        <Badge
+          variant="secondary"
+          appearance="outline"
+          size="sm"
+          shape="circle"
+          data-testid="chat-effort-chip"
+          data-effort={effort ?? ''}
+          title={`Reasoning effort — ${effortLabel}`}
+          className="min-w-0 shrink gap-1 truncate"
+        >
+          <Gauge className="size-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{effortLabel}</span>
         </Badge>
       )}
     </span>

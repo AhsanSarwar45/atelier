@@ -1034,7 +1034,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             as grey text — `claude · claude-opus-5 · permission mode:
             bypassPermissions` — an inch from a picker calling that same setting
             "Skip all checks" (bw-ja9l.1). */}
-        <WhatItRuns model={view.model} permissionMode={view.permissionMode} models={view.menu.models} />
+        <WhatItRuns
+          model={view.model}
+          permissionMode={view.permissionMode}
+          models={view.menu.models}
+          effort={view.effort}
+          efforts={view.menu.efforts}
+        />
         {facts?.folder && (
           <Badge
             hue={hueFor(facts.folder)}
