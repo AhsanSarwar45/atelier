@@ -119,10 +119,17 @@ const OBJECT = 44;
  * half as another thing the command did. A single `&` is left alone so `2>&1`
  * stays part of the command it belongs to.
  */
-function links(command: string): string[] {
-  const out: string[] = [];
+interface CommandLink {
+  text: string;
+  /** True only when this command consumes the previous command's pipe. */
+  piped: boolean;
+}
+
+function commandLinks(command: string): CommandLink[] {
+  const out: CommandLink[] = [];
   let start = 0;
   let quote = 0;
+  let piped = false;
   for (let i = 0; i < command.length; i++) {
     const c = command.charCodeAt(i);
     if (quote) {
@@ -139,13 +146,19 @@ function links(command: string): string[] {
       continue;
     }
     if (c === 59 || c === 10 || c === 124 || (c === 38 && command.charCodeAt(i + 1) === 38)) {
-      out.push(command.slice(start, i));
-      if ((c === 124 || c === 38) && command.charCodeAt(i + 1) === c) i++;
+      out.push({ text: command.slice(start, i), piped });
+      const doubled = (c === 124 || c === 38) && command.charCodeAt(i + 1) === c;
+      piped = c === 124 && !doubled;
+      if (doubled) i++;
       start = i + 1;
     }
   }
-  out.push(command.slice(start));
+  out.push({ text: command.slice(start), piped });
   return out;
+}
+
+function links(command: string): string[] {
+  return commandLinks(command).map((link) => link.text);
 }
 
 /** `FOO=bar` — a setting in front of a command rather than the command. */
@@ -809,7 +822,13 @@ const HEADS: Record<string, Rule> = {
     },
   },
   head: { kind: 'read', say: (a) => (object(a, 1) ? `Read the top of ${brief(place(object(a, 1)))}` : null) },
-  tail: { kind: 'read', say: (a) => (object(a, 1) ? `Read the end of ${brief(place(object(a, 1)))}` : null) },
+  tail: {
+    kind: 'read',
+    say: (a) => {
+      const target = objects(a, 1).filter((word) => !/^\+?\d+$/.test(word)).at(-1) ?? '';
+      return target ? `Read the end of ${brief(place(target))}` : 'Read the end of the output';
+    },
+  },
   ls: { kind: 'read', say: (a) => `Listed ${worthNaming(object(a, 1)) ? brief(place(object(a, 1))) : 'this folder'}` },
   wc: { kind: 'read', say: (a) => (object(a, 1) ? `Counted ${brief(place(object(a, 1)))}` : 'Counted the lines') },
   stat: { kind: 'read', say: (a) => `Checked ${brief(place(object(a, 1))) || 'a file'}` },
@@ -825,6 +844,15 @@ const HEADS: Record<string, Rule> = {
       return what.length >= 2 ? `Compared ${brief(leaf(what[0]!))} and ${brief(leaf(what[1]!))}` : 'Compared two files';
     },
   },
+  cmp: {
+    kind: 'read',
+    say: (a) => {
+      const what = objects(a, 1);
+      return what.length >= 2 ? `Compared ${brief(leaf(what[0]!))} and ${brief(leaf(what[1]!))}` : 'Compared two files';
+    },
+  },
+  join: { kind: 'read', say: () => 'Joined matching lines from files' },
+  nl: { kind: 'read', say: (a) => `Read numbered ${brief(place(object(a, 1))) || 'text'}` },
 
   // Searching.
   grep: { kind: 'search', say: (a) => searchSaid(a, 1) },
@@ -896,6 +924,7 @@ const HEADS: Record<string, Rule> = {
 
   // Running things.
   node: { kind: 'run', say: (a) => runSaid(a, 'Node') },
+  tsx: { kind: 'run', say: (a) => runSaid(a, 'TypeScript') },
   deno: { kind: 'run', say: (a) => runSaid(a, 'Deno') },
   bun: { kind: 'run', say: (a) => runSaid(a, 'Bun') },
   python: { kind: 'run', say: (a) => runSaid(a, 'Python') },
@@ -1127,7 +1156,16 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   }
 
   const rule = HEADS[head];
-  if (!rule) return null;
+  if (!rule) {
+    // Executable scripts are common in project tooling. Their filename is a
+    // useful human label even when this app has never seen that script before.
+    if (/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/.test(head) || argv[0]!.includes('machinery/board/')) {
+      const stem = head.replace(/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/, '').replaceAll('-', ' ');
+      const text = has(argv, '--help', '-h') ? `Read the ${brief(stem)} options` : `Ran ${brief(stem)}`;
+      return { text, kind: has(argv, '--help', '-h') ? 'read' : 'script', grave: false };
+    }
+    return null;
+  }
   const text = rule.say(argv);
   if (!text) return null;
 
@@ -1149,7 +1187,38 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
  * Cargo.toml". Unwrap only an explicit `c` option; an ordinary script file is
  * still described as a script.
  */
+/** Decode the one shell word following `-c`, including `'…'"'"'…'` joins. */
+function shellWord(text: string): string {
+  let out = '';
+  let quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charAt(i);
+    if (!quote) {
+      if (/\s/.test(char)) break;
+      if (char === "'" || char === '"') { quote = char; continue; }
+      if (char === '\\' && i + 1 < text.length) { out += text.charAt(++i); continue; }
+      out += char;
+      continue;
+    }
+    if (char === quote) { quote = ''; continue; }
+    if (quote === '"' && char === '\\' && i + 1 < text.length) {
+      const next = text.charAt(i + 1);
+      if (next === '"' || next === '\\' || next === '$' || next === '`') { out += next; i++; continue; }
+    }
+    out += char;
+  }
+  return out;
+}
+
 function commandHandedToShell(command: string): string | null {
+  // Native Codex commandExecution uses this exact launcher. Read it directly
+  // before tokenising: its double-quoted body often contains escaped JSON,
+  // which is valid shell but deliberately beyond the tiny word reader below.
+  const launched = /^\s*(?:\S*\/)?(?:bash|sh|zsh|dash)\s+-[A-Za-z]*c[A-Za-z]*\s+([\s\S]+)$/.exec(command);
+  if (launched) {
+    const held = launched[1]!.trim();
+    return shellWord(held);
+  }
   const argv = headOf(stripped(words(command)));
   const head = named(argv[0] ?? '');
   if (head !== 'bash' && head !== 'sh' && head !== 'zsh' && head !== 'dash') return null;
@@ -1157,10 +1226,76 @@ function commandHandedToShell(command: string): string | null {
   return at >= 0 ? (argv[at + 1] ?? null) : null;
 }
 
+/** A JavaScript string literal passed as an object property. */
+function jsStringAfter(text: string, property: string): string | null {
+  const at = new RegExp(`(?:\\b${property}|["']${property}["'])\\s*:\\s*`).exec(text);
+  if (!at) return null;
+  const from = at.index + at[0].length;
+  const quote = text.charAt(from);
+  if (quote !== '"' && quote !== "'" && quote !== '`') return null;
+  let out = '';
+  for (let i = from + 1; i < text.length; i++) {
+    const char = text.charAt(i);
+    if (char === quote) return out;
+    if (char !== '\\') { out += char; continue; }
+    const next = text.charAt(++i);
+    if (!next) break;
+    if (next === 'n') out += '\n';
+    else if (next === 'r') out += '\r';
+    else if (next === 't') out += '\t';
+    else out += next;
+  }
+  // Older stored rows may end at the payload limit halfway through a very
+  // large programmatic call. The useful command prefix is still better than
+  // throwing the entire row back to raw JavaScript.
+  return out || null;
+}
+
+/**
+ * Older Codex rollouts stored their programmatic orchestration call as Bash.
+ * Recognising the envelope here repairs those rows on read and protects
+ * imports from any provider version that emits the same shape.
+ */
+function agentEnvelopeDid(text: string, shellDepth: number): Ran | null {
+  if (/\btools\.(?:exec_command|exec)\s*\(/.test(text)) {
+    const command = jsStringAfter(text, 'cmd');
+    if (command) return whatACommandDid(command, shellDepth + 1);
+  }
+  if (/\btools\.(?:write_stdin|wait)\s*\(/.test(text)) {
+    return { said: 'Waited for a running command', kind: 'wait', grave: false };
+  }
+  if (/\btools\.apply_patch\s*\(|\*\*\* Begin Patch/.test(text)) {
+    const paths: string[] = [];
+    const pattern = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm;
+    const patch = text.replaceAll('\\n', '\n');
+    let hit: RegExpExecArray | null;
+    while ((hit = pattern.exec(patch))) if (hit[1]) paths.push(hit[1]);
+    const target = paths[0] ? brief(place(paths[0])) : '';
+    return {
+      said: paths.length > 1 ? `Changed ${paths.length} files` : target ? `Changed ${target}` : 'Changed files',
+      kind: 'edit', grave: false,
+    };
+  }
+  if (/\btools\.view_image\s*\(/.test(text)) {
+    const path = jsStringAfter(text, 'path');
+    return { said: path ? `Looked at ${brief(place(path))}` : 'Looked at an image', kind: 'read', grave: false };
+  }
+  if (/\btools\.web__run\s*\(/.test(text)) {
+    return { said: /(?:\bsearch_query|["']search_query["'])\s*:/.test(text) ? 'Searched the web' : 'Used the browser', kind: 'web', grave: false };
+  }
+  if (/^(?:const|let|var)\s/.test(text)) {
+    return { said: 'Ran an agent helper script', kind: 'script', grave: false };
+  }
+  return null;
+}
+
 /** One shell command, as a sentence. Null when no rule here can name it. */
 export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
   const text = command.trim();
   if (!text) return null;
+
+  const envelope = shellDepth < 4 ? agentEnvelopeDid(text, shellDepth) : null;
+  if (envelope) return envelope;
 
   // Provider launchers may nest (for example `env bash -lc …`), but malformed
   // or adversarial input must not recurse forever.
@@ -1178,20 +1313,24 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
     if (!only) return null;
     stages.push(only);
   } else {
-    const chain = links(text);
+    const chain = commandLinks(text);
     for (let i = 0; i < chain.length; i++) {
       if (i >= MOST_LINKS) {
         missed += chain.length - i;
         break;
       }
-      const argv = headOf(stripped(words(chain[i]!)));
+      const link = chain[i]!;
+      const argv = headOf(stripped(words(link.text)));
       // A folder change is WHERE a command ran and never WHAT it did. A quarter
       // of his commands open with one, and naming it as a stage named nothing.
       if (argv.length && named(argv[0]!) === 'cd') {
         if (!where) where = folder(argv);
         continue;
       }
-      const stage = linkStage(argv, stages.length > 0);
+      // Search/read tools after a pipe merely shape the previous command's
+      // output. After `&&`, `||`, `;`, or a newline they are real work and
+      // must be named in the transcript.
+      const stage = linkStage(argv, link.piped && stages.length > 0);
       if (stage === null) missed++;
       else if (stage !== DROPPED) stages.push(stage);
     }
@@ -1464,7 +1603,7 @@ const UNDER_WAY: Record<string, string> = {
   Compared: 'Comparing', Copied: 'Copying', Counted: 'Counting', Cut: 'Cutting',
   Deleted: 'Deleting', Diffed: 'Diffing', Downloaded: 'Downloading',
   Fetched: 'Fetching', 'Force-pushed': 'Force-pushing', Formatted: 'Formatting',
-  Found: 'Finding', Gave: 'Giving', Installed: 'Installing', Killed: 'Killing',
+  Found: 'Finding', Gave: 'Giving', Installed: 'Installing', Joined: 'Joining', Killed: 'Killing',
   Landed: 'Landing', Left: 'Leaving', Linked: 'Linking', Linted: 'Linting',
   Listed: 'Listing', Looked: 'Looking', Made: 'Making', Measured: 'Measuring',
   Merged: 'Merging', Messaged: 'Messaging', Moved: 'Moving', Opened: 'Opening',
