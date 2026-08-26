@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Keep AGENTS.md's managed workflow to one explicit repository path."""
+"""Keep both providers on the one canonical Atelier workflow."""
 
 from pathlib import Path
 import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TEXT = (ROOT / "AGENTS.md").read_text()
+AGENTS = (ROOT / "AGENTS.md").read_text()
+CLAUDE = (ROOT / "CLAUDE.md").read_text()
+POLICY = (ROOT / "machinery" / "workflow-policy.md").read_text().strip()
 START = "<!-- BEGIN ATELIER WORKFLOW -->"
 END = "<!-- END ATELIER WORKFLOW -->"
 
@@ -16,10 +18,16 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-if TEXT.count(START) != 1 or TEXT.count(END) != 1:
-    fail("managed block markers must each appear once")
+if AGENTS != CLAUDE:
+    fail("AGENTS.md and CLAUDE.md must be byte-identical")
 
-managed = TEXT.split(START, 1)[1].split(END, 1)[0]
+if AGENTS.count(START) != 1 or AGENTS.count(END) != 1:
+    fail("managed block markers must each appear once in both provider files")
+
+managed = AGENTS.split(START, 1)[1].split(END, 1)[0].strip()
+expected = f"## Atelier workflow (managed)\n\n{POLICY}"
+if managed != expected:
+    fail("the managed provider block does not match machinery/workflow-policy.md")
 required_once = (
     "machinery/board/job new",
     "git -C . worktree add worktrees/<job-id> -b <job-id>",
