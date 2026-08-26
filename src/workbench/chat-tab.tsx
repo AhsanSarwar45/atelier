@@ -18,6 +18,7 @@ import {
   Cpu,
   Folder,
   FolderGit2,
+  Gauge,
   Loader2,
   PanelLeft,
   PanelRight,
@@ -1351,6 +1352,24 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               onPick={(model) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.model', sessionId, model }).catch((e: unknown) =>
+                  setSteerError(e instanceof Error ? e.message : String(e)),
+                );
+              }}
+            />
+            <Picker
+              icon={<Gauge className="h-3.5 w-3.5" />}
+              label="Reasoning effort"
+              testid="effort-picker"
+              current={view.effort ?? null}
+              asleep={asleep}
+              options={view.menu.efforts.map((effort) => ({
+                value: effort.value,
+                label: effort.displayName,
+                hint: effort.description,
+              }))}
+              onPick={(effort) => {
+                setSteerError(null);
+                void sendCommand({ type: 'session.effort', sessionId, effort }).catch((e: unknown) =>
                   setSteerError(e instanceof Error ? e.message : String(e)),
                 );
               }}
