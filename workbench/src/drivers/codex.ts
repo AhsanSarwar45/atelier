@@ -15,8 +15,21 @@ type Pending = { resolve: (value: any) => void; reject: (reason: Error) => void 
 type PendingAsk = { answer: (choice: string, value?: string) => void };
 
 const MODES = ['untrusted', 'on-request', 'never'];
+const BEADS_SANDBOX_CONFIG = { sandbox_workspace_write: { network_access: true } };
 const decision = (choice: PermissionAnswer) =>
   choice === 'allow_once' ? 'accept' : choice === 'allow_always' ? 'acceptForSession' : 'decline';
+
+export function codexThreadOpenRequest(opts: {
+  resume?: string; cwd: string; model?: string; approvalPolicy: string; effort?: string;
+}): { method: 'thread/start' | 'thread/resume'; params: Bag } {
+  const common = {
+    cwd: opts.cwd, model: opts.model ?? null, approvalPolicy: opts.approvalPolicy,
+    effort: opts.effort ?? null, config: BEADS_SANDBOX_CONFIG,
+  };
+  return opts.resume
+    ? { method: 'thread/resume', params: { threadId: opts.resume, ...common, excludeTurns: true } }
+    : { method: 'thread/start', params: { ...common, sandbox: 'workspace-write', ephemeral: false } };
+}
 
 function patchSides(diff: string): { before: string; after: string } {
   const before: string[] = [];
@@ -466,15 +479,11 @@ export class CodexDriver implements Driver {
     });
     this.notify('initialized', {});
 
-    const opened = opts.resume
-      ? await this.call('thread/resume', {
-          threadId: opts.resume, cwd: opts.cwd, model: this.model ?? null,
-          approvalPolicy: this.mode, effort: this.effort ?? null, excludeTurns: true,
-        })
-      : await this.call('thread/start', {
-          cwd: opts.cwd, model: this.model ?? null, approvalPolicy: this.mode, effort: this.effort ?? null,
-          sandbox: 'workspace-write', ephemeral: false,
-        });
+    const request = codexThreadOpenRequest({
+      resume: opts.resume, cwd: opts.cwd, model: this.model,
+      approvalPolicy: this.mode, effort: this.effort,
+    });
+    const opened = await this.call(request.method, request.params);
     this.threadId = opened.thread.id;
     this.model = opened.model || this.model;
     this.emit({

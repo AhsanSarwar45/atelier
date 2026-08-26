@@ -7,7 +7,7 @@ import { join } from 'node:path';
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({}));
 
 import type { WbpEvent } from '../../../src/workbench/protocol';
-import { CodexDriver, codexAgentDefinitions, replayCodexThread } from '../drivers/codex';
+import { CodexDriver, codexAgentDefinitions, codexThreadOpenRequest, replayCodexThread } from '../drivers/codex';
 import { createDriver, defaultPermissionMode } from '../drivers';
 
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
@@ -171,6 +171,18 @@ describe('Codex persisted history', () => {
 });
 
 describe('Codex first-class controls and live work', () => {
+  it('gives new and resumed workspace commands access to the local Beads server', () => {
+    for (const resume of [undefined, 'existing-thread']) {
+      const request = codexThreadOpenRequest({ cwd: '/repo', approvalPolicy: 'on-request', resume });
+      expect(request).toMatchObject({
+        method: resume ? 'thread/resume' : 'thread/start',
+        params: {
+          config: { sandbox_workspace_write: { network_access: true } },
+        },
+      });
+    }
+  });
+
   it('shows a file edit with its before and after sides', () => {
     const events: BareEvent[] = [];
     const driver = new CodexDriver() as any;
