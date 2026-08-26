@@ -27,6 +27,7 @@ import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import type { HeldDoing } from '../../src/workbench/chat-state.ts';
 import { lastSpokeAt } from './spoken.ts';
 import type { Store } from './store.ts';
+import { conversationTitle } from './conversation-title.ts';
 import { codexRolloutPath, listCodexThreads } from './drivers/codex.ts';
 
 interface KnownSession {
@@ -216,7 +217,7 @@ export async function knownSessions(projectPath: string | null, everything = fal
       brand: 'claude' as const,
       externalId: s.sessionId,
       lastActiveAt: new Date(s.lastModified).toISOString(),
-      name: s.customTitle ?? s.summary ?? s.firstPrompt ?? null,
+      name: s.customTitle ?? s.summary ?? conversationTitle(s.firstPrompt ?? ''),
       cwd: s.cwd ?? null,
       branch: s.gitBranch ?? null,
       running: false,
@@ -234,7 +235,7 @@ export async function knownSessions(projectPath: string | null, everything = fal
         brand: 'codex' as const,
         externalId: thread.id,
         lastActiveAt: new Date(Number(thread.updatedAt) * 1000).toISOString(),
-        name: thread.name ?? thread.preview ?? null,
+        name: thread.name ?? conversationTitle(thread.preview ?? ''),
         cwd: thread.cwd ?? null,
         branch: thread.gitInfo?.branch ?? null,
         running: thread.status?.type === 'active' || running.has(String(thread.id).toLowerCase()),

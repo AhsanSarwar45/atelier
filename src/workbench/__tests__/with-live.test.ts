@@ -68,7 +68,7 @@ describe('the list keeps up', () => {
     const merged = withLive([row()], [session({ id: 's1', state: 'thinking', title: 'Renamed' })], PROJECT);
     expect(merged).toHaveLength(1);
     expect(merged[0]!.state).toBe('thinking');
-    expect(merged[0]!.title).toBe('Renamed');
+    expect(merged[0]!.title).toBe('An older chat');
   });
 
   it('what the row already knew survives a live frame that knows less', () => {

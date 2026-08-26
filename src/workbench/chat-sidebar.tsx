@@ -225,7 +225,9 @@ export function withLive(
       merged[merged.indexOf(known)] = {
         ...known,
         state: session.state,
-        title: session.title ?? known.title,
+        // The restore row has already asked the provider for its conversation
+        // name. Keep that over our live session's temporary generated label.
+        title: known.title ?? session.title,
         // Never backwards: the stream carries what our own driver has seen, and
         // the row may already hold a later time from the tool's index — a chat
         // being worked on in a terminal moves that index and not our driver.

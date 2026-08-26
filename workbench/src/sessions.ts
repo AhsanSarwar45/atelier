@@ -70,6 +70,7 @@ export function boundedEvent<T extends DriverEvent | WbpEvent>(event: T): T {
 }
 import { knownSessions, providerHolderPids, providerHoldsNow } from './registry.ts';
 import type { Store } from './store.ts';
+import { conversationTitle } from './conversation-title.ts';
 
 type Subscriber = (e: WbpEvent) => void;
 
@@ -1481,7 +1482,7 @@ export class Sessions {
     this.publish(sessionId, { type: 'message.completed', messageId });
 
     const s = this.store.getSession(sessionId);
-    if (s && !s.title) this.store.updateSession(sessionId, { title: text.slice(0, 80) });
+    if (s && !s.title) this.store.updateSession(sessionId, { title: conversationTitle(text) });
     // He spoke. This is the ONLY place the second clock moves for a chat this
     // app drives — the whole point of it is that nothing the agent then does
     // moves it again (bw-zhs9). A chat started from a card comes through here
