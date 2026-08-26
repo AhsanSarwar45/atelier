@@ -53,7 +53,7 @@ import {
   type LiveSession,
 } from '@/workbench/live';
 import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type Brand, type RestoreRow } from '@/workbench/protocol';
-import { heldElsewhere } from '@/workbench/running';
+import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
 import { BrandIcon, brandName } from '@/workbench/brand-icon';
 
@@ -621,11 +621,12 @@ export function ChatSidebar({
               // Something of ours is attached and can be taken away. Anything
               // else has nothing to close, so it is not offered one.
               const closable = Boolean(row.sessionId) && live && !row.runningElsewhere;
+              const ownership = sessionOwnership(row.state, row.externalId, row.runningElsewhere === true);
               const state = chatState({
                 state: row.state,
                 label: row.activity,
                 since: row.busySince ? Date.parse(row.busySince) : null,
-                held: row.held ?? (row.runningElsewhere ? {
+                held: row.held ?? (ownership.kind === 'elsewhere' ? {
                   id: row.externalId ?? '',
                   holder: row.origin === 'terminal' ? 'terminal' : 'program',
                   doing: 'working',
@@ -760,9 +761,7 @@ export function ChatSidebar({
                     ending === key ||
                     state.working ||
                     state.waiting ||
-                    live ||
-                    state.external ||
-                    row.origin === 'terminal') && (
+                    ownership.kind === 'elsewhere') && (
                     <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
                       {busy === key || ending === key ? (
                         <Badge
@@ -793,8 +792,8 @@ export function ChatSidebar({
                         // (chat-state-chip.tsx, splitDetail; bw-gnzl).
                         <ChatStateChip state={state} testId="row-pill" className="min-w-0 shrink" />
                       )}
-                      {(state.external || row.origin === 'terminal') && (
-                        <ExternalBadge holder={state.external?.holder ?? 'terminal'} className="ml-auto shrink-0" />
+                      {ownership.kind === 'elsewhere' && state.external && (
+                        <ExternalBadge holder={state.external.holder} className="ml-auto shrink-0" />
                       )}
                     </div>
                   )}

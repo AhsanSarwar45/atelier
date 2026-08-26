@@ -75,6 +75,16 @@ export function modelName(wire: string | null, announced?: string | null): strin
   const id = wire.toLowerCase();
   if (id === BRAND_DEFAULT_MODEL) return BRAND_DEFAULT_LABEL;
 
+  // Codex model ids are identifiers, not labels. Both the picker and the
+  // status chip use this branch, so `gpt-5-3-codex` cannot be raw in one and
+  // prettied in the other.
+  const gpt = /^gpt-([0-9]+(?:-[0-9]+)*)(?:-(.*))?$/.exec(id);
+  if (gpt) {
+    const version = gpt[1]!.replaceAll('-', '.');
+    const variant = gpt[2] ? ` ${inWords(gpt[2])}` : '';
+    return `GPT ${version}${variant}`;
+  }
+
   const build = /\[([^\]]+)\]$/.exec(id)?.[1] ?? null;
   const parts = id
     .replace(/\[[^\]]*\]$/, '')
@@ -125,6 +135,7 @@ export function modelWords(model: string | null, models: ModelChoice[]): string 
  * reads.
  */
 export function modelKey(model: string): string {
+  if (/^gpt-[0-9]/i.test(model)) return model.toLowerCase().includes('codex') ? 'codex' : 'gpt';
   const family = model
     .toLowerCase()
     .replace(/^claude-/, '')

@@ -36,6 +36,35 @@
 // server reads this file raw, and knows nothing of the browser build's `@/`.
 import { asleepHere, type SessionState } from './protocol.ts';
 
+/** Current ownership, deliberately separate from immutable session origin. */
+export type SessionOwnership =
+  | { kind: 'atelier' }
+  | { kind: 'elsewhere'; externalId: string }
+  | { kind: 'unheld'; externalId: string | null };
+
+/**
+ * One provider-neutral ownership state machine.
+ *
+ * A terminal-created chat is not permanently external. While no driver is
+ * attached it is unheld and may be resumed by the first send; while another
+ * live process holds it, it is external and read-only; once Atelier attaches,
+ * it is ours regardless of where it was originally created.
+ */
+export function sessionOwnership(
+  state: SessionState,
+  externalId: string | null | undefined,
+  heldByAnother: boolean,
+): SessionOwnership {
+  if (!asleepHere(state)) return { kind: 'atelier' };
+  if (externalId && heldByAnother) return { kind: 'elsewhere', externalId };
+  return { kind: 'unheld', externalId: externalId ?? null };
+}
+
+/** Whether the shared composer may accept a message in this ownership state. */
+export function canCompose(ownership: SessionOwnership): boolean {
+  return ownership.kind !== 'elsewhere';
+}
+
 /**
  * One marker file, as the tool writes it.
  *
@@ -240,8 +269,6 @@ export function heldElsewhere(
   running: ReadonlySet<string> | null,
   saidAtOpen = false,
 ): boolean {
-  if (!asleepHere(state)) return false;
-  if (!externalId) return false;
-  if (running === null) return saidAtOpen;
-  return running.has(externalId);
+  const held = !!externalId && (running === null ? saidAtOpen : running.has(externalId));
+  return sessionOwnership(state, externalId, held).kind === 'elsewhere';
 }

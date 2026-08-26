@@ -69,7 +69,7 @@ import { EVERYTHING, hisDoing, remember, remembered, showing as stillShowing, ty
 import type { Brand, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { ReportChip } from '@/workbench/report-view';
-import { heldElsewhere } from '@/workbench/running';
+import { canCompose, heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
 import { AgentView } from '@/workbench/agent-view';
 import { DrawnTranscript } from '@/workbench/drawn-transcript';
@@ -631,6 +631,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const plan = usePlanUsage(sessionBrand);
   const externalId = live?.externalId ?? facts?.externalId ?? null;
   const held = heldElsewhere(view.state, externalId, elsewhere, facts?.runningElsewhere);
+  const ownership = sessionOwnership(view.state, externalId, held);
   // What that program is doing, from the stream while it is connected and from
   // the chat's own facts until it has spoken (bw-96is).
   const holds = useHolds();
@@ -1011,7 +1012,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             are separate facts and the badge never stands in for the first
             (bw-96is). Both clear themselves when that program stops, because
             the stream they are read from does (bw-dmxj.10). */}
-        {(state.external || facts?.origin === 'terminal') && <span
+        {state.external && <span
           data-testid="session-state"
           data-state={held ? 'held' : view.state}
           className={cn('flex shrink-0 items-center', CHIP_GAP)}
@@ -1020,7 +1021,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               live line at the foot of the transcript, and the same state is on
               the chat's row in the list beside it. Only the badge naming
               another program holding this chat stays — nothing else says it. */}
-          <ExternalBadge holder={state.external?.holder ?? 'terminal'} />
+          <ExternalBadge holder={state.external.holder} />
         </span>}
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
@@ -1175,7 +1176,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             comes back by itself when they let go, because the stream this is
             read from does (bw-96is). The line's words are the reading's, so it
             cannot contradict the mark at the top of the pane (bw-96is.9). */}
-        {held ? (
+        {!canCompose(ownership) ? (
           <p data-testid="held-elsewhere" className="mx-auto w-full max-w-[110ch] px-1 text-xs text-muted-foreground">
             {heldLine(state)}
           </p>

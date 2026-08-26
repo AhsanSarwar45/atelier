@@ -135,6 +135,8 @@ describe('what the chat is running, on its own line', () => {
       ['default', 'Default model'],
       // No family it knows: the id opened up is better than the id.
       ['some-new-thing', 'Some new thing'],
+      ['gpt-5-3-codex', 'GPT 5.3 Codex'],
+      ['gpt-5-3-codex-spark', 'GPT 5.3 Codex spark'],
     ] as const) {
       expect(modelName(wire), wire).toBe(said);
     }
@@ -146,6 +148,7 @@ describe('what the chat is running, on its own line', () => {
     expect(modelName('opus')).toBe('Opus');
     expect(modelName('claude-opus-5[1m]', 'claude-opus-5[1m]')).toBe('Opus 5 (1M context)');
     expect(modelName('opusplan', 'Opus, planning first')).toBe('Opus, planning first');
+    expect(modelName('gpt-5-3-codex', 'gpt-5-3-codex')).toBe('GPT 5.3 Codex');
     expect(modelName(null)).toBeNull();
   });
 
@@ -205,6 +208,8 @@ describe('what the chat is running, on its own line', () => {
       ['claude-haiku-4-5-20251001', 'haiku'],
       ['claude-sonnet-5-latest', 'sonnet'],
       ['default', 'default'],
+      ['gpt-5-3-codex', 'codex'],
+      ['gpt-5-3-codex-spark', 'codex'],
     ] as const) {
       expect(modelKey(wire), wire).toBe(family);
     }

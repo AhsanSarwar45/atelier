@@ -135,6 +135,30 @@ afterEach(() => {
 });
 
 describe('a chat begun in another tool', () => {
+  it('is neither external nor asleep once no other process holds it', async () => {
+    list = [row({ origin: 'terminal', externalId: 'outside-1', runningElsewhere: false })];
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(screen.queryByTestId('chat-external')).toBeNull();
+    expect(screen.queryByText('Asleep')).toBeNull();
+    expect(screen.queryByTestId('row-pill')).toBeNull();
+  });
+
+  it('becomes external only while another live process holds it', async () => {
+    list = [row({
+      origin: 'terminal', externalId: 'outside-1', runningElsewhere: true,
+      held: { id: 'outside-1', holder: 'terminal', doing: 'idle', since: null },
+    })];
+    const ChatSidebar = await freshSidebar();
+    render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(screen.getByTestId('chat-external')).toBeInTheDocument();
+    expect(screen.getByTestId('row-pill')).toHaveTextContent('Idle');
+  });
+
   it('joins the list on the word alone, with nothing clicked', async () => {
     const ChatSidebar = await freshSidebar();
     render(<ChatSidebar projectId={PROJECT} projectPath={PATH} openSessionId={null} onOpen={() => {}} />);
