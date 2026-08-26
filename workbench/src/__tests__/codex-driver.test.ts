@@ -171,6 +171,47 @@ describe('Codex persisted history', () => {
 });
 
 describe('Codex first-class controls and live work', () => {
+  it('turns a live generated image into a transcript image message', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'codex-generated-image-'));
+    const path = join(folder, 'result.png');
+    writeFileSync(path, Buffer.from('89504e470d0a1a0a', 'hex'));
+    try {
+      const events: BareEvent[] = [];
+      const driver = new CodexDriver() as any;
+      driver.emit = (event: BareEvent) => events.push(event);
+      driver.itemStarted({ id: 'generated', type: 'imageGeneration', status: 'inProgress', result: '' });
+      driver.itemCompleted({ id: 'generated', type: 'imageGeneration', status: 'completed', result: 'Made it', savedPath: path });
+
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'message.started', messageId: 'generated:image', role: 'assistant',
+      }));
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'image', messageId: 'generated:image',
+        image: expect.objectContaining({ mime: 'image/png', alt: 'result.png' }),
+      }));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('turns a live viewed image into a transcript image message', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'codex-viewed-image-'));
+    const path = join(folder, 'selected.png');
+    writeFileSync(path, Buffer.from('89504e470d0a1a0a', 'hex'));
+    try {
+      const events: BareEvent[] = [];
+      const driver = new CodexDriver() as any;
+      driver.emit = (event: BareEvent) => events.push(event);
+      driver.itemStarted({ id: 'viewed', type: 'imageView', path });
+      driver.itemCompleted({ id: 'viewed', type: 'imageView', path });
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'image', messageId: 'viewed:image', image: expect.objectContaining({ alt: 'selected.png' }),
+      }));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it('gives new and resumed workspace commands access to the local Beads server', () => {
     for (const resume of [undefined, 'existing-thread']) {
       const request = codexThreadOpenRequest({ cwd: '/repo', approvalPolicy: 'on-request', resume });

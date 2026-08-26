@@ -195,6 +195,22 @@ export function answerOf(result: unknown, output: string): string {
   return words || output;
 }
 
+/** A picture returned by a Claude tool result, translated into the browser's
+ * shared inline-image payload. */
+function resultImage(part: Record<string, any>): ImagePayload | null {
+  if (part.type !== 'image' || !part.source) return null;
+  const source = part.source as Record<string, unknown>;
+  if (source.type === 'base64' && typeof source.data === 'string') {
+    const mime = typeof source.media_type === 'string' ? source.media_type : 'image/*';
+    return { mime, dataUrl: `data:${mime};base64,${source.data}`, alt: 'Agent-produced image' };
+  }
+  if (source.type === 'url' && typeof source.url === 'string') {
+    const mime = typeof source.media_type === 'string' ? source.media_type : 'image/*';
+    return { mime, dataUrl: source.url, alt: 'Agent-produced image' };
+  }
+  return null;
+}
+
 /**
  * Everything the machine says about itself, as one line and a body.
  *
@@ -1948,6 +1964,17 @@ export class ClaudeDriver implements Driver {
               ok: !b.is_error,
               output: cut(output),
             });
+            const pictures = Array.isArray(b.content)
+              ? b.content
+                  .map((part: Record<string, any>) => resultImage(part))
+                  .filter((image: ImagePayload | null): image is ImagePayload => image !== null)
+              : [];
+            if (pictures.length) {
+              const messageId = `${b.tool_use_id}:images`;
+              this.emit({ type: 'message.started', messageId, role: 'assistant' });
+              for (const image of pictures) this.emit({ type: 'image', messageId, image });
+              this.emit({ type: 'message.completed', messageId });
+            }
             // A helper's run totals, which the kit sends structured rather than
             // in the words it hands the model: the model it settled on, what it
             // spent and how many calls it made. The row's own edge message says

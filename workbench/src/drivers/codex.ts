@@ -84,6 +84,21 @@ function localImagePayload(path: string): { dataUrl: string; mime: string; alt: 
   } catch { return null; }
 }
 
+/** Put a tool-produced picture into the transcript as an assistant message.
+ * Codex reports imageView/imageGeneration as tool items, not agentMessage
+ * content, so without this translation the browser receives only the tool's
+ * text receipt and PictureGrid has no image event to draw. */
+function emitToolImage(driver: CodexDriver, item: Bag): void {
+  const path = item.type === 'imageGeneration' ? item.savedPath : item.type === 'imageView' ? item.path : null;
+  if (typeof path !== 'string' || !path) return;
+  const image = localImagePayload(path);
+  if (!image) return;
+  const messageId = `${item.id}:image`;
+  driver.emit({ type: 'message.started', messageId, role: 'assistant' });
+  driver.emit({ type: 'image', messageId, image });
+  driver.emit({ type: 'message.completed', messageId });
+}
+
 export function codexAgentDefinitions(cwd: string): { name: string; description: string; source: 'project' | 'user' }[] {
   const found = new Map<string, { name: string; description: string; source: 'project' | 'user' }>();
   for (const [dir, source] of [[join(homedir(), '.codex', 'agents'), 'user'], [join(cwd, '.codex', 'agents'), 'project']] as const) {
@@ -1064,6 +1079,7 @@ export class CodexDriver implements Driver {
     if (!this.tools.has(item.id)) return;
     const ok = !['failed', 'declined'].includes(item.status) && (item.exitCode === null || item.exitCode === undefined || item.exitCode === 0);
     this.emit({ type: 'tool.completed', toolCallId: item.id, ok, output: outputOf(item) || this.toolOutput.get(item.id) || '' });
+    if (ok) emitToolImage(this, item);
     this.tools.delete(item.id);
     this.toolOutput.delete(item.id);
   }
