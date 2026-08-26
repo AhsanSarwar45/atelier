@@ -57,7 +57,11 @@ def mutates(data):
     # These bootstrap operations must work before a ticket worktree exists.
     if re.match(r"^\s*bd\s+create\b", command, re.I):
         return False
-    if re.match(r"^\s*bd\s+update\s+\S+\s+--claim(?:\s|$)", command, re.I):
+    # The worktree gate requires an explicit `cd` because some hosts do not
+    # propagate tool cwd into hook input. Accept that exact bootstrap prefix;
+    # otherwise the two gates deadlock (one demands cd, the other demands bd
+    # be the first word) before any child can be claimed.
+    if re.match(r"^\s*(?:cd\s+\S+\s*&&\s*)?bd\s+update\s+\S+\s+--claim(?:\s|$)", command, re.I):
         return False
     # Landing necessarily runs from the main checkout. Other hooks verify the
     # merge slot and lifecycle; this gate only requires the safe fast-forward
@@ -106,7 +110,10 @@ def checked_out_for(issue, cwd):
 
 
 def children_for(issue, cwd):
-    ok, out = run(["bd", "list", "--parent", issue, "--json"], cwd)
+    # Decomposition is durable history. Closed/landed children still prove the
+    # epic was decomposed; excluding them deadlocks the final deployment step
+    # as soon as earlier implementation children are correctly closed.
+    ok, out = run(["bd", "list", "--parent", issue, "--all", "--limit", "0", "--json"], cwd)
     if not ok:
         return None
     try:
