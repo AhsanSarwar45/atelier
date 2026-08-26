@@ -560,6 +560,33 @@ const GIT: Record<string, (argv: string[]) => string> = {
   },
 };
 
+/**
+ * Git accepts repository-wide options before its subcommand. Agents use `-C`
+ * constantly to avoid a separate `cd`, so treating argv[1] as the operation
+ * turns an ordinary status/read/commit into the useless label "Ran git -C".
+ */
+function gitCommand(argv: string[]): { sub: string; at: number } {
+  let at = 1;
+  while (at < argv.length) {
+    const word = argv[at] ?? '';
+    if (word === '-C' || word === '-c' || word === '--git-dir' || word === '--work-tree' || word === '--namespace') {
+      at += 2;
+      continue;
+    }
+    if (/^--(?:git-dir|work-tree|namespace)=/.test(word)) {
+      at += 1;
+      continue;
+    }
+    break;
+  }
+  return { sub: argv[at] ?? '', at };
+}
+
+/** Put a globally-optioned Git invocation into the shape the sentence table expects. */
+function ordinaryGitArgs(argv: string[], at: number): string[] {
+  return at === 1 ? argv : ['git', ...argv.slice(at)];
+}
+
 const CARGO: Record<string, string> = {
   build: 'Built the Rust side',
   test: 'Ran the Rust tests',
@@ -718,9 +745,9 @@ const HEADS: Record<string, Rule> = {
   git: {
     kind: 'vcs',
     say: (a) => {
-      const sub = a[1] ?? '';
+      const { sub, at } = gitCommand(a);
       const known = GIT[sub];
-      if (known) return known(a);
+      if (known) return known(ordinaryGitArgs(a, at));
       return sub ? `Ran git ${sub}` : null;
     },
   },
@@ -801,7 +828,19 @@ const HEADS: Record<string, Rule> = {
 
   // Searching.
   grep: { kind: 'search', say: (a) => searchSaid(a, 1) },
-  rg: { kind: 'search', say: (a) => searchSaid(a, 1) },
+  rg: {
+    kind: 'search',
+    say: (a) => {
+      if (has(a, '--files')) {
+        const globs: string[] = [];
+        for (let i = 1; i < a.length; i++) {
+          if ((a[i] === '-g' || a[i] === '--glob') && a[i + 1]) globs.push(a[++i]!);
+        }
+        return globs.length ? `Listed the files matching ${brief(globs.join(', '), 32)}` : 'Listed the files';
+      }
+      return searchSaid(a, 1);
+    },
+  },
   ag: { kind: 'search', say: (a) => searchSaid(a, 1) },
   ack: { kind: 'search', say: (a) => searchSaid(a, 1) },
   find: {

@@ -93,4 +93,19 @@ describe('Codex live-runtime regressions', () => {
       expect(events[0], id).toMatchObject({ type: 'tool.started', name, title });
     }
   });
+
+  it('gives wrapped common commands the same human labels as every provider', () => {
+    const calls = [
+      ['git', 'const r = await tools.exec_command({"cmd":"git -C /repo status --short"}); text(r.output)', 'Checked the working tree'],
+      ['rg', 'const r = await tools.exec_command({"cmd":"rg --files -g \\\"*.ts\\\""}); text(r.output)', 'Listed the files matching *.ts'],
+      ['sed', 'const r = await tools.exec_command({"cmd":"sed -n \\\"1,80p\\\" src/app.ts"}); text(r.output)', 'Read part of src/app.ts'],
+    ] as const;
+    for (const [id, input, title] of calls) {
+      const events: BareEvent[] = [];
+      codexRolloutLine(JSON.stringify({ type: 'response_item', payload: {
+        type: 'custom_tool_call', call_id: id, name: 'exec', input,
+      } }), new CodexDriver(), (event) => events.push(event));
+      expect(events[0], id).toMatchObject({ type: 'tool.started', name: 'Bash', title });
+    }
+  });
 });

@@ -86,6 +86,9 @@ const RULES: Array<[string, string]> = [
 
   // Version control.
   ['git status', 'Checked the working tree'],
+  ['git -C /home/me/project status --short', 'Checked the working tree'],
+  ['git -c color.ui=false log --oneline', 'Read the history'],
+  ['git --git-dir=/tmp/repo/.git --work-tree=/tmp/repo diff', 'Diffed the changes'],
   ['git log --oneline -20', 'Read the history'],
   ['git show HEAD', 'Showed HEAD'],
   ['git diff package-lock.json', 'Diffed package-lock.json'],
@@ -164,6 +167,8 @@ const RULES: Array<[string, string]> = [
   // Searching. The pattern is kept exactly as typed.
   ['grep -rn "toolTitle" workbench/src', 'Searched for toolTitle in workbench/src'],
   ['rg "whatItRan" src', 'Searched for whatItRan in src'],
+  ['rg --files', 'Listed the files'],
+  ['rg --files -g "*.ts" -g "!*.test.ts"', 'Listed the files matching *.ts, !*.test.ts'],
   ['grep -c foo a.txt b.txt c.txt', 'Searched for foo across 3 paths'],
   ['find . -name "*.test.ts"', 'Looked for *.test.ts'],
   ['find src -type f', 'Looked through src'],
