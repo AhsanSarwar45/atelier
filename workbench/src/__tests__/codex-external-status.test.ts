@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ listSessions: vi.fn() }));
 
-import { codexDoingFromLines, latestCodexThreadsByPid } from '../registry.ts';
+import { codexDoingFromLines, latestCodexThreadsByPid, restoreRunningElsewhere } from '../registry.ts';
 
 const row = (type: string, item?: string) => JSON.stringify({
   type: 'event_msg',
@@ -21,6 +21,13 @@ describe('external Codex activity', () => {
       [101, 'current-a'],
       [202, 'current-b'],
     ]);
+  });
+
+  it('keeps an externally held Codex row external after imported activity changes its stored state', () => {
+    const codex = new Set(['outside-codex']);
+    expect(restoreRunningElsewhere('codex', 'running_tool', 'outside-codex', new Map(), codex)).toBe(true);
+    expect(restoreRunningElsewhere('codex', 'starting', 'OUTSIDE-CODEX', new Map(), codex)).toBe(true);
+    expect(restoreRunningElsewhere('codex', 'dormant', 'not-running', new Map(), codex)).toBe(false);
   });
 
   it('is idle after a completed or aborted turn', () => {

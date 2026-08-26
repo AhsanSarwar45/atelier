@@ -100,6 +100,20 @@ export function runningCodexThreads(): Set<string> {
   return new Set(codexThreadProcesses().keys());
 }
 
+/** Whether a stored row is owned outside this helper right now. */
+export function restoreRunningElsewhere(
+  brand: 'claude' | 'codex',
+  state: SessionSummary['state'],
+  externalId: string | null,
+  claude: Map<string, unknown>,
+  codex: Set<string>,
+): boolean {
+  if (!externalId) return false;
+  return brand === 'codex'
+    ? codex.has(externalId.toLowerCase())
+    : asleepHere(state) && claude.has(externalId);
+}
+
 /** Live Codex processes by thread. More than one process can hold the same
  * thread, which is precisely the conflict the ownership UI must expose. */
 export function codexThreadProcesses(): Map<string, Set<number>> {
@@ -348,9 +362,10 @@ export async function restoreList(
   // writing (bw-dmxj). The tool's own markers are asked instead, and the
   // answer is cached, so listing forty rows costs one look at the machine.
   const running = runningNow();
+  const runningCodex = runningCodexThreads();
   // What each held chat is doing, so a row draws the same moving mark as the
   // chat's own line does (bw-96is). Read off the same beat as the set above.
-  const holds = new Map(holdsNow().map((h) => [h.id, h]));
+  const holds = new Map(providerHoldsNow().map((h) => [h.id.toLowerCase(), h]));
   // When the person last spoke, asked for every chat at once. Bounded and
   // remembered per record (spoken.ts), so a list of forty rows costs forty
   // looks at a file's length plus whatever each record has gained since the
@@ -399,8 +414,15 @@ export async function restoreList(
       // the chat's own line has always applied and this row did not: one chat
       // drew "external" here and "Ready" in the bar above it at the same moment
       // (bw-jaoz.2).
-      runningElsewhere: !!s.externalId && asleepHere(s.state) && (seen?.brand === 'codex' ? seen.running : running.has(s.externalId)),
-      held: (s.externalId && asleepHere(s.state) ? holds.get(s.externalId) : null) ?? null,
+      // Codex processes started by Atelier are app-server children and are
+      // excluded by runningCodexThreads(). A terminal Codex owner therefore
+      // wins over stale stored activity unconditionally. Imported activity
+      // used to change the row from dormant to running_tool and, perversely,
+      // that made the external badge disappear while the terminal kept going.
+      runningElsewhere: restoreRunningElsewhere(s.brand, s.state, s.externalId, running, runningCodex),
+      held: (s.externalId && (s.brand === 'codex' || asleepHere(s.state))
+        ? holds.get(s.externalId.toLowerCase())
+        : null) ?? null,
     };
   });
 
@@ -428,7 +450,7 @@ export async function restoreList(
       // a terminal is `dormant` here, because nothing of ours is attached to
       // it, and until now it was drawn identically to one that died last week.
       runningElsewhere: s.brand === 'codex' ? s.running : running.has(s.externalId),
-      held: holds.get(s.externalId) ?? null,
+      held: holds.get(s.externalId.toLowerCase()) ?? null,
     });
   }
 
