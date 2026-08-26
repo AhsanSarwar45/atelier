@@ -48,6 +48,26 @@ import {
   saysWhatItRuns,
   type RecordLine,
 } from './record-tail.ts';
+
+/**
+ * The provider-neutral wire/storage boundary for potentially unbounded agent
+ * payloads. Drivers may hand us whole command scripts and megabytes of output;
+ * neither the event log nor every browser reopening the chat should carry
+ * those verbatim. Applying this while replaying also repairs rows written by an
+ * older build without rewriting the database.
+ */
+export function boundedEvent<T extends DriverEvent | WbpEvent>(event: T): T {
+  if (event.type === 'tool.started') {
+    const input = trimInput(event.input);
+    return { ...event, input, title: toolTitle(event.name, input) } as T;
+  }
+  if (event.type === 'tool.completed') return { ...event, output: cut(event.output) } as T;
+  if (event.type === 'diff') {
+    return { ...event, before: cut(event.before), after: cut(event.after) } as T;
+  }
+  if (event.type === 'agent.finished') return { ...event, result: cut(event.result) } as T;
+  return event;
+}
 import { knownSessions, runningCodexThreads } from './registry.ts';
 import { runningNow } from './running.ts';
 import type { Store } from './store.ts';
@@ -1671,6 +1691,7 @@ export class Sessions {
 
   /** Stamps identity onto a driver event, logs it, then fans it out. */
   private publish(sessionId: string, e: DriverEvent): void {
+    e = boundedEvent(e);
     const full = {
       ...e,
       seq: this.store.nextSeq(sessionId),

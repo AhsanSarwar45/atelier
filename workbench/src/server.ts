@@ -20,7 +20,7 @@ import { codexUsage, watchCodexUsage } from './codex-usage.ts';
 import { knownSessions, restoreList } from './registry.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { holdsNow, rememberSummaryRuns, runningNow } from './running.ts';
-import { Sessions } from './sessions.ts';
+import { boundedEvent, Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 import { summaryMemoryOf } from './summary-runs.ts';
 
@@ -95,11 +95,12 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: stri
   });
 
   const write = (e: unknown) => {
-    res.write(`id: ${(e as { seq: number }).seq}\ndata: ${JSON.stringify(e)}\n\n`);
+    const safe = boundedEvent(e as Parameters<typeof boundedEvent>[0]);
+    res.write(`id: ${(safe as { seq: number }).seq}\ndata: ${JSON.stringify(safe)}\n\n`);
   };
 
   if (since === 0) {
-    const view = foldAll(sessions.replay(sessionId, 0));
+    const view = foldAll(sessions.replay(sessionId, 0).map((event) => boundedEvent(event)));
     // Named, so the browser tells the conversation apart from an event; the id
     // is what a reconnection resumes from, whether ours or the browser's own.
     res.write(`id: ${view.lastSeq}\nevent: snapshot\ndata: ${JSON.stringify(view)}\n\n`);

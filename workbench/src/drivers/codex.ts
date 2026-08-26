@@ -2,9 +2,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { closeSync, fstatSync, openSync, readFileSync, readSync, readdirSync } from 'node:fs';
+import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
 import type { AgentControl, AgentState } from '../../../src/workbench/protocol.ts';
 import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
@@ -36,6 +36,30 @@ function patchSides(diff: string): { before: string; after: string } {
 function outputOf(item: Bag): string {
   const value = item.aggregatedOutput ?? item.error?.message ?? item.failure?.message ?? item.result ?? item.results ?? '';
   return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+const IMAGE_EXT: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+};
+
+/** Codex app-server accepts a native localImage. Materialising the shared
+ * browser payload avoids handing its JSON-RPC line a multi-megabyte data URL. */
+function localCodexImage(image: { dataUrl: string; mime: string }, dir: string, at: number): Bag {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(image.dataUrl);
+  if (!match) return { type: 'image', url: image.dataUrl };
+  const mime = match[1] || image.mime;
+  const path = join(dir, `image-${at}.${IMAGE_EXT[mime] ?? 'img'}`);
+  writeFileSync(path, Buffer.from(match[2]!, 'base64'));
+  return { type: 'localImage', path };
+}
+
+function localImagePayload(path: string): { dataUrl: string; mime: string; alt: string } | null {
+  const ext = /\.([^.]+)$/.exec(path)?.[1]?.toLowerCase();
+  const mime = ext === 'png' ? 'image/png' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+    : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/*';
+  try {
+    return { dataUrl: `data:${mime};base64,${readFileSync(path).toString('base64')}`, mime, alt: basename(path) };
+  } catch { return null; }
 }
 
 export function codexAgentDefinitions(cwd: string): { name: string; description: string; source: 'project' | 'user' }[] {
@@ -255,6 +279,10 @@ export function replayCodexThread(thread: Bag, emit: (event: DriverEvent) => voi
             type: 'image', messageId: item.id,
             image: { dataUrl: part.url, mime: /^data:([^;,]+)/.exec(part.url)?.[1] ?? 'image/*', alt: 'Attached image' },
           });
+          else if (part.type === 'localImage' && part.path) {
+            const image = localImagePayload(part.path);
+            if (image) driver.emit({ type: 'image', messageId: item.id, image });
+          }
           else if (part.type !== 'text') driver.emit({
             type: 'note', noteId: randomUUID(), rank: 'detail', kind: `attachment/${part.type}`,
             text: part.path || part.url || `A ${part.type} attachment was part of this turn.`, body: null,
@@ -393,6 +421,7 @@ export class CodexDriver implements Driver {
   private skills = new Map<string, string>();
   private lastUsage: Bag | null = null;
   private contextWindow: number | null = null;
+  private imageDirs = new Set<string>();
 
   async start(opts: StartOptions): Promise<void> {
     this.emit = opts.emit;
@@ -449,15 +478,25 @@ export class CodexDriver implements Driver {
     const content: Bag[] = skillPath
       ? [{ type: 'skill', name: skill![1], path: skillPath }, ...(skill![2].trim() ? [{ type: 'text', text: skill![2].trim(), text_elements: [] }] : [])]
       : [{ type: 'text', text: input.text, text_elements: [] }];
-    for (const image of input.images) content.push({ type: 'image', url: image.dataUrl });
+    let imageDir: string | null = null;
+    if (input.images.length) {
+      imageDir = mkdtempSync(join(tmpdir(), 'atelier-codex-images-'));
+      this.imageDirs.add(imageDir);
+      input.images.forEach((image, at) => content.push(localCodexImage(image, imageDir!, at)));
+    }
     this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
-    if (this.turnId) {
-      await this.call('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: content });
-    } else {
-      const result = await this.call('turn/start', {
-        threadId: this.threadId, input: content, model: this.model ?? null, approvalPolicy: this.mode,
-      });
-      this.turnId = result.turn.id;
+    try {
+      if (this.turnId) {
+        await this.call('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: content });
+      } else {
+        const result = await this.call('turn/start', {
+          threadId: this.threadId, input: content, model: this.model ?? null, approvalPolicy: this.mode,
+        });
+        this.turnId = result.turn.id;
+      }
+    } catch (error) {
+      if (imageDir) this.dropImageDir(imageDir);
+      throw error;
     }
   }
 
@@ -503,6 +542,7 @@ export class CodexDriver implements Driver {
     this.child = null;
     for (const pending of this.pending.values()) pending.reject(new Error('Codex app-server closed'));
     this.pending.clear();
+    this.dropImageDirs();
   }
 
   private resolveAsks(choice: PermissionAnswer): void {
@@ -795,6 +835,7 @@ export class CodexDriver implements Driver {
       this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
     } else if (method === 'turn/completed') {
       this.turnId = null;
+      this.dropImageDirs();
       const failed = p.turn?.status === 'failed';
       const interrupted = p.turn?.status === 'interrupted';
       if (failed) this.emit({ type: 'error', message: p.turn?.error?.message || 'Codex turn failed', fatal: false });
@@ -822,6 +863,15 @@ export class CodexDriver implements Driver {
     this.messages.add(id);
     this.emit({ type: 'message.started', messageId: id, role: 'assistant' });
     this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
+  }
+
+  private dropImageDir(dir: string): void {
+    rmSync(dir, { recursive: true, force: true });
+    this.imageDirs.delete(dir);
+  }
+
+  private dropImageDirs(): void {
+    for (const dir of [...this.imageDirs]) this.dropImageDir(dir);
   }
 
   itemStarted(item: Bag): void {

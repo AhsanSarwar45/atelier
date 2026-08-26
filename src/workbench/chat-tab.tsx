@@ -79,7 +79,7 @@ import { PlanChip, UsageView } from '@/workbench/usage-view';
 import { CHIP_GAP, ModeMark, modelName, modeWords, WhatItRuns } from '@/workbench/what-it-runs';
 import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type TranscriptItem } from '@/workbench/use-session';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import { ProviderBadge } from '@/workbench/brand-icon';
+import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 
 /** Where the "show me everything" switch is remembered between visits. */
@@ -832,8 +832,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           </DialogHeader>
           <div className="grid grid-cols-2 gap-2">
             {(['claude', 'codex'] as const).map((brand) => (
-              <Button key={brand} variant={newBrand === brand ? 'primary' : 'secondary'} onClick={() => setNewBrand(brand)}>
-                <ProviderBadge brand={brand} />
+              <Button
+                key={brand}
+                variant={newBrand === brand ? 'primary' : 'outline'}
+                data-testid={`new-chat-provider-${brand}`}
+                onClick={() => setNewBrand(brand)}
+              >
+                <BrandIcon brand={brand} /> {brandName(brand)}
               </Button>
             ))}
           </div>

@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 import { describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -64,6 +64,29 @@ describe('Codex subagents on the common workbench protocol', () => {
 });
 
 describe('Codex app-server requests', () => {
+  it('adapts shared image payloads to native local images and cleans them after the turn', async () => {
+    const calls: any[] = [];
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'thread';
+    driver.emit = () => {};
+    driver.call = async (method: string, params: any) => {
+      calls.push([method, params]);
+      const path = params.input?.find((part: any) => part.type === 'localImage')?.path;
+      if (path) expect(existsSync(path)).toBe(true);
+      return { turn: { id: 'turn' } };
+    };
+
+    await driver.send({
+      text: 'What is in this image?',
+      images: [{ mime: 'image/png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=', alt: 'sample.png' }],
+    });
+
+    const image = calls[0][1].input.find((part: any) => part.type === 'localImage');
+    expect(image.path).toMatch(/atelier-codex-images-.*image-0\.png$/);
+    driver.event('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+    expect(existsSync(image.path)).toBe(false);
+  });
+
   it('denies and clears outstanding questions before interrupting a turn', async () => {
     const events: BareEvent[] = [];
     const answered: string[] = [];
