@@ -42,11 +42,17 @@ For every repository file change, use this path. Do not substitute generic
    machinery/board/land <card-id>
    ```
 
-5. The board opens checks, review, record, and land work in order. Continue with
-   the open child shown by `bd list --parent <job-id> --all`; claim it, satisfy
-   its own acceptance criterion, commit when it changes files or records
-   evidence, and run the same land command with that child's ID. Stop only when
-   `bd show <job-id>` says the job is closed or asks for manager judgment.
+5. After the work lands, follow the step the board opens; do not invent it:
+
+   - For `Checks:`, run `machinery/checks <checks-id>` from the worktree. It
+     runs the declared suites, records their exact result, and closes the step.
+   - Review starts automatically. If it files findings, claim each finding,
+     fix and commit it, then run the same land command with the finding's ID.
+   - For any later open child, use `bd list --parent <job-id> --all`, follow
+     that child's acceptance criterion, and use the command named on the card.
+
+   Stop only when `bd show <job-id>` says the job is closed or asks for manager
+   judgment.
 
 The lifecycle gates are authoritative. Tests alone do not finish work, and a
 direct status change never replaces commit, independent review, landing, or

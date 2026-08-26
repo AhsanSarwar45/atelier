@@ -25,6 +25,7 @@ required_once = (
     "git worktree add worktrees/<job-id> -b <job-id>",
     "bd update <work-id> --claim",
     "machinery/board/land <card-id>",
+    "machinery/checks <checks-id>",
 )
 for command in required_once:
     count = managed.count(command)
