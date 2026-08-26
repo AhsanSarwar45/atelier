@@ -80,7 +80,7 @@ describe('Codex live-runtime regressions', () => {
     const calls = [
       ['shell', 'const r = await tools.exec_command({cmd:"npm test"})', 'Bash', 'Ran the tests'],
       ['patch', 'const p = "*** Begin Patch\\n*** Update File: /repo/a.ts\\n*** End Patch"; await tools.apply_patch(p)', 'Edit', 'Changed repo/a.ts'],
-      ['poll', 'await tools.write_stdin({session_id:12,chars:""})', 'Wait', 'Wait'],
+      ['poll', 'await tools.write_stdin({session_id:12,chars:""})', 'Wait', 'Waited for a running command'],
       ['search', 'await tools.web__run({search_query:[{q:"Codex docs"}]})', 'WebSearch', 'Searched the web for Codex docs'],
       ['open', 'await tools.web__run({open:[{ref_id:"page"}]})', 'WebFetch', 'Fetched a page'],
       ['image', 'await tools.view_image({path:"/tmp/screen.png"})', 'Read', 'Read tmp/screen.png'],

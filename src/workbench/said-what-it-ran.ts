@@ -1306,6 +1306,7 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
     };
   },
   BashOutput: () => ({ said: 'Checked on a command left running', kind: 'system', grave: false }),
+  Wait: () => ({ said: 'Waited for a running command', kind: 'wait', grave: false }),
   KillShell: () => ({ said: 'Stopped a command left running', kind: 'grave', grave: true }),
   Agent: (i) => {
     const what = arg(i, 'description', 'prompt');

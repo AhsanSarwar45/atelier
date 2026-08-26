@@ -481,6 +481,7 @@ describe('the tools that are not commands', () => {
     ['WebFetch', { url: 'https://docs.anthropic.com/en/api' }, 'Fetched docs.anthropic.com/en/api'],
     ['WebSearch', { query: 'vitest jsdom' }, 'Searched the web for vitest jsdom'],
     ['BashOutput', { bash_id: '1' }, 'Checked on a command left running'],
+    ['Wait', {}, 'Waited for a running command'],
     ['ToolSearch', { query: 'select:Read' }, 'Looked for a tool it could use'],
     ['mcp__chrome-devtools__take_screenshot', {}, 'Looked at the screen'],
     ['mcp__chrome-devtools__navigate_page', {}, 'Opened a page'],
