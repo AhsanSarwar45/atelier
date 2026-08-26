@@ -1002,14 +1002,9 @@ WIRING = (
     ("PreToolUse", "Bash|Edit|Write|MultiEdit|NotebookEdit", ("workflow-gate.py",)),
     ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
                             "board-status-gate.py")),
-    ("PreToolUse", "AskUserQuestion", ("report-gate.py",)),
-    ("PreToolUse", "Edit|Write|MultiEdit", ("plan-doc-lint.py",)),
-    ("PreToolUse", "Read", ("picture-gate.py",)),
-    ("PreToolUse", "Bash|Read", ("slice-gate.py",)),
     ("PreToolUse", "Bash", ("wait-gate.py",)),
     ("PostToolUse", TOUCHING, ("board-touch.py",)),
-    ("SubagentStop", "", ("board-touch.py", "helper-proof.py")),
-    ("UserPromptSubmit", "", ("habit-reading.py",)),
+    ("SubagentStop", "", ("board-touch.py",)),
     ("SessionStart", "", ("board-prime.py",)),
     ("SessionEnd", "", ("board-push.py",)),
     ("Stop", "", ("completion-gate.py", "board-gate.py")),
@@ -1019,13 +1014,17 @@ CODEX_WIRING = (
     ("PreToolUse", "Bash|apply_patch|Edit|Write", ("workflow-gate.py",)),
     ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
                             "board-status-gate.py")),
-    ("PreToolUse", "request_user_input", ("report-gate.py",)),
-    ("PreToolUse", "apply_patch|Edit|Write", ("plan-doc-lint.py",)),
-    ("PreToolUse", "view_image", ("picture-gate.py",)),
-    ("PreToolUse", "Bash|view_image", ("slice-gate.py",)),
     ("PreToolUse", "Bash", ("wait-gate.py",)),
     ("PostToolUse", "Bash|apply_patch|Edit|Write", ("board-touch.py",)),
-    ("SubagentStop", "", ("board-touch.py", "helper-proof.py")),
+    ("SubagentStop", "", ("board-touch.py",)),
+)
+# Former managed gates that imposed interaction style or micro-optimisation
+# rather than protecting ownership and landing. They must be removed on repair,
+# not merely omitted for new projects, or `atelier init` leaves old deadlocks
+# installed forever.
+RETIRED_GATES = (
+    "report-gate.py", "plan-doc-lint.py", "picture-gate.py",
+    "slice-gate.py", "helper-proof.py", "habit-reading.py",
 )
 # The one gate that is not the machinery's own: it reads a report before it is
 # published, and the report tools are shared out of a home of their own.
@@ -1164,6 +1163,13 @@ def wire(root, say):
         say("kept   %s — its hooks are not a set of events, so nothing was "
             "written into it" % where)
         return
+    for blocks in hooks.values():
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            block["hooks"] = [h for h in (block.get("hooks") or [])
+                              if not any(runs(h.get("command"), name)
+                                         for name in RETIRED_GATES)]
     wired, missing = [], []
     for event, matcher, names in WIRING:
         blocks = hooks.setdefault(event, [])
@@ -1244,6 +1250,13 @@ def wire_codex(root, say):
     if not isinstance(hooks, dict):
         say("kept   %s — its hooks are not a set of events" % where)
         return
+    for blocks in hooks.values():
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            block["hooks"] = [h for h in (block.get("hooks") or [])
+                              if not any(runs(h.get("command"), name)
+                                         for name in RETIRED_GATES)]
     wired = []
     for event, matcher, names in CODEX_WIRING:
         blocks = hooks.setdefault(event, [])

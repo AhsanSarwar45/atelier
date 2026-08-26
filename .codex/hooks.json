@@ -31,10 +31,6 @@
           }
         ]
       },
-      { "matcher": "request_user_input", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/report-gate.py\"" }] },
-      { "matcher": "apply_patch|Edit|Write", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/plan-doc-lint.py\"" }] },
-      { "matcher": "view_image", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/picture-gate.py\"" }] },
-      { "matcher": "Bash|view_image", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/slice-gate.py\"" }] },
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/wait-gate.py\"" }] }
     ],
     "PostToolUse": [
@@ -43,10 +39,6 @@
         "hooks": [
           {
             "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/board-touch.py\"",
-            "type": "command"
-          },
-          {
-            "command": "python3 \"$(git rev-parse --show-toplevel)/machinery/hooks/helper-proof.py\"",
             "type": "command"
           },
           {
