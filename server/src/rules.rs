@@ -188,6 +188,33 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     run_python(&args, &[])
 }
 
+/// Run one deliberately public workflow command from the installed rules.
+///
+/// The allowlist is the contract written into initialized projects. Accepting
+/// an arbitrary relative path here would turn a documentation convenience into
+/// a general script runner over application data.
+pub fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
+    let dir = crate::identity::rules_dir()
+        .ok_or_else(|| "this computer names no folder for Atelier's working rules".to_string())?;
+    let script = tool_path(name, &dir)?;
+    if !script.is_file() {
+        return Err(format!("the installed workflow tool is missing: {}", script.display()));
+    }
+    let mut args = vec![script.display().to_string()];
+    args.extend(rest.iter().cloned());
+    run_python(&args, &[])
+}
+
+fn tool_path(name: &str, dir: &Path) -> Result<PathBuf, String> {
+    let relative = match name {
+        "board/job" => Path::new("board").join("job"),
+        "board/land" => Path::new("board").join("land"),
+        "checks" => PathBuf::from("checks"),
+        _ => return Err(format!("`{name}` is not an Atelier workflow tool")),
+    };
+    Ok(dir.join(MACHINERY).join(relative))
+}
+
 fn gate_places(name: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(dir) = crate::identity::rules_dir() {
@@ -325,5 +352,16 @@ mod tests {
         assert!(hook("../thing.py", &[]).is_err());
         assert!(hook("hooks/board-gate.py", &[]).is_err());
         assert!(hook("", &[]).is_err());
+    }
+
+    #[test]
+    fn only_the_workflow_tools_named_in_project_instructions_are_public() {
+        let dir = Path::new("/installed/rules");
+        assert_eq!(tool_path("board/job", dir).unwrap(), dir.join("machinery/board/job"));
+        assert_eq!(tool_path("board/land", dir).unwrap(), dir.join("machinery/board/land"));
+        assert_eq!(tool_path("checks", dir).unwrap(), dir.join("machinery/checks"));
+        for name in ["../join", "hooks/board-gate.py", "board/review", ""] {
+            assert!(tool_path(name, dir).unwrap_err().contains("not an Atelier workflow tool"));
+        }
     }
 }

@@ -38,6 +38,9 @@ pub enum Ask {
     /// Run one session gate by name, on behalf of a project whose settings
     /// name a word rather than a path.
     Hook { name: String, rest: Vec<String> },
+    /// Run one public workflow tool from the machinery bundled with this
+    /// installed application.
+    Tool { name: String, rest: Vec<String> },
     /// Print what the program can do.
     Help,
     /// Print which build this is.
@@ -92,6 +95,10 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             Some(name) => Ask::Hook { name: name.clone(), rest: args[2..].to_vec() },
             None => Ask::Unknown("hook".to_string()),
         },
+        "tool" => match args.get(1) {
+            Some(name) => Ask::Tool { name: name.clone(), rest: args[2..].to_vec() },
+            None => Ask::Unknown("tool".to_string()),
+        },
         "where" => Ask::Where,
         "--data-dir" => Ask::DataDir,
         "--help" | "-h" | "help" => Ask::Help,
@@ -112,6 +119,7 @@ Usage:
   atelier                     The same as `run --no-browser`
   atelier init [folder]       Set a project up here: the board, the working
                               rules and the session gates, wired to each other
+  atelier tool <name> [...]   Run a board workflow command installed with Atelier
   atelier where               Print the addresses to open it at, and start nothing
   atelier service install     Have this computer start it at login, and keep it up
   atelier service uninstall   Stop having it started, and leave nothing behind
@@ -217,6 +225,22 @@ mod tests {
     fn a_gate_with_no_name_is_not_a_gate() {
         // A settings file that lost the name would otherwise run the server.
         assert_eq!(ask(&["hook"]), Ask::Unknown("hook".to_string()));
+    }
+
+    #[test]
+    fn a_bundled_workflow_tool_carries_its_arguments_untouched() {
+        assert_eq!(
+            ask(&["tool", "board/job", "under", "bw-one"]),
+            Ask::Tool {
+                name: "board/job".to_string(),
+                rest: vec!["under".to_string(), "bw-one".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn a_tool_with_no_name_is_not_a_request_to_start_the_server() {
+        assert_eq!(ask(&["tool"]), Ask::Unknown("tool".to_string()));
     }
 
     #[test]

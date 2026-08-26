@@ -1274,7 +1274,16 @@ def wire_codex(root, say):
 
 def instruct(root, say):
     """Put the canonical lifecycle into both providers' project instructions."""
-    policy = open(os.path.join(HOME, POLICY)).read().strip()
+    with open(os.path.join(HOME, POLICY)) as source:
+        policy = source.read().strip()
+    if not ours(root):
+        prefix = "%s tool" % WORD if WORD else "python3 %s" % HOME
+        policy = policy.replace("machinery/board/job", prefix + "/board/job" if not WORD
+                                else prefix + " board/job")
+        policy = policy.replace("machinery/board/land", prefix + "/board/land" if not WORD
+                                else prefix + " board/land")
+        policy = policy.replace("machinery/checks", prefix + "/checks" if not WORD
+                                else prefix + " checks")
     block = "%s\n\n## Atelier workflow (managed)\n\n%s\n\n%s" % (
         POLICY_BEGIN, policy, POLICY_END)
     pattern = re.compile(re.escape(POLICY_BEGIN) + r".*?" +

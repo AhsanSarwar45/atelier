@@ -182,6 +182,15 @@ async fn main() {
                 std::process::exit(1);
             }
         },
+        // A joined project's instructions use this stable word instead of an
+        // absolute path into one computer's application-data directory.
+        command_line::Ask::Tool { name, rest } => match rules::tool(&name, &rest) {
+            Ok(code) => std::process::exit(code),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
         command_line::Ask::Version => println!("{}", command_line::version()),
         // A copy the computer started at login printed its addresses into a
         // log nobody reads. Asking it where it is has to be something a person
