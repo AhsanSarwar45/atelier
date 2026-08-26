@@ -224,7 +224,14 @@ def reason(data):
         _, path, removing_issue = removing
         if removing_issue != issue or not checked_out_for(issue, path):
             return "The separate copy being removed is not the registered copy for %s." % issue
-        if active:
+        # A container stays `in_progress` while the workflow advances through
+        # checks and review, even after its build children have all closed. Its
+        # own bookkeeping status is not live work inside the copy; its children
+        # are the authoritative answer.
+        removal_active = (bool(children and any(
+            child.get("status") == "in_progress" and child.get("assignee")
+            for child in children)) if card.get("issue_type") == "epic" else active)
+        if removal_active:
             return "Beads issue %s still has active work, so its separate copy stays." % issue
         if card.get("issue_type") == "epic":
             if children is None:

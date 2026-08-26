@@ -28,7 +28,7 @@ class CopyLifecycle(unittest.TestCase):
 
     @patch.object(gate, "checked_out_for", return_value=True)
     @patch.object(gate, "children_for", return_value=[{"status": "closed"}, {"status": "closed"}])
-    @patch.object(gate, "card_for", return_value={"issue_type": "epic", "status": "in_progress"})
+    @patch.object(gate, "card_for", return_value={"issue_type": "epic", "status": "in_progress", "assignee": "owner"})
     def test_a_finished_jobs_copy_can_be_removed(self, _card, _children, _checked):
         command = "rm -rf /repo/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
         self.assertIsNone(gate.reason(bash(command)))
