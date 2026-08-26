@@ -46,7 +46,7 @@ export const IMPORTED_MESSAGES = 200;
  * It lives beside the reading it numbers, so raising the reading and raising
  * the number are one edit in one file (bw-khe.11).
  */
-export const IMPORT_RECIPE = 9;
+export const IMPORT_RECIPE = 10;
 
 /** What opening a chat does about a past it may or may not have read already. */
 export type ReadingChoice =

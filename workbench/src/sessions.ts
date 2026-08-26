@@ -878,7 +878,8 @@ export class Sessions {
    */
   private draw(sessionId: string, entry: PastEntry, parent: string | null = null, already = false): void {
     if (entry.kind === 'said') {
-      for (const e of spokenAsEvents(entry, randomUUID(), parent)) this.publish(sessionId, e);
+      const cwd = this.store.getSession(sessionId)?.cwd;
+      for (const e of spokenAsEvents(entry, randomUUID(), parent, cwd)) this.publish(sessionId, e);
       return;
     }
     // `already` when the call was drawn as running on an earlier beat: it is

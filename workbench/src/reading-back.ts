@@ -8,7 +8,9 @@
  * behind it. That is the thing worth holding still.
  */
 import type { PastEntry } from '../../src/workbench/imported-history.ts';
+import { widgetSpecs } from '../../src/workbench/chat-widgets.ts';
 import type { DriverEvent } from './drivers/types.ts';
+import { materializeComparisons } from './materialize-chat-media.ts';
 
 /**
  * One spoken row: the message opening, the pictures it held, its words, the
@@ -30,6 +32,7 @@ export function spokenAsEvents(
   entry: Extract<PastEntry, { kind: 'said' }>,
   messageId: string,
   sentBy: string | null = null,
+  cwd?: string,
 ): DriverEvent[] {
   const events: DriverEvent[] = [
     { type: 'message.started', messageId, role: entry.role, ...(sentBy === null ? {} : { parentToolCallId: sentBy }) },
@@ -39,5 +42,16 @@ export function spokenAsEvents(
   // word is still a word in the log.
   if (entry.text) events.push({ type: 'text.delta', messageId, text: entry.text });
   events.push({ type: 'message.completed', messageId });
+  // Live drivers emit rich-media events after the words settle. Reopening a
+  // provider-owned chat must rebuild the same events from those stored words,
+  // or the fenced source is all the manager sees after a restart.
+  if (entry.role === 'assistant') {
+    if (cwd) {
+      for (const comparison of materializeComparisons(entry.text, cwd)) {
+        events.push({ type: 'image.compare', messageId, comparison });
+      }
+    }
+    for (const widget of widgetSpecs(entry.text)) events.push({ type: 'widget', messageId, widget });
+  }
   return events;
 }
