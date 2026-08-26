@@ -414,6 +414,10 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
     }
     return;
   }
+  if (row.type === 'response_item' && payload.type === 'message' && payload.role === 'assistant') {
+    driver.itemCompleted({ id: payload.id, type: 'agentMessage', text: rolloutText(payload) });
+    return;
+  }
   if (row.type === 'response_item' && (payload.type === 'custom_tool_call' || payload.type === 'function_call')) {
     const id = payload.call_id ?? payload.id;
     const tool = rolloutTool(payload.name, payload.input);

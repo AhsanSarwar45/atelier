@@ -59,6 +59,37 @@ describe('Codex live-runtime regressions', () => {
     expect(events.at(-1)).toMatchObject({ type: 'tool.completed', toolCallId: 'new', output: 'passed' });
   });
 
+  it('shows assistant messages recorded as response items', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver();
+    const emit = (event: BareEvent) => events.push(event);
+    codexRolloutLine(JSON.stringify({ type: 'response_item', payload: {
+      type: 'message', id: 'reply', role: 'assistant',
+      content: [{ type: 'output_text', text: 'All tests pass.' }], phase: 'final_answer',
+    } }), driver, emit);
+
+    expect(events).toContainEqual({ type: 'message.started', messageId: 'reply', role: 'assistant' });
+    expect(events).toContainEqual({ type: 'text.delta', messageId: 'reply', text: 'All tests pass.' });
+    expect(events).toContainEqual({ type: 'message.completed', messageId: 'reply' });
+  });
+
+  it('does not repeat a reply recorded in both rollout shapes', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver();
+    const emit = (event: BareEvent) => events.push(event);
+    const content = [{ type: 'output_text', text: 'Shown once.' }];
+    codexRolloutLine(JSON.stringify({ type: 'response_item', payload: {
+      type: 'message', id: 'reply', role: 'assistant', content,
+    } }), driver, emit);
+    codexRolloutLine(JSON.stringify({ type: 'event_msg', payload: {
+      type: 'item_completed', item: { type: 'AgentMessage', id: 'reply', content },
+    } }), driver, emit);
+
+    expect(events.filter((event) => event.type === 'text.delta')).toEqual([
+      { type: 'text.delta', messageId: 'reply', text: 'Shown once.' },
+    ]);
+  });
+
   it('settles an external turn and unwraps orchestration patches as edits', () => {
     const events: BareEvent[] = [];
     const driver = new CodexDriver();
