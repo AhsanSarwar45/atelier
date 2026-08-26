@@ -316,7 +316,10 @@ export async function restoreList(
       sessionId: s.id,
       externalId: s.externalId,
       brand: s.brand,
-      title: seen?.name ?? s.title,
+      // Older app rows hold the opening prompt here. Programmatic Claude
+      // sessions are absent from the default provider index, so normalize the
+      // stored fallback as well as the index's first-prompt fallback.
+      title: seen?.name ?? conversationTitle(s.title ?? ''),
       // The tool's index moves whenever the conversation is written to, wherever
       // that happens; our own log only moves when this app drives it. A chat
       // worked on elsewhere is exactly the one that matters most here, so the

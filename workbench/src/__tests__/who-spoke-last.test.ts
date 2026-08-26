@@ -186,7 +186,7 @@ function lay(text: string, at = WORKED): number {
 }
 
 /** A chat this app ran, with a title so the list counts it as one that was used. */
-function ours(id: string, externalId: string | null, lastActiveAt: string): void {
+function ours(id: string, externalId: string | null, lastActiveAt: string, title = 'a chat'): void {
   store.createSession({
     id,
     brand: 'claude',
@@ -196,7 +196,7 @@ function ours(id: string, externalId: string | null, lastActiveAt: string): void
     cwd: PROJECT.path,
     model: null,
     permissionMode: 'default',
-    title: 'a chat',
+    title,
     state: 'dormant',
     createdAt: SPOKE,
     lastActiveAt,
@@ -221,6 +221,14 @@ afterEach(() => {
 });
 
 describe('the clock that moves only when the person speaks', () => {
+  it('normalizes a legacy opening-prompt title when Claude omits programmatic sessions from its index', async () => {
+    ours('legacy', OUTSIDE, WORKED, 'currently we do not have the ability to rename these chats from their first message');
+
+    const [row] = await restoreList(store, PROJECT);
+
+    expect(row!.title).toBe('Do Ability Rename Chats First Message');
+  });
+
   it('a chat whose agent has been writing all day carries the hour he last spoke', async () => {
     // He said one thing this morning. The agent has been at it ever since.
     lay(said('go on then', SPOKE) + Array.from({ length: 40 }, (_, i) =>

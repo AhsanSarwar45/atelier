@@ -14,6 +14,7 @@ import type { WbpCommand } from '../../src/workbench/protocol.ts';
 import { whatItRan } from '../../src/workbench/said-what-it-ran.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
+import { conversationTitle } from './conversation-title.ts';
 import { watchOutside } from './outside.ts';
 import { planUsage, watchUsage } from './plan-usage.ts';
 import { codexUsage, watchCodexUsage } from './codex-usage.ts';
@@ -487,7 +488,7 @@ const server = createServer((req, res) => {
           // from its first frame rather than a beat later (bw-96is).
           held: s.externalId === null ? null : (outsideHoldsNow(true)
             .find((hold) => hold.id.toLowerCase() === s.externalId?.toLowerCase()) ?? null),
-          title: seen?.name ?? s.title,
+          title: seen?.name ?? conversationTitle(s.title ?? ''),
           cwd,
           folder: folderOf(cwd),
           branch: seen?.branch ?? null,
