@@ -290,7 +290,7 @@ export async function knownSessions(projectPath: string | null, everything = fal
       brand: 'claude' as const,
       externalId: s.sessionId,
       lastActiveAt: new Date(s.lastModified).toISOString(),
-      name: s.customTitle ?? s.summary ?? conversationTitle(s.firstPrompt ?? ''),
+      name: s.customTitle ?? conversationTitle(s.summary ?? s.firstPrompt ?? ''),
       cwd: s.cwd ?? null,
       branch: s.gitBranch ?? null,
       running: false,
