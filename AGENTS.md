@@ -8,20 +8,48 @@ This project uses Beads for durable task tracking. Run `bd prime` before work.
 
 Atelier uses one shared Beads board. A worktree isolates code; it does not create another board.
 
-- Create or claim the bead before changing code.
-- Classify scope before implementation. Work with three or more independently verifiable outcomes, or work spanning multiple product/system areas, is an epic: create at least two child execution beads that name those outcomes.
-- Do not implement directly from an undecomposed epic. Its children are the durable progress record; keep their statuses current as each area starts, reaches review, and lands.
-- Use exactly one code worktree per unit of ownership. A standalone bead uses
-  `worktrees/<bead-id>`; an epic and all its children share
-  `worktrees/<epic-id>`. Never create a worktree for an epic child.
-- Ticket creation and claiming must remain possible before a worktree exists.
-  A narrowly scoped, recorded recovery bypass may repair a malfunctioning gate,
-  but cannot bypass review, merge, land, or close prerequisites.
-- Guarded fast-forward landing is performed from the main checkout; it is the
-  intentional exception to the source-worktree mutation rule.
-- Tests do not complete a bead. Tested but uncommitted work stays `in_progress`.
-- Commit with the bead ID and merge that commit into the declared main line before advancing to agent review or closing the code step.
-- Complete the job's checks, review, and land steps in order before closing the job.
-- Never use a direct `bd` status change to bypass commit, merge, review, or land prerequisites. A command being accepted is not permission to skip the lifecycle.
+For every repository file change, use this path. Do not substitute generic
+`bd create`, `git worktree add`, `bd close`, or a guessed board command.
+
+1. From the main checkout, create the job with the existing job command. Use
+   `--size small --do "WHAT|CHECK"` for one independently verifiable outcome;
+   otherwise omit `--do` and pour each outcome afterward with
+   `machinery/board/job under <job-id> --do "WHAT|CHECK"`:
+
+   ```bash
+   machinery/board/job new --what "OBSERVABLE OUTCOME" --evidence "WHY IT IS REAL NOW" --done "COMMAND reports EXPECTED RESULT" --not "NAMED OUT-OF-SCOPE FILE OR SYSTEM" --area AREA --kind bug|feature|chore --size small|medium|large --judge agent="WHAT SETTLES IT" --alone "WHY NO OPEN JOB OWNS IT" -p 2
+   ```
+
+2. Still from the main checkout, make the job's one worktree. All of its work
+   items use this same tree; never make a tree for a child:
+
+   ```bash
+   git -C /home/ahsan/dev/beads-web worktree add worktrees/<job-id> -b <job-id>
+   ```
+
+3. From that worktree, claim the work item in a command of its own, then edit:
+
+   ```bash
+   cd /home/ahsan/dev/beads-web/worktrees/<job-id>
+   bd update <work-id> --claim
+   ```
+
+4. Run the work item's stated check, commit the result with every work-item ID
+   in the commit subject, and land it from that same worktree:
+
+   ```bash
+   git commit -m "<work-id>: OUTCOME"
+   machinery/board/land <card-id>
+   ```
+
+5. The board opens checks, review, record, and land work in order. Continue with
+   the open child shown by `bd list --parent <job-id> --all`; claim it, satisfy
+   its own acceptance criterion, commit when it changes files or records
+   evidence, and run the same land command with that child's ID. Stop only when
+   `bd show <job-id>` says the job is closed or asks for manager judgment.
+
+The lifecycle gates are authoritative. Tests alone do not finish work, and a
+direct status change never replaces commit, independent review, landing, or
+closure.
 
 <!-- END ATELIER WORKFLOW -->
