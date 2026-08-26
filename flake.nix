@@ -26,7 +26,7 @@
             src = ./.;
 
             nodejs = pkgs.nodejs_22;
-            npmDepsHash = "sha256-gpZ1rfPKODrADRrs5Sc1PyX9i/biksqsxgwM89Ui/Ik=";
+            npmDepsHash = "sha256-DkN3giD/r79mSka4QwJjzhQ9JZKY/H/OE4sG5HaHYok=";
 
             env.NEXT_TELEMETRY_DISABLED = "1";
 
