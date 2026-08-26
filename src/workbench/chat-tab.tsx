@@ -1056,7 +1056,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             // Never squeezed by the line, and never wider than a name: a chip
             // that shrinks under its own text spills it over its neighbour
             // (bw-7ks.22.15).
-            className="max-w-40 shrink-0 gap-1 truncate font-mono"
+            className="max-w-40 shrink-0 gap-1 truncate"
           >
             {/* A folder that is a checkout says so: the branch is already in
                 this chip's tooltip, and the mark is what says there is one to
@@ -1066,7 +1066,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             ) : (
               <Folder className="size-3 shrink-0" aria-hidden="true" />
             )}
-            <span className="min-w-0 truncate">{facts.folder}</span>
+            <span className="relative top-px min-w-0 truncate">{facts.folder}</span>
           </Badge>
         )}
         {/* What this chat is using and what it has spent, then how much of the

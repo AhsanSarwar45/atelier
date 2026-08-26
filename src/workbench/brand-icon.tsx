@@ -26,7 +26,7 @@ export function ProviderBadge({ brand, className }: { brand: Brand; className?: 
       size="sm"
       shape="circle"
       className={cn(
-        'shrink-0 gap-1.5',
+        'shrink-0 gap-1',
         brand === 'codex'
           ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
           : 'border-orange-500/35 bg-orange-500/10 text-orange-700 dark:text-orange-300',
@@ -36,8 +36,8 @@ export function ProviderBadge({ brand, className }: { brand: Brand; className?: 
       data-brand={brand}
       title={`Coding agent — ${brandName(brand)}`}
     >
-      <BrandIcon brand={brand} className="size-3.5" />
-      {brandName(brand)}
+      <BrandIcon brand={brand} className="size-3" />
+      <span className="relative top-px">{brandName(brand)}</span>
     </Badge>
   );
 }

@@ -468,7 +468,7 @@ export const ToolRow = memo(function ToolRow({
               the chips are here too, not only in the command behind the click.
               A span inside a button is fine; the conversation's own listener
               stops a chip's click reaching the toggle (bw-khe.13). */}
-          <span className="truncate">
+          <span className="relative top-px truncate">
             <Chipped text={says ?? item.title} />
           </span>
           {/* How long it has been running, while it is running: a call that takes a
