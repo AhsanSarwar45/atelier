@@ -16,9 +16,9 @@ import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { watchOutside } from './outside.ts';
 import { planUsage, watchUsage } from './plan-usage.ts';
 import { codexUsage, watchCodexUsage } from './codex-usage.ts';
-import { knownSessions, restoreList } from './registry.ts';
+import { codexThreadProcesses, knownSessions, providerHoldsNow, restoreList } from './registry.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
-import { holdsNow, rememberSummaryRuns, runningNow } from './running.ts';
+import { rememberSummaryRuns } from './running.ts';
 import { boundedEvent, Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 import { summaryMemoryOf } from './summary-runs.ts';
@@ -42,6 +42,18 @@ const store = new Store();
 // be running until a click brings it back.
 store.markAllDormant();
 const sessions = new Sessions(store);
+
+/** Provider locks excluding processes owned by this sidecar itself. */
+function outsideHoldsNow(fresh = false): HeldChat[] {
+  const codex = codexThreadProcesses();
+  return providerHoldsNow(fresh).filter((hold) => {
+    if (!sessions.drivesExternal(hold.id)) return true;
+    const owners = codex.get(hold.id.toLowerCase());
+    if (!owners) return false;
+    const ours = sessions.processForExternal(hold.id);
+    return ours === null || Array.from(owners).some((pid) => pid !== ours);
+  });
+}
 // The bar over a compaction fills against this project's own middle run, once
 // enough of them have been watched from beginning to end (bw-jaoz.14.9).
 rememberSummaryRuns(summaryMemoryOf(store));
@@ -199,7 +211,7 @@ function heldKey(holds: HeldChat[]): string {
 }
 
 function lookAtRunning(): void {
-  const holds = holdsNow();
+  const holds = outsideHoldsNow();
   const key = heldKey(holds);
   if (key === announced) return;
   announced = key;
@@ -249,7 +261,7 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   });
   // Straight after the snapshot, because a chat somebody is working in has no
   // row in our store to appear in one, and the rail marks its rows off this.
-  write({ kind: 'running', holds: holdsNow() });
+  write({ kind: 'running', holds: outsideHoldsNow() });
   // The account's own allowance, whether or not this browser has a chat open
   // and however long that chat has been silent: this server reads it on a beat
   // of its own and every page hears the same figure at the same moment
@@ -453,10 +465,12 @@ const server = createServer((req, res) => {
           externalId: s.externalId,
           // Said here as well as on the stream, because the writing box must
           // refuse from the first frame it draws (protocol.ts, SessionFacts).
-          runningElsewhere: s.externalId !== null && (s.brand === 'codex' ? seen?.running === true : runningNow(true).has(s.externalId)),
+          runningElsewhere: s.externalId !== null && outsideHoldsNow(true)
+            .some((hold) => hold.id.toLowerCase() === s.externalId?.toLowerCase()),
           // And what that program is doing, so the chat draws a moving mark
           // from its first frame rather than a beat later (bw-96is).
-          held: s.externalId === null ? null : (holdsNow(true).find((h) => h.id === s.externalId) ?? null),
+          held: s.externalId === null ? null : (outsideHoldsNow(true)
+            .find((hold) => hold.id.toLowerCase() === s.externalId?.toLowerCase()) ?? null),
           title: seen?.name ?? s.title,
           cwd,
           folder: folderOf(cwd),
@@ -471,7 +485,12 @@ const server = createServer((req, res) => {
         const id = url.searchParams.get('project');
         const projectPath = url.searchParams.get('path');
         const everything = url.searchParams.get('all') === '1';
-        json(res, 200, await restoreList(store, id && projectPath ? { id, path: projectPath } : null, everything));
+        const rows = await restoreList(store, id && projectPath ? { id, path: projectPath } : null, everything);
+        const outside = new Map(outsideHoldsNow(true).map((hold) => [hold.id.toLowerCase(), hold]));
+        json(res, 200, rows.map((row) => {
+          const held = row.externalId ? outside.get(row.externalId.toLowerCase()) ?? null : null;
+          return { ...row, runningElsewhere: held !== null, held };
+        }));
       } else if (path === '/sessions' && req.method === 'GET') {
         json(res, 200, sessions ? store.listSessions(url.searchParams.get('project') ?? undefined) : []);
       } else if (path === '/command' && req.method === 'POST') {

@@ -36,6 +36,8 @@ export interface StartOptions {
 export type PermissionAnswer = 'allow_once' | 'allow_always' | 'deny' | string;
 
 export interface Driver {
+  /** OS process owned by this driver, when the provider exposes one. */
+  processId?(): number | null;
   /** Begin the session. Resolves once the channel is open, not when the turn ends. */
   start(opts: StartOptions): Promise<void>;
   /** Queue a user turn. */

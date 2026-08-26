@@ -68,8 +68,7 @@ export function boundedEvent<T extends DriverEvent | WbpEvent>(event: T): T {
   if (event.type === 'agent.finished') return { ...event, result: cut(event.result) } as T;
   return event;
 }
-import { knownSessions, runningCodexThreads } from './registry.ts';
-import { runningNow } from './running.ts';
+import { knownSessions, providerHoldsNow } from './registry.ts';
 import type { Store } from './store.ts';
 
 type Subscriber = (e: WbpEvent) => void;
@@ -190,6 +189,27 @@ async function carryByByte(read: ReadSoFar, sessionId: string | null): Promise<R
 
 export class Sessions {
   private drivers = new Map<string, Driver>();
+
+  /** Whether Atelier itself owns the provider process for this conversation. */
+  drivesExternal(externalId: string): boolean {
+    const wanted = externalId.toLowerCase();
+    for (const sessionId of this.drivers.keys()) {
+      if (this.store.getSession(sessionId)?.externalId?.toLowerCase() === wanted) return true;
+    }
+    return false;
+  }
+
+  /** Provider process Atelier spawned for this conversation, if observable. */
+  processForExternal(externalId: string): number | null {
+    const wanted = externalId.toLowerCase();
+    for (const [sessionId, driver] of this.drivers) {
+      if (this.store.getSession(sessionId)?.externalId?.toLowerCase() === wanted) {
+        return driver.processId?.() ?? null;
+      }
+    }
+    return null;
+  }
+
   private linkers = new Map<string, Linker>();
   private subs = new Map<string, Set<Subscriber>>();
   /** Listeners on every session at once — the app's single global stream. */
@@ -971,13 +991,13 @@ export class Sessions {
    * may not be only as good as that stream (bw-dmxj.12).
    */
   private refuseIfHeld(conversation: string | null | undefined): void {
-    if (conversation && (runningNow(true).has(conversation) || runningCodexThreads().has(conversation.toLowerCase()))) throw new Error(HELD_ELSEWHERE);
+    if (conversation && providerHoldsNow(true)
+      .some((hold) => hold.id.toLowerCase() === conversation.toLowerCase())) throw new Error(HELD_ELSEWHERE);
   }
 
   private heldElsewhere(summary: SessionSummary): boolean {
-    return summary.externalId !== null && (summary.brand === 'codex'
-      ? runningCodexThreads().has(summary.externalId.toLowerCase())
-      : runningNow(true).has(summary.externalId));
+    return summary.externalId !== null && providerHoldsNow(true)
+      .some((hold) => hold.id.toLowerCase() === summary.externalId?.toLowerCase());
   }
 
   /**

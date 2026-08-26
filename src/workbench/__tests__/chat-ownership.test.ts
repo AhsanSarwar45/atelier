@@ -15,11 +15,11 @@ describe.each(['claude', 'codex'])('%s chat ownership', () => {
     expect(canCompose(ownership)).toBe(false);
   });
 
-  it('belongs to Atelier as soon as its driver is attached', () => {
+  it('keeps followed live activity external while another process owns it', () => {
     for (const state of ['starting', 'idle', 'thinking', 'streaming', 'running_tool', 'waiting_permission'] as const) {
       const ownership = sessionOwnership(state, 'provider-session', true);
-      expect(ownership, state).toEqual({ kind: 'atelier' });
-      expect(canCompose(ownership), state).toBe(true);
+      expect(ownership, state).toEqual({ kind: 'elsewhere', externalId: 'provider-session' });
+      expect(canCompose(ownership), state).toBe(false);
     }
   });
 });

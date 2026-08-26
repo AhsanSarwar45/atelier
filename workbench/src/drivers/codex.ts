@@ -423,6 +423,10 @@ export class CodexDriver implements Driver {
   private contextWindow: number | null = null;
   private imageDirs = new Set<string>();
 
+  processId(): number | null {
+    return this.child?.pid ?? null;
+  }
+
   async start(opts: StartOptions): Promise<void> {
     this.emit = opts.emit;
     this.cwd = opts.cwd;

@@ -149,6 +149,7 @@ describe('what the chat is running, on its own line', () => {
     expect(modelName('claude-opus-5[1m]', 'claude-opus-5[1m]')).toBe('Opus 5 (1M context)');
     expect(modelName('opusplan', 'Opus, planning first')).toBe('Opus, planning first');
     expect(modelName('gpt-5-3-codex', 'gpt-5-3-codex')).toBe('GPT 5.3 Codex');
+    expect(modelName('gpt-5.6-sol', 'gpt-5.6-sol')).toBe('GPT 5.6 Sol');
     expect(modelName(null)).toBeNull();
   });
 

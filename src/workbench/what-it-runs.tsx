@@ -78,7 +78,7 @@ export function modelName(wire: string | null, announced?: string | null): strin
   // Codex model ids are identifiers, not labels. Both the picker and the
   // status chip use this branch, so `gpt-5-3-codex` cannot be raw in one and
   // prettied in the other.
-  const gpt = /^gpt-([0-9]+(?:-[0-9]+)*)(?:-(.*))?$/.exec(id);
+  const gpt = /^gpt-([0-9]+(?:[.-][0-9]+)*)(?:-(.*))?$/.exec(id);
   if (gpt) {
     const version = gpt[1]!.replaceAll('-', '.');
     const variant = gpt[2] ? ` ${inWords(gpt[2])}` : '';

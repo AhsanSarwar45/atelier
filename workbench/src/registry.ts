@@ -23,6 +23,7 @@ import { closeSync, fstatSync, openSync, readFileSync, readlinkSync, readSync, r
 import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
 import { holdsNow, runningNow } from './running.ts';
+import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { lastSpokeAt } from './spoken.ts';
 import type { Store } from './store.ts';
 import { listCodexThreads } from './drivers/codex.ts';
@@ -43,7 +44,13 @@ interface KnownSession {
  * threads as notLoaded, so recognize both ids carried by active commands and
  * rollout files held open by a Codex process. */
 export function runningCodexThreads(): Set<string> {
-  const found = new Set<string>();
+  return new Set(codexThreadProcesses().keys());
+}
+
+/** Live Codex processes by thread. More than one process can hold the same
+ * thread, which is precisely the conflict the ownership UI must expose. */
+export function codexThreadProcesses(): Map<string, Set<number>> {
+  const found = new Map<string, Set<number>>();
   if (process.platform !== 'linux') return found;
   let pids: string[] = [];
   try { pids = readdirSync('/proc').filter((name) => /^\d+$/.test(name)); } catch { return found; }
@@ -52,19 +59,46 @@ export function runningCodexThreads(): Set<string> {
     let command = '';
     try { command = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' '); } catch { continue; }
     if (!/codex/i.test(command)) continue;
-    for (const id of command.match(uuid) ?? []) found.add(id.toLowerCase());
+    const ids = new Set((command.match(uuid) ?? []).map((id) => id.toLowerCase()));
     try {
       for (const fd of readdirSync(`/proc/${pid}/fd`)) {
         let target = '';
         try { target = readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; }
         if (!/\.codex\/sessions|rollout-/i.test(target)) continue;
-        for (const id of target.match(uuid) ?? []) found.add(id.toLowerCase());
+        for (const id of target.match(uuid) ?? []) ids.add(id.toLowerCase());
       }
     } catch {
       // Processes can exit or deny fd inspection between the two reads.
     }
+    for (const id of ids) {
+      const owners = found.get(id) ?? new Set<number>();
+      owners.add(Number(pid));
+      found.set(id, owners);
+    }
   }
   return found;
+}
+
+/** One ownership snapshot for every provider. Claude contributes rich marker
+ * state; Codex currently contributes its live thread lock. Keeping both on
+ * this wire prevents the UI offering a composer that the send guard rejects. */
+export function providerHoldsNow(fresh = false): HeldChat[] {
+  const holds = holdsNow(fresh);
+  const seen = new Set(holds.map((hold) => hold.id.toLowerCase()));
+  for (const id of runningCodexThreads()) {
+    if (seen.has(id)) continue;
+    holds.push({
+      id,
+      holder: 'terminal',
+      doing: 'working',
+      detail: null,
+      told: false,
+      since: null,
+      turnSince: null,
+      typicalMs: null,
+    });
+  }
+  return holds.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Last actual user message in a Codex rollout, without reading the whole file. */
