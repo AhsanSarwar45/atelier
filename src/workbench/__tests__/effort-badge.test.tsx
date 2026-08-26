@@ -25,4 +25,9 @@ describe('the active effort in the chat status line', () => {
     render(<WhatItRuns model={null} permissionMode={null} models={[]} efforts={[]} />);
     expect(screen.queryByTestId('chat-effort-chip')).toBeNull();
   });
+
+  it('keeps a newly introduced provider value readable before this app knows it', () => {
+    render(<WhatItRuns model={null} permissionMode={null} models={[]} effort="extra_deep" efforts={[]} />);
+    expect(screen.getByTestId('chat-effort-chip')).toHaveTextContent('Extra deep');
+  });
 });
