@@ -49,6 +49,22 @@ vi.mock('../running.ts', async (real) => {
   };
 });
 
+vi.mock('../registry.ts', async (real) => {
+  const actual = await real<typeof import('../registry.ts')>();
+  return {
+    ...actual,
+    providerHoldsNow: (fresh?: boolean) => [
+      ...actual.providerHoldsNow(fresh),
+      ...[...drivenElsewhere].map((id) => ({
+        id,
+        holder: 'terminal' as const,
+        doing: 'idle' as const,
+        since: null,
+      })),
+    ],
+  };
+});
+
 let root: string;
 let project: string;
 let dbPath: string;

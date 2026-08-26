@@ -55,8 +55,8 @@ export function sessionOwnership(
   externalId: string | null | undefined,
   heldByAnother: boolean,
 ): SessionOwnership {
-  if (externalId && heldByAnother) return { kind: 'elsewhere', externalId };
   if (!asleepHere(state)) return { kind: 'atelier' };
+  if (externalId && heldByAnother) return { kind: 'elsewhere', externalId };
   return { kind: 'unheld', externalId: externalId ?? null };
 }
 

@@ -246,6 +246,7 @@ describe('a chat opened, and opened again after the stream drops', () => {
  * before the panel existed.
  */
 describe('a conversation handed over by an older sidecar', () => {
+  const sessionId = 'chat-from-older-sidecar';
   beforeEach(() => {
     opened = [];
     stamped = 0;
@@ -265,7 +266,7 @@ describe('a conversation handed over by an older sidecar', () => {
   }
 
   it('draws it, with nothing where the lists it never sent would be', () => {
-    const { result } = renderHook(() => useSession('chat-1'));
+    const { result } = renderHook(() => useSession(sessionId));
     const older = anOlderChat();
     act(() => opened[0].hands(older));
 
@@ -282,20 +283,24 @@ describe('a conversation handed over by an older sidecar', () => {
   });
 
   it('still folds what arrives live on top of it', () => {
-    const { result } = renderHook(() => useSession('chat-1'));
+    const { result } = renderHook(() => useSession(sessionId));
     const older = anOlderChat();
     act(() => opened[0].hands(older));
     const drawn = result.current.items.length;
 
-    stamped = older.lastSeq as number;
     act(() =>
       opened[0].says({
         type: 'agent.started',
+        seq: (older.lastSeq as number) + 1,
+        sessionId,
+        at: '2026-08-20T00:00:01.000Z',
         agentId: 'a1',
+        toolCallId: null,
         kind: 'helper',
         what: 'check the login code',
+        agentType: null,
         model: null,
-      } as WbpEvent),
+      }),
     );
 
     expect(result.current.items).toHaveLength(drawn);
