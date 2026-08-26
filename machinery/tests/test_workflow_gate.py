@@ -40,6 +40,13 @@ class CopyLifecycle(unittest.TestCase):
         command = "rm -rf /repo/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
         self.assertIn("still has active work", gate.reason(bash(command)))
 
+    @patch.object(gate, "checked_out_for", return_value=True)
+    @patch.object(gate, "children_for", return_value=[{"status": "open"}])
+    @patch.object(gate, "card_for", return_value={"issue_type": "epic", "status": "in_progress"})
+    def test_an_unstarted_child_also_keeps_the_copy(self, _card, _children, _checked):
+        command = "rm -rf /repo/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
+        self.assertIn("unfinished children", gate.reason(bash(command)))
+
     def test_a_broad_delete_is_still_refused(self):
         self.assertIn("dedicated ticket worktree", gate.reason(bash("rm -rf /repo/anything")))
 
