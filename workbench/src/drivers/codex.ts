@@ -450,6 +450,7 @@ export class CodexDriver implements Driver {
   private pending = new Map<number, Pending>();
   private asks = new Map<string, PendingAsk>();
   private messages = new Set<string>();
+  private completedMessages = new Set<string>();
   private tools = new Map<string, string>();
   private toolOutput = new Map<string, string>();
   private agents = new Map<string, { since: number; model: string | null; calls: number; agentType?: string | null }>();
@@ -1013,11 +1014,13 @@ export class CodexDriver implements Driver {
   itemCompleted(item: Bag): void {
     if (!item) return;
     if (item.type === 'agentMessage') {
+      if (this.completedMessages.has(item.id)) return;
       const opened = this.messages.has(item.id);
       if (!opened && !String(item.text ?? '').trim()) return;
       this.openMessage(item.id);
       if (!opened && item.text) this.emit({ type: 'text.delta', messageId: item.id, text: item.text });
       this.emit({ type: 'message.completed', messageId: item.id });
+      this.completedMessages.add(item.id);
       return;
     }
     if (['reasoning', 'plan', 'hookPrompt', 'subAgentActivity', 'contextCompaction', 'enteredReviewMode', 'exitedReviewMode'].includes(item.type)) return;

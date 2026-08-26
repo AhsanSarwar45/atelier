@@ -88,6 +88,9 @@ describe('Codex live-runtime regressions', () => {
     expect(events.filter((event) => event.type === 'text.delta')).toEqual([
       { type: 'text.delta', messageId: 'reply', text: 'Shown once.' },
     ]);
+    expect(events.filter((event) => event.type === 'message.completed')).toEqual([
+      { type: 'message.completed', messageId: 'reply' },
+    ]);
   });
 
   it('settles an external turn and unwraps orchestration patches as edits', () => {
