@@ -244,6 +244,17 @@ export async function codexMenu(cwd: string): Promise<Bag> {
   const models = modelResult.status === 'fulfilled' ? modelResult.value.data ?? [] : [];
   const entries = skillResult.status === 'fulfilled' ? skillResult.value.data ?? [] : [];
   const skills = entries.flatMap((entry: Bag) => entry.skills ?? []).filter((skill: Bag) => skill.enabled !== false);
+  const efforts = new Map<string, { value: string; displayName: string; description?: string }>();
+  for (const model of models) {
+    for (const offered of model.supportedReasoningEfforts ?? []) {
+      const value = offered.reasoningEffort ?? offered.effort;
+      if (typeof value === 'string' && value) efforts.set(value, {
+        value,
+        displayName: value.replace(/(^|[-_])\w/g, (part: string) => part.replace(/[-_]/, '').toUpperCase()),
+        description: offered.description,
+      });
+    }
+  }
   return {
     commands: [
       { name: 'compact', description: 'Compact this conversation now', kind: 'command' },
@@ -256,7 +267,7 @@ export async function codexMenu(cwd: string): Promise<Bag> {
     ],
     skills: skills.map((skill: Bag) => skill.name),
     models: [{ value: 'default', displayName: 'Default', description: 'Use the Codex default model' }, ...models.map((m: Bag) => ({ value: m.model, displayName: m.displayName, description: m.description }))],
-    permissionModes: MODES, agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
+    permissionModes: MODES, efforts: [...efforts.values()], agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
     skillPaths: Object.fromEntries(skills.map((skill: Bag) => [skill.name, skill.path])),
   };
 }
@@ -416,6 +427,7 @@ export class CodexDriver implements Driver {
   private threadId: string | null = null;
   private turnId: string | null = null;
   private model: string | undefined;
+  private effort: string | undefined;
   private mode = 'on-request';
   private cwd = process.cwd();
   private skills = new Map<string, string>();
@@ -431,6 +443,7 @@ export class CodexDriver implements Driver {
     this.emit = opts.emit;
     this.cwd = opts.cwd;
     this.model = opts.model === 'default' ? undefined : opts.model;
+    this.effort = opts.effort;
     this.mode = MODES.includes(opts.permissionMode) ? opts.permissionMode : 'on-request';
     const executable = process.env.CODEX_PATH || 'codex';
     this.child = spawn(executable, ['app-server', '--stdio'], {
@@ -456,17 +469,17 @@ export class CodexDriver implements Driver {
     const opened = opts.resume
       ? await this.call('thread/resume', {
           threadId: opts.resume, cwd: opts.cwd, model: this.model ?? null,
-          approvalPolicy: this.mode, excludeTurns: true,
+          approvalPolicy: this.mode, effort: this.effort ?? null, excludeTurns: true,
         })
       : await this.call('thread/start', {
-          cwd: opts.cwd, model: this.model ?? null, approvalPolicy: this.mode,
+          cwd: opts.cwd, model: this.model ?? null, approvalPolicy: this.mode, effort: this.effort ?? null,
           sandbox: 'workspace-write', ephemeral: false,
         });
     this.threadId = opened.thread.id;
     this.model = opened.model || this.model;
     this.emit({
       type: 'session.started', brand: 'codex', externalId: this.threadId,
-      model: this.model ?? null, cwd: opened.cwd || opts.cwd, permissionMode: this.mode,
+      model: this.model ?? null, cwd: opened.cwd || opts.cwd, permissionMode: this.mode, effort: this.effort ?? null,
     });
     await this.menu();
     await this.backgroundTerminals();
@@ -494,7 +507,7 @@ export class CodexDriver implements Driver {
         await this.call('turn/steer', { threadId: this.threadId, expectedTurnId: this.turnId, input: content });
       } else {
         const result = await this.call('turn/start', {
-          threadId: this.threadId, input: content, model: this.model ?? null, approvalPolicy: this.mode,
+          threadId: this.threadId, input: content, model: this.model ?? null, approvalPolicy: this.mode, effort: this.effort ?? null,
         });
         this.turnId = result.turn.id;
       }
@@ -521,6 +534,11 @@ export class CodexDriver implements Driver {
   async setModel(model: string): Promise<void> {
     this.model = model === 'default' ? undefined : model;
     this.emit({ type: 'session.pinned', permissionMode: null, model: this.model ?? model });
+  }
+
+  async setEffort(effort: string): Promise<void> {
+    this.effort = effort;
+    this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort });
   }
 
   async interrupt(): Promise<void> {

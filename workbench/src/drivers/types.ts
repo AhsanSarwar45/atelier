@@ -26,6 +26,7 @@ export interface StartOptions {
   cwd: string;
   model?: string;
   permissionMode: string;
+  effort?: string;
   /** Continue this brand-side session instead of opening a new one. */
   resume?: string;
   /** Called for every event the driver produces. */
@@ -47,6 +48,7 @@ export interface Driver {
   /** Change what the RUNNING session is pinned to (docs/agent-workbench.md §8.2.3). */
   setMode(mode: string): Promise<void>;
   setModel(model: string): Promise<void>;
+  setEffort(effort: string): Promise<void>;
   /** Stop the turn in flight, leaving the session usable. */
   interrupt(): Promise<void>;
   /**

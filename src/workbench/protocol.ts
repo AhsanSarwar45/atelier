@@ -104,6 +104,13 @@ export interface ModelChoice {
   description?: string;
 }
 
+/** One provider-supported reasoning budget. Values stay in provider spelling. */
+export interface EffortChoice {
+  value: string;
+  displayName: string;
+  description?: string;
+}
+
 export interface AgentDefinition {
   name: string;
   description: string;
@@ -119,7 +126,7 @@ interface EventBase {
 
 export type WbpEvent = EventBase &
   (
-    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string }
+    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null }
     | { type: 'session.state'; state: SessionState; label: string }
     /**
      * Everything this session can offer: the commands and skills the install
@@ -134,6 +141,7 @@ export type WbpEvent = EventBase &
         skills: string[];
         models: ModelChoice[];
         permissionModes: string[];
+        efforts?: EffortChoice[];
         agentDefinitions?: AgentDefinition[];
         /**
          * Which of the three steering controls this session's brand actually
@@ -153,7 +161,7 @@ export type WbpEvent = EventBase &
      * ends plan mode). A field that is `null` is one this message says nothing
      * about, and the reader keeps what it had (bw-1u1.43).
      */
-    | { type: 'session.pinned'; permissionMode: string | null; model: string | null }
+    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null }
     | { type: 'session.ended'; reason: string }
     /**
      * `parentToolCallId` is set when a SENT-OFF agent said this, and names the
@@ -465,6 +473,7 @@ export type WbpCommand =
       brand: Brand;
       model?: string;
       permissionMode?: string;
+      effort?: string;
       brief?: Brief;
     }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; takeover?: boolean }
@@ -492,6 +501,7 @@ export type WbpCommand =
   /** Both act on the session that is open, not on the next one (§8.2.3). */
   | { type: 'session.mode'; sessionId: string; mode: string }
   | { type: 'session.model'; sessionId: string; model: string }
+  | { type: 'session.effort'; sessionId: string; effort: string }
   | {
       /**
        * Open a chat for reading: give a conversation begun elsewhere an id, read
@@ -711,6 +721,7 @@ export interface SessionSummary {
   cwd: string;
   model: string | null;
   permissionMode: string;
+  effort?: string | null;
   title: string | null;
   state: SessionState;
   createdAt: string;

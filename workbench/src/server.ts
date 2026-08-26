@@ -359,6 +359,10 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       await sessions.pin(cmd.sessionId, { model: cmd.model });
       json(res, 200, { ok: true });
       return;
+    case 'session.effort':
+      await sessions.pin(cmd.sessionId, { effort: cmd.effort });
+      json(res, 200, { ok: true });
+      return;
     default:
       json(res, 400, { error: `unknown command ${(cmd as { type: string }).type}` });
   }

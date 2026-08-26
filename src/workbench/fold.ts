@@ -28,6 +28,7 @@ import type {
   Brand,
   CommandInfo,
   Cost,
+  EffortChoice,
   ImagePayload,
   MachineFamily,
   ModelChoice,
@@ -239,6 +240,7 @@ export interface SessionView {
   /** What the session is actually pinned to, as the agent reported it. */
   permissionMode: string | null;
   model: string | null;
+  effort: string | null;
   /** What the writing box can offer for this session: its commands, skills, models. */
   menu: SessionMenu;
   /** Thinking done in this turn when the thinking itself is withheld, as the brand estimates it. */
@@ -254,13 +256,14 @@ export interface SessionMenu {
   commands: CommandInfo[];
   skills: string[];
   models: ModelChoice[];
+  efforts: EffortChoice[];
   permissionModes: string[];
   agentDefinitions: AgentDefinition[];
   /** Which steering controls this session's brand has for the work it sent away. */
   agentControls: AgentControl[];
 }
 
-const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], permissionModes: [], agentDefinitions: [], agentControls: [] };
+const NO_MENU: SessionMenu = { commands: [], skills: [], models: [], efforts: [], permissionModes: [], agentDefinitions: [], agentControls: [] };
 
 /** A chat with nothing drawn yet. Exported so the fold can be checked on its own. */
 export const EMPTY: SessionView = {
@@ -275,6 +278,7 @@ export const EMPTY: SessionView = {
   beads: [],
   permissionMode: null,
   model: null,
+  effort: null,
   menu: NO_MENU,
   thinkingTokens: 0,
   error: null,
@@ -305,6 +309,7 @@ function menuOf(sent: Partial<SessionMenu>): SessionMenu {
     commands: list(sent.commands, NO_MENU.commands),
     skills: list(sent.skills, NO_MENU.skills),
     models: list(sent.models, NO_MENU.models),
+    efforts: list(sent.efforts, NO_MENU.efforts),
     permissionModes: list(sent.permissionModes, NO_MENU.permissionModes),
     agentDefinitions: list(sent.agentDefinitions, NO_MENU.agentDefinitions),
     agentControls: list(sent.agentControls, NO_MENU.agentControls),
@@ -348,6 +353,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.brand = e.brand;
       next.permissionMode = e.permissionMode || null;
       next.model = e.model;
+      next.effort = e.effort ?? null;
       return next;
 
     case 'session.state':
@@ -615,6 +621,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // not blank the model on its way past (bw-1u1.43).
       if (e.permissionMode !== null) next.permissionMode = e.permissionMode;
       if (e.model !== null) next.model = e.model;
+      if (e.effort != null) next.effort = e.effort;
       return next;
 
     case 'cost':
@@ -700,6 +707,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         view.brand = e.brand;
         view.permissionMode = e.permissionMode || null;
         view.model = e.model;
+        view.effort = e.effort ?? null;
         break;
 
       case 'session.state':
@@ -953,6 +961,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       case 'session.pinned':
         if (e.permissionMode !== null) view.permissionMode = e.permissionMode;
         if (e.model !== null) view.model = e.model;
+        if (e.effort != null) view.effort = e.effort;
         break;
 
       case 'cost':

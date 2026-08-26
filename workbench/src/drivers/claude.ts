@@ -28,6 +28,11 @@ import {
   workerStopped,
 } from '../../../src/workbench/machine-words.ts';
 import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
+
+const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'max'].map((value) => ({
+  value,
+  displayName: value[0]!.toUpperCase() + value.slice(1),
+}));
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
 import { rawTitle, toolTitle, whileItRuns } from '../../../src/workbench/said-what-it-ran.ts';
@@ -826,6 +831,7 @@ export class ClaudeDriver implements Driver {
    * first line of its chat (bw-6jq5.2, bw-k3vs).
    */
   private mode: string | null = null;
+  private effort: string | null = null;
   /** TaskCreate calls awaiting the result that carries the task's id. */
   private pendingTodo = new Map<string, { text: string }>();
   /**
@@ -1255,6 +1261,7 @@ export class ClaudeDriver implements Driver {
   }
 
   async start(opts: StartOptions): Promise<void> {
+    this.effort = opts.effort ?? null;
     this.emit = opts.emit;
     this.mode = opts.permissionMode ?? '';
 
@@ -1311,6 +1318,7 @@ export class ClaudeDriver implements Driver {
         // bypass are not restored on resume. 'default' is the mode that asks
         // about every tool — measured, see protocol.ts.
         permissionMode: opts.permissionMode as never,
+        effort: opts.effort as never,
         // Permission to SWITCH to bypass later, not a switch to it: the mode
         // above is still what the session runs in, and every tool is still
         // asked about until he picks otherwise. Without this the kit refuses
@@ -1488,6 +1496,7 @@ export class ClaudeDriver implements Driver {
       skills: this.skills,
       models: this.models,
       permissionModes: [...CLAUDE_PERMISSION_MODES],
+      efforts: CLAUDE_EFFORTS,
       agentDefinitions: [],
       agentControls: this.agentControls(),
     });
@@ -1535,6 +1544,14 @@ export class ClaudeDriver implements Driver {
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model);
     this.note({ rank: 'note', kind: 'model', text: `Model is now ${model}.`, always: true });
+  }
+
+  async setEffort(effort: string): Promise<void> {
+    const active = this.q as unknown as { setEffort?: (value: string) => Promise<void> } | null;
+    if (!active?.setEffort) throw new Error('This Claude installation cannot change effort while a chat is running');
+    await active.setEffort(effort);
+    this.effort = effort;
+    this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort });
   }
 
   answer(askId: string, choice: PermissionAnswer): void {
@@ -1716,6 +1733,7 @@ export class ClaudeDriver implements Driver {
             model: m.model ?? null,
             cwd: m.cwd ?? '',
             permissionMode: m.permissionMode ?? '',
+            effort: typeof m.effort === 'string' ? m.effort : this.effort,
           });
           // Only when nothing is in flight: see `awaitingAnswer`.
           if (!this.awaitingAnswer) this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });

@@ -254,6 +254,7 @@ export class Sessions {
     brand: Brand;
     model?: string;
     permissionMode?: string;
+    effort?: string;
     brief?: { beadId: string; text: string };
   }): Promise<SessionSummary> {
     const now = new Date().toISOString();
@@ -272,6 +273,7 @@ export class Sessions {
       cwd: params.projectPath,
       model: params.model ?? owner.model ?? null,
       permissionMode: params.permissionMode ?? owner.permissionMode ?? defaultPermissionMode(params.brand),
+      effort: params.effort ?? null,
       title: null,
       state: 'starting',
       createdAt: now,
@@ -1427,6 +1429,7 @@ export class Sessions {
       cwd: summary.cwd,
       model,
       permissionMode: summary.permissionMode,
+      effort: summary.effort ?? undefined,
       resume,
       emit: (e) => this.publish(summary.id, e),
     });
@@ -1437,6 +1440,7 @@ export class Sessions {
       type: 'session.pinned',
       permissionMode: summary.permissionMode,
       model: model ?? summary.model ?? null,
+      effort: summary.effort,
     });
   }
 
@@ -1529,7 +1533,7 @@ export class Sessions {
    * His settings are still READ — a brand new chat opens on what they say
    * (`start`) — and nothing in the app writes to them any more.
    */
-  async pin(sessionId: string, what: { mode?: string; model?: string }): Promise<void> {
+  async pin(sessionId: string, what: { mode?: string; model?: string; effort?: string }): Promise<void> {
     const driver = this.require(sessionId);
     if (what.mode !== undefined) {
       await driver.setMode(what.mode);
@@ -1539,11 +1543,16 @@ export class Sessions {
       await driver.setModel(what.model);
       this.store.updateSession(sessionId, { model: what.model === BRAND_DEFAULT_MODEL ? null : what.model });
     }
+    if (what.effort !== undefined) {
+      await driver.setEffort(what.effort);
+      this.store.updateSession(sessionId, { effort: what.effort });
+    }
     const now = this.store.getSession(sessionId);
     this.publish(sessionId, {
       type: 'session.pinned',
       permissionMode: now?.permissionMode ?? null,
       model: now?.model ?? null,
+      effort: now?.effort ?? null,
     });
   }
 
