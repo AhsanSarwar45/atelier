@@ -15,10 +15,10 @@ describe.each(['claude', 'codex'])('%s chat ownership', () => {
     expect(canCompose(ownership)).toBe(true);
   });
 
-  it('keeps followed live activity external while another process owns it', () => {
+  it('keeps an attached live chat ours even if a stale outside hold remains', () => {
     for (const state of ['starting', 'idle', 'thinking', 'streaming', 'running_tool', 'waiting_permission'] as const) {
       const ownership = sessionOwnership(state, 'provider-session', true);
-      expect(ownership, state).toEqual({ kind: 'elsewhere', externalId: 'provider-session' });
+      expect(ownership, state).toEqual({ kind: 'atelier' });
       expect(canCompose(ownership), state).toBe(true);
     }
   });
