@@ -78,7 +78,7 @@ describe('following a chat somebody else is driving', () => {
       fresh: [],
       rewritten: false,
       read: 0,
-      running: { permissionMode: null, model: null },
+      running: { permissionMode: null, model: null, effort: null },
     });
   });
 
