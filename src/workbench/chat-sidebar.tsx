@@ -23,11 +23,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, Loader2, Plus, Power, Search, X } from 'lucide-react';
+import { Bot, ChevronDown, Loader2, Plus, Power, Search, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { request } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -42,10 +52,10 @@ import {
   useRunningElsewhere,
   type LiveSession,
 } from '@/workbench/live';
-import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type RestoreRow } from '@/workbench/protocol';
+import { byWhatIsWorking, folderOf, laterOf, laterSpoke, whenHeSpoke, type Brand, type RestoreRow } from '@/workbench/protocol';
 import { heldElsewhere } from '@/workbench/running';
 import { sendCommand } from '@/workbench/use-session';
-import { BrandIcon } from '@/workbench/brand-icon';
+import { BrandIcon, brandName } from '@/workbench/brand-icon';
 
 /**
  * How many rows are drawn before the reader asks for more. A 288px rail shows
@@ -290,7 +300,9 @@ interface ChatSidebarProps {
    */
   onSearch?: () => void;
   onToggleEverything?: () => void;
-  onNewChat?: () => void;
+  onNewChat?: (brand?: Brand) => void;
+  newChatDefault?: Brand | 'ask';
+  onNewChatDefault?: (choice: Brand | 'ask') => void;
   startingNewChat?: boolean;
   /**
    * The way out of the drawer, on a phone where this list IS the screen. Drawn
@@ -310,6 +322,8 @@ export function ChatSidebar({
   onSearch,
   onToggleEverything,
   onNewChat,
+  newChatDefault = 'ask',
+  onNewChatDefault,
   startingNewChat = false,
   onClose,
 }: ChatSidebarProps) {
@@ -507,18 +521,55 @@ export function ChatSidebar({
               />
             )}
             {onNewChat && (
-              <Button
-                size="sm"
-                variant="primary"
-                className="ml-auto shrink-0"
-                data-testid="new-chat-tool"
-                aria-label="New Chat"
-                disabled={startingNewChat}
-                onClick={onNewChat}
-              >
-                {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
-                {startingNewChat ? 'Starting…' : 'New Chat'}
-              </Button>
+              <div className="ml-auto flex shrink-0">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  radius="md"
+                  className="rounded-r-none border-r border-primary-foreground/20"
+                  data-testid="new-chat-tool"
+                  aria-label="New Chat"
+                  disabled={startingNewChat}
+                  onClick={() => onNewChat()}
+                >
+                  {startingNewChat ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus data-testid="new-chat-plus" aria-hidden="true" />}
+                  {startingNewChat ? 'Starting…' : 'New Chat'}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      radius="md"
+                      className="rounded-l-none px-2"
+                      aria-label="New chat options"
+                      data-testid="new-chat-menu"
+                      disabled={startingNewChat}
+                    >
+                      <ChevronDown aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Start with</DropdownMenuLabel>
+                    {(['claude', 'codex'] as const).map((brand) => (
+                      <DropdownMenuItem key={brand} onSelect={() => onNewChat(brand)}>
+                        <BrandIcon brand={brand} /> New {brandName(brand)} chat
+                      </DropdownMenuItem>
+                    ))}
+                    {onNewChatDefault && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel>Main button</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup value={newChatDefault} onValueChange={(value) => onNewChatDefault(value as Brand | 'ask')}>
+                          <DropdownMenuRadioItem value="ask">Ask every time</DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="claude">Use Claude by default</DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="codex">Use Codex by default</DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
             {/* Last on the row and only on a phone: on a wide screen the list
                 is part of the shell and has nothing to close (bw-81wt.30). */}

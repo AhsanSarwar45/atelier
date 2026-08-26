@@ -35,7 +35,7 @@ import { useReports } from '@/components/reports';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,6 +84,7 @@ import { workingLine } from '@/workbench/working-line';
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
+const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
 
 /**
  * Everything one row of a conversation actually says, for going through once
@@ -372,11 +373,20 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [newBrand, setNewBrand] = useState<Brand>('claude');
+  const [newChatDefault, setNewChatDefaultState] = useState<Brand | 'ask'>('ask');
+  useEffect(() => {
+    const saved = localStorage.getItem(NEW_CHAT_DEFAULT);
+    if (saved === 'claude' || saved === 'codex' || saved === 'ask') setNewChatDefaultState(saved);
+  }, []);
+  const setNewChatDefault = useCallback((choice: Brand | 'ask') => {
+    setNewChatDefaultState(choice);
+    localStorage.setItem(NEW_CHAT_DEFAULT, choice);
+  }, []);
   /** What went wrong the last time he changed the mode or the model. */
   const [steerError, setSteerError] = useState<string | null>(null);
   /** Why the last thing he wrote did not go, if it did not go. */
   const [sendError, setSendError] = useState<string | null>(null);
-  const start = useCallback(async () => {
+  const start = useCallback(async (brand: Brand = newBrand) => {
     if (!projectId || !projectPath) return;
     setStarting(true);
     setStartError(null);
@@ -385,7 +395,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         type: 'session.start',
         projectId,
         projectPath,
-        brand: newBrand,
+        brand,
       });
       open(s.id);
     } catch (e) {
@@ -502,7 +512,18 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The chat's own column on the right, remembered between visits. */
   const [rightOpen, flipRight] = useRightRail();
   /** The ways in that live in this tab, each a full-screen panel. */
-  const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | null>(null);
+  const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | 'new-chat' | null>(null);
+  const newChat = useCallback((brand?: Brand) => {
+    if (brand) {
+      setRailOpen(false);
+      void start(brand);
+    } else if (newChatDefault === 'ask') {
+      setShowing('new-chat');
+    } else {
+      setRailOpen(false);
+      void start(newChatDefault);
+    }
+  }, [newChatDefault, start]);
   /**
    * Whether the list also holds the chats an agent started for another chat.
    * Off unless he says otherwise, and remembered, because it is a way of
@@ -803,6 +824,29 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {showing === 'tokens' && sessionId && (
         <TokenView sessionId={sessionId} onClose={() => setShowing(null)} />
       )}
+      <Dialog open={showing === 'new-chat'} onOpenChange={(opened) => { if (!opened) setShowing(null); }}>
+        <DialogContent className="sm:max-w-md" data-testid="new-chat-provider-dialog">
+          <DialogHeader>
+            <DialogTitle>Choose a coding agent</DialogTitle>
+            <DialogDescription>This choice applies to this new chat.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-2">
+            {(['claude', 'codex'] as const).map((brand) => (
+              <Button key={brand} variant={newBrand === brand ? 'primary' : 'secondary'} onClick={() => setNewBrand(brand)}>
+                <ProviderBadge brand={brand} />
+              </Button>
+            ))}
+          </div>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <Button variant="secondary" onClick={() => setNewChatDefault(newBrand)}>
+              Use {newBrand === 'claude' ? 'Claude' : 'Codex'} by default
+            </Button>
+            <Button variant="primary" disabled={starting} onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand); }}>
+              {starting ? 'Starting…' : 'Start chat'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div
         data-testid="chat-rail"
@@ -830,7 +874,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // Same reason as `onOpen`: the drawer opened to reach this button, and
           // its job is done once the chat it starts exists — left open, it would
           // sit over the transcript it just created (bw-81wt.5).
-          onNewChat={() => { setRailOpen(false); void start(); }}
+          onNewChat={newChat}
+          newChatDefault={newChatDefault}
+          onNewChatDefault={setNewChatDefault}
           startingNewChat={starting}
           // The cross inside the drawer, for a phone where the bar that opened
           // it is behind the sheet (bw-81wt.30).
@@ -960,7 +1006,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             are separate facts and the badge never stands in for the first
             (bw-96is). Both clear themselves when that program stops, because
             the stream they are read from does (bw-dmxj.10). */}
-        <span
+        {(state.external || facts?.origin === 'terminal') && <span
           data-testid="session-state"
           data-state={held ? 'held' : view.state}
           className={cn('flex shrink-0 items-center', CHIP_GAP)}
@@ -969,10 +1015,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               live line at the foot of the transcript, and the same state is on
               the chat's row in the list beside it. Only the badge naming
               another program holding this chat stays — nothing else says it. */}
-          {(state.external || facts?.origin === 'terminal') && (
-            <ExternalBadge holder={state.external?.holder ?? 'terminal'} />
-          )}
-        </span>
+          <ExternalBadge holder={state.external?.holder ?? 'terminal'} />
+        </span>}
         {/* The one thing on this line allowed to give way when the line runs
             short, and the only one that can: the model and the permission mode
             are both named again on the writing box below, while every chip
