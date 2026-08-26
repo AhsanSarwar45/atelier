@@ -24,13 +24,13 @@ For every repository file change, use this path. Do not substitute generic
    items use this same tree; never make a tree for a child:
 
    ```bash
-   git -C /home/ahsan/dev/beads-web worktree add worktrees/<job-id> -b <job-id>
+   git worktree add worktrees/<job-id> -b <job-id>
    ```
 
 3. From that worktree, claim the work item in a command of its own, then edit:
 
    ```bash
-   cd /home/ahsan/dev/beads-web/worktrees/<job-id>
+   cd worktrees/<job-id>
    bd update <work-id> --claim
    ```
 

@@ -22,7 +22,7 @@ if TEXT.count(START) != 1 or TEXT.count(END) != 1:
 managed = TEXT.split(START, 1)[1].split(END, 1)[0]
 required_once = (
     "machinery/board/job new",
-    "git -C /home/ahsan/dev/beads-web worktree add",
+    "git worktree add worktrees/<job-id> -b <job-id>",
     "bd update <work-id> --claim",
     "machinery/board/land <card-id>",
 )
