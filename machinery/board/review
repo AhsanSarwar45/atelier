@@ -278,26 +278,23 @@ Answer with one fenced json block and nothing after it:
        "shas": "\n".join(shas) or "none found", "diff": diff or "no diff found"}
 
 
-def run_reviewer(prompt, actor, goal_id):
-    """A separate claude, with the edit tools withheld and this project's hooks
-    told to stand aside for it (hooks/board_common.py reads the same
-    variable, under every name it answers to).
+def run_reviewer(prompt, actor, goal_id, base, head, here):
+    """Use the machine's named personal reviewer through its bounded runner.
 
-    The model is named here rather than inherited. A reader that names none takes
-    whatever the person running the board happens to have saved as their default,
-    so the same reading costs the top model's price on one machine and a fraction
-    of it on the next; naming it makes the reading cost the same wherever it runs.
+    Model, tools, and reviewer policy belong to the personal ``reviewer`` agent;
+    this project supplies only immutable scope and evidence. Stderr is inherited
+    so the runner's heartbeat reaches the detached run log while stdout remains a
+    machine-readable verdict.
     """
     env = dict(os.environ, BEADS_ACTOR=actor)
     for name in project.env(DECL, "REVIEWER"):
         env[name] = goal_id
-    cmd = ["claude", "-p", "--model", "claude-sonnet-5",
-           "--allowedTools", "Read", "Grep", "Glob", "Bash(git:*)", "Bash(rg:*)",
-           "--disallowedTools", "Edit", "Write", "MultiEdit", "NotebookEdit",
-           "Bash(cargo:*)", "Bash(bd:*)"]
-    run = subprocess.run(cmd, input=prompt, cwd=ROOT, env=env, text=True,
-                         capture_output=True, timeout=inflight.ATTEMPT_TIMEOUT)
-    return run.stdout or "", run.stderr or ""
+    cmd = ["external-review", "--repo", ROOT, "--base", base, "--head", head,
+           "--spec", prompt, "--evidence", "Atelier ran its declared checks before review.",
+           "--timeout", "600", "--output-dir", here]
+    run = subprocess.run(cmd, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+                         stderr=None, timeout=630)
+    return run.stdout or "", "external-review exit %d" % run.returncode
 
 
 def run_log(goal_id):
@@ -363,6 +360,14 @@ def parse(text):
         except Exception:
             continue
         if isinstance(got, dict) and "findings" in got:
+            if "checked" not in got and "verified" in got:
+                got["checked"] = got.get("verified") or []
+                got["findings"] = [{"title": f.get("title", ""),
+                                    "where": "%s%s" % (f.get("file", ""),
+                                                         (":" + str(f["line"])) if f.get("line") else ""),
+                                    "why": f.get("evidence", ""),
+                                    "fixed_when": f.get("recommendation", "")}
+                                   for f in got.get("findings") or []]
             return got
     return None
 
@@ -411,24 +416,17 @@ def reset_at(said):
     return when.group(0).strip() if when else ""
 
 
-def attempts(prompt, actor, goal_id, here):
-    """Fire a reader at this job until it answers, and give back all it said.
-
-    Twice at most (board/inflight.py ATTEMPTS) — and once where the first answer
-    is the account saying it is out of allowance, because the second run cannot
-    be told anything else.
-    """
-    said = []
-    for attempt in range(1, inflight.ATTEMPTS + 1):
-        out, err = run_reviewer(prompt, actor, goal_id)
-        with open(os.path.join(here, "%d.log" % attempt), "w") as fh:
-            fh.write(out + "\n--- stderr ---\n" + err)
-        said.append(out)
-        if parse(out) or limited(out):
-            break
-        prompt += ("\n\nYour last answer carried no json block. Answer with the "
-                   "fenced json block described above and nothing else.\n")
-    return said
+def attempts(prompt, actor, goal_id, here, shas):
+    """Make one supervised attempt; retries are an explicit human decision."""
+    if not shas:
+        return []
+    where = whose(shas[0], goal_id)
+    base = git(["rev-parse", "%s^" % shas[0]], where).strip()
+    head = shas[-1]
+    out, err = run_reviewer(prompt, actor, goal_id, base, head, here)
+    with open(os.path.join(here, "1.log"), "w") as fh:
+        fh.write(out + "\n--- runner ---\n" + err)
+    return [out]
 
 
 # What the goal is told when no reading happened because the account had nothing
@@ -712,7 +710,7 @@ def main():
     # the readings that have already happened and not of this one.
     prompt = ask(goal, named, diff, reading.final(goal), suites_ran)
     here = run_log(goal_id)
-    verdict = answered(attempts(prompt, actor, goal_id, here), goal_id, actor, here)
+    verdict = answered(attempts(prompt, actor, goal_id, here, shas), goal_id, actor, here)
 
     made, turned = file_findings(goal_id, verdict.get("findings") or [])
     checked = verdict.get("checked") or []
