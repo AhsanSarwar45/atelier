@@ -185,7 +185,8 @@ export function KindFilter({ items, off, onChange }: TreeProps) {
         <ToolButton
           icon={<ListFilter />}
           label={filtered ? 'Some kinds of message are hidden' : 'Which kinds of message show'}
-          emphasis={filtered ? 'loud' : 'quiet'}
+          emphasis="quiet"
+          className={cn('h-10 w-10 sm:h-8 sm:w-8', filtered && 'text-primary')}
           data-testid="open-kind-filter"
           data-filtered={filtered}
         />

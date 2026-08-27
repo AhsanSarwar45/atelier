@@ -7,7 +7,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -26,6 +26,7 @@ import {
   Paperclip,
   Plus,
   ShieldCheck,
+  SlidersHorizontal,
   Square,
   Star,
   X,
@@ -405,6 +406,14 @@ function costLabel(cost: Cost): string {
   return cost.kind === 'usd' ? `$${cost.usd.toFixed(4)}` : `${cost.total.toLocaleString()} tokens`;
 }
 
+/** Desktop keeps its quick Enter shortcut; phone keyboards always make a new line. */
+export function enterSubmits(
+  event: Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey'>,
+  mobile = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 767px)').matches),
+): boolean {
+  return event.key === 'Enter' && !event.shiftKey && !mobile;
+}
+
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
   const router = useRouter();
   const params = useSearchParams();
@@ -422,6 +431,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [newChatDefault, setNewChatDefaultState] = useState<Brand | 'ask'>('ask');
   const [modelDefaults, setModelDefaults] = useState<Partial<Record<Brand, string>>>({});
   const [effortDefaults, setEffortDefaults] = useState<Partial<Record<Brand, string>>>({});
+  const [composerSettingsOpen, setComposerSettingsOpen] = useState(false);
   useEffect(() => {
     const saved = localStorage.getItem(NEW_CHAT_DEFAULT);
     if (saved === 'claude' || saved === 'codex' || saved === 'ask') setNewChatDefaultState(saved);
@@ -1085,7 +1095,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           'gap-y-1',
         )}
       >
-        <ProviderBadge brand={sessionBrand} />
+        <ProviderBadge brand={sessionBrand} className="hidden sm:inline-flex" />
         {/* A chat another program is working in has no agent of OURS attached,
             which is what "Asleep" describes and not what the reader is looking
             at: the messages arrive as that program works. So the line says what
@@ -1096,7 +1106,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         {state.external && <span
           data-testid="session-state"
           data-state={held ? 'held' : view.state}
-          className={cn('flex shrink-0 items-center', CHIP_GAP)}
+          className={cn('hidden shrink-0 items-center sm:flex', CHIP_GAP)}
         >
           {/* No activity chip here: what the agent is doing now is already the
               live line at the foot of the transcript, and the same state is on
@@ -1120,6 +1130,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           models={view.menu.models}
           effort={view.effort}
           efforts={view.menu.efforts}
+          className="hidden sm:flex"
         />
         {facts?.folder && (
           <Badge
@@ -1136,7 +1147,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             // Never squeezed by the line, and never wider than a name: a chip
             // that shrinks under its own text spills it over its neighbour
             // (bw-7ks.22.15).
-            className="max-w-40 shrink-0 gap-1 truncate"
+            className="hidden max-w-40 shrink-0 gap-1 truncate sm:inline-flex"
           >
             {/* A folder that is a checkout says so: the branch is already in
                 this chip's tooltip, and the mark is what says there is one to
@@ -1172,7 +1183,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
               data-kind={view.cost.kind}
               data-total={view.cost.kind === 'usd' ? view.cost.usd : view.cost.total}
               title="What this conversation has spent so far, counting every agent it sent off"
-              className="font-mono"
+              className="hidden font-mono sm:inline-flex"
             >
               <Coins />
               {costLabel(view.cost)}
@@ -1369,7 +1380,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 void recallLastPrompt();
                 return;
               }
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (enterSubmits(e)) {
                 e.preventDefault();
                 void submit();
               }
@@ -1401,6 +1412,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             </Button>
             {/* Both act on THIS chat, and are kept in his own settings so the
                 next one opens on them too (§8.2.3). */}
+            <div className="hidden items-center gap-1 sm:flex" data-testid="desktop-composer-settings">
             <Picker
               icon={<ModeMark mode={view.permissionMode} className="h-3.5 w-3.5" />}
               label="Permission mode"
@@ -1472,6 +1484,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 );
               }}
             />
+            </div>
+            <Button
+              variant="ghost"
+              mode="icon"
+              size="sm"
+              aria-label="Chat settings"
+              title="Chat settings"
+              data-testid="mobile-composer-settings"
+              className="rounded-full text-muted-foreground sm:hidden"
+              onClick={() => setComposerSettingsOpen(true)}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </Button>
             {view.menu.agentDefinitions.length > 0 && (
               <Badge
                 variant="secondary"
@@ -1479,6 +1504,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 size="sm"
                 title={view.menu.agentDefinitions.map((agent) => `${agent.name}${agent.description ? ` — ${agent.description}` : ''}`).join('\n')}
                 data-testid="agent-definitions"
+                className="hidden sm:inline-flex"
               >
                 {view.menu.agentDefinitions.length} agent{view.menu.agentDefinitions.length === 1 ? '' : 's'}
               </Badge>
@@ -1517,6 +1543,77 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             )}
           </div>
         </Panel>
+        <Dialog open={composerSettingsOpen} onOpenChange={setComposerSettingsOpen}>
+          <DialogContent className="max-w-[calc(100vw-2rem)] sm:hidden" data-testid="mobile-composer-settings-dialog">
+            <DialogHeader>
+              <DialogTitle>Chat settings</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-2 [&_[data-testid$='-picker']]:h-10 [&_[data-testid$='-picker']]:w-full [&_[data-testid$='-picker']]:justify-start [&_[data-testid$='-picker']]:rounded-md">
+              <Picker
+                icon={<ModeMark mode={view.permissionMode} className="h-4 w-4" />}
+                label="Permission mode"
+                testid="mobile-mode-picker"
+                current={view.permissionMode}
+                currentLabel={modeWords(view.permissionMode)?.label}
+                asleep={asleep}
+                options={view.menu.permissionModes.map((mode) => ({
+                  value: mode,
+                  label: PERMISSION_MODE[mode]?.label ?? inWords(mode),
+                }))}
+                onPick={(mode) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.mode', sessionId, mode }).catch((error: unknown) =>
+                    setSteerError(error instanceof Error ? error.message : String(error)),
+                  );
+                }}
+              />
+              <Picker
+                icon={<Cpu className="h-4 w-4" />}
+                label="Model"
+                testid="mobile-model-picker"
+                current={view.model ?? BRAND_DEFAULT_MODEL}
+                currentLabel={modelName(view.model ?? BRAND_DEFAULT_MODEL)}
+                asleep={asleep}
+                options={view.menu.models.map((model) => ({
+                  value: model.value,
+                  label: modelName(model.value, model.displayName) ?? model.displayName,
+                  hint: model.description,
+                }))}
+                defaultValue={modelDefaults[sessionBrand] ?? null}
+                onDefault={(model) => makeProviderDefault('model', model)}
+                onPick={(model) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.model', sessionId, model }).catch((error: unknown) =>
+                    setSteerError(error instanceof Error ? error.message : String(error)),
+                  );
+                }}
+              />
+              <Picker
+                icon={<Gauge className="h-4 w-4" />}
+                label="Reasoning effort"
+                testid="mobile-effort-picker"
+                current={view.effort ?? null}
+                asleep={asleep}
+                options={view.menu.efforts.map((effort) => ({
+                  value: effort.value,
+                  label: effort.displayName,
+                  hint: effort.description,
+                }))}
+                defaultValue={effortDefaults[sessionBrand] ?? null}
+                onDefault={(effort) => makeProviderDefault('effort', effort)}
+                cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
+                  ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
+                  : null}
+                onPick={(effort) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.effort', sessionId, effort }).catch((error: unknown) =>
+                    setSteerError(error instanceof Error ? error.message : String(error)),
+                  );
+                }}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}

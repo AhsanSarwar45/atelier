@@ -443,7 +443,7 @@ export const ToolRow = memo(function ToolRow({
       data-open={open}
       className={cn(nested && SENT_OFF)}
     >
-      <Panel inset="none" className="px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
+      <Panel inset="none" className="px-2.5 py-1 font-mono text-xs text-muted-foreground md:py-1.5">
         <button
           type="button"
           data-testid="tool-toggle"
@@ -538,7 +538,7 @@ export const MachineLine = memo(
         data-times={row.lines.length}
         data-open={open}
       >
-        <Panel inset="none" className={cn('px-2.5 py-1.5 font-mono text-xs', look.row)}>
+        <Panel inset="none" className={cn('px-2.5 py-1 font-mono text-xs md:py-1.5', look.row)}>
           <button
             type="button"
             data-testid="note-toggle"

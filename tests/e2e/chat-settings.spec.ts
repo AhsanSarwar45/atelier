@@ -148,4 +148,27 @@ test.describe('a chat the app starts', () => {
 
     await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: started.id } });
   });
+
+  test('shows all live chat settings in the mobile composer modal', async ({ page, request }) => {
+    const project = await fixtureProject(request);
+    const response = await request.post('/api/workbench/command', {
+      data: { type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude' },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const started = (await response.json()) as { id: string };
+
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`/project?id=${project.id}&tab=chat&chat=${started.id}`);
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+      await page.getByTestId('mobile-composer-settings').click();
+      await expect(page.getByTestId('mobile-mode-picker')).toBeVisible({ timeout: HELLO_MS });
+      await expect(page.getByTestId('mobile-model-picker')).toBeVisible({ timeout: HELLO_MS });
+      await expect(page.getByTestId('mobile-effort-picker')).toBeVisible({ timeout: HELLO_MS });
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `${SHOTS}/mobile-chat-settings-after.png`, fullPage: true });
+    } finally {
+      await request.post('/api/workbench/command', { data: { type: 'session.stop', sessionId: started.id } });
+    }
+  });
 });

@@ -29,7 +29,7 @@ describe('compact workbench vertical alignment', () => {
     const tab = source('chat-tab.tsx');
     const transcript = source('transcript-rows.tsx');
 
-    expect(tab).toContain('className="max-w-40 shrink-0 gap-1 truncate"');
+    expect(tab).toContain('max-w-40 shrink-0 gap-1 truncate');
     expect(tab).toContain('className="relative top-px min-w-0 truncate">{facts.folder}');
     expect(transcript).toContain('<span className="relative top-px truncate">');
   });

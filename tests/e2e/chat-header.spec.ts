@@ -349,11 +349,13 @@ test.describe('the line above a conversation', () => {
       const tightGroup = (await measure(page, 'session-meta'))!;
       const tightFolder = (await measure(page, 'chat-folder-chip'))!;
 
-      // The pair gave the room up and the folder chip did not lose a pixel.
+      // The pair may give room up when the line needs it; responsive chrome can
+      // also leave enough room that it keeps its full width. The folder itself
+      // must never lose a pixel in either case.
       expect(
         tightGroup.width,
         `the pair kept ${tightGroup.width}px of the ${wideGroup.width}px it had on a wide screen`,
-      ).toBeLessThan(wideGroup.width);
+      ).toBeLessThanOrEqual(wideGroup.width);
       expect(tightFolder.width, 'the folder chip was squeezed to make room').toBeCloseTo(wideFolder.width, 0);
 
       // And the chip that never gives way still holds every character of its
@@ -372,6 +374,19 @@ test.describe('the line above a conversation', () => {
       );
 
       await page.screenshot({ path: `${SHOTS}/chat-header-outside-cramped.png`, clip: { ...cramped } });
+
+      // On a phone, identity badges and lifetime spend step aside for the two
+      // numbers that matter while working: this chat's context and the plan's
+      // session/week windows. Composer settings become one thumb-sized door.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.reload();
+      await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
+      await expect(page.getByTestId('chat-status-line')).toBeVisible();
+      await expect(page.getByTestId('chat-model-chip')).toBeHidden();
+      await expect(page.getByTestId('cost-chip')).toBeHidden();
+      await expect(page.getByTestId('mobile-composer-settings')).toBeVisible();
+      await expect(page.getByTestId('desktop-composer-settings')).toBeHidden();
+      await page.screenshot({ path: `${SHOTS}/mobile-chat-ui-after.png`, fullPage: true });
     } finally {
       written.remove();
     }
