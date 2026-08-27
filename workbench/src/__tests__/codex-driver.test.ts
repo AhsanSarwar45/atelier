@@ -13,6 +13,25 @@ import { createDriver, defaultPermissionMode } from '../drivers';
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
 
 describe('the provider boundary', () => {
+  it('publishes a plan update immediately as checklist state', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    driver.event('turn/plan/updated', { plan: [
+      { step: 'Find the cause', status: 'completed' },
+      { step: 'Fix the screen', status: 'in_progress' },
+    ] });
+
+    expect(events).toEqual([{
+      type: 'todo',
+      items: [
+        { id: '0', text: 'Find the cause', status: 'completed' },
+        { id: '1', text: 'Fix the screen', status: 'in_progress' },
+      ],
+    }]);
+  });
+
   it('selects Codex without leaking that choice through the session runtime', () => {
     expect(createDriver('codex')).toBeInstanceOf(CodexDriver);
     expect(defaultPermissionMode('codex')).toBe('on-request');

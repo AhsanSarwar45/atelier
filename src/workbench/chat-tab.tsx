@@ -16,10 +16,13 @@ import {
   ArrowUp,
   Coins,
   Cpu,
+  ChevronDown,
+  ChevronRight,
   Folder,
   FolderGit2,
   Gauge,
   Loader2,
+  ListChecks,
   PanelLeft,
   PanelRight,
   PanelRightClose,
@@ -389,12 +392,41 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
 }
 
 /** The agent's checklist, as it stands right now. */
-function TodoPanel({ items }: { items: TodoItem[] }) {
+export function TodoPanel({ items }: { items: TodoItem[] }) {
+  const complete = items.filter((item) => item.status === 'completed').length;
+  const allComplete = complete === items.length;
+  const [expanded, setExpanded] = useState(!allComplete);
+  const wasComplete = useRef(allComplete);
+
+  useEffect(() => {
+    // A new active plan deserves to be seen immediately. Once its last item is
+    // checked, it gets out of the transcript's way without disappearing.
+    if (allComplete && !wasComplete.current) setExpanded(false);
+    if (!allComplete && wasComplete.current) setExpanded(true);
+    wasComplete.current = allComplete;
+  }, [allComplete]);
+
   if (!items.length) return null;
   return (
-    <Panel data-testid="todo-panel">
-      <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Checklist</div>
-      <ul className="space-y-1">
+    <Panel data-testid="todo-panel" inset="none" data-expanded={expanded ? 'yes' : 'no'} className="overflow-hidden">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls="active-checklist-items"
+        onClick={() => setExpanded((open) => !open)}
+        className="flex min-h-9 w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/40"
+      >
+        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <ListChecks className="h-4 w-4 text-muted-foreground" />
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Checklist</span>
+        {!expanded && !allComplete && (
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {items.find((item) => item.status === 'in_progress')?.text ?? items.find((item) => item.status === 'pending')?.text}
+          </span>
+        )}
+        <span className="ml-auto text-xs tabular-nums text-muted-foreground">{complete}/{items.length}</span>
+      </button>
+      <ul id="active-checklist-items" hidden={!expanded} className="space-y-1 border-t border-border/60 px-3 py-2">
         {items.map((t) => (
           <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="flex items-center gap-2 text-sm">
             <span
@@ -1263,7 +1295,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       </div>
 
       {view.todos.length > 0 && (
-        <div className="border-b border-border/60 px-4 py-2">
+        <div className="border-b border-border/60 px-4 py-2" aria-live="polite">
           <TodoPanel items={view.todos} />
         </div>
       )}
