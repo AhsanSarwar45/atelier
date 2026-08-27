@@ -90,11 +90,12 @@ image. Do this before handing the work back; do not wait for the manager to ask.
 Use an `atelier-widget` fenced block when a structured visual makes the result
 faster to understand than prose. Use `metrics` for 2–6 headline values,
 `chart` with `bar` for category comparisons or `line` for trends, `progress`
-for bounded completion, `timeline` for ordered events, and `table` for exact
-side-by-side facts. Do not use a widget for one fact or a short list.
+for bounded completion, `timeline` for ordered events, `table` for exact
+side-by-side facts, and `video` whenever showing video proof. Never present
+video as a file link. Do not use a widget for one fact or a short list.
 
 The block contains one object. Common fields are `type` and optional `title`.
-The five accepted shapes are:
+The six accepted shapes are:
 
 - `metrics`: `items` with `label`, `value`, and optional `detail`/`trend`.
 - `chart`: `chart`, `series` (`name`, optional `color`), and `data` (`label`,
@@ -103,5 +104,6 @@ The five accepted shapes are:
 - `timeline`: `items` with `label`, optional `detail`, and optional `status`
   (`done`, `current`, or `next`).
 - `table`: `columns` and equally sized string `rows`.
+- `video`: absolute local or HTTP(S) `src`, with optional `title`/`poster`.
 
 <!-- END ATELIER WORKFLOW -->

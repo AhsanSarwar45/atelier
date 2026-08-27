@@ -1,14 +1,22 @@
 'use client';
 
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Circle, Clock } from 'lucide-react';
+
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
+import { apiUrl } from '@/lib/api-base';
 import type { ChartWidget, ChatWidget } from '@/workbench/chat-widgets';
 
 const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
 
 function Heading({ title }: { title?: string }) {
   return title ? <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4> : null;
+}
+
+function mediaUrl(src: string): string {
+  if (/^(https?:|data:|blob:)/.test(src)) return src;
+  const path = src.startsWith('file://') ? decodeURIComponent(new URL(src).pathname) : src;
+  return apiUrl(`/api/fs/media?path=${encodeURIComponent(path)}`);
 }
 
 function Chart({ widget }: { widget: ChartWidget }) {
@@ -41,6 +49,14 @@ function Chart({ widget }: { widget: ChartWidget }) {
 }
 
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
+  if (widget.type === 'video') return (
+    <Panel data-testid="chat-widget" data-widget="video" tone="frame" className="mb-3 max-w-2xl">
+      <Heading title={widget.title} />
+      <video className="w-full rounded-md bg-black" controls preload="metadata" src={mediaUrl(widget.src)} poster={widget.poster ? mediaUrl(widget.poster) : undefined}>
+        Your browser cannot play this video.
+      </video>
+    </Panel>
+  );
   if (widget.type === 'metrics') return (
     <div data-testid="chat-widget" data-widget="metrics" className="mb-3 max-w-2xl">
       <Heading title={widget.title} />

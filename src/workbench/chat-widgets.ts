@@ -20,12 +20,18 @@ export type TimelineWidget = {
 export type TableWidget = {
   type: 'table'; title?: string; columns: string[]; rows: string[][];
 };
-export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget;
+export type VideoWidget = {
+  type: 'video'; title?: string; src: string; poster?: string;
+};
+export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget;
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
 const title = (value: unknown) => value === undefined || text(value);
+const mediaSource = (value: unknown): value is string => typeof value === 'string'
+  && value.trim().length > 0 && value.length <= 4096
+  && (/^(https?:|data:video\/|blob:|file:)/.test(value) || value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value));
 
 export function widget(value: unknown): ChatWidget | null {
   if (!object(value) || !text(value.type) || !title(value.title)) return null;
@@ -49,6 +55,8 @@ export function widget(value: unknown): ChatWidget | null {
   if (value.type === 'timeline' && Array.isArray(value.items) && value.items.length > 0 && value.items.length <= 20
     && value.items.every((item) => object(item) && text(item.label) && (item.detail === undefined || text(item.detail))
       && (item.status === undefined || ['done', 'current', 'next'].includes(String(item.status))))) return value as TimelineWidget;
+  if (value.type === 'video' && mediaSource(value.src)
+    && (value.poster === undefined || mediaSource(value.poster))) return value as VideoWidget;
   const columns = value.columns;
   if (value.type === 'table' && Array.isArray(columns) && columns.length > 0 && columns.length <= 8
     && columns.every(text) && Array.isArray(value.rows) && value.rows.length <= 30

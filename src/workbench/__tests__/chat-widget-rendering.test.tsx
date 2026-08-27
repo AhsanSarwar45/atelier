@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+
 import { describe, expect, it } from 'vitest';
 import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import type { ChatWidget } from '@/workbench/chat-widgets';
@@ -10,6 +11,7 @@ const widgets: ChatWidget[] = [
   { type: 'progress', title: 'Release', items: [{ label: 'Tests', value: 8, max: 10 }] },
   { type: 'timeline', title: 'Next', items: [{ label: 'Built', status: 'done' }, { label: 'Ship', status: 'next' }] },
   { type: 'table', title: 'Options', columns: ['Choice', 'Cost'], rows: [['A', '$2']] },
+  { type: 'video', title: 'Proof', src: '/home/me/proof.webm' },
 ];
 
 describe('chat widget rendering', () => {
@@ -24,5 +26,12 @@ describe('chat widget rendering', () => {
     expect(screen.getByRole('img', { name: 'bar chart' })).toBeVisible();
     rerender(<ChatWidgetView widget={widgets[3]!} />);
     expect(screen.getByRole('progressbar', { name: 'Tests' })).toHaveAttribute('aria-valuenow', '80');
+  });
+
+  it('draws a local video through the backend with playback controls', () => {
+    render(<ChatWidgetView widget={widgets[6]!} />);
+    const video = document.querySelector('video');
+    expect(video).toHaveAttribute('controls');
+    expect(video).toHaveAttribute('src', '/api/fs/media?path=%2Fhome%2Fme%2Fproof.webm');
   });
 });

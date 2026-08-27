@@ -14,6 +14,7 @@ import remarkGfm from "remark-gfm";
 
 import "highlight.js/styles/github-dark.css";
 
+import { fs } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
 
@@ -77,6 +78,18 @@ function wroteItOut(href: string, written: string): boolean {
   return words === href || `http://${words}` === href || `https://${words}` === href;
 }
 
+/** A path the host can open, rather than an address the browser should visit. */
+function localPath(href: string): string | null {
+  // A leading slash is also an in-app URL. Limit Unix paths to the locations
+  // people can actually link to under the backend's filesystem policy.
+  if (/^\/(home|Users|tmp)\//.test(href)) return href;
+  if (/^[A-Za-z]:[\\/]/.test(href)) return href;
+  if (href.startsWith('file://')) {
+    try { return decodeURIComponent(new URL(href).pathname); } catch { return null; }
+  }
+  return null;
+}
+
 export function MarkdownBody({
   children,
   className,
@@ -107,6 +120,18 @@ export function MarkdownBody({
             const href = String(props.href ?? '');
             const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
             if (ours) return <>{ours}</>;
+            const path = localPath(href);
+            if (path) return (
+              <a
+                {...props}
+                href={href}
+                onClick={(event) => {
+                  event.preventDefault();
+                  void fs.openExternal(path, 'finder');
+                }}
+                data-testid="markdown-file-link"
+              />
+            );
             return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
           },
           // A name the rewriting step marked. Everything else drawn as a span

@@ -433,6 +433,7 @@ async fn serve(open_browser: bool) {
         .route("/api/dolt/servers", get(routes::dolt::dolt_servers))
         .route("/api/fs/list", get(routes::fs::list_directory))
         .route("/api/fs/exists", get(routes::fs::path_exists))
+        .route("/api/fs/media", get(routes::fs::media))
         .route("/api/fs/roots", get(routes::fs::fs_roots))
         .route("/api/fs/open-external", post(routes::fs::open_external))
         .route("/api/bd/command", post(routes::cli::bd_command))

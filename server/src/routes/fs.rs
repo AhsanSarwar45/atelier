@@ -3,9 +3,10 @@
 //! Provides endpoints for listing directories and checking path existence.
 
 use axum::{
+    body::Body,
     extract::Query,
-    http::StatusCode,
-    response::IntoResponse,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,27 @@ pub struct FsListParams {
 pub struct FsExistsParams {
     /// The path to check for existence
     pub path: String,
+}
+
+/// GET /api/fs/media?path=/some/video.webm
+pub async fn media(Query(params): Query<FsExistsParams>) -> Response {
+    let path = PathBuf::from(&params.path);
+    if let Err(e) = validate_path_security(&path) {
+        return (StatusCode::FORBIDDEN, e).into_response();
+    }
+    if !path.is_file() {
+        return (StatusCode::NOT_FOUND, "File does not exist").into_response();
+    }
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read file: {e}")).into_response(),
+    };
+    let content_type = mime_guess::from_path(&path).first_or_octet_stream().to_string();
+    Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_DISPOSITION, "inline")
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serve file").into_response())
 }
 
 /// Request body for opening a path in an external application.
