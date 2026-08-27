@@ -7,7 +7,7 @@ import { join } from 'node:path';
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({}));
 
 import type { WbpEvent } from '../../../src/workbench/protocol';
-import { CodexDriver, codexAgentDefinitions, codexThreadOpenRequest, replayCodexThread } from '../drivers/codex';
+import { CodexDriver, codexAgentDefinitions, codexRolloutLine, codexThreadOpenRequest, replayCodexThread } from '../drivers/codex';
 import { createDriver, defaultPermissionMode } from '../drivers';
 
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
@@ -217,6 +217,49 @@ describe('Codex persisted history', () => {
     ]));
     expect(events).not.toContainEqual(expect.objectContaining({ type: 'session.state' }));
     expect(events).toContainEqual(expect.objectContaining({ type: 'agent.started', agentId: 'typed-helper', agentType: 'reviewer' }));
+  });
+
+  it('finishes persisted helpers when the rollout active set clears', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver();
+    const line = (type: string, payload: Record<string, unknown>) =>
+      codexRolloutLine(JSON.stringify({ type, payload }), driver, (event) => events.push(event));
+
+    line('world_state', { full: true, state: { environments: { subagents: null } } });
+    line('event_msg', {
+      type: 'sub_agent_activity', event_id: 'spawn-reviewer', kind: 'started',
+      agent_thread_id: 'reviewer-thread', agent_path: '/root/reviewer',
+    });
+    line('world_state', {
+      full: false, state: { environments: { subagents: '- reviewer: Ada' } },
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'agent.finished' }));
+
+    line('world_state', { full: false, state: { environments: { subagents: null } } });
+
+    expect(events.filter((event) => event.type === 'agent.started')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'agent.finished')).toEqual([
+      expect.objectContaining({ type: 'agent.finished', agentId: 'reviewer-thread', state: 'done' }),
+    ]);
+  });
+
+  it('finishes only helpers omitted from a non-empty rollout active set', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver();
+    const line = (type: string, payload: Record<string, unknown>) =>
+      codexRolloutLine(JSON.stringify({ type, payload }), driver, (event) => events.push(event));
+
+    for (const name of ['reader', 'reviewer']) line('event_msg', {
+      type: 'sub_agent_activity', event_id: `spawn-${name}`, kind: 'started',
+      agent_thread_id: `${name}-thread`, agent_path: `/root/${name}`,
+    });
+    line('world_state', {
+      full: false, state: { environments: { subagents: '- reviewer: Ada' } },
+    });
+
+    expect(events.filter((event) => event.type === 'agent.finished')).toEqual([
+      expect.objectContaining({ agentId: 'reader-thread', state: 'done' }),
+    ]);
   });
 });
 

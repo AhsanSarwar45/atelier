@@ -426,6 +426,17 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
   try { row = JSON.parse(line); } catch { return; }
   driver.emit = emit;
   const payload = row.payload ?? {};
+  if (row.type === 'event_msg' && payload.type === 'sub_agent_activity') {
+    driver.itemStarted({
+      id: payload.event_id, type: 'subAgentActivity', kind: payload.kind,
+      agentThreadId: payload.agent_thread_id, agentPath: payload.agent_path,
+    });
+    return;
+  }
+  if (row.type === 'world_state' && Object.prototype.hasOwnProperty.call(payload.state?.environments ?? {}, 'subagents')) {
+    driver.reconcileRolloutAgents(payload.state.environments.subagents);
+    return;
+  }
   if (row.type === 'event_msg' && payload.type === 'task_started') {
     emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
     return;
@@ -1078,6 +1089,26 @@ export class CodexDriver implements Driver {
     this.emit({ type: 'session.state', state: 'running_tool', label: name });
     if (item.type === 'fileChange') {
       for (const change of item.changes ?? []) this.emit({ type: 'diff', toolCallId: item.id, path: change.path, ...patchSides(change.diff ?? '') });
+    }
+  }
+
+  /**
+   * A persisted Codex rollout has no "completed" sub-agent activity. Its
+   * world-state snapshot is the authoritative active set: an omitted helper,
+   * or `null` when the last one leaves, is the terminal signal.
+   */
+  reconcileRolloutAgents(list: string | null): void {
+    const active = new Set((list ?? '').split('\n').map((line) =>
+      /^\s*-\s*([^:]+)(?::|$)/.exec(line)?.[1]?.trim(),
+    ).filter((name): name is string => Boolean(name)));
+    for (const [agentId, known] of [...this.agents]) {
+      if (list !== null && known.agentType && active.has(known.agentType)) continue;
+      const seconds = Math.max(0, Math.round((Date.now() - known.since) / 1000));
+      this.emit({
+        type: 'agent.finished', agentId, state: 'done', seconds, tokens: 0,
+        calls: known.calls, model: known.model, result: null,
+      });
+      this.agents.delete(agentId);
     }
   }
 
