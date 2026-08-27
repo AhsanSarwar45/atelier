@@ -3,7 +3,8 @@ import { whatItRan } from '../../src/workbench/said-what-it-ran.ts';
 import { boundedEvent } from './bounded-event.ts';
 import type { Store } from './store.ts';
 
-export const TRANSCRIPT_WINDOW = 40;
+/** User turns per server page. Their replies, tools and thinking come intact. */
+export const TRANSCRIPT_WINDOW = 20;
 
 /**
  * Fold one storage window without cutting it a second time.

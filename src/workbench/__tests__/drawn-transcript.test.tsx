@@ -72,7 +72,11 @@ function conversation(held: number): SessionView {
 
 const HELD = 201;
 
-function chat(sessionId = 's', held = HELD, onOlder: (() => Promise<void>) | null = null) {
+function chat(
+  sessionId = 's',
+  held = HELD,
+  onOlder: (() => Promise<{ added: number; hasOlder: boolean }>) | null = null,
+) {
   const pane = createRef<HTMLDivElement>();
   const rows = drawnRows(conversation(held).items);
   const shows = (what: { rows: DrawnRow[]; sessionId: string; watching: boolean }) => (
@@ -134,6 +138,33 @@ describe('what a chat puts on the page', () => {
     expect(screen.queryByTestId('older-messages')).toBeNull();
   });
 
+  it('starts watching when a later snapshot says older history exists', async () => {
+    const pane = createRef<HTMLDivElement>();
+    const rows = drawnRows(conversation(10).items);
+    const older = vi.fn().mockResolvedValue({ added: SCREENFUL, hasOlder: true });
+    const view = (onOlder: (() => Promise<{ added: number; hasOlder: boolean }>) | null) => (
+      <div ref={pane}>
+        <DrawnTranscript
+          rows={rows}
+          sessionId="late-history"
+          mentions={MENTIONS}
+          onLook={LOOK}
+          pane={pane}
+          held={true}
+          onOlder={onOlder}
+        />
+      </div>
+    );
+    const drawn = render(view(null));
+    expect(heads).toHaveLength(0);
+
+    drawn.rerender(view(older));
+    expect(heads).toHaveLength(1);
+    await act(async () => { heads[0]!.reached(); });
+
+    expect(older).toHaveBeenCalledTimes(1);
+  });
+
   it('opens another chat at its own end, not where the last one had been read to', () => {
     const { again } = chat();
     act(() => heads[heads.length - 1]!.reached());
@@ -144,7 +175,7 @@ describe('what a chat puts on the page', () => {
   });
 
   it('asks for one server page while the history head remains visible', async () => {
-    const older = vi.fn().mockResolvedValue(undefined);
+    const older = vi.fn().mockResolvedValue({ added: SCREENFUL, hasOlder: true });
     chat('paged', 10, older);
     const head = heads[heads.length - 1]!;
 
@@ -157,7 +188,7 @@ describe('what a chat puts on the page', () => {
   });
 
   it('asks for another page only after the reader leaves and reaches the head again', async () => {
-    const older = vi.fn().mockResolvedValue(undefined);
+    const older = vi.fn().mockResolvedValue({ added: SCREENFUL, hasOlder: true });
     chat('paged-again', 10, older);
     const head = heads[heads.length - 1]!;
 
@@ -166,6 +197,18 @@ describe('what a chat puts on the page', () => {
     await act(async () => { head.reached(); });
 
     expect(older).toHaveBeenCalledTimes(2);
+  });
+
+  it('fills one useful batch when cursor pages contain only a few items', async () => {
+    const older = vi.fn()
+      .mockResolvedValueOnce({ added: 6, hasOlder: true })
+      .mockResolvedValueOnce({ added: 8, hasOlder: true })
+      .mockResolvedValueOnce({ added: 26, hasOlder: true });
+    chat('small-pages', 10, older);
+
+    await act(async () => { heads[heads.length - 1]!.reached(); });
+
+    expect(older).toHaveBeenCalledTimes(3);
   });
 
   it('holds the same viewport place when older rows are prepended', () => {

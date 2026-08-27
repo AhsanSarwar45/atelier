@@ -114,7 +114,14 @@ export function useSessionFacts(sessionId: string | null): SessionFacts | null {
   return facts;
 }
 
-export type LoadedSessionView = SessionView & { loadOlder: (() => Promise<void>) | null };
+export interface HistoryLoad {
+  /** Unique transcript items prepended by this cursor request. */
+  added: number;
+  /** Whether another cursor page exists after this one. */
+  hasOlder: boolean;
+}
+
+export type LoadedSessionView = SessionView & { loadOlder: (() => Promise<HistoryLoad>) | null };
 
 interface CachedSession {
   view: SessionView;
@@ -156,25 +163,28 @@ export function cacheSessionEvent(event: WbpEvent): void {
   publishCached(event.sessionId, reduce(entry.view, event));
 }
 
-async function loadHistory(id: string): Promise<void> {
+async function loadHistory(id: string): Promise<HistoryLoad> {
   const entry = cached(id);
-  if (entry.loadingOlder) return;
-  if (!entry.view.hasOlder || entry.view.historyCursor === null) return;
+  if (entry.loadingOlder) return { added: 0, hasOlder: entry.view.hasOlder };
+  if (!entry.view.hasOlder || entry.view.historyCursor === null) return { added: 0, hasOlder: false };
   entry.loadingOlder = true;
   try {
     const before = entry.view.historyCursor;
     const res = await request(`/api/workbench/history?session=${encodeURIComponent(id)}&before=${before}`);
-    if (!res.ok) return;
+    if (!res.ok) return { added: 0, hasOlder: entry.view.hasOlder };
     const page = (await res.json()) as { items: SessionView['items']; cursor: number | null; hasOlder: boolean };
     const existing = new Set(entry.view.items.map((item) => `${item.kind}:${item.id}`));
+    const added = page.items.filter((item) => !existing.has(`${item.kind}:${item.id}`));
+    const hasOlder = page.cursor !== before && page.hasOlder;
     publishCached(id, {
       ...entry.view,
-      items: [...page.items.filter((item) => !existing.has(`${item.kind}:${item.id}`)), ...entry.view.items],
+      items: [...added, ...entry.view.items],
       historyCursor: page.cursor,
       // A cursor that did not move cannot be asked forever. Treat that broken
       // page as the head rather than turning one observer into a replay loop.
-      hasOlder: page.cursor !== before && page.hasOlder,
+      hasOlder,
     });
+    return { added: added.length, hasOlder };
   } finally {
     entry.loadingOlder = false;
   }
@@ -238,7 +248,7 @@ export function useSession(sessionId: string | null): LoadedSessionView {
   }, [sessionId]);
 
   const requestOlder = useCallback(
-    () => sessionId ? loadHistory(sessionId) : Promise.resolve(),
+    () => sessionId ? loadHistory(sessionId) : Promise.resolve({ added: 0, hasOlder: false }),
     [sessionId],
   );
   return {

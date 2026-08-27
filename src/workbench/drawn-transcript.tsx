@@ -41,7 +41,7 @@ interface DrawnTranscriptProps {
   /** Whether the end of the conversation is what the reader is watching. */
   held: boolean;
   /** Fetches the preceding server window; null when the beginning is loaded. */
-  onOlder?: (() => Promise<void>) | null;
+  onOlder?: (() => Promise<{ added: number; hasOlder: boolean }>) | null;
 }
 
 export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held, onOlder = null }: DrawnTranscriptProps) {
@@ -69,6 +69,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
   else if (!held && rows.length > was.current.many) count = shown + (rows.length - was.current.many);
   was.current = { sessionId, many: rows.length };
   if (count !== shown) setShown(count);
+  const hasHead = count < rows.length || onOlder !== null;
 
   useEffect(() => {
     atHead.current = false;
@@ -88,16 +89,30 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
         setShown((n) => n + SCREENFUL);
         return;
       }
-      const older = current.current.onOlder;
-      if (!older) return;
+      if (!current.current.onOlder) return;
       loading.current = true;
-      void older().finally(() => {
+      void (async () => {
+        // One visit to the head should reveal a useful batch, not one tiny
+        // storage page. Cursor loading remains single-flight in use-session;
+        // this bounded loop only fills one screenful and can never replay the
+        // whole transcript in one visit.
+        let added = 0;
+        while (added < SCREENFUL) {
+          const older = current.current.onOlder;
+          if (!older) break;
+          wasTall.current ??= pane.current?.scrollHeight ?? null;
+          const page = await older();
+          if (page.added <= 0) break;
+          added += page.added;
+          if (!page.hasOlder) break;
+        }
+      })().finally(() => {
         loading.current = false;
       });
     });
     watch.observe(mark);
     return () => watch.disconnect();
-  }, [sessionId, pane]);
+  }, [sessionId, pane, hasHead]);
 
   // Older messages arrive ABOVE where the reader is looking, which would slide
   // the words he is reading down the screen by however tall they are. Put back
@@ -114,7 +129,9 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
 
   return (
     <>
-      {(count < rows.length || onOlder) && <div ref={head} data-testid="older-messages" />}
+      {hasHead && (
+        <div ref={head} data-testid="older-messages" className="h-px shrink-0" aria-hidden="true" />
+      )}
       {window.map((drawnRow) =>
         // A machine line and one of the app's own asides are the same shape:
         // both are the chat talking about itself rather than someone in it, and

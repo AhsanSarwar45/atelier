@@ -571,11 +571,13 @@ export class Store {
   /**
    * A bounded slice of transcript events, newest window first.
    *
-   * Row anchors are deliberately provider-neutral WBP types. The query starts
-   * at the oldest selected anchor, so all deltas/completions belonging to the
-   * selected rows are present without walking anything older.
+   * A page is counted in user turns, not incidental rows. A single assistant
+   * turn can contain dozens of tools and thinking blocks; counting those as
+   * page anchors can fill the whole window after the user's prompt and make
+   * that prompt appear to have vanished. The query starts at the oldest
+   * selected prompt, so every complete turn after it remains intact.
    */
-  transcriptWindow(sessionId: string, before: number | null, limit = 40): {
+  transcriptWindow(sessionId: string, before: number | null, limit = 20): {
     events: WbpEvent[];
     cursor: number | null;
     hasOlder: boolean;
@@ -588,14 +590,37 @@ export class Store {
     const reset = this.db
       .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM event WHERE session_id = ? AND type = 'transcript.reset' AND seq < ?")
       .get(sessionId, ceiling) as { seq: number };
-    const anchors = this.db
+    const turns = this.db
+      .prepare(
+        `SELECT seq FROM event
+          WHERE session_id = ? AND seq > ? AND seq < ?
+            AND type = 'message.started'
+            AND json_extract(json, '$.role') = 'user'
+            AND json_extract(json, '$.parentToolCallId') IS NULL
+          ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(sessionId, reset.seq, ceiling, limit) as { seq: number }[];
+    // Provider/system conversations can contain no user turn. They still page
+    // by messages, at roughly two messages per ordinary user/assistant turn.
+    const messages = turns.length ? [] : this.db
+      .prepare(
+        `SELECT seq FROM event
+          WHERE session_id = ? AND seq > ? AND seq < ?
+            AND type = 'message.started'
+            AND json_extract(json, '$.parentToolCallId') IS NULL
+          ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(sessionId, reset.seq, ceiling, limit * 2) as { seq: number }[];
+    // A transcript made only of notices/tools still pages rather than becoming
+    // unreachable. This final fallback is used only when there is no message.
+    const anchors = turns.length ? turns : messages.length ? messages : this.db
       .prepare(
         `SELECT seq FROM event
           WHERE session_id = ? AND seq > ? AND seq < ?
             AND type IN ('message.started','tool.started','note','ask.permission','notice')
           ORDER BY seq DESC LIMIT ?`,
       )
-      .all(sessionId, reset.seq, ceiling, limit) as { seq: number }[];
+      .all(sessionId, reset.seq, ceiling, limit * 2) as { seq: number }[];
     const start = anchors.length ? anchors[anchors.length - 1]!.seq : Math.max(reset.seq + 1, newest.seq);
     const rows = this.db
       .prepare('SELECT json FROM event WHERE session_id = ? AND seq >= ? AND seq < ? ORDER BY seq')

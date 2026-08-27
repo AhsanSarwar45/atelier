@@ -28,12 +28,12 @@ describe('paged transcript storage', () => {
       event(store, ++seq, { type: 'message.completed', messageId: `m-${i}` });
     }
 
-    const newest = store.transcriptWindow('chat', null, 40);
+    const newest = store.transcriptWindow('chat', null, 20);
     expect(newest.events).toHaveLength(120);
     expect(newest.events[0]).toMatchObject({ type: 'message.started', messageId: 'm-35' });
     expect(newest.hasOlder).toBe(true);
 
-    const older = store.transcriptWindow('chat', newest.cursor, 40);
+    const older = store.transcriptWindow('chat', newest.cursor, 20);
     expect(older.events[0]).toMatchObject({ type: 'message.started', messageId: 'm-0' });
     expect(older.hasOlder).toBe(false);
   });
@@ -50,11 +50,35 @@ describe('paged transcript storage', () => {
 
     const newest = transcriptPage(store, 'chat', null);
     const messages = newest.items.filter((item) => item.kind === 'message');
-    expect(messages).toHaveLength(40);
-    expect(messages[0]).toMatchObject({ id: 'm-1', role: 'assistant' });
+    expect(messages).toHaveLength(39);
+    expect(messages[0]).toMatchObject({ id: 'm-2', role: 'user' });
     expect(messages.filter((item) => item.role === 'user')).toHaveLength(20);
-    expect(newest.items.filter((item) => item.kind === 'thinking')).toHaveLength(40);
+    expect(newest.items.filter((item) => item.kind === 'thinking')).toHaveLength(39);
     expect(newest.hasOlder).toBe(true);
+  });
+
+  it('keeps the user prompt that began a tool-heavy assistant turn', () => {
+    const store = new Store(join(mkdtempSync(join(tmpdir(), 'atelier-turns-')), 'workbench.db'));
+    let seq = 0;
+    event(store, ++seq, { type: 'message.started', messageId: 'prompt', role: 'user' });
+    event(store, ++seq, { type: 'text.delta', messageId: 'prompt', text: 'Please inspect the whole repository' });
+    event(store, ++seq, { type: 'message.completed', messageId: 'prompt' });
+    event(store, ++seq, { type: 'message.started', messageId: 'answer', role: 'assistant' });
+    for (let i = 0; i < 75; i++) {
+      event(store, ++seq, {
+        type: 'tool.started', toolCallId: `tool-${i}`, name: 'Read', title: `Read file ${i}`,
+        input: { file_path: `file-${i}.ts` }, parentToolCallId: null,
+      });
+      event(store, ++seq, { type: 'tool.completed', toolCallId: `tool-${i}`, ok: true, output: 'done' });
+    }
+    event(store, ++seq, { type: 'text.delta', messageId: 'answer', text: 'Finished' });
+    event(store, ++seq, { type: 'message.completed', messageId: 'answer' });
+
+    const newest = transcriptPage(store, 'chat', null);
+    expect(newest.items.find((item) => item.kind === 'message' && item.role === 'user')).toMatchObject({
+      id: 'prompt', text: 'Please inspect the whole repository',
+    });
+    expect(newest.items.filter((item) => item.kind === 'tool')).toHaveLength(75);
   });
 
   it('fetches a large tool body only by its call id', () => {

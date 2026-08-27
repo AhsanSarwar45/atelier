@@ -535,11 +535,19 @@ test.describe('how a chat scrolls', () => {
       await page.waitForTimeout(600);
       const read = await reading(page);
       expect(read.text, 'nothing was being read at the top of the pane').not.toBe('');
-
       await expect
         .poll(async () => (await place(page)).rows, { message: 'no older messages ever arrived', timeout: HELLO_MS })
         .toBeGreaterThan(before.rows);
       await settled(page);
+
+      // Reaching the head repeatedly eventually reaches the first turn; no
+      // invisible zero-height sentinel or one-shot latch may impose a ceiling.
+      for (let n = 0; n < 12 && (await page.getByText(longChatSaid(0), { exact: true }).count()) === 0; n += 1) {
+        await page.mouse.wheel(0, -1500);
+        await page.waitForTimeout(250);
+      }
+      await expect(page.getByText(longChatSaid(0), { exact: true })).toHaveCount(1);
+      await expect(page.getByTestId('transcript').locator('[data-testid="user-message"]')).not.toHaveCount(0);
 
       const after = await stillAt(page, read.text);
       expect(after, 'the row that was being read is no longer drawn').not.toBeNull();

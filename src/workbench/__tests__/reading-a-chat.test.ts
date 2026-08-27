@@ -230,7 +230,7 @@ describe('a chat opened, and opened again after the stream drops', () => {
     act(() => opened[0].hands({ ...built, hasOlder: true, historyCursor: 42 }));
     const older = foldAll(turn(99)).items;
 
-    let first!: Promise<void>;
+    let first!: Promise<{ added: number; hasOlder: boolean }>;
     act(() => {
       first = result.current.loadOlder!();
       void result.current.loadOlder!();
@@ -239,8 +239,10 @@ describe('a chat opened, and opened again after the stream drops', () => {
     expect(String(fetch.mock.calls[0]![0])).toContain('before=42');
 
     answer({ ok: true, json: async () => ({ items: older, cursor: 21, hasOlder: true }) });
-    await act(async () => { await first; });
+    let loaded!: { added: number; hasOlder: boolean };
+    await act(async () => { loaded = await first; });
 
+    expect(loaded).toEqual({ added: older.length, hasOlder: true });
     expect(result.current.historyCursor).toBe(21);
     expect(result.current.hasOlder).toBe(true);
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -256,8 +258,10 @@ describe('a chat opened, and opened again after the stream drops', () => {
     const built = foldAll(aWholeChat(2));
     act(() => opened[0].hands({ ...built, hasOlder: true, historyCursor: 42 }));
 
-    await act(async () => { await result.current.loadOlder!(); });
+    let loaded!: { added: number; hasOlder: boolean };
+    await act(async () => { loaded = await result.current.loadOlder!(); });
 
+    expect(loaded).toEqual({ added: 0, hasOlder: false });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(result.current.hasOlder).toBe(false);
     expect(result.current.loadOlder).toBeNull();
