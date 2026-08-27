@@ -21,6 +21,16 @@ def load_join():
 
 
 class JoinInstructionsTest(unittest.TestCase):
+    def test_beads_review_handoff_names_the_personal_reviewer_contract(self):
+        skill = (ROOT / "machinery/skills/beads/SKILL.md").read_text()
+        reviewer = (ROOT / ".claude/agents/reviewer.md").read_text()
+
+        self.assertIn("run only `machinery/board/review <job-id>`", skill)
+        self.assertIn("personal `external-review` runner", skill)
+        self.assertIn("personal Claude agent named `reviewer`", skill)
+        self.assertIn("model: sonnet", reviewer)
+        self.assertRegex(reviewer, r"(?m)^skills:\n  - external-review$")
+
     def test_migration_never_replaces_a_registry_published_concurrently(self):
         join = load_join()
         with tempfile.TemporaryDirectory() as held:
