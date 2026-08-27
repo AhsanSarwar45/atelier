@@ -11,8 +11,7 @@
  */
 'use client';
 
-import { fs } from '@/lib/api';
-import { toast } from '@/hooks/use-toast';
+import { openLocalPath } from '@/workbench/open-local-path';
 import { CHIP_CLASS, TITLE } from '@/workbench/paths-in-html';
 
 /** A file named in a message. Its words are the reader's, not the address. */
@@ -57,17 +56,7 @@ export function openPathClicked(event: {
   const line = at ? Number(at) : null;
   const toEditor = event.altKey && line !== null;
 
-  void fs
-    .openExternal(absolute, toEditor ? 'vscode' : 'finder', toEditor ? line : null)
-    .catch((e: unknown) =>
-      // A file that will not open must say so. Failing in silence is how a
-      // reader ends up clicking the same dead address four times.
-      toast({
-        title: 'Could not open that file',
-        description: e instanceof Error ? e.message : absolute,
-        variant: 'destructive',
-      }),
-    );
+  openLocalPath(absolute, toEditor ? 'vscode' : 'finder', toEditor ? line : null);
 
   return true;
 }

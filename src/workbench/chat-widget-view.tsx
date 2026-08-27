@@ -15,8 +15,12 @@ function Heading({ title }: { title?: string }) {
 
 function mediaUrl(src: string): string {
   if (/^(https?:|data:|blob:)/.test(src)) return src;
-  const path = src.startsWith('file://') ? decodeURIComponent(new URL(src).pathname) : src;
-  return apiUrl(`/api/fs/media?path=${encodeURIComponent(path)}`);
+  try {
+    const path = src.startsWith('file://') ? decodeURIComponent(new URL(src).pathname) : src;
+    return apiUrl(`/api/fs/media?path=${encodeURIComponent(path)}`);
+  } catch {
+    return '';
+  }
 }
 
 function Chart({ widget }: { widget: ChartWidget }) {

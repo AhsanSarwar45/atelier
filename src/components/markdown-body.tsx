@@ -14,10 +14,9 @@ import remarkGfm from "remark-gfm";
 
 import "highlight.js/styles/github-dark.css";
 
-import { toast } from "@/hooks/use-toast";
-import { fs } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
+import { openLocalPath } from "@/workbench/open-local-path";
 
 /**
  * What a name written in the words should become. Absent — everywhere but a
@@ -128,13 +127,7 @@ export function MarkdownBody({
                 href={href}
                 onClick={(event) => {
                   event.preventDefault();
-                  void fs.openExternal(path, 'finder').catch((error: unknown) =>
-                    toast({
-                      title: 'Could not open that file',
-                      description: error instanceof Error ? error.message : path,
-                      variant: 'destructive',
-                    }),
-                  );
+                  openLocalPath(path);
                 }}
                 data-testid="markdown-file-link"
               />

@@ -34,4 +34,9 @@ describe('chat widget rendering', () => {
     expect(video).toHaveAttribute('controls');
     expect(video).toHaveAttribute('src', '/api/fs/media?path=%2Fhome%2Fme%2Fproof.webm');
   });
+
+  it('does not crash on a malformed file URL', () => {
+    render(<ChatWidgetView widget={{ type: 'video', src: 'file:///%E0%A4%A' }} />);
+    expect(document.querySelector('video')).toHaveAttribute('src', '');
+  });
 });

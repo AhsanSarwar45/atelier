@@ -5,7 +5,7 @@
 use axum::{
     body::Body,
     extract::Query,
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -28,8 +28,21 @@ pub struct FsExistsParams {
     pub path: String,
 }
 
+fn media_origin_allowed(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()) else {
+        return true;
+    };
+    let Ok(url) = reqwest::Url::parse(origin) else { return false };
+    matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
+}
+
 /// GET /api/fs/media?path=/some/video.webm
-pub async fn media(Query(params): Query<FsExistsParams>) -> Response {
+pub async fn media(headers: HeaderMap, Query(params): Query<FsExistsParams>) -> Response {
+    // Unlike the metadata-only filesystem routes, this returns file bytes.
+    // Refuse a web page in another origin before resolving its requested path.
+    if !media_origin_allowed(&headers) {
+        return (StatusCode::FORBIDDEN, "Cross-origin media reads are not allowed").into_response();
+    }
     let path = PathBuf::from(&params.path);
     if let Err(e) = validate_path_security(&path) {
         return (StatusCode::FORBIDDEN, e).into_response();
@@ -377,5 +390,16 @@ mod tests {
         let with_line: OpenExternalRequest =
             serde_json::from_str(r#"{"path":"/home/someone/x","target":"vscode","line":7}"#).unwrap();
         assert_eq!(with_line.line, Some(7));
+    }
+
+    #[test]
+    fn media_bytes_are_only_read_for_the_local_app() {
+        let mut local = HeaderMap::new();
+        local.insert(header::ORIGIN, "http://127.0.0.1:3008".parse().unwrap());
+        assert!(media_origin_allowed(&local));
+
+        let mut foreign = HeaderMap::new();
+        foreign.insert(header::ORIGIN, "https://evil.example".parse().unwrap());
+        assert!(!media_origin_allowed(&foreign));
     }
 }
