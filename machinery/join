@@ -21,9 +21,11 @@ merely reported —
                        unserved one. A board already here is MOVED, and the move
                        counts its cards on both sides and puts itself back if the
                        count changes
-  agent policy         the canonical lifecycle is merged into `CLAUDE.md` and
-                       `AGENTS.md`; equivalent hard gates are merged into both
-                       `.claude/settings.json` and `.codex/hooks.json`
+  agent policy         the canonical lifecycle is copied to
+                       `ATELIER_WORKFLOW.md`, and a mandatory read instruction
+                       is merged into `CLAUDE.md` and `AGENTS.md`; equivalent
+                       hard gates are merged into both `.claude/settings.json`
+                       and `.codex/hooks.json`
   the board screen     one row in the screen's own list of projects, found by
                        where the project lives, so its cards are on the screen
                        without anybody typing a path into it
@@ -66,7 +68,8 @@ HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 import project  # noqa: E402
 
-POLICY = "workflow-policy.md"
+POLICY = os.path.join(os.path.dirname(HOME), "ATELIER_WORKFLOW.md")
+PROJECT_POLICY = "ATELIER_WORKFLOW.md"
 POLICY_BEGIN = "<!-- BEGIN ATELIER WORKFLOW -->"
 POLICY_END = "<!-- END ATELIER WORKFLOW -->"
 
@@ -1273,8 +1276,8 @@ def wire_codex(root, say):
 
 
 def instruct(root, say):
-    """Put the canonical lifecycle into both providers' project instructions."""
-    with open(os.path.join(HOME, POLICY)) as source:
+    """Copy the lifecycle and require both providers to read it before work."""
+    with open(POLICY) as source:
         policy = source.read().strip()
     if not ours(root):
         prefix = "%s tool" % WORD if WORD else "python3 %s" % HOME
@@ -1284,14 +1287,38 @@ def instruct(root, say):
                                 else prefix + " board/land")
         policy = policy.replace("machinery/checks", prefix + "/checks" if not WORD
                                 else prefix + " checks")
-    block = "%s\n\n## Atelier workflow (managed)\n\n%s\n\n%s" % (
-        POLICY_BEGIN, policy, POLICY_END)
+    workflow = os.path.join(root, PROJECT_POLICY)
+    fresh_policy = policy + "\n"
+    try:
+        if os.path.exists(workflow):
+            with open(workflow) as source:
+                held_policy = source.read()
+        else:
+            held_policy = ""
+    except OSError as why:
+        say("kept   %s — it cannot be read (%s)" % (workflow, why))
+        held_policy = None
+    if held_policy is not None and held_policy != fresh_policy:
+        temporary = workflow + ".atelier-new"
+        with open(temporary, "w") as fh:
+            fh.write(fresh_policy)
+        os.replace(temporary, workflow)
+        say("taught %s the shared Atelier lifecycle" % workflow)
+
+    block = ("%s\n\n## Atelier workflow (managed)\n\n"
+             "Before doing any work, read and follow "
+             "[ATELIER_WORKFLOW.md](ATELIER_WORKFLOW.md).\n\n%s" % (
+                 POLICY_BEGIN, POLICY_END))
     pattern = re.compile(re.escape(POLICY_BEGIN) + r".*?" +
                          re.escape(POLICY_END), re.S)
     for name in ("CLAUDE.md", "AGENTS.md"):
         where = os.path.join(root, name)
         try:
-            held = open(where).read() if os.path.exists(where) else ""
+            if os.path.exists(where):
+                with open(where) as source:
+                    held = source.read()
+            else:
+                held = ""
         except OSError as why:
             say("kept   %s — it cannot be read (%s)" % (where, why))
             continue
@@ -1306,14 +1333,17 @@ def instruct(root, say):
 
 def uninstructed(root):
     said = []
+    workflow = os.path.join(root, PROJECT_POLICY)
+    if not os.path.isfile(workflow):
+        said.append("no managed Atelier workflow at %s" % workflow)
     for name in ("CLAUDE.md", "AGENTS.md"):
         where = os.path.join(root, name)
         try:
             text = open(where).read()
         except OSError:
             text = ""
-        if POLICY_BEGIN not in text:
-            said.append("no managed Atelier workflow in %s" % where)
+        if POLICY_BEGIN not in text or PROJECT_POLICY not in text:
+            said.append("no mandatory Atelier workflow reference in %s" % where)
     return said
 
 
