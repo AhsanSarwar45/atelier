@@ -278,8 +278,24 @@ def reading_due(goal_id, goal, order, rows, root):
         return False
     if steps_of(rows) & set(order[order.index("review") + 1:]):
         return False
-    return reading.wanted(goal, reading.commits(goal_id, root),
-                          reading.wrote(goal_id, root))
+    return (reading.wanted(goal, reading.commits(goal_id, root),
+                           reading.wrote(goal_id, root))
+            or answered_findings(goal_id, goal, rows, root))
+
+
+def answered_findings(goal_id, goal, rows, root):
+    """Whether a prior reading's last work item has now been answered.
+
+    A finding may be settled by a no-code decision, producing no new commit.
+    The open reading gate and an existing signature prove a reading happened;
+    once every work item is closed, its answers still need the gated re-read.
+    Without this route both `wanted` callers wait forever for a SHA that a
+    legitimate decision does not create.
+    """
+    if not reading.readers(goal) or not reading_gates(goal_id, root):
+        return False
+    items = [r for r in rows if "step:work" in (r.get("labels") or [])]
+    return bool(items) and all(r.get("status") == "closed" for r in items)
 
 
 def due_again(goal_id, root):

@@ -662,7 +662,9 @@ def main():
     # a fresh full-price session — and one goal was read twenty-four times over
     # (bw-5e8.5). A job a dead reader left shut is read without any forcing: it
     # carries no signature, so what stands on it has been read by nobody.
-    if not reading.wanted(goal, shas, reading.wrote(goal_id, ROOT)):
+    rows = running.children(goal_id, ROOT)
+    if not (reading.wanted(goal, shas, reading.wrote(goal_id, ROOT))
+            or running.answered_findings(goal_id, goal, rows, ROOT)):
         print("%s has been read and nothing has been written under it since; the "
               "reading on it is current" % goal_id)
         return
