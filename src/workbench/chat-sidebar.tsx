@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Bot, Check, ChevronDown, Loader2, Plus, Power, Search, X } from 'lucide-react';
+import { Bot, ChevronDown, Loader2, Plus, Power, Search, X } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +33,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -579,34 +581,19 @@ export function ChatSidebar({
                   <DropdownMenuContent align="end" className="w-56">
                     <DropdownMenuLabel>Start with</DropdownMenuLabel>
                     {(['claude', 'codex'] as const).map((brand) => (
-                      <div key={brand} className="flex items-center gap-1 px-1" data-testid={`new-chat-agent-${brand}`}>
-                        <DropdownMenuItem className="min-w-0 flex-1" onSelect={() => onNewChat(brand)}>
-                          <BrandIcon brand={brand} /> New {brandName(brand)} chat
-                        </DropdownMenuItem>
-                        {onNewChatDefault && (
-                          <DropdownMenuItem
-                            className={cn('h-7 px-2 text-xs', newChatDefault === brand && 'bg-secondary')}
-                            data-testid={`set-new-chat-default-${brand}`}
-                            data-default={newChatDefault === brand}
-                            aria-pressed={newChatDefault === brand}
-                            aria-label={newChatDefault === brand ? `${brandName(brand)} is the default agent` : `Make ${brandName(brand)} the default agent`}
-                            onSelect={() => onNewChatDefault(brand)}
-                          >
-                            {newChatDefault === brand && <Check aria-hidden="true" />}
-                            {newChatDefault === brand ? 'Default' : 'Make default'}
-                          </DropdownMenuItem>
-                        )}
-                      </div>
+                      <DropdownMenuItem key={brand} onSelect={() => onNewChat(brand)}>
+                        <BrandIcon brand={brand} /> New {brandName(brand)} chat
+                      </DropdownMenuItem>
                     ))}
                     {onNewChatDefault && (
                       <>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          data-testid="ask-new-chat-agent"
-                          onSelect={() => onNewChatDefault('ask')}
-                        >
-                          Ask every time
-                        </DropdownMenuItem>
+                        <DropdownMenuLabel>Main button</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup value={newChatDefault} onValueChange={(value) => onNewChatDefault(value as Brand | 'ask')}>
+                          <DropdownMenuRadioItem value="ask">Ask every time</DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="claude">Use Claude by default</DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="codex">Use Codex by default</DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
                       </>
                     )}
                   </DropdownMenuContent>

@@ -84,6 +84,8 @@ import { workingLine } from '@/workbench/working-line';
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
 const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
+const MODEL_DEFAULTS = 'workbench.model-defaults';
+const EFFORT_DEFAULTS = 'workbench.effort-defaults';
 
 /**
  * Everything one row of a conversation actually says, for going through once
@@ -139,6 +141,8 @@ function Picker({
   testid,
   asleep,
   onPick,
+  defaultValue,
+  onDefault,
 }: {
   icon: ReactNode;
   label: string;
@@ -154,6 +158,8 @@ function Picker({
   /** No agent is attached, so there is nothing to change until he writes. */
   asleep: boolean;
   onPick: (value: string) => void;
+  defaultValue?: string | null;
+  onDefault?: (value: string) => void;
 }) {
   if (!options.length) return null;
   const shown = options.find((o) => o.value === current)?.label ?? currentLabel ?? current ?? label;
@@ -180,17 +186,28 @@ function Picker({
       <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto" data-testid={`${testid}-menu`}>
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
         {options.map((o) => (
-          <DropdownMenuItem
-            key={o.value}
-            data-testid={`${testid}-option`}
-            data-value={o.value}
-            data-picked={o.value === current}
-            onSelect={() => onPick(o.value)}
-            className="flex-col items-start gap-0.5"
-          >
-            <span className={cn('text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
-            {o.hint && <span className="text-xs text-muted-foreground">{o.hint}</span>}
-          </DropdownMenuItem>
+          <div key={o.value} className="flex items-center gap-1 px-1">
+            <DropdownMenuItem
+              data-testid={`${testid}-option`}
+              data-value={o.value}
+              data-picked={o.value === current}
+              onSelect={() => onPick(o.value)}
+              className="min-w-0 flex-1 flex-col items-start gap-0.5"
+            >
+              <span className={cn('text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
+              {o.hint && <span className="text-xs text-muted-foreground">{o.hint}</span>}
+            </DropdownMenuItem>
+            {onDefault && (
+              <DropdownMenuItem
+                className={cn('h-7 px-2 text-xs', defaultValue === o.value && 'bg-secondary')}
+                data-testid={`${testid}-default-${o.value}`}
+                data-default={defaultValue === o.value}
+                onSelect={() => onDefault(o.value)}
+              >
+                {defaultValue === o.value ? 'Default' : 'Make default'}
+              </DropdownMenuItem>
+            )}
+          </div>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -389,9 +406,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [startError, setStartError] = useState<string | null>(null);
   const [newBrand, setNewBrand] = useState<Brand>('claude');
   const [newChatDefault, setNewChatDefaultState] = useState<Brand | 'ask'>('ask');
+  const [modelDefaults, setModelDefaults] = useState<Partial<Record<Brand, string>>>({});
+  const [effortDefaults, setEffortDefaults] = useState<Partial<Record<Brand, string>>>({});
   useEffect(() => {
     const saved = localStorage.getItem(NEW_CHAT_DEFAULT);
     if (saved === 'claude' || saved === 'codex' || saved === 'ask') setNewChatDefaultState(saved);
+    for (const [key, set] of [[MODEL_DEFAULTS, setModelDefaults], [EFFORT_DEFAULTS, setEffortDefaults]] as const) {
+      try {
+        const values = JSON.parse(localStorage.getItem(key) ?? '{}');
+        if (values && typeof values === 'object') set(values as Partial<Record<Brand, string>>);
+      } catch {}
+    }
   }, []);
   const setNewChatDefault = useCallback((choice: Brand | 'ask') => {
     setNewChatDefaultState(choice);
@@ -411,6 +436,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         projectId,
         projectPath,
         brand,
+        model: modelDefaults[brand],
+        effort: effortDefaults[brand],
       });
       open(s.id);
     } catch (e) {
@@ -418,7 +445,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     } finally {
       setStarting(false);
     }
-  }, [projectId, projectPath, open, newBrand]);
+  }, [projectId, projectPath, open, newBrand, modelDefaults, effortDefaults]);
   const view = useSession(sessionId);
   const facts = useSessionFacts(sessionId);
   // What the board knows plus what this chat has been seen doing since.
@@ -1387,6 +1414,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 label: modelName(m.value, m.displayName) ?? m.displayName,
                 hint: m.description,
               }))}
+              defaultValue={view.brand ? modelDefaults[view.brand] ?? null : null}
+              onDefault={(model) => {
+                const brand = view.brand;
+                if (!brand) return;
+                setModelDefaults((was) => {
+                  const next = { ...was, [brand]: model };
+                  localStorage.setItem(MODEL_DEFAULTS, JSON.stringify(next));
+                  return next;
+                });
+              }}
               onPick={(model) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.model', sessionId, model }).catch((e: unknown) =>
@@ -1405,6 +1442,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 label: effort.displayName,
                 hint: effort.description,
               }))}
+              defaultValue={view.brand ? effortDefaults[view.brand] ?? null : null}
+              onDefault={(effort) => {
+                const brand = view.brand;
+                if (!brand) return;
+                setEffortDefaults((was) => {
+                  const next = { ...was, [brand]: effort };
+                  localStorage.setItem(EFFORT_DEFAULTS, JSON.stringify(next));
+                  return next;
+                });
+              }}
               onPick={(effort) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.effort', sessionId, effort }).catch((e: unknown) =>
