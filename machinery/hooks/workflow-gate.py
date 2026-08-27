@@ -161,6 +161,34 @@ def mutates(data):
     return shell_mutates(command)
 
 
+def external_edit_only(patch, cwd):
+    """Whether every explicit edit target is outside this Git project.
+
+    The hook belongs to one repository. Personal skills and other machine-local
+    configuration are not repository changes, even when the host reports the
+    session's project cwd for every tool call. Use Git's common directory so a
+    linked worktree cannot mistake the shared checkout for an external path.
+    Mixed patches stay guarded.
+    """
+    edited = re.findall(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$", patch, re.M)
+    if not edited:
+        return False
+    ok, common = run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd)
+    if not ok:
+        return False
+    project_root = os.path.dirname(os.path.realpath(common))
+
+    def outside(path):
+        target = os.path.realpath(path if os.path.isabs(path) else os.path.join(cwd, path))
+        try:
+            return os.path.commonpath([project_root, target]) != project_root
+        except ValueError:
+            return True
+
+    return all(outside(path.strip()) for path in edited)
+
+
 def run(args, cwd):
     try:
         done = subprocess.run(args, cwd=cwd, capture_output=True, text=True,
@@ -241,6 +269,9 @@ def reason(data):
             return None
         return "The separate copy names no readable Beads issue %s." % issue
     if not mutates(data):
+        return None
+    if (data.get("tool_name") in EDIT_TOOLS and isinstance(patch, str)
+            and external_edit_only(patch, cwd)):
         return None
     # A broken workflow gate must never be able to prevent its own repair.
     # Changes through this escape hatch are limited to tracked policy/config

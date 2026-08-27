@@ -15,6 +15,11 @@ def bash(command):
     return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "/repo"}
 
 
+def edit(*paths):
+    patch_text = "\n".join("*** Update File: %s" % path for path in paths)
+    return {"tool_name": "apply_patch", "tool_input": {"patch": patch_text}, "cwd": "/repo"}
+
+
 class CopyLifecycle(unittest.TestCase):
     @patch.object(gate, "card_for", return_value={"id": "bw-123"})
     def test_a_copy_can_be_cut_before_the_card_is_claimed(self, _card):
@@ -130,6 +135,21 @@ class ShellClassification(unittest.TestCase):
         command = ('bd close bw-123 --reason="removed '
                    '/repo/worktrees/bw-123, then released the slot"')
         self.assertIsNone(gate.reason(bash(command)))
+
+
+class EditScope(unittest.TestCase):
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_personal_skill_is_not_a_repository_change(self, _run):
+        self.assertIsNone(gate.reason(edit("/home/person/.codex/skills/beads/SKILL.md")))
+
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_repository_edit_still_requires_its_copy(self, _run):
+        self.assertIn("dedicated ticket worktree", gate.reason(edit("/repo/src/app.ts")))
+
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_mixed_patch_cannot_hide_a_repository_edit(self, _run):
+        result = gate.reason(edit("/home/person/.codex/skills/beads/SKILL.md", "/repo/src/app.ts"))
+        self.assertIn("dedicated ticket worktree", result)
 
 
 if __name__ == "__main__":
