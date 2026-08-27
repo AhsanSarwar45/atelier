@@ -11,16 +11,34 @@ they make the result easier to understand.
 ## Widgets
 
 Use an `atelier-widget` fenced block for structured information that is clearer
-than prose. The block contains one JSON object with one of these shapes:
+than prose. The block must contain exactly one valid JSON object. Every object
+requires a `type`; `title` is optional. All labels, values displayed as text,
+details, titles, series names, colors, columns, and cells must be non-empty
+strings of at most 200 characters.
 
-- `metrics`: `items` with `label`, `value`, and optional `detail` or `trend`.
-- `chart`: `chart` (`bar` or `line`), `series`, and `data` whose numeric `values`
-  follow series order.
-- `progress`: `items` with `label`, numeric `value`, and optional `max` or `detail`.
-- `timeline`: `items` with `label`, optional `detail`, and optional `status`
-  (`done`, `current`, or `next`).
-- `table`: `columns` and equally sized string `rows`.
-- `video`: absolute local or HTTP(S) `src`, with optional `title` or `poster`.
+Use these exact payload shapes:
+
+- `metrics`: `{"type":"metrics","items":[...]}` with 1–6 items. Each item
+  requires string `label` and string `value`; optional `detail` is a string and
+  optional `trend` is exactly `"up"`, `"down"`, or `"flat"`. Put percentages or
+  other explanatory text in `detail`, not `trend`.
+- `chart`: `{"type":"chart","chart":"bar"|"line","series":[...],"data":[...]}`.
+  Use 1–4 series objects, each with string `name` and optional string `color`—a
+  series must not be a bare string. Use 1–30 data objects with string `label`
+  and numeric `values`. Each `values` array must have exactly one finite number
+  per series, in the same order as `series`.
+- `progress`: `{"type":"progress","items":[...]}` with 1–12 items. Each item
+  requires string `label` and finite numeric `value`; optional `max` is a finite
+  number greater than zero and optional `detail` is a string.
+- `timeline`: `{"type":"timeline","items":[...]}` with 1–20 items. Each item
+  requires string `label`; optional `detail` is a string and optional `status`
+  is exactly `"done"`, `"current"`, or `"next"`.
+- `table`: `{"type":"table","columns":[...],"rows":[...]}` with 1–8 string
+  columns and at most 30 rows. Every row must contain exactly one non-empty
+  string cell per column.
+- `video`: `{"type":"video","src":"..."}`. `src` and optional `poster` must
+  be an absolute local path or start with `http:`, `https:`, `data:video/`,
+  `blob:`, or `file:`.
 
 Use `video` whenever showing video proof. Never present
 video as a file link. Do not use a widget for one fact or a short list.
