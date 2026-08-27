@@ -781,7 +781,7 @@ def instruct_personal(say):
         except OSError as why:
             say("kept   %s — it cannot be read (%s)" % (where, why))
             continue
-        fresh = pattern.sub(block, held) if pattern.search(held) else \
+        fresh = pattern.sub(lambda _: block, held) if pattern.search(held) else \
             ((held.rstrip() + "\n\n") if held.strip() else "") + block + "\n"
         if fresh == held:
             continue
@@ -864,12 +864,12 @@ def registered_root(root):
     known = project.registry()
     for registered in known.values():
         if os.path.realpath(registered) == root:
-            return os.path.realpath(registered)
+            return registered
     identity = git_identity(root)
     if identity:
         for registered in known.values():
             if git_identity(registered) == identity:
-                return os.path.realpath(registered)
+                return registered
     return None
 
 
@@ -879,7 +879,7 @@ def unregister(root, say):
     if registered is None:
         return
     names = [name for name, path in project.registry().items()
-             if os.path.realpath(path) == registered]
+             if os.path.realpath(path) == os.path.realpath(registered)]
     if os.path.exists(project.REGISTRY):
         with open(project.REGISTRY) as source:
             held = source.read()
@@ -896,8 +896,8 @@ def unregister(root, say):
     db = opened()
     if db is not None:
         try:
-            removed = db.execute("DELETE FROM projects WHERE path = ?", (registered,)) \
-                        .rowcount
+            removed = db.execute("DELETE FROM projects WHERE path IN (?, ?)",
+                                 (registered, os.path.realpath(registered))).rowcount
             db.commit()
             if removed:
                 say("hidden %s from the board screen" % registered)

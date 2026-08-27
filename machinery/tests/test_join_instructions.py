@@ -3,6 +3,7 @@ import importlib.util
 import tempfile
 import unittest
 import subprocess
+import sqlite3
 from pathlib import Path
 
 
@@ -64,6 +65,24 @@ class JoinInstructionsTest(unittest.TestCase):
             agents = (root / ".codex" / "AGENTS.md").read_text()
             self.assertEqual(agents.count(join.PERSONAL_BEGIN), 1)
 
+    def test_replacing_a_personal_block_treats_backslashes_in_paths_literally(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            join.MACHINE = str(root / ".claude")
+            join.CODEX_MACHINE = str(root / ".codex")
+            policy = root / "installed\\rules" / "ATELIER_WORKFLOW.md"
+            policy.parent.mkdir()
+            policy.write_text((ROOT / "ATELIER_WORKFLOW.md").read_text())
+            join.POLICY = str(policy)
+            Path(join.MACHINE).mkdir()
+            (Path(join.MACHINE) / "CLAUDE.md").write_text(
+                join.PERSONAL_BEGIN + "\nstale\n" + join.PERSONAL_END + "\n")
+
+            join.instruct_personal(lambda _: None)
+
+            self.assertIn(str(policy), (Path(join.MACHINE) / "CLAUDE.md").read_text())
+
     def test_a_linked_worktree_inherits_the_main_projects_registration(self):
         join = load_join()
         with tempfile.TemporaryDirectory() as held:
@@ -82,7 +101,13 @@ class JoinInstructionsTest(unittest.TestCase):
             registry = root / "projects.toml"
             registry.write_text('[projects]\nexample = "%s"\n' % main)
             join.project.REGISTRY = str(registry)
-            join.opened = lambda: None
+            screen = root / "screen.sqlite"
+            db = sqlite3.connect(screen)
+            db.execute("CREATE TABLE projects (path TEXT)")
+            db.execute("INSERT INTO projects (path) VALUES (?)", (str(main),))
+            db.commit()
+            db.close()
+            join.opened = lambda: sqlite3.connect(screen)
             before = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
 
             self.assertEqual(join.registered_root(str(main)), str(main.resolve()))
@@ -92,6 +117,34 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertIsNone(join.registered_root(str(main)))
             after = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
             self.assertEqual(after, before)
+            db = sqlite3.connect(screen)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 0)
+            db.close()
+
+    def test_chat_only_removes_a_board_row_stored_through_a_symlink(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            project = root / "real-project"
+            project.mkdir()
+            alias = root / "project-link"
+            alias.symlink_to(project, target_is_directory=True)
+            registry = root / "projects.toml"
+            registry.write_text('[projects]\nexample = "%s"\n' % alias)
+            join.project.REGISTRY = str(registry)
+            screen = root / "screen.sqlite"
+            db = sqlite3.connect(screen)
+            db.execute("CREATE TABLE projects (path TEXT)")
+            db.execute("INSERT INTO projects (path) VALUES (?)", (str(alias),))
+            db.commit()
+            db.close()
+            join.opened = lambda: sqlite3.connect(screen)
+
+            join.unregister(str(alias), lambda _: None)
+
+            db = sqlite3.connect(screen)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 0)
+            db.close()
 
     def test_a_new_beads_declaration_needs_no_second_question(self):
         join = load_join()
