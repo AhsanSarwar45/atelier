@@ -160,6 +160,35 @@ describe('one wire', () => {
     expect(drawnFromScratch).toEqual(['{"lastSeq":3}']);
   });
 
+  it('drops the previous chat’s last frame while the wire switches chats', async () => {
+    const firstSaw: string[] = [];
+    const secondSaw: string[] = [];
+    const leaveFirst = onChat('first', {
+      snapshot: () => {},
+      event: (data) => firstSaw.push(data),
+      since: () => 0,
+    });
+    await settled();
+    const firstWire = Stream.open[0]!;
+
+    // React removes one chat listener and adds the next in the same paint. The
+    // reconnect is queued until that paint ends, so this is the exact interval
+    // in which a final frame from `first` used to be handed to `second`.
+    leaveFirst();
+    onChat('second', {
+      snapshot: () => {},
+      event: (data) => secondSaw.push(data),
+      since: () => 0,
+    });
+    firstWire.says('chat', 'belongs only to first');
+
+    expect(firstSaw).toEqual([]);
+    expect(secondSaw).toEqual([]);
+    await settled();
+    Stream.open[0]!.says('chat', 'belongs only to second');
+    expect(secondSaw).toEqual(['belongs only to second']);
+  });
+
   it('keeps one project’s board out of another’s', async () => {
     const mine: string[] = [];
     const theirs: string[] = [];

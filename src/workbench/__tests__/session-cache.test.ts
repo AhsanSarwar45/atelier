@@ -42,4 +42,22 @@ describe('the browser session cache', () => {
     const reopened = renderHook(() => useSession('cache-background'));
     expect(reopened.result.current.items.some((item) => item.id === 'm2')).toBe(true);
   });
+
+  it('shows no row from the previous chat while the next snapshot is loading', () => {
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useSession(id),
+      { initialProps: { id: 'isolation-first' } },
+    );
+    act(() => listener!.snapshot(JSON.stringify({
+      ...opened,
+      items: [{ ...opened.items[0]!, text: 'belongs only to the first chat' }],
+    })));
+    expect(result.current.items[0]?.kind === 'message' && result.current.items[0].text).toBe(
+      'belongs only to the first chat',
+    );
+
+    rerender({ id: 'isolation-second' });
+
+    expect(result.current.items).toEqual([]);
+  });
 });
