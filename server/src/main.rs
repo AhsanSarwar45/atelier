@@ -7,6 +7,7 @@ mod command_line;
 mod db;
 mod doing;
 mod dolt;
+mod dolt_lifecycle;
 mod handover;
 mod helper;
 mod identity;
@@ -349,7 +350,9 @@ async fn serve(open_browser: bool) {
     );
     info!("Database initialized");
 
-    // Initialize Dolt connection manager
+    // Initialize Dolt connection manager. Local boards already backed by Dolt
+    // are brought up through bd before the read-ahead can fall back to stale
+    // JSONL, then checked for the rest of this process's lifetime.
     let dolt_manager = Arc::new(dolt::DoltManager::new());
     if dolt_manager.check_server().await {
         info!("Dolt server is available on port 3307");
@@ -385,6 +388,13 @@ async fn serve(open_browser: bool) {
         tracing::warn!("⚠ bd CLI not found — beads read/write will not work for filesystem projects");
         tracing::warn!("  Install: https://github.com/gastownhall/beads");
     }
+
+    let _dolt_supervisor = if let Some(bd) = routes::find_bd() {
+        dolt_lifecycle::ensure_registered(&database, bd).await;
+        Some(dolt_lifecycle::supervise(database.clone(), bd.clone()))
+    } else {
+        None
+    };
 
     // Initialize version check cache
     let version_cache = routes::version::new_cache();
