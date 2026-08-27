@@ -873,6 +873,24 @@ def registered_root(root):
     return None
 
 
+def project_root(root):
+    """The one checkout Atelier registers for a Git repository.
+
+    An existing registration wins so its original spelling is preserved. For a
+    first setup from a linked worktree, Git's common directory points back to
+    the main checkout; the worktree must never become another project row.
+    """
+    registered = registered_root(root)
+    if registered:
+        return registered
+    common = git_identity(root)
+    if common and os.path.basename(common) == ".git":
+        main = os.path.dirname(common)
+        if os.path.isdir(main):
+            return main
+    return root
+
+
 def unregister(root, say):
     """Remove external board registration while changing nothing in the tree."""
     registered = registered_root(root)
@@ -1451,7 +1469,7 @@ def main():
             bad += bool(said)
         sys.exit(1 if bad else 0)
 
-    root = os.path.abspath(os.path.expanduser(a.path))
+    root = project_root(os.path.abspath(os.path.expanduser(a.path)))
     decl = project.of(root)
     said = []
     if not decl.declared:

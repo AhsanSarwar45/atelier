@@ -99,8 +99,9 @@ class JoinInstructionsTest(unittest.TestCase):
             subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "-b", "job",
                             str(tree)], check=True)
             registry = root / "projects.toml"
-            registry.write_text('[projects]\nexample = "%s"\n' % main)
             join.project.REGISTRY = str(registry)
+            self.assertEqual(join.project_root(str(tree)), str(main.resolve()))
+            registry.write_text('[projects]\nexample = "%s"\n' % main)
             screen = root / "screen.sqlite"
             db = sqlite3.connect(screen)
             db.execute("CREATE TABLE projects (path TEXT)")
