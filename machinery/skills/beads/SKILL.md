@@ -46,8 +46,16 @@ For every repository file change, use this path. Do not substitute generic
 
    - For `Checks:`, run `machinery/checks <checks-id>` from the worktree. It
      runs the declared suites, records their exact result, and closes the step.
-   - Review starts automatically. If it files findings, claim each finding,
-     fix and commit it, then run the same land command with the finding's ID.
+   - After the completed change and checks are known, decide whether external
+     review is worth its cost. Use it for large or cross-cutting changes and for
+     security, authorization, concurrency, migration, or data-loss risk. Skip it
+     for localized routine work, documentation, tests, and mechanical edits.
+   - When warranted, run `machinery/board/review <job-id>` exactly once before
+     teardown. It is never launched automatically. PASS, NEEDS_WORK, timeout,
+     cancellation, malformed output, and account limits all consume the job's
+     one attempt. Fix any findings and land them; never invoke the reviewer again.
+   - Without external review, continue directly to done or manager review. After
+     the one attempt, do the same once its findings are answered.
    - For any later open child, use `bd list --parent <job-id> --all`, follow
      that child's acceptance criterion, and use the command named on the card.
 
@@ -55,5 +63,5 @@ For every repository file change, use this path. Do not substitute generic
    judgment.
 
 The lifecycle gates are authoritative. Tests alone do not finish work, and a
-direct status change never replaces commit, independent review, landing, or
-closure.
+direct status change never replaces commit, landing, or closure. External review
+is a completion-time risk decision, not a mandatory step and not a retry loop.

@@ -3,6 +3,7 @@ import importlib.util
 import tempfile
 import unittest
 import os
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -19,6 +20,48 @@ def load_review():
 
 
 class ReviewRunnerTests(unittest.TestCase):
+    def test_a_spent_job_refuses_before_launching_the_reviewer(self):
+        review = load_review()
+        goal = {"id": "bw-job", "labels": ["job", review.reading.ATTEMPT_LABEL]}
+        with mock.patch.object(sys, "argv", [str(REVIEW), "bw-job"]), \
+             mock.patch.object(review, "card", side_effect=[goal, goal]), \
+             mock.patch.object(review.running, "children", return_value=[]), \
+             mock.patch.object(review.inflight, "held", return_value=True), \
+             mock.patch.object(review, "run_reviewer") as launch:
+            with self.assertRaisesRegex(SystemExit, "already spent"):
+                review.main()
+        launch.assert_not_called()
+
+    def test_completion_time_review_requires_closed_work_and_checks(self):
+        review = load_review()
+        self.assertFalse(review.ready_for_review([
+            {"status": "closed", "labels": ["step:work"]},
+            {"status": "open", "labels": ["step:checks"]},
+        ]))
+        self.assertTrue(review.ready_for_review([
+            {"status": "closed", "labels": ["step:work"]},
+            {"status": "closed", "labels": ["step:checks"]},
+        ]))
+
+    def test_first_invocation_records_the_attempt_before_handoff(self):
+        review = load_review()
+        goal = {"id": "bw-job", "labels": ["job"]}
+        rows = [{"status": "closed", "labels": ["step:work"]},
+                {"status": "closed", "labels": ["step:checks"]}]
+        with mock.patch.object(sys, "argv", [str(REVIEW), "bw-job"]), \
+             mock.patch.object(review, "card", side_effect=[goal, goal]), \
+             mock.patch.object(review.running, "children", return_value=rows), \
+             mock.patch.object(review.reading, "commits", return_value=["abc123"]), \
+             mock.patch.object(review.inflight, "take", return_value=True), \
+             mock.patch.object(review, "bd") as board, \
+             mock.patch.object(review, "hand_off") as handoff:
+            review.main()
+
+        board.assert_called_once_with(
+            ["update", "bw-job", "--add-label", review.reading.ATTEMPT_LABEL],
+            actor="review-bw-job")
+        handoff.assert_called_once_with("bw-job")
+
     def test_review_checks_override_read_only_scratch_paths(self):
         review = load_review()
         with mock.patch.dict(os.environ, {"TMPDIR": "/home/readonly",

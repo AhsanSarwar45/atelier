@@ -33,7 +33,8 @@ class ProviderLifecycle(unittest.TestCase):
     def test_canonical_workflow_names_every_lifecycle_transition(self):
         text = (ROOT / "machinery" / "skills" / "beads" / "SKILL.md").read_text()
         for transition in ("job new", "worktree add", "--claim", "git commit",
-                           "board/land", "machinery/checks", "Review starts",
+                           "board/land", "machinery/checks", "never launched automatically",
+                           "exactly once",
                            "Stop only when"):
             with self.subTest(transition=transition):
                 self.assertIn(transition, text)

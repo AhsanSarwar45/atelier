@@ -61,10 +61,8 @@ NO_CODE = ("no-code", "find", "question", "decision")
 # Said when a goal cannot close because nobody has read it. The reading has no card
 # of its own, so "close the steps" is the wrong instruction for that one.
 UNREAD = (
-    " The review is not one of them, because it has no card. The board sends a "
-    "reader when a job's last piece closes and it signs the goal itself. If that "
-    "one died, "
-    "`%s --rerun` sends another."
+    " External review is optional and never automatic. If this legacy job selected "
+    "it, run the review command once; every outcome consumes that one attempt."
 )
 
 
@@ -663,8 +661,9 @@ def unfinished_spine(card, root, me=None):
                 at_step.setdefault(spine.now(l[5:]), []).append(r)
     done = {s for s, cards in at_step.items()
             if all(c.get("status") == "closed" for c in cards)}
-    if "review" in order and "review" not in done and reading.read_by(
-            card, card.get("id"), root, also=[me] if me else ()):
+    if "review" in order and "review" not in done and (
+            reading.attempted(card) or reading.read_by(
+                card, card.get("id"), root, also=[me] if me else ())):
         done.add("review")
     return [s for s in order if s not in done]
 
@@ -956,9 +955,9 @@ def main():
     if RESOLVE.search(bare):
         deny(
             "A gate is not opened from the session it is holding. That is where all "
-            "its value comes from. The board's own reader opens the one on a job when "
-            "it has read the change. If it died, fire another: "
-            "`%s <the goal> --rerun`." % bc.tool(root, "review")
+            "its value comes from. External review is never retried: its command "
+            "records the one attempt before launch and advances the normal workflow "
+            "after any outcome."
         )
         return
 
@@ -1018,16 +1017,15 @@ def main():
             if shut:
                 deny(
                     "%s is held shut by %s, and this close says the work landed. A "
-                    "gate is a review somebody still has to do. It opens when a reader that "
-                    "did not write the job has read it. Nothing else lands a job.\n\nIf this job is not being delivered at all, it has its "
+                    "gate is a selected review step. External review is never launched "
+                    "automatically and never retried.\n\nIf this job is not being delivered at all, it has its "
                     "own route. That one resolves the gate in writing and marks the job "
                     "as never delivered, so the manager's board never counts it as "
                     "something they got:\n  %s cancel %s "
                     "--reason=\"<why this is being dropped>\"\n\nIf it is being "
-                    "delivered, let the reader finish; if the reader died, "
-                    "`%s %s --rerun` sends another."
-                    % (cid, " and ".join(shut), bc.tool(root, "job"), cid,
-                       bc.tool(root, "review"), cid)
+                    "delivered, let its one attempt finish and then continue through "
+                    "the normal done or manager-review path."
+                    % (cid, " and ".join(shut), bc.tool(root, "job"), cid)
                 )
                 tally("landing-gated")
                 return
@@ -1040,7 +1038,7 @@ def main():
                     "closes early is how most of this board's work reached done without "
                     "ever being read: close the steps, and the next one opens itself.%s"
                     % (cid, " and ".join(left),
-                       UNREAD % ("%s %s" % (bc.tool(root, "review"), cid))
+                       UNREAD
                        if "review" in left else "")
                 )
                 return

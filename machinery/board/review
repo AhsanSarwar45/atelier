@@ -9,8 +9,8 @@ commits it was shown, and it opens the gate holding the job shut — see
 docs/board.md#4b-review-is-done-by-someone-who-did-not-write-the-change.
 
 Read-only by construction: the edit tools are refused to it, so a review can
-never touch the shared working tree. It is fired detached by
-board/run.py the moment a job's last piece closes.
+never touch the shared working tree. It is launched explicitly after the agent
+has seen the completed change and its checks; board advancement never starts it.
 
 Detached whoever asks for it. A reading is a whole session and takes minutes, so
 a run started by hand does the quick part — is this a job, is a reading already
@@ -18,9 +18,9 @@ going, is one owed at all — hands the reading itself to a copy of this script
 running on its own, says where that copy's console is, and ends. The agent that
 asked keeps working, and the verdict arrives on the goal (bw-k0w).
 
-One reading per finish, and the work is what decides: a job with a reader out is
-left to that reader, and a job read clean is not read again until something is
-written under it (bw-5e8).
+One invocation per job, ever. The attempt is recorded before the external model
+starts, so a verdict, timeout, malformed answer, account limit, or cancellation
+all consume it. Findings are fixed without sending the job back for another read.
 """
 import argparse
 import importlib.machinery
@@ -128,16 +128,10 @@ def changes(shas, goal_id):
     return ["%s in %s" % (sha, where) for where, sha in dated], body
 
 
-# What the reader is told about where in the job's two readings it stands. A
-# reader that does not know is a reader that leaves a point for the round after
-# it, and on the last reading there is no round after it (board/reading.py
-# ROUNDS).
-FIRST = ("This job is read at most twice and this is the first reading. What you "
-         "raise here comes back to you once, answered.")
-LAST = ("This is the second and last reading this job will ever get, and you are "
-        "shown only what the first reading was not shown. Nobody reads this job "
-        "after you: what you file here is answered and the job goes on, so raise "
-        "what is actually wrong and leave nothing for a round that will not come.")
+# The only reviewer is told there is no later round to defer findings to.
+FIRST = ("This is the only external review this job will ever get. Nobody reviews "
+         "the fixes after you, so raise every material issue now.")
+LAST = FIRST
 
 
 def checks_tool():
@@ -321,11 +315,8 @@ def run_reviewer(prompt, actor, goal_id, repo, base, head, here):
 
 
 def run_log(goal_id):
-    """A directory of this run's own, so two readers of one job are both readable.
+    """A unique directory for the job's one explicitly requested review run.
 
-    The board fires a reader whenever a job's last piece closes, and a job answered
-    and finished twice is fired at twice; both wrote to one path named after the
-    goal, and the second truncated the first before anybody read it (cor-987e).
     `mkdtemp` is the allocation and the claim in one call, so there is no window
     between choosing a name and holding it.
 
@@ -341,7 +332,7 @@ def run_log(goal_id):
     return tempfile.mkdtemp(prefix=goal_id + ".", suffix=".run", dir=LOG_DIR)
 
 
-def hand_off(goal_id, rerun):
+def hand_off(goal_id):
     """Give the shell back, and let a copy of this script do the reading.
 
     A reading is a whole `claude` session and takes minutes. Run by hand it held
@@ -360,7 +351,7 @@ def hand_off(goal_id, rerun):
     log = os.path.join(here, "run.log")
     env = dict(os.environ, **{inflight.DETACHED: "1", inflight.RUN_DIR: here,
                               inflight.CONSOLE: log})
-    args = [os.path.realpath(__file__), goal_id] + (["--rerun"] if rerun else [])
+    args = [os.path.realpath(__file__), goal_id]
     with open(log, "w") as fh:
         reader = subprocess.Popen(args, cwd=ROOT, stdout=fh, stderr=fh,
                                   stdin=subprocess.DEVNULL, env=env,
@@ -404,9 +395,8 @@ def parse(text):
 # that is deliberate (bw-aczr.19): it is only ever asked of an answer under
 # SPENT_MAX characters that did not parse, since a reading always parses first,
 # in `attempts` and in `answered`. The cost of taking such an answer for the
-# account's refusal is one rerun by hand, while the cost of missing a refusal in
-# a wording nobody has seen is a second reader fired to be told the same thing
-# and the job written up as broken (bw-aczr.7).
+# account's refusal is treating an available attempt as spent, while the cost of
+# missing one is leaving a job behind a verdict it can never produce.
 SPENT = re.compile(r"(?:hit|reached|exceeded)\b[^.\n]{0,40}?\blimit\b"
                    r"|\b(?:session|usage|rate|quota|account)\s+limits?\b"
                    r"|\blimits?\s+(?:reached|exceeded)\b", re.I)
@@ -459,14 +449,28 @@ LIMITED_NOTE = (
     "No reading happened here. The account's own limit was reached, so the reader "
     "was turned away before it read anything. What it said back was: %s. Nothing "
     "is wrong with this job and nothing is wrong with the reader, so there is "
-    "nothing here for you to fix. Wait for that time and then fire another with "
-    "`%s %s --rerun`. The runs are in %s.")
-# And what it is told when a reader really did answer twice and neither answer
-# could be read.
+    "nothing here for you to fix. This still consumed the job's one external review "
+    "attempt; continue to its normal done or manager-review path. The run is in %s.")
+# And what it is told when the one reader did not answer in a readable shape.
 UNREADABLE_NOTE = (
-    "A reader was fired at this job twice and neither run answered in the shape "
-    "the board can read; the job stays shut. The runs are in %s. Fire another "
-    "with `%s %s --rerun`.")
+    "The job's one external review attempt did not answer in the shape the board "
+    "can read. It will not be run again; continue to the normal done or manager-"
+    "review path. The run is in %s.")
+
+
+def finish_unread_attempt(goal_id):
+    """Release a legacy review gate after the single attempt produced no verdict."""
+    for gate in running.reading_gates(goal_id, ROOT):
+        bd(["gate", "resolve", gate], must=False)
+    running.after_reading(goal_id, ROOT)
+
+
+def ready_for_review(rows):
+    """Whether the job's work and its declared checks are both complete."""
+    work = [r for r in rows if "step:work" in (r.get("labels") or [])]
+    checks = [r for r in rows if "step:checks" in (r.get("labels") or [])]
+    return bool(work and checks) and all(r.get("status") == "closed"
+                                        for r in work + checks)
 
 
 def answered(said, goal_id, actor, here):
@@ -475,11 +479,10 @@ def answered(said, goal_id, actor, here):
     Handed the answers rather than firing a reader, so what a reader really said
     can be put through this without firing a reader.
 
-    Three ends, and only one of them is a fault. An answer that parses is the
-    reading. An account with nothing left to spend is nobody's mistake, so the
-    goal is told that and left in its column with no findings filed. Anything
-    else is a reader that answered twice in a shape the board cannot read, and
-    that job stays shut.
+    Three ends, and only one of them is a verdict. An answer that parses is the
+    reading. An account with nothing left to spend is nobody's mistake. Anything
+    else is an unreadable answer. Both non-verdict outcomes are recorded and the
+    job continues without another invocation.
     """
     for text in said:
         got = parse(text)
@@ -490,15 +493,17 @@ def answered(said, goal_id, actor, here):
         stopped = stopped or limited(text)
     if stopped:
         bd(["update", goal_id, "--append-notes",
-            LIMITED_NOTE % (stopped, project.tool(DECL, "review"), goal_id, here)],
+            LIMITED_NOTE % (stopped, here)],
            actor=actor, must=False)
+        finish_unread_attempt(goal_id)
         when = reset_at(stopped)
         sys.exit("%s was not read because the account's limit was reached. %s"
                  % (goal_id, ("It %s." % when) if when else stopped))
     bd(["update", goal_id, "--append-notes",
-        UNREADABLE_NOTE % (here, project.tool(DECL, "review"), goal_id)],
+        UNREADABLE_NOTE % here],
        actor=actor, must=False)
-    sys.exit("reader produced nothing readable; %s stays gated" % goal_id)
+    finish_unread_attempt(goal_id)
+    sys.exit("reader produced nothing readable; %s will not be reviewed again" % goal_id)
 
 
 # A title that survived the repair below with nothing left of it. The substance is
@@ -640,19 +645,29 @@ def retire_legacy(goal_id, actor):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("job", help="the goal to read; a job's old review card also names it")
-    ap.add_argument("--rerun", action="store_true",
-                    help="kept for the advice the gates print; a job a dead reader "
-                         "left shut carries no signature and is read without it")
     a = ap.parse_args()
 
     asked = card(a.job)
     # A job poured before the reading stopped being a piece still has its review
-    # card, and that is the id anyone reruns by hand.
+    # card, and that id still resolves to the job for its one explicit invocation.
     goal_id = label(asked, "of:") if "step:review" in (asked.get("labels") or []) else a.job
     goal = card(goal_id)
     if "job" not in (goal.get("labels") or []):
         sys.exit("%s is not a job: only a job is read (docs/board.md#3a1)" % goal_id)
     actor = "review-" + goal_id
+    detached = bool(os.environ.pop(inflight.DETACHED, None))
+    rows = running.children(goal_id, ROOT)
+    if not detached and reading.attempted(goal):
+        if not inflight.held(goal_id) and ready_for_review(rows):
+            finish_unread_attempt(goal_id)
+        sys.exit("%s has already spent its one external review attempt; it cannot be "
+                 "run again" % goal_id)
+    if not detached and not ready_for_review(rows):
+        sys.exit("%s is not ready for completion-time review: its work and checks "
+                 "must both be closed first" % goal_id)
+    shas = reading.commits(goal_id, ROOT)
+    if not shas:
+        sys.exit("%s has no landed commits to review" % goal_id)
     global READING
     READING = goal_id
     # A reader started by hand is still a reader out on this job, so it claims
@@ -662,40 +677,29 @@ def main():
     # are one reading done twice, at the account's expense, and the verdict of the
     # one already out lands on the goal either way (bw-5e8.4). The copy this run
     # hands off to is the exception — the claim it finds held is its own parent's.
-    mine = inflight.take(goal_id)
-    # The flag is this copy's alone, so it comes out of the environment here: left
-    # in, the checks line and the reading this copy spawns are each told they are
-    # the copy too, and a suite run under a reader fired its own hand-off case
-    # inline (bw-aczr.9).
-    detached = bool(os.environ.pop(inflight.DETACHED, None))
+    if detached:
+        if not inflight.held(goal_id):
+            sys.exit("detached review for %s has no parent-held attempt" % goal_id)
+        mine = False
+    else:
+        mine = inflight.take(goal_id)
     if not mine and not detached:
         where = inflight.console(goal_id)
         print("%s already has a reader out%s; the verdict goes onto the goal itself"
               % (goal_id, (", writing to " + where) if where else ""))
         return
 
-    shas = reading.commits(goal_id, ROOT)
-    # What a reading covers is the job's own commits, and it says so on the goal.
-    # So the answer to whether one is owed comes from the work and not from how
-    # the run was asked for: a goal read clean is read again when something has
-    # been written under it and not before, however many times it is fired at.
-    # Forcing past this bought nothing — the same commits read a second time by
-    # a fresh full-price session — and one goal was read twenty-four times over
-    # (bw-5e8.5). A job a dead reader left shut is read without any forcing: it
-    # carries no signature, so what stands on it has been read by nobody.
-    rows = running.children(goal_id, ROOT)
-    if not (reading.wanted(goal, shas, reading.wrote(goal_id, ROOT))
-            or running.answered_findings(goal_id, goal, rows, ROOT)):
-        print("%s has been read and nothing has been written under it since; the "
-              "reading on it is current" % goal_id)
-        return
+    if mine:
+        # Durable and written before the model starts: every outcome consumes the
+        # one invocation, including a killed parent or an unreadable answer.
+        bd(["update", goal_id, "--add-label", reading.ATTEMPT_LABEL], actor=actor)
     # Everything above is quick, and answering here is what makes a reading asked
     # for by hand worth asking for: whoever asked hears at once that this job is
     # not one to read, rather than hearing it from a run they cannot see. The
     # reading itself is minutes long, so it happens in a copy of this script and
     # this run ends.
     if not detached:
-        hand_off(goal_id, a.rerun)
+        hand_off(goal_id)
         global HANDED
         HANDED = True
         return
@@ -765,7 +769,7 @@ def main():
     # A job turned down stays shut. Its answers are its own pieces, and closing the
     # last of them brings it back here rather than past here.
     if not made:
-        for gate in gates_on(goal_id):
+        for gate in running.reading_gates(goal_id, ROOT):
             bd(["gate", "resolve", gate], actor=actor, must=False)
         running.after_reading(goal_id, ROOT)
     print("%s read by %s: %d finding(s) %s%s"
@@ -774,17 +778,7 @@ def main():
 
 
 def release():
-    """Let the job go, and send one more reader if what stands is still unread.
-
-    Every sending while this reader was out did nothing, so a change that landed
-    under it would otherwise go unread until something else closed. What may
-    follow it is decided by `run.due_again`, which is narrower than the test that
-    sends a reader in the first place, precisely because this one can send its own
-    successor.
-
-    A reader that never signed sends nobody — that is the run that dies on the
-    account's allowance, and refiring it is the storm this claim exists to stop.
-    A reader run by hand holds no claim and so reaches neither branch.
+    """Let go of this job's single review claim.
 
     A run that handed the reading to a detached copy lets go of nothing. The
     claim is the copy's now — named after it — and dropping it here would leave
@@ -796,8 +790,8 @@ def release():
         return
     if not SIGNED:
         return
-    if running.due_again(READING, ROOT):
-        running.fire(READING, ROOT)
+    # Findings return through ordinary work and manager/done handling. Nothing
+    # here may launch another external reviewer for the same job.
 
 
 if __name__ == "__main__":

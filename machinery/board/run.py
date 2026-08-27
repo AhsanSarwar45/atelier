@@ -17,7 +17,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
@@ -171,54 +170,8 @@ def reading_gates(goal_id, root):
             and r.get("title") == GATE_TITLE]
 
 
-def fire(goal_id, root):
-    """Send a reader at a job, detached, and let it outlive the tool call.
-
-    The reader is the machinery's, standing in the project's own checkout: `cwd`
-    is what tells it whose job this is. Its console goes to a file of this run's
-    own — two readers fired at one job used to share a path, and the second wiped
-    the first (cor-987e).
-
-    One command closing several cards of a job reaches here once per card, so the
-    job is claimed first and a sending that finds a reader already out does
-    nothing (board/inflight.py, mch-m1t). The claim is named after the reader as
-    soon as there is one to name.
-
-    The reader is told it is already the detached copy. This sending IS the
-    hand-off, so a reader started here does the reading itself rather than
-    spawning a second copy of itself to do it (bw-k0w.5).
-    """
-    if not inflight.take(goal_id):
-        return
-    reader = None
-    try:
-        os.makedirs(inflight.home(), exist_ok=True)
-        fd, log = tempfile.mkstemp(prefix=goal_id + ".", suffix=".run.log",
-                                   dir=inflight.home())
-        # A reader sent from inside another reader would otherwise inherit that
-        # one's run directory and write its attempts on top of them, which is
-        # cor-987e again by another route. This one allocates its own.
-        env = dict(os.environ, **{inflight.DETACHED: "1",
-                                  inflight.CONSOLE: log})
-        env.pop(inflight.RUN_DIR, None)
-        reader = subprocess.Popen([os.path.join(HERE, "review"), goal_id],
-                                  cwd=root, stdout=fd, stderr=fd,
-                                  stdin=subprocess.DEVNULL, start_new_session=True,
-                                  env=env)
-        # The console goes down with the name so a firing that finds this claim
-        # held has somewhere to point whoever asked (bw-5e8.4).
-        inflight.name(goal_id, reader.pid, log)
-        os.close(fd)
-    except Exception:
-        # Only a reader that never started leaves the claim behind: past this
-        # point one is out, and clearing would let the next closed card send a
-        # second at the same job.
-        if reader is None:
-            inflight.clear(goal_id)
-
-
 def open_reading(goal_id, goal, root):
-    """Draw the job in its column, hold it shut, and send someone to read it.
+    """Draw an explicitly selected legacy review step without launching a reader.
 
     The gate is bd's own refusal (`cannot close blocked issue`) and it is raised
     before any reader exists: a reader that never starts leaves the job visibly
@@ -229,7 +182,8 @@ def open_reading(goal_id, goal, root):
     if not gated(goal_id, root):
         bc.bd(["gate", "create", "--blocks", goal_id, "--type", "human",
                "--title", GATE_TITLE, "--reason", GATE_WHY], root)
-    fire(goal_id, root)
+    # External review is a completion-time decision made by the working agent.
+    # Merely reaching this position must never spend model tokens.
 
 
 def before_reading(order, rows):
@@ -275,6 +229,8 @@ def reading_due(goal_id, goal, order, rows, root):
     finishing the work did, and the same test fires. No branch of its own.
     """
     if not at_reading(order, rows):
+        return False
+    if reading.spent(goal):
         return False
     if steps_of(rows) & set(order[order.index("review") + 1:]):
         return False
@@ -328,11 +284,8 @@ def due_again(goal_id, root):
 # being read — is indistinguishable from the fault this replaced, where a job sat
 # behind an open gate with nothing after the reading ever opening (mch-4cl).
 SPENT_NOTE = (
-    "The last reading's findings are answered and this job has had the %d readings "
-    "a job gets, so the run goes on past the reading rather than sending another "
-    "reader. A third round was measured raising fresh objections to code the round "
-    "before it had read and accepted (bw-7e8), and settled nothing."
-    % reading.ROUNDS)
+    "The single external review attempt is complete and its findings are answered, "
+    "so the run goes on without launching another reviewer.")
 
 
 def past_reading(order, rows):

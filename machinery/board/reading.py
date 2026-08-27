@@ -25,6 +25,7 @@ import board_common as bc  # noqa: E402
 RECEIPT = re.compile(r"reviewed-by:\s*(\S+)")
 COVERS = re.compile(r"read-commits:\s*([0-9a-f][0-9a-f ]*)")
 SIGNATURE = "reviewed-by: %s\nread-commits: %s"
+ATTEMPT_LABEL = "external-review-attempted"
 # Long enough that a hook asking twice in a turn is not felt, short enough that a
 # stalled repository cannot hold a tool call open.
 GIT_TIMEOUT = 30
@@ -64,13 +65,14 @@ def commits(goal_id, root):
     return list(dict.fromkeys(found))
 
 
-# How many times one job is ever read. A reading raises points against the change
-# it was shown; a second is owed because answering the first IS a change, and it
-# is shown only what came after. A third has nothing left to be about — measured
-# on bw-7e8, read three times, each round raising a new objection to code the
-# round before had read and accepted. Two, and the run goes on past the reading
-# with what the second found answered (the manager's ruling on bw-510).
-ROUNDS = 2
+# How many external-review invocations one job may spend. A durable marker is
+# written before launch, so every outcome spends the attempt.
+ROUNDS = 1
+
+
+def attempted(goal):
+    """Whether this job has spent its one external-review invocation."""
+    return ATTEMPT_LABEL in (goal.get("labels") or []) or bool(readers(goal))
 
 
 def readers(goal):
@@ -92,7 +94,7 @@ def rounds(goal):
 
 def spent(goal):
     """Whether this job has had every reading it will ever get."""
-    return rounds(goal) >= ROUNDS
+    return attempted(goal)
 
 
 def final(goal):
@@ -108,8 +110,8 @@ def final(goal):
 def covered(goal):
     """Every commit some reading of this goal was shown.
 
-    The union of them all: a commit read once stays read, because a second reading
-    is about what came after the first and not about the whole job again.
+    Kept as a union for legacy goals that were read under the former multi-round
+    policy. New jobs can contribute at most one line.
     """
     out = set()
     for line in COVERS.findall(goal.get("notes") or ""):

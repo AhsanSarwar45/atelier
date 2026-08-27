@@ -25,7 +25,7 @@ import time
 # reader to both. They live here rather than there because board/review carries
 # no suffix to import by, and a number written out in two files is two numbers.
 ATTEMPT_TIMEOUT = 3600
-ATTEMPTS = 2
+ATTEMPTS = 1
 
 # A claim nothing can be told about is judged by its age, and this is the
 # ceiling. Nothing this file writes leaves a claim in that state — the owner goes

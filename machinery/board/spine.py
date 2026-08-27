@@ -71,12 +71,11 @@ STEPS = [
      "before and the after are on this card, each with the command that produced it.",
      NOTE, PICKED),
     ("review", "Review",
-     "One round, by someone who did not write it. The board fires that reader itself "
-     "when the job's last piece closes, and holds the goal shut with a gate until one "
-     "has read the change.\n\n## Acceptance Criteria\nA reader that did not write the "
-     "job has signed the goal, and every point it raised is either fixed or answered "
-     "on a piece of the job.",
-     READ, MUST),
+     "One optional external reading, chosen after the actual change and checks are "
+     "known. It is never launched automatically and is never repeated.\n\n"
+     "## Acceptance Criteria\nThe single attempt is recorded, and every point it "
+     "raised is either fixed or answered on a piece of the job.",
+     READ, PICKED),
     ("record", "Record",
      "The durable facts go into the document that owns the subject — %(record)s — and "
      "shortcuts taken go on that document's debt list.\n\n## Acceptance Criteria\nThe "
