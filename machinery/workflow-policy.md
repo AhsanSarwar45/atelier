@@ -50,6 +50,25 @@ The lifecycle gates are authoritative. Tests alone do not finish work, and a
 direct status change never replaces commit, independent review, landing, or
 closure.
 
+## Isolated app instances
+
+Each worktree must use its own disposable app stack. Never touch the owner's
+app, backend, helper, data, or port 3008.
+
+```bash
+export BEADS_WEB_PORT="<unique-free-port>"
+export ATELIER_PORT="$BEADS_WEB_PORT"
+export BEADS_WORKBENCH_PORT="<different-unique-free-port>"
+export WORKBENCH_E2E_RUN="$PWD/tests/.e2e-run-<job-id>"
+scripts/workbench-e2e.sh <spec> [playwright arguments]
+```
+
+- Probe both ports immediately before startup; fail if either is occupied.
+- Keep data, config, sessions, fixtures, and processes worktree-local.
+- Cleanup only recorded child PIDs and the two allocated ports.
+- Never use `pkill`, `killall`, process-name cleanup, or shared/default ports.
+- Afterward, verify both ports are free.
+
 ## Visual proof in chat
 
 For every visual change, capture the relevant screen before editing and again
@@ -63,11 +82,12 @@ image. Do this before handing the work back; do not wait for the manager to ask.
 Use an `atelier-widget` fenced block when a structured visual makes the result
 faster to understand than prose. Use `metrics` for 2–6 headline values,
 `chart` with `bar` for category comparisons or `line` for trends, `progress`
-for bounded completion, `timeline` for ordered events, and `table` for exact
-side-by-side facts. Do not use a widget for one fact or a short list.
+for bounded completion, `timeline` for ordered events, `table` for exact
+side-by-side facts, and `video` whenever showing video proof. Never present
+video as a file link. Do not use a widget for one fact or a short list.
 
 The block contains one object. Common fields are `type` and optional `title`.
-The five accepted shapes are:
+The six accepted shapes are:
 
 - `metrics`: `items` with `label`, `value`, and optional `detail`/`trend`.
 - `chart`: `chart`, `series` (`name`, optional `color`), and `data` (`label`,
@@ -76,3 +96,4 @@ The five accepted shapes are:
 - `timeline`: `items` with `label`, optional `detail`, and optional `status`
   (`done`, `current`, or `next`).
 - `table`: `columns` and equally sized string `rows`.
+- `video`: absolute local or HTTP(S) `src`, with optional `title`/`poster`.
