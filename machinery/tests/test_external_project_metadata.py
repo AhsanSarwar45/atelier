@@ -1,5 +1,7 @@
 import importlib.machinery
 import importlib.util
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,6 +41,32 @@ class ExternalProjectMetadataTests(unittest.TestCase):
                  ROOT / "machinery/hooks/board-merge-gate.py"]
         self.assertFalse(any("project.DECLARATION" in path.read_text()
                              for path in paths))
+
+    def test_legacy_checks_are_read_from_the_linked_worktree(self):
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            main = root / "project"
+            tree = root / "worktree"
+            main.mkdir()
+            subprocess.run(["git", "init", "-q", "-b", "main", str(main)], check=True)
+            subprocess.run(["git", "-C", str(main), "config", "user.email",
+                            "test@example.com"], check=True)
+            subprocess.run(["git", "-C", str(main), "config", "user.name", "Test"],
+                           check=True)
+            (main / "machinery.toml").write_text('checks = "echo main-checks"\n')
+            subprocess.run(["git", "-C", str(main), "add", "machinery.toml"], check=True)
+            subprocess.run(["git", "-C", str(main), "commit", "-qm", "base"], check=True)
+            subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "-b", "job",
+                            str(tree)], check=True)
+            (tree / "machinery.toml").write_text('checks = "echo worktree-checks"\n')
+            environment = dict(os.environ, ATELIER_DATA_DIR=str(root / "personal"))
+
+            run = subprocess.run([str(ROOT / "machinery/checks"), "--dry", "--all"],
+                                 cwd=tree, env=environment, capture_output=True,
+                                 text=True, check=True)
+
+            self.assertIn("echo worktree-checks", run.stdout)
+            self.assertNotIn("echo main-checks", run.stdout)
 
     def test_windows_data_home_matches_the_application(self):
         project = load_project()

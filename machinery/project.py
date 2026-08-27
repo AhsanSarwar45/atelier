@@ -116,6 +116,14 @@ def checkout(path):
     return here.split("/worktrees/")[0].rstrip("/") or here
 
 
+def working_tree(path):
+    """The particular checkout containing `path`, including a linked worktree."""
+    here = (path or os.getcwd()).rstrip("/")
+    if not os.path.isdir(here):
+        here = os.path.dirname(here) or "/"
+    return _git(["rev-parse", "--show-toplevel"], here) or here
+
+
 def git_identity(path):
     """Stable identity shared by a Git repository and all of its worktrees."""
     common = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], path)
@@ -143,7 +151,7 @@ def declaration_path(path):
 
 def legacy_declaration_path(path):
     """The repository-local declaration used before personal metadata."""
-    return os.path.join(checkout(path), "machinery.toml")
+    return os.path.join(working_tree(path), "machinery.toml")
 
 
 def root(path=None):
@@ -233,12 +241,19 @@ def _read(path):
 def of(path=None):
     """The declaration of the project holding `path`."""
     where = root(path)
-    if where not in _DECLS:
-        data = _read(declaration_path(where))
-        if not data:
-            data = _read(legacy_declaration_path(where))
-        _DECLS[where] = Declaration(where, data)
-    return _DECLS[where]
+    data = _read(declaration_path(where))
+    declared_at = where
+    key = ("external", where)
+    if not data:
+        # Compatibility for a project not migrated by `atelier init` yet. A
+        # linked worktree may be changing its checks declaration as part of the
+        # work, so this fallback must read that checkout rather than main.
+        declared_at = working_tree(path)
+        key = ("legacy", os.path.realpath(declared_at))
+        data = _read(legacy_declaration_path(declared_at))
+    if key not in _DECLS:
+        _DECLS[key] = Declaration(declared_at, data)
+    return _DECLS[key]
 
 
 def tool(decl, name, where="board"):
