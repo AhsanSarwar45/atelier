@@ -1059,9 +1059,10 @@ def unlisted(root):
     return []
 
 
-def standing(root):
+def standing(root, session_root=None):
     """Every reason this project is not yet running the machinery."""
     said = []
+    session_root = session_root or root
     decl = project.of(root)
     if not decl.declared:
         said.append("no machinery.toml at %s — a project declares its own prefix, "
@@ -1086,8 +1087,8 @@ def standing(root):
         said.append("git config beads.role is %r — a fork infers a contributor and "
                     "routes `bd list` at a planning store rather than at this board; "
                     "`git -C %s config beads.role maintainer`" % (role or "unset", root))
-    said += unwired(root)
-    said += codex_unwired(root)
+    said += unwired(session_root)
+    said += codex_unwired(session_root)
     said += unguarded(root)
     said += untidy(root)
     return said, decl
@@ -1469,7 +1470,8 @@ def main():
             bad += bool(said)
         sys.exit(1 if bad else 0)
 
-    root = project_root(os.path.abspath(os.path.expanduser(a.path)))
+    requested = os.path.abspath(os.path.expanduser(a.path))
+    root = project_root(requested)
     decl = project.of(root)
     said = []
     if not decl.declared:
@@ -1500,8 +1502,11 @@ def main():
     # After the board is where it is going to be, never before: everything below
     # asks the board something, and asking one that is mid-move answers for the
     # copy that is about to stop existing.
-    wire(root, said.append)
-    wire_codex(root, said.append)
+    # Board state belongs to the main checkout, but provider settings are read
+    # from the checkout the session actually opened. A sibling worktree needs
+    # its own wiring even though it must never become another board project.
+    wire(requested, said.append)
+    wire_codex(requested, said.append)
     tidy(root, said.append)
     listing(root, decl, said.append)
     states(root, said.append)
@@ -1509,7 +1514,7 @@ def main():
     # refused for want of the word it has just been told.
     replace(root, said.append)
     print("\n".join(said) or "nothing to do — %s was already joined" % decl.name)
-    left, _ = standing(root)
+    left, _ = standing(root, requested)
     if left:
         print("\nstill missing:")
         for line in left:

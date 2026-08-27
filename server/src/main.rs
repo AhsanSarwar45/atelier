@@ -163,15 +163,14 @@ async fn main() {
         // off is one command, so nobody edits a service file by hand
         // (bw-8um.3.13).
         command_line::Ask::Service(action) => {
-            if action == service::Action::Install {
-                if let Err(e) = rules::install_personal() {
-                    eprintln!("Atelier's personal instructions could not be installed: {e}");
-                    std::process::exit(1);
-                }
-            }
             if let Err(e) = service::run(action) {
                 eprintln!("{e}");
                 std::process::exit(1);
+            }
+            if action == service::Action::Install {
+                if let Err(e) = rules::install_personal() {
+                    eprintln!("warning: Atelier's personal instructions could not be installed: {e}");
+                }
             }
         }
         // The third of the three commands a teammate types. Installing gets

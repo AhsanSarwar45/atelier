@@ -181,10 +181,12 @@ fn init_with(
         &[join.display().to_string(), "--personal".to_string()],
         &[(PERSONAL_POLICY, policy.as_str())],
     )?;
-    let current = mode_from(&join, &root)?;
     let mode = match chosen {
         Some(mode) => mode,
-        None => ask_for_mode(input, output, current == Mode::Beads)?,
+        None => {
+            let current = mode_from(&join, &root)?;
+            ask_for_mode(input, output, current == Mode::Beads)?
+        }
     };
     if mode == Mode::Chat {
         return run_python(
