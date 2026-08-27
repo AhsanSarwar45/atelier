@@ -20,13 +20,13 @@
  */
 'use client';
 
-import { Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff } from 'lucide-react';
+import { Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff, Workflow } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
 import { inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
-import { BRAND_DEFAULT_MODEL, type EffortChoice, type ModelChoice } from '@/workbench/protocol';
+import { BRAND_DEFAULT_MODEL, type CollaborationModeChoice, type EffortChoice, type ModelChoice } from '@/workbench/protocol';
 
 /** The brand's own word for a chat nobody has pinned a model to. */
 const BRAND_DEFAULT_LABEL = 'Default model';
@@ -202,6 +202,8 @@ export function WhatItRuns({
   models,
   effort,
   efforts = [],
+  collaborationMode,
+  collaborationModes = [],
   className,
 }: {
   model: string | null;
@@ -210,6 +212,8 @@ export function WhatItRuns({
   models: ModelChoice[];
   effort?: string | null;
   efforts?: EffortChoice[];
+  collaborationMode?: string | null;
+  collaborationModes?: CollaborationModeChoice[];
   className?: string;
 }) {
   const mode = modeWords(permissionMode);
@@ -221,6 +225,9 @@ export function WhatItRuns({
   const effortLabel = effort
     ? efforts.find((choice) => choice.value === effort)?.displayName ?? inWords(effort)
     : null;
+  const collaborationLabel = collaborationMode
+    ? collaborationModes.find((choice) => choice.value === collaborationMode)?.displayName ?? inWords(collaborationMode)
+    : null;
 
   return (
     <span
@@ -228,6 +235,7 @@ export function WhatItRuns({
       data-model={model ?? ''}
       data-mode={permissionMode ?? ''}
       data-effort={effort ?? ''}
+      data-collaboration-mode={collaborationMode ?? ''}
       // `min-w-0 shrink truncate` is the whole reason this group exists: left at
       // its full width the chips inside shrank under their own words and what
       // the chat was running printed straight across the folder chip beside it,
@@ -298,6 +306,21 @@ export function WhatItRuns({
         >
           <Gauge className="size-3 shrink-0" aria-hidden="true" />
           <span className="relative top-px min-w-0 truncate">{effortLabel}</span>
+        </Badge>
+      )}
+      {collaborationLabel && (
+        <Badge
+          variant="secondary"
+          appearance="outline"
+          size="sm"
+          shape="circle"
+          data-testid="chat-collaboration-mode-chip"
+          data-collaboration-mode={collaborationMode ?? ''}
+          title={`Collaboration mode — ${collaborationLabel}`}
+          className="min-w-0 shrink gap-1 truncate"
+        >
+          <Workflow className="size-3 shrink-0" aria-hidden="true" />
+          <span className="relative top-px min-w-0 truncate">{collaborationLabel}</span>
         </Badge>
       )}
     </span>

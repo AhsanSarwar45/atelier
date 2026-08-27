@@ -176,7 +176,7 @@ monotone integer, and it is the whole reconnect and replay story (§4).
 | `session.title` | `title` (derived from the first user message) |
 | `session.ended` | `reason` |
 | `capabilities` | the matrix of §3.3 — the UI hides every control that is false |
-| `session.menu` | `commands[{name,description,argumentHint}], skills[], models[{value,displayName,description}], permissionModes[]` — everything the writing box offers for THIS session (§7, §8.2.3). Sent at birth and again whenever the brand pushes a new list |
+| `session.menu` | `commands[{name,description,argumentHint}], skills[], models[{value,displayName,description}], permissionModes[], collaborationModes[{value,displayName,description}]` — everything the writing box offers for THIS session (§7, §8.2.3). Sent at birth and again whenever the brand pushes a new list; an absent collaboration list means that provider offers no working-style control |
 | `error` | `message, fatal` |
 
 **Content**
@@ -251,7 +251,9 @@ interface Driver {
   send(input: PromptInput): Promise<void>;
   answer(askId: string, answer: Answer): Promise<void>;
   interrupt(): Promise<void>;
+  setMode(mode: string): Promise<void>;
   setModel(model: string, effort?: string): Promise<void>;
+  setCollaborationMode?(mode: string): Promise<void>;
   listCommands(): Promise<Command[]>;
   close(): Promise<void>;
 }
@@ -259,6 +261,14 @@ interface Driver {
 
 That is the extension point. A third brand is `drivers/<brand>.ts` plus one
 line in `drivers/index.ts`.
+
+Permission mode and collaboration mode are deliberately different seams.
+Permission mode governs whether tools require approval. Collaboration mode is
+a provider-defined working style (Codex currently advertises `default` and
+`plan`) and may also carry provider-owned model, effort, or instruction
+settings. A driver advertises the latter dynamically and implements the
+optional setter only when the provider protocol supports it; the browser draws
+no collaboration control for an empty list.
 
 ---
 

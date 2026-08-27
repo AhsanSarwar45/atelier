@@ -32,6 +32,7 @@ import {
   SlidersHorizontal,
   Square,
   Star,
+  Workflow,
   X,
 } from 'lucide-react';
 
@@ -1233,6 +1234,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           models={view.menu.models}
           effort={view.effort}
           efforts={view.menu.efforts}
+          collaborationMode={view.collaborationMode}
+          collaborationModes={view.menu.collaborationModes}
           className="hidden sm:flex"
         />
         {facts?.folder && (
@@ -1537,6 +1540,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 );
               }}
             />
+            {view.menu.collaborationModes.length > 0 && (
+              <Picker
+                icon={<Workflow className="h-3.5 w-3.5" />}
+                label="Collaboration mode"
+                testid="collaboration-mode-picker"
+                current={view.collaborationMode}
+                currentLabel={view.menu.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
+                asleep={asleep}
+                options={view.menu.collaborationModes.map((mode) => ({
+                  value: mode.value,
+                  label: mode.displayName,
+                  hint: mode.description,
+                }))}
+                onPick={(mode) => {
+                  setSteerError(null);
+                  void sendCommand({ type: 'session.collaboration-mode', sessionId, mode }).catch((e: unknown) =>
+                    setSteerError(e instanceof Error ? e.message : String(e)),
+                  );
+                }}
+              />
+            )}
             <Picker
               icon={<Cpu className="h-3.5 w-3.5" />}
               label="Model"
@@ -1670,6 +1694,27 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   );
                 }}
               />
+              {view.menu.collaborationModes.length > 0 && (
+                <Picker
+                  icon={<Workflow className="h-4 w-4" />}
+                  label="Collaboration mode"
+                  testid="mobile-collaboration-mode-picker"
+                  current={view.collaborationMode}
+                  currentLabel={view.menu.collaborationModes.find((mode) => mode.value === view.collaborationMode)?.displayName}
+                  asleep={asleep}
+                  options={view.menu.collaborationModes.map((mode) => ({
+                    value: mode.value,
+                    label: mode.displayName,
+                    hint: mode.description,
+                  }))}
+                  onPick={(mode) => {
+                    setSteerError(null);
+                    void sendCommand({ type: 'session.collaboration-mode', sessionId, mode }).catch((error: unknown) =>
+                      setSteerError(error instanceof Error ? error.message : String(error)),
+                    );
+                  }}
+                />
+              )}
               <Picker
                 icon={<Cpu className="h-4 w-4" />}
                 label="Model"

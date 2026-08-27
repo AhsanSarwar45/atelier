@@ -31,3 +31,27 @@ describe('the active effort in the chat status line', () => {
     expect(screen.getByTestId('chat-effort-chip')).toHaveTextContent('Extra deep');
   });
 });
+
+describe('the active collaboration mode in the chat status line', () => {
+  it('uses the provider-announced name and keeps it distinct from permissions', () => {
+    render(
+      <WhatItRuns
+        model="gpt-5.6-sol"
+        permissionMode="on-request"
+        models={[]}
+        collaborationMode="plan"
+        collaborationModes={[{ value: 'default', displayName: 'Default' }, { value: 'plan', displayName: 'Plan' }]}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-mode-chip')).toHaveTextContent('On request');
+    const collaboration = screen.getByTestId('chat-collaboration-mode-chip');
+    expect(collaboration).toHaveTextContent('Plan');
+    expect(collaboration).toHaveAttribute('data-collaboration-mode', 'plan');
+  });
+
+  it('draws no collaboration badge for providers that announce none', () => {
+    render(<WhatItRuns model={null} permissionMode={null} models={[]} />);
+    expect(screen.queryByTestId('chat-collaboration-mode-chip')).toBeNull();
+  });
+});

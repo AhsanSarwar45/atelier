@@ -517,7 +517,7 @@ export class CodexDriver implements Driver {
   private turnId: string | null = null;
   private model: string | undefined;
   private effort: string | undefined;
-  private collaborationMode = 'default';
+  private collaborationMode: string | null = null;
   private collaborationPresets = new Map<string, Bag>();
   private mode = 'on-request';
   private cwd = process.cwd();
@@ -536,7 +536,7 @@ export class CodexDriver implements Driver {
     this.cwd = opts.cwd;
     this.model = opts.model === 'default' ? undefined : opts.model;
     this.effort = opts.effort;
-    this.collaborationMode = opts.collaborationMode ?? 'default';
+    this.collaborationMode = opts.collaborationMode ?? null;
     this.mode = MODES.includes(opts.permissionMode) ? opts.permissionMode : 'on-request';
     const executable = process.env.CODEX_PATH || 'codex';
     this.child = spawn(executable, ['app-server', '--stdio'], {
@@ -602,7 +602,7 @@ export class CodexDriver implements Driver {
       } else {
         const result = await this.call('turn/start', {
           threadId: this.threadId, input: content, model: this.model ?? null, approvalPolicy: this.mode, effort: this.effort ?? null,
-          collaborationMode: this.collaborationModePayload(this.collaborationMode),
+          ...(this.collaborationMode ? { collaborationMode: this.collaborationModePayload(this.collaborationMode) } : {}),
         });
         this.turnId = result.turn.id;
       }
@@ -719,11 +719,13 @@ export class CodexDriver implements Driver {
   private async menu(): Promise<void> {
     const menu = await codexMenu(this.cwd, this.model);
     this.collaborationPresets = new Map((menu.collaborationPresets ?? []).map((preset: Bag) => [preset.mode, preset]));
-    if (!this.collaborationPresets.has(this.collaborationMode)) {
-      this.collaborationMode = this.collaborationPresets.has('default')
-        ? 'default'
-        : (menu.collaborationModes[0]?.value ?? this.collaborationMode);
+    if (this.collaborationPresets.size > 0 && (!this.collaborationMode || !this.collaborationPresets.has(this.collaborationMode))) {
+      this.collaborationMode = this.collaborationPresets.has('default') ? 'default' : menu.collaborationModes[0]!.value;
       this.emit({ type: 'session.pinned', permissionMode: null, model: null, collaborationMode: this.collaborationMode });
+    } else if (this.collaborationPresets.size === 0) {
+      // Older app-servers reject collaborationMode/list. Keep their turns on
+      // the old request shape even if this chat was last opened by a newer one.
+      this.collaborationMode = null;
     }
     this.skills = new Map(Object.entries(menu.skillPaths ?? {}));
     const resolvedEffort = codexResolvedEffort(this.effort, menu.defaultEffort);

@@ -27,17 +27,23 @@ interface Project {
 }
 
 /** A chat of its own for this case, with nothing said in it. */
-async function freshChat(request: APIRequestContext, page: Page): Promise<{ project: Project; id: string }> {
+async function freshChat(request: APIRequestContext, page: Page, brand: 'claude' | 'codex' = 'claude'): Promise<{ project: Project; id: string }> {
   const api = backend();
-  const projects = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
-  expect(projects.length, 'the instance lists no projects').toBeGreaterThan(0);
+  const projects = (await (await request.get(`${api}/api/projects?include_test=true`)).json()) as Project[];
+  if (projects.length === 0) {
+    const created = await request.post(`${api}/api/projects`, {
+      data: { name: 'chat-steer', path: process.cwd(), isTest: true },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    projects.push((await created.json()) as Project);
+  }
   const project = process.env.BEADS_E2E_PROJECT
     ? projects.find((p) => p.id === process.env.BEADS_E2E_PROJECT)!
     : projects[0]!;
 
   const started = (await (
     await request.post(`${api}/api/workbench/command`, {
-      data: { type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude' },
+      data: { type: 'session.start', projectId: project.id, projectPath: project.path, brand },
     })
   ).json()) as { id: string };
 
@@ -49,6 +55,15 @@ async function freshChat(request: APIRequestContext, page: Page): Promise<{ proj
 test.describe('steering the chat you are in', () => {
   // Starting an agent and waiting for it to say what it can do.
   test.describe.configure({ timeout: 300_000 });
+
+  test.beforeEach(async ({ page }) => {
+    await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const url = new URL(route.request().url());
+      url.searchParams.set('include_test', 'true');
+      await route.continue({ url: url.toString() });
+    });
+  });
 
   test('the permission mode is a menu, and picking one changes this chat', async ({ page, request }) => {
     await freshChat(request, page);
@@ -70,6 +85,30 @@ test.describe('steering the chat you are in', () => {
     await expect.poll(async () => picker.getAttribute('data-current'), { timeout: 60_000 }).toBe(target);
     // And the chat's own line agrees, because the change came back as an event.
     await expect(page.getByTestId('session-meta')).toContainText(target, { timeout: 60_000 });
+  });
+
+  test('Codex collaboration mode is separate from permissions and follows this chat', async ({ page, request }) => {
+    await freshChat(request, page, 'codex');
+
+    const permissions = page.getByTestId('mode-picker');
+    const collaboration = page.getByTestId('collaboration-mode-picker');
+    await collaboration.waitFor({ timeout: HELLO_MS });
+    await expect(permissions).toHaveAttribute('data-current', /.+/);
+    const permissionBefore = await permissions.getAttribute('data-current');
+
+    await collaboration.click();
+    const options = page.getByTestId('collaboration-mode-picker-option');
+    await options.first().waitFor({ timeout: 30_000 });
+    const values = await Promise.all((await options.all()).map((option) => option.getAttribute('data-value')));
+    expect(values).toEqual(expect.arrayContaining(['default', 'plan']));
+
+    const before = await collaboration.getAttribute('data-current');
+    const target = values.find((value) => value && value !== before)!;
+    await page.locator(`[data-testid="collaboration-mode-picker-option"][data-value="${target}"]`).click();
+
+    await expect.poll(async () => collaboration.getAttribute('data-current'), { timeout: 60_000 }).toBe(target);
+    await expect(page.getByTestId('session-meta')).toHaveAttribute('data-collaboration-mode', target);
+    await expect(permissions).toHaveAttribute('data-current', permissionBefore!);
   });
 
   test('the model is a menu of what this session offers', async ({ page, request }) => {
