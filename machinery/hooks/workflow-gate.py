@@ -98,10 +98,21 @@ def branch_mutates(argv):
     return any(a in changing for a in args) or any(not a.startswith("-") for a in args)
 
 
+def redirected_project_output(segment):
+    """Whether shell output is aimed somewhere that may be project work."""
+    targets = re.findall(r"(?:^|\s)(?:\d*>>?|&>)\s*([^\s;&|]+)", segment)
+    for raw in targets:
+        target = raw.strip("\"'")
+        if target == "/dev/null" or target.startswith("/tmp/"):
+            continue
+        return True
+    return False
+
+
 def shell_mutates(command):
     """Classify commands by parsed executable and verb, never argument prose."""
     for segment in bc.segments(bc.unshelled(command)):
-        if re.search(r"(?:^|\s)(?:\d*>>?|&>)\s*\S", segment):
+        if redirected_project_output(segment):
             return True
         argv = bc.plain(bc.words(segment))[1]
         if not argv:

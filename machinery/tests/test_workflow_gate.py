@@ -121,6 +121,11 @@ class ShellClassification(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(gate.shell_mutates(command))
 
+    def test_diagnostic_redirections_outside_the_project_are_read_only(self):
+        for command in ("ls missing 2>/dev/null", "git status > /tmp/status.txt"):
+            with self.subTest(command=command):
+                self.assertFalse(gate.shell_mutates(command))
+
     def test_a_path_in_a_close_reason_is_not_a_working_directory(self):
         command = ('bd close bw-123 --reason="removed '
                    '/repo/worktrees/bw-123, then released the slot"')
