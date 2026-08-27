@@ -39,6 +39,11 @@ class FakeHead {
   reached(): void {
     this.tell([{ isIntersecting: true }]);
   }
+
+  /** The reader leaves the history head, permitting a later deliberate page. */
+  left(): void {
+    this.tell([{ isIntersecting: false }]);
+  }
 }
 
 const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
@@ -67,7 +72,7 @@ function conversation(held: number): SessionView {
 
 const HELD = 201;
 
-function chat(sessionId = 's', held = HELD) {
+function chat(sessionId = 's', held = HELD, onOlder: (() => Promise<void>) | null = null) {
   const pane = createRef<HTMLDivElement>();
   const rows = drawnRows(conversation(held).items);
   const shows = (what: { rows: DrawnRow[]; sessionId: string; watching: boolean }) => (
@@ -79,6 +84,7 @@ function chat(sessionId = 's', held = HELD) {
         onLook={LOOK}
         pane={pane}
         held={what.watching}
+        onOlder={onOlder}
       />
     </div>
   );
@@ -135,6 +141,46 @@ describe('what a chat puts on the page', () => {
 
     again({ sessionId: 'another' });
     expect(messages()).toHaveLength(SCREENFUL);
+  });
+
+  it('asks for one server page while the history head remains visible', async () => {
+    const older = vi.fn().mockResolvedValue(undefined);
+    chat('paged', 10, older);
+    const head = heads[heads.length - 1]!;
+
+    await act(async () => {
+      head.reached();
+      head.reached();
+    });
+
+    expect(older).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for another page only after the reader leaves and reaches the head again', async () => {
+    const older = vi.fn().mockResolvedValue(undefined);
+    chat('paged-again', 10, older);
+    const head = heads[heads.length - 1]!;
+
+    await act(async () => { head.reached(); });
+    head.left();
+    await act(async () => { head.reached(); });
+
+    expect(older).toHaveBeenCalledTimes(2);
+  });
+
+  it('holds the same viewport place when older rows are prepended', () => {
+    const { pane } = chat();
+    const box = pane.current!;
+    Object.defineProperty(box, 'scrollHeight', {
+      configurable: true,
+      get: () => messages().length * 10,
+    });
+    box.scrollTop = 120;
+
+    act(() => heads[heads.length - 1]!.reached());
+
+    expect(messages()).toHaveLength(SCREENFUL * 2);
+    expect(box.scrollTop).toBe(520);
   });
 
   it('keeps the row the reader is reading when messages arrive behind him', () => {

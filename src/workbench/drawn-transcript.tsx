@@ -49,6 +49,11 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
   const head = useRef<HTMLDivElement | null>(null);
   /** How tall the pane's contents were when the last batch was asked for. */
   const wasTall = useRef<number | null>(null);
+  /** A visible head is one request, even when prepending rows redraws it. */
+  const atHead = useRef(false);
+  const loading = useRef(false);
+  const current = useRef({ shown, many: rows.length, onOlder });
+  current.current = { shown, many: rows.length, onOlder };
   /** Which conversation these rows were, and how many of them, on the last frame. */
   const was = useRef({ sessionId, many: rows.length });
 
@@ -66,17 +71,33 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
   if (count !== shown) setShown(count);
 
   useEffect(() => {
+    atHead.current = false;
+    loading.current = false;
     const mark = head.current;
     if (!mark) return;
     const watch = new IntersectionObserver((entries) => {
-      if (!entries.some((e) => e.isIntersecting)) return;
+      const touching = entries.some((e) => e.isIntersecting);
+      if (!touching) {
+        atHead.current = false;
+        return;
+      }
+      if (atHead.current || loading.current) return;
+      atHead.current = true;
       wasTall.current = pane.current?.scrollHeight ?? null;
-      if (shown < rows.length) setShown((n) => n + SCREENFUL);
-      else void onOlder?.();
+      if (current.current.shown < current.current.many) {
+        setShown((n) => n + SCREENFUL);
+        return;
+      }
+      const older = current.current.onOlder;
+      if (!older) return;
+      loading.current = true;
+      void older().finally(() => {
+        loading.current = false;
+      });
     });
     watch.observe(mark);
     return () => watch.disconnect();
-  }, [shown, rows.length, pane, onOlder]);
+  }, [sessionId, pane]);
 
   // Older messages arrive ABOVE where the reader is looking, which would slide
   // the words he is reading down the screen by however tall they are. Put back
@@ -87,7 +108,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
     wasTall.current = null;
     if (!box || before === null) return;
     box.scrollTop += box.scrollHeight - before;
-  }, [shown, pane]);
+  }, [shown, rows.length, pane]);
 
   const window = count >= rows.length ? rows : rows.slice(rows.length - count);
 

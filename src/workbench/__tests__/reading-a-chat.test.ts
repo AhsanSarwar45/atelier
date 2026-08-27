@@ -219,6 +219,50 @@ describe('a chat opened, and opened again after the stream drops', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('loads exactly one cursor page per request and suppresses an overlapping request', async () => {
+    let answer!: (value: unknown) => void;
+    const response = new Promise((resolve) => { answer = resolve; });
+    const fetch = vi.fn((_input: RequestInfo | URL) => response);
+    vi.stubGlobal('fetch', fetch);
+    const { result } = renderHook(() => useSession('paged-chat'));
+
+    const built = foldAll(aWholeChat(2));
+    act(() => opened[0].hands({ ...built, hasOlder: true, historyCursor: 42 }));
+    const older = foldAll(turn(99)).items;
+
+    let first!: Promise<void>;
+    act(() => {
+      first = result.current.loadOlder!();
+      void result.current.loadOlder!();
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]![0])).toContain('before=42');
+
+    answer({ ok: true, json: async () => ({ items: older, cursor: 21, hasOlder: true }) });
+    await act(async () => { await first; });
+
+    expect(result.current.historyCursor).toBe(21);
+    expect(result.current.hasOlder).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops at a cursor that does not advance instead of replaying it forever', async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [], cursor: 42, hasOlder: true }),
+    });
+    vi.stubGlobal('fetch', fetch);
+    const { result } = renderHook(() => useSession('stuck-page-chat'));
+    const built = foldAll(aWholeChat(2));
+    act(() => opened[0].hands({ ...built, hasOlder: true, historyCursor: 42 }));
+
+    await act(async () => { await result.current.loadOlder!(); });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.current.hasOlder).toBe(false);
+    expect(result.current.loadOlder).toBeNull();
+  });
+
   it('asks only for what arrived since, when the stream comes back', () => {
     const { result } = renderHook(() => useSession('chat-1'));
     const built = foldAll(aWholeChat(2));

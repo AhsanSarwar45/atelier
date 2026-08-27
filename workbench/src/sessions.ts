@@ -32,6 +32,7 @@ import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbe
 import { createDriver, defaultPermissionMode } from './drivers/index.ts';
 import { codexMenu, codexRolloutLine, codexRolloutPath, CodexDriver, readCodexThread, readCodexThreadUsage, seedCodexSnapshot } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
+import { boundedEvent } from './bounded-event.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
 import { Linker } from './linker.ts';
 import { type HelperPast, helperNamed, helpersNow, helpersOf } from './helper-records.ts';
@@ -49,28 +50,11 @@ import {
   type RecordLine,
 } from './record-tail.ts';
 
-/**
- * The provider-neutral wire/storage boundary for potentially unbounded agent
- * payloads. Drivers may hand us whole command scripts and megabytes of output;
- * neither the event log nor every browser reopening the chat should carry
- * those verbatim. Applying this while replaying also repairs rows written by an
- * older build without rewriting the database.
- */
-export function boundedEvent<T extends DriverEvent | WbpEvent>(event: T): T {
-  if (event.type === 'tool.started') {
-    const input = trimInput(event.input);
-    return { ...event, input, title: toolTitle(event.name, input) } as T;
-  }
-  if (event.type === 'tool.completed') return { ...event, output: cut(event.output) } as T;
-  if (event.type === 'diff') {
-    return { ...event, before: cut(event.before), after: cut(event.after) } as T;
-  }
-  if (event.type === 'agent.finished') return { ...event, result: cut(event.result) } as T;
-  return event;
-}
 import { knownSessions, providerHolderPids, providerHoldsNow } from './registry.ts';
 import type { Store } from './store.ts';
 import { conversationTitle } from './conversation-title.ts';
+
+export { boundedEvent } from './bounded-event.ts';
 
 type Subscriber = (e: WbpEvent) => void;
 

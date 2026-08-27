@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { WbpEvent } from '../../../src/workbench/protocol.ts';
 import { Store } from '../store.ts';
+import { transcriptPage } from '../transcript-page.ts';
 
 function event(store: Store, seq: number, body: Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>): void {
   store.appendEvent({
@@ -35,6 +36,25 @@ describe('paged transcript storage', () => {
     const older = store.transcriptWindow('chat', newest.cursor, 40);
     expect(older.events[0]).toMatchObject({ type: 'message.started', messageId: 'm-0' });
     expect(older.hasOlder).toBe(false);
+  });
+
+  it('keeps each selected message beside the thinking row it produced', () => {
+    const store = new Store(join(mkdtempSync(join(tmpdir(), 'atelier-speakers-')), 'workbench.db'));
+    let seq = 0;
+    for (let i = 0; i < 41; i++) {
+      event(store, ++seq, { type: 'message.started', messageId: `m-${i}`, role: i % 2 ? 'assistant' : 'user' });
+      event(store, ++seq, { type: 'text.delta', messageId: `m-${i}`, text: `message ${i}` });
+      event(store, ++seq, { type: 'thinking.delta', messageId: `m-${i}`, text: `thought ${i}` });
+      event(store, ++seq, { type: 'message.completed', messageId: `m-${i}` });
+    }
+
+    const newest = transcriptPage(store, 'chat', null);
+    const messages = newest.items.filter((item) => item.kind === 'message');
+    expect(messages).toHaveLength(40);
+    expect(messages[0]).toMatchObject({ id: 'm-1', role: 'assistant' });
+    expect(messages.filter((item) => item.role === 'user')).toHaveLength(20);
+    expect(newest.items.filter((item) => item.kind === 'thinking')).toHaveLength(40);
+    expect(newest.hasOlder).toBe(true);
   });
 
   it('fetches a large tool body only by its call id', () => {

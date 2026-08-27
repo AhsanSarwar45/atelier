@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { request } from '@/lib/api';
 import { onChat } from '@/workbench/live-wire';
@@ -124,7 +124,6 @@ interface CachedSession {
 }
 
 const SESSION_CACHE_LIMIT = 10;
-const READ_AHEAD_ROWS = 400;
 const cachedSessions = new Map<string, CachedSession>();
 
 function cached(id: string): CachedSession {
@@ -157,25 +156,25 @@ export function cacheSessionEvent(event: WbpEvent): void {
   publishCached(event.sessionId, reduce(entry.view, event));
 }
 
-async function loadHistory(id: string, targetRows = READ_AHEAD_ROWS): Promise<void> {
+async function loadHistory(id: string): Promise<void> {
   const entry = cached(id);
   if (entry.loadingOlder) return;
+  if (!entry.view.hasOlder || entry.view.historyCursor === null) return;
   entry.loadingOlder = true;
   try {
-    while (entry.view.hasOlder && entry.view.historyCursor !== null && entry.view.items.length < targetRows) {
-      const before = entry.view.historyCursor;
-      const res = await request(`/api/workbench/history?session=${encodeURIComponent(id)}&before=${before}`);
-      if (!res.ok) return;
-      const page = (await res.json()) as { items: SessionView['items']; cursor: number | null; hasOlder: boolean };
-      const existing = new Set(entry.view.items.map((item) => `${item.kind}:${item.id}`));
-      publishCached(id, {
-        ...entry.view,
-        items: [...page.items.filter((item) => !existing.has(`${item.kind}:${item.id}`)), ...entry.view.items],
-        historyCursor: page.cursor,
-        hasOlder: page.hasOlder,
-      });
-      if (page.cursor === before) return;
-    }
+    const before = entry.view.historyCursor;
+    const res = await request(`/api/workbench/history?session=${encodeURIComponent(id)}&before=${before}`);
+    if (!res.ok) return;
+    const page = (await res.json()) as { items: SessionView['items']; cursor: number | null; hasOlder: boolean };
+    const existing = new Set(entry.view.items.map((item) => `${item.kind}:${item.id}`));
+    publishCached(id, {
+      ...entry.view,
+      items: [...page.items.filter((item) => !existing.has(`${item.kind}:${item.id}`)), ...entry.view.items],
+      historyCursor: page.cursor,
+      // A cursor that did not move cannot be asked forever. Treat that broken
+      // page as the head rather than turning one observer into a replay loop.
+      hasOlder: page.cursor !== before && page.hasOlder,
+    });
   } finally {
     entry.loadingOlder = false;
   }
@@ -238,10 +237,14 @@ export function useSession(sessionId: string | null): LoadedSessionView {
     });
   }, [sessionId]);
 
-  const loadOlder = sessionId && view.hasOlder && view.historyCursor !== null
-    ? () => loadHistory(sessionId, Math.max(READ_AHEAD_ROWS, view.items.length + 160))
-    : null;
-  return { ...view, loadOlder };
+  const requestOlder = useCallback(
+    () => sessionId ? loadHistory(sessionId) : Promise.resolve(),
+    [sessionId],
+  );
+  return {
+    ...view,
+    loadOlder: sessionId && view.hasOlder && view.historyCursor !== null ? requestOlder : null,
+  };
 }
 
 /** True while the agent owes an answer — the Stop button's condition. */

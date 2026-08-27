@@ -8,10 +8,9 @@
  * SSE down, POST up — the same shape server/src/routes/watch.rs already uses.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { foldAll, reduce, type SessionView, type TranscriptTool } from '../../src/workbench/fold.ts';
+import { foldAll, reduce, type SessionView } from '../../src/workbench/fold.ts';
 import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
-import { whatItRan } from '../../src/workbench/said-what-it-ran.ts';
 import { issuesForSession, sessionsForIssue } from './bd.ts';
 import { cardsForOpen, sweepClaims } from './chat-cards.ts';
 import { conversationTitle } from './conversation-title.ts';
@@ -22,10 +21,12 @@ import { codexThreadProcesses, knownSessions, providerHoldsNow, restoreList } fr
 import { withOutsideHolds } from '../../src/workbench/restore-status.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import { rememberSummaryRuns } from './running.ts';
-import { boundedEvent, Sessions } from './sessions.ts';
+import { Sessions } from './sessions.ts';
+import { boundedEvent } from './bounded-event.ts';
 import { Store } from './store.ts';
 import { summaryMemoryOf } from './summary-runs.ts';
 import { readProviderDefaults, writeProviderDefault } from './provider-defaults.ts';
+import { transcriptPage } from './transcript-page.ts';
 
 // The operating system picks the port unless somebody names one. It used to be
 // 3009 always, and the app forwarded there on trust: whatever program held that
@@ -61,51 +62,6 @@ function outsideHoldsNow(fresh = false): HeldChat[] {
 // The bar over a compaction fills against this project's own middle run, once
 // enough of them have been watched from beginning to end (bw-jaoz.14.9).
 rememberSummaryRuns(summaryMemoryOf(store));
-
-const TRANSCRIPT_WINDOW = 40;
-
-/** Which event began a folded row. Used only when one message also produced a
- * thinking row and a 40-anchor query therefore folded slightly more than 40
- * rows: the cursor moves to the first row actually sent, so none are skipped. */
-function starts(event: ReturnType<Store['transcriptWindow']>['events'][number], item: SessionView['items'][number]): boolean {
-  if (item.kind === 'message') return event.type === 'message.started' && event.messageId === item.id;
-  if (item.kind === 'thinking') return event.type === 'message.started' && event.messageId === item.id;
-  if (item.kind === 'tool') return event.type === 'tool.started' && event.toolCallId === item.id;
-  if (item.kind === 'ask') return event.type === 'ask.permission' && event.askId === item.id;
-  if (item.kind === 'note') return event.type === 'note' && event.noteId === item.id;
-  return event.type === 'notice' && `notice-${event.seq}` === item.id;
-}
-
-function transcriptPage(sessionId: string, before: number | null): {
-  items: SessionView['items']; cursor: number | null; hasOlder: boolean; newestSeq: number;
-} {
-  const page = store.transcriptWindow(sessionId, before, TRANSCRIPT_WINDOW);
-  const folded = foldAll(page.events.map(boundedEvent));
-  const visible = folded.items.slice(-TRANSCRIPT_WINDOW);
-  const truncated = visible.length < folded.items.length;
-  const first = visible[0];
-  const cursor = truncated && first
-    ? (page.events.find((event) => starts(event, first))?.seq ?? page.cursor)
-    : page.cursor;
-  return {
-    items: visible.map((item) => {
-      if (item.kind !== 'tool') return item;
-      const ran = whatItRan(item.name, item.input);
-      return {
-        ...item,
-        input: {},
-        output: null,
-        diff: null,
-        detailsDeferred: true,
-        ranKind: ran?.kind,
-        ranGrave: ran?.grave,
-      } satisfies TranscriptTool;
-    }),
-    cursor,
-    hasOlder: page.hasOlder || truncated,
-    newestSeq: page.newestSeq,
-  };
-}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -159,7 +115,7 @@ function streamEvents(req: IncomingMessage, res: ServerResponse, sessionId: stri
   };
 
   if (since === 0) {
-    const page = transcriptPage(sessionId, null);
+    const page = transcriptPage(store, sessionId, null);
     const facts = foldAll(store.sessionFactsEvents(sessionId).map(boundedEvent));
     const view: SessionView = {
       ...facts,
@@ -415,7 +371,7 @@ const server = createServer((req, res) => {
         const sessionId = url.searchParams.get('session');
         const before = Number(url.searchParams.get('before'));
         if (!sessionId || !Number.isFinite(before)) return json(res, 400, { error: 'session and before are required' });
-        const page = transcriptPage(sessionId, before);
+        const page = transcriptPage(store, sessionId, before);
         json(res, 200, {
           items: page.items,
           cursor: page.cursor,
