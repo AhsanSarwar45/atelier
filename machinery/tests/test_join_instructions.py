@@ -30,6 +30,10 @@ class JoinInstructionsTest(unittest.TestCase):
             codex_home = root / ".codex"
             claude_home.mkdir()
             codex_home.mkdir()
+            installed_policy = root / "installed" / "ATELIER_WORKFLOW.md"
+            installed_policy.parent.mkdir()
+            installed_policy.write_text((ROOT / "ATELIER_WORKFLOW.md").read_text())
+            join.POLICY = str(installed_policy)
             (claude_home / "CLAUDE.md").write_text("Claude-only personal rule.\n")
             (codex_home / "AGENTS.md").write_text("Codex-only personal rule.\n")
             join.MACHINE = str(claude_home)
@@ -45,7 +49,8 @@ class JoinInstructionsTest(unittest.TestCase):
             for provider in (claude, agents):
                 self.assertIn("atelier project mode", provider)
                 self.assertIn("## Useful widgets in chat", provider)
-                self.assertIn("ATELIER_WORKFLOW.md", provider)
+                self.assertIn(str(installed_policy), provider)
+                self.assertNotIn(str(JOIN.parent.parent / "ATELIER_WORKFLOW.md"), provider)
             self.assertEqual(list(project.iterdir()), [])
 
     def test_reinstalling_refreshes_one_personal_managed_block(self):
@@ -96,7 +101,7 @@ class JoinInstructionsTest(unittest.TestCase):
             where = Path(join.declaring(str(root)))
             declaration = where.read_text()
             self.assertRegex(declaration, r'(?m)^prefix = "[a-z]{3}"$')
-            self.assertIn("agent_merges = true", declaration)
+            self.assertIn("agent_merges = false", declaration)
             self.assertNotIn('prefix = ""', declaration)
 
 

@@ -69,10 +69,8 @@ HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 import project  # noqa: E402
 
-POLICY = os.path.join(os.path.dirname(HOME), "ATELIER_WORKFLOW.md")
-PROJECT_POLICY = "ATELIER_WORKFLOW.md"
-POLICY_BEGIN = "<!-- BEGIN ATELIER WORKFLOW -->"
-POLICY_END = "<!-- END ATELIER WORKFLOW -->"
+POLICY = os.environ.get("ATELIER_PERSONAL_POLICY") or \
+    os.path.join(os.path.dirname(HOME), "ATELIER_WORKFLOW.md")
 
 # Where a project that carried the tools itself kept them, and what belongs at
 # each path. The machinery's own layout is the other half of the pair.
@@ -924,7 +922,6 @@ def declaring(root):
     for was, now in ((r'^name = "example"$', 'name = ' + quoted(base)),
                      (r'^prefix = "ex"$', 'prefix = ' + quoted(prefix)),
                      (r'^lands_on = "main"$', 'lands_on = ' + quoted(branch)),
-                     (r'^agent_merges = false$', 'agent_merges = true'),
                      (r'^brand = "EXAMPLE"$', 'brand = ' + quoted(brand)),
                      (r'^checks = ".*"$', 'checks = ""'),
                      (r'^persona = ".*"$', 'persona = ' + quoted(
@@ -1044,25 +1041,6 @@ def unlisted(root):
     return []
 
 
-def unowned(decl):
-    """The one question about this project that only its owner can answer.
-
-    Nothing here can answer it: whether an agent may put work onto the lines this
-    project ships from is a permission, and a checkout that has said nothing is
-    protected. Said in its own function because joining asks it twice — once of a
-    project already running, and once, up front, of a project that has just been
-    written its first declaration and is about to be filled in by hand.
-    """
-    if decl.lands_on not in decl.protected:
-        return []
-    return ["machinery.toml does not say who lands work here, so %s is protected "
-            "— and a card here closes only once a commit naming it reaches %s. "
-            "Nothing can finish until this project answers: `agent_merges = true` "
-            "if agents land their own work, or a line they may land on in "
-            "`lands_on` with only what they may not in `protected`"
-            % (decl.lands_on, decl.lands_on)]
-
-
 def standing(root):
     """Every reason this project is not yet running the machinery."""
     said = []
@@ -1082,7 +1060,6 @@ def standing(root):
         said += unserved(root)
         said += unstated(root)
         said += unsigned(root)
-        said += unowned(decl)
     if decl.name not in project.registry():
         said.append("not in the register (%s)" % project.REGISTRY)
     said += unlisted(root)
@@ -1384,78 +1361,6 @@ def wire_codex(root, say):
         json.dump(held, fh, indent=2)
         fh.write("\n")
     say("wired  %s runs %d lifecycle gate(s)" % (where, len(wired)))
-
-
-def instruct(root, say):
-    """Copy the lifecycle and require both providers to read it before work."""
-    with open(POLICY) as source:
-        policy = source.read().strip()
-    if not ours(root):
-        prefix = "%s tool" % WORD if WORD else "python3 %s" % HOME
-        policy = policy.replace("machinery/board/job", prefix + "/board/job" if not WORD
-                                else prefix + " board/job")
-        policy = policy.replace("machinery/board/land", prefix + "/board/land" if not WORD
-                                else prefix + " board/land")
-        policy = policy.replace("machinery/checks", prefix + "/checks" if not WORD
-                                else prefix + " checks")
-    workflow = os.path.join(root, PROJECT_POLICY)
-    fresh_policy = policy + "\n"
-    try:
-        if os.path.exists(workflow):
-            with open(workflow) as source:
-                held_policy = source.read()
-        else:
-            held_policy = ""
-    except OSError as why:
-        say("kept   %s — it cannot be read (%s)" % (workflow, why))
-        held_policy = None
-    if held_policy is not None and held_policy != fresh_policy:
-        temporary = workflow + ".atelier-new"
-        with open(temporary, "w") as fh:
-            fh.write(fresh_policy)
-        os.replace(temporary, workflow)
-        say("taught %s the shared Atelier lifecycle" % workflow)
-
-    block = ("%s\n\n## Atelier workflow (managed)\n\n"
-             "Before doing any work, read and follow "
-             "[ATELIER_WORKFLOW.md](ATELIER_WORKFLOW.md).\n\n%s" % (
-                 POLICY_BEGIN, POLICY_END))
-    pattern = re.compile(re.escape(POLICY_BEGIN) + r".*?" +
-                         re.escape(POLICY_END), re.S)
-    for name in ("CLAUDE.md", "AGENTS.md"):
-        where = os.path.join(root, name)
-        try:
-            if os.path.exists(where):
-                with open(where) as source:
-                    held = source.read()
-            else:
-                held = ""
-        except OSError as why:
-            say("kept   %s — it cannot be read (%s)" % (where, why))
-            continue
-        fresh = pattern.sub(block, held) if pattern.search(held) else \
-            ((held.rstrip() + "\n\n") if held.strip() else "") + block + "\n"
-        if fresh == held:
-            continue
-        with open(where, "w") as fh:
-            fh.write(fresh)
-        say("taught %s the shared Atelier lifecycle" % where)
-
-
-def uninstructed(root):
-    said = []
-    workflow = os.path.join(root, PROJECT_POLICY)
-    if not os.path.isfile(workflow):
-        said.append("no managed Atelier workflow at %s" % workflow)
-    for name in ("CLAUDE.md", "AGENTS.md"):
-        where = os.path.join(root, name)
-        try:
-            text = open(where).read()
-        except OSError:
-            text = ""
-        if POLICY_BEGIN not in text or PROJECT_POLICY not in text:
-            said.append("no mandatory Atelier workflow reference in %s" % where)
-    return said
 
 
 def codex_unwired(root):

@@ -68,6 +68,7 @@ pub const CRAFT: &str = ".claude";
 /// The word `join` writes into a project's gates instead of a path, when this
 /// program is the one running it.
 const GATE_WORD: &str = "ATELIER_GATE_WORD";
+const PERSONAL_POLICY: &str = "ATELIER_PERSONAL_POLICY";
 
 /// Lay the rules down beside the data, and say where they went.
 pub fn install() -> Result<PathBuf, String> {
@@ -130,7 +131,11 @@ pub fn init(rest: &[String]) -> Result<i32, String> {
 pub fn install_personal() -> Result<i32, String> {
     let dir = install()?;
     let join = dir.join(MACHINERY).join("join");
-    run_python(&[join.display().to_string(), "--personal".to_string()], &[])
+    let policy = dir.join("ATELIER_WORKFLOW.md").display().to_string();
+    run_python(
+        &[join.display().to_string(), "--personal".to_string()],
+        &[(PERSONAL_POLICY, policy.as_str())],
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,7 +176,11 @@ fn init_with(
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
 
     let join = join_for(&root, &dir);
-    run_python(&[join.display().to_string(), "--personal".to_string()], &[])?;
+    let policy = dir.join("ATELIER_WORKFLOW.md").display().to_string();
+    run_python(
+        &[join.display().to_string(), "--personal".to_string()],
+        &[(PERSONAL_POLICY, policy.as_str())],
+    )?;
     let current = mode_from(&join, &root)?;
     let mode = match chosen {
         Some(mode) => mode,

@@ -150,6 +150,8 @@ registered() {
       ATELIER_PORT="$PORT" \
       ATELIER_HOST=127.0.0.1 \
       ATELIER_DATA_DIR="$WORK/data" \
+      ATELIER_CLAUDE_HOME="$WORK/claude" \
+      ATELIER_CODEX_HOME="$WORK/codex" \
       BEADS_WORKBENCH_PORT="$HELPER_PORT" \
       PATH="$PLACES" \
       "$WORK/atelier" service "$@" 2>&1

@@ -249,7 +249,9 @@ general capabilities remain available. Answering yes registers the main Git
 project once and completes its Beads setup; linked worktrees inherit the same
 board instead of becoming separate projects. An existing registration defaults
 to yes. Scripts can answer explicitly with `atelier init --beads` or
-`atelier init --chat`.
+`atelier init --chat`. New Beads projects keep their shipping branch protected;
+granting agents permission to merge remains a separate, explicit project-owner
+decision.
 
 Atelier installs its managed guidance into personal `~/.claude/CLAUDE.md` and
 `~/.codex/AGENTS.md`, preserving everything outside its marked block. General
