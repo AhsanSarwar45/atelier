@@ -26,6 +26,11 @@ class CopyLifecycle(unittest.TestCase):
         command = "git -C /repo worktree add worktrees/bw-missing -b bw-missing"
         self.assertIn("no readable Beads issue", gate.reason(bash(command)))
 
+    @patch.object(gate, "card_for", return_value={"id": "bw-123"})
+    def test_a_claude_managed_copy_can_be_cut_before_claim(self, _card):
+        command = "git -C /repo worktree add .claude/worktrees/bw-123 -b bw-123"
+        self.assertIsNone(gate.reason(bash(command)))
+
     @patch.object(gate, "checked_out_for", return_value=True)
     @patch.object(gate, "children_for", return_value=[{"status": "closed"}, {"status": "closed"}])
     @patch.object(gate, "card_for", return_value={"issue_type": "epic", "status": "in_progress", "assignee": "owner"})
@@ -43,6 +48,16 @@ class CopyLifecycle(unittest.TestCase):
     def test_a_copy_is_removed_before_its_teardown_card_closes(self, _card, _children, _checked):
         command = "rm -rf /repo/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
         self.assertIsNone(gate.reason(bash(command)))
+
+    @patch.object(gate, "checked_out_for", return_value=True)
+    @patch.object(gate, "card_for", return_value={"issue_type": "task", "status": "closed"})
+    def test_a_finished_claude_managed_copy_can_be_removed(self, _card, _checked):
+        command = "rm -rf /repo/.claude/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
+        self.assertIsNone(gate.reason(bash(command)))
+
+    def test_a_similar_unmanaged_path_is_not_a_teardown_escape(self):
+        command = "rm -rf /repo/other/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
+        self.assertIn("registered matching branch", gate.reason(bash(command)))
 
     @patch.object(gate, "checked_out_for", return_value=True)
     @patch.object(gate, "children_for", return_value=[

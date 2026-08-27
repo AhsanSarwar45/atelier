@@ -50,7 +50,12 @@ def copy_to_cut(command):
     root, target, issue = words[2], words[5], words[7]
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", issue):
         return None
-    expected = {os.path.join("worktrees", issue), os.path.join(root, "worktrees", issue)}
+    expected = {
+        os.path.join("worktrees", issue),
+        os.path.join(root, "worktrees", issue),
+        os.path.join(".claude", "worktrees", issue),
+        os.path.join(root, ".claude", "worktrees", issue),
+    }
     return (root, issue) if target in expected else None
 
 
@@ -70,7 +75,11 @@ def copy_to_remove(command):
     if words[13:15] != ["branch", "-d"]:
         return None
     issue = words[15]
-    if path != os.path.join(root, "worktrees", issue) or not re.fullmatch(r"[A-Za-z0-9_.-]+", issue):
+    expected = {
+        os.path.join(root, "worktrees", issue),
+        os.path.join(root, ".claude", "worktrees", issue),
+    }
+    if path not in expected or not re.fullmatch(r"[A-Za-z0-9_.-]+", issue):
         return None
     return root, path, issue
 
@@ -205,8 +214,11 @@ def reason(data):
                             if path.endswith(part)), path) for path in edited}
         if edited and normalized.issubset(RECOVERY_FILES):
             return None
+    removing = copy_to_remove(command)
     targets = WORKTREE.findall(patch) if isinstance(patch, str) else []
-    if targets:
+    if removing:
+        cwd = removing[1]
+    elif targets:
         cwd = os.path.join(os.path.realpath(data.get("cwd") or os.getcwd()), "worktrees", targets[0])
     match = WORKTREE.search(os.path.realpath(cwd))
     if not match:
@@ -230,7 +242,6 @@ def reason(data):
         active = active or bool(children and any(
             child.get("status") == "in_progress" and child.get("assignee")
             for child in children))
-    removing = copy_to_remove(command)
     if removing:
         _, path, removing_issue = removing
         if removing_issue != issue or not checked_out_for(issue, path):
