@@ -20,12 +20,9 @@ EDIT_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 GIT_MUTATIONS = {"add", "am", "checkout", "cherry-pick", "clean", "commit",
                  "merge", "mv", "rebase", "reset", "restore", "revert", "rm",
                  "switch", "update-ref"}
-BD_MUTATIONS = {"close", "create", "defer", "dep", "reopen", "supersede", "update"}
 FILE_MUTATIONS = {"apply_patch", "cp", "install", "mkdir", "mv", "rm", "touch",
                   "truncate"}
 PACKAGE_MUTATIONS = {"install", "add", "remove", "update"}
-BD_TAKES_VALUE = {"--actor", "--database", "--db", "--directory", "-C",
-                  "--dolt-auto-commit", "--mem-profile"}
 WORKTREE = re.compile(r"(?:^|/)worktrees/([^/\s]+)(?:/|\s|$)")
 RECOVERY_FILES = {
     ".codex/hooks.json",
@@ -91,21 +88,6 @@ def deny(reason):
     }}))
 
 
-def bd_verb(argv):
-    """The actual bd subcommand, ignoring its global switches and values."""
-    if not argv or os.path.basename(argv[0]) != "bd":
-        return ""
-    i = 1
-    while i < len(argv):
-        arg = argv[i]
-        if not arg.startswith("-"):
-            return arg.lower()
-        if "=" not in arg and arg in BD_TAKES_VALUE:
-            i += 1
-        i += 1
-    return ""
-
-
 def branch_mutates(argv):
     """Whether a git branch call changes a ref rather than listing it."""
     if bc.git_verb(argv) != "branch":
@@ -130,8 +112,6 @@ def shell_mutates(command):
             return True
         if git_verb == "worktree" and any(a in {"add", "move", "remove", "prune", "repair"}
                                            for a in argv[2:3]):
-            return True
-        if bd_verb(argv) in BD_MUTATIONS:
             return True
         if name in FILE_MUTATIONS:
             return True
@@ -231,7 +211,8 @@ def reason(data):
     """Return a refusal for a mutating call, or None when it may proceed."""
     supplied = data.get("tool_input") or {}
     if isinstance(supplied, dict):
-        cwd = supplied.get("workdir") or data.get("cwd") or os.getcwd()
+        cwd = (bc.where(data) if data.get("tool_name") == "Bash" else
+               supplied.get("workdir") or data.get("cwd") or os.getcwd())
         patch = (supplied.get("patch") or supplied.get("input") or
                  supplied.get("command") or "")
     else:
@@ -262,7 +243,9 @@ def reason(data):
         if edited and normalized.issubset(RECOVERY_FILES):
             return None
     removing = copy_to_remove(command)
-    targets = WORKTREE.findall(patch) if isinstance(patch, str) else []
+    targets = (WORKTREE.findall(patch)
+               if data.get("tool_name") in EDIT_TOOLS and isinstance(patch, str)
+               else [])
     if removing:
         cwd = removing[1]
     elif targets:

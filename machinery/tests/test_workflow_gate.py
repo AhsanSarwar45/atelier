@@ -57,7 +57,7 @@ class CopyLifecycle(unittest.TestCase):
 
     def test_a_similar_unmanaged_path_is_not_a_teardown_escape(self):
         command = "rm -rf /repo/other/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
-        self.assertIn("registered matching branch", gate.reason(bash(command)))
+        self.assertIn("dedicated ticket worktree", gate.reason(bash(command)))
 
     @patch.object(gate, "checked_out_for", return_value=True)
     @patch.object(gate, "children_for", return_value=[
@@ -97,11 +97,17 @@ class ShellClassification(unittest.TestCase):
         command = "git status --short; git rev-parse HEAD; bd show bw-123"
         self.assertFalse(gate.shell_mutates(command))
 
-    def test_real_git_and_board_mutations_are_detected(self):
+    def test_real_repository_mutations_are_detected(self):
         for command in ("git -C /repo commit -m done", "git branch -d topic",
-                        "bd --actor worker close bw-123", "git worktree prune"):
+                        "git worktree prune"):
             with self.subTest(command=command):
                 self.assertTrue(gate.shell_mutates(command))
+
+    def test_board_writes_are_left_to_the_independent_lifecycle_gate(self):
+        for command in ("bd --actor worker close bw-123", "bd update bw-123 --claim",
+                        "bd create temporary"):
+            with self.subTest(command=command):
+                self.assertFalse(gate.shell_mutates(command))
 
     def test_mutation_words_inside_arguments_are_only_text(self):
         for command in ('printf "git commit"', 'rg "bd close" file.py',
@@ -114,6 +120,11 @@ class ShellClassification(unittest.TestCase):
                         "printf value > result"):
             with self.subTest(command=command):
                 self.assertTrue(gate.shell_mutates(command))
+
+    def test_a_path_in_a_close_reason_is_not_a_working_directory(self):
+        command = ('bd close bw-123 --reason="removed '
+                   '/repo/worktrees/bw-123, then released the slot"')
+        self.assertIsNone(gate.reason(bash(command)))
 
 
 if __name__ == "__main__":
