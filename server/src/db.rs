@@ -254,12 +254,40 @@ impl Database {
             (4, "ALTER TABLE project_bead_counts ADD COLUMN manager_review INTEGER NOT NULL DEFAULT 0"),
             (5, "ALTER TABLE project_bead_counts ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0"),
             (6, "ALTER TABLE projects ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0"),
+            (7, "ALTER TABLE projects ADD COLUMN uses_beads INTEGER NOT NULL DEFAULT 1"),
         ];
 
         let now = Utc::now().to_rfc3339();
         for (version, sql) in migrations {
             if version > current_version {
                 conn.execute_batch(sql)?;
+                if version == 7 {
+                    // Older rows predate an explicit capability. Backfill that
+                    // one legacy ambiguity from the board layout the old app
+                    // required. After migration, the stored choice is the only
+                    // runtime truth; the UI never probes project files.
+                    let mut stmt = conn.prepare("SELECT id, path, local_path FROM projects")?;
+                    let rows = stmt
+                        .query_map([], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                            ))
+                        })?
+                        .collect::<SqliteResult<Vec<_>>>()?;
+                    drop(stmt);
+                    for (id, path, local_path) in rows {
+                        let has_board = path.starts_with("dolt://")
+                            || std::path::Path::new(local_path.as_deref().unwrap_or(&path))
+                                .join(".beads")
+                                .is_dir();
+                        conn.execute(
+                            "UPDATE projects SET uses_beads = ?1 WHERE id = ?2",
+                            params![has_board, id],
+                        )?;
+                    }
+                }
                 conn.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
                     params![version, now],
@@ -298,6 +326,18 @@ impl Database {
         }
 
         Ok(result)
+    }
+
+    /// Whether Atelier should expose board features for a saved project.
+    /// This is an explicit registration choice, not a filesystem probe.
+    pub fn project_uses_beads(&self, id: &str) -> Result<bool, DbError> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT uses_beads FROM projects WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(DbError::from)
     }
 
     /// Gets projects, optionally including archived and/or test projects

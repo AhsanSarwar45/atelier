@@ -95,7 +95,7 @@ export function useProjects(): UseProjectsResult {
       const beadsSignal = beadsAbortRef.current.signal;
 
       // Skip beads loading for archived projects
-      const activeData = data.filter(p => !p.archivedAt);
+      const activeData = data.filter(p => !p.archivedAt && p.usesBeads !== false);
 
       // Then load beads per-project, updating each as it completes
       let loaded = 0;

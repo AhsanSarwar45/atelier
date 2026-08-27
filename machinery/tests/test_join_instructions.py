@@ -119,7 +119,8 @@ class JoinInstructionsTest(unittest.TestCase):
             db = sqlite3.connect(screen)
             db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
                        "local_path TEXT, last_opened TEXT, created_at TEXT, "
-                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
+                       "is_test INTEGER DEFAULT 0, archived_at TEXT, "
+                       "uses_beads INTEGER NOT NULL DEFAULT 1)")
             db.commit()
             db.close()
             join.opened = lambda: sqlite3.connect(screen)
@@ -214,7 +215,8 @@ class JoinInstructionsTest(unittest.TestCase):
             db = sqlite3.connect(screen)
             db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
                        "local_path TEXT, last_opened TEXT, created_at TEXT, "
-                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
+                       "is_test INTEGER DEFAULT 0, archived_at TEXT, "
+                       "uses_beads INTEGER NOT NULL DEFAULT 1)")
             db.commit()
             db.close()
             join.opened = lambda: sqlite3.connect(screen)
@@ -222,9 +224,9 @@ class JoinInstructionsTest(unittest.TestCase):
             join.unregister(str(project), lambda _: None)
 
             db = sqlite3.connect(screen)
-            row = db.execute("SELECT name, path FROM projects").fetchone()
+            row = db.execute("SELECT name, path, uses_beads FROM projects").fetchone()
             db.close()
-            self.assertEqual(("Keystone", str(project)), row)
+            self.assertEqual(("Keystone", str(project), 0), row)
             self.assertFalse(Path(join.project.REGISTRY).exists())
             self.assertFalse(Path(join.project.declaration_path(str(project))).exists())
 

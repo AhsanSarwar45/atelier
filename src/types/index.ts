@@ -62,6 +62,8 @@ export interface Project {
    * asked for test projects explicitly; the frontend does not filter on it.
    */
   isTest?: boolean;
+  /** Whether this project opted into Beads-backed board features. */
+  usesBeads?: boolean;
   beadCounts?: BeadCounts;
   dataSource?: string;
   beadError?: string;

@@ -69,6 +69,8 @@ pub struct ProjectWithTagsAndCounts {
     #[serde(flatten)]
     pub project: ProjectWithTags,
     pub cached_counts: Option<CachedCounts>,
+    /// Controls whether the project has board UI and card reads.
+    pub uses_beads: bool,
 }
 
 /// GET /api/projects - List all projects with their tags and cached bead counts
@@ -103,6 +105,7 @@ pub async fn list_projects(
             }
         };
         result.push(ProjectWithTagsAndCounts {
+            uses_beads: db.project_uses_beads(&project.id).map_err(db_error_response)?,
             project,
             cached_counts,
         });
@@ -295,6 +298,7 @@ mod tests {
                 data_source: Some("cli".to_string()),
                 updated_at: "2026-04-22T10:00:00Z".to_string(),
             }),
+            uses_beads: true,
         };
         let json = serde_json::to_string(&entry).unwrap();
 
@@ -306,6 +310,7 @@ mod tests {
 
         // cachedCounts wrapper is camelCase
         assert!(json.contains("\"cachedCounts\":{"));
+        assert!(json.contains("\"usesBeads\":true"));
         // CachedCounts inner fields are camelCase
         assert!(json.contains("\"inProgress\":1"));
         assert!(json.contains("\"dataSource\":\"cli\""));
@@ -321,6 +326,7 @@ mod tests {
         let entry = ProjectWithTagsAndCounts {
             project: make_project_with_tags(),
             cached_counts: None,
+            uses_beads: false,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"cachedCounts\":null"));

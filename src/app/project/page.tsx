@@ -49,6 +49,18 @@ function ProjectTabs() {
   const { theme } = useTheme();
   const terminal = theme.headerVariant === 'terminal';
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const usesBeads = project?.usesBeads !== false;
+  const shownTab = usesBeads ? tab : 'chat';
+  const shownCard = usesBeads ? openCard : null;
+
+  // Old bookmarks can still name the board for a project that has since opted
+  // out. Draw chat immediately, then clean the address so refresh and Back do
+  // not lead back into a board read that can never succeed.
+  useEffect(() => {
+    if (project?.usesBeads === false && (tab === 'board' || openCard)) {
+      router.replace(addressWith(params, { tab: 'chat', card: null }));
+    }
+  }, [project?.usesBeads, tab, openCard, router, params]);
 
   /** A move he made by hand: it belongs in the history, so Back undoes it. */
   const go = useCallback(
@@ -94,7 +106,7 @@ function ProjectTabs() {
 
   return (
     <Shell
-      activeTab={tab}
+      activeTab={shownTab}
       barClassName={terminal ? 'terminal-header' : undefined}
       bar={
         <>
@@ -163,7 +175,7 @@ function ProjectTabs() {
           <WorkbenchStatus />
         </>
       }
-      tabs={
+      tabs={usesBeads ? (
         <Tabs
           value={tab}
           // Pushed, so the tab he left is a step back. It also keeps the chat or
@@ -182,7 +194,7 @@ function ProjectTabs() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-      }
+      ) : undefined}
     >
       {/* The project itself could not be read, so nothing under the tabs has
           anything to draw: every one of them is mounted only once the project
@@ -204,7 +216,7 @@ function ProjectTabs() {
         </div>
       )}
 
-      {tab === 'chat' && !projectError && (
+      {shownTab === 'chat' && !projectError && (
         <ChatTab projectId={projectId} projectPath={project?.path ?? null} openSessionId={openChat} />
       )}
 
@@ -212,20 +224,20 @@ function ProjectTabs() {
           moves the card behind it. It is
           mounted only when one of them is on screen, so the chat tab alone
           still pays nothing for the board (docs/designs/app-shell.md §1.6). */}
-      {(tab === 'board' || openCard) && project && (
+      {usesBeads && (shownTab === 'board' || shownCard) && project && (
         <BoardCards projectPath={project.path}>
           {/* Only the tab in front is mounted: a board kept alive behind the
               chat is paid for on every switch, both ways. */}
-          {tab === 'board' && (
+          {shownTab === 'board' && (
             <div className="flex min-h-0 flex-1 flex-col">
               <KanbanBoard />
             </div>
           )}
           {/* One card panel for the whole screen, over whichever tab is showing
               (docs/designs/app-shell.md §1.8). */}
-          {openCard && (
+          {shownCard && (
             <CardPanel
-              cardId={openCard}
+              cardId={shownCard}
               projectId={projectId}
               projectPath={project.path}
               projectLocalPath={project.localPath}

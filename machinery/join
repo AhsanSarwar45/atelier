@@ -957,7 +957,7 @@ def unregister(root, say):
             say("unlisted %s from the Beads project registry" % registered)
     # Chat-only is still an Atelier project: its card and chat remain, while the
     # absence from the Beads registry is what suppresses the board tab/workflow.
-    listing(registered, decl, say)
+    listing(registered, decl, say, uses_beads=False)
     metadata = project.declaration_path(registered)
     try:
         os.remove(metadata)
@@ -1073,7 +1073,7 @@ def opened():
         return None
 
 
-def listing(root, decl, say):
+def listing(root, decl, say, uses_beads=True):
     """Keep this project's row in the board screen's list, matched on where the
     project lives.
 
@@ -1090,21 +1090,36 @@ def listing(root, decl, say):
             % (root, where))
         return
     try:
-        row = db.execute("SELECT name, archived_at, is_test FROM projects "
-                         "WHERE path = ?", (root,)).fetchone()
+        columns = {column[1] for column in db.execute("PRAGMA table_info(projects)")}
+        capability = ", uses_beads" if "uses_beads" in columns else ""
+        row = db.execute(
+            "SELECT name, archived_at, is_test%s FROM projects WHERE path = ?"
+            % capability, (root,)).fetchone()
         if row is None:
             now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            db.execute("INSERT INTO projects (id, name, path, local_path, "
-                       "last_opened, created_at, is_test) VALUES (?,?,?,?,?,?,0)",
-                       (str(uuid.uuid4()), called(decl), root, None, now, now))
+            if capability:
+                db.execute("INSERT INTO projects (id, name, path, local_path, "
+                           "last_opened, created_at, is_test, uses_beads) "
+                           "VALUES (?,?,?,?,?,?,0,?)",
+                           (str(uuid.uuid4()), called(decl), root, None, now, now,
+                            int(uses_beads)))
+            else:
+                db.execute("INSERT INTO projects (id, name, path, local_path, "
+                           "last_opened, created_at, is_test) VALUES (?,?,?,?,?,?,0)",
+                           (str(uuid.uuid4()), called(decl), root, None, now, now))
             db.commit()
             say("shown  %s is on the board screen's list as %s" % (root, called(decl)))
             return
-        held, archived, test = row
-        if not archived and not test:
+        held, archived, test = row[:3]
+        recorded = bool(row[3]) if capability else uses_beads
+        if not archived and not test and recorded == uses_beads:
             return
-        db.execute("UPDATE projects SET archived_at = NULL, is_test = 0 "
-                   "WHERE path = ?", (root,))
+        if capability:
+            db.execute("UPDATE projects SET archived_at = NULL, is_test = 0, "
+                       "uses_beads = ? WHERE path = ?", (int(uses_beads), root))
+        else:
+            db.execute("UPDATE projects SET archived_at = NULL, is_test = 0 "
+                       "WHERE path = ?", (root,))
         db.commit()
         say("shown  %s was %s on the board screen's list and is back on it as %s"
             % (root, "archived" if archived else "marked a test project", held))

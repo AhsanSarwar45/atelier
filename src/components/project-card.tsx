@@ -61,6 +61,7 @@ interface ProjectCardProps {
   countsLoaded?: boolean;
   dataSource?: string;
   beadError?: string;
+  usesBeads?: boolean;
   archivedAt?: string;
   onTagsChange?: (tags: Tag[]) => void;
   onUpdated?: () => void;
@@ -79,6 +80,7 @@ export function ProjectCard({
   countsLoaded = true,
   dataSource,
   beadError,
+  usesBeads = true,
   archivedAt,
   onTagsChange,
   onUpdated,
@@ -141,7 +143,9 @@ export function ProjectCard({
     >
       {/* Top row: Donut left, Tags right */}
       <div className="flex items-start justify-between">
-        {beadError ? (
+        {!usesBeads ? (
+          <div className="h-9 w-9" aria-hidden="true" />
+        ) : beadError ? (
           <TooltipProvider delayDuration={300}>
             <Tooltip>
               <TooltipTrigger asChild>

@@ -46,6 +46,25 @@ beforeEach(() => {
 });
 
 describe('useProjects — cached counts seeding', () => {
+  it('never asks for card counts when a project is chat-only', async () => {
+    getProjectsWithTagsMock.mockResolvedValueOnce([{
+      id: 'chat',
+      name: 'Keystone',
+      path: '/dev/keystone',
+      tags: [],
+      lastOpened: '2026-04-22T00:00:00Z',
+      createdAt: '2026-04-22T00:00:00Z',
+      cachedCounts: null,
+      usesBeads: false,
+    }]);
+
+    const { result } = renderHook(() => useProjects());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(countsMock).not.toHaveBeenCalled();
+    expect(result.current.loadingStatus).toBeNull();
+  });
+
   it('seeds beadCounts from server cachedCounts on initial render', async () => {
     const project: Project = {
       id: 'p1',
