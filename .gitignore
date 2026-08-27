@@ -114,9 +114,8 @@ worktrees/
 .beads/proxieddb/
 *.gate.lock*
 
-# The machine's own list of which checkouts run this machinery. `machinery/join`
-# writes it and it is never the same on two computers; `machinery/projects.toml.example`
-# is the one that ships.
+# Optional legacy project registry. `machinery/join` migrates it once into
+# personal Atelier data; new registrations are never written here.
 /machinery/projects.toml
 
 # The dev server's own log, one machine's running notes.
