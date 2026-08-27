@@ -61,7 +61,7 @@ test('model and reasoning effort rows set defaults used by the next chat', async
       .toBe(value);
 
     await expect(page.getByTestId(`${pickerName}-default-${value}`)).toHaveAttribute('data-default', 'true');
-    await page.screenshot({ path: join(SHOTS, `${pickerName}-default.png`) });
+    await page.getByTestId(`${pickerName}-menu`).screenshot({ path: join(SHOTS, `${pickerName}-default.png`) });
     await page.reload();
   }
 
