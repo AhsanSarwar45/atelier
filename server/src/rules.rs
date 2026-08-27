@@ -48,6 +48,11 @@ struct Machinery;
 #[exclude = "**/*.pyc"]
 struct Craft;
 
+/// The lifecycle text is read by the personal provider instructions only when
+/// the current repository is registered for Beads. It travels beside the
+/// machinery instead of being copied into each repository.
+const BEADS_WORKFLOW: &[u8] = include_bytes!("../../ATELIER_WORKFLOW.md");
+
 /// Where the machinery lands under the rules folder.
 ///
 /// `project.py` reads its own file's path to find the registry beside it and
@@ -70,6 +75,7 @@ pub fn install() -> Result<PathBuf, String> {
     };
     let mut files = crate::laid_down::gather::<Machinery>(MACHINERY)?;
     files.extend(crate::laid_down::gather::<Craft>(CRAFT)?);
+    files.push(("ATELIER_WORKFLOW.md".to_string(), BEADS_WORKFLOW.to_vec()));
     crate::laid_down::install(&dir, &files)?;
     runnable(&dir, &files);
     Ok(dir)

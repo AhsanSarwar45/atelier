@@ -692,6 +692,9 @@ def there(path):
 
 
 MACHINE = os.path.expanduser("~/.claude")
+CODEX_MACHINE = os.path.expanduser("~/.codex")
+PERSONAL_BEGIN = "<!-- BEGIN ATELIER PERSONAL INSTRUCTIONS -->"
+PERSONAL_END = "<!-- END ATELIER PERSONAL INSTRUCTIONS -->"
 
 
 def same(here, there):
@@ -743,6 +746,52 @@ def install(say):
                 shutil.rmtree(link) if os.path.isdir(link) else os.remove(link)
             os.symlink(target, link)
             say("link   %s -> %s" % (link, target))
+    instruct_personal(say)
+
+
+def instruct_personal(say):
+    """Teach both providers about Atelier without touching any repository.
+
+    Chat presentation is universal, so it is written directly into the
+    personal instruction block. The board lifecycle remains one external file
+    and is conditional on the machine registry, not on files in a checkout.
+    """
+    with open(POLICY) as source:
+        policy = source.read().strip()
+    visual = policy.find("## Visual proof in chat")
+    chat = policy[visual:] if visual >= 0 else policy
+    workflow = os.path.abspath(POLICY)
+    block = ("%s\n\n## Atelier (managed)\n\n"
+             "Atelier chat capabilities are available in every project. "
+             "Before using a project board or changing repository files, run "
+             "`atelier project mode`. If it prints `beads`, read and follow "
+             "[%s](%s). If it prints `chat`, do not use Beads or its board "
+             "workflow for that project.\n\n%s\n\n%s" %
+             (PERSONAL_BEGIN, os.path.basename(workflow), workflow, chat,
+              PERSONAL_END))
+    pattern = re.compile(re.escape(PERSONAL_BEGIN) + r".*?" +
+                         re.escape(PERSONAL_END), re.S)
+    for where in (os.path.join(MACHINE, "CLAUDE.md"),
+                  os.path.join(CODEX_MACHINE, "AGENTS.md")):
+        try:
+            if os.path.exists(where):
+                with open(where) as source:
+                    held = source.read()
+            else:
+                held = ""
+        except OSError as why:
+            say("kept   %s — it cannot be read (%s)" % (where, why))
+            continue
+        fresh = pattern.sub(block, held) if pattern.search(held) else \
+            ((held.rstrip() + "\n\n") if held.strip() else "") + block + "\n"
+        if fresh == held:
+            continue
+        os.makedirs(os.path.dirname(where), exist_ok=True)
+        temporary = where + ".atelier-new"
+        with open(temporary, "w") as fh:
+            fh.write(fresh)
+        os.replace(temporary, where)
+        say("taught %s Atelier's personal chat capabilities" % where)
 
 
 BARE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -981,7 +1030,6 @@ def standing(root):
                     "`git -C %s config beads.role maintainer`" % (role or "unset", root))
     said += unwired(root)
     said += codex_unwired(root)
-    said += uninstructed(root)
     said += unguarded(root)
     said += untidy(root)
     return said, decl
@@ -1400,7 +1448,15 @@ def main():
                     help="leave forwarders where this project used to keep the tools")
     ap.add_argument("--check", action="store_true",
                     help="say where every registered project stands, and change nothing")
+    ap.add_argument("--personal", action="store_true",
+                    help="install personal provider capabilities, and join no project")
     a = ap.parse_args()
+
+    if a.personal:
+        said = []
+        install(said.append)
+        print("\n".join(said) or "nothing to do — personal Atelier instructions are current")
+        return
 
     if a.check or not a.path:
         bad = 0
@@ -1460,7 +1516,6 @@ def main():
     # copy that is about to stop existing.
     wire(root, said.append)
     wire_codex(root, said.append)
-    instruct(root, said.append)
     tidy(root, said.append)
     listing(root, decl, said.append)
     states(root, said.append)
