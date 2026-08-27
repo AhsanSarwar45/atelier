@@ -7,6 +7,7 @@ describe('video proof guidance', () => {
     const guidance = readFileSync(file, 'utf8');
     expect(guidance).toContain('`video` whenever showing video proof');
     expect(guidance).toContain('Never present\nvideo as a file link.');
-    expect(guidance).toContain('`video`: absolute local or HTTP(S) `src`');
+    expect(guidance).toContain('- `video`: `{"type":"video","src":"..."}`.');
+    expect(guidance).toMatch(/absolute local path or start with `http:`, `https:`/s);
   });
 });
