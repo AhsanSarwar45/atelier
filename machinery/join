@@ -741,6 +741,17 @@ def install(say):
     install_session_hooks(say)
 
 
+def install_tolerantly(say):
+    """Personal provider wiring is independent from project registration."""
+    try:
+        install(say)
+        return True
+    except OSError as why:
+        say("kept   personal provider setup could not be updated (%s); project "
+            "registration is still complete" % why)
+        return False
+
+
 def install_skills(say):
     """Expose the installed session and review skills to both providers."""
     source = os.path.join(HOME, "skills")
@@ -857,6 +868,7 @@ def register(root, decl, say):
     rather than appended to — a torn append would be read as a project that no
     longer exists.
     """
+    os.makedirs(os.path.dirname(project.REGISTRY), exist_ok=True)
     text = open(project.REGISTRY).read() if os.path.exists(project.REGISTRY) else ""
     if re.search(r"^\s*(?:%s|%s)\s*=" % (re.escape(decl.name),
                                             re.escape(quoted(decl.name))), text, re.M):
@@ -922,10 +934,12 @@ def project_root(root):
 
 
 def unregister(root, say):
-    """Remove external registration without changing the repository."""
-    registered = registered_root(root)
+    """Remove only Beads registration while keeping an Atelier project row."""
+    requested = os.path.abspath(os.path.expanduser(root))
+    registered = registered_root(requested)
     if registered is None:
-        return
+        registered = project_root(requested)
+    decl = project.of(registered)
     names = [name for name, path in project.registry().items()
              if os.path.realpath(path) == os.path.realpath(registered)]
     if os.path.exists(project.REGISTRY):
@@ -941,16 +955,9 @@ def unregister(root, say):
                 fh.write(fresh)
             os.replace(temporary, project.REGISTRY)
             say("unlisted %s from the Beads project registry" % registered)
-    db = opened()
-    if db is not None:
-        try:
-            removed = db.execute("DELETE FROM projects WHERE path IN (?, ?)",
-                                 (registered, os.path.realpath(registered))).rowcount
-            db.commit()
-            if removed:
-                say("hidden %s from the board screen" % registered)
-        finally:
-            db.close()
+    # Chat-only is still an Atelier project: its card and chat remain, while the
+    # absence from the Beads registry is what suppresses the board tab/workflow.
+    listing(registered, decl, say)
     metadata = project.declaration_path(registered)
     try:
         os.remove(metadata)
@@ -988,13 +995,36 @@ def declaring(root):
     return where
 
 
+def migrate_registry(say):
+    """Move the old rules-local registry into personal Atelier data once."""
+    legacy = project.LEGACY_REGISTRY
+    if os.path.exists(project.REGISTRY) or not os.path.exists(legacy):
+        return
+    os.makedirs(os.path.dirname(project.REGISTRY), exist_ok=True)
+    shutil.copyfile(legacy, project.REGISTRY)
+    say("moved  the project registry into personal Atelier data at %s" %
+        project.REGISTRY)
+
+
+def ensure_declaration(root, say):
+    """Preserve a legacy declaration byte-for-byte before inferring one."""
+    where = project.declaration_path(root)
+    if os.path.exists(where):
+        return where
+    legacy = project.legacy_declaration_path(root)
+    if os.path.exists(legacy):
+        os.makedirs(os.path.dirname(where), exist_ok=True)
+        shutil.copyfile(legacy, where)
+        say("moved  legacy project metadata into personal Atelier data at %s" % where)
+        return where
+    where = declaring(root)
+    say("wrote  %s — inferred external metadata for this project" % where)
+    return where
+
+
 def project_list():
     """Where the board screen keeps this machine's list of projects."""
-    if sys.platform == "darwin":
-        return os.path.expanduser("~/Library/Application Support/com.beads.%s/%s"
-                                  % (APP, LIST))
-    room = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    return os.path.join(room, APP, LIST)
+    return os.path.join(project.atelier_data_dir(), LIST)
 
 
 def called(decl):
@@ -1481,7 +1511,7 @@ def main():
 
     if a.personal:
         said = []
-        install(said.append)
+        install_tolerantly(said.append)
         print("\n".join(said) or "nothing to do — personal Atelier instructions are current")
         return
 
@@ -1491,6 +1521,7 @@ def main():
 
     if a.chat_only:
         said = []
+        migrate_registry(said.append)
         unregister(a.chat_only, said.append)
         print("\n".join(said) or "chat only — no Beads registration for %s" %
               os.path.realpath(a.chat_only))
@@ -1507,19 +1538,17 @@ def main():
         sys.exit(1 if bad else 0)
 
     requested = os.path.abspath(os.path.expanduser(a.path))
-    root = project_root(requested)
     said = []
+    migrate_registry(said.append)
+    root = project_root(requested)
+    ensure_declaration(root, said.append)
+    project._DECLS.clear()
+    project._ROOTS.clear()
     decl = project.of(root)
-    if not decl.declared:
-        said.append("wrote  %s — a declaration of this project's own, from the "
-                    "shape kept beside these tools" % declaring(root))
-        project._DECLS.clear()
-        project._ROOTS.clear()
-        decl = project.of(root)
     register(root, decl, said.append)
     project._DECLS.clear()
     project._ROOTS.clear()
-    install(said.append)
+    install_tolerantly(said.append)
     if a.forward:
         forwarders(root, said.append)
     code, role = git(["config", "--get", "beads.role"], root)

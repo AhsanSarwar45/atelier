@@ -5,6 +5,7 @@ import unittest
 import subprocess
 import sqlite3
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -141,10 +142,10 @@ class JoinInstructionsTest(unittest.TestCase):
             after = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
             self.assertEqual(after, before)
             db = sqlite3.connect(screen)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
             db.close()
 
-    def test_chat_only_removes_a_board_row_stored_through_a_symlink(self):
+    def test_chat_only_keeps_a_project_row_stored_through_a_symlink(self):
         join = load_join()
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
@@ -166,8 +167,69 @@ class JoinInstructionsTest(unittest.TestCase):
             join.unregister(str(alias), lambda _: None)
 
             db = sqlite3.connect(screen)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
             db.close()
+
+    def test_new_chat_only_project_is_added_to_atelier_without_beads_registration(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            project = root / "keystone"
+            project.mkdir()
+            join.project.REGISTRY = str(root / "personal/projects.toml")
+            join.project.LEGACY_REGISTRY = str(root / "rules/projects.toml")
+            screen = root / "settings.db"
+            db = sqlite3.connect(screen)
+            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
+                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
+                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
+            db.commit()
+            db.close()
+            join.opened = lambda: sqlite3.connect(screen)
+
+            join.unregister(str(project), lambda _: None)
+
+            db = sqlite3.connect(screen)
+            row = db.execute("SELECT name, path FROM projects").fetchone()
+            db.close()
+            self.assertEqual(("Keystone", str(project)), row)
+            self.assertFalse(Path(join.project.REGISTRY).exists())
+            self.assertFalse(Path(join.project.declaration_path(str(project))).exists())
+
+    def test_legacy_registry_and_declaration_move_to_personal_data_verbatim(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            project = root / "company-project"
+            project.mkdir()
+            legacy_registry = root / "rules/projects.toml"
+            legacy_registry.parent.mkdir()
+            legacy_registry.write_text('[projects]\ncompany = "%s"\n' % project)
+            personal_registry = root / "personal/projects.toml"
+            join.project.LEGACY_REGISTRY = str(legacy_registry)
+            join.project.REGISTRY = str(personal_registry)
+            legacy = project / "machinery.toml"
+            declaration = ('name = "company"\nprefix = "cmp"\nlands_on = "ship"\n'
+                           'agent_merges = true\nareas = ["billing", "api"]\n'
+                           'checks = "make test"\n[review]\npersona = "Company"\n'
+                           'proves = "run it"\n')
+            legacy.write_text(declaration)
+
+            messages = []
+            join.migrate_registry(messages.append)
+            join.ensure_declaration(str(project), messages.append)
+
+            self.assertEqual(personal_registry.read_text(), legacy_registry.read_text())
+            self.assertEqual(Path(join.project.declaration_path(str(project))).read_text(),
+                             declaration)
+            self.assertEqual(legacy.read_text(), declaration)
+
+    def test_provider_home_failure_does_not_fail_project_registration(self):
+        join = load_join()
+        messages = []
+        with mock.patch.object(join, "install", side_effect=OSError("read-only")):
+            self.assertFalse(join.install_tolerantly(messages.append))
+        self.assertIn("project registration is still complete", messages[0])
 
     def test_a_new_beads_declaration_needs_no_second_question(self):
         join = load_join()

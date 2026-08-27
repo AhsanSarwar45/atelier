@@ -18,12 +18,30 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tomllib
 
 HOME = os.path.dirname(os.path.realpath(__file__))
-# Every project that runs this machinery, by the name its own declaration gives
-# it. `machinery/join` writes it; nothing else does.
-REGISTRY = os.path.join(HOME, "projects.toml")
+
+
+def atelier_data_dir():
+    """The same personal data home the Atelier application uses."""
+    override = (os.environ.get("ATELIER_DATA_DIR") or "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Application Support/com.weselow.atelier")
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~/AppData/Roaming")
+        return os.path.join(base, "atelier")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "atelier")
+
+
+# Registration and inferred declarations are personal Atelier data, never files
+# inside a project checkout or inside the installed rules bundle.
+REGISTRY = os.path.join(atelier_data_dir(), "projects.toml")
+LEGACY_REGISTRY = os.path.join(HOME, "projects.toml")
 # The branch a project calls main when its declaration does not say.
 DEFAULT_LANDS_ON = "main"
 # The lines an agent may not write to in a project that has said nothing about
@@ -123,6 +141,11 @@ def declaration_path(path):
     return os.path.join(os.path.dirname(REGISTRY), "projects", digest + ".toml")
 
 
+def legacy_declaration_path(path):
+    """The repository-local declaration used before personal metadata."""
+    return os.path.join(checkout(path), "machinery.toml")
+
+
 def root(path=None):
     """The registered main checkout for path, or Git's checkout when unjoined."""
     here = os.path.abspath(path or os.getcwd())
@@ -211,7 +234,10 @@ def of(path=None):
     """The declaration of the project holding `path`."""
     where = root(path)
     if where not in _DECLS:
-        _DECLS[where] = Declaration(where, _read(declaration_path(where)))
+        data = _read(declaration_path(where))
+        if not data:
+            data = _read(legacy_declaration_path(where))
+        _DECLS[where] = Declaration(where, data)
     return _DECLS[where]
 
 
@@ -231,7 +257,8 @@ def registry():
     """Every registered project, name to path. A path that is no longer on the
     disk is dropped: a project that moved is not a project whose commits can be
     looked for."""
-    rows = (_read(REGISTRY).get("projects") or {})
+    source = REGISTRY if os.path.exists(REGISTRY) else LEGACY_REGISTRY
+    rows = (_read(source).get("projects") or {})
     return {name: os.path.expanduser(path) for name, path in rows.items()
             if os.path.exists(os.path.expanduser(path))}
 
