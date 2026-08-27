@@ -1,6 +1,6 @@
 {
   "name": "atelier",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "license": "MIT",
   "scripts": {
     "dev": "next dev -p 3007",
