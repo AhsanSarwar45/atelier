@@ -4,10 +4,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownBody } from '@/components/markdown-body';
 
 const { openExternal } = vi.hoisted(() => ({ openExternal: vi.fn() }));
+const { toast } = vi.hoisted(() => ({ toast: vi.fn() }));
 vi.mock('@/lib/api', () => ({ fs: { openExternal } }));
+vi.mock('@/hooks/use-toast', () => ({ toast }));
 
 describe('Markdown file links', () => {
-  beforeEach(() => openExternal.mockReset());
+  beforeEach(() => {
+    openExternal.mockReset();
+    openExternal.mockResolvedValue({ success: true });
+    toast.mockReset();
+  });
 
   it('opens an absolute path with the system default application', () => {
     render(<MarkdownBody>{'[proof](</home/me/proof.webm>)'}</MarkdownBody>);
@@ -25,5 +31,22 @@ describe('Markdown file links', () => {
     render(<MarkdownBody>{'[project](/project)'}</MarkdownBody>);
     expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', '/project');
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('leaves a temporary path in the browser because the backend forbids it', () => {
+    render(<MarkdownBody>{'[proof](</tmp/proof.webm>)'}</MarkdownBody>);
+    expect(screen.getByTestId('markdown-link')).toHaveAttribute('href', '/tmp/proof.webm');
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('tells the reader when the system opener refuses the file', async () => {
+    openExternal.mockRejectedValue(new Error('permission denied'));
+    render(<MarkdownBody>{'[proof](</home/me/proof.webm>)'}</MarkdownBody>);
+    fireEvent.click(screen.getByTestId('markdown-file-link'));
+    await vi.waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Could not open that file',
+      description: 'permission denied',
+      variant: 'destructive',
+    })));
   });
 });

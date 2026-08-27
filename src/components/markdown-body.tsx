@@ -14,6 +14,7 @@ import remarkGfm from "remark-gfm";
 
 import "highlight.js/styles/github-dark.css";
 
+import { toast } from "@/hooks/use-toast";
 import { fs } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
@@ -82,7 +83,7 @@ function wroteItOut(href: string, written: string): boolean {
 function localPath(href: string): string | null {
   // A leading slash is also an in-app URL. Limit Unix paths to the locations
   // people can actually link to under the backend's filesystem policy.
-  if (/^\/(home|Users|tmp)\//.test(href)) return href;
+  if (/^\/(home|Users)\//.test(href)) return href;
   if (/^[A-Za-z]:[\\/]/.test(href)) return href;
   if (href.startsWith('file://')) {
     try { return decodeURIComponent(new URL(href).pathname); } catch { return null; }
@@ -127,7 +128,13 @@ export function MarkdownBody({
                 href={href}
                 onClick={(event) => {
                   event.preventDefault();
-                  void fs.openExternal(path, 'finder');
+                  void fs.openExternal(path, 'finder').catch((error: unknown) =>
+                    toast({
+                      title: 'Could not open that file',
+                      description: error instanceof Error ? error.message : path,
+                      variant: 'destructive',
+                    }),
+                  );
                 }}
                 data-testid="markdown-file-link"
               />
