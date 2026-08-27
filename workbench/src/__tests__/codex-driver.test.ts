@@ -133,6 +133,45 @@ describe('Codex subagents on the common workbench protocol', () => {
 });
 
 describe('Codex app-server requests', () => {
+  it('switches collaboration modes through thread settings and carries the full preset into turns', async () => {
+    const calls: any[] = [];
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'thread';
+    driver.model = 'gpt-5.6-sol';
+    driver.effort = 'high';
+    driver.collaborationPresets = new Map([
+      ['default', { name: 'Default', mode: 'default', model: null, reasoning_effort: null }],
+      ['plan', { name: 'Plan', mode: 'plan', model: null, reasoning_effort: 'xhigh' }],
+    ]);
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.call = async (method: string, params: any) => {
+      calls.push([method, params]);
+      return method === 'turn/start' ? { turn: { id: 'turn' } } : {};
+    };
+
+    await driver.setCollaborationMode('plan');
+    await driver.send({ text: 'Ask before deciding', images: [] });
+
+    expect(calls[0]).toEqual(['thread/settings/update', {
+      threadId: 'thread',
+      collaborationMode: {
+        mode: 'plan',
+        settings: { model: 'gpt-5.6-sol', reasoning_effort: 'xhigh', developer_instructions: null },
+      },
+    }]);
+    expect(calls[1][1].collaborationMode).toEqual(calls[0][1].collaborationMode);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'session.pinned', collaborationMode: 'plan', permissionMode: null, model: null,
+    }));
+  });
+
+  it('rejects collaboration modes the provider did not advertise', async () => {
+    const driver = new CodexDriver() as any;
+    driver.collaborationPresets = new Map([['default', { mode: 'default' }]]);
+    await expect(driver.setCollaborationMode('invented')).rejects.toThrow('does not support collaboration mode');
+  });
+
   it('adapts shared image payloads to native local images and cleans them after the turn', async () => {
     const calls: any[] = [];
     const driver = new CodexDriver() as any;

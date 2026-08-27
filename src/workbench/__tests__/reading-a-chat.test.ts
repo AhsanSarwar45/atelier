@@ -78,8 +78,8 @@ function turn(n: number): WbpEvent[] {
 /** Everything a conversation can hold, with a re-read of its past in the middle. */
 function aWholeChat(turns: number): WbpEvent[] {
   const log: WbpEvent[] = [
-    said({ type: 'session.started', brand: 'claude', externalId: null, model: 'opus', permissionMode: 'default', cwd: '/w' }),
-    said({ type: 'session.menu', commands: [], skills: ['x'], models: [], permissionModes: ['default'], agentControls: ['stop', 'park', 'say'] }),
+    said({ type: 'session.started', brand: 'codex', externalId: null, model: 'opus', permissionMode: 'default', collaborationMode: 'default', cwd: '/w' }),
+    said({ type: 'session.menu', commands: [], skills: ['x'], models: [], permissionModes: ['default'], collaborationModes: [{ value: 'default', displayName: 'Default' }, { value: 'plan', displayName: 'Plan' }], agentControls: ['stop', 'park', 'say'] }),
     ...turn(0),
     said({ type: 'note', noteId: 'n1', rank: 'note', kind: 'compact', text: 'compacted', body: null }),
     said({ type: 'link.bead', beadId: 'bw-uiyz', via: 'tool' }),
@@ -96,7 +96,7 @@ function aWholeChat(turns: number): WbpEvent[] {
     said({ type: 'cost', cost: { kind: 'usd', usd: 1.5 } }),
     said({ type: 'context', used: 10, window: 100 }),
     said({ type: 'thinking.progress', tokens: 44 }),
-    said({ type: 'session.pinned', permissionMode: 'plan', model: null }),
+    said({ type: 'session.pinned', permissionMode: 'plan', model: null, collaborationMode: 'plan' }),
     said({ type: 'session.state', state: 'idle', label: 'Idle' }),
     said({ type: 'link.bead', beadId: 'bw-2uh1', via: 'tool' }),
   );

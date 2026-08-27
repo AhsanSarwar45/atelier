@@ -27,6 +27,7 @@ export interface StartOptions {
   model?: string;
   permissionMode: string;
   effort?: string;
+  collaborationMode?: string;
   /** Continue this brand-side session instead of opening a new one. */
   resume?: string;
   /** Called for every event the driver produces. */
@@ -51,6 +52,8 @@ export interface Driver {
   setMode(mode: string): Promise<void>;
   setModel(model: string): Promise<void>;
   setEffort(effort: string): Promise<void>;
+  /** Change provider-defined working style when this driver advertises one. */
+  setCollaborationMode?(mode: string): Promise<void>;
   /** Stop the turn in flight, leaving the session usable. */
   interrupt(): Promise<void>;
   /**

@@ -300,21 +300,30 @@ export function codexResolvedEffort(current: string | undefined, fallback: strin
 }
 
 export async function codexMenu(cwd: string, activeModel?: string): Promise<Bag> {
-  const [modelResult, skillResult] = await Promise.allSettled([
+  const [modelResult, skillResult, collaborationResult] = await Promise.allSettled([
     codexRequest('model/list', { includeHidden: false }, cwd),
     codexRequest('skills/list', { cwds: [cwd], forceReload: false }, cwd),
+    codexRequest('collaborationMode/list', {}, cwd),
   ]);
   const models = modelResult.status === 'fulfilled' ? modelResult.value.data ?? [] : [];
   const entries = skillResult.status === 'fulfilled' ? skillResult.value.data ?? [] : [];
   const skills = entries.flatMap((entry: Bag) => entry.skills ?? []).filter((skill: Bag) => skill.enabled !== false);
   const effortMenu = codexEffortMenu(models, activeModel);
+  const collaborationPresets = collaborationResult.status === 'fulfilled'
+    ? (collaborationResult.value.data ?? []).filter((preset: Bag) => typeof preset.mode === 'string')
+    : [];
+  const collaborationModes = collaborationPresets.map((preset: Bag) => ({
+    value: preset.mode,
+    displayName: preset.name || preset.mode.replace(/(^|[-_])\w/g, (part: string) => part.replace(/[-_]/, '').toUpperCase()),
+  }));
   return {
     commands: [...CODEX_SLASH_COMMANDS, ...skills.map((skill: Bag) => ({
       name: skill.name, description: skill.description || skill.shortDescription || '', kind: 'skill', execution: 'skill',
     }))],
     skills: skills.map((skill: Bag) => skill.name),
     models: [{ value: 'default', displayName: 'Default', description: 'Use the Codex default model' }, ...models.map((m: Bag) => ({ value: m.model, displayName: m.displayName, description: m.description }))],
-    permissionModes: MODES, ...effortMenu, agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
+    permissionModes: MODES, collaborationModes, collaborationPresets, ...effortMenu,
+    agentControls: ['stop', 'say'], agentDefinitions: codexAgentDefinitions(cwd),
     skillPaths: Object.fromEntries(skills.map((skill: Bag) => [skill.name, skill.path])),
   };
 }
@@ -508,6 +517,8 @@ export class CodexDriver implements Driver {
   private turnId: string | null = null;
   private model: string | undefined;
   private effort: string | undefined;
+  private collaborationMode = 'default';
+  private collaborationPresets = new Map<string, Bag>();
   private mode = 'on-request';
   private cwd = process.cwd();
   private skills = new Map<string, string>();
@@ -525,6 +536,7 @@ export class CodexDriver implements Driver {
     this.cwd = opts.cwd;
     this.model = opts.model === 'default' ? undefined : opts.model;
     this.effort = opts.effort;
+    this.collaborationMode = opts.collaborationMode ?? 'default';
     this.mode = MODES.includes(opts.permissionMode) ? opts.permissionMode : 'on-request';
     const executable = process.env.CODEX_PATH || 'codex';
     this.child = spawn(executable, ['app-server', '--stdio'], {
@@ -560,6 +572,7 @@ export class CodexDriver implements Driver {
     this.emit({
       type: 'session.started', brand: 'codex', externalId: this.threadId,
       model: this.model ?? null, cwd: opened.cwd || opts.cwd, permissionMode: this.mode, effort: this.effort ?? null,
+      collaborationMode: this.collaborationMode,
     });
     await this.menu();
     await this.backgroundTerminals();
@@ -589,6 +602,7 @@ export class CodexDriver implements Driver {
       } else {
         const result = await this.call('turn/start', {
           threadId: this.threadId, input: content, model: this.model ?? null, approvalPolicy: this.mode, effort: this.effort ?? null,
+          collaborationMode: this.collaborationModePayload(this.collaborationMode),
         });
         this.turnId = result.turn.id;
       }
@@ -644,6 +658,30 @@ export class CodexDriver implements Driver {
     this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort });
   }
 
+  async setCollaborationMode(mode: string): Promise<void> {
+    if (!this.collaborationPresets.has(mode)) throw new Error(`Codex does not support collaboration mode "${mode}"`);
+    this.collaborationMode = mode;
+    if (this.threadId) {
+      await this.call('thread/settings/update', {
+        threadId: this.threadId,
+        collaborationMode: this.collaborationModePayload(mode),
+      });
+    }
+    this.emit({ type: 'session.pinned', permissionMode: null, model: null, collaborationMode: mode });
+  }
+
+  private collaborationModePayload(mode: string): Bag {
+    const preset = this.collaborationPresets.get(mode) ?? { mode };
+    return {
+      mode,
+      settings: {
+        model: preset.model ?? this.model ?? 'default',
+        reasoning_effort: preset.reasoning_effort ?? this.effort ?? null,
+        developer_instructions: null,
+      },
+    };
+  }
+
   async interrupt(): Promise<void> {
     this.resolveAsks('deny');
     if (this.threadId && this.turnId) await this.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
@@ -680,13 +718,20 @@ export class CodexDriver implements Driver {
 
   private async menu(): Promise<void> {
     const menu = await codexMenu(this.cwd, this.model);
+    this.collaborationPresets = new Map((menu.collaborationPresets ?? []).map((preset: Bag) => [preset.mode, preset]));
+    if (!this.collaborationPresets.has(this.collaborationMode)) {
+      this.collaborationMode = this.collaborationPresets.has('default')
+        ? 'default'
+        : (menu.collaborationModes[0]?.value ?? this.collaborationMode);
+      this.emit({ type: 'session.pinned', permissionMode: null, model: null, collaborationMode: this.collaborationMode });
+    }
     this.skills = new Map(Object.entries(menu.skillPaths ?? {}));
     const resolvedEffort = codexResolvedEffort(this.effort, menu.defaultEffort);
     if (resolvedEffort !== this.effort) {
       this.effort = resolvedEffort;
       this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort: this.effort });
     }
-    const { skillPaths: _skillPaths, defaultEffort: _defaultEffort, ...shown } = menu;
+    const { skillPaths: _skillPaths, defaultEffort: _defaultEffort, collaborationPresets: _collaborationPresets, ...shown } = menu;
     this.commands = shown.commands;
     this.emit({ type: 'session.menu', ...shown } as DriverEvent);
   }

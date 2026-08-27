@@ -240,6 +240,7 @@ export class Sessions {
     model?: string;
     permissionMode?: string;
     effort?: string;
+    collaborationMode?: string;
     brief?: { beadId: string; text: string };
   }): Promise<SessionSummary> {
     const now = new Date().toISOString();
@@ -259,6 +260,7 @@ export class Sessions {
       model: params.model ?? owner.model ?? null,
       permissionMode: params.permissionMode ?? owner.permissionMode ?? defaultPermissionMode(params.brand),
       effort: params.effort ?? owner.effort ?? null,
+      collaborationMode: params.collaborationMode ?? null,
       title: null,
       state: 'starting',
       createdAt: now,
@@ -1425,6 +1427,7 @@ export class Sessions {
       model,
       permissionMode: summary.permissionMode,
       effort: summary.effort ?? undefined,
+      collaborationMode: summary.collaborationMode ?? undefined,
       resume,
       emit: (e) => this.publish(summary.id, e),
     });
@@ -1441,6 +1444,7 @@ export class Sessions {
       permissionMode: summary.permissionMode,
       model: model ?? summary.model ?? null,
       effort: started.effort,
+      collaborationMode: started.collaborationMode ?? null,
     });
   }
 
@@ -1538,7 +1542,7 @@ export class Sessions {
    * His settings are still READ — a brand new chat opens on what they say
    * (`start`) — and nothing in the app writes to them any more.
    */
-  async pin(sessionId: string, what: { mode?: string; model?: string; effort?: string }): Promise<void> {
+  async pin(sessionId: string, what: { mode?: string; model?: string; effort?: string; collaborationMode?: string }): Promise<void> {
     const driver = this.require(sessionId);
     if (what.mode !== undefined) {
       await driver.setMode(what.mode);
@@ -1552,12 +1556,18 @@ export class Sessions {
       await driver.setEffort(what.effort);
       this.store.updateSession(sessionId, { effort: what.effort });
     }
+    if (what.collaborationMode !== undefined) {
+      if (!driver.setCollaborationMode) throw new Error('This provider does not support collaboration modes');
+      await driver.setCollaborationMode(what.collaborationMode);
+      this.store.updateSession(sessionId, { collaborationMode: what.collaborationMode });
+    }
     const now = this.store.getSession(sessionId);
     this.publish(sessionId, {
       type: 'session.pinned',
       permissionMode: now?.permissionMode ?? null,
       model: now?.model ?? null,
       effort: now?.effort ?? null,
+      collaborationMode: now?.collaborationMode ?? null,
     });
   }
 
@@ -1769,6 +1779,9 @@ export class Sessions {
       // (bw-1u1.43).
       if (full.permissionMode !== null) {
         this.store.updateSession(sessionId, { permissionMode: full.permissionMode });
+      }
+      if (full.collaborationMode != null) {
+        this.store.updateSession(sessionId, { collaborationMode: full.collaborationMode });
       }
       // And the model for the same reason. This event is also how a chat this
       // app does not drive says what it is running, read from its own record by

@@ -141,6 +141,10 @@ const MIGRATIONS: string[] = [
   // Provider-neutral reasoning budget, nullable for conversations created by
   // providers or builds that did not report one.
   `ALTER TABLE session ADD COLUMN effort TEXT;`,
+
+  // Provider-defined working style (for example Codex default/plan), distinct
+  // from the approval policy stored in permission_mode.
+  `ALTER TABLE session ADD COLUMN collaboration_mode TEXT;`,
 ];
 
 export class Store {
@@ -214,12 +218,12 @@ export class Store {
     this.db
       .prepare(
         `INSERT INTO session (id, brand, external_id, project_id, project_path, cwd, model,
-           permission_mode, effort, title, state, origin, created_at, last_active_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+           permission_mode, effort, collaboration_mode, title, state, origin, created_at, last_active_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         s.id, s.brand, s.externalId, s.projectId, s.projectPath, s.cwd, s.model,
-        s.permissionMode, s.effort ?? null, s.title, s.state, s.origin, s.createdAt, s.lastActiveAt,
+        s.permissionMode, s.effort ?? null, s.collaborationMode ?? null, s.title, s.state, s.origin, s.createdAt, s.lastActiveAt,
       );
   }
 
@@ -231,7 +235,7 @@ export class Store {
    */
   updateSession(
     id: string,
-    patch: Partial<Pick<SessionSummary, 'externalId' | 'title' | 'state' | 'model' | 'permissionMode' | 'effort'>>,
+    patch: Partial<Pick<SessionSummary, 'externalId' | 'title' | 'state' | 'model' | 'permissionMode' | 'effort' | 'collaborationMode'>>,
     touch = true,
   ): void {
     const sets: string[] = [];
@@ -242,6 +246,7 @@ export class Store {
     if ('model' in patch) { sets.push('model = ?'); vals.push(patch.model ?? null); }
     if ('permissionMode' in patch) { sets.push('permission_mode = ?'); vals.push(patch.permissionMode ?? null); }
     if ('effort' in patch) { sets.push('effort = ?'); vals.push(patch.effort ?? null); }
+    if ('collaborationMode' in patch) { sets.push('collaboration_mode = ?'); vals.push(patch.collaborationMode ?? null); }
     if (touch) {
       sets.push('last_active_at = ?');
       vals.push(new Date().toISOString());
@@ -711,6 +716,7 @@ function rowToSummary(r: Record<string, unknown>): SessionSummary {
     model: (r.model as string) ?? null,
     permissionMode: r.permission_mode as string,
     effort: (r.effort as string) ?? null,
+    collaborationMode: (r.collaboration_mode as string) ?? null,
     title: (r.title as string) ?? null,
     state: r.state as SessionSummary['state'],
     createdAt: r.created_at as string,

@@ -124,6 +124,13 @@ export interface EffortChoice {
   description?: string;
 }
 
+/** One provider-defined working style, independent of tool permissions. */
+export interface CollaborationModeChoice {
+  value: string;
+  displayName: string;
+  description?: string;
+}
+
 export interface AgentDefinition {
   name: string;
   description: string;
@@ -139,7 +146,7 @@ interface EventBase {
 
 export type WbpEvent = EventBase &
   (
-    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null }
+    | { type: 'session.started'; brand: Brand; externalId: string | null; model: string | null; cwd: string; permissionMode: string; effort?: string | null; collaborationMode?: string | null }
     | { type: 'session.state'; state: SessionState; label: string }
     /**
      * Everything this session can offer: the commands and skills the install
@@ -154,6 +161,7 @@ export type WbpEvent = EventBase &
         skills: string[];
         models: ModelChoice[];
         permissionModes: string[];
+        collaborationModes?: CollaborationModeChoice[];
         efforts?: EffortChoice[];
         agentDefinitions?: AgentDefinition[];
         /**
@@ -174,7 +182,7 @@ export type WbpEvent = EventBase &
      * ends plan mode). A field that is `null` is one this message says nothing
      * about, and the reader keeps what it had (bw-1u1.43).
      */
-    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null }
+    | { type: 'session.pinned'; permissionMode: string | null; model: string | null; effort?: string | null; collaborationMode?: string | null }
     | { type: 'session.ended'; reason: string }
     /**
      * `parentToolCallId` is set when a SENT-OFF agent said this, and names the
@@ -492,6 +500,7 @@ export type WbpCommand =
       model?: string;
       permissionMode?: string;
       effort?: string;
+      collaborationMode?: string;
       brief?: Brief;
     }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; takeover?: boolean }
@@ -520,6 +529,7 @@ export type WbpCommand =
   | { type: 'session.mode'; sessionId: string; mode: string }
   | { type: 'session.model'; sessionId: string; model: string }
   | { type: 'session.effort'; sessionId: string; effort: string }
+  | { type: 'session.collaboration-mode'; sessionId: string; mode: string }
   | {
       /**
        * Open a chat for reading: give a conversation begun elsewhere an id, read
@@ -740,6 +750,7 @@ export interface SessionSummary {
   model: string | null;
   permissionMode: string;
   effort?: string | null;
+  collaborationMode?: string | null;
   title: string | null;
   state: SessionState;
   createdAt: string;
