@@ -180,7 +180,19 @@ test.describe('a picture in a chat that already happened', () => {
       await thumbnail.click();
       await expect(page.getByTestId('picture-viewer')).toBeVisible();
       await expect(page.getByTestId('picture-viewer-image')).toBeVisible();
-      await page.screenshot({ path: join(SHOTS, 'chat-picture.png'), fullPage: false });
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await expect(page.getByTestId('picture-transform')).toHaveAttribute('data-scale', '2');
+      const viewport = page.getByTestId('picture-zoom-viewport');
+      const box = await viewport.boundingBox();
+      expect(box).not.toBeNull();
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box!.x + box!.width / 2 + 100, box!.y + box!.height / 2 + 60);
+      await page.mouse.up();
+      await expect(page.getByTestId('picture-transform')).toHaveAttribute('data-pan-x', '100');
+      await expect(page.getByTestId('picture-transform')).toHaveAttribute('data-pan-y', '60');
+      await page.screenshot({ path: join(SHOTS, 'chat-picture-zoomed.png'), fullPage: false });
 
       // And it closes again, so the chat is not left behind a sheet.
       await page.keyboard.press('Escape');

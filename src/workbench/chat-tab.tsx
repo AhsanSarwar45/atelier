@@ -82,6 +82,9 @@ import { isBusy, readImage, sendCommand, useSession, useSessionFacts, type Trans
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
+import { PictureViewer } from '@/workbench/picture-viewer';
+
+export { PictureViewer } from '@/workbench/picture-viewer';
 
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
@@ -349,65 +352,6 @@ function CommandMenu({
  * same ones every other popup in the app gets, rather than a backdrop and a key
  * listener this screen kept for itself (bw-dks8.10).
  */
-export function PictureViewer({ image, onClose }: { image: LookableImage; onClose: () => void }) {
-  const comparison: ImageComparison | null = 'mode' in image ? image : null;
-  const single: ImagePayload | null = 'mode' in image ? null : image;
-  const label = comparison ? `${comparison.before.alt} and ${comparison.after.alt}` : single?.alt;
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent
-        shape="screen"
-        hideClose
-        overlayClassName="bg-black/80"
-        aria-describedby={undefined}
-        aria-label={label || 'Picture'}
-        data-testid="picture-viewer"
-        className="flex items-center justify-center p-2 sm:p-6"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-      >
-        <DialogTitle className="sr-only">{label || 'Picture'}</DialogTitle>
-        {comparison ? (
-          <div data-testid="picture-viewer-comparison" className="grid max-h-full w-full grid-cols-2 gap-3">
-            {[comparison.before, comparison.after].map((side) => (
-              <figure key={side.dataUrl} className="flex min-h-0 min-w-0 flex-col items-center gap-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={side.dataUrl} alt={side.alt} className="min-h-0 max-h-[calc(100vh-5rem)] max-w-full rounded object-contain shadow-2xl" />
-                <figcaption className="text-sm text-white">{side.alt}</figcaption>
-              </figure>
-            ))}
-          </div>
-        ) : (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            data-testid="picture-viewer-image"
-            src={single!.dataUrl}
-            alt={single!.alt}
-            className="max-h-full max-w-full rounded shadow-2xl"
-          />
-        )}
-        <Button
-          variant="ghost"
-          mode="icon"
-          size="sm"
-          aria-label="Close the picture"
-          data-testid="picture-viewer-close"
-          className="absolute right-4 top-4 text-white"
-          onClick={onClose}
-        >
-          <X className="h-5 w-5" />
-        </Button>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 /**
  * The one click back to the newest words.
  *

@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { ZoomIn } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import type { ImageComparison } from '@/workbench/protocol';
 import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
@@ -77,6 +79,18 @@ export function ImageComparisonView({ comparison, onLook }: {
       <div className="absolute inset-y-0 w-0.5 cursor-ew-resize bg-background" style={{ left: `${pct}%` }} />
       <Badge variant="outline" size="xs" className="absolute bottom-2 left-2 bg-background">{comparison.before.alt}</Badge>
       <Badge variant="outline" size="xs" className="absolute bottom-2 right-2 bg-background">{comparison.after.alt}</Badge>
+      <Button
+        variant="secondary"
+        mode="icon"
+        size="sm"
+        radius="full"
+        aria-label="Open comparison to zoom"
+        className="absolute right-2 top-2 z-10 shadow"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => onLook(comparison)}
+      >
+        <ZoomIn />
+      </Button>
     </div>
     </Panel>
   );
