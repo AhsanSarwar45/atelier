@@ -34,6 +34,26 @@ class CopyLifecycle(unittest.TestCase):
         self.assertIsNone(gate.reason(bash(command)))
 
     @patch.object(gate, "checked_out_for", return_value=True)
+    @patch.object(gate, "children_for", return_value=[
+        {"status": "closed", "labels": ["step:work"]},
+        {"status": "in_progress", "assignee": "worker",
+         "labels": ["step:land", "no-code"]},
+    ])
+    @patch.object(gate, "card_for", return_value={"issue_type": "epic", "status": "in_progress"})
+    def test_a_copy_is_removed_before_its_teardown_card_closes(self, _card, _children, _checked):
+        command = "rm -rf /repo/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
+        self.assertIsNone(gate.reason(bash(command)))
+
+    @patch.object(gate, "checked_out_for", return_value=True)
+    @patch.object(gate, "children_for", return_value=[
+        {"status": "open", "labels": ["step:land"]},
+    ])
+    @patch.object(gate, "card_for", return_value={"issue_type": "epic", "status": "in_progress"})
+    def test_a_land_named_code_card_does_not_bypass_unfinished_work(self, _card, _children, _checked):
+        command = "rm -rf /repo/worktrees/bw-123 && git -C /repo worktree prune && git -C /repo branch -d bw-123"
+        self.assertIn("unfinished children", gate.reason(bash(command)))
+
+    @patch.object(gate, "checked_out_for", return_value=True)
     @patch.object(gate, "children_for", return_value=[{"status": "in_progress", "assignee": "worker"}])
     @patch.object(gate, "card_for", return_value={"issue_type": "epic", "status": "in_progress"})
     def test_an_active_jobs_copy_stays(self, _card, _children, _checked):

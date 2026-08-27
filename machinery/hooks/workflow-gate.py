@@ -160,6 +160,17 @@ def children_for(issue, cwd):
         return None
 
 
+def is_teardown(child):
+    """Whether a child is the no-code land step that removes its own copy.
+
+    That step must still be open while its copy is removed: the independent
+    status gate refuses to close it until the copy is gone. Treating it as
+    unfinished work here makes those two safety rules wait on each other.
+    """
+    labels = set(child.get("labels") or [])
+    return "step:land" in labels and "no-code" in labels
+
+
 def reason(data):
     """Return a refusal for a mutating call, or None when it may proceed."""
     supplied = data.get("tool_input") or {}
@@ -229,6 +240,7 @@ def reason(data):
         # own bookkeeping status is not live work inside the copy; its children
         # are the authoritative answer.
         removal_active = (bool(children and any(
+            not is_teardown(child) and
             child.get("status") == "in_progress" and child.get("assignee")
             for child in children)) if card.get("issue_type") == "epic" else active)
         if removal_active:
@@ -236,7 +248,8 @@ def reason(data):
         if card.get("issue_type") == "epic":
             if children is None:
                 return "The child beads for epic %s could not be read." % issue
-            if any(child.get("status") != "closed" for child in children):
+            if any(child.get("status") != "closed" and not is_teardown(child)
+                   for child in children):
                 return "Beads issue %s still has unfinished children, so its separate copy stays." % issue
         elif card.get("status") != "closed":
             return "Beads issue %s is not finished, so its separate copy stays." % issue
