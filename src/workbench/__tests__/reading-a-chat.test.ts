@@ -154,6 +154,10 @@ class FakeStream {
     opened.push(this);
   }
 
+  private owner(): string {
+    return new URL(this.url).searchParams.get('chat') ?? '';
+  }
+
   close(): void {
     this.closed = true;
   }
@@ -166,12 +170,12 @@ class FakeStream {
    * screen copes with the shape it wrote itself.
    */
   hands(view: SessionView | Record<string, unknown>): void {
-    this.onmessage?.(tagged('chat.snapshot', JSON.stringify(view)));
+    this.onmessage?.(tagged('chat.snapshot', JSON.stringify(view), this.owner()));
   }
 
   /** One event arriving live, after the conversation was drawn. */
   says(e: WbpEvent): void {
-    this.onmessage?.(tagged('chat', JSON.stringify(e)));
+    this.onmessage?.(tagged('chat', JSON.stringify(e), this.owner()));
   }
 
   dies(): void {

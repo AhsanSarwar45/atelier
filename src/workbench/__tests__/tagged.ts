@@ -7,6 +7,6 @@
  * in these cases speak the shape the real server speaks rather than each
  * spelling it out again.
  */
-export function tagged(tag: string, data: string): { data: string } {
-  return { data: JSON.stringify({ tag, data }) };
+export function tagged(tag: string, data: string, scope?: string): { data: string } {
+  return { data: JSON.stringify({ tag, data, ...(scope ? { scope } : {}) }) };
 }

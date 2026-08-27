@@ -38,8 +38,8 @@ class Stream {
   }
 
   /** The server says something on this connection, on the feed named. */
-  says(tag: string, data: string): void {
-    this.onmessage?.(tagged(tag, data));
+  says(tag: string, data: string, scope?: string): void {
+    this.onmessage?.(tagged(tag, data, scope));
   }
 
   /** The connection goes away under the window, rather than being hung up. */
@@ -151,8 +151,8 @@ describe('one wire', () => {
     const wire = Stream.open[0];
     wire.says('board', JSON.stringify({ path: '/work/atelier/.beads/issues.jsonl', type: 'modify' }));
     wire.says('workbench', '{"kind":"snapshot"}');
-    wire.says('chat', '{"type":"text"}');
-    wire.says('chat.snapshot', '{"lastSeq":3}');
+    wire.says('chat', '{"type":"text"}', 'abc');
+    wire.says('chat.snapshot', '{"lastSeq":3}', 'abc');
 
     expect(boardSaw).toEqual(['/work/atelier/.beads/issues.jsonl']);
     expect(helperSaw).toEqual(['{"kind":"snapshot"}']);
@@ -180,13 +180,42 @@ describe('one wire', () => {
       event: (data) => secondSaw.push(data),
       since: () => 0,
     });
-    firstWire.says('chat', 'belongs only to first');
+    firstWire.says('chat', 'belongs only to first', 'first');
 
     expect(firstSaw).toEqual([]);
     expect(secondSaw).toEqual([]);
     await settled();
-    Stream.open[0]!.says('chat', 'belongs only to second');
+    Stream.open[0]!.says('chat', 'belongs only to second', 'second');
     expect(secondSaw).toEqual(['belongs only to second']);
+  });
+
+  it('never hands a frame with another chat’s identity to the open chat', async () => {
+    const saw: string[] = [];
+    const snapshots: string[] = [];
+    onChat('selected', {
+      snapshot: (data) => snapshots.push(data),
+      event: (data) => saw.push(data),
+      since: () => 0,
+    });
+    await settled();
+
+    Stream.open[0]!.says('chat', 'foreign sequence', 'some-other-chat');
+    Stream.open[0]!.says('chat.snapshot', 'foreign snapshot', 'some-other-chat');
+    Stream.open[0]!.says('chat', 'selected sequence', 'selected');
+    Stream.open[0]!.says('chat.snapshot', 'selected snapshot', 'selected');
+
+    expect(saw).toEqual(['selected sequence']);
+    expect(snapshots).toEqual(['selected snapshot']);
+  });
+
+  it('drops an unowned chat frame instead of guessing from the active chat', async () => {
+    const saw: string[] = [];
+    onChat('selected', { snapshot: () => {}, event: (data) => saw.push(data), since: () => 0 });
+    await settled();
+
+    Stream.open[0]!.says('chat', 'has no owner');
+
+    expect(saw).toEqual([]);
   });
 
   it('keeps one project’s board out of another’s', async () => {

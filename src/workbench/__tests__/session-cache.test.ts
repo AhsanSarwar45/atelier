@@ -60,4 +60,39 @@ describe('the browser session cache', () => {
 
     expect(result.current.items).toEqual([]);
   });
+
+  it('rejects an event whose immutable session identity is not this cache', () => {
+    const { result } = renderHook(() => useSession('cache-owner'));
+    act(() => listener!.event(JSON.stringify({
+      type: 'message.started',
+      sessionId: 'foreign-owner',
+      seq: 99,
+      at: '',
+      messageId: 'foreign-message',
+      role: 'assistant',
+    })));
+
+    expect(result.current.items).toEqual([]);
+    expect(result.current.lastSeq).toBe(0);
+  });
+
+  it('folds an identical replayed sequence only once', () => {
+    const { result } = renderHook(() => useSession('replay-owner'));
+    const start = JSON.stringify({
+      type: 'message.started', sessionId: 'replay-owner', seq: 1, at: '', messageId: 'one', role: 'assistant',
+    });
+    const words = JSON.stringify({
+      type: 'text.delta', sessionId: 'replay-owner', seq: 2, at: '', messageId: 'one', text: 'once',
+    });
+
+    act(() => {
+      listener!.event(start);
+      listener!.event(words);
+      listener!.event(start);
+      listener!.event(words);
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0]?.kind === 'message' && result.current.items[0].text).toBe('once');
+  });
 });

@@ -71,6 +71,10 @@ pub(super) struct Tagged {
     /// The feed it belongs to. `None` on a connection carrying one feed only,
     /// where naming it would say nothing (watch.rs).
     pub tag: Option<String>,
+    /// Which chat produced this frame. Chat data is never routed by whichever
+    /// conversation the browser happens to call current when it arrives.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
     /// What the feed said, exactly as it said it.
     pub data: String,
 }
@@ -79,6 +83,15 @@ impl Tagged {
     pub(super) fn new(tag: Option<&str>, data: String) -> Self {
         Tagged {
             tag: tag.map(str::to_string),
+            scope: None,
+            data,
+        }
+    }
+
+    fn scoped(tag: &str, scope: &str, data: String) -> Self {
+        Tagged {
+            tag: Some(tag.to_string()),
+            scope: Some(scope.to_string()),
             data,
         }
     }
@@ -151,6 +164,7 @@ pub async fn live(
         let base = format!("/events?session={}", urlencoded(&chat));
         let feed = Feed {
             since: Some(params.since.unwrap_or(0)),
+            scope: Some(chat),
             ..Feed::new(&base, "chat")
         };
         tokio::spawn(relay(feed, tx.clone()));
@@ -264,6 +278,8 @@ struct Feed {
     /// arrive, so a helper that restarts does not replay what the browser has
     /// already drawn — this stream outlives the helper behind it.
     since: Option<u64>,
+    /// The immutable conversation identity carried by every chat frame.
+    scope: Option<String>,
 }
 
 impl Feed {
@@ -272,6 +288,7 @@ impl Feed {
             base: base.to_string(),
             tag,
             since: None,
+            scope: None,
         }
     }
 
@@ -324,7 +341,11 @@ async fn relay(mut feed: Feed, tx: mpsc::Sender<Tagged>) {
                                     Some(name) => format!("{}.{name}", feed.tag),
                                     None => feed.tag.to_string(),
                                 };
-                                if tx.send(Tagged::new(Some(&tag), frame.data)).await.is_err() {
+                                let tagged = match &feed.scope {
+                                    Some(scope) => Tagged::scoped(&tag, scope, frame.data),
+                                    None => Tagged::new(Some(&tag), frame.data),
+                                };
+                                if tx.send(tagged).await.is_err() {
                                     return;
                                 }
                             }
@@ -604,7 +625,15 @@ mod tests {
                     // said untouched, which is the whole contract with
                     // src/workbench/live-wire.ts.
                     assert!(frame["data"].is_string(), "a frame carried no data: {text}");
-                    tags.push(frame["tag"].as_str().unwrap_or_default().to_string());
+                    let tag = frame["tag"].as_str().unwrap_or_default();
+                    if tag == "chat" || tag == "chat.snapshot" {
+                        assert_eq!(
+                            frame["scope"].as_str(),
+                            Some("abc"),
+                            "a chat frame did not carry its immutable owner: {text}",
+                        );
+                    }
+                    tags.push(tag.to_string());
                 }
                 if ["board", "workbench", "chat.snapshot"]
                     .iter()

@@ -229,6 +229,10 @@ export function useSession(sessionId: string | null): LoadedSessionView {
         } catch {
           return;
         }
+        // Ownership is checked again here, after the multiplexed wire routed
+        // the frame. A delayed, replayed, or malformed frame cannot enter the
+        // selected transcript merely because it arrived on that subscription.
+        if (event.sessionId !== sessionId) return;
         if (event.seq > entry.view.lastSeq) publishCached(sessionId, reduce(entry.view, event));
       },
     });

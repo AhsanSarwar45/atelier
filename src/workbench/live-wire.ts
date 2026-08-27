@@ -115,20 +115,6 @@ function openChat(): string | null {
   return open.length === 0 ? null : open[open.length - 1];
 }
 
-/**
- * The chat the socket that is speaking was actually opened for.
- *
- * Changing listeners and replacing the socket are deliberately separated by
- * one microtask so several hooks mounting together cost one reconnect. During
- * that gap `openChat()` already names the next conversation while the current
- * socket can still say one last word from the previous one. Routing that word
- * by the new listener poisons the next conversation's cache until reload.
- */
-function chatAskedFor(): string | null {
-  if (!asked) return null;
-  return new URLSearchParams(asked).get('chat');
-}
-
 /** How far the readers of a chat have already drawn it. */
 function furthestSeen(chat: string): number {
   let seen = 0;
@@ -199,6 +185,8 @@ function wire(want: string): string {
 interface Frame {
   tag?: string;
   data?: string;
+  /** Immutable owner of a chat frame, supplied by the server relay. */
+  scope?: string;
 }
 
 /** Hands one frame to whoever asked for that feed. */
@@ -226,12 +214,12 @@ function heard(raw: string): void {
       workbenchers.forEach((w) => w.frame(said));
       return;
     case 'chat': {
-      const chat = chatAskedFor();
+      const chat = frame.scope;
       if (chat) chats.get(chat)?.forEach((c) => c.event(said));
       return;
     }
     case 'chat.snapshot': {
-      const chat = chatAskedFor();
+      const chat = frame.scope;
       if (chat) chats.get(chat)?.forEach((c) => c.snapshot(said));
       return;
     }
