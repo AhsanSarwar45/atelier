@@ -85,8 +85,6 @@ import { workingLine } from '@/workbench/working-line';
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
 const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
-const MODEL_DEFAULTS = 'workbench.model-defaults';
-const EFFORT_DEFAULTS = 'workbench.effort-defaults';
 
 /**
  * Everything one row of a conversation actually says, for going through once
@@ -144,6 +142,7 @@ function Picker({
   onPick,
   defaultValue,
   onDefault,
+  cannotDefault,
 }: {
   icon: ReactNode;
   label: string;
@@ -161,6 +160,7 @@ function Picker({
   onPick: (value: string) => void;
   defaultValue?: string | null;
   onDefault?: (value: string) => void;
+  cannotDefault?: (value: string) => string | null;
 }) {
   if (!options.length) return null;
   const shown = options.find((o) => o.value === current)?.label ?? currentLabel ?? current ?? label;
@@ -173,11 +173,11 @@ function Picker({
           data-testid={testid}
           data-current={current ?? ''}
           data-asleep={asleep}
-          disabled={asleep}
+          disabled={asleep && !onDefault}
           aria-label={label}
           // A sleeping chat has no agent to tell, and the command behind this
           // would fail silently; sending a message wakes it (bw-f1q.12).
-          title={asleep ? `${label} — send a message to wake this chat first` : label}
+          title={asleep && !onDefault ? `${label} — send a message to wake this chat first` : label}
           className="h-7 gap-1.5 rounded-full px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
         >
           {icon}
@@ -193,6 +193,7 @@ function Picker({
                 data-testid={`${testid}-option`}
                 data-value={o.value}
                 data-picked={o.value === current}
+                disabled={asleep}
                 onSelect={() => onPick(o.value)}
                 className="h-7 min-w-0 flex-1 px-2 py-1"
               >
@@ -206,14 +207,14 @@ function Picker({
                   data-testid={`${testid}-default-${o.value}`}
                   data-default={defaultValue === o.value}
                   aria-pressed={defaultValue === o.value}
-                  aria-label={defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`}
-                  title={defaultValue === o.value ? 'Default' : 'Make default'}
+                  disabled={Boolean(cannotDefault?.(o.value))}
+                  aria-label={cannotDefault?.(o.value) ?? (defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`)}
+                  title={cannotDefault?.(o.value) ?? (defaultValue === o.value ? 'Default' : 'Make default')}
                   onPointerDown={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onDefault(o.value);
+                    if (!cannotDefault?.(o.value)) onDefault(o.value);
                   }}
-                  onClick={() => onDefault(o.value)}
                 >
                   <Star className={cn('h-3 w-3', defaultValue === o.value && 'fill-current text-primary')} aria-hidden="true" />
                 </Button>
@@ -424,12 +425,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   useEffect(() => {
     const saved = localStorage.getItem(NEW_CHAT_DEFAULT);
     if (saved === 'claude' || saved === 'codex' || saved === 'ask') setNewChatDefaultState(saved);
-    for (const [key, set] of [[MODEL_DEFAULTS, setModelDefaults], [EFFORT_DEFAULTS, setEffortDefaults]] as const) {
-      try {
-        const values = JSON.parse(localStorage.getItem(key) ?? '{}');
-        if (values && typeof values === 'object') set(values as Partial<Record<Brand, string>>);
-      } catch {}
-    }
   }, []);
   const setNewChatDefault = useCallback((choice: Brand | 'ask') => {
     setNewChatDefaultState(choice);
@@ -449,8 +444,6 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         projectId,
         projectPath,
         brand,
-        model: modelDefaults[brand],
-        effort: effortDefaults[brand],
       });
       open(s.id);
     } catch (e) {
@@ -458,7 +451,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     } finally {
       setStarting(false);
     }
-  }, [projectId, projectPath, open, newBrand, modelDefaults, effortDefaults]);
+  }, [projectId, projectPath, open, newBrand]);
   const view = useSession(sessionId);
   const facts = useSessionFacts(sessionId);
   // What the board knows plus what this chat has been seen doing since.
@@ -673,6 +666,26 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // first frame it draws (live.ts, LiveSession.externalId).
   const live = useLiveSessions().find((s) => s.id === sessionId);
   const sessionBrand = live?.brand ?? facts?.brand ?? 'claude';
+  useEffect(() => {
+    let current = true;
+    void sendCommand<{ model: string | null; effort: string | null }>({ type: 'provider-defaults.read', brand: sessionBrand })
+      .then((defaults) => {
+        if (!current) return;
+        setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
+        setEffortDefaults((was) => ({ ...was, [sessionBrand]: defaults.effort ?? undefined }));
+      })
+      .catch((e: unknown) => current && setSteerError(e instanceof Error ? e.message : String(e)));
+    return () => { current = false; };
+  }, [sessionBrand]);
+  const makeProviderDefault = useCallback((kind: 'model' | 'effort', value: string) => {
+    setSteerError(null);
+    void sendCommand<{ model: string | null; effort: string | null }>({
+      type: 'provider-defaults.write', brand: sessionBrand, kind, value,
+    }).then((defaults) => {
+      setModelDefaults((was) => ({ ...was, [sessionBrand]: defaults.model ?? undefined }));
+      setEffortDefaults((was) => ({ ...was, [sessionBrand]: defaults.effort ?? undefined }));
+    }).catch((e: unknown) => setSteerError(e instanceof Error ? e.message : String(e)));
+  }, [sessionBrand]);
   /** The selected provider account's allowance, never the other provider's. */
   const plan = usePlanUsage(sessionBrand);
   const externalId = live?.externalId ?? facts?.externalId ?? null;
@@ -1428,13 +1441,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 hint: m.description,
               }))}
               defaultValue={modelDefaults[sessionBrand] ?? null}
-              onDefault={(model) => {
-                setModelDefaults((was) => {
-                  const next = { ...was, [sessionBrand]: model };
-                  localStorage.setItem(MODEL_DEFAULTS, JSON.stringify(next));
-                  return next;
-                });
-              }}
+              onDefault={(model) => makeProviderDefault('model', model)}
               onPick={(model) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.model', sessionId, model }).catch((e: unknown) =>
@@ -1454,13 +1461,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 hint: effort.description,
               }))}
               defaultValue={effortDefaults[sessionBrand] ?? null}
-              onDefault={(effort) => {
-                setEffortDefaults((was) => {
-                  const next = { ...was, [sessionBrand]: effort };
-                  localStorage.setItem(EFFORT_DEFAULTS, JSON.stringify(next));
-                  return next;
-                });
-              }}
+              onDefault={(effort) => makeProviderDefault('effort', effort)}
+              cannotDefault={(effort) => sessionBrand === 'claude' && effort === 'max'
+                ? 'Claude supports Max for the current session only; it cannot be saved as the system default'
+                : null}
               onPick={(effort) => {
                 setSteerError(null);
                 void sendCommand({ type: 'session.effort', sessionId, effort }).catch((e: unknown) =>

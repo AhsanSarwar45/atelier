@@ -43,6 +43,8 @@ export interface OwnerSettings {
   model: string | null;
   /** The `permissions.defaultMode` key, in the kit's own spelling. */
   permissionMode: string | null;
+  /** The provider's persisted `effortLevel` key. */
+  effort: string | null;
 }
 
 /** One file the answer can come from. */
@@ -113,13 +115,19 @@ function modelOf(bag: Bag | undefined): string | null {
   return typeof model === 'string' && model ? model : null;
 }
 
+function effortOf(bag: Bag | undefined): string | null {
+  const effort = bag?.effortLevel;
+  return typeof effort === 'string' && effort ? effort : null;
+}
+
 /** What the whole pile says, once the higher files have had their say. */
 export function readOwnerSettings(projectPath: string): OwnerSettings {
-  const answer: OwnerSettings = { model: null, permissionMode: null };
+  const answer: OwnerSettings = { model: null, permissionMode: null, effort: null };
   for (const layer of settingsLayers(projectPath)) {
     const bag = readLayer(layer.path);
     answer.model = modelOf(bag) ?? answer.model;
     answer.permissionMode = modeOf(bag) ?? answer.permissionMode;
+    answer.effort = effortOf(bag) ?? answer.effort;
   }
   return answer;
 }

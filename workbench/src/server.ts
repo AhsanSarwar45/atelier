@@ -25,6 +25,7 @@ import { rememberSummaryRuns } from './running.ts';
 import { boundedEvent, Sessions } from './sessions.ts';
 import { Store } from './store.ts';
 import { summaryMemoryOf } from './summary-runs.ts';
+import { readProviderDefaults, writeProviderDefault } from './provider-defaults.ts';
 
 // The operating system picks the port unless somebody names one. It used to be
 // 3009 always, and the app forwarded there on trust: whatever program held that
@@ -309,6 +310,12 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
 
 async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void> {
   switch (cmd.type) {
+    case 'provider-defaults.read':
+      json(res, 200, readProviderDefaults(cmd.brand));
+      return;
+    case 'provider-defaults.write':
+      json(res, 200, await writeProviderDefault(cmd.brand, cmd.kind, cmd.value));
+      return;
     case 'session.start': {
       const s = await sessions.start(cmd);
       json(res, 200, s);

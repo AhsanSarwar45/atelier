@@ -19,6 +19,8 @@ export BEADS_WEB_HOST="${BEADS_WEB_HOST:-127.0.0.1}"
 export BEADS_WEB_PORT="${BEADS_WEB_PORT:-3018}"
 export BEADS_WORKBENCH_PORT="${BEADS_WORKBENCH_PORT:-3019}"
 export XDG_DATA_HOME="$RUN/xdg"
+export ATELIER_PORT="$BEADS_WEB_PORT"
+export ATELIER_DATA_DIR="$RUN/data"
 export BEADS_E2E_URL="http://$BEADS_WEB_HOST:$BEADS_WEB_PORT"
 # The links test builds its own reporting tree; the real one is never written to.
 export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
@@ -38,14 +40,15 @@ export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
 # name wherever it has been moved to (bw-jaoz.11).
 export BEADS_E2E_REAL_CONFIG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 export CLAUDE_CONFIG_DIR="$RUN/claude"
+export CODEX_HOME="$RUN/codex"
 export BEADS_E2E_MARKERS="$CLAUDE_CONFIG_DIR/sessions"
 
 # A run starts from nothing: sessions left in the store by the last one are
 # offered again by the restore list, and a test that resumes one of those is
 # testing last week. The scratch records go the same way, or the chats one run
 # leaves behind are rows the next run counts.
-rm -rf "$XDG_DATA_HOME" "$RUN/claude"
-mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results" "$BEADS_E2E_MARKERS" "$CLAUDE_CONFIG_DIR/projects"
+rm -rf "$XDG_DATA_HOME" "$ATELIER_DATA_DIR" "$RUN/claude" "$RUN/codex"
+mkdir -p "$XDG_DATA_HOME" "$ROOT/tests/results" "$BEADS_E2E_MARKERS" "$CLAUDE_CONFIG_DIR/projects" "$CODEX_HOME"
 
 SERVER_LOG="$RUN/server.log"
 : > "$SERVER_LOG"

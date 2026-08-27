@@ -477,6 +477,8 @@ export interface Brief {
 }
 
 export type WbpCommand =
+  | { type: 'provider-defaults.read'; brand: Brand }
+  | { type: 'provider-defaults.write'; brand: Brand; kind: 'model' | 'effort'; value: string }
   | {
       type: 'session.start';
       projectId: string;

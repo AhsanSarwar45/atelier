@@ -264,7 +264,7 @@ export class Sessions {
     // fallback only where his settings say nothing (bw-7ks.23, owner-settings.ts).
     const owner = params.brand === 'claude'
       ? readOwnerSettings(params.projectPath)
-      : { model: null, permissionMode: null };
+      : { model: null, permissionMode: null, effort: null };
     const summary: SessionSummary = {
       id: randomUUID(),
       brand: params.brand,
@@ -274,7 +274,7 @@ export class Sessions {
       cwd: params.projectPath,
       model: params.model ?? owner.model ?? null,
       permissionMode: params.permissionMode ?? owner.permissionMode ?? defaultPermissionMode(params.brand),
-      effort: params.effort ?? null,
+      effort: params.effort ?? owner.effort ?? null,
       title: null,
       state: 'starting',
       createdAt: now,

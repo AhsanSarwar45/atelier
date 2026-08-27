@@ -59,13 +59,13 @@ afterEach(() => {
 
 describe('what a chat opens on', () => {
   it('is nothing at all when he has set nothing', () => {
-    expect(readOwnerSettings(project)).toEqual({ model: null, permissionMode: null });
+    expect(readOwnerSettings(project)).toEqual({ model: null, permissionMode: null, effort: null });
   });
 
   it('is the mode and the model his own settings name', () => {
     write(his(), { model: 'opus', permissions: { defaultMode: 'bypassPermissions' } });
 
-    expect(readOwnerSettings(project)).toEqual({ model: 'opus', permissionMode: 'bypassPermissions' });
+    expect(readOwnerSettings(project)).toEqual({ model: 'opus', permissionMode: 'bypassPermissions', effort: null });
   });
 
   it('takes the project over him, and this copy over the project', () => {
@@ -73,7 +73,7 @@ describe('what a chat opens on', () => {
     write(theProject(), { permissions: { defaultMode: 'plan' } });
     write(thisCopy(), { model: 'sonnet' });
 
-    expect(readOwnerSettings(project)).toEqual({ model: 'sonnet', permissionMode: 'plan' });
+    expect(readOwnerSettings(project)).toEqual({ model: 'sonnet', permissionMode: 'plan', effort: null });
   });
 
   // The sidecar serves every chat on the machine; one file saved mid-edit is
