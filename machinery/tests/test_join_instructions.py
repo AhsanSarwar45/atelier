@@ -1,9 +1,9 @@
 import importlib.machinery
 import importlib.util
+import sqlite3
+import subprocess
 import tempfile
 import unittest
-import subprocess
-import sqlite3
 from pathlib import Path
 from unittest import mock
 
@@ -102,8 +102,17 @@ class JoinInstructionsTest(unittest.TestCase):
 
             before = {path.name: path.read_bytes() for path in root.iterdir()}
             join.project.REGISTRY = str(root / "external" / "projects.toml")
+            screen = root / "settings.db"
+            db = sqlite3.connect(screen)
+            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
+                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
+                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
+            db.commit()
+            db.close()
+            join.opened = lambda: sqlite3.connect(screen)
             join.unregister(str(root), lambda _: None)
-            after = {path.name: path.read_bytes() for path in root.iterdir()}
+            after = {path.name: path.read_bytes() for path in root.iterdir()
+                     if path != screen}
             self.assertEqual(after, before)
 
     def test_a_linked_worktree_inherits_the_main_projects_registration(self):
