@@ -115,7 +115,7 @@ The first two are once per computer. The third is once per project.
 
 ### Prerequisites
 
-- [Beads CLI](https://github.com/gastownhall/beads) (`bd`) installed and available in PATH
+- [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH only for projects that opt into a board
 - [Node.js](https://nodejs.org/) 20+ in PATH — the board and every other screen
   run without it, but the chat helper is started with `node`, and `npm` fetches
   its kit once on first run
@@ -237,21 +237,25 @@ cd my-project
 atelier init
 ```
 
-One command turns a folder you already have into a project Atelier runs. It
-writes the working rules out beside this computer's data, gives the project a
-board, puts it on the board screen's list, and wires the project's session
-gates to Atelier by name.
+The command asks one question, with a safe default for a new folder:
 
-The first run asks you two things it cannot answer for you — a two or three
-letter prefix for the card ids, and who may land work — and writes them into a
-`machinery.toml` in the project for you to fill in. Answer those two lines and
-run it again; it does the rest. It can be run again any time, and re-running it
-repairs anything that has drifted.
+```text
+Use Beads for this project? [y/N]:
+```
 
-What it leaves in the project is two committable files: that `machinery.toml`,
-and a `.claude/settings.json` naming the gates as `atelier hook …`. Neither
-holds a path off your disk, so a teammate who clones the project and installs
-Atelier is running the same gates without editing anything.
+Answering no keeps the folder chat-only: Atelier writes nothing into it and it
+gets no board tab, while chat, widgets, visual proof, and the rest of Atelier's
+general capabilities remain available. Answering yes registers the main Git
+project once and completes its Beads setup; linked worktrees inherit the same
+board instead of becoming separate projects. An existing registration defaults
+to yes. Scripts can answer explicitly with `atelier init --beads` or
+`atelier init --chat`.
+
+Atelier installs its managed guidance into personal `~/.claude/CLAUDE.md` and
+`~/.codex/AGENTS.md`, preserving everything outside its marked block. General
+chat guidance lives directly in that block. The external Beads workflow is read
+only when `atelier project mode` reports `beads`, so Atelier never edits a
+project's own `CLAUDE.md` or `AGENTS.md`.
 
 It needs `bd` and `python3` on your PATH.
 

@@ -55,6 +55,7 @@ pointing and no logic.
 import argparse
 import datetime
 import filecmp
+import hashlib
 import json
 import os
 import re
@@ -907,20 +908,23 @@ def unregister(root, say):
 
 
 def declaring(root):
-    """Give a project that declares nothing the shape of one, and say so.
-
-    The example beside this file is the shape; what a directory can answer for
-    itself is answered in the copy, and the one line it cannot is left empty.
-
-    A prefix is not guessable. It goes into every card id this board will ever
-    issue, so a wrong one is undone by rewriting all of them — which is why this
-    writes the file and stops rather than picking something and carrying on.
-    """
+    """Give a project a complete, deterministic declaration in one run."""
     base = os.path.basename(root.rstrip("/")) or "project"
     brand = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_").upper()
-    text = open(os.path.join(HOME, EXAMPLE)).read()
+    letters = re.sub(r"[^a-z]", "", base.lower())
+    prefix = (letters + "prj")[:3]
+    used = {project.of(path).prefix for path in project.registry().values()}
+    if prefix in used:
+        digest = hashlib.sha256(os.path.realpath(root).encode()).digest()
+        prefix = "".join(chr(ord("a") + byte % 26) for byte in digest[:3])
+    _, branch = git(["branch", "--show-current"], root)
+    branch = branch or "main"
+    with open(os.path.join(HOME, EXAMPLE)) as source:
+        text = source.read()
     for was, now in ((r'^name = "example"$', 'name = ' + quoted(base)),
-                     (r'^prefix = "ex"$', 'prefix = ""'),
+                     (r'^prefix = "ex"$', 'prefix = ' + quoted(prefix)),
+                     (r'^lands_on = "main"$', 'lands_on = ' + quoted(branch)),
+                     (r'^agent_merges = false$', 'agent_merges = true'),
                      (r'^brand = "EXAMPLE"$', 'brand = ' + quoted(brand)),
                      (r'^checks = ".*"$', 'checks = ""'),
                      (r'^persona = ".*"$', 'persona = ' + quoted(
@@ -1551,21 +1555,6 @@ def main():
         project._DECLS.clear()
         project._ROOTS.clear()
         decl = project.of(root)
-    if not decl.prefix:
-        print("\n".join(said))
-        # Every line a person has to fill, in one refusal. Answered one at a
-        # time this is two edits and two runs, and the second refusal arrives
-        # after the board, the gates and the screen's list are already made —
-        # which reads as a join that half worked rather than as a question.
-        asked = ["%s/%s says nothing on the `prefix` line, and nothing here can "
-                 "answer it for you: it is written into every card id this board "
-                 "will ever issue, so a guess is undone by rewriting all of them. "
-                 "Fill it in — two or three letters, no dash."
-                 % (root, project.DECLARATION)]
-        asked += ["While that file is open, the other line only you can answer: "
-                  + line for line in unowned(decl)]
-        asked.append("Answer them and run this again; joining does the rest.")
-        sys.exit("\n\n".join(asked))
     register(root, decl, said.append)
     project._DECLS.clear()
     project._ROOTS.clear()

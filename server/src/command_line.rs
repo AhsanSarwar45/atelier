@@ -130,8 +130,8 @@ Usage:
   atelier run                 Start everything and open the board in your browser
   atelier run --no-browser    The same, without opening a browser
   atelier                     The same as `run --no-browser`
-  atelier init [folder]       Set a project up here: the board, the working
-                              rules and the session gates, wired to each other
+  atelier init [folder]       Choose whether this project uses Beads; chat and
+                              Atelier presentation remain available either way
   atelier project mode [folder]
                               Print `beads` or `chat` for this folder
   atelier tool <name> [...]   Run a board workflow command installed with Atelier
@@ -146,11 +146,12 @@ Usage:
 There is nothing else to start. The screens live inside this program and the
 chat helper is started beside it, so one command is the whole product.
 
-`init` is the one to run inside a project. It writes the working rules out
-beside this computer's data, puts that project on the board screen's list, and
-wires its session gates to this program by name — so the settings file it
-leaves behind holds no path off this disk and can be committed. It needs
-python3 and `bd` on your path, and it can be run again safely.
+`init` asks one question: whether this project uses Beads. Chat-only projects
+are changed in no way and have no board tab. A Beads project is registered once;
+its linked Git worktrees share that board. Personal CLAUDE.md and AGENTS.md
+carry Atelier's chat and widget guidance for every project. `--beads` and
+`--chat` answer the question non-interactively. Beads setup needs python3 and
+`bd` on your path; init can be run again safely.
 
 Where it listens:
   ATELIER_PORT                the port (default {PORT})

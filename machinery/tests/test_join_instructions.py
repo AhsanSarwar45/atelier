@@ -88,6 +88,17 @@ class JoinInstructionsTest(unittest.TestCase):
             after = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
             self.assertEqual(after, before)
 
+    def test_a_new_beads_declaration_needs_no_second_question(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            join.project.REGISTRY = str(root / "projects.toml")
+            where = Path(join.declaring(str(root)))
+            declaration = where.read_text()
+            self.assertRegex(declaration, r'(?m)^prefix = "[a-z]{3}"$')
+            self.assertIn("agent_merges = true", declaration)
+            self.assertNotIn('prefix = ""', declaration)
+
 
 if __name__ == "__main__":
     unittest.main()
