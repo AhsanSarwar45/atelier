@@ -33,7 +33,7 @@ def atelier_data_dir():
         return os.path.expanduser("~/Library/Application Support/com.weselow.atelier")
     if os.name == "nt":
         base = os.environ.get("APPDATA") or os.path.expanduser("~/AppData/Roaming")
-        return os.path.join(base, "atelier")
+        return os.path.join(base, "weselow", "atelier", "data")
     base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     return os.path.join(base, "atelier")
 

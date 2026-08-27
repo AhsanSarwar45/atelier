@@ -3,6 +3,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_FILE = ROOT / "machinery/project.py"
@@ -38,6 +39,16 @@ class ExternalProjectMetadataTests(unittest.TestCase):
                  ROOT / "machinery/hooks/board-merge-gate.py"]
         self.assertFalse(any("project.DECLARATION" in path.read_text()
                              for path in paths))
+
+    def test_windows_data_home_matches_the_application(self):
+        project = load_project()
+        with mock.patch.object(project.os, "name", "nt"), \
+             mock.patch.dict(project.os.environ,
+                             {"APPDATA": r"C:\Users\x\AppData\Roaming",
+                              "ATELIER_DATA_DIR": ""}):
+            path = project.atelier_data_dir()
+        self.assertTrue(path.replace("\\", "/").endswith(
+            "AppData/Roaming/weselow/atelier/data"), path)
 
 
 if __name__ == "__main__":

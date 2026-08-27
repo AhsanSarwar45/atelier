@@ -261,16 +261,19 @@ title as one plain sentence saying what is wrong — no file names, no symbols, 
 instruction to do something; those belong in `where` and `why`. Write `fixed_when`
 as something anyone can run and what it must produce, never "it works".
 
-Answer with one fenced json block and nothing after it:
+Answer with one JSON object and nothing before or after it. This is the same
+schema the personal reviewer runner validates:
 
-```json
-{"verdict": "<one sentence: what you read and what you conclude>",
- "checked": ["<a thing you checked and found correct>", "..."],
- "findings": [{"title": "<one plain line: what is wrong, not what to do>",
-               "where": "<file, and the symbol or heading>",
-               "why": "<why it is wrong, in one or two sentences>",
-               "fixed_when": "<a command and what it must produce>"}]}
-```
+{"verdict": "<PASS or NEEDS_WORK>",
+ "summary": "<one sentence: what you read and what you conclude>",
+ "verified": ["<a thing you checked and found correct>", "..."],
+ "findings": [{"severity": "<critical, high, or medium>",
+               "confidence": 80,
+               "file": "<file path>",
+               "line": null,
+               "title": "<one plain line: what is wrong, not what to do>",
+               "evidence": "<the concrete failure mode and why it is wrong>",
+               "recommendation": "<a command and what it must produce>"}]}
 """ % {"root": ROOT, "what": goal.get("title", ""), "desc": goal.get("description", ""),
        "done": goal.get("acceptance_criteria") or goal.get("acceptance") or "",
        "persona": DECL.persona, "proves": sections.PROVES,
