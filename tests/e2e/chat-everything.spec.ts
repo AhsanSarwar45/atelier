@@ -131,6 +131,41 @@ async function say(page: Page, text: string): Promise<void> {
 test.describe('the chat draws everything the agent does', () => {
   test.describe.configure({ timeout: 420_000 });
 
+  test('Escape pulls an unprocessed prompt out of the transcript and back into the composer', async ({ page, request }) => {
+    const api = backend();
+    const listed = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
+    if (listed.length === 0) {
+      const made = await request.post(`${api}/api/projects`, {
+        data: { name: 'escape-recall', path: process.cwd() },
+      });
+      expect(made.ok(), 'the isolated run could not add its worktree').toBe(true);
+    }
+    await freshChat(request, page);
+
+    let releaseResponse = () => {};
+    const held = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    await page.route('**/api/workbench/command', async (route) => {
+      const command = route.request().postDataJSON() as { type?: string } | null;
+      if (command?.type !== 'prompt.send') return route.continue();
+      const response = await route.fetch();
+      await held;
+      await route.fulfill({ response });
+    });
+
+    const text = 'testing';
+    const composer = page.getByTestId('composer');
+    const echo = page.getByTestId('user-message').filter({ hasText: text });
+    await composer.fill(text);
+    await composer.press('Enter');
+    await page.screenshot({ path: 'tests/results/escape-recall-before.png', fullPage: false });
+
+    await composer.press('Escape');
+    await expect(composer).toHaveValue(text);
+    releaseResponse();
+    await expect(echo).toHaveCount(0, { timeout: 60_000 });
+    await page.screenshot({ path: 'tests/results/escape-recall-after.png', fullPage: false });
+  });
+
   test('the mode picker takes bypass, and says so in the chat', async ({ page, request }) => {
     await freshChat(request, page);
 

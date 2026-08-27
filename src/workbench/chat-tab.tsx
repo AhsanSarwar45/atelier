@@ -650,6 +650,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   /** The POST being accepted; Escape waits for it before sending Stop. */
   const sending = useRef<Promise<{ messageId: string }> | null>(null);
   const [recallable, setRecallable] = useState<RecallablePrompt | null>(null);
+  /** The same prompt for a key pressed before React has committed the next render. */
+  const recallableNow = useRef<RecallablePrompt | null>(null);
 
   /**
    * Where the reader is in the conversation, and whether the newest words are
@@ -697,11 +699,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // or assistant text). Any of them makes the prompt history, not a draft.
   useEffect(() => {
     setRecallable(null);
+    recallableNow.current = null;
     sending.current = null;
   }, [sessionId]);
   useEffect(() => {
     if (recallable && agentRespondedSince(view.items, recallable.itemsBeforeSend)) {
       setRecallable(null);
+      recallableNow.current = null;
       sending.current = null;
     }
   }, [recallable, view.items]);
@@ -853,7 +857,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     const text = draft.trim();
     if (!text || !sessionId) return;
     const images = attached;
-    setRecallable({ text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) });
+    const pending = { text: draft, images, itemsBeforeSend: new Set(view.items.map((item) => item.id)) };
+    recallableNow.current = pending;
+    setRecallable(pending);
     setDraft('');
     setAttached([]);
     setSendError(null);
@@ -869,6 +875,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       setDraft(draft);
       setAttached(images);
       setRecallable(null);
+      recallableNow.current = null;
       sending.current = null;
       setSendError(e instanceof Error ? e.message : String(e));
     }
@@ -876,9 +883,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   /** Stop an unanswered turn and put its exact input back under the cursor. */
   async function recallLastPrompt() {
-    if (!recallable || !sessionId) return;
-    const pending = recallable;
+    if (!recallableNow.current || !sessionId) return;
+    const pending = recallableNow.current;
     setRecallable(null);
+    recallableNow.current = null;
     setDraft(pending.text);
     setAttached(pending.images);
     setSendError(null);
@@ -1436,7 +1444,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   return;
                 }
               }
-              if (e.key === 'Escape' && recallable) {
+              if (e.key === 'Escape' && recallableNow.current) {
                 e.preventDefault();
                 void recallLastPrompt();
                 return;
