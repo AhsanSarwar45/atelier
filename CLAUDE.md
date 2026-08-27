@@ -58,6 +58,40 @@ The lifecycle gates are authoritative. Tests alone do not finish work, and a
 direct status change never replaces commit, independent review, landing, or
 closure.
 
+## Isolated app instances
+
+Never run development or proof work against the owner's Atelier instance on
+port 3008, its backend, its helper, or its data. Every job worktree owns a
+separate disposable stack, including frontend/backend, workbench helper, data,
+configuration, fixture projects, and processes.
+
+Before starting a stack, allocate two currently unused TCP ports unique to the
+worktree: one for Atelier and one for its helper. Do not reuse fixed example
+ports such as 3018/3019, and do not borrow ports from another worktree. Export
+both ports, explicitly set `ATELIER_PORT` to the first, and give the run a
+worktree-specific directory:
+
+```bash
+export BEADS_WEB_PORT="<free-port-for-this-worktree>"
+export ATELIER_PORT="$BEADS_WEB_PORT"
+export BEADS_WORKBENCH_PORT="<different-free-port-for-this-worktree>"
+export WORKBENCH_E2E_RUN="$PWD/tests/.e2e-run-<job-id>"
+scripts/workbench-e2e.sh <spec> [playwright arguments]
+```
+
+The two selected ports must be probed immediately before startup and startup
+must fail if either is occupied. `ATELIER_PORT` is mandatory: without it the
+backend's installed-service guard can target the owner's port 3008 even when
+`BEADS_WEB_PORT` is set. Use `scripts/workbench-e2e.sh` when possible; it gives
+the run isolated XDG/Claude/session data and removes only the processes on its
+two declared ports. For a manual stack, record every child PID at launch, use
+worktree-specific data/config directories, and install an EXIT trap that stops
+only those recorded PIDs. Never use `pkill`, `killall`, process-name matching,
+or cleanup by a shared/default port.
+
+When the proof ends, verify both allocated ports are free. Do not stop, start,
+restart, install, or reload the owner's app or any process you did not launch.
+
 ## Visual proof in chat
 
 For every visual change, capture the relevant screen before editing and again
