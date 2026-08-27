@@ -201,6 +201,8 @@ export type WbpEvent = EventBase &
      */
     | { type: 'thinking.progress'; tokens: number }
     | { type: 'message.completed'; messageId: string }
+    /** The user pulled an unanswered, locally echoed prompt back into the composer. */
+    | { type: 'message.retracted'; messageId: string }
     | {
         type: 'tool.started';
         toolCallId: string;
@@ -494,7 +496,7 @@ export type WbpCommand =
     }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; takeover?: boolean }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string; value?: string }
-  | { type: 'session.stop'; sessionId: string }
+  | { type: 'session.stop'; sessionId: string; retractMessageId?: string }
   /**
    * End the chat itself: the agent is torn down and the row is marked `ended`.
    *

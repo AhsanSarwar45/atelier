@@ -72,3 +72,31 @@ describe('a chat read again', () => {
     expect(reset.items.map((it) => it.id)).toEqual(straight.items.map((it) => it.id));
   });
 });
+
+describe('a prompt pulled back before the agent answers', () => {
+  it('removes the exact user echo from the live transcript', () => {
+    const before = fold([
+      at({ type: 'message.started', messageId: 'older', role: 'assistant' }),
+      at({ type: 'text.delta', messageId: 'older', text: 'Earlier' }),
+      at({ type: 'message.completed', messageId: 'older' }),
+      at({ type: 'message.started', messageId: 'pulled-back', role: 'user' }),
+      at({ type: 'text.delta', messageId: 'pulled-back', text: 'testing' }),
+      at({ type: 'message.completed', messageId: 'pulled-back' }),
+    ]);
+
+    const after = reduce(before, at({ type: 'message.retracted', messageId: 'pulled-back' }));
+
+    expect(after.items.map((item) => item.id)).toEqual(['older']);
+  });
+
+  it('stays removed when the stored event log is replayed', () => {
+    const view = fold([
+      at({ type: 'message.started', messageId: 'pulled-back', role: 'user' }),
+      at({ type: 'text.delta', messageId: 'pulled-back', text: 'testing' }),
+      at({ type: 'message.completed', messageId: 'pulled-back' }),
+      at({ type: 'message.retracted', messageId: 'pulled-back' }),
+    ]);
+
+    expect(view.items).toEqual([]);
+  });
+});

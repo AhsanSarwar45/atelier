@@ -425,6 +425,10 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       );
       return next;
 
+    case 'message.retracted':
+      next.items = items.filter((it) => !(it.kind === 'message' && it.id === e.messageId));
+      return next;
+
     case 'tool.started': {
       const row: TranscriptTool = {
         kind: 'tool',
@@ -790,6 +794,20 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
         if (said !== undefined) (items[said] as TranscriptMessage).done = true;
         const thought = thinkingAt.get(e.messageId);
         if (thought !== undefined) (items[thought] as TranscriptThinking).done = true;
+        break;
+      }
+
+      case 'message.retracted': {
+        const at = messageAt.get(e.messageId);
+        if (at !== undefined) {
+          items.splice(at, 1);
+          messageAt.delete(e.messageId);
+          for (const index of [messageAt, thinkingAt, toolAt, askAt]) {
+            index.forEach((row, id) => {
+              if (row > at) index.set(id, row - 1);
+            });
+          }
+        }
         break;
       }
 

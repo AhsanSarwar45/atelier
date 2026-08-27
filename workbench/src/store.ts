@@ -495,6 +495,11 @@ export class Store {
       .run(text, sessionId, messageId);
   }
 
+  /** Removes the search copy of a prompt pulled back before an answer began. */
+  retractMessage(sessionId: string, messageId: string): void {
+    this.db.prepare('DELETE FROM message WHERE session_id = ? AND message_id = ?').run(sessionId, messageId);
+  }
+
   /** What one turn cost, in the unit the brand reported. */
   rememberTurn(row: {
     sessionId: string;

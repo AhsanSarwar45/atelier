@@ -648,7 +648,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const typing = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   /** The POST being accepted; Escape waits for it before sending Stop. */
-  const sending = useRef<Promise<unknown> | null>(null);
+  const sending = useRef<Promise<{ messageId: string }> | null>(null);
   const [recallable, setRecallable] = useState<RecallablePrompt | null>(null);
 
   /**
@@ -695,10 +695,14 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   // Claude and Codex expose different first signs of life (thinking, a tool,
   // or assistant text). Any of them makes the prompt history, not a draft.
-  useEffect(() => setRecallable(null), [sessionId]);
+  useEffect(() => {
+    setRecallable(null);
+    sending.current = null;
+  }, [sessionId]);
   useEffect(() => {
     if (recallable && agentRespondedSince(view.items, recallable.itemsBeforeSend)) {
       setRecallable(null);
+      sending.current = null;
     }
   }, [recallable, view.items]);
 
@@ -854,7 +858,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setAttached([]);
     setSendError(null);
     try {
-      const sent = sendCommand({ type: 'prompt.send', sessionId, text, images, takeover: ownership.kind === 'elsewhere' });
+      const sent = sendCommand<{ messageId: string }>({ type: 'prompt.send', sessionId, text, images, takeover: ownership.kind === 'elsewhere' });
       sending.current = sent;
       await sent;
     } catch (e) {
@@ -865,9 +869,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       setDraft(draft);
       setAttached(images);
       setRecallable(null);
-      setSendError(e instanceof Error ? e.message : String(e));
-    } finally {
       sending.current = null;
+      setSendError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -881,8 +884,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setSendError(null);
     typing.current?.focus();
     try {
-      await sending.current;
-      await sendCommand({ type: 'session.stop', sessionId });
+      const accepted = await sending.current;
+      await sendCommand({ type: 'session.stop', sessionId, retractMessageId: accepted?.messageId });
+      sending.current = null;
     } catch (e) {
       setSendError(`Prompt restored, but the turn could not be stopped. ${e instanceof Error ? e.message : String(e)}`);
     }

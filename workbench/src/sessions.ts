@@ -1460,7 +1460,7 @@ export class Sessions {
     });
   }
 
-  async send(sessionId: string, text: string, images: ImagePayload[] = [], takeover = false): Promise<void> {
+  async send(sessionId: string, text: string, images: ImagePayload[] = [], takeover = false): Promise<string> {
     // Sending is what wakes a chat that was opened for reading. Nothing else
     // does, so a link into a sleeping conversation is a working one the moment
     // he types (docs/designs/app-shell.md §1.9).
@@ -1509,6 +1509,7 @@ export class Sessions {
     this.store.markSpoke(sessionId);
 
     await driver.send({ text, images });
+    return messageId;
   }
 
   /** Stop the other local holder before attaching this app to the same thread. */
@@ -1576,8 +1577,9 @@ export class Sessions {
     });
   }
 
-  async stop(sessionId: string): Promise<void> {
+  async stop(sessionId: string, retractMessageId?: string): Promise<void> {
     await this.require(sessionId).interrupt();
+    if (retractMessageId) this.publish(sessionId, { type: 'message.retracted', messageId: retractMessageId });
   }
 
   /**
@@ -1798,6 +1800,8 @@ export class Sessions {
       this.store.openMessage(sessionId, full.messageId, full.role, full.at);
     } else if (full.type === 'text.delta') {
       this.store.growMessage(sessionId, full.messageId, full.text);
+    } else if (full.type === 'message.retracted') {
+      this.store.retractMessage(sessionId, full.messageId);
     } else if (full.type === 'cost') {
       const s = this.store.getSession(sessionId);
       this.store.rememberTurn({

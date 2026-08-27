@@ -322,8 +322,10 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       return;
     }
     case 'prompt.send':
-      await sessions.send(cmd.sessionId, cmd.text, cmd.images ?? [], cmd.takeover ?? false);
-      json(res, 200, { ok: true });
+      json(res, 200, {
+        ok: true,
+        messageId: await sessions.send(cmd.sessionId, cmd.text, cmd.images ?? [], cmd.takeover ?? false),
+      });
       return;
     case 'ask.answer':
       sessions.answer(cmd.sessionId, cmd.askId, cmd.optionId, cmd.value);
@@ -340,7 +342,7 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       return;
     }
     case 'session.stop':
-      await sessions.stop(cmd.sessionId);
+      await sessions.stop(cmd.sessionId, cmd.retractMessageId);
       json(res, 200, { ok: true });
       return;
     case 'session.close':
