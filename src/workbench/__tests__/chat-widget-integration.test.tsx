@@ -22,6 +22,8 @@ describe('chat widget integration', () => {
     render(<TranscriptRow item={item!} sessionId="chat" mentions={mentions} onLook={vi.fn()} />);
     expect(screen.getByText('42 ms')).toBeVisible();
     expect(screen.getByText('Numbers')).toBeVisible();
+    expect(screen.getByText('Numbers').compareDocumentPosition(screen.getByTestId('chat-widget'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText(/atelier-widget/)).not.toBeInTheDocument();
   });
 });

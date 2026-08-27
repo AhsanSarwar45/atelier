@@ -25,4 +25,18 @@ describe('materializing chat comparison files', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('reads Codex chat attachments from their generated temp directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'project-'));
+    const attachments = mkdtempSync(join(tmpdir(), 'atelier-codex-images-'));
+    writeFileSync(join(attachments, 'before.png'), Buffer.from('before'));
+    writeFileSync(join(root, 'after.png'), Buffer.from('after'));
+    try {
+      const source = `\`\`\`atelier-image-compare\n{"before":{"path":"${join(attachments, 'before.png')}"},"after":{"path":"after.png"}}\n\`\`\``;
+      expect(materializeComparisons(source, root)).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(attachments, { recursive: true, force: true });
+    }
+  });
 });

@@ -13,7 +13,7 @@
  */
 'use client';
 
-import { memo, useContext, useEffect, useReducer, useState } from 'react';
+import { memo, useContext, useEffect, useReducer, useState, type ReactNode } from 'react';
 
 import { request } from '@/lib/api';
 
@@ -34,9 +34,9 @@ import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
 import { PictureGrid } from '@/workbench/picture-grid';
 import { ImageComparisonView } from '@/workbench/image-comparison';
-import { withoutComparisonSpecs } from '@/workbench/chat-media';
+import { comparisonSpecs } from '@/workbench/chat-media';
 import { ChatWidgetView } from '@/workbench/chat-widget-view';
-import { withoutWidgetSpecs } from '@/workbench/chat-widgets';
+import { widgetSpecs } from '@/workbench/chat-widgets';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import type { AskOption, ImagePayload } from '@/workbench/protocol';
@@ -831,16 +831,48 @@ const MessageRow = memo(function MessageRow({
       )}
     >
       <PictureGrid images={item.images} onLook={onLook} />
-      {(item.comparisons ?? []).map((comparison, index) => (
-        <ImageComparisonView key={index} comparison={comparison} onLook={onLook} />
-      ))}
-      {(item.widgets ?? []).map((widget, index) => <ChatWidgetView key={index} widget={widget} />)}
-      <MarkdownBody className="text-sm" mentions={mentions}>
-        {withoutWidgetSpecs(item.comparisons?.length ? withoutComparisonSpecs(item.text) : item.text)}
-      </MarkdownBody>
+      <RichMessageContent item={item} mentions={mentions} onLook={onLook} />
     </div>
   );
 });
+
+const RICH_BLOCK = /```(atelier-widget|atelier-image-compare)\s*\n([\s\S]*?)\n```/g;
+
+/** Keeps a rich block where it was written instead of hoisting every visual above the prose. */
+function RichMessageContent({ item, mentions, onLook }: {
+  item: Extract<TranscriptItem, { kind: 'message' }>;
+  mentions: Mentions;
+  onLook: (image: ImagePayload) => void;
+}) {
+  const parts: ReactNode[] = [];
+  const comparisons = item.comparisons ?? [];
+  const widgets = item.widgets ?? [];
+  let comparisonIndex = 0;
+  let widgetIndex = 0;
+  let textAt = 0;
+  let part = 0;
+  const blocks = new RegExp(RICH_BLOCK.source, RICH_BLOCK.flags);
+  let match: RegExpExecArray | null;
+
+  const words = (text: string) => {
+    if (text) parts.push(<MarkdownBody key={`words-${part++}`} className="text-sm" mentions={mentions}>{text}</MarkdownBody>);
+  };
+
+  while ((match = blocks.exec(item.text)) !== null) {
+    words(item.text.slice(textAt, match.index));
+    const source = match[0];
+    if (match[1] === 'atelier-widget' && widgetSpecs(source).length > 0 && widgets[widgetIndex]) {
+      parts.push(<ChatWidgetView key={`widget-${part++}`} widget={widgets[widgetIndex++]!} />);
+    } else if (match[1] === 'atelier-image-compare' && comparisonSpecs(source).length > 0 && comparisons[comparisonIndex]) {
+      parts.push(<ImageComparisonView key={`comparison-${part++}`} comparison={comparisons[comparisonIndex++]!} onLook={onLook} />);
+    } else {
+      words(source);
+    }
+    textAt = blocks.lastIndex;
+  }
+  words(item.text.slice(textAt));
+  return <>{parts}</>;
+}
 
 /**
  * One row of the conversation, whatever kind it is.

@@ -1,5 +1,6 @@
 import { readFileSync, realpathSync } from 'node:fs';
-import { extname, isAbsolute, relative, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 
 import { comparisonSpecs } from '../../src/workbench/chat-media.ts';
 import type { ImageComparison, ImagePayload } from '../../src/workbench/protocol.ts';
@@ -13,11 +14,19 @@ function inside(root: string, path: string): boolean {
   return from === '' || (!from.startsWith('..') && !isAbsolute(from));
 }
 
+function generatedCodexImage(path: string): boolean {
+  return dirname(dirname(path)) === realpathSync(tmpdir())
+    && basename(dirname(path)).startsWith('atelier-codex-images-');
+}
+
 function picture(cwd: string, named: { path: string; caption?: string }, fallback: string): ImagePayload | null {
   try {
     const root = realpathSync(cwd);
     const path = realpathSync(resolve(root, named.path));
-    if (!inside(root, path)) return null;
+    // Codex places images attached to a chat in a private, per-turn temp
+    // directory. Those are legitimate comparison inputs even though they sit
+    // outside the repository; every other outside path remains forbidden.
+    if (!inside(root, path) && !generatedCodexImage(path)) return null;
     const mime = MIMES[extname(path).toLowerCase()];
     if (!mime) return null;
     return { mime, dataUrl: `data:${mime};base64,${readFileSync(path).toString('base64')}`, alt: named.caption || fallback };

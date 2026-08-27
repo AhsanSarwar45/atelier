@@ -28,6 +28,8 @@ describe('structured image comparisons in chat', () => {
     expect(screen.getByTestId('image-comparison')).toHaveAttribute('data-mode', 'wipe');
     expect(screen.getByRole('slider')).toHaveAttribute('aria-valuenow', '50');
     expect(screen.getByText('Here is the change.')).toBeVisible();
+    expect(screen.getByText('Here is the change.').compareDocumentPosition(screen.getByTestId('image-comparison'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText(/atelier-image-compare/)).not.toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole('slider'), { key: 'ArrowRight' });
     expect(screen.getByRole('slider')).toHaveAttribute('aria-valuenow', '52');
