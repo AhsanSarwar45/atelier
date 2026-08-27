@@ -91,6 +91,9 @@ export interface ImageComparison {
   after: ImagePayload;
 }
 
+/** Anything the transcript can open in the full-screen picture viewer. */
+export type LookableImage = ImagePayload | ImageComparison;
+
 /**
  * One entry in the writing box's `/` menu: a command the install has, or a skill
  * it can run. Both are typed the same way, so both are listed the same way

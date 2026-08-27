@@ -15,7 +15,7 @@ import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
-import type { ImagePayload, WbpEvent } from '@/workbench/protocol';
+import type { LookableImage, WbpEvent } from '@/workbench/protocol';
 import { TranscriptRow, WorkingLine } from '@/workbench/transcript-rows';
 import { EMPTY, reduce, type SessionView } from '@/workbench/use-session';
 
@@ -48,7 +48,7 @@ vi.mock('@/workbench/colouring', async (real) => {
 const HELD = 200;
 
 const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
-const LOOK = (_image: ImagePayload) => {};
+const LOOK = (_image: LookableImage) => {};
 
 /** One event without the envelope the wire wraps it in. */
 type Said<T> = T extends unknown ? Omit<T, 'seq' | 'sessionId' | 'at'> : never;

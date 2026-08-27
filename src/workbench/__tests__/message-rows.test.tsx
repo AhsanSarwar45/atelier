@@ -13,12 +13,12 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
-import type { ImagePayload } from '@/workbench/protocol';
+import type { LookableImage } from '@/workbench/protocol';
 import { TranscriptRow } from '@/workbench/transcript-rows';
 import type { TranscriptItem } from '@/workbench/use-session';
 
 const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
-const LOOK = (_image: ImagePayload) => {};
+const LOOK = (_image: LookableImage) => {};
 
 /** One message, said by whoever, from wherever. */
 const said = (

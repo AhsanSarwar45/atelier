@@ -4,12 +4,12 @@ import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent }
 
 import { Badge } from '@/components/ui/badge';
 import { Panel } from '@/components/ui/panel';
-import type { ImageComparison, ImagePayload } from '@/workbench/protocol';
+import type { ImageComparison } from '@/workbench/protocol';
 import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
 export function ImageComparisonView({ comparison, onLook }: {
   comparison: ImageComparison;
-  onLook: (image: ImagePayload) => void;
+  onLook: (comparison: ImageComparison) => void;
 }) {
   const [pct, setPct] = useState(50);
   const frame = useRef<HTMLDivElement>(null);
@@ -28,7 +28,7 @@ export function ImageComparisonView({ comparison, onLook }: {
             <img
               src={image.dataUrl}
               alt={image.alt}
-              onClick={() => onLook(image)}
+              onClick={() => onLook(comparison)}
               className="cursor-zoom-in rounded border border-border/60 object-contain"
               style={INLINE_MEDIA_BOUNDS}
             />

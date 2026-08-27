@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mentions } from '@/components/markdown-body';
 import { DrawnTranscript, SCREENFUL } from '@/workbench/drawn-transcript';
 import { drawnRows, type DrawnRow } from '@/workbench/machine-lines';
-import type { ImagePayload, WbpEvent } from '@/workbench/protocol';
+import type { LookableImage, WbpEvent } from '@/workbench/protocol';
 import { EMPTY, reduce, type SessionView } from '@/workbench/use-session';
 
 /** Every watcher of the head of the conversation, newest last. */
@@ -42,7 +42,7 @@ class FakeHead {
 }
 
 const MENTIONS: Mentions = { split: (text) => [{ kind: 'text', text }], card: (id) => id };
-const LOOK = (_image: ImagePayload) => {};
+const LOOK = (_image: LookableImage) => {};
 
 /** One event without the envelope the wire wraps it in. */
 type Said<T> = T extends unknown ? Omit<T, 'seq' | 'sessionId' | 'at'> : never;

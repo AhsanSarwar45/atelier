@@ -19,7 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { Mentions } from '@/components/markdown-body';
 import type { DrawnRow } from '@/workbench/machine-lines';
-import type { ImagePayload } from '@/workbench/protocol';
+import type { LookableImage } from '@/workbench/protocol';
 import { MachineLine, TranscriptRow } from '@/workbench/transcript-rows';
 
 /**
@@ -35,7 +35,7 @@ interface DrawnTranscriptProps {
   /** Which chat this is, so opening another starts at its own end. */
   sessionId: string;
   mentions: Mentions;
-  onLook: (image: ImagePayload) => void;
+  onLook: (image: LookableImage) => void;
   /** The pane these rows scroll inside, whose place must be kept as they grow. */
   pane: React.RefObject<HTMLElement | null>;
   /** Whether the end of the conversation is what the reader is watching. */

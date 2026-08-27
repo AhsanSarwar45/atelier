@@ -5,6 +5,7 @@ import type { Mentions } from '@/components/markdown-body';
 import type { TranscriptMessage } from '@/workbench/fold';
 import type { ImageComparison, ImagePayload } from '@/workbench/protocol';
 import { TranscriptRow } from '@/workbench/transcript-rows';
+import { PictureViewer } from '@/workbench/chat-tab';
 import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
 const mentions: Mentions = { split: (text) => [{ kind: 'text', text }], card: () => null };
@@ -41,7 +42,18 @@ describe('structured image comparisons in chat', () => {
 
     expect(screen.getByTestId('image-comparison')).toHaveAttribute('data-mode', 'side_by_side');
     fireEvent.click(screen.getByAltText('After'));
-    expect(look).toHaveBeenCalledWith(expect.objectContaining({ alt: 'After' }));
+    expect(look).toHaveBeenCalledWith(expect.objectContaining({
+      before: expect.objectContaining({ alt: 'Before' }),
+      after: expect.objectContaining({ alt: 'After' }),
+    }));
+  });
+
+  it('opens a comparison as two large pictures held side by side', () => {
+    render(<PictureViewer image={{ mode: 'side_by_side', before: image('Large before'), after: image('Large after') }} onClose={vi.fn()} />);
+
+    expect(screen.getByTestId('picture-viewer-comparison')).toBeVisible();
+    expect(screen.getByAltText('Large before')).toBeVisible();
+    expect(screen.getByAltText('Large after')).toBeVisible();
   });
 
   it.each(['wipe', 'side_by_side'] as const)('bounds portrait images in %s comparisons without cropping them', (mode) => {

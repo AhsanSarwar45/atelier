@@ -39,7 +39,7 @@ import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import { widgetSpecs } from '@/workbench/chat-widgets';
 import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
-import type { AskOption, ImagePayload } from '@/workbench/protocol';
+import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
 
@@ -796,7 +796,7 @@ const MessageRow = memo(function MessageRow({
 }: {
   item: Extract<TranscriptItem, { kind: 'message' }>;
   mentions: Mentions;
-  onLook: (image: ImagePayload) => void;
+  onLook: (image: LookableImage) => void;
 }) {
   const sentBy = item.parentId;
   return (
@@ -842,7 +842,7 @@ const RICH_BLOCK = /```(atelier-widget|atelier-image-compare)\s*\n([\s\S]*?)\n``
 function RichMessageContent({ item, mentions, onLook }: {
   item: Extract<TranscriptItem, { kind: 'message' }>;
   mentions: Mentions;
-  onLook: (image: ImagePayload) => void;
+  onLook: (image: LookableImage) => void;
 }) {
   const parts: ReactNode[] = [];
   const comparisons = item.comparisons ?? [];
@@ -890,7 +890,7 @@ export const TranscriptRow = memo(function TranscriptRow({
   item: TranscriptItem;
   sessionId: string;
   mentions: Mentions;
-  onLook: (image: ImagePayload) => void;
+  onLook: (image: LookableImage) => void;
 }) {
   switch (item.kind) {
     case 'tool':

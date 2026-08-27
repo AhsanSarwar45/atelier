@@ -68,7 +68,7 @@ import { usePathsOnDisk } from '@/workbench/paths-on-disk';
 import { SplitPaths } from '@/workbench/split-paths';
 import { useHeldFactsAreOld, useHolds, useLiveSessions, usePlanUsage, useRunningElsewhere } from '@/workbench/live';
 import { EVERYTHING, hisDoing, remember, remembered, showing as stillShowing, type KindId } from '@/workbench/message-filter';
-import type { Brand, CommandInfo, Cost, ImagePayload, TodoItem } from '@/workbench/protocol';
+import type { Brand, CommandInfo, Cost, ImageComparison, ImagePayload, LookableImage, TodoItem } from '@/workbench/protocol';
 import { BRAND_DEFAULT_MODEL } from '@/workbench/protocol';
 import { heldElsewhere, sessionOwnership } from '@/workbench/running';
 import { SearchPanel } from '@/workbench/search-panel';
@@ -289,7 +289,10 @@ function CommandMenu({
  * same ones every other popup in the app gets, rather than a backdrop and a key
  * listener this screen kept for itself (bw-dks8.10).
  */
-function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () => void }) {
+export function PictureViewer({ image, onClose }: { image: LookableImage; onClose: () => void }) {
+  const comparison: ImageComparison | null = 'mode' in image ? image : null;
+  const single: ImagePayload | null = 'mode' in image ? null : image;
+  const label = comparison ? `${comparison.before.alt} and ${comparison.after.alt}` : single?.alt;
   return (
     <Dialog
       open
@@ -302,21 +305,33 @@ function PictureViewer({ image, onClose }: { image: ImagePayload; onClose: () =>
         hideClose
         overlayClassName="bg-black/80"
         aria-describedby={undefined}
-        aria-label={image.alt || 'Picture'}
+        aria-label={label || 'Picture'}
         data-testid="picture-viewer"
         className="flex items-center justify-center p-2 sm:p-6"
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        <DialogTitle className="sr-only">{image.alt || 'Picture'}</DialogTitle>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          data-testid="picture-viewer-image"
-          src={image.dataUrl}
-          alt={image.alt}
-          className="max-h-full max-w-full rounded shadow-2xl"
-        />
+        <DialogTitle className="sr-only">{label || 'Picture'}</DialogTitle>
+        {comparison ? (
+          <div data-testid="picture-viewer-comparison" className="grid max-h-full w-full grid-cols-2 gap-3">
+            {[comparison.before, comparison.after].map((side) => (
+              <figure key={side.dataUrl} className="flex min-h-0 min-w-0 flex-col items-center gap-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={side.dataUrl} alt={side.alt} className="min-h-0 max-h-[calc(100vh-5rem)] max-w-full rounded object-contain shadow-2xl" />
+                <figcaption className="text-sm text-white">{side.alt}</figcaption>
+              </figure>
+            ))}
+          </div>
+        ) : (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            data-testid="picture-viewer-image"
+            src={single!.dataUrl}
+            alt={single!.alt}
+            className="max-h-full max-w-full rounded shadow-2xl"
+          />
+        )}
         <Button
           variant="ghost"
           mode="icon"
@@ -526,7 +541,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [draft, setDraft] = useUnsentLine(sessionId ?? '');
   const [attached, setAttached] = useUnsentPictures(sessionId ?? '');
   /** The picture being looked at, from the tray or from a message. */
-  const [looking, setLooking] = useState<ImagePayload | null>(null);
+  const [looking, setLooking] = useState<LookableImage | null>(null);
   /** Which sent-off agent's own conversation is open, by the call that sent it. */
   const [openAgent, setOpenAgent] = useState<string | null>(null);
   /**
