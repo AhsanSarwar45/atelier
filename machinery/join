@@ -1000,10 +1000,29 @@ def migrate_registry(say):
     legacy = project.LEGACY_REGISTRY
     if os.path.exists(project.REGISTRY) or not os.path.exists(legacy):
         return
-    os.makedirs(os.path.dirname(project.REGISTRY), exist_ok=True)
-    shutil.copyfile(legacy, project.REGISTRY)
-    say("moved  the project registry into personal Atelier data at %s" %
-        project.REGISTRY)
+    if copy_if_absent(legacy, project.REGISTRY):
+        say("moved  the project registry into personal Atelier data at %s" %
+            project.REGISTRY)
+
+
+def copy_if_absent(source, destination):
+    """Publish a complete copy once without exposing a partial destination."""
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    temporary = "%s.%s.tmp" % (destination, uuid.uuid4().hex)
+    try:
+        shutil.copyfile(source, temporary)
+        try:
+            # Linking a completed sibling is atomic and refuses to replace a
+            # destination another join or registration published first.
+            os.link(temporary, destination)
+            return True
+        except FileExistsError:
+            return False
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def ensure_declaration(root, say):
@@ -1013,9 +1032,8 @@ def ensure_declaration(root, say):
         return where
     legacy = project.legacy_declaration_path(root)
     if os.path.exists(legacy):
-        os.makedirs(os.path.dirname(where), exist_ok=True)
-        shutil.copyfile(legacy, where)
-        say("moved  legacy project metadata into personal Atelier data at %s" % where)
+        if copy_if_absent(legacy, where):
+            say("moved  legacy project metadata into personal Atelier data at %s" % where)
         return where
     where = declaring(root)
     say("wrote  %s — inferred external metadata for this project" % where)

@@ -21,6 +21,19 @@ def load_join():
 
 
 class JoinInstructionsTest(unittest.TestCase):
+    def test_migration_never_replaces_a_registry_published_concurrently(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            legacy = root / "legacy.toml"
+            personal = root / "personal" / "projects.toml"
+            legacy.write_text('[projects]\nold = "/old"\n')
+            personal.parent.mkdir()
+            personal.write_text('[projects]\nnew = "/new"\n')
+
+            self.assertFalse(join.copy_if_absent(str(legacy), str(personal)))
+            self.assertEqual('[projects]\nnew = "/new"\n', personal.read_text())
+
     def test_personal_install_adds_skills_and_hooks_without_instruction_files(self):
         join = load_join()
         join.WORD = "atelier"
