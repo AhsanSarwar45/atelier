@@ -27,6 +27,7 @@ import {
   Plus,
   ShieldCheck,
   Square,
+  Star,
   X,
 } from 'lucide-react';
 
@@ -186,35 +187,39 @@ function Picker({
       <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto" data-testid={`${testid}-menu`}>
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
         {options.map((o) => (
-          <div key={o.value} className="flex items-center gap-1 px-1">
-            <DropdownMenuItem
-              data-testid={`${testid}-option`}
-              data-value={o.value}
-              data-picked={o.value === current}
-              onSelect={() => onPick(o.value)}
-              className="min-w-0 flex-1 flex-col items-start gap-0.5"
-            >
-              <span className={cn('text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
-              {o.hint && <span className="text-xs text-muted-foreground">{o.hint}</span>}
-            </DropdownMenuItem>
-            {onDefault && (
-              <Button
-                size="xs"
-                variant={defaultValue === o.value ? 'secondary' : 'ghost'}
-                data-testid={`${testid}-default-${o.value}`}
-                data-default={defaultValue === o.value}
-                aria-pressed={defaultValue === o.value}
-                aria-label={defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onDefault(o.value);
-                }}
-                onClick={() => onDefault(o.value)}
+          <div key={o.value} className="px-1 py-0.5">
+            <div className="flex items-center gap-1">
+              <DropdownMenuItem
+                data-testid={`${testid}-option`}
+                data-value={o.value}
+                data-picked={o.value === current}
+                onSelect={() => onPick(o.value)}
+                className="h-7 min-w-0 flex-1 px-2 py-1"
               >
-                {defaultValue === o.value ? 'Default' : 'Make default'}
-              </Button>
-            )}
+                <span className={cn('truncate text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
+              </DropdownMenuItem>
+              {onDefault && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="h-5 w-5 shrink-0 rounded-sm p-0"
+                  data-testid={`${testid}-default-${o.value}`}
+                  data-default={defaultValue === o.value}
+                  aria-pressed={defaultValue === o.value}
+                  aria-label={defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`}
+                  title={defaultValue === o.value ? 'Default' : 'Make default'}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onDefault(o.value);
+                  }}
+                  onClick={() => onDefault(o.value)}
+                >
+                  <Star className={cn('h-3 w-3', defaultValue === o.value && 'fill-current text-primary')} aria-hidden="true" />
+                </Button>
+              )}
+            </div>
+            {o.hint && <p className="px-2 pb-1 text-xs text-muted-foreground">{o.hint}</p>}
           </div>
         ))}
       </DropdownMenuContent>
