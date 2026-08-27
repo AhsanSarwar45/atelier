@@ -13,7 +13,9 @@ use tokio::process::Command;
 use tokio::task::JoinHandle;
 
 const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
-const START_TIMEOUT: Duration = Duration::from_secs(20);
+// This only bounds how long Atelier observes the command. `bd` owns its own,
+// configurable startup deadline and is deliberately left alive if ours elapses.
+const START_OBSERVATION_TIMEOUT: Duration = Duration::from_secs(120);
 const SUPERVISION_INTERVAL: Duration = Duration::from_secs(15);
 
 /// A monitoring task whose lifetime is exactly the lifetime of its owner.
@@ -29,8 +31,8 @@ impl Drop for Supervisor {
 pub fn supervise(db: Arc<Database>, bd: PathBuf) -> Supervisor {
     Supervisor(tokio::spawn(async move {
         loop {
-            tokio::time::sleep(SUPERVISION_INTERVAL).await;
             ensure_registered(&db, &bd).await;
+            tokio::time::sleep(SUPERVISION_INTERVAL).await;
         }
     }))
 }
@@ -54,11 +56,16 @@ pub async fn ensure_registered(db: &Database, bd: &Path) {
 }
 
 fn managed_project(project: &Path) -> bool {
-    !project.to_string_lossy().starts_with("dolt://")
+    !project.as_os_str().is_empty()
+        && !project.to_string_lossy().starts_with("dolt://")
         && project.join(".beads").join("dolt").is_dir()
 }
 
 async fn ensure_project(project: PathBuf, bd: PathBuf) {
+    ensure_project_with_timeout(project, bd, START_OBSERVATION_TIMEOUT).await;
+}
+
+async fn ensure_project_with_timeout(project: PathBuf, bd: PathBuf, observation: Duration) {
     let beads = project.join(".beads");
     if endpoint_is_alive(&beads).await {
         return;
@@ -66,11 +73,10 @@ async fn ensure_project(project: PathBuf, bd: PathBuf) {
 
     tracing::info!("Restoring Dolt server for {}", project.display());
     let result = tokio::time::timeout(
-        START_TIMEOUT,
+        observation,
         Command::new(&bd)
             .args(["dolt", "start"])
             .current_dir(&project)
-            .kill_on_drop(true)
             .output(),
     )
     .await;
@@ -96,9 +102,9 @@ async fn ensure_project(project: PathBuf, bd: PathBuf) {
             project.display()
         ),
         Err(_) => tracing::warn!(
-            "Timed out restoring Dolt server for {} after {:?}",
+            "Stopped waiting for bd to restore Dolt server for {} after {:?}; bd remains alive to finish",
             project.display(),
-            START_TIMEOUT
+            observation
         ),
     }
 }
@@ -132,6 +138,7 @@ mod tests {
         assert!(managed_project(&local));
         assert!(!managed_project(&jsonl));
         assert!(!managed_project(Path::new("dolt://remote")));
+        assert!(!managed_project(Path::new("")));
     }
 
     #[cfg(unix)]
@@ -218,6 +225,71 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dolt_lifecycle_does_not_kill_bd_when_our_wait_ends_first() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("slow");
+        fs::create_dir_all(project.join(".beads/dolt")).unwrap();
+        let bd = temp.path().join("slow-bd");
+        let finished = temp.path().join("finished");
+        fs::write(
+            &bd,
+            format!(
+                "#!/bin/sh\nsleep 0.1\nprintf finished > '{}'\n",
+                finished.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&bd, fs::Permissions::from_mode(0o755)).unwrap();
+
+        ensure_project_with_timeout(project, bd, Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        assert_eq!(fs::read_to_string(finished).unwrap(), "finished");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dolt_lifecycle_first_restore_does_not_block_server_startup() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("slow");
+        fs::create_dir_all(project.join(".beads/dolt")).unwrap();
+        let bd = temp.path().join("slow-bd");
+        let started = temp.path().join("started");
+        fs::write(
+            &bd,
+            format!(
+                "#!/bin/sh\nprintf started > '{}'\nsleep 0.2\n",
+                started.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&bd, fs::Permissions::from_mode(0o755)).unwrap();
+        let db = Arc::new(Database::new_in_memory().unwrap());
+        db.create_project(CreateProjectInput {
+            name: "slow".to_string(),
+            path: project.to_string_lossy().into_owned(),
+            local_path: None,
+            is_test: false,
+        })
+        .unwrap();
+
+        let began = std::time::Instant::now();
+        let supervisor = supervise(db, bd);
+        assert!(began.elapsed() < Duration::from_millis(20));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !started.exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(supervisor);
     }
 
     #[tokio::test]

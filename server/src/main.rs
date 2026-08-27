@@ -390,7 +390,6 @@ async fn serve(open_browser: bool) {
     }
 
     let _dolt_supervisor = if let Some(bd) = routes::find_bd() {
-        dolt_lifecycle::ensure_registered(&database, bd).await;
         Some(dolt_lifecycle::supervise(database.clone(), bd.clone()))
     } else {
         None
