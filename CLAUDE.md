@@ -1,7 +1,5 @@
 # Agent Instructions
 
-This project uses Beads for durable task tracking. Run `bd prime` before work.
-
 ## Isolated app instances
 
 Each worktree must use its own disposable app stack. Never touch the owner's
