@@ -278,7 +278,7 @@ Answer with one fenced json block and nothing after it:
        "shas": "\n".join(shas) or "none found", "diff": diff or "no diff found"}
 
 
-def run_reviewer(prompt, actor, goal_id, base, head, here):
+def run_reviewer(prompt, actor, goal_id, repo, base, head, here):
     """Use the machine's named personal reviewer through its bounded runner.
 
     Model, tools, and reviewer policy belong to the personal ``reviewer`` agent;
@@ -289,7 +289,7 @@ def run_reviewer(prompt, actor, goal_id, base, head, here):
     env = dict(os.environ, BEADS_ACTOR=actor)
     for name in project.env(DECL, "REVIEWER"):
         env[name] = goal_id
-    cmd = ["external-review", "--repo", ROOT, "--base", base, "--head", head,
+    cmd = ["external-review", "--repo", repo, "--base", base, "--head", head,
            "--spec", prompt, "--evidence", "Atelier ran its declared checks before review.",
            "--timeout", "600", "--output-dir", here]
     run = subprocess.run(cmd, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
@@ -423,7 +423,7 @@ def attempts(prompt, actor, goal_id, here, shas):
     where = whose(shas[0], goal_id)
     base = git(["rev-parse", "%s^" % shas[0]], where).strip()
     head = shas[-1]
-    out, err = run_reviewer(prompt, actor, goal_id, base, head, here)
+    out, err = run_reviewer(prompt, actor, goal_id, where, base, head, here)
     with open(os.path.join(here, "1.log"), "w") as fh:
         fh.write(out + "\n--- runner ---\n" + err)
     return [out]

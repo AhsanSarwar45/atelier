@@ -43,13 +43,23 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertEqual((codex_home / "AGENTS.md").read_text(),
                              "Codex-only personal rule.\n")
             for provider in (claude_home, codex_home):
-                for skill in ("atelier", "beads"):
+                for skill in ("atelier", "beads", "external-review"):
                     self.assertTrue((provider / "skills" / skill).is_symlink())
             claude = (claude_home / "settings.json").read_text()
             codex = (codex_home / "hooks.json").read_text()
             self.assertIn("session-context.py", claude)
             self.assertIn("session-context.py", codex)
             self.assertEqual(list(project.iterdir()), [])
+
+    def test_personal_install_adds_external_review_command(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            join.PERSONAL_BIN = str(Path(held) / "bin")
+            join.install_external_review(lambda _: None)
+            command = Path(join.PERSONAL_BIN) / "external-review"
+            self.assertTrue(command.is_symlink())
+            self.assertTrue(command.resolve().samefile(
+                ROOT / "machinery/external-review/scripts/external_review.py"))
 
     def test_reinstalling_keeps_one_session_hook(self):
         join = load_join()

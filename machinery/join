@@ -684,6 +684,7 @@ def there(path):
 
 MACHINE = os.environ.get("ATELIER_CLAUDE_HOME") or os.path.expanduser("~/.claude")
 CODEX_MACHINE = os.environ.get("ATELIER_CODEX_HOME") or os.path.expanduser("~/.codex")
+PERSONAL_BIN = os.environ.get("ATELIER_PERSONAL_BIN") or os.path.expanduser("~/.local/bin")
 
 
 def same(here, there):
@@ -736,16 +737,17 @@ def install(say):
             os.symlink(target, link)
             say("link   %s -> %s" % (link, target))
     install_skills(say)
+    install_external_review(say)
     install_session_hooks(say)
 
 
 def install_skills(say):
-    """Expose Atelier's two installed skills to both providers."""
+    """Expose the installed session and review skills to both providers."""
     source = os.path.join(HOME, "skills")
     for provider in (MACHINE, CODEX_MACHINE):
         target = os.path.join(provider, "skills")
         os.makedirs(target, exist_ok=True)
-        for name in ("atelier", "beads"):
+        for name in ("atelier", "beads", "external-review"):
             link = os.path.join(target, name)
             want = os.path.join(source, name)
             if os.path.islink(link) and os.path.realpath(link) == want:
@@ -758,6 +760,22 @@ def install_skills(say):
                     else os.remove(link)
             os.symlink(want, link)
             say("skill  %s -> %s" % (link, want))
+
+
+def install_external_review(say):
+    """Expose the provider-neutral bounded runner as a personal command."""
+    want = os.path.join(HOME, "external-review", "scripts", "external_review.py")
+    link = os.path.join(PERSONAL_BIN, "external-review")
+    os.makedirs(PERSONAL_BIN, exist_ok=True)
+    if os.path.islink(link) and os.path.realpath(link) == want:
+        return
+    if os.path.lexists(link):
+        if not same(link, want):
+            say("kept   %s — it is not Atelier's external-review runner" % link)
+            return
+        os.remove(link)
+    os.symlink(want, link)
+    say("review %s -> %s" % (link, want))
 
 
 def install_session_hooks(say):

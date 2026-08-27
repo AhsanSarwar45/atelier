@@ -23,6 +23,9 @@ def make_packet(repo,base,head,spec,evidence):
 
 def normalize(payload):
     if isinstance(payload,dict) and "structured_output" in payload: payload=payload["structured_output"]
+    elif isinstance(payload,dict) and isinstance(payload.get("result"),str):
+        try: payload=json.loads(payload["result"])
+        except json.JSONDecodeError: raise ValueError("provider result was not the required JSON object")
     if not isinstance(payload,dict) or not {"verdict","summary","findings","verified"}.issubset(payload): raise ValueError("missing result fields")
     findings=payload["findings"]
     if not isinstance(findings,list): raise ValueError("findings must be a list")

@@ -46,6 +46,13 @@ class ExternalReviewTests(unittest.TestCase):
             fake = self.fake(tmp, "import json\nprint(json.dumps(%r))\n" % payload)
             self.assertEqual(1, self.run_review(fake, Path(tmp) / "out").returncode)
 
+    def test_json_in_provider_result_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = {"verdict":"PASS","summary":"clean","findings":[],"verified":[]}
+            payload = {"result": json.dumps(verdict)}
+            fake = self.fake(tmp, "import json\nprint(json.dumps(%r))\n" % payload)
+            self.assertEqual(0, self.run_review(fake, Path(tmp) / "out").returncode)
+
     def test_timeout_is_bounded(self):
         with tempfile.TemporaryDirectory() as tmp:
             fake = self.fake(tmp, "import time\ntime.sleep(10)\n")
