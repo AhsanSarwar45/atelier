@@ -152,6 +152,16 @@ def checks_tool():
     return mod
 
 
+def review_check_environment():
+    """Writable scratch paths for checks run inside a read-only agent sandbox."""
+    scratch = os.environ.get("MACHINERY_REVIEW_TMPDIR") or \
+        ("/tmp" if os.name != "nt" else tempfile.gettempdir())
+    compiler = os.path.join(scratch, "atelier-review-ccache")
+    os.makedirs(compiler, exist_ok=True)
+    return {"TMPDIR": scratch, "TEMP": scratch, "TMP": scratch,
+            "CCACHE_DIR": compiler}
+
+
 def ran_checks(goal_id):
     """Run this project's whole declared checks line over the tree about to be read.
 
@@ -173,7 +183,17 @@ def ran_checks(goal_id):
         return None
     here = shapes.git(["write-tree"], ROOT)
     log_dir = shapes.runs_dir(goal_id)
-    rows = shapes.run_line(every, ROOT, log_dir)
+    changed = review_check_environment()
+    previous = {name: os.environ.get(name) for name in changed}
+    os.environ.update(changed)
+    try:
+        rows = shapes.run_line(every, ROOT, log_dir)
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
     red = next((r for r in rows if not r["ok"]), None)
     return {"tree": here, "rows": rows, "red": red, "log": log_dir,
             "line": DECL.checks, "tool": project.tool(DECL, "checks", "")}
