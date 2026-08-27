@@ -409,12 +409,14 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
   if (!items.length) return null;
   return (
     <Panel data-testid="todo-panel" inset="none" data-expanded={expanded ? 'yes' : 'no'} className="overflow-hidden">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         aria-expanded={expanded}
         aria-controls="active-checklist-items"
         onClick={() => setExpanded((open) => !open)}
-        className="flex min-h-9 w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/40"
+        className="flex min-h-9 w-full justify-start gap-2 rounded-none px-3 py-2 text-left hover:bg-muted/40"
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <ListChecks className="h-4 w-4 text-muted-foreground" />
@@ -425,7 +427,7 @@ export function TodoPanel({ items }: { items: TodoItem[] }) {
           </span>
         )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">{complete}/{items.length}</span>
-      </button>
+      </Button>
       <ul id="active-checklist-items" hidden={!expanded} className="space-y-1 border-t border-border/60 px-3 py-2">
         {items.map((t) => (
           <li key={t.id} data-testid="todo-item" data-todo-status={t.status} className="flex items-center gap-2 text-sm">
