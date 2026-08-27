@@ -1485,7 +1485,7 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
   send_message: (i) => ({ said: `Messaged ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'agent', grave: false }),
   interrupt_agent: (i) => ({ said: `Stopped ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'grave', grave: true }),
   close_agent: (i) => ({ said: `Closed ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'grave', grave: true }),
-  resume_agent: (i) => ({ said: `Started ${brief(arg(i, 'target')) || 'a helper'} again`, kind: 'agent', grave: false }),
+  resume_agent: (i) => ({ said: `Started ${brief(arg(i, 'id')) || 'a helper'} again`, kind: 'agent', grave: false }),
   list_agents: () => ({ said: 'Listed the helpers', kind: 'agent', grave: false }),
   wait_agent: () => ({ said: 'Waited for a helper', kind: 'agent', grave: false }),
   TaskCreate: (i) => {

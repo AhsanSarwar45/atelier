@@ -493,6 +493,7 @@ describe('the tools that are not commands', () => {
     ['Glob', { pattern: '**/*.test.ts' }, 'Listed the files matching **/*.test.ts'],
     ['Agent', { subagent_type: 'scout', description: 'find the call sites' }, 'Sent off a scout to find the call sites'],
     ['SendMessage', { to: 'builder-1' }, 'Messaged builder-1'],
+    ['resume_agent', { id: 'scout' }, 'Started scout again'],
     ['Skill', { skill: 'report' }, 'Ran the report skill'],
     ['WebFetch', { url: 'https://docs.anthropic.com/en/api' }, 'Fetched docs.anthropic.com/en/api'],
     ['WebSearch', { query: 'vitest jsdom' }, 'Searched the web for vitest jsdom'],

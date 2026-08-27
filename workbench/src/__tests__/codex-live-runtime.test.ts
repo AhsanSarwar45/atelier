@@ -45,7 +45,7 @@ describe('Codex live-runtime regressions', () => {
       ['send_message', { target: 'scout' }, 'Messaged scout'],
       ['interrupt_agent', { target: 'scout' }, 'Stopped scout'],
       ['close_agent', { target: 'scout' }, 'Closed scout'],
-      ['resume_agent', { target: 'scout' }, 'Started scout again'],
+      ['resume_agent', { id: 'scout' }, 'Started scout again'],
       ['list_agents', {}, 'Listed the helpers'],
       ['wait_agent', {}, 'Waited for a helper'],
     ] as const;
