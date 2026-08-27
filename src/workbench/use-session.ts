@@ -212,7 +212,11 @@ export function useSession(sessionId: string | null): LoadedSessionView {
           // and simply not send a list the screen draws (bw-7ks.22.16).
           const opening = asView(JSON.parse(data) as Partial<SessionView>);
           if (opening.lastSeq >= entry.view.lastSeq) publishCached(sessionId, opening);
-          void loadHistory(sessionId);
+          // The snapshot is the newest server-built window. Loading farther
+          // back here makes an opened chat grow through its older history
+          // before the reader has asked for it, which reads as the transcript
+          // replaying from the top. `DrawnTranscript` calls `loadOlder` only
+          // after the reader reaches its head.
         } catch {
           // A frame this page cannot read leaves the transcript as it stands.
         }

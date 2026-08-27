@@ -204,6 +204,17 @@ describe('a chat opened, and opened again after the stream drops', () => {
     expect(result.current.lastSeq).toBe(built.lastSeq);
   });
 
+  it('leaves older history unread until the reader reaches the transcript head', () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    renderHook(() => useSession('chat-1'));
+
+    const built = foldAll(aWholeChat(2));
+    act(() => opened[0].hands({ ...built, hasOlder: true, historyCursor: 42 }));
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('asks only for what arrived since, when the stream comes back', () => {
     const { result } = renderHook(() => useSession('chat-1'));
     const built = foldAll(aWholeChat(2));
