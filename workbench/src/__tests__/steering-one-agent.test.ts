@@ -323,4 +323,26 @@ describe('and nothing that arrives afterwards reopens it', () => {
 
     expect(rowOf(events)).toMatchObject({ state: 'parked' });
   });
+
+  it('returns a parked helper to running when the kit says in progress', () => {
+    const { events } = reading([
+      SENT_OFF,
+      status('in_progress', true),
+      status('in_progress', false),
+    ]);
+
+    expect(states(events)).toEqual(['parked', 'running']);
+    expect(rowOf(events)).toMatchObject({ state: 'running' });
+  });
+
+  it.each([
+    ['completed', 'done'],
+    ['failed', 'failed'],
+    ['killed', 'stopped'],
+  ])('treats a terminal %s update as a finished helper even without a notification', (statusName, state) => {
+    const { events } = reading([SENT_OFF, status(statusName)]);
+
+    expect(endings(events)).toEqual([{ state, result: null }]);
+    expect(rowOf(events)).toMatchObject({ state });
+  });
 });

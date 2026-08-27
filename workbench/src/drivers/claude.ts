@@ -258,6 +258,7 @@ const OVER = new Set<AgentState>(['done', 'failed', 'stopped']);
 const TASK_STATE: Record<string, AgentState> = {
   pending: 'running',
   running: 'running',
+  in_progress: 'running',
   paused: 'parked',
   completed: 'done',
   failed: 'failed',
@@ -993,14 +994,22 @@ export class ClaudeDriver implements Driver {
           ? 'parked'
           : (patch.status && TASK_STATE[patch.status]) || was.state;
         this.sentAway.set(id, { ...was, state });
-        this.emit({
-          type: 'agent.progress',
-          agentId: id,
-          seconds: was.seconds,
-          tokens: was.tokens,
-          calls: was.calls,
-          state,
-        });
+        if (OVER.has(state)) {
+          this.emit({
+            type: 'agent.finished', agentId: id, state,
+            seconds: was.seconds, tokens: was.tokens, calls: was.calls,
+            model: was.model, result: null,
+          });
+        } else {
+          this.emit({
+            type: 'agent.progress',
+            agentId: id,
+            seconds: was.seconds,
+            tokens: was.tokens,
+            calls: was.calls,
+            state,
+          });
+        }
         return false;
       }
 

@@ -295,6 +295,26 @@ describe('the panel', () => {
     expect(run.querySelector('[data-testid="sent-away-for"]')).toHaveTextContent('45s');
   });
 
+  it.each(['Claude', 'Codex'])('draws a terminal %s helper as Done, never Working', (provider) => {
+    const id = `${provider.toLowerCase()}-helper`;
+    const agents = foldAll([
+      said({
+        type: 'agent.started', agentId: id, toolCallId: `${id}-call`, kind: 'helper',
+        what: `Inspect with ${provider}`, agentType: 'reviewer', model: null,
+      }),
+      said({
+        type: 'agent.finished', agentId: id, state: 'done', seconds: 23,
+        tokens: 100, calls: 2, model: null, result: 'Inspection complete.',
+      }),
+    ]).agents;
+
+    render(<SentAwayPanel items={[]} agents={agents} sessionId="chat-1" controls={[]} />);
+
+    const mark = screen.getByTestId('sent-away-state');
+    expect(mark).toHaveAttribute('data-word', 'Done');
+    expect(mark).not.toHaveTextContent('Working');
+  });
+
   it('says which of them are waiting on you', () => {
     const rows = drawn();
     expect(rows['bash-1']!.querySelector('[data-testid="sent-away-state"]')).toHaveAttribute('data-word', 'In background');
