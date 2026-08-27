@@ -40,6 +40,36 @@ Use these exact payload shapes:
   be an absolute local path or start with `http:`, `https:`, `data:video/`,
   `blob:`, or `file:`.
 
+Valid examples:
+
+```atelier-widget
+{"type":"metrics","title":"Health","items":[{"label":"Latency","value":"42 ms","detail":"Improved by 8 ms","trend":"down"}]}
+```
+
+```atelier-widget
+{"type":"chart","chart":"bar","title":"Requests","series":[{"name":"Web"},{"name":"API"}],"data":[{"label":"Mon","values":[12,8]},{"label":"Tue","values":[18,11]}]}
+```
+
+```atelier-widget
+{"type":"chart","chart":"line","title":"Response time","series":[{"name":"P95"}],"data":[{"label":"Mon","values":[52]},{"label":"Tue","values":[42]}]}
+```
+
+```atelier-widget
+{"type":"progress","items":[{"label":"Tests","value":8,"max":10,"detail":"8 of 10"}]}
+```
+
+```atelier-widget
+{"type":"timeline","items":[{"label":"Built","status":"done"},{"label":"Review","status":"current"},{"label":"Release","status":"next"}]}
+```
+
+```atelier-widget
+{"type":"table","columns":["Choice","Cost"],"rows":[["A","$2"],["B","$3"]]}
+```
+
+```atelier-widget
+{"type":"video","title":"Proof","src":"/absolute/path/proof.webm"}
+```
+
 Use `video` whenever showing video proof. Never present
 video as a file link. Do not use a widget for one fact or a short list.
 
