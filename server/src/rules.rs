@@ -17,6 +17,7 @@
 //! moves.
 
 use rust_embed::Embed;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -116,29 +117,83 @@ fn runnable(_dir: &Path, _files: &crate::laid_down::Carried) {}
 /// `--check` keep working and this stays one command rather than a second
 /// help screen to keep in step with the first.
 pub fn init(rest: &[String]) -> Result<i32, String> {
-    let dir = install()?;
-    // The board screen keeps its list of projects in a database it makes on
-    // first run, and joining puts a row in it. Made here rather than left to
-    // the first run, so setting a project up leaves it on the screen instead of
-    // leaving the reader a sentence about starting the app once and joining
-    // again.
-    if let Err(e) = crate::db::Database::new() {
-        eprintln!("the board screen's list of projects could not be opened: {e}");
-    }
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let stdout = std::io::stdout();
+    let mut output = stdout.lock();
+    init_with(rest, &mut input, &mut output)
+}
 
+/// Install the universal provider guidance without joining any repository.
+/// Service installation calls this once for the whole computer; init calls the
+/// same path so machines that do not use a login service still receive it.
+pub fn install_personal() -> Result<i32, String> {
+    let dir = install()?;
+    let join = dir.join(MACHINERY).join("join");
+    run_python(&[join.display().to_string(), "--personal".to_string()], &[])
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Beads,
+    Chat,
+}
+
+fn init_with(
+    rest: &[String],
+    input: &mut dyn BufRead,
+    output: &mut dyn Write,
+) -> Result<i32, String> {
+    let dir = install()?;
     let mut said: Vec<String> = Vec::new();
     let mut where_ = None;
+    let mut chosen = None;
     for word in rest {
-        if word.starts_with('-') {
+        if word == "--beads" {
+            if chosen.replace(Mode::Beads) == Some(Mode::Chat) {
+                return Err("`--beads` and `--chat` cannot be used together".to_string());
+            }
+        } else if word == "--chat" {
+            if chosen.replace(Mode::Chat) == Some(Mode::Beads) {
+                return Err("`--beads` and `--chat` cannot be used together".to_string());
+            }
+        } else if word.starts_with('-') {
             said.push(word.clone());
         } else if where_.is_none() {
             where_ = Some(word.clone());
         } else {
-            return Err(format!("`{word}`: only one project can be set up at a time"));
+            return Err(format!(
+                "`{word}`: only one project can be set up at a time"
+            ));
         }
     }
     let root = std::fs::canonicalize(where_.unwrap_or_else(|| ".".to_string()))
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
+
+    let join = join_for(&root, &dir);
+    run_python(&[join.display().to_string(), "--personal".to_string()], &[])?;
+    let current = mode_from(&join, &root)?;
+    let mode = match chosen {
+        Some(mode) => mode,
+        None => ask_for_mode(input, output, current == Mode::Beads)?,
+    };
+    if mode == Mode::Chat {
+        return run_python(
+            &[
+                join.display().to_string(),
+                "--chat-only".to_string(),
+                root.display().to_string(),
+            ],
+            &[],
+        );
+    }
+
+    // Only a Beads project belongs on the board screen. Creating its list is
+    // deliberately below the choice so chat-only setup changes no project or
+    // project-list state.
+    if let Err(e) = crate::db::Database::new() {
+        eprintln!("the board screen's list of projects could not be opened: {e}");
+    }
 
     // A project that ships the machinery itself is joined by its own copy, and
     // told nothing about the word. That is this repository and the one other
@@ -146,15 +201,104 @@ pub fn init(rest: &[String]) -> Result<i32, String> {
     // would move it onto whatever version happens to be installed, which is
     // the one thing somebody editing the rules must not have happen to them.
     let mine = root.join(MACHINERY).join("join");
-    let (join, word): (PathBuf, &[(&str, &str)]) = match mine.is_file() {
-        true => (mine, &[]),
+    let word: &[(&str, &str)] = match mine.is_file() {
+        true => &[],
         // Named rather than pathed: what `join` writes into the project is a
         // word every machine has, so the file it writes can be committed.
-        false => (dir.join(MACHINERY).join("join"), &[(GATE_WORD, crate::identity::NAME)]),
+        false => &[(GATE_WORD, crate::identity::NAME)],
     };
     let mut args: Vec<String> = vec![join.display().to_string(), root.display().to_string()];
     args.extend(said);
     run_python(&args, word)
+}
+
+fn join_for(root: &Path, dir: &Path) -> PathBuf {
+    let mine = root.join(MACHINERY).join("join");
+    if mine.is_file() {
+        mine
+    } else {
+        dir.join(MACHINERY).join("join")
+    }
+}
+
+fn ask_for_mode(
+    input: &mut dyn BufRead,
+    output: &mut dyn Write,
+    default_beads: bool,
+) -> Result<Mode, String> {
+    loop {
+        let hint = if default_beads { "Y/n" } else { "y/N" };
+        write!(output, "Use Beads for this project? [{hint}]: ")
+            .map_err(|e| format!("the setup question could not be shown: {e}"))?;
+        output
+            .flush()
+            .map_err(|e| format!("the setup question could not be shown: {e}"))?;
+        let mut answer = String::new();
+        input
+            .read_line(&mut answer)
+            .map_err(|e| format!("the setup answer could not be read: {e}"))?;
+        match answer.trim().to_ascii_lowercase().as_str() {
+            "" => {
+                return Ok(if default_beads {
+                    Mode::Beads
+                } else {
+                    Mode::Chat
+                })
+            }
+            "y" | "yes" => return Ok(Mode::Beads),
+            "n" | "no" => return Ok(Mode::Chat),
+            _ => writeln!(output, "Please answer yes or no.")
+                .map_err(|e| format!("the setup question could not be shown: {e}"))?,
+        }
+    }
+}
+
+fn mode_from(join: &Path, root: &Path) -> Result<Mode, String> {
+    let said = run_python_output(&[
+        join.display().to_string(),
+        "--mode".to_string(),
+        root.display().to_string(),
+    ])?;
+    match said.trim() {
+        "beads" => Ok(Mode::Beads),
+        "chat" => Ok(Mode::Chat),
+        other => Err(format!(
+            "Atelier could not determine this project's mode: {other}"
+        )),
+    }
+}
+
+pub fn project_mode(rest: &[String]) -> Result<String, String> {
+    if rest.len() > 1 {
+        return Err("`atelier project mode` accepts at most one folder".to_string());
+    }
+    let root = std::fs::canonicalize(rest.first().cloned().unwrap_or_else(|| ".".to_string()))
+        .map_err(|e| format!("that folder cannot be read: {e}"))?;
+    let dir = install()?;
+    let join = join_for(&root, &dir);
+    Ok(match mode_from(&join, &root)? {
+        Mode::Beads => "beads",
+        Mode::Chat => "chat",
+    }
+    .into())
+}
+
+fn run_python_output(args: &[String]) -> Result<String, String> {
+    let mut refused = None;
+    for word in ["python3", "python"] {
+        match Command::new(word).args(args).output() {
+            Ok(out) if out.status.success() => {
+                return Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+            }
+            Ok(out) => return Err(String::from_utf8_lossy(&out.stderr).into_owned()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => refused = Some(e),
+            Err(e) => return Err(format!("{word}: {e}")),
+        }
+    }
+    Err(format!(
+        "this computer has no python on its path ({})",
+        refused.map(|e| e.to_string()).unwrap_or_default()
+    ))
 }
 
 /// Run one session gate by name, on behalf of a project wired to a word.
@@ -185,7 +329,11 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
         eprintln!(
             "{}: no gate called `{name}` — looked in {}",
             crate::identity::NAME,
-            looked.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+            looked
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
         return Ok(0);
     };
@@ -204,7 +352,10 @@ pub fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
         .ok_or_else(|| "this computer names no folder for Atelier's working rules".to_string())?;
     let script = tool_path(name, &dir)?;
     if !script.is_file() {
-        return Err(format!("the installed workflow tool is missing: {}", script.display()));
+        return Err(format!(
+            "the installed workflow tool is missing: {}",
+            script.display()
+        ));
     }
     let mut args = vec![script.display().to_string()];
     args.extend(rest.iter().cloned());
@@ -259,6 +410,7 @@ fn run_python(args: &[String], env: &[(&str, &str)]) -> Result<i32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     fn carried() -> crate::laid_down::Carried {
         let mut files = crate::laid_down::gather::<Machinery>(MACHINERY).unwrap();
@@ -276,7 +428,10 @@ mod tests {
             "machinery/board/job",
             ".claude/output-styles/manager.md",
         ] {
-            assert!(files.iter().any(|(name, _)| name == want), "{want} is not carried");
+            assert!(
+                files.iter().any(|(name, _)| name == want),
+                "{want} is not carried"
+            );
         }
     }
 
@@ -287,7 +442,9 @@ mod tests {
         // machinery would leave every worker and skill unread.
         let files = carried();
         assert!(files.iter().any(|(name, _)| name.starts_with(".claude/")));
-        assert!(!files.iter().any(|(name, _)| name.contains("machinery/.claude")));
+        assert!(!files
+            .iter()
+            .any(|(name, _)| name.contains("machinery/.claude")));
     }
 
     #[test]
@@ -295,15 +452,21 @@ mod tests {
         // It names folders on the maintainer's disk. Shipped, it would point a
         // teammate's board screen at projects they do not have.
         let files = carried();
-        assert!(!files.iter().any(|(name, _)| name.ends_with("projects.toml")));
-        assert!(files.iter().any(|(name, _)| name.ends_with("projects.toml.example")));
+        assert!(!files
+            .iter()
+            .any(|(name, _)| name.ends_with("projects.toml")));
+        assert!(files
+            .iter()
+            .any(|(name, _)| name.ends_with("projects.toml.example")));
     }
 
     #[test]
     fn one_projects_own_wiring_stays_behind() {
         // `join` writes each project its own, merged into what it already had.
         let files = carried();
-        assert!(!files.iter().any(|(name, _)| name == ".claude/settings.json"));
+        assert!(!files
+            .iter()
+            .any(|(name, _)| name == ".claude/settings.json"));
     }
 
     #[test]
@@ -322,8 +485,14 @@ mod tests {
         // Only the bytes travel; a file's mode does not. Anything opening with
         // a shebang is something somebody runs.
         let files = carried();
-        let shebanged = files.iter().filter(|(_, bytes)| bytes.starts_with(b"#!")).count();
-        assert!(shebanged > 10, "only {shebanged} carried files open with a shebang");
+        let shebanged = files
+            .iter()
+            .filter(|(_, bytes)| bytes.starts_with(b"#!"))
+            .count();
+        assert!(
+            shebanged > 10,
+            "only {shebanged} carried files open with a shebang"
+        );
     }
 
     #[test]
@@ -332,8 +501,16 @@ mod tests {
         // Joining that through the installed copy would move it onto whatever
         // version is installed and quietly stop their edits being the ones
         // running.
-        let root = std::env::current_dir().unwrap().parent().unwrap().to_path_buf();
-        assert!(root.join(MACHINERY).join("join").is_file(), "{}", root.display());
+        let root = std::env::current_dir()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        assert!(
+            root.join(MACHINERY).join("join").is_file(),
+            "{}",
+            root.display()
+        );
     }
 
     #[test]
@@ -363,11 +540,49 @@ mod tests {
     #[test]
     fn only_the_workflow_tools_named_in_project_instructions_are_public() {
         let dir = Path::new("/installed/rules");
-        assert_eq!(tool_path("board/job", dir).unwrap(), dir.join("machinery/board/job"));
-        assert_eq!(tool_path("board/land", dir).unwrap(), dir.join("machinery/board/land"));
-        assert_eq!(tool_path("checks", dir).unwrap(), dir.join("machinery/checks"));
+        assert_eq!(
+            tool_path("board/job", dir).unwrap(),
+            dir.join("machinery/board/job")
+        );
+        assert_eq!(
+            tool_path("board/land", dir).unwrap(),
+            dir.join("machinery/board/land")
+        );
+        assert_eq!(
+            tool_path("checks", dir).unwrap(),
+            dir.join("machinery/checks")
+        );
         for name in ["../join", "hooks/board-gate.py", "board/review", ""] {
-            assert!(tool_path(name, dir).unwrap_err().contains("not an Atelier workflow tool"));
+            assert!(tool_path(name, dir)
+                .unwrap_err()
+                .contains("not an Atelier workflow tool"));
         }
+    }
+
+    #[test]
+    fn a_new_project_defaults_to_chat_and_an_existing_registration_defaults_to_beads() {
+        let mut shown = Vec::new();
+        assert_eq!(
+            ask_for_mode(&mut Cursor::new("\n"), &mut shown, false).unwrap(),
+            Mode::Chat
+        );
+        shown.clear();
+        assert_eq!(
+            ask_for_mode(&mut Cursor::new("\n"), &mut shown, true).unwrap(),
+            Mode::Beads
+        );
+        assert!(String::from_utf8(shown).unwrap().contains("[Y/n]"));
+    }
+
+    #[test]
+    fn the_interactive_choice_accepts_words_and_reasks_after_a_typo() {
+        let mut shown = Vec::new();
+        assert_eq!(
+            ask_for_mode(&mut Cursor::new("perhaps\nno\n"), &mut shown, true).unwrap(),
+            Mode::Chat
+        );
+        assert!(String::from_utf8(shown)
+            .unwrap()
+            .contains("Please answer yes or no."));
     }
 }

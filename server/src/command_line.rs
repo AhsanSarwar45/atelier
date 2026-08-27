@@ -35,6 +35,8 @@ pub enum Ask {
     /// Set a project up: lay the working rules down and wire that project to
     /// them. The words after it are passed to the rules' own joining tool.
     Init(Vec<String>),
+    /// Say whether a folder belongs to a registered Beads project.
+    ProjectMode(Vec<String>),
     /// Run one session gate by name, on behalf of a project whose settings
     /// name a word rather than a path.
     Hook { name: String, rest: Vec<String> },
@@ -62,7 +64,9 @@ pub const PORT: u16 = 3008;
 pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
     let args: Vec<String> = args.into_iter().collect();
     let Some(first) = args.first() else {
-        return Ask::Run { open_browser: false };
+        return Ask::Run {
+            open_browser: false,
+        };
     };
 
     match first.as_str() {
@@ -88,15 +92,24 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
         // Everything after the word goes to the joining tool untouched, so
         // its flags do not have to be listed in two places to keep working.
         "init" => Ask::Init(args[1..].to_vec()),
+        "project" if args.get(1).map(String::as_str) == Some("mode") => {
+            Ask::ProjectMode(args[2..].to_vec())
+        }
         // Not for typing. It is what a project's own settings file names, so
         // the gates it runs are a word every machine has instead of one
         // person's home folder (bw-8um.3.3).
         "hook" => match args.get(1) {
-            Some(name) => Ask::Hook { name: name.clone(), rest: args[2..].to_vec() },
+            Some(name) => Ask::Hook {
+                name: name.clone(),
+                rest: args[2..].to_vec(),
+            },
             None => Ask::Unknown("hook".to_string()),
         },
         "tool" => match args.get(1) {
-            Some(name) => Ask::Tool { name: name.clone(), rest: args[2..].to_vec() },
+            Some(name) => Ask::Tool {
+                name: name.clone(),
+                rest: args[2..].to_vec(),
+            },
             None => Ask::Unknown("tool".to_string()),
         },
         "where" => Ask::Where,
@@ -119,6 +132,8 @@ Usage:
   atelier                     The same as `run --no-browser`
   atelier init [folder]       Set a project up here: the board, the working
                               rules and the session gates, wired to each other
+  atelier project mode [folder]
+                              Print `beads` or `chat` for this folder
   atelier tool <name> [...]   Run a board workflow command installed with Atelier
   atelier where               Print the addresses to open it at, and start nothing
   atelier service install     Have this computer start it at login, and keep it up
@@ -172,7 +187,12 @@ mod tests {
     #[test]
     fn run_can_be_told_to_leave_the_browser_alone() {
         // What a service manager starts, and what the proof scripts start.
-        assert_eq!(ask(&["run", "--no-browser"]), Ask::Run { open_browser: false });
+        assert_eq!(
+            ask(&["run", "--no-browser"]),
+            Ask::Run {
+                open_browser: false
+            }
+        );
     }
 
     #[test]
@@ -180,7 +200,12 @@ mod tests {
         // Every launcher, script and test that already starts this binary
         // passes no arguments at all. Changing what that means would break
         // all of them at once.
-        assert_eq!(ask(&[]), Ask::Run { open_browser: false });
+        assert_eq!(
+            ask(&[]),
+            Ask::Run {
+                open_browser: false
+            }
+        );
     }
 
     #[test]
@@ -204,6 +229,15 @@ mod tests {
     }
 
     #[test]
+    fn project_mode_is_a_read_only_question_with_an_optional_folder() {
+        assert_eq!(ask(&["project", "mode"]), Ask::ProjectMode(vec![]));
+        assert_eq!(
+            ask(&["project", "mode", "."]),
+            Ask::ProjectMode(vec![".".into()])
+        );
+    }
+
+    #[test]
     fn the_joining_tools_own_flags_reach_it_untouched() {
         // Listing them here would be a second help screen to keep in step
         // with the first, and it would go stale on the next flag.
@@ -217,7 +251,10 @@ mod tests {
     fn a_gate_is_run_by_name_and_carries_its_own_words() {
         assert_eq!(
             ask(&["hook", "board-gate.py", "--why"]),
-            Ask::Hook { name: "board-gate.py".to_string(), rest: vec!["--why".to_string()] }
+            Ask::Hook {
+                name: "board-gate.py".to_string(),
+                rest: vec!["--why".to_string()]
+            }
         );
     }
 
@@ -270,13 +307,19 @@ mod tests {
         // been taken and quietly wasn't.
         assert_eq!(ask(&["srve"]), Ask::Unknown("srve".to_string()));
         assert_eq!(ask(&["--port", "3010"]), Ask::Unknown("--port".to_string()));
-        assert_eq!(ask(&["run", "--headless"]), Ask::Unknown("--headless".to_string()));
+        assert_eq!(
+            ask(&["run", "--headless"]),
+            Ask::Unknown("--headless".to_string())
+        );
     }
 
     #[test]
     fn the_computer_can_be_asked_to_start_it_and_to_stop_starting_it() {
         assert_eq!(ask(&["service", "install"]), Ask::Service(Action::Install));
-        assert_eq!(ask(&["service", "uninstall"]), Ask::Service(Action::Uninstall));
+        assert_eq!(
+            ask(&["service", "uninstall"]),
+            Ask::Service(Action::Uninstall)
+        );
         assert_eq!(ask(&["service", "remove"]), Ask::Service(Action::Uninstall));
         assert_eq!(ask(&["service", "status"]), Ask::Service(Action::Status));
     }
@@ -286,17 +329,32 @@ mod tests {
         // Asking is the only one of the three that touches nothing, so it is
         // what a reader who stopped mid-sentence gets.
         assert_eq!(ask(&["service"]), Ask::Service(Action::Status));
-        assert_eq!(ask(&["service", "instal"]), Ask::Unknown("instal".to_string()));
+        assert_eq!(
+            ask(&["service", "instal"]),
+            Ask::Unknown("instal".to_string())
+        );
     }
 
     #[test]
     fn the_help_screen_names_run_among_the_things_it_can_do() {
         let help = help();
         assert!(help.contains("atelier run"), "run is not offered:\n{help}");
-        assert!(help.contains("atelier where"), "where is not offered:\n{help}");
-        assert!(help.contains("--data-dir"), "--data-dir is not offered:\n{help}");
-        assert!(help.contains("service install"), "service install is not offered:\n{help}");
-        assert!(help.contains("service uninstall"), "service uninstall is not offered:\n{help}");
+        assert!(
+            help.contains("atelier where"),
+            "where is not offered:\n{help}"
+        );
+        assert!(
+            help.contains("--data-dir"),
+            "--data-dir is not offered:\n{help}"
+        );
+        assert!(
+            help.contains("service install"),
+            "service install is not offered:\n{help}"
+        );
+        assert!(
+            help.contains("service uninstall"),
+            "service uninstall is not offered:\n{help}"
+        );
     }
 
     #[test]

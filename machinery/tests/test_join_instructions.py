@@ -2,6 +2,7 @@ import importlib.machinery
 import importlib.util
 import tempfile
 import unittest
+import subprocess
 from pathlib import Path
 
 
@@ -57,6 +58,35 @@ class JoinInstructionsTest(unittest.TestCase):
             join.instruct_personal(lambda _: None)
             agents = (root / ".codex" / "AGENTS.md").read_text()
             self.assertEqual(agents.count(join.PERSONAL_BEGIN), 1)
+
+    def test_a_linked_worktree_inherits_the_main_projects_registration(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            main = root / "project"
+            tree = root / "worktree"
+            main.mkdir()
+            subprocess.run(["git", "init", "-q", "-b", "main", str(main)], check=True)
+            subprocess.run(["git", "-C", str(main), "config", "user.email", "test@example.com"],
+                           check=True)
+            subprocess.run(["git", "-C", str(main), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(main), "commit", "--allow-empty", "-qm", "base"],
+                           check=True)
+            subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "-b", "job",
+                            str(tree)], check=True)
+            registry = root / "projects.toml"
+            registry.write_text('[projects]\nexample = "%s"\n' % main)
+            join.project.REGISTRY = str(registry)
+            join.opened = lambda: None
+            before = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
+
+            self.assertEqual(join.registered_root(str(main)), str(main.resolve()))
+            self.assertEqual(join.registered_root(str(tree)), str(main.resolve()))
+
+            join.unregister(str(tree), lambda _: None)
+            self.assertIsNone(join.registered_root(str(main)))
+            after = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
+            self.assertEqual(after, before)
 
 
 if __name__ == "__main__":

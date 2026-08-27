@@ -15,8 +15,8 @@ mod laid_down;
 mod reachable;
 mod routes;
 mod rules;
-mod serving;
 mod service;
+mod serving;
 
 use axum::{
     body::Body,
@@ -43,7 +43,12 @@ struct Assets;
 
 fn env_flag(name: &str) -> bool {
     env::var(name)
-        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -158,6 +163,12 @@ async fn main() {
         // off is one command, so nobody edits a service file by hand
         // (bw-8um.3.13).
         command_line::Ask::Service(action) => {
+            if action == service::Action::Install {
+                if let Err(e) = rules::install_personal() {
+                    eprintln!("Atelier's personal instructions could not be installed: {e}");
+                    std::process::exit(1);
+                }
+            }
             if let Err(e) = service::run(action) {
                 eprintln!("{e}");
                 std::process::exit(1);
@@ -169,6 +180,13 @@ async fn main() {
         // (bw-8um.3.6).
         command_line::Ask::Init(rest) => match rules::init(&rest) {
             Ok(code) => std::process::exit(code),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
+        command_line::Ask::ProjectMode(rest) => match rules::project_mode(&rest) {
+            Ok(mode) => println!("{mode}"),
             Err(e) => {
                 eprintln!("{e}");
                 std::process::exit(1);
@@ -275,8 +293,7 @@ async fn serve(open_browser: bool) {
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     // Where it listens, read the one way `atelier where` reads it too.
     let host = bind_host();
@@ -345,9 +362,7 @@ async fn serve(open_browser: bool) {
         .allow_headers(Any);
 
     // Initialize the database
-    let database = Arc::new(
-        db::Database::new().expect("Failed to initialize database"),
-    );
+    let database = Arc::new(db::Database::new().expect("Failed to initialize database"));
     info!("Database initialized");
 
     // Initialize Dolt connection manager. Local boards already backed by Dolt
@@ -385,7 +400,9 @@ async fn serve(open_browser: bool) {
             }
         }
     } else {
-        tracing::warn!("⚠ bd CLI not found — beads read/write will not work for filesystem projects");
+        tracing::warn!(
+            "⚠ bd CLI not found — beads read/write will not work for filesystem projects"
+        );
         tracing::warn!("  Install: https://github.com/gastownhall/beads");
     }
 
@@ -408,7 +425,10 @@ async fn serve(open_browser: bool) {
             Some(laid)
         }
         Err(e) => {
-            tracing::warn!("The chat helper was not laid down, so the Chat tab will not answer: {}", e);
+            tracing::warn!(
+                "The chat helper was not laid down, so the Chat tab will not answer: {}",
+                e
+            );
             None
         }
     };
@@ -423,10 +443,19 @@ async fn serve(open_browser: bool) {
     // Build the router
     let app = Router::new()
         .route("/api/health", get(routes::health))
-        .nest("/api", routes::project_routes().with_state(database.clone()))
+        .nest(
+            "/api",
+            routes::project_routes().with_state(database.clone()),
+        )
         .route("/api/beads", get(routes::beads::read_beads))
-        .route("/api/beads/create", post(routes::beads::create_bead_handler))
-        .route("/api/beads/update", patch(routes::beads::update_bead_handler))
+        .route(
+            "/api/beads/create",
+            post(routes::beads::create_bead_handler),
+        )
+        .route(
+            "/api/beads/update",
+            patch(routes::beads::update_bead_handler),
+        )
         // Dolt endpoints
         .route("/api/dolt/status", get(routes::dolt::dolt_status))
         .route("/api/dolt/databases", get(routes::dolt::dolt_databases))
@@ -439,9 +468,15 @@ async fn serve(open_browser: bool) {
         .route("/api/bd/command", post(routes::cli::bd_command))
         .route("/api/git/branch-status", get(routes::git::branch_status))
         // Worktree endpoints
-        .route("/api/git/worktree-status", get(routes::worktree::worktree_status))
+        .route(
+            "/api/git/worktree-status",
+            get(routes::worktree::worktree_status),
+        )
         .route("/api/git/worktree", post(routes::worktree::create_worktree))
-        .route("/api/git/worktree", delete(routes::worktree::delete_worktree))
+        .route(
+            "/api/git/worktree",
+            delete(routes::worktree::delete_worktree),
+        )
         .route("/api/git/worktrees", get(routes::worktree::list_worktrees))
         // PR endpoints
         .route("/api/watch/beads", get(routes::watch_beads))
@@ -487,7 +522,10 @@ async fn serve(open_browser: bool) {
                 println!("{line}");
             }
         }
-        Err(e) => tracing::warn!("Your chats were not wired up to say what they are doing: {}", e),
+        Err(e) => tracing::warn!(
+            "Your chats were not wired up to say what they are doing: {}",
+            e
+        ),
     }
 
     if open_browser || env_flag("ATELIER_OPEN_BROWSER") || env_flag("BEADS_WEB_OPEN_BROWSER") {

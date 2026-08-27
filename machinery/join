@@ -691,8 +691,8 @@ def there(path):
     return HOME in said or "hook %s" % os.path.basename(GUARD_REL) in said
 
 
-MACHINE = os.path.expanduser("~/.claude")
-CODEX_MACHINE = os.path.expanduser("~/.codex")
+MACHINE = os.environ.get("ATELIER_CLAUDE_HOME") or os.path.expanduser("~/.claude")
+CODEX_MACHINE = os.environ.get("ATELIER_CODEX_HOME") or os.path.expanduser("~/.codex")
 PERSONAL_BEGIN = "<!-- BEGIN ATELIER PERSONAL INSTRUCTIONS -->"
 PERSONAL_END = "<!-- END ATELIER PERSONAL INSTRUCTIONS -->"
 
@@ -845,6 +845,65 @@ def register(root, decl, say):
     with open(project.REGISTRY, "w") as fh:
         fh.write(text)
     say("listed %s as %s" % (root, decl.name))
+
+
+def git_identity(root):
+    """The one Git repository shared by a main checkout and all its worktrees."""
+    run = subprocess.run(["git", "-C", root, "rev-parse", "--git-common-dir"],
+                         capture_output=True, text=True)
+    if run.returncode:
+        return None
+    common = run.stdout.strip()
+    if not os.path.isabs(common):
+        common = os.path.join(root, common)
+    return os.path.realpath(common)
+
+
+def registered_root(root):
+    """The registered main checkout for root, including linked worktrees."""
+    root = os.path.realpath(root)
+    known = project.registry()
+    for registered in known.values():
+        if os.path.realpath(registered) == root:
+            return os.path.realpath(registered)
+    identity = git_identity(root)
+    if identity:
+        for registered in known.values():
+            if git_identity(registered) == identity:
+                return os.path.realpath(registered)
+    return None
+
+
+def unregister(root, say):
+    """Remove external board registration while changing nothing in the tree."""
+    registered = registered_root(root)
+    if registered is None:
+        return
+    names = [name for name, path in project.registry().items()
+             if os.path.realpath(path) == registered]
+    if os.path.exists(project.REGISTRY):
+        with open(project.REGISTRY) as source:
+            held = source.read()
+        fresh = held
+        for name in names:
+            key = r"(?:%s|%s)" % (re.escape(name), re.escape(quoted(name)))
+            fresh = re.sub(r"^\s*%s\s*=.*(?:\n|$)" % key, "", fresh, flags=re.M)
+        if fresh != held:
+            temporary = project.REGISTRY + ".atelier-new"
+            with open(temporary, "w") as fh:
+                fh.write(fresh)
+            os.replace(temporary, project.REGISTRY)
+            say("unlisted %s from the Beads project registry" % registered)
+    db = opened()
+    if db is not None:
+        try:
+            removed = db.execute("DELETE FROM projects WHERE path = ?", (registered,)) \
+                        .rowcount
+            db.commit()
+            if removed:
+                say("hidden %s from the board screen" % registered)
+        finally:
+            db.close()
 
 
 def declaring(root):
@@ -1450,12 +1509,27 @@ def main():
                     help="say where every registered project stands, and change nothing")
     ap.add_argument("--personal", action="store_true",
                     help="install personal provider capabilities, and join no project")
+    ap.add_argument("--mode", metavar="PATH",
+                    help="print beads or chat for a project, and change nothing")
+    ap.add_argument("--chat-only", metavar="PATH",
+                    help="remove a project's external Beads registration only")
     a = ap.parse_args()
 
     if a.personal:
         said = []
         install(said.append)
         print("\n".join(said) or "nothing to do — personal Atelier instructions are current")
+        return
+
+    if a.mode:
+        print("beads" if registered_root(a.mode) else "chat")
+        return
+
+    if a.chat_only:
+        said = []
+        unregister(a.chat_only, said.append)
+        print("\n".join(said) or "chat only — no Beads registration for %s" %
+              os.path.realpath(a.chat_only))
         return
 
     if a.check or not a.path:
