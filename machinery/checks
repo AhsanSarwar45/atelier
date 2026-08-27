@@ -398,15 +398,14 @@ def main():
                     help="run these instead of the declared line, for the cases")
     a = ap.parse_args()
 
-    # Run the declaration in this worktree. `project.of` intentionally resolves
-    # to the main checkout for board identity, but checks must test this copy.
-    decl = project.Declaration(
-        HERE_TREE, project._read(os.path.join(HERE_TREE, project.DECLARATION)))
+    # Project policy is personal metadata shared by the main checkout and all
+    # linked worktrees. Commands still run with HERE_TREE as their cwd below.
+    decl = project.of(HERE_TREE)
     every = told(a.suites) or suites(decl)
     if not every:
         sys.exit("%s declares no checks command, so there is nothing here to run. "
                  "Run what holds a change in this project and write on the card "
-                 "what that was." % os.path.join(ROOT, project.DECLARATION))
+                 "what that was." % project.declaration_path(ROOT))
 
     session = os.environ.get("CLAUDE_CODE_SESSION_ID")
     actor = me()

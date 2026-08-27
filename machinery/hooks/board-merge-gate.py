@@ -180,7 +180,7 @@ def refusal(subject, name, where):
     close against is the one being refused, so a project that joined and said
     nothing has no route at all until it answers.
     """
-    said = REFUSED % (subject, name, project.DECLARATION)
+    said = REFUSED % (subject, name, project.declaration_path(where))
     try:
         decl = project.of(where)
         board = os.path.isdir(os.path.join(project.root(where), ".beads"))
