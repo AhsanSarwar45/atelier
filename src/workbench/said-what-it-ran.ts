@@ -1483,8 +1483,8 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
   spawn_agent: (i) => CALLS.Agent!(i),
   followup_task: (i) => ({ said: `Gave ${brief(arg(i, 'target')) || 'a helper'} more work`, kind: 'agent', grave: false }),
   send_message: (i) => ({ said: `Messaged ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'agent', grave: false }),
-  interrupt_agent: (i) => ({ said: `Stopped ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'agent', grave: false }),
-  close_agent: (i) => ({ said: `Closed ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'agent', grave: false }),
+  interrupt_agent: (i) => ({ said: `Stopped ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'grave', grave: true }),
+  close_agent: (i) => ({ said: `Closed ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'grave', grave: true }),
   resume_agent: (i) => ({ said: `Started ${brief(arg(i, 'target')) || 'a helper'} again`, kind: 'agent', grave: false }),
   list_agents: () => ({ said: 'Listed the helpers', kind: 'agent', grave: false }),
   wait_agent: () => ({ said: 'Waited for a helper', kind: 'agent', grave: false }),
@@ -1498,7 +1498,7 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
   TaskStop: () => ({ said: 'Stopped a helper', kind: 'grave', grave: true }),
   TaskList: () => ({ said: 'Listed the work in flight', kind: 'agent', grave: false }),
   TeamCreate: () => ({ said: 'Started a helper team', kind: 'agent', grave: false }),
-  TeamDelete: () => ({ said: 'Removed a helper team', kind: 'agent', grave: false }),
+  TeamDelete: () => ({ said: 'Removed a helper team', kind: 'grave', grave: true }),
   Skill: (i) => {
     const named2 = arg(i, 'skill');
     return { said: named2 ? `Ran the ${brief(named2)} skill` : 'Ran a skill', kind: 'agent', grave: false };

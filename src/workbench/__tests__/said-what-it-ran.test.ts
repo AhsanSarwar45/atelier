@@ -533,15 +533,21 @@ describe('the tools that are not commands', () => {
   it('puts every Claude and Codex agent operation in the agent category', () => {
     const claude = [
       'Agent', 'Task', 'SendMessage', 'ListAgents', 'TaskCreate', 'TaskGet',
-      'TaskUpdate', 'TaskOutput', 'TaskList', 'TeamCreate', 'TeamDelete',
+      'TaskUpdate', 'TaskOutput', 'TaskList', 'TeamCreate',
     ];
     const codex = [
-      'spawn_agent', 'followup_task', 'send_message', 'interrupt_agent',
-      'close_agent', 'resume_agent', 'list_agents', 'wait_agent',
+      'spawn_agent', 'followup_task', 'send_message', 'resume_agent',
+      'list_agents', 'wait_agent',
     ];
 
     for (const name of [...claude, ...codex]) {
       expect(whatItRan(name, {})?.kind, name).toBe('agent');
+    }
+  });
+
+  it('keeps agent operations that stop or delete work in the grave category', () => {
+    for (const name of ['TaskStop', 'TeamDelete', 'interrupt_agent', 'close_agent']) {
+      expect(whatItRan(name, {}), name).toMatchObject({ kind: 'grave', grave: true });
     }
   });
 });
