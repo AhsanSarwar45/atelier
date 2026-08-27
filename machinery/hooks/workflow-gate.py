@@ -13,20 +13,19 @@ import shlex
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import board_common as bc  # noqa: E402
 
 EDIT_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
-MUTATING_SHELL = re.compile(
-    r"(?:^|[;&|]\s*)(?:"
-    r"apply_patch|"
-    r"(?:git\s+(?:[^;&|\n]+\s+)?(?:add|am|checkout|cherry-pick|clean|commit|"
-    r"merge|mv|rebase|reset|restore|revert|rm|switch|update-ref))|"
-    r"(?:bd\s+(?:[^;&|\n]+\s+)?(?:close|create|defer|dep|reopen|supersede|update))|"
-    r"(?:cp|install|mkdir|mv|rm|touch|truncate)\b|"
-    r"(?:npm|pnpm|yarn|cargo|go)\s+(?:install|add|remove|update)\b|"
-    r"(?:perl|sed)\s+[^;&|\n]*\s-i(?:\s|$)"
-    r")",
-    re.I | re.M,
-)
+GIT_MUTATIONS = {"add", "am", "checkout", "cherry-pick", "clean", "commit",
+                 "merge", "mv", "rebase", "reset", "restore", "revert", "rm",
+                 "switch", "update-ref"}
+BD_MUTATIONS = {"close", "create", "defer", "dep", "reopen", "supersede", "update"}
+FILE_MUTATIONS = {"apply_patch", "cp", "install", "mkdir", "mv", "rm", "touch",
+                  "truncate"}
+PACKAGE_MUTATIONS = {"install", "add", "remove", "update"}
+BD_TAKES_VALUE = {"--actor", "--database", "--db", "--directory", "-C",
+                  "--dolt-auto-commit", "--mem-profile"}
 WORKTREE = re.compile(r"(?:^|/)worktrees/([^/\s]+)(?:/|\s|$)")
 RECOVERY_FILES = {
     ".codex/hooks.json",
@@ -92,6 +91,59 @@ def deny(reason):
     }}))
 
 
+def bd_verb(argv):
+    """The actual bd subcommand, ignoring its global switches and values."""
+    if not argv or os.path.basename(argv[0]) != "bd":
+        return ""
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        if not arg.startswith("-"):
+            return arg.lower()
+        if "=" not in arg and arg in BD_TAKES_VALUE:
+            i += 1
+        i += 1
+    return ""
+
+
+def branch_mutates(argv):
+    """Whether a git branch call changes a ref rather than listing it."""
+    if bc.git_verb(argv) != "branch":
+        return False
+    args = argv[argv.index("branch") + 1:]
+    changing = {"-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move",
+                "--copy", "-f", "--force"}
+    return any(a in changing for a in args) or any(not a.startswith("-") for a in args)
+
+
+def shell_mutates(command):
+    """Classify commands by parsed executable and verb, never argument prose."""
+    for segment in bc.segments(bc.unshelled(command)):
+        if re.search(r"(?:^|\s)(?:\d*>>?|&>)\s*\S", segment):
+            return True
+        argv = bc.plain(bc.words(segment))[1]
+        if not argv:
+            continue
+        name = os.path.basename(argv[0]).lower()
+        git_verb = bc.git_verb(argv).lower()
+        if git_verb in GIT_MUTATIONS or branch_mutates(argv):
+            return True
+        if git_verb == "worktree" and any(a in {"add", "move", "remove", "prune", "repair"}
+                                           for a in argv[2:3]):
+            return True
+        if bd_verb(argv) in BD_MUTATIONS:
+            return True
+        if name in FILE_MUTATIONS:
+            return True
+        if name in {"npm", "pnpm", "yarn", "cargo", "go"} \
+                and len(argv) > 1 and argv[1].lower() in PACKAGE_MUTATIONS:
+            return True
+        if name in {"perl", "sed"} and any(a == "-i" or a.startswith("-i.")
+                                             for a in argv[1:]):
+            return True
+    return False
+
+
 def mutates(data):
     tool = data.get("tool_name") or ""
     if tool in EDIT_TOOLS:
@@ -115,12 +167,7 @@ def mutates(data):
     if re.match(r"^\s*git\s+merge\s+--ff-only\s+[A-Za-z0-9_.-]+\s*$",
                 command, re.I):
         return False
-    branch = re.search(r"(?:^|[;&|]\s*)git\s+(?:-C\s+\S+\s+)?branch\b([^;&|\n]*)",
-                       command, re.I)
-    if branch and re.search(r"(?:^|\s)(?:-[dDmMcC]|--delete|--move|--copy)(?:\s|$)|\s+[A-Za-z0-9_.][A-Za-z0-9_.-]*\s*$",
-                            branch.group(1)):
-        return True
-    return bool(MUTATING_SHELL.search(command))
+    return shell_mutates(command)
 
 
 def run(args, cwd):

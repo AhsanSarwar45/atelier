@@ -86,5 +86,35 @@ class CopyLifecycle(unittest.TestCase):
         self.assertIn("dedicated ticket worktree", gate.reason(bash("rm -rf /repo/anything")))
 
 
+class ShellClassification(unittest.TestCase):
+    def test_git_merge_base_is_read_only(self):
+        self.assertFalse(gate.shell_mutates("git merge-base --is-ancestor ours topic"))
+
+    def test_bd_search_text_cannot_turn_into_a_close(self):
+        self.assertFalse(gate.shell_mutates('bd search "cannot close"'))
+
+    def test_read_only_commands_stay_read_only_in_a_chain(self):
+        command = "git status --short; git rev-parse HEAD; bd show bw-123"
+        self.assertFalse(gate.shell_mutates(command))
+
+    def test_real_git_and_board_mutations_are_detected(self):
+        for command in ("git -C /repo commit -m done", "git branch -d topic",
+                        "bd --actor worker close bw-123", "git worktree prune"):
+            with self.subTest(command=command):
+                self.assertTrue(gate.shell_mutates(command))
+
+    def test_mutation_words_inside_arguments_are_only_text(self):
+        for command in ('printf "git commit"', 'rg "bd close" file.py',
+                        'bd search "git merge and bd update"'):
+            with self.subTest(command=command):
+                self.assertFalse(gate.shell_mutates(command))
+
+    def test_file_writes_and_package_changes_are_detected(self):
+        for command in ("touch result", "npm install", "sed -i.bak x file",
+                        "printf value > result"):
+            with self.subTest(command=command):
+                self.assertTrue(gate.shell_mutates(command))
+
+
 if __name__ == "__main__":
     unittest.main()
