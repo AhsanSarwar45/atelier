@@ -99,6 +99,10 @@ export interface ChatRightRailProps {
   /** Opening one of them onto its own conversation. */
   onOpenAgent: (id: string) => void;
   open: boolean;
+  /** Width of the in-row desktop column; the phone sheet stays 288px wide. */
+  desktopWidth: number;
+  /** Pointer is moving the desktop divider, so the column must follow it immediately. */
+  resizing?: boolean;
   /**
    * Shutting it. The button that opens it is on the bar above (bw-81wt.5), and
    * on a phone that bar is behind this sheet — so the same call is what the
@@ -116,6 +120,8 @@ export function ChatRightRail({
   agentControls,
   onOpenAgent,
   open,
+  desktopWidth,
+  resizing = false,
   onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
@@ -126,9 +132,10 @@ export function ChatRightRail({
       data-open={open}
       data-cards={jobs.length}
       data-pieces={cards.length}
+      style={{ '--chat-right-rail-width': `${desktopWidth}px` } as React.CSSProperties}
       className={cn(
         'z-30 flex shrink-0 flex-col overflow-hidden border-border/60 bg-background',
-        'transition-[width] duration-200 ease-out motion-reduce:transition-none',
+        !resizing && 'transition-[width] duration-200 ease-out motion-reduce:transition-none',
         open
           ? // A sheet down the whole right edge on a phone, as tall as the
             // screen under the bars and hard against the side it opens from —
@@ -136,7 +143,7 @@ export function ChatRightRail({
             // the one side that touches it.
             cn(
               'fixed inset-y-0 right-0 z-50 w-72 max-w-[85vw] border-l shadow-2xl',
-              'md:static md:inset-auto md:z-30 md:h-full md:w-72 md:max-w-none md:shadow-none',
+              'md:static md:inset-auto md:z-30 md:h-full md:w-[var(--chat-right-rail-width)] md:max-w-none md:shadow-none',
             )
           : // Shut, it takes no width at all, on a wide screen as much as on
             // a phone. It used to keep a thin edge on a desktop because the
@@ -153,7 +160,7 @@ export function ChatRightRail({
         aria-hidden={!open}
         data-testid="chat-right-rail-body"
         className={cn(
-          'flex min-h-0 w-72 flex-1 flex-col divide-y divide-border/60 overflow-y-auto',
+          'flex min-h-0 w-72 flex-1 flex-col divide-y divide-border/60 overflow-y-auto md:w-full',
           'transition-opacity duration-150 ease-out motion-reduce:transition-none',
           open ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}

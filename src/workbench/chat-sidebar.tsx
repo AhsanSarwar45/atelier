@@ -526,7 +526,7 @@ export function ChatSidebar({
   return (
     <aside
       data-testid="chat-sidebar"
-      className="flex h-full min-h-0 w-72 shrink-0 flex-col border-r border-border/60"
+      className="flex h-full min-h-0 w-72 shrink-0 flex-col border-r border-border/60 md:w-full"
     >
       {/*
         Search, the "everything" switch and New Chat all live here now — they

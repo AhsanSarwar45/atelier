@@ -7,7 +7,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -86,6 +86,66 @@ import { workingLine } from '@/workbench/working-line';
 /** Where the "show me everything" switch is remembered between visits. */
 const EVERY_CHAT = 'workbench.every-chat';
 const NEW_CHAT_DEFAULT = 'workbench.new-chat-default';
+const LEFT_PANEL_WIDTH = 'workbench.left-panel-width';
+const RIGHT_PANEL_WIDTH = 'workbench.right-panel-width';
+const DEFAULT_PANEL_WIDTH = 288;
+const MIN_PANEL_WIDTH = 208;
+const MAX_PANEL_WIDTH = 560;
+const MIN_CHAT_WIDTH = 320;
+
+function rememberedPanelWidth(key: string): number {
+  const width = Number(localStorage.getItem(key));
+  return Number.isFinite(width) && width >= MIN_PANEL_WIDTH ? Math.min(width, MAX_PANEL_WIDTH) : DEFAULT_PANEL_WIDTH;
+}
+
+export function ResizeDivider({ side, value, onChange, maximum, onDragging }: {
+  side: 'left' | 'right';
+  value: number;
+  onChange: (width: number) => void;
+  maximum: () => number;
+  onDragging?: (dragging: boolean) => void;
+}) {
+  const drag = useRef<{ x: number; width: number } | null>(null);
+  const resize = (width: number) => onChange(Math.max(MIN_PANEL_WIDTH, Math.min(width, MAX_PANEL_WIDTH, maximum())));
+  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    const distance = event.clientX - drag.current.x;
+    resize(drag.current.width + (side === 'left' ? distance : -distance));
+  };
+  return (
+    <div
+      role="separator"
+      aria-label={`Resize ${side} panel`}
+      aria-orientation="vertical"
+      aria-valuemin={MIN_PANEL_WIDTH}
+      aria-valuemax={Math.max(MIN_PANEL_WIDTH, maximum())}
+      aria-valuenow={Math.round(value)}
+      tabIndex={0}
+      data-testid={`${side}-panel-resizer`}
+      className="group relative z-40 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none md:block"
+      onPointerDown={(event) => {
+        drag.current = { x: event.clientX, width: value };
+        onDragging?.(true);
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={move}
+      onPointerUp={(event) => {
+        drag.current = null;
+        onDragging?.(false);
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+      onPointerCancel={() => { drag.current = null; onDragging?.(false); }}
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        const direction = event.key === 'ArrowRight' ? 1 : -1;
+        resize(value + direction * (side === 'left' ? 16 : -16));
+      }}
+    >
+      <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/60 transition-colors group-hover:bg-primary group-focus:bg-primary" />
+    </div>
+  );
+}
 
 /**
  * Everything one row of a conversation actually says, for going through once
@@ -430,6 +490,24 @@ export function enterSubmits(
 }
 
 export default function ChatTab({ projectId, projectPath, openSessionId }: ChatTabProps) {
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [leftWidth, setLeftWidth] = useState(DEFAULT_PANEL_WIDTH);
+  const [rightWidth, setRightWidth] = useState(DEFAULT_PANEL_WIDTH);
+  const [resizingRight, setResizingRight] = useState(false);
+
+  useEffect(() => {
+    setLeftWidth(rememberedPanelWidth(LEFT_PANEL_WIDTH));
+    setRightWidth(rememberedPanelWidth(RIGHT_PANEL_WIDTH));
+  }, []);
+
+  const changeLeftWidth = useCallback((width: number) => {
+    setLeftWidth(width);
+    localStorage.setItem(LEFT_PANEL_WIDTH, String(Math.round(width)));
+  }, []);
+  const changeRightWidth = useCallback((width: number) => {
+    setRightWidth(width);
+    localStorage.setItem(RIGHT_PANEL_WIDTH, String(Math.round(width)));
+  }, []);
   const router = useRouter();
   const params = useSearchParams();
   // The address is which chat is open — never a state of this component's own.
@@ -885,7 +963,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
    */
   const shell = (inner: React.ReactNode) => (
     // The height is the shell's to give: this box fills what the bars left.
-    <div className="relative flex min-h-0 flex-1">
+    <div ref={shellRef} className="relative flex min-h-0 flex-1">
       {/* First thing on the row, ahead of Chat/Board/Reports: the way into the
           chat list is not one tool among this tab's own, it opens a whole other
           pane, the same reason the right rail's own way in sits on the bar and
@@ -964,6 +1042,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       <div
         data-testid="chat-rail"
         data-open={railOpen}
+        style={{ '--chat-left-rail-width': `${leftWidth}px` } as CSSProperties}
         className={cn(
           // On a phone it is a sheet over the WHOLE screen, bars included, not
           // a panel inside the box the bars left over: a sheet that starts
@@ -972,7 +1051,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // around it is only the work area. On a wide screen it is a column
           // of the row again, and behind the popups as it always was.
           'z-50 h-full shrink-0 bg-background transition-transform md:relative md:z-30 md:translate-x-0',
-          'fixed inset-y-0 left-0',
+          'fixed inset-y-0 left-0 md:w-[var(--chat-left-rail-width)]',
           railOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full',
         )}
       >
@@ -996,6 +1075,12 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           onClose={() => setRailOpen(false)}
         />
       </div>
+      <ResizeDivider
+        side="left"
+        value={leftWidth}
+        onChange={changeLeftWidth}
+        maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - (rightOpen && sessionId ? rightWidth : 0) - MIN_CHAT_WIDTH}
+      />
       {/* Mounted either way and faded, so the darkening arrives with the panel
           instead of snapping on in front of it (bw-7ks.22.12). */}
       <button
@@ -1023,17 +1108,30 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       {/* The chat's own column. Only when there IS a chat: an empty rail beside
           an empty screen says nothing and takes width to say it. */}
       {sessionId && (
-        <ChatRightRail
-          projectId={projectId}
-          cards={cards}
-          agents={view.agents}
-          items={view.items}
-          sessionId={sessionId}
-          agentControls={view.menu.agentControls}
-          onOpenAgent={setOpenAgent}
-          open={rightOpen}
-          onToggle={flipRight}
-        />
+        <>
+          {rightOpen && (
+            <ResizeDivider
+              side="right"
+              value={rightWidth}
+              onChange={changeRightWidth}
+              onDragging={setResizingRight}
+              maximum={() => (shellRef.current?.clientWidth ?? window.innerWidth) - leftWidth - MIN_CHAT_WIDTH}
+            />
+          )}
+          <ChatRightRail
+            projectId={projectId}
+            cards={cards}
+            agents={view.agents}
+            items={view.items}
+            sessionId={sessionId}
+            agentControls={view.menu.agentControls}
+            onOpenAgent={setOpenAgent}
+            open={rightOpen}
+            desktopWidth={rightWidth}
+            resizing={resizingRight}
+            onToggle={flipRight}
+          />
+        </>
       )}
       {sessionId && (
         <button
@@ -1225,7 +1323,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         // this chat reads as the reader taking it over. It holds its own place —
         // at the end while that is what he is watching, and on his own row when
         // older messages arrive above him — so the browser's guess is turned off.
-        className="mx-auto w-full max-w-[110ch] flex-1 overflow-y-auto px-4 py-4 [overflow-anchor:none]"
+        className="w-full flex-1 overflow-y-auto [overflow-anchor:none]"
         data-testid="transcript"
         // One listener for every file chip in the conversation, wherever it was
         // drawn: in a message, in a command, or on a tool row's own line. A
@@ -1243,7 +1341,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             conversation grew — a picture arriving late or a line still being
             typed moves it without a row being added, and the reader watching
             the end must stay at the end through both. */}
-        <div ref={contentRef} data-testid="transcript-rows" className="flex flex-col gap-3">
+        <div ref={contentRef} data-testid="transcript-rows" className="mx-auto flex w-full max-w-[110ch] flex-col gap-3 px-4 py-4">
         {/* Only when what is hidden is his own doing: a chat that has said
             nothing yet holds the machine's own start-up lines and nothing else,
             and the quiet start hides those for him (bw-aqpc). */}

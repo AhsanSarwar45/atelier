@@ -62,6 +62,7 @@ const rail = (agents: SentAway[], cards: string[]) =>
       agentControls={['stop']}
       onOpenAgent={() => {}}
       open
+      desktopWidth={288}
       onToggle={() => {}}
     />,
   );
