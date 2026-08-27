@@ -198,14 +198,22 @@ function Picker({
               {o.hint && <span className="text-xs text-muted-foreground">{o.hint}</span>}
             </DropdownMenuItem>
             {onDefault && (
-              <DropdownMenuItem
-                className={cn('h-7 px-2 text-xs', defaultValue === o.value && 'bg-secondary')}
+              <Button
+                size="xs"
+                variant={defaultValue === o.value ? 'secondary' : 'ghost'}
                 data-testid={`${testid}-default-${o.value}`}
                 data-default={defaultValue === o.value}
-                onSelect={() => onDefault(o.value)}
+                aria-pressed={defaultValue === o.value}
+                aria-label={defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDefault(o.value);
+                }}
+                onClick={() => onDefault(o.value)}
               >
                 {defaultValue === o.value ? 'Default' : 'Make default'}
-              </DropdownMenuItem>
+              </Button>
             )}
           </div>
         ))}
@@ -1414,12 +1422,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 label: modelName(m.value, m.displayName) ?? m.displayName,
                 hint: m.description,
               }))}
-              defaultValue={view.brand ? modelDefaults[view.brand] ?? null : null}
+              defaultValue={modelDefaults[sessionBrand] ?? null}
               onDefault={(model) => {
-                const brand = view.brand;
-                if (!brand) return;
                 setModelDefaults((was) => {
-                  const next = { ...was, [brand]: model };
+                  const next = { ...was, [sessionBrand]: model };
                   localStorage.setItem(MODEL_DEFAULTS, JSON.stringify(next));
                   return next;
                 });
@@ -1442,12 +1448,10 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 label: effort.displayName,
                 hint: effort.description,
               }))}
-              defaultValue={view.brand ? effortDefaults[view.brand] ?? null : null}
+              defaultValue={effortDefaults[sessionBrand] ?? null}
               onDefault={(effort) => {
-                const brand = view.brand;
-                if (!brand) return;
                 setEffortDefaults((was) => {
-                  const next = { ...was, [brand]: effort };
+                  const next = { ...was, [sessionBrand]: effort };
                   localStorage.setItem(EFFORT_DEFAULTS, JSON.stringify(next));
                   return next;
                 });
