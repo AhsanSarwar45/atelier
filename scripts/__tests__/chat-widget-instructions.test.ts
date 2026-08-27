@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const instructions = [
-  readFileSync('ATELIER_WORKFLOW.md', 'utf8'),
+  readFileSync('machinery/skills/atelier/SKILL.md', 'utf8'),
   readFileSync('.claude/output-styles/manager.md', 'utf8'),
 ];
 

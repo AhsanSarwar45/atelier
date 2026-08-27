@@ -49,11 +49,6 @@ struct Machinery;
 #[exclude = "**/*.pyc"]
 struct Craft;
 
-/// The lifecycle text is read by the personal provider instructions only when
-/// the current repository is registered for Beads. It travels beside the
-/// machinery instead of being copied into each repository.
-const BEADS_WORKFLOW: &[u8] = include_bytes!("../../ATELIER_WORKFLOW.md");
-
 /// Where the machinery lands under the rules folder.
 ///
 /// `project.py` reads its own file's path to find the registry beside it and
@@ -68,7 +63,6 @@ pub const CRAFT: &str = ".claude";
 /// The word `join` writes into a project's gates instead of a path, when this
 /// program is the one running it.
 const GATE_WORD: &str = "ATELIER_GATE_WORD";
-const PERSONAL_POLICY: &str = "ATELIER_PERSONAL_POLICY";
 
 /// Lay the rules down beside the data, and say where they went.
 pub fn install() -> Result<PathBuf, String> {
@@ -77,7 +71,6 @@ pub fn install() -> Result<PathBuf, String> {
     };
     let mut files = crate::laid_down::gather::<Machinery>(MACHINERY)?;
     files.extend(crate::laid_down::gather::<Craft>(CRAFT)?);
-    files.push(("ATELIER_WORKFLOW.md".to_string(), BEADS_WORKFLOW.to_vec()));
     crate::laid_down::install(&dir, &files)?;
     runnable(&dir, &files);
     Ok(dir)
@@ -125,16 +118,15 @@ pub fn init(rest: &[String]) -> Result<i32, String> {
     init_with(rest, &mut input, &mut output)
 }
 
-/// Install the universal provider guidance without joining any repository.
+/// Install personal skills and conditional provider hooks without joining a repository.
 /// Service installation calls this once for the whole computer; init calls the
 /// same path so machines that do not use a login service still receive it.
 pub fn install_personal() -> Result<i32, String> {
     let dir = install()?;
     let join = dir.join(MACHINERY).join("join");
-    let policy = dir.join("ATELIER_WORKFLOW.md").display().to_string();
     run_python(
         &[join.display().to_string(), "--personal".to_string()],
-        &[(PERSONAL_POLICY, policy.as_str())],
+        &[(GATE_WORD, crate::identity::NAME)],
     )
 }
 
@@ -176,10 +168,9 @@ fn init_with(
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
 
     let join = join_for(&root, &dir);
-    let policy = dir.join("ATELIER_WORKFLOW.md").display().to_string();
     run_python(
         &[join.display().to_string(), "--personal".to_string()],
-        &[(PERSONAL_POLICY, policy.as_str())],
+        &[(GATE_WORD, crate::identity::NAME)],
     )?;
     let mode = match chosen {
         Some(mode) => mode,
@@ -437,6 +428,9 @@ mod tests {
             "machinery/project.py",
             "machinery/hooks/board-gate.py",
             "machinery/board/job",
+            "machinery/skills/atelier/SKILL.md",
+            "machinery/skills/beads/SKILL.md",
+            "machinery/hooks/session-context.py",
             ".claude/output-styles/manager.md",
         ] {
             assert!(
@@ -472,8 +466,8 @@ mod tests {
     }
 
     #[test]
-    fn one_projects_own_wiring_stays_behind() {
-        // `join` writes each project its own, merged into what it already had.
+    fn repository_provider_wiring_stays_behind() {
+        // Provider hooks are installed personally, never copied into a project.
         let files = carried();
         assert!(!files
             .iter()

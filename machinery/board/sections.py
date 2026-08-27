@@ -63,7 +63,7 @@ SHOWS = re.compile(r"\b(shows?|prints?|draws?|renders?|reads?|returns?|exits?|fa
                    r"names?|treats?|leaves?|holds?|sends?|opens?|closes?|stalls?)\b", re.I)
 
 # The three things below differ by project and are read off its declaration
-# (`machinery.toml`, one per project): the systems a card may belong to, the shape
+# (external Atelier metadata, one per project): the systems a card may belong to, the shape
 # of its card ids, and the ways this project names somewhere to go and look that
 # are not a file — a debug view in a renderer, a screen in an app.
 AREAS, CARD, PLACE = [], None, None

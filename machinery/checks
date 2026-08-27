@@ -23,7 +23,7 @@ tree proves nothing about the code standing now, and that is the one failure a
 step's own words could never show: the suites were green, then three more commits
 landed, and the note still read green.
 
-⛔ The suites are the project's own, off `machinery.toml`. This picks among them
+⛔ The suites are the project's own, from Atelier's external metadata. This picks among them
 and never invents one. A project whose declared line this cannot take apart runs
 the whole line as a single suite, which is the old behaviour and is still right.
 Machinery does not add a suite that grades Machinery itself.

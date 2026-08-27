@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""Keep both providers pointed at the one canonical Atelier workflow."""
+"""Keep the installed Beads skill canonical."""
 
 from pathlib import Path
 import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-AGENTS = (ROOT / "AGENTS.md").read_text()
-CLAUDE = (ROOT / "CLAUDE.md").read_text()
-POLICY = (ROOT / "ATELIER_WORKFLOW.md").read_text().strip()
-START = "<!-- BEGIN ATELIER WORKFLOW -->"
-END = "<!-- END ATELIER WORKFLOW -->"
+POLICY = (ROOT / "machinery" / "skills" / "beads" / "SKILL.md").read_text().strip()
 
 
 def fail(message: str) -> None:
@@ -18,14 +14,6 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-expected = ("## Atelier workflow (managed)\n\nBefore doing any work, read and "
-            "follow [ATELIER_WORKFLOW.md](ATELIER_WORKFLOW.md).")
-for name, provider in (("AGENTS.md", AGENTS), ("CLAUDE.md", CLAUDE)):
-    if provider.count(START) != 1 or provider.count(END) != 1:
-        fail(f"managed block markers must each appear once in {name}")
-    managed = provider.split(START, 1)[1].split(END, 1)[0].strip()
-    if managed != expected:
-        fail(f"the managed block in {name} must require reading ATELIER_WORKFLOW.md")
 required_once = (
     "machinery/board/job new",
     "git -C . worktree add worktrees/<job-id> -b <job-id>",

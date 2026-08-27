@@ -1,9 +1,8 @@
 # The machinery, and how a project joins it
 
-Every project on this machine runs the same board tooling and the same session
-gates, in place, out of this one directory. Nothing is copied into a project:
-what differs by project is declared once at the project's own root, in
-`machinery.toml`, and everything here reads that.
+Every registered project on this machine runs the same board tooling and session
+gates from this directory. Nothing is copied into a project: inferred metadata
+is stored beside Atelier's personal registry and everything here reads that.
 
 Joining is one command.
 
@@ -22,8 +21,8 @@ home folder (bw-8um.3.7). Cloning beads-web now brings the board tools, the
 gates and the workers with it.
 
 Everything here finds itself from its own file, so the clone can sit anywhere,
-and a project's `.claude/settings.json` names its gates through
-`$CLAUDE_PROJECT_DIR` rather than a path off somebody's disk.
+and personal provider settings name the startup hook through the installed
+`atelier` command rather than a path off somebody's disk.
 
 Two things are of the machine and not of the clone, so neither is tracked:
 `projects.toml`, the list of which checkouts on this computer run this machinery
@@ -39,20 +38,17 @@ alone; only what is missing is put right.
 
 ## What it does
 
-1. **Writes the project a declaration** it can fill in — `machinery.toml`, from
-   the example beside this file, with the project's own name already in it,
-   written so a name holding a quote survives being read back.
+1. **Infers external project metadata** beside `projects.toml`, including the
+   board prefix and landing branch, without adding a repository file.
 2. **Brings the board up on a database server.** A project with no board gets
    one made, already on a server. A board beads runs in its own process is
    moved onto one: its cards are counted and exported first, its data directory
    is moved to where the server looks, its record of how it runs is rewritten,
    the server is started, and the count is read again. If the number changed,
    the whole move is undone and the board is handed back exactly as it was.
-3. **Wires the session gates** into the project's own `.claude/settings.json`,
-   generated from the one table in `join` that says which gate answers which
-   event. The file is merged into, never replaced: every setting and every gate
-   the project owns survives, and a gate wired where it would never be heard is
-   moved rather than doubled.
+3. **Wires personal startup hooks** for Claude and Codex. They inject the
+   Atelier skill only in Atelier-owned sessions and the Beads skill only when
+   the external registry resolves the current checkout or worktree.
 4. **Sets the session history ceiling** where it is missing or too high.
 5. **Puts the project on the board screen's list**, matched by where the project
    lives, so it appears without anyone typing a path into the screen.

@@ -148,10 +148,11 @@ chat helper is started beside it, so one command is the whole product.
 
 `init` asks one question: whether this project uses Beads. Chat-only projects
 are changed in no way and have no board tab. A Beads project is registered once;
-its linked Git worktrees share that board. Personal CLAUDE.md and AGENTS.md
-carry Atelier's chat and widget guidance for every project. `--beads` and
-`--chat` answer the question non-interactively. Beads setup needs python3 and
-`bd` on your path; init can be run again safely.
+its linked Git worktrees share that board. Personal SessionStart hooks inject
+the Atelier skill in Atelier-owned chats and the Beads skill only in registered
+projects; no CLAUDE.md or AGENTS.md is edited. `--beads` and `--chat` answer the
+question non-interactively. Beads setup needs python3 and `bd` on your path;
+init can be run again safely.
 
 Where it listens:
   ATELIER_PORT                the port (default {PORT})

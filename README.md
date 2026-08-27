@@ -253,11 +253,12 @@ to yes. Scripts can answer explicitly with `atelier init --beads` or
 granting agents permission to merge remains a separate, explicit project-owner
 decision.
 
-Atelier installs its managed guidance into personal `~/.claude/CLAUDE.md` and
-`~/.codex/AGENTS.md`, preserving everything outside its marked block. General
-chat guidance lives directly in that block. The external Beads workflow is read
-only when `atelier project mode` reports `beads`, so Atelier never edits a
-project's own `CLAUDE.md` or `AGENTS.md`.
+Atelier installs two personal skills and a personal startup hook for Claude and
+Codex; it does not edit personal or project `CLAUDE.md`/`AGENTS.md` files. An
+Atelier-owned chat receives the `atelier` widget and visual-proof skill. A
+project registered for Beads receives the separate `beads` workflow skill,
+including from any linked worktree. Inferred project metadata remains in
+Atelier's external data directory rather than the repository.
 
 It needs `bd` and `python3` on your PATH.
 

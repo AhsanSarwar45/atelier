@@ -1,5 +1,5 @@
 # The declaration every project that runs this machinery keeps at its own root,
-# as `machinery.toml`. It carries exactly what differs by project and nothing
+# as external Atelier project metadata. It carries exactly what differs by project and nothing
 # else — the shared code holds no project's name, prefix, systems or branch.
 
 # What the manager and the outside reader call this project.

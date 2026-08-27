@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Which project a path belongs to, and what that project answers about itself.
+"""Which registered project a path belongs to, and what it answers about itself.
 
-Every tool and every gate here runs in more than one project, so nothing may be
-written down twice: what differs by project is declared once, at the project's
-own root, in `machinery.toml`. This file is the only reader of it.
+Project metadata is machine-local Atelier data beside the registry. Nothing is
+written into a repository merely to let Atelier or an agent recognise it.
 
 The board of the CHECKOUT THE WORK LANDS IN is what a gate judges against, never
 the directory a session was started from. A commit made in one project while the
@@ -11,10 +10,10 @@ session's home is another is a commit in the first, and asking `CLAUDE_PROJECT_D
 answers with the second (cor-up1g).
 
 A worktree is a checkout of the same project, so the walk starts at git's own
-answer for where the repository really is: `.beads` and `machinery.toml` are both
-checked in, so a copy carries them and reading them there answers with a project
-that has its own board and its own name.
+answer for where the repository really is. External registration then maps every
+linked worktree back to the one shared project and board.
 """
+import hashlib
 import json
 import os
 import re
@@ -25,7 +24,6 @@ HOME = os.path.dirname(os.path.realpath(__file__))
 # Every project that runs this machinery, by the name its own declaration gives
 # it. `machinery/join` writes it; nothing else does.
 REGISTRY = os.path.join(HOME, "projects.toml")
-DECLARATION = "machinery.toml"
 # The branch a project calls main when its declaration does not say.
 DEFAULT_LANDS_ON = "main"
 # The lines an agent may not write to in a project that has said nothing about
@@ -100,27 +98,40 @@ def checkout(path):
     return here.split("/worktrees/")[0].rstrip("/") or here
 
 
-def root(path=None):
-    """The project a path belongs to: the checkout, walked up to a declaration.
+def git_identity(path):
+    """Stable identity shared by a Git repository and all of its worktrees."""
+    common = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], path)
+    return os.path.realpath(common) if common else ""
 
-    A project that has not joined has no declaration, and the checkout itself is
-    the answer — which is what every tool did before this file existed.
-    """
+
+def registered_root(path):
+    """Registered main checkout containing path, including linked worktrees."""
+    here = os.path.realpath(path)
+    identity = git_identity(here)
+    for known in registry().values():
+        if os.path.realpath(known) == here:
+            return known
+        if identity and git_identity(known) == identity:
+            return known
+    return ""
+
+
+def declaration_path(path):
+    """External declaration path for one registered Git identity."""
+    key = git_identity(path) or os.path.realpath(path)
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    return os.path.join(os.path.dirname(REGISTRY), "projects", digest + ".toml")
+
+
+def root(path=None):
+    """The registered main checkout for path, or Git's checkout when unjoined."""
     here = os.path.abspath(path or os.getcwd())
     if here in _ROOTS:
         return _ROOTS[here]
     tree = checkout(here)
-    walk = tree
-    while True:
-        if os.path.exists(os.path.join(walk, DECLARATION)):
-            break
-        up = os.path.dirname(walk)
-        if up == walk:
-            walk = tree
-            break
-        walk = up
-    _ROOTS[here] = walk
-    return walk
+    found = registered_root(tree) or tree
+    _ROOTS[here] = found
+    return found
 
 
 class Declaration:
@@ -131,7 +142,10 @@ class Declaration:
         self.path = path
         self.name = data.get("name") or os.path.basename(path.rstrip("/"))
         self.prefix = data.get("prefix") or ""
-        self.lands_on = data.get("lands_on") or DEFAULT_LANDS_ON
+        # A pre-external-metadata project still has an authoritative landing
+        # checkout: use the branch currently checked out in its main tree.
+        self.lands_on = data.get("lands_on") or \
+            _git(["branch", "--show-current"], path) or DEFAULT_LANDS_ON
         self.areas = list(data.get("areas") or [])
         self.places = list(data.get("places") or [])
         self.brand = (data.get("brand") or "").upper()
@@ -197,7 +211,7 @@ def of(path=None):
     """The declaration of the project holding `path`."""
     where = root(path)
     if where not in _DECLS:
-        _DECLS[where] = Declaration(where, _read(os.path.join(where, DECLARATION)))
+        _DECLS[where] = Declaration(where, _read(declaration_path(where)))
     return _DECLS[where]
 
 

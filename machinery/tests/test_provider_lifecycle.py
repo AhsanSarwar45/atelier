@@ -31,7 +31,7 @@ class ProviderLifecycle(unittest.TestCase):
                 self.assertTrue(CRITICAL_GATES.issubset(commands(settings)))
 
     def test_canonical_workflow_names_every_lifecycle_transition(self):
-        text = (ROOT / "ATELIER_WORKFLOW.md").read_text()
+        text = (ROOT / "machinery" / "skills" / "beads" / "SKILL.md").read_text()
         for transition in ("job new", "worktree add", "--claim", "git commit",
                            "board/land", "machinery/checks", "Review starts",
                            "Stop only when"):

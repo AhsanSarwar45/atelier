@@ -20,7 +20,7 @@ def load_join():
 
 
 class JoinInstructionsTest(unittest.TestCase):
-    def test_personal_instructions_preserve_provider_rules_and_leave_project_alone(self):
+    def test_personal_install_adds_skills_and_hooks_without_instruction_files(self):
         join = load_join()
         join.WORD = "atelier"
         with tempfile.TemporaryDirectory() as held:
@@ -31,57 +31,69 @@ class JoinInstructionsTest(unittest.TestCase):
             codex_home = root / ".codex"
             claude_home.mkdir()
             codex_home.mkdir()
-            installed_policy = root / "installed" / "ATELIER_WORKFLOW.md"
-            installed_policy.parent.mkdir()
-            installed_policy.write_text((ROOT / "ATELIER_WORKFLOW.md").read_text())
-            join.POLICY = str(installed_policy)
             (claude_home / "CLAUDE.md").write_text("Claude-only personal rule.\n")
             (codex_home / "AGENTS.md").write_text("Codex-only personal rule.\n")
             join.MACHINE = str(claude_home)
             join.CODEX_MACHINE = str(codex_home)
-            join.instruct_personal(lambda _: None)
+            join.install_skills(lambda _: None)
+            join.install_session_hooks(lambda _: None)
 
-            claude = (claude_home / "CLAUDE.md").read_text()
-            agents = (codex_home / "AGENTS.md").read_text()
-            self.assertIn("Claude-only personal rule.", claude)
-            self.assertNotIn("Claude-only personal rule.", agents)
-            self.assertIn("Codex-only personal rule.", agents)
-            self.assertNotIn("Codex-only personal rule.", claude)
-            for provider in (claude, agents):
-                self.assertIn("atelier project mode", provider)
-                self.assertIn("## Useful widgets in chat", provider)
-                self.assertIn(str(installed_policy), provider)
-                self.assertNotIn(str(JOIN.parent.parent / "ATELIER_WORKFLOW.md"), provider)
+            self.assertEqual((claude_home / "CLAUDE.md").read_text(),
+                             "Claude-only personal rule.\n")
+            self.assertEqual((codex_home / "AGENTS.md").read_text(),
+                             "Codex-only personal rule.\n")
+            for provider in (claude_home, codex_home):
+                for skill in ("atelier", "beads"):
+                    self.assertTrue((provider / "skills" / skill).is_symlink())
+            claude = (claude_home / "settings.json").read_text()
+            codex = (codex_home / "hooks.json").read_text()
+            self.assertIn("session-context.py", claude)
+            self.assertIn("session-context.py", codex)
             self.assertEqual(list(project.iterdir()), [])
 
-    def test_reinstalling_refreshes_one_personal_managed_block(self):
+    def test_reinstalling_keeps_one_session_hook(self):
         join = load_join()
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
             join.MACHINE = str(root / ".claude")
             join.CODEX_MACHINE = str(root / ".codex")
-            join.instruct_personal(lambda _: None)
-            join.instruct_personal(lambda _: None)
-            agents = (root / ".codex" / "AGENTS.md").read_text()
-            self.assertEqual(agents.count(join.PERSONAL_BEGIN), 1)
+            join.install_session_hooks(lambda _: None)
+            join.install_session_hooks(lambda _: None)
+            hooks = (root / ".codex" / "hooks.json").read_text()
+            self.assertEqual(hooks.count("session-context.py"), 1)
 
-    def test_replacing_a_personal_block_treats_backslashes_in_paths_literally(self):
+    def test_personal_hook_preserves_existing_provider_hooks(self):
         join = load_join()
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
             join.MACHINE = str(root / ".claude")
             join.CODEX_MACHINE = str(root / ".codex")
-            policy = root / "installed\\rules" / "ATELIER_WORKFLOW.md"
-            policy.parent.mkdir()
-            policy.write_text((ROOT / "ATELIER_WORKFLOW.md").read_text())
-            join.POLICY = str(policy)
             Path(join.MACHINE).mkdir()
-            (Path(join.MACHINE) / "CLAUDE.md").write_text(
-                join.PERSONAL_BEGIN + "\nstale\n" + join.PERSONAL_END + "\n")
+            (Path(join.MACHINE) / "settings.json").write_text(
+                '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"mine"}]}]}}')
 
-            join.instruct_personal(lambda _: None)
+            join.install_session_hooks(lambda _: None)
 
-            self.assertIn(str(policy), (Path(join.MACHINE) / "CLAUDE.md").read_text())
+            settings = (Path(join.MACHINE) / "settings.json").read_text()
+            self.assertIn('"command": "mine"', settings)
+            self.assertIn("session-context.py", settings)
+
+    def test_setup_does_not_rewrite_legacy_or_user_project_instructions(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            legacy = ("<!-- BEGIN ATELIER WORKFLOW -->\nold Atelier text\n"
+                      "<!-- END ATELIER WORKFLOW -->\n")
+            (root / "CLAUDE.md").write_text("Keep Claude rule.\n\n" + legacy)
+            (root / "AGENTS.md").write_text(legacy + "Keep Codex rule.\n")
+            (root / "ATELIER_WORKFLOW.md").write_text(
+                "<!-- This file is managed by `atelier init`; re-running it refreshes this file. -->\nold\n")
+
+            before = {path.name: path.read_bytes() for path in root.iterdir()}
+            join.project.REGISTRY = str(root / "external" / "projects.toml")
+            join.unregister(str(root), lambda _: None)
+            after = {path.name: path.read_bytes() for path in root.iterdir()}
+            self.assertEqual(after, before)
 
     def test_a_linked_worktree_inherits_the_main_projects_registration(self):
         join = load_join()
@@ -152,11 +164,15 @@ class JoinInstructionsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
             join.project.REGISTRY = str(root / "projects.toml")
-            where = Path(join.declaring(str(root)))
+            project = root / "company-project"
+            project.mkdir()
+            where = Path(join.declaring(str(project)))
             declaration = where.read_text()
             self.assertRegex(declaration, r'(?m)^prefix = "[a-z]{3}"$')
             self.assertIn("agent_merges = false", declaration)
             self.assertNotIn('prefix = ""', declaration)
+            self.assertFalse((project / "machinery.toml").exists())
+            self.assertTrue(str(where).startswith(str(root / "projects")))
 
 
 if __name__ == "__main__":

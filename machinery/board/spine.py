@@ -300,7 +300,7 @@ def card(sid, goal, meta, priority):
     fill = {"done": meta.get("done", ""), "pour": sections.EG_POUR,
             "proves": sections.PROVES,
             "checks": ("`%s`" % meta["checks"]) if meta.get("checks") else
-                      "this project declares no checks command in `machinery.toml`, so "
+                      "this project's external Atelier metadata declares no checks command, so "
                       "run what holds a change here and say on the card what that was",
             "record": meta.get("record") or "the one this job's success criteria name"}
     args = ["create", "--title", "%s: %s" % (verb, meta.get("subject", "")),

@@ -250,8 +250,8 @@ def lands(names):
         if name not in allowed:
             bar("--lands %s: this project does not declare that its work lands "
                 "there. It declares: %s.\nAdd it to lands_elsewhere in "
-                "%s/machinery.toml first, or drop the flag."
-                % (name, ", ".join(allowed) or "nowhere else", ROOT))
+                "Atelier's external project metadata first, or drop the flag."
+                % (name, ", ".join(allowed) or "nowhere else"))
     return [bc.LANDS + n for n in dict.fromkeys(names) if n in allowed]
 
 
@@ -347,7 +347,7 @@ def _runs(text):
 
 def _spots(text):
     """The places a line names — a path, a file, or whatever this project calls a
-    place that is not a file (`machinery.toml`, place_re) — and where each was said."""
+    place declared in external project metadata (`place_re`) — and where each was said."""
     got = [(m.start(), m.group(0).lower()) for m in sections.PATH.finditer(text or "")]
     if sections.PLACE:
         got += [(m.start(), m.group(0).lower())

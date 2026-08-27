@@ -6,11 +6,8 @@ Nothing is ever copied into it: it runs the tools and the gates in place, out of
 this one home. Joining is these things, and each of them is fixed rather than
 merely reported —
 
-  the declaration      `machinery.toml` at the project root. A project that has
-                       none is written one from the example kept here, with what
-                       a directory can answer for itself already answered; it
-                       stops on the prefix, which nothing can guess, because that
-                       goes into every card id the board will ever issue
+  project metadata     inferred once and kept beside Atelier's personal project
+                       registry, never in the repository
   the register         one line in `projects.toml` here, so `lands:<name>` on a
                        goal means something and a commit in one checkout may name
                        the ids of a project whose work lands there
@@ -21,11 +18,9 @@ merely reported —
                        unserved one. A board already here is MOVED, and the move
                        counts its cards on both sides and puts itself back if the
                        count changes
-  agent policy         the canonical lifecycle is copied to
-                       `ATELIER_WORKFLOW.md`, and a mandatory read instruction
-                       is merged into `CLAUDE.md` and `AGENTS.md`; equivalent
-                       hard gates are merged into both `.claude/settings.json`
-                       and `.codex/hooks.json`
+  agent policy         personal SessionStart hooks inject the Atelier skill in
+                       Atelier-owned chats and the Beads skill only for a project
+                       present in this registry
   the board screen     one row in the screen's own list of projects, found by
                        where the project lives, so its cards are on the screen
                        without anybody typing a path into it
@@ -69,9 +64,6 @@ HOME = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOME)
 import project  # noqa: E402
 
-POLICY = os.environ.get("ATELIER_PERSONAL_POLICY") or \
-    os.path.join(os.path.dirname(HOME), "ATELIER_WORKFLOW.md")
-
 # Where a project that carried the tools itself kept them, and what belongs at
 # each path. The machinery's own layout is the other half of the pair.
 FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
@@ -84,9 +76,9 @@ SHARED = ("agents", "skills", "output-styles", "commands")
 # product arrives with the workers, the skills, the commands and the house voice
 # already wired, and nothing has to be pointed at anything first (bw-8um.3.7).
 CRAFT = os.path.join(os.path.dirname(HOME), ".claude")
-# The shape of a declaration, kept beside this file. A project that declares
-# nothing is given a copy of it rather than a sentence about where to find one.
-EXAMPLE = "machinery.toml.example"
+# The shape of inferred project metadata, kept beside this file and written
+# only into Atelier's external data directory.
+EXAMPLE = "project.example.toml"
 # The board screen's own list of projects. A project whose board runs perfectly
 # is still not on the screen until a row here names where it lives, and typing
 # that path into the screen by hand is the last piece of joining anybody was
@@ -692,8 +684,6 @@ def there(path):
 
 MACHINE = os.environ.get("ATELIER_CLAUDE_HOME") or os.path.expanduser("~/.claude")
 CODEX_MACHINE = os.environ.get("ATELIER_CODEX_HOME") or os.path.expanduser("~/.codex")
-PERSONAL_BEGIN = "<!-- BEGIN ATELIER PERSONAL INSTRUCTIONS -->"
-PERSONAL_END = "<!-- END ATELIER PERSONAL INSTRUCTIONS -->"
 
 
 def same(here, there):
@@ -745,52 +735,74 @@ def install(say):
                 shutil.rmtree(link) if os.path.isdir(link) else os.remove(link)
             os.symlink(target, link)
             say("link   %s -> %s" % (link, target))
-    instruct_personal(say)
+    install_skills(say)
+    install_session_hooks(say)
 
 
-def instruct_personal(say):
-    """Teach both providers about Atelier without touching any repository.
+def install_skills(say):
+    """Expose Atelier's two installed skills to both providers."""
+    source = os.path.join(HOME, "skills")
+    for provider in (MACHINE, CODEX_MACHINE):
+        target = os.path.join(provider, "skills")
+        os.makedirs(target, exist_ok=True)
+        for name in ("atelier", "beads"):
+            link = os.path.join(target, name)
+            want = os.path.join(source, name)
+            if os.path.islink(link) and os.path.realpath(link) == want:
+                continue
+            if os.path.lexists(link):
+                if not same(link, want):
+                    say("kept   %s — it is not Atelier's skill" % link)
+                    continue
+                shutil.rmtree(link) if os.path.isdir(link) and not os.path.islink(link) \
+                    else os.remove(link)
+            os.symlink(want, link)
+            say("skill  %s -> %s" % (link, want))
 
-    Chat presentation is universal, so it is written directly into the
-    personal instruction block. The board lifecycle remains one external file
-    and is conditional on the machine registry, not on files in a checkout.
-    """
-    with open(POLICY) as source:
-        policy = source.read().strip()
-    visual = policy.find("## Visual proof in chat")
-    chat = policy[visual:] if visual >= 0 else policy
-    workflow = os.path.abspath(POLICY)
-    block = ("%s\n\n## Atelier (managed)\n\n"
-             "Atelier chat capabilities are available in every project. "
-             "Before using a project board or changing repository files, run "
-             "`atelier project mode`. If it prints `beads`, read and follow "
-             "[%s](%s). If it prints `chat`, do not use Beads or its board "
-             "workflow for that project.\n\n%s\n\n%s" %
-             (PERSONAL_BEGIN, os.path.basename(workflow), workflow, chat,
-              PERSONAL_END))
-    pattern = re.compile(re.escape(PERSONAL_BEGIN) + r".*?" +
-                         re.escape(PERSONAL_END), re.S)
-    for where in (os.path.join(MACHINE, "CLAUDE.md"),
-                  os.path.join(CODEX_MACHINE, "AGENTS.md")):
+
+def install_session_hooks(say):
+    """Merge the conditional context hook into personal provider settings."""
+    command = typed("session-context.py") or \
+        "python3 %s" % os.path.join(HOME, "hooks", "session-context.py")
+    for where in (os.path.join(MACHINE, "settings.json"),
+                  os.path.join(CODEX_MACHINE, "hooks.json")):
         try:
             if os.path.exists(where):
                 with open(where) as source:
-                    held = source.read()
+                    held = json.load(source)
             else:
-                held = ""
-        except OSError as why:
-            say("kept   %s — it cannot be read (%s)" % (where, why))
+                held = {}
+        except (OSError, ValueError) as why:
+            say("kept   %s — it cannot be merged (%s)" % (where, why))
             continue
-        fresh = pattern.sub(lambda _: block, held) if pattern.search(held) else \
-            ((held.rstrip() + "\n\n") if held.strip() else "") + block + "\n"
-        if fresh == held:
+        if not isinstance(held, dict):
+            say("kept   %s — it is not a settings object" % where)
             continue
+        hooks = held.setdefault("hooks", {})
+        if not isinstance(hooks, dict):
+            say("kept   %s — its hooks are not an object" % where)
+            continue
+        blocks = hooks.setdefault("SessionStart", [])
+        if not isinstance(blocks, list):
+            say("kept   %s — its SessionStart hooks are not a list" % where)
+            continue
+        for block in blocks:
+            if isinstance(block, dict):
+                block["hooks"] = [hook for hook in block.get("hooks", [])
+                                  if not runs(hook.get("command"), "session-context.py")]
+        blocks[:] = [block for block in blocks if block.get("hooks")]
+        matcher = "startup|resume|clear" if where.endswith("hooks.json") else ""
+        entry = {"hooks": [{"type": "command", "command": command}]}
+        if matcher:
+            entry["matcher"] = matcher
+        blocks.append(entry)
         os.makedirs(os.path.dirname(where), exist_ok=True)
         temporary = where + ".atelier-new"
         with open(temporary, "w") as fh:
-            fh.write(fresh)
+            json.dump(held, fh, indent=2)
+            fh.write("\n")
         os.replace(temporary, where)
-        say("taught %s Atelier's personal chat capabilities" % where)
+        say("hook   %s loads conditional Atelier session context" % where)
 
 
 BARE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -892,7 +904,7 @@ def project_root(root):
 
 
 def unregister(root, say):
-    """Remove external board registration while changing nothing in the tree."""
+    """Remove external registration without changing the repository."""
     registered = registered_root(root)
     if registered is None:
         return
@@ -921,10 +933,16 @@ def unregister(root, say):
                 say("hidden %s from the board screen" % registered)
         finally:
             db.close()
+    metadata = project.declaration_path(registered)
+    try:
+        os.remove(metadata)
+        say("removed external Atelier metadata for %s" % registered)
+    except FileNotFoundError:
+        pass
 
 
 def declaring(root):
-    """Give a project a complete, deterministic declaration in one run."""
+    """Give a project external, deterministic metadata in one run."""
     base = os.path.basename(root.rstrip("/")) or "project"
     brand = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_").upper()
     letters = re.sub(r"[^a-z]", "", base.lower())
@@ -945,7 +963,8 @@ def declaring(root):
                      (r'^persona = ".*"$', 'persona = ' + quoted(
                          "the %s project — what it is, in one line" % base))):
         text = re.sub(was, lambda _, now=now: now, text, count=1, flags=re.M)
-    where = os.path.join(root, project.DECLARATION)
+    where = project.declaration_path(root)
+    os.makedirs(os.path.dirname(where), exist_ok=True)
     with open(where, "w") as fh:
         fh.write(text)
     return where
@@ -1065,14 +1084,13 @@ def standing(root, session_root=None):
     session_root = session_root or root
     decl = project.of(root)
     if not decl.declared:
-        said.append("no machinery.toml at %s — a project declares its own prefix, "
-                    "systems and branch before anything here can answer for it" % root)
+        said.append("no external Atelier metadata for %s" % root)
         return said, decl
     for field, what in (("prefix", "the card ids its board issues"),
                         ("areas", "the systems a card may belong to"),
                         ("lands_on", "the branch finished work lands on")):
         if not getattr(decl, field):
-            said.append("machinery.toml names no %s (%s)" % (field, what))
+            said.append("external project metadata names no %s (%s)" % (field, what))
     if not os.path.isdir(os.path.join(root, ".beads")):
         said.append("no board at %s/.beads — `bd init --prefix %s`" % (root, decl.prefix))
     else:
@@ -1472,8 +1490,8 @@ def main():
 
     requested = os.path.abspath(os.path.expanduser(a.path))
     root = project_root(requested)
-    decl = project.of(root)
     said = []
+    decl = project.of(root)
     if not decl.declared:
         said.append("wrote  %s — a declaration of this project's own, from the "
                     "shape kept beside these tools" % declaring(root))
@@ -1502,11 +1520,9 @@ def main():
     # After the board is where it is going to be, never before: everything below
     # asks the board something, and asking one that is mid-move answers for the
     # copy that is about to stop existing.
-    # Board state belongs to the main checkout, but provider settings are read
-    # from the checkout the session actually opened. A sibling worktree needs
-    # its own wiring even though it must never become another board project.
-    wire(requested, said.append)
-    wire_codex(requested, said.append)
+    # Provider context is wired once at personal scope. SessionStart resolves
+    # this registration, including from any linked worktree, so no provider
+    # settings are written into the repository.
     tidy(root, said.append)
     listing(root, decl, said.append)
     states(root, said.append)

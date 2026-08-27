@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const policy = readFileSync('ATELIER_WORKFLOW.md', 'utf8');
+const policy = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8');
 const claudeStyle = readFileSync('.claude/output-styles/manager.md', 'utf8');
 
 describe('visual proof instructions', () => {

@@ -29,7 +29,7 @@ RECOVERY_FILES = {
     ".claude/settings.json",
     ".claude/settings.local.json",
     "AGENTS.md",
-    "ATELIER_WORKFLOW.md",
+    "machinery/skills/beads/SKILL.md",
     "CLAUDE.md",
     "machinery/hooks/workflow-gate.py",
 }
