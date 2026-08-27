@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run a bounded, observable review through the personal Claude reviewer agent."""
 import argparse, json, os, signal, subprocess, sys, tempfile, threading, time
+import re
 from pathlib import Path
 
 SCHEMA={"type":"object","required":["verdict","summary","findings","verified"],"properties":{"verdict":{"enum":["PASS","NEEDS_WORK"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","required":["severity","confidence","file","line","title","evidence","recommendation"],"properties":{"severity":{"enum":["critical","high","medium"]},"confidence":{"type":"integer","minimum":80,"maximum":100},"file":{"type":"string"},"line":{"type":["integer","null"]},"title":{"type":"string"},"evidence":{"type":"string"},"recommendation":{"type":"string"}},"additionalProperties":False}},"verified":{"type":"array","items":{"type":"string"}}},"additionalProperties":False}
@@ -24,7 +25,10 @@ def make_packet(repo,base,head,spec,evidence):
 def normalize(payload):
     if isinstance(payload,dict) and "structured_output" in payload: payload=payload["structured_output"]
     elif isinstance(payload,dict) and isinstance(payload.get("result"),str):
-        try: payload=json.loads(payload["result"])
+        result=payload["result"].strip()
+        fenced=re.fullmatch(r"```(?:json)?\s*(\{.*\})\s*```",result,re.S)
+        if fenced: result=fenced.group(1)
+        try: payload=json.loads(result)
         except json.JSONDecodeError: raise ValueError("provider result was not the required JSON object")
     if not isinstance(payload,dict) or not {"verdict","summary","findings","verified"}.issubset(payload): raise ValueError("missing result fields")
     findings=payload["findings"]

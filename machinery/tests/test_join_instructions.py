@@ -127,8 +127,11 @@ class JoinInstructionsTest(unittest.TestCase):
             registry.write_text('[projects]\nexample = "%s"\n' % main)
             screen = root / "screen.sqlite"
             db = sqlite3.connect(screen)
-            db.execute("CREATE TABLE projects (path TEXT)")
-            db.execute("INSERT INTO projects (path) VALUES (?)", (str(main),))
+            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
+                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
+                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
+            db.execute("INSERT INTO projects (name, path, is_test) VALUES (?,?,0)",
+                       ("Company Project", str(main)))
             db.commit()
             db.close()
             join.opened = lambda: sqlite3.connect(screen)
@@ -143,6 +146,8 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertEqual(after, before)
             db = sqlite3.connect(screen)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
+            self.assertEqual(("Company Project", str(main)),
+                             db.execute("SELECT name, path FROM projects").fetchone())
             db.close()
 
     def test_chat_only_keeps_a_project_row_stored_through_a_symlink(self):
@@ -158,8 +163,11 @@ class JoinInstructionsTest(unittest.TestCase):
             join.project.REGISTRY = str(registry)
             screen = root / "screen.sqlite"
             db = sqlite3.connect(screen)
-            db.execute("CREATE TABLE projects (path TEXT)")
-            db.execute("INSERT INTO projects (path) VALUES (?)", (str(alias),))
+            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
+                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
+                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
+            db.execute("INSERT INTO projects (name, path, is_test) VALUES (?,?,0)",
+                       ("Linked Project", str(alias)))
             db.commit()
             db.close()
             join.opened = lambda: sqlite3.connect(screen)
@@ -168,6 +176,8 @@ class JoinInstructionsTest(unittest.TestCase):
 
             db = sqlite3.connect(screen)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
+            self.assertEqual(("Linked Project", str(alias)),
+                             db.execute("SELECT name, path FROM projects").fetchone())
             db.close()
 
     def test_new_chat_only_project_is_added_to_atelier_without_beads_registration(self):
