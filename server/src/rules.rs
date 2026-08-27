@@ -23,9 +23,9 @@ use std::process::Command;
 
 /// The board tools and the session gates, as they sit in the repository.
 ///
-/// `projects.toml` is this machine's own list of where its projects are and is
-/// never carried: shipping the maintainer's copy would point a teammate's board
-/// screen at folders that do not exist on their disk.
+/// `projects.toml` and declarations live in personal Atelier data and are never
+/// carried: shipping the maintainer's copies would point a teammate at folders
+/// and project policy that do not belong to their machine.
 #[derive(Embed)]
 #[folder = "../machinery/"]
 #[exclude = "projects.toml"]
@@ -460,7 +460,7 @@ mod tests {
         assert!(!files
             .iter()
             .any(|(name, _)| name.ends_with("projects.toml")));
-        assert!(files
+        assert!(!files
             .iter()
             .any(|(name, _)| name.ends_with("projects.toml.example")));
     }

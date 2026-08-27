@@ -2,14 +2,6 @@
 
 This project uses Beads for durable task tracking. Run `bd prime` before work.
 
-<!-- BEGIN ATELIER WORKFLOW -->
-
-## Atelier workflow (managed)
-
-Before doing any work, read and follow [ATELIER_WORKFLOW.md](ATELIER_WORKFLOW.md).
-
-<!-- END ATELIER WORKFLOW -->
-
 ## Isolated app instances
 
 Each worktree must use its own disposable app stack. Never touch the owner's

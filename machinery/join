@@ -8,9 +8,9 @@ merely reported —
 
   project metadata     inferred once and kept beside Atelier's personal project
                        registry, never in the repository
-  the register         one line in `projects.toml` here, so `lands:<name>` on a
-                       goal means something and a commit in one checkout may name
-                       the ids of a project whose work lands there
+  the register         one line in personal Atelier data, so `lands:<name>` on
+                       a goal means something and a commit in one checkout may
+                       name the ids of a project whose work lands there
   the board            on a database server, never one beads runs in its own
                        process: the board screen reads a served board straight
                        over SQL and otherwise falls back to spawning `bd` once

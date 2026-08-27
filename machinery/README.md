@@ -25,9 +25,10 @@ and personal provider settings name the startup hook through the installed
 `atelier` command rather than a path off somebody's disk.
 
 Two things are of the machine and not of the clone, so neither is tracked:
-`projects.toml`, the list of which checkouts on this computer run this machinery
-— `join` writes it, and `projects.toml.example` is what ships — and the board
-each project keeps under its own `.beads`.
+`projects.toml` and per-project declarations under Atelier's personal data
+directory, plus the board each Beads project keeps under its own `.beads`.
+`join` migrates the old rules-local registry and repository-local
+`machinery.toml` byte-for-byte before relying on the personal copies.
 
 The shared craft the workers use is not in here: the agents, the skills, the
 commands and the house voice are the repository's own `.claude/`, so a fresh
@@ -58,8 +59,9 @@ alone; only what is missing is put right.
 7. **Leaves the landing guard** wherever this project's git looks for a
    hook — after the board is made, never before, because making the board
    is what moves that directory.
-8. **Registers the project** in `projects.toml`, which is how every other
-   project here can name it.
+8. **Registers the project** in Atelier's personal `projects.toml`, which is
+   how every other project here can name it. Chat-only projects remain on the
+   Atelier projects page but are absent from this Beads registry.
 
 ## The two answers only the owner can give
 

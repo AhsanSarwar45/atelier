@@ -243,9 +243,10 @@ The command asks one question, with a safe default for a new folder:
 Use Beads for this project? [y/N]:
 ```
 
-Answering no keeps the folder chat-only: Atelier writes nothing into it and it
-gets no board tab, while chat, widgets, visual proof, and the rest of Atelier's
-general capabilities remain available. Answering yes registers the main Git
+Answering no keeps the folder visible on Atelier's projects page and chat-only:
+Atelier writes nothing into it and it gets no board tab, while chat, widgets,
+visual proof, and the rest of Atelier's general capabilities remain available.
+Answering yes registers the main Git
 project once and completes its Beads setup; linked worktrees inherit the same
 board instead of becoming separate projects. An existing registration defaults
 to yes. Scripts can answer explicitly with `atelier init --beads` or
