@@ -35,10 +35,12 @@ def die(message):
 
 
 def session():
-    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    sid = (os.environ.get("CLAUDE_CODE_SESSION_ID")
+           or os.environ.get("CODEX_SESSION_ID"))
     if not sid:
-        die("No session to waive: CLAUDE_CODE_SESSION_ID is unset. A waiver is "
-            "one session's, so there is nothing to write it against.")
+        die("No session to waive: neither CLAUDE_CODE_SESSION_ID nor "
+            "CODEX_SESSION_ID is set. A waiver is one session's, so there is "
+            "nothing to write it against.")
     return sid
 
 
