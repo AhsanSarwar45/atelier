@@ -1473,21 +1473,32 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
   Wait: () => ({ said: 'Waited for a running command', kind: 'wait', grave: false }),
   KillShell: () => ({ said: 'Stopped a command left running', kind: 'grave', grave: true }),
   Agent: (i) => {
-    const what = arg(i, 'description', 'prompt');
-    const who = arg(i, 'subagent_type');
+    const what = arg(i, 'description', 'prompt', 'message');
+    const who = arg(i, 'subagent_type', 'task_name');
     return { said: `Sent off ${who ? `a ${who}` : 'a helper'}${what ? ` to ${brief(what, 48)}` : ''}`, kind: 'agent', grave: false };
   },
   Task: (i) => CALLS.Agent!(i),
   SendMessage: (i) => ({ said: `Messaged ${brief(arg(i, 'to')) || 'a helper'}`, kind: 'agent', grave: false }),
   ListAgents: () => ({ said: 'Listed the helpers', kind: 'agent', grave: false }),
+  spawn_agent: (i) => CALLS.Agent!(i),
+  followup_task: (i) => ({ said: `Gave ${brief(arg(i, 'target')) || 'a helper'} more work`, kind: 'agent', grave: false }),
+  send_message: (i) => ({ said: `Messaged ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'agent', grave: false }),
+  interrupt_agent: (i) => ({ said: `Stopped ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'agent', grave: false }),
+  close_agent: (i) => ({ said: `Closed ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'agent', grave: false }),
+  resume_agent: (i) => ({ said: `Started ${brief(arg(i, 'target')) || 'a helper'} again`, kind: 'agent', grave: false }),
+  list_agents: () => ({ said: 'Listed the helpers', kind: 'agent', grave: false }),
+  wait_agent: () => ({ said: 'Waited for a helper', kind: 'agent', grave: false }),
   TaskCreate: (i) => {
     const what = arg(i, 'description', 'title');
     return { said: what ? `Started work on ${brief(what, 48)}` : 'Started a piece of work', kind: 'agent', grave: false };
   },
   TaskUpdate: () => ({ said: 'Moved a piece of work on', kind: 'agent', grave: false }),
+  TaskGet: () => ({ said: 'Read a piece of work', kind: 'agent', grave: false }),
   TaskOutput: () => ({ said: 'Read what a helper came back with', kind: 'agent', grave: false }),
   TaskStop: () => ({ said: 'Stopped a helper', kind: 'grave', grave: true }),
   TaskList: () => ({ said: 'Listed the work in flight', kind: 'agent', grave: false }),
+  TeamCreate: () => ({ said: 'Started a helper team', kind: 'agent', grave: false }),
+  TeamDelete: () => ({ said: 'Removed a helper team', kind: 'agent', grave: false }),
   Skill: (i) => {
     const named2 = arg(i, 'skill');
     return { said: named2 ? `Ran the ${brief(named2)} skill` : 'Ran a skill', kind: 'agent', grave: false };

@@ -529,6 +529,21 @@ describe('the tools that are not commands', () => {
     expect(whatItRan('KillShell', {})?.grave).toBe(true);
     expect(whatItRan('TaskStop', {})?.grave).toBe(true);
   });
+
+  it('puts every Claude and Codex agent operation in the agent category', () => {
+    const claude = [
+      'Agent', 'Task', 'SendMessage', 'ListAgents', 'TaskCreate', 'TaskGet',
+      'TaskUpdate', 'TaskOutput', 'TaskList', 'TeamCreate', 'TeamDelete',
+    ];
+    const codex = [
+      'spawn_agent', 'followup_task', 'send_message', 'interrupt_agent',
+      'close_agent', 'resume_agent', 'list_agents', 'wait_agent',
+    ];
+
+    for (const name of [...claude, ...codex]) {
+      expect(whatItRan(name, {})?.kind, name).toBe('agent');
+    }
+  });
 });
 
 describe('both sides say it the same way', () => {

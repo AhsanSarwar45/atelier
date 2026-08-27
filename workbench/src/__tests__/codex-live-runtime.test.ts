@@ -38,6 +38,29 @@ describe('Codex live-runtime regressions', () => {
     expect(events.find((event: any) => event.toolCallId === 'test')).toMatchObject({ name: 'Bash', title: 'Ran the tests' });
   });
 
+  it('gives every Codex collaboration call a readable agent title', () => {
+    const cases = [
+      ['spawn_agent', { task_name: 'scout', message: 'find the call sites' }, 'Sent off a scout to find the call sites'],
+      ['followup_task', { target: 'scout' }, 'Gave scout more work'],
+      ['send_message', { target: 'scout' }, 'Messaged scout'],
+      ['interrupt_agent', { target: 'scout' }, 'Stopped scout'],
+      ['close_agent', { target: 'scout' }, 'Closed scout'],
+      ['resume_agent', { target: 'scout' }, 'Started scout again'],
+      ['list_agents', {}, 'Listed the helpers'],
+      ['wait_agent', {}, 'Waited for a helper'],
+    ] as const;
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    for (const [tool, args, title] of cases) {
+      driver.itemStarted({ id: tool, type: 'dynamicToolCall', tool, arguments: args });
+      expect(events.find((event: any) => event.toolCallId === tool)).toMatchObject({
+        name: tool, title,
+      });
+    }
+  });
+
   it('does not restore empty assistant rows', () => {
     const events: BareEvent[] = [];
     replayCodexThread({ turns: [{ items: [
