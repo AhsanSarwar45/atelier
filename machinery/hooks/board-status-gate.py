@@ -273,7 +273,24 @@ def carried(names, cid, goal):
     return any(n == goal or n.startswith(goal + ".") for n in names)
 
 
-def standing(tree, rel, began, cid, goal, prefix):
+def effective_carrier(named, cid, goal):
+    """Who most recently carried this file for the step's own job.
+
+    Commits from unrelated jobs do not decide whether this step left work
+    behind. Git lists the commits newest first, so the first commit belonging
+    to this job is the effective file state: the step's own commit leaves work;
+    a later sibling commit carries it away. No such commit means the edit was
+    put back and left nothing.
+    """
+    for names in named:
+        if cid in names:
+            return True
+        if carried(names, cid, goal):
+            return False
+    return False
+
+
+def standing(tree, rel, began, cid, goal, prefix, trunk):
     """Whether a change to this file is still standing under the step.
 
     Three ways it is. It is still sitting in the tree. It is committed but not in
@@ -285,15 +302,13 @@ def standing(tree, rel, began, cid, goal, prefix):
     if git(["status", "--porcelain", "--", rel], tree):
         return True
     window = ["--since=@%d" % int(began), "--format=%H"]
-    if git(["log"] + window + ["HEAD", "--not", "main", "--", rel], tree):
+    if git(["log"] + window + ["HEAD", "--not", trunk, "--", rel], tree):
         return True
-    landed = git(["log"] + window + ["main", "--", rel], tree).split()
+    landed = git(["log"] + window + [trunk, "--", rel], tree).split()
     if not landed:
         return False
     named = [named_in(git(["log", "-1", "--format=%B", sha], tree), prefix) for sha in landed]
-    if any(cid in names for names in named):
-        return True
-    return not any(carried(names, cid, goal) for names in named)
+    return effective_carrier(named, cid, goal)
 
 
 def wrote_code(cid, card, session, root):
@@ -308,6 +323,8 @@ def wrote_code(cid, card, session, root):
         return []
     goal = next((l[3:] for l in card.get("labels") or [] if l.startswith("of:")), cid)
     prefix = bc.prefix(root)
+    landings = bc.landings(root, cid)
+    trunk = landings[0][1] if landings else "main"
     state = bc.load(session or "")
     touched = {}
     for e in state.get("edits") or []:
@@ -327,7 +344,7 @@ def wrote_code(cid, card, session, root):
                 left.append(path)
                 continue
             rel = sub
-        if standing(tree, rel, began, cid, goal, prefix):
+        if standing(tree, rel, began, cid, goal, prefix, trunk):
             left.append(path)
     return left
 
