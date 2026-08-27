@@ -61,6 +61,56 @@ describe('Codex subagents on the common workbench protocol', () => {
       type: 'agent.finished', agentId: 'agent-1', state: 'done', result: 'Registry checked.',
     });
   });
+
+  it('finishes child threads without changing the parent chat state', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'parent';
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    for (const agentThreadId of ['finished-child', 'failed-child']) {
+      driver.itemStarted({
+        id: `activity-${agentThreadId}`, type: 'subAgentActivity', kind: 'started',
+        agentThreadId, agentPath: '/repo/.codex/agents/reviewer.toml',
+      });
+    }
+    driver.event('thread/status/changed', {
+      threadId: 'finished-child', status: { type: 'active', activeFlags: [] },
+    });
+    driver.event('thread/status/changed', {
+      threadId: 'finished-child', status: { type: 'idle' },
+    });
+    driver.event('thread/status/changed', {
+      threadId: 'failed-child', status: { type: 'systemError' },
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'agent.progress', agentId: 'finished-child', state: 'running',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'agent.finished', agentId: 'finished-child', state: 'done',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'agent.finished', agentId: 'failed-child', state: 'failed',
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'session.state' }));
+    expect(driver.agents.size).toBe(0);
+  });
+
+  it('still uses the parent thread status for the parent chat', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'parent';
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    driver.event('thread/status/changed', {
+      threadId: 'parent', status: { type: 'active', activeFlags: [] },
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'session.state', state: 'thinking', label: 'Working',
+    }));
+  });
 });
 
 describe('Codex app-server requests', () => {

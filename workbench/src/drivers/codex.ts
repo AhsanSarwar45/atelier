@@ -932,6 +932,26 @@ export class CodexDriver implements Driver {
   private event(method: string, p: Bag): void {
     if (method === 'thread/status/changed') {
       const status = p.status ?? p.thread?.status ?? {};
+      const changedThread = p.threadId ?? p.thread?.id;
+      if (changedThread && changedThread !== this.threadId) {
+        const known = this.agents.get(changedThread);
+        if (!known) return;
+        const seconds = Math.max(0, Math.round((Date.now() - known.since) / 1000));
+        if (status.type === 'active') {
+          this.emit({
+            type: 'agent.progress', agentId: changedThread, seconds, tokens: 0,
+            calls: known.calls, state: 'running',
+          });
+        } else if (status.type === 'idle' || status.type === 'systemError') {
+          this.emit({
+            type: 'agent.finished', agentId: changedThread,
+            state: status.type === 'idle' ? 'done' : 'failed', seconds, tokens: 0,
+            calls: known.calls, model: known.model, result: null,
+          });
+          this.agents.delete(changedThread);
+        }
+        return;
+      }
       const waiting = status.activeFlags?.includes('waitingOnApproval') || status.activeFlags?.includes('waitingOnUserInput');
       const state = status.type === 'active' ? (waiting ? 'waiting_permission' : 'thinking') : status.type === 'systemError' ? 'errored' : 'idle';
       this.emit({ type: 'session.state', state, label: waiting ? 'Waiting for you' : status.type === 'active' ? 'Working' : status.type === 'systemError' ? 'Failed' : 'Ready' });
