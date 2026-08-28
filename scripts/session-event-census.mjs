@@ -48,6 +48,7 @@ const report = {
   commandLabels: { covered: 0, verifiedCorrect: 0, knownWrong: 0, unverified: 0, uncovered: 0 },
   commandIntents: {},
   contradictions: {},
+  contradictionLabels: {},
   boundaries: {},
   unknown: {},
 };
@@ -80,6 +81,7 @@ function commandCandidate(raw, source = 'direct') {
     else if (verdict.status === 'contradiction') {
       report.commandLabels.knownWrong += 1;
       count(report.contradictions, `${verdict.intent}: ${verdict.reason}`);
+      count(report.contradictionLabels, `${verdict.intent}: ${ran?.said ?? 'raw'}`);
     } else if (verdict.status === 'unverified') report.commandLabels.unverified += 1;
     else report.commandLabels.uncovered += 1;
     if ('intent' in verdict && verdict.intent) count(report.commandIntents, verdict.intent);

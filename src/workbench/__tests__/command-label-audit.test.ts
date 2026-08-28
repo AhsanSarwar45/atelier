@@ -27,11 +27,13 @@ describe('command label evidence', () => {
 
   it('does not read help-looking quoted data as invocation intent', () => {
     expect(explicitCommandIntent("rg '--help' src")).toBeNull();
+    expect(explicitCommandIntent('bd show bw-a\nmachinery/board/land --help')).toBeNull();
   });
 
   it('recognises dry runs and destructive commands independently', () => {
     expect(explicitCommandIntent('npm install --dry-run')).toBe('dry-run');
     expect(explicitCommandIntent('git reset --hard HEAD')).toBe('destructive');
+    expect(explicitCommandIntent('git clean -n')).toBeNull();
     expect(explicitCommandIntent('kill -0 123')).toBeNull();
   });
 });

@@ -13,10 +13,10 @@ export interface ServiceAction {
   confidence: 'schema' | 'parsed' | 'heuristic' | 'unknown';
 }
 
-const READ = new Set(['get', 'read', 'fetch', 'list', 'show', 'lookup']);
+const READ = new Set(['get', 'read', 'fetch', 'list', 'show', 'lookup', 'open', 'inspect', 'view', 'describe', 'download', 'status', 'check', 'validate', 'count', 'history', 'version']);
 const SEARCH = new Set(['search', 'find', 'query']);
-const CREATE = new Set(['create', 'add', 'publish', 'apply', 'label', 'upload']);
-const UPDATE = new Set(['update', 'edit', 'set', 'move', 'copy', 'write', 'change']);
+const CREATE = new Set(['create', 'add', 'publish', 'upload']);
+const UPDATE = new Set(['update', 'edit', 'set', 'move', 'copy', 'write', 'change', 'apply', 'label']);
 const COMMUNICATE = new Set(['send', 'post', 'comment', 'reply', 'notify']);
 const DELETE = new Set(['delete', 'remove', 'revoke', 'destroy', 'purge']);
 const AUTH = new Set(['authenticate', 'login', 'connect', 'authorize']);
@@ -51,7 +51,7 @@ function targetIn(input: Record<string, unknown>): string | undefined {
 }
 
 function objectIn(method: string, verb: string): string {
-  const rest = words(method).filter((word, index) => index > 0 && word.toLowerCase() !== verb);
+  const rest = words(method).filter((word) => word.toLowerCase() !== verb);
   if (!rest.length) return 'data';
   return rest.join(' ').replace(/\bids\b/i, 'items');
 }
@@ -68,7 +68,13 @@ export function normalizeServiceAction(
   const methodWords = words(identity.method);
   // Some servers repeat their name in every method (codegraph_explore).
   if (methodWords[0]?.toLowerCase() === words(identity.server)[0]?.toLowerCase()) methodWords.shift();
-  const verb = (methodWords[0] ?? '').toLowerCase();
+  const lower = methodWords.map((word) => word.toLowerCase());
+  // Tool servers commonly namespace the operation (`issues_get`) or qualify
+  // it (`batch_update_issues`). Prefer the most consequential capability the
+  // method actually names instead of assuming its first word is the verb.
+  const pick = (set: Set<string>): string => lower.find((word) => set.has(word)) ?? '';
+  const verb = pick(DELETE) || pick(CREATE) || pick(UPDATE) || pick(COMMUNICATE) ||
+    pick(AUTH) || pick(EXECUTE) || pick(SEARCH) || pick(READ);
   const target = targetIn(input);
   const object = objectIn(methodWords.join('_'), verb);
 
@@ -77,6 +83,8 @@ export function normalizeServiceAction(
   let phrase: string;
   if (DELETE.has(verb) || annotations.destructiveHint) {
     effect = 'delete'; risk = 'destructive'; phrase = 'Deleted';
+  } else if (annotations.readOnlyHint) {
+    effect = 'read'; risk = 'read-only'; phrase = verb === 'list' ? 'Listed' : 'Read';
   } else if (READ.has(verb)) {
     effect = 'read'; risk = 'read-only'; phrase = verb === 'list' ? 'Listed' : 'Read';
   } else if (SEARCH.has(verb)) {
@@ -91,8 +99,6 @@ export function normalizeServiceAction(
     effect = 'authenticate'; risk = 'mutating'; phrase = 'Authenticated with';
   } else if (EXECUTE.has(verb)) {
     effect = 'execute'; risk = 'unknown'; phrase = 'Ran';
-  } else if (annotations.readOnlyHint) {
-    effect = 'read'; risk = 'read-only'; phrase = 'Read';
   } else {
     effect = 'execute'; risk = 'unknown';
     return {

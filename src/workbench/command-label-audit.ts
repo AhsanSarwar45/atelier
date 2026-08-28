@@ -45,6 +45,7 @@ function simpleWords(command: string): string[] | null {
     }
     if (char === "'" || char === '"') { quote = char; quoted = true; continue; }
     if (char === '\\' && i + 1 < command.length) { word += command[++i]!; continue; }
+    if (char === '\n' || char === '\r') return null;
     if (/\s/.test(char)) {
       push();
       continue;
@@ -81,12 +82,12 @@ export function explicitCommandIntent(command: string): ExplicitIntent | null {
   if (args.includes('--version') || args[0] === 'version' || (args.length === 1 && args[0] === '-V')) return 'version';
   if (args.includes('--dry-run') || args.includes('--dry')) return 'dry-run';
 
-  if (['rm', 'rmdir', 'shred', 'mkfs', 'truncate', 'pkill', 'killall'].includes(head)) return 'destructive';
-  if (head === 'kill' && !args.includes('-0')) return 'destructive';
+  if (['rm', 'rmdir', 'shred', 'mkfs', 'truncate', 'killall'].includes(head)) return 'destructive';
+  if ((head === 'kill' || head === 'pkill') && !args.includes('-0')) return 'destructive';
   if (head === 'find' && args.includes('-delete')) return 'destructive';
   if (head === 'git') {
     const sub = args.find((arg) => !arg.startsWith('-')) ?? '';
-    if (sub === 'rm' || sub === 'clean') return 'destructive';
+    if (sub === 'rm' || (sub === 'clean' && !args.includes('-n') && !args.includes('--dry-run'))) return 'destructive';
     if (sub === 'reset' && args.includes('--hard')) return 'destructive';
     if (sub === 'push' && args.some((arg) => arg === '-f' || arg === '--force' || arg === '--force-with-lease')) return 'destructive';
   }

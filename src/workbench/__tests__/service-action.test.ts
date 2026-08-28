@@ -41,4 +41,28 @@ describe('provider-neutral external service actions', () => {
       effect: 'execute', risk: 'unknown', confidence: 'unknown',
     });
   });
+
+  it('finds a capability after service namespaces and qualifiers', () => {
+    expect(normalizeServiceAction('linear/issues_get', { issueId: 'KEY-2' })).toMatchObject({
+      effect: 'read', risk: 'read-only', summary: 'Read Linear issues KEY-2',
+    });
+    expect(normalizeServiceAction('linear/batch_update_issues', {})).toMatchObject({
+      effect: 'update', risk: 'mutating', summary: 'Updated Linear batch issues',
+    });
+  });
+
+  it('does not call applying or labelling an update a creation', () => {
+    expect(normalizeServiceAction('workspace/apply_patch', {})).toMatchObject({
+      effect: 'update', risk: 'mutating', summary: 'Updated Workspace patch',
+    });
+    expect(normalizeServiceAction('linear/label_issue', { issueId: 'KEY-3' })).toMatchObject({
+      effect: 'update', risk: 'mutating', summary: 'Updated Linear issue KEY-3',
+    });
+  });
+
+  it('uses read-only schema evidence ahead of a heuristic mutating word', () => {
+    expect(normalizeServiceAction('preview/create_preview', {}, { readOnlyHint: true })).toMatchObject({
+      effect: 'read', risk: 'read-only', confidence: 'schema',
+    });
+  });
 });

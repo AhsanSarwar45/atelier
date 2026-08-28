@@ -96,6 +96,8 @@ interface Stage {
   text: string;
   kind: RanKind;
   grave: boolean;
+  /** The invocation only reads metadata or previews work; it executes no verb. */
+  intentOnly?: boolean;
 }
 
 /** How many links of a chain are read at all. A guard, not a feature. */
@@ -409,13 +411,14 @@ function graveStage(head: string, argv: string[]): Stage | null {
   }
   if (head === 'git') {
     const sub = argv[1] ?? '';
-    if (sub === 'push') {
-      const forced = has(argv, '--force', '-f', '--force-with-lease');
-      return { text: forced ? 'Force-pushed' : 'Pushed', kind: 'grave', grave: true };
+    if (sub === 'push' && has(argv, '--force', '-f', '--force-with-lease')) {
+      return { text: 'Force-pushed', kind: 'grave', grave: true };
     }
     if (sub === 'rm') return { text: `Deleted ${brief(place(object(argv, 2))) || 'a tracked file'}`, kind: 'grave', grave: true };
-    if (sub === 'clean') return { text: 'Threw away untracked files', kind: 'grave', grave: true };
+    if (sub === 'clean' && !has(argv, '-n', '--dry-run')) return { text: 'Threw away untracked files', kind: 'grave', grave: true };
     if (sub === 'reset' && has(argv, '--hard')) return { text: 'Threw away every change', kind: 'grave', grave: true };
+    if (sub === 'branch' && has(argv, '-d', '-D', '--delete')) return { text: 'Deleted a branch', kind: 'grave', grave: true };
+    if (sub === 'tag' && has(argv, '-d', '--delete')) return { text: 'Deleted a tag', kind: 'grave', grave: true };
   }
   if (head === 'docker') {
     const sub = argv[1] ?? '';
@@ -547,13 +550,14 @@ const GIT: Record<string, (argv: string[]) => string> = {
     return what.length > 1 ? `Staged ${what.length} paths` : `Staged ${brief(place(what[0]!))}`;
   },
   commit: () => 'Committed',
+  push: () => 'Pushed',
   pull: () => 'Pulled',
   fetch: () => 'Fetched',
   checkout: (a) => `Checked out ${brief(object(a, 2)) || 'a branch'}`,
   switch: (a) => `Switched to ${brief(object(a, 2)) || 'a branch'}`,
   branch: (a) => (has(a, '-b', '-c') ? 'Made a branch' : 'Listed the branches'),
-  merge: (a) => `Merged ${brief(object(a, 2)) || 'a branch'}`,
-  rebase: (a) => `Rebased onto ${brief(object(a, 2)) || 'main'}`,
+  merge: (a) => has(a, '--abort') ? 'Aborted the merge' : has(a, '--continue') ? 'Continued the merge' : `Merged ${brief(object(a, 2)) || 'a branch'}`,
+  rebase: (a) => has(a, '--abort') ? 'Aborted the rebase' : has(a, '--continue') ? 'Continued the rebase' : has(a, '--skip') ? 'Skipped a rebase commit' : `Rebased onto ${brief(object(a, 2)) || 'main'}`,
   stash: (a) => (a[2] === 'pop' || a[2] === 'apply' ? 'Took the stash back' : 'Stashed the changes'),
   reset: () => 'Unstaged the changes',
   restore: (a) => `Restored ${brief(place(object(a, 2))) || 'a file'}`,
@@ -562,14 +566,19 @@ const GIT: Record<string, (argv: string[]) => string> = {
   'merge-base': () => 'Found the common ancestor',
   'ls-files': () => 'Listed the tracked files',
   blame: (a) => `Blamed ${brief(place(object(a, 2))) || 'a file'}`,
-  tag: () => 'Tagged',
-  remote: () => 'Listed the remotes',
+  tag: (a) => object(a, 2) ? 'Tagged' : 'Listed the tags',
+  remote: (a) => {
+    if (a[2] === 'add') return `Added remote ${brief(object(a, 3)) || ''}`.trim();
+    if (a[2] === 'remove' || a[2] === 'rm') return `Removed remote ${brief(object(a, 3)) || ''}`.trim();
+    if (a[2] === 'set-url') return `Changed remote ${brief(object(a, 3)) || ''}`.trim();
+    return 'Listed the remotes';
+  },
   clone: (a) => `Cloned ${address(object(a, 2)) || 'a repository'}`,
   init: () => 'Started a repository',
-  apply: () => 'Applied a patch',
+  apply: (a) => has(a, '--check') ? 'Checked whether a patch applies' : 'Applied a patch',
   am: () => 'Applied a patch',
   cherry: () => 'Compared the branches',
-  'cherry-pick': (a) => `Cherry-picked ${brief(object(a, 2))}`,
+  'cherry-pick': (a) => has(a, '--abort') ? 'Aborted the cherry-pick' : has(a, '--continue') ? 'Continued the cherry-pick' : `Cherry-picked ${brief(object(a, 2))}`,
   describe: () => 'Named the current commit',
   shortlog: () => 'Read the history',
   worktree: (a) => {
@@ -687,7 +696,14 @@ function nodePackage(argv: string[]): { kind: RanKind; said: string } {
     return startsOrBuilds(object(argv, 2));
   }
   const tool = TOOLS[front];
-  if (tool) return tool;
+  if (tool) {
+    if (front === 'prettier' && has(argv, '--check')) return { kind: 'lint', said: 'Checked formatting' };
+    if (front === 'prettier' && has(argv, '--write', '-w')) return { kind: 'edit', said: 'Formatted files' };
+    if (front === 'eslint' && has(argv, '--fix')) return { kind: 'edit', said: 'Linted and fixed files' };
+    if (front === 'ruff' && argv.includes('format') && has(argv, '--check')) return { kind: 'lint', said: 'Checked Python formatting' };
+    if (front === 'black' && has(argv, '--check')) return { kind: 'lint', said: 'Checked Python formatting' };
+    return tool;
+  }
   const script = SCRIPTS[sub];
   if (script) return script;
   if (!sub) return { kind: 'run', said: `Ran ${head}` };
@@ -1137,6 +1153,61 @@ function headOf(argv: string[]): string[] {
   return rest;
 }
 
+const SHORT_HELP = new Set([
+  'bd', 'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'job', 'kubectl', 'land',
+  'make', 'npm', 'npx', 'pnpm', 'report', 'review', 'yarn',
+]);
+
+const COMMAND_NAME: Record<string, string> = {
+  bd: 'board',
+  gh: 'GitHub',
+  git: 'Git',
+};
+
+const commandName = (head: string): string => COMMAND_NAME[head] ?? head
+  .replace(/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/, '')
+  .replaceAll('-', ' ');
+
+/**
+ * Modes that inspect the executable or preview work take precedence over its
+ * action verb. `land --help` did not land, `git push --dry-run` did not push,
+ * and `prettier --check` did not format anything.
+ */
+function intentOnlyStage(head: string, argv: string[]): Stage | null {
+  const args = argv.slice(1);
+  const called = commandName(head);
+  const help = args.includes('--help') || args[0] === 'help' ||
+    (args.length === 1 && args[0] === '-h' && (SHORT_HELP.has(head) || argv[0]!.includes('machinery/')));
+  if (help) return { text: `Read the ${brief(called)} options`, kind: 'read', grave: false, intentOnly: true };
+
+  const version = args.includes('--version') || args[0] === 'version' || (args.length === 1 && args[0] === '-V');
+  if (version) return { text: `Checked the ${brief(called)} version`, kind: 'read', grave: false, intentOnly: true };
+
+  const dry = args.includes('--dry-run') || args.includes('--dry') ||
+    ((head === 'git' && args[0] === 'clean') || head === 'make') && args.includes('-n');
+  if (dry) return { text: `Checked what ${brief(called)} would do`, kind: 'read', grave: false, intentOnly: true };
+
+  if (head === 'git' && args[0] === 'diff' && args.includes('--check')) {
+    return { text: 'Checked the diff', kind: 'vcs', grave: false, intentOnly: true };
+  }
+  if (head === 'git' && args[0] === 'apply' && args.includes('--check')) {
+    return { text: 'Checked whether a patch applies', kind: 'vcs', grave: false, intentOnly: true };
+  }
+  if (head === 'cargo' && args[0] === 'fmt' && args.includes('--check')) {
+    return { text: 'Checked Rust formatting', kind: 'lint', grave: false, intentOnly: true };
+  }
+  if (head === 'prettier' && args.includes('--check')) {
+    return { text: 'Checked formatting', kind: 'lint', grave: false, intentOnly: true };
+  }
+  if (head === 'black' && args.includes('--check')) {
+    return { text: 'Checked Python formatting', kind: 'lint', grave: false, intentOnly: true };
+  }
+  if (head === 'ruff' && args[0] === 'format' && args.includes('--check')) {
+    return { text: 'Checked Python formatting', kind: 'lint', grave: false, intentOnly: true };
+  }
+  return null;
+}
+
 /** A link that was deliberately passed over rather than one nothing could name. */
 const DROPPED = 'dropped';
 
@@ -1151,6 +1222,9 @@ const DROPPED = 'dropped';
 function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED | null {
   if (!argv.length) return DROPPED;
   const head = named(argv[0]!);
+
+  const intent = intentOnlyStage(head, argv);
+  if (intent) return intent;
 
   const heavy = graveStage(head, argv);
   if (heavy) return heavy;
@@ -1340,7 +1414,7 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
 
   // Whatever the chain reader could not see. A `rm` inside `sh -c '…'` is one
   // word to it and a delete to the machine.
-  if (!stages.some((s) => s.grave)) {
+  if (!stages.some((s) => s.grave) && !stages.every((s) => s.intentOnly)) {
     const hidden = graveBackstop(text);
     if (hidden) stages.push({ text: hidden.did, kind: 'grave', grave: true });
   }
@@ -1628,9 +1702,9 @@ export function rawTitle(name: string, input: Record<string, unknown>): string {
  * tense at a reader watching it happen (bw-7ks.24.6).
  */
 const UNDER_WAY: Record<string, string> = {
-  Added: 'Adding', Asked: 'Asking', Blamed: 'Blaming', Built: 'Building',
+  Aborted: 'Aborting', Added: 'Adding', Asked: 'Asking', Blamed: 'Blaming', Built: 'Building',
   Changed: 'Changing', Checked: 'Checking', Claimed: 'Claiming', Cloned: 'Cloning',
-  Closed: 'Closing', Commented: 'Commenting', Committed: 'Committing',
+  Closed: 'Closing', Commented: 'Commenting', Committed: 'Committing', Continued: 'Continuing',
   Compared: 'Comparing', Copied: 'Copying', Counted: 'Counting', Cut: 'Cutting',
   Deleted: 'Deleting', Diffed: 'Diffing', Downloaded: 'Downloading',
   Fetched: 'Fetching', 'Force-pushed': 'Force-pushing', Formatted: 'Formatting',
@@ -1643,7 +1717,7 @@ const UNDER_WAY: Record<string, string> = {
   Rebased: 'Rebasing', Removed: 'Removing', Reported: 'Reporting',
   Resolved: 'Resolving', Restarted: 'Restarting', Restored: 'Restoring',
   Reviewed: 'Reviewing', Rewrote: 'Rewriting', Scheduled: 'Scheduling',
-  Searched: 'Searching', Sent: 'Sending', Set: 'Setting', Showed: 'Showing',
+  Searched: 'Searching', Sent: 'Sending', Set: 'Setting', Showed: 'Showing', Skipped: 'Skipping',
   Staged: 'Staging', Started: 'Starting', Stashed: 'Stashing', Stopped: 'Stopping',
   Switched: 'Switching', Threw: 'Throwing', Took: 'Taking', Typechecked: 'Typechecking',
   Unpacked: 'Unpacking', Unstaged: 'Unstaging', Waited: 'Waiting',

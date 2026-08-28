@@ -93,7 +93,12 @@ const RULES: Array<[string, string]> = [
   ['machinery/board/job new --what x', 'Opened a job'],
   ['machinery/board/job under bw-7ks.24 --do "what to do|how we know"', 'Added the work items'],
   ['machinery/board/land bw-7ks.24', 'Landed bw-7ks.24'],
+  ['machinery/board/land --help', 'Read the land options'],
+  ["/bin/bash -lc 'machinery/board/land --help'", 'Read the land options'],
+  ['machinery/board/land --dry', 'Checked what land would do'],
   ['machinery/board/review bw-7ks.24', 'Reviewed bw-7ks.24'],
+  ['bd --help', 'Read the board options'],
+  ['cargo --version', 'Checked the cargo version'],
 
   // Version control.
   ['git status', 'Checked the working tree'],
@@ -106,13 +111,17 @@ const RULES: Array<[string, string]> = [
   ['git add -A', 'Staged everything'],
   ['git add src/a.ts', 'Staged src/a.ts'],
   ['git commit -m "x"', 'Committed'],
+  ['git push', 'Pushed'],
+  ['git push --dry-run', 'Checked what Git would do'],
   ['git pull', 'Pulled'],
   ['git fetch --all', 'Fetched'],
   ['git checkout main', 'Checked out main'],
   ['git switch -c foo', 'Switched to foo'],
   ['git branch -a', 'Listed the branches'],
   ['git merge main', 'Merged main'],
+  ['git merge --abort', 'Aborted the merge'],
   ['git rebase main', 'Rebased onto main'],
+  ['git rebase --continue', 'Continued the rebase'],
   ['git stash', 'Stashed the changes'],
   ['git stash pop', 'Took the stash back'],
   ['git reset', 'Unstaged the changes'],
@@ -120,6 +129,9 @@ const RULES: Array<[string, string]> = [
   ['git blame src/x.ts', 'Blamed src/x.ts'],
   ['git worktree add worktrees/bw-7ks.24 -b bw-7ks.24', 'Cut a worktree at bw-7ks.24'],
   ['git worktree list', 'Listed the worktrees'],
+  ['git branch -d old', 'Deleted a branch'],
+  ['git tag', 'Listed the tags'],
+  ['git remote add upstream https://example.com/repo', 'Added remote upstream'],
   ['git rev-parse HEAD', 'Resolved a revision'],
   ['git merge-base main HEAD', 'Found the common ancestor'],
   ['git ls-files', 'Listed the tracked files'],
@@ -137,6 +149,7 @@ const RULES: Array<[string, string]> = [
   ['cargo check', 'Checked the Rust side'],
   ['cargo clippy', 'Linted the Rust side'],
   ['cargo fmt', 'Formatted the Rust side'],
+  ['cargo fmt --check', 'Checked Rust formatting'],
   ['rg -n "providerHoldsNow" workbench/src | head -20', 'Searched for providerHoldsNow in workbench/src'],
   ["sed -n '1,80p' src/workbench/live.ts", 'Read part of workbench/live.ts'],
   ['BEADS_E2E_URL=http://127.0.0.1:3008 node scripts/codex-ownership-smoke.mjs p s', 'Checked Codex ownership in the browser'],
@@ -158,6 +171,9 @@ const RULES: Array<[string, string]> = [
   ['npx tsc --noEmit', 'Typechecked'],
   ['npx playwright test', 'Ran the browser tests'],
   ['npx eslint .', 'Linted'],
+  ['npx eslint . --fix', 'Linted and fixed files'],
+  ['npx prettier . --check', 'Checked formatting'],
+  ['npx prettier . --write', 'Formatted files'],
   ['pip install -r requirements.txt', 'Installed the Python dependencies'],
 
   // Reading.
@@ -467,7 +483,6 @@ describe('a delete is never hidden', () => {
       ['kill -9 12345', 'Killed 12345'],
       ['pkill -f workbench', 'Killed workbench'],
       ['killall node', 'Killed node'],
-      ['git push', 'Pushed'],
       ['git push --force-with-lease', 'Force-pushed'],
       ['git reset --hard', 'Threw away every change'],
       ['git clean -fd', 'Threw away untracked files'],
@@ -478,6 +493,11 @@ describe('a delete is never hidden', () => {
       expect(ran?.said, command).toBe(sentence);
       expect(ran?.grave, command).toBe(true);
     }
+  });
+
+  it('does not call an ordinary push destructive', () => {
+    const ran = whatACommandDid('git push');
+    expect(ran).toMatchObject({ said: 'Pushed', kind: 'vcs', grave: false });
   });
 
   it('does not call a liveness check a kill', () => {
