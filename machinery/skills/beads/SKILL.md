@@ -71,7 +71,7 @@ must explain why the new job cannot fold into one that is already open.
      record them without rerunning:
 
      ```bash
-     machinery/checks <checks-id> --record npm-test=1799/0 --record cargo-test=557/0
+     machinery/checks CHECKS-CARD --record npm-test=1799/0 --record cargo-test=557/0
      ```
 
      `--record` is an explicit trust-based route: it marks the counts as
@@ -105,7 +105,7 @@ must explain why the new job cannot fold into one that is already open.
 - Run every `bd` or `machinery/board/...` command on its own shell line. Do not
   chain it behind another command: the provider hooks use that boundary to stamp
   the session identity consistently.
-- Never create cards with `bd create`. Use `machinery/board/job new`; add work
+- Never create cards with `bd create`. Use the job command shown in step 1; add work
   the current change will touch with `machinery/board/job under <job-id>`, and
   open a separate complete job for a different cause, system, or scope. A fault
   discovered during implementation must take one of those two routes before the
