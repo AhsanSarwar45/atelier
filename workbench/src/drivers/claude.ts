@@ -266,6 +266,46 @@ function isOver(state: AgentState): state is FinishedState {
   return OVER.has(state);
 }
 
+/** One field from the task-notification envelope Claude queues as a user turn. */
+function notificationField(body: string, name: string): string {
+  const found = body.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
+  return found?.[1]?.trim() ?? '';
+}
+
+/**
+ * The completion edge for work Claude was allowed to leave in the background.
+ *
+ * Foreground work comes back as `system/task_notification`. Background work
+ * is queued into the conversation as a synthetic user turn carrying the same
+ * fields in a task-notification envelope. Treat both as one lifecycle shape;
+ * otherwise a helper that really came home remains `running` forever.
+ */
+function queuedTaskNotification(m: Record<string, any>): Record<string, any> | null {
+  if (m.origin?.kind !== 'task-notification') return null;
+  const content = m.message?.content;
+  const body = typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.filter((part) => part?.type === 'text').map((part) => String(part.text ?? '')).join('\n')
+      : '';
+  if (!body.includes('<task-notification>')) return null;
+  const taskId = notificationField(body, 'task-id');
+  if (!taskId) return null;
+  return {
+    type: 'system',
+    subtype: 'task_notification',
+    task_id: taskId,
+    status: notificationField(body, 'status') || 'completed',
+    summary: notificationField(body, 'summary'),
+    result: notificationField(body, 'result'),
+    usage: {
+      total_tokens: Number(notificationField(body, 'subagent_tokens')) || 0,
+      tool_uses: Number(notificationField(body, 'tool_uses')) || 0,
+      duration_ms: Number(notificationField(body, 'duration_ms')) || 0,
+    },
+  };
+}
+
 /** What the kit's own word for a task's state means on a row. */
 const TASK_STATE: Record<string, AgentState> = {
   pending: 'running',
@@ -1049,7 +1089,7 @@ export class ClaudeDriver implements Driver {
           model: was.model,
           // Its last word, kept on the row. A finished row that throws the
           // answer away is a row the reader has to go looking for it.
-          result: oneLine(m.summary ?? '') || null,
+          result: oneLine(m.result ?? m.summary ?? '') || null,
         });
         return false;
       }
@@ -1063,6 +1103,12 @@ export class ClaudeDriver implements Driver {
         for (const task of (m.tasks ?? []) as { task_id: string; task_type: string; description: string }[]) {
           const id = String(task.task_id ?? '');
           if (!id || this.sentAway.has(id) || this.tasksOfHelpers.has(id)) continue;
+          // A local agent has a real task_started edge carrying the call that
+          // dispatched it. The level snapshot can arrive first, but opening a
+          // row from it writes an anonymous start and then a second identified
+          // start a moment later. Commands and workflows do not promise that
+          // edge, so the snapshot remains their legitimate opening event.
+          if (String(task.task_type ?? '').toLowerCase().includes('agent')) continue;
           if (sentAwayByAHelper(task as Record<string, any>, this.callsOfHelpers)) {
             this.tasksOfHelpers.add(id);
             continue;
@@ -2020,6 +2066,13 @@ export class ClaudeDriver implements Driver {
       }
 
       case 'user':
+        // The edge that closes a background helper arrives through this arm,
+        // unlike the foreground system/task_notification shape. Feed both to
+        // the same state machine so they cannot drift again (bw-n856.1).
+        {
+          const notification = queuedTaskNotification(m);
+          if (notification) this.sawTask(notification);
+        }
         // A turn the kit wrote in his name — an interrupt notice, a queued
         // message — says something he should read. A turn HE typed is
         // already in the log from the moment he sent it, and `isSynthetic`
