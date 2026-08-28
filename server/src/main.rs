@@ -17,6 +17,7 @@ mod reachable;
 mod routes;
 mod rules;
 mod service;
+mod terminal;
 mod serving;
 
 use axum::{
