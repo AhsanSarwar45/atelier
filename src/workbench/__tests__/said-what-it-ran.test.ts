@@ -70,6 +70,16 @@ const RULES: Array<[string, string]> = [
   ['bd blocked', 'Listed what is blocked'],
   ['bd prime', 'Read the board rules'],
   ['bd stats', 'Counted the board'],
+  ['bd create "a card"', 'Created a card'],
+  ['bd search "something"', 'Searched the board'],
+  ['bd label add bw-7ks.24 bug', 'Labeled bw-7ks.24'],
+  ['bd supersede bw-old --with bw-new', 'Superseded bw-old'],
+  ['bd children bw-7ks.24', 'Listed the child cards'],
+  ['bd doctor', 'Checked the board health'],
+  ['bd unclaim bw-7ks.24', 'Released bw-7ks.24'],
+  ['bd note bw-7ks.24 "done"', 'Wrote a note on bw-7ks.24'],
+  ['bd set-state bw-7ks.24 patrol=active', 'Set the state of bw-7ks.24'],
+  ['bd dolt start', 'Started the board database'],
   ['bd update bw-7ks.24.2 --claim', 'Claimed bw-7ks.24.2'],
   ['bd update bw-7ks.24.2 --status=in_progress', 'Moved bw-7ks.24.2'],
   ['bd update bw-7ks.24.2 --append-notes "x"', 'Wrote a note on bw-7ks.24.2'],
@@ -92,6 +102,7 @@ const RULES: Array<[string, string]> = [
   ["docker exec app sh -lc 'npm test'", 'Ran the tests'],
   ['machinery/board/job new --what x', 'Opened a job'],
   ['machinery/board/job under bw-7ks.24 --do "what to do|how we know"', 'Added the work items'],
+  ['machinery/board/job find bw-7ks.24', 'Ran job find'],
   ['machinery/board/land bw-7ks.24', 'Landed bw-7ks.24'],
   ['machinery/board/land --help', 'Read the land options'],
   ["/bin/bash -lc 'machinery/board/land --help'", 'Read the land options'],
@@ -130,6 +141,14 @@ const RULES: Array<[string, string]> = [
   ['git worktree add worktrees/bw-7ks.24 -b bw-7ks.24', 'Cut a worktree at bw-7ks.24'],
   ['git worktree list', 'Listed the worktrees'],
   ['git branch -d old', 'Deleted a branch'],
+  ['git -C /home/me/project branch -d old', 'Deleted a branch'],
+  ['git -C /home/me/project rm old.ts', 'Deleted old.ts'],
+  ['git worktree remove --force worktrees/old', 'Removed a worktree'],
+  ['git show-ref --heads', 'Listed the references'],
+  ['git show-ref --verify refs/heads/main', 'Checked a reference'],
+  ['git for-each-ref refs/heads', 'Listed the references'],
+  ['git check-ignore src/x.ts', 'Checked ignored paths'],
+  ['git write-tree', 'Wrote the index tree'],
   ['git tag', 'Listed the tags'],
   ['git remote add upstream https://example.com/repo', 'Added remote upstream'],
   ['git rev-parse HEAD', 'Resolved a revision'],
@@ -175,6 +194,8 @@ const RULES: Array<[string, string]> = [
   ['npx prettier . --check', 'Checked formatting'],
   ['npx prettier . --write', 'Formatted files'],
   ['pip install -r requirements.txt', 'Installed the Python dependencies'],
+  ['next dev', 'Started the app'],
+  ['vite build', 'Built the app'],
 
   // Reading.
   ['cat src/workbench/fold.ts', 'Read workbench/fold.ts'],
@@ -210,6 +231,7 @@ const RULES: Array<[string, string]> = [
 
   // Changing things on disk.
   ['sed -i "s/a/b/" src/x.ts', 'Rewrote src/x.ts'],
+  ['awk "{print $1}" src/x.ts', 'Picked fields out of a file'],
   ['mkdir -p out/x', 'Made out/x'],
   ['touch a.ts', 'Made a.ts'],
   ['cp a.ts b.ts', 'Copied a.ts to b.ts'],
@@ -240,9 +262,13 @@ const RULES: Array<[string, string]> = [
   ['systemctl restart nginx', 'Restarted nginx'],
   ['systemctl status beads-web', 'Checked beads-web'],
   ['systemctl --user stop beads-web', 'Stopped beads-web'],
+  ['systemctl --user is-active beads-web', 'Checked beads-web'],
   ['docker ps', 'Listed the containers'],
   ['docker logs api', 'Read a container log'],
   ['docker compose up -d', 'Started the containers'],
+  ['docker compose exec api npm test', 'Ran a command in a container'],
+  ['docker compose ps', 'Listed the containers'],
+  ['docker run --rm image', 'Started a container'],
   ['docker build -t x .', 'Built an image'],
   ['kubectl get pods', 'Listed pods'],
   ['kubectl logs api', 'Read a pod log'],
@@ -275,6 +301,11 @@ describe('one command, one sentence', () => {
       const ran = whatACommandDid(command);
       expect(RAN_KINDS, command).toContain(ran?.kind);
     }
+  });
+
+  it('files browser checks and generated protocol artifacts by their work, not their launcher', () => {
+    expect(whatACommandDid('node scripts/codex-ownership-smoke.mjs')).toMatchObject({ kind: 'test' });
+    expect(whatACommandDid('codex app-server generate-ts')).toMatchObject({ kind: 'build' });
   });
 });
 
@@ -324,6 +355,11 @@ describe('a chain of commands', () => {
       .toBe('Added the work items');
   });
 
+  it('keeps multiline quoted arguments out of shell-script detection', () => {
+    expect(said("git commit -m 'First line\nthen more detail\nfinal line'")).toBe('Committed');
+    expect(said("bd close bw-7ks.24 --reason 'Done\nthen verified'")).toBe('Closed bw-7ks.24');
+  });
+
   it('reads through a wrapper to the command underneath it', () => {
     expect(said('timeout 60 npm test')).toBe('Ran the tests');
     expect(said('sudo systemctl restart nginx')).toBe('Restarted nginx');
@@ -340,6 +376,24 @@ describe('a chain of commands', () => {
 });
 
 describe('a delete is never hidden', () => {
+  it('does not mistake quoted prose for a command', () => {
+    expect(whatACommandDid('bd close bw-7ks.24 --reason "remove obsolete wording"')).toMatchObject({
+      said: 'Closed bw-7ks.24', kind: 'board', grave: false,
+    });
+    expect(whatACommandDid('node -e "console.log(\'rm is a command\')"')).toMatchObject({
+      kind: 'run', grave: false,
+    });
+    expect(whatACommandDid('bd close bw-7ks.24 --reason "--dry"')).toMatchObject({
+      said: 'Closed bw-7ks.24', kind: 'board', grave: false,
+    });
+    expect(whatACommandDid("bd update bw-7ks.24 --notes='ordinary prose --dry still prose'")).toMatchObject({
+      said: 'Updated bw-7ks.24', kind: 'board', grave: false,
+    });
+    expect(whatACommandDid('git commit -m "--dry"')).toMatchObject({
+      said: 'Committed', kind: 'vcs', grave: false,
+    });
+  });
+
   it('reaches the sentence from the third link of a chain', () => {
     // The rule that is about safety rather than reading. A reader cannot tell
     // a wrong sentence from a right one, so the sentence must never be the

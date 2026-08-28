@@ -174,9 +174,6 @@ function links(command: string): string[] {
 /** `FOO=bar` — a setting in front of a command rather than the command. */
 const SETTING = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-/** A quoted run counts as one word, so a pattern with spaces stays whole. */
-const WORD = /'[^']*'|"[^"]*"|\S+/g;
-
 /**
  * Wrappers that say nothing about what ran. `timeout` and `nice` swallow a
  * number as well, and `rtk` is the manager's own proxy — `rtk git status` is a
@@ -230,12 +227,46 @@ const TRIMMERS = [
 /** Words that never did anything a reader cares about. */
 const PLUMBING = ['cd', 'echo', 'printf', 'export', 'set', 'test', 'true', 'false', 'env', 'pwd', 'source', '.', ':'];
 
-/** Every word of a link, with quoted runs held together and unquoted. */
+/** Every shell word in a link, with quotes removed after they have done their
+ * grouping work. Quotes may begin in the middle of a word (`--notes='a b'`),
+ * which a token regex cannot parse without turning its contents into flags. */
 function words(link: string): string[] {
-  const found = link.match(WORD);
-  if (!found) return [];
   const out: string[] = [];
-  for (const w of found) out.push(bare(w));
+  let word = '';
+  let quote = '';
+  let began = false;
+  const push = () => {
+    if (began) out.push(word);
+    word = '';
+    began = false;
+  };
+  for (let at = 0; at < link.length; at += 1) {
+    const char = link[at]!;
+    if (quote) {
+      if (char === '\\' && quote === '"' && at + 1 < link.length) {
+        word += link[++at]!;
+      } else if (char === quote) {
+        quote = '';
+      } else {
+        word += char;
+      }
+      began = true;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      began = true;
+    } else if (char === '\\' && at + 1 < link.length) {
+      word += link[++at]!;
+      began = true;
+    } else if (/\s/.test(char)) {
+      push();
+    } else {
+      word += char;
+      began = true;
+    }
+  }
+  push();
   return out;
 }
 
@@ -259,15 +290,6 @@ function stripped(argv: string[]): string[] {
   let i = 0;
   while (i < rest.length && SETTING.test(rest[i]!)) i++;
   return i ? rest.slice(i) : rest;
-}
-
-/** A word without the quotes that held it together. */
-function bare(word: string): string {
-  const first = word.charAt(0);
-  if ((first === "'" || first === '"') && word.length > 1 && word.charAt(word.length - 1) === first) {
-    return word.slice(1, -1);
-  }
-  return word;
 }
 
 /** The command's own name, without the folders that led to it. */
@@ -410,15 +432,17 @@ function graveStage(head: string, argv: string[]): Stage | null {
     };
   }
   if (head === 'git') {
-    const sub = argv[1] ?? '';
-    if (sub === 'push' && has(argv, '--force', '-f', '--force-with-lease')) {
+    const { sub, at } = gitCommand(argv);
+    const git = ordinaryGitArgs(argv, at);
+    if (sub === 'push' && has(git, '--force', '-f', '--force-with-lease')) {
       return { text: 'Force-pushed', kind: 'grave', grave: true };
     }
-    if (sub === 'rm') return { text: `Deleted ${brief(place(object(argv, 2))) || 'a tracked file'}`, kind: 'grave', grave: true };
-    if (sub === 'clean' && !has(argv, '-n', '--dry-run')) return { text: 'Threw away untracked files', kind: 'grave', grave: true };
-    if (sub === 'reset' && has(argv, '--hard')) return { text: 'Threw away every change', kind: 'grave', grave: true };
-    if (sub === 'branch' && has(argv, '-d', '-D', '--delete')) return { text: 'Deleted a branch', kind: 'grave', grave: true };
-    if (sub === 'tag' && has(argv, '-d', '--delete')) return { text: 'Deleted a tag', kind: 'grave', grave: true };
+    if (sub === 'rm') return { text: `Deleted ${brief(place(object(git, 2))) || 'a tracked file'}`, kind: 'grave', grave: true };
+    if (sub === 'clean' && !has(git, '-n', '--dry-run')) return { text: 'Threw away untracked files', kind: 'grave', grave: true };
+    if (sub === 'reset' && has(git, '--hard')) return { text: 'Threw away every change', kind: 'grave', grave: true };
+    if (sub === 'branch' && has(git, '-d', '-D', '--delete')) return { text: 'Deleted a branch', kind: 'grave', grave: true };
+    if (sub === 'tag' && has(git, '-d', '--delete')) return { text: 'Deleted a tag', kind: 'grave', grave: true };
+    if (sub === 'worktree' && git[2] === 'remove') return { text: 'Removed a worktree', kind: 'grave', grave: true };
   }
   if (head === 'docker') {
     const sub = argv[1] ?? '';
@@ -468,19 +492,31 @@ const A_DELETE_FLAG = /\s--?delete(?![\w-])/;
  * covers the flag.
  */
 function graveBackstop(command: string): { did: string; does: string } | null {
-  if (command.indexOf('delete') >= 0 && A_DELETE_FLAG.test(command)) {
+  const executable = commandText(command);
+  if (executable.indexOf('delete') >= 0 && A_DELETE_FLAG.test(executable)) {
     return { did: 'Deleted files', does: 'deletes files' };
   }
   if (
-    command.indexOf('rm') < 0 &&
-    command.indexOf('kill') < 0 &&
-    command.indexOf('shred') < 0 &&
-    command.indexOf('mkfs') < 0
+    executable.indexOf('rm') < 0 &&
+    executable.indexOf('kill') < 0 &&
+    executable.indexOf('shred') < 0 &&
+    executable.indexOf('mkfs') < 0
   ) {
     return null;
   }
-  const found = GRAVE_ANYWHERE.exec(command);
+  const found = GRAVE_ANYWHERE.exec(executable);
   return found ? (GRAVE_BACKSTOP[found[1]!] ?? { did: 'Deleted files', does: 'deletes files' }) : null;
+}
+
+/** Shell syntax without quoted argument prose. Commands handed to a shell and
+ * command substitutions remain executable and are appended back. */
+function commandText(command: string): string {
+  const nested: string[] = [];
+  for (const match of command.matchAll(/\b(?:sh|bash|zsh|dash)\s+(?:-\w+\s+)*-\w*c\w*\s+(['"])([\s\S]*?)\1/g)) {
+    if (match[2]) nested.push(match[2]);
+  }
+  for (const match of command.matchAll(/\$\(([^)]*)\)/g)) if (match[1]) nested.push(match[1]);
+  return `${command.replace(/'[^']*'|"[^"]*"/g, ' ')}\n${nested.join('\n')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -504,6 +540,15 @@ const BD: Record<string, (argv: string[]) => string> = {
   reclaim: () => 'Took work back',
   remember: () => 'Wrote a note to the board',
   stats: () => 'Counted the board',
+  create: () => 'Created a card',
+  search: () => 'Searched the board',
+  label: (a) => `${a[2] === 'remove' ? 'Removed' : 'Labeled'} ${object(a, 3) || object(a, 2) || 'a card'}`,
+  supersede: (a) => `Superseded ${object(a, 2) || 'a card'}`,
+  children: () => 'Listed the child cards',
+  doctor: () => 'Checked the board health',
+  unclaim: (a) => `Released ${object(a, 2) || 'a card'}`,
+  note: (a) => `Wrote a note on ${object(a, 2) || 'a card'}`,
+  'set-state': (a) => `Set the state of ${object(a, 2) || 'a card'}`,
 };
 
 function bdSaid(argv: string[]): string {
@@ -530,6 +575,16 @@ function bdSaid(argv: string[]): string {
     if (how === 'acquire') return 'Took the merge slot';
     if (how === 'release') return 'Gave the merge slot back';
     return 'Checked the merge slot';
+  }
+  if (sub === 'dolt') {
+    const how = argv[2] ?? '';
+    if (how === 'start') return 'Started the board database';
+    if (how === 'stop') return 'Stopped the board database';
+    if (how === 'status' || how === 'show' || how === 'test') return 'Checked the board database';
+    if (how === 'commit') return 'Committed the board database';
+    if (how === 'push') return 'Pushed the board database';
+    if (how === 'pull') return 'Pulled the board database';
+    return how ? `Ran bd dolt ${brief(how)}` : 'Ran the board database tool';
   }
   const known = BD[sub];
   if (known) return known(argv);
@@ -565,6 +620,10 @@ const GIT: Record<string, (argv: string[]) => string> = {
   'rev-parse': () => 'Resolved a revision',
   'merge-base': () => 'Found the common ancestor',
   'ls-files': () => 'Listed the tracked files',
+  'show-ref': (a) => has(a, '--verify', '--exists') ? 'Checked a reference' : 'Listed the references',
+  'for-each-ref': () => 'Listed the references',
+  'check-ignore': () => 'Checked ignored paths',
+  'write-tree': () => 'Wrote the index tree',
   blame: (a) => `Blamed ${brief(place(object(a, 2))) || 'a file'}`,
   tag: (a) => object(a, 2) ? 'Tagged' : 'Listed the tags',
   remote: (a) => {
@@ -744,7 +803,7 @@ const HEADS: Record<string, Rule> = {
       if (sub === 'epic') return 'Opened a container';
       if (sub === 'cancel') return 'Dropped a card';
       if (sub === 'upgrade') return 'Filled in a placeholder';
-      return 'Poured onto the board';
+      return sub ? `Ran job ${brief(sub)}` : 'Ran the job tool';
     },
   },
   land: { kind: 'board', say: (a) => `Landed ${object(a, 1) || 'the change'}` },
@@ -920,7 +979,7 @@ const HEADS: Record<string, Rule> = {
       return target ? `Picked lines out of ${brief(place(target))}` : null;
     },
   },
-  awk: { kind: 'edit', say: (a) => (objects(a, 1).length > 1 ? 'Picked fields out of a file' : null) },
+  awk: { kind: 'data', say: (a) => (objects(a, 1).length > 1 ? 'Picked fields out of a file' : null) },
   mkdir: { kind: 'edit', say: (a) => `Made ${brief(place(object(a, 1))) || 'a folder'}` },
   touch: { kind: 'edit', say: (a) => `Made ${brief(place(object(a, 1))) || 'a file'}` },
   cp: {
@@ -987,6 +1046,9 @@ const HEADS: Record<string, Rule> = {
       const how = rest[0] ?? '';
       const service = brief(rest[1] ?? '') || 'a service';
       if (how === 'status') return `Checked ${service}`;
+      if (how === 'is-active' || how === 'is-failed' || how === 'is-enabled' || how === 'is-system-running') return `Checked ${service}`;
+      if (how === 'show') return `Showed ${service}`;
+      if (how === 'cat') return `Read ${service}`;
       const did = SYSTEMD[how];
       if (did) return `${did} ${service}`;
       return `Asked systemd for ${how || 'a service'}`;
@@ -1006,8 +1068,16 @@ const HEADS: Record<string, Rule> = {
         if (how === 'up') return 'Started the containers';
         if (how === 'down') return 'Stopped the containers';
         if (how === 'logs') return 'Read the container logs';
+        if (how === 'exec') return 'Ran a command in a container';
+        if (how === 'ps') return 'Listed the containers';
+        if (how === 'build') return 'Built the containers';
+        if (how === 'pull') return 'Pulled the container images';
+        if (how === 'restart') return 'Restarted the containers';
+        if (how === 'start') return 'Started the containers';
+        if (how === 'stop') return 'Stopped the containers';
         return 'Worked on the containers';
       }
+      if (sub === 'run') return 'Started a container';
       return sub ? `Asked Docker to ${sub}` : 'Asked Docker';
     },
   },
@@ -1086,6 +1156,35 @@ function runSaid(argv: string[], tongue: string): string | null {
 
 /** A here-document, a loop or a branch is a script, not a chain. */
 const IS_SCRIPT = /<<[-\s]*['"]?\w|^\s*(?:for|while|until|if|function)\s|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/;
+
+/** Shell operators and control words, with quoted argument data blanked out.
+ * A multiline commit message is still one argument, not a nineteen-line shell
+ * script; testing the raw text made prose containing `then` look executable. */
+function shellSyntax(command: string): string {
+  let quote = '';
+  let syntax = '';
+  for (let at = 0; at < command.length; at += 1) {
+    const char = command[at]!;
+    if (quote) {
+      if (char === '\\' && quote === '"' && at + 1 < command.length) at += 1;
+      else if (char === quote) quote = '';
+      syntax += ' ';
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      syntax += ' ';
+      continue;
+    }
+    if (char === '\\' && at + 1 < command.length) {
+      syntax += '  ';
+      at += 1;
+      continue;
+    }
+    syntax += char;
+  }
+  return syntax;
+}
 
 /** `cat > path <<'EOF'` and `tee path <<EOF` are how a file gets written. */
 const WRITES_A_FILE = /(?:^|\|)\s*(?:cat|tee)\s+(?:-a\s+)?>?>?\s*([^\s<>|;&]+)[^|;&]*<</;
@@ -1168,13 +1267,32 @@ const commandName = (head: string): string => COMMAND_NAME[head] ?? head
   .replace(/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/, '')
   .replaceAll('-', ' ');
 
+/** Options whose following word is data even when that data begins with `-`.
+ * Without this distinction, a commit message or board reason equal to
+ * `--dry` was mistaken for an execution mode. */
+const TAKES_VALUE = new Set([
+  '-m', '--message', '--reason', '--notes', '--append-notes', '--description',
+  '--title', '--body', '--prompt', '--query', '--pattern', '--status', '--state',
+  '--assignee', '--owner', '--priority', '--type', '--with', '-c', '-C',
+]);
+
+function modeArgs(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let at = 1; at < argv.length; at += 1) {
+    const word = argv[at]!;
+    if (TAKES_VALUE.has(word)) { at += 1; continue; }
+    out.push(word);
+  }
+  return out;
+}
+
 /**
  * Modes that inspect the executable or preview work take precedence over its
  * action verb. `land --help` did not land, `git push --dry-run` did not push,
  * and `prettier --check` did not format anything.
  */
 function intentOnlyStage(head: string, argv: string[]): Stage | null {
-  const args = argv.slice(1);
+  const args = modeArgs(argv);
   const called = commandName(head);
   const help = args.includes('--help') || args[0] === 'help' ||
     (args.length === 1 && args[0] === '-h' && (SHORT_HELP.has(head) || argv[0]!.includes('machinery/')));
@@ -1255,7 +1373,13 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   if (head === 'cargo') kind = CARGO_KIND[argv[1] ?? ''] ?? 'build';
   if (head === 'go') kind = GO_KIND[argv[1] ?? ''] ?? 'build';
   if (head === 'docker' && argv[1] === 'build') kind = 'build';
+  if (head === 'docker' && argv[1] === 'run') kind = 'run';
+  if (head === 'docker' && argv[1] === 'compose' && argv[2] === 'exec') kind = 'run';
+  if (head === 'docker' && argv[1] === 'compose' && argv[2] === 'build') kind = 'build';
   if (head === 'sed' && !has(argv, '-i')) kind = 'read';
+  if (head === 'next' || head === 'vite') kind = startsOrBuilds(object(argv, 1)).kind;
+  if (head === 'node' && (text.startsWith('Checked ') || text.startsWith('Measured '))) kind = 'test';
+  if (head === 'codex' && text.startsWith('Generated ')) kind = 'build';
   return { text, kind, grave: false };
 }
 
@@ -1376,7 +1500,7 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
   let missed = 0;
   let where = '';
 
-  if (IS_SCRIPT.test(text)) {
+  if (IS_SCRIPT.test(shellSyntax(text))) {
     const only = scriptStage(text);
     if (!only) {
       const hidden = graveBackstop(text);
@@ -1703,23 +1827,23 @@ export function rawTitle(name: string, input: Record<string, unknown>): string {
  */
 const UNDER_WAY: Record<string, string> = {
   Aborted: 'Aborting', Added: 'Adding', Asked: 'Asking', Blamed: 'Blaming', Built: 'Building',
-  Changed: 'Changing', Checked: 'Checking', Claimed: 'Claiming', Cloned: 'Cloning',
+  Changed: 'Changing', Checked: 'Checking', Claimed: 'Claiming', Cloned: 'Cloning', Created: 'Creating',
   Closed: 'Closing', Commented: 'Commenting', Committed: 'Committing', Continued: 'Continuing',
   Compared: 'Comparing', Copied: 'Copying', Counted: 'Counting', Cut: 'Cutting',
   Deleted: 'Deleting', Diffed: 'Diffing', Downloaded: 'Downloading',
   Fetched: 'Fetching', 'Force-pushed': 'Force-pushing', Formatted: 'Formatting',
   Found: 'Finding', Gave: 'Giving', Installed: 'Installing', Joined: 'Joining', Killed: 'Killing',
-  Landed: 'Landing', Left: 'Leaving', Linked: 'Linking', Linted: 'Linting',
+  Labeled: 'Labeling', Landed: 'Landing', Left: 'Leaving', Linked: 'Linking', Linted: 'Linting',
   Listed: 'Listing', Looked: 'Looking', Made: 'Making', Measured: 'Measuring',
   Merged: 'Merging', Messaged: 'Messaging', Moved: 'Moving', Opened: 'Opening',
   Picked: 'Picking', Published: 'Publishing', Pulled: 'Pulling', Pushed: 'Pushing',
   Put: 'Putting', Queried: 'Querying', Ran: 'Running', Read: 'Reading',
-  Rebased: 'Rebasing', Removed: 'Removing', Reported: 'Reporting',
+  Rebased: 'Rebasing', Released: 'Releasing', Removed: 'Removing', Reported: 'Reporting',
   Resolved: 'Resolving', Restarted: 'Restarting', Restored: 'Restoring',
   Reviewed: 'Reviewing', Rewrote: 'Rewriting', Scheduled: 'Scheduling',
   Searched: 'Searching', Sent: 'Sending', Set: 'Setting', Showed: 'Showing', Skipped: 'Skipping',
   Staged: 'Staging', Started: 'Starting', Stashed: 'Stashing', Stopped: 'Stopping',
-  Switched: 'Switching', Threw: 'Throwing', Took: 'Taking', Typechecked: 'Typechecking',
+  Superseded: 'Superseding', Switched: 'Switching', Threw: 'Throwing', Took: 'Taking', Typechecked: 'Typechecking',
   Unpacked: 'Unpacking', Unstaged: 'Unstaging', Waited: 'Waiting',
   Watched: 'Watching', Wrote: 'Writing',
 };

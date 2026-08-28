@@ -17,8 +17,14 @@ export type ExplicitIntent = 'help' | 'version' | 'dry-run' | 'destructive' | 'b
 
 const SUBCOMMAND_TOOLS = new Set([
   'bd', 'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'job', 'kubectl', 'npm',
-  'npx', 'pnpm', 'report', 'review', 'systemctl', 'yarn',
+  'npx', 'pnpm', 'report', 'systemctl', 'yarn',
 ]);
+
+const SAFE_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
+  bd: new Set(['blocked', 'children', 'close', 'comments', 'create', 'doctor', 'dolt', 'gate', 'help', 'label', 'list', 'merge-slot', 'note', 'prime', 'ready', 'reclaim', 'remember', 'search', 'set-state', 'show', 'stats', 'supersede', 'unclaim', 'update']),
+  job: new Set(['cancel', 'epic', 'find', 'new', 'start', 'under', 'upgrade']),
+  report: new Set(['list', 'new']),
+};
 
 const BEHAVIOR_FLAGS = new Set([
   '--abort', '--apply', '--cached', '--check', '--continue', '--delete', '--dry',
@@ -72,13 +78,38 @@ function simpleWords(command: string): string[] | null {
 
 const base = (word: string): string => word.slice(word.lastIndexOf('/') + 1).toLowerCase();
 
+const WRAPPER_SKIP: Record<string, number> = {
+  sudo: 0, time: 0, setsid: 0, nohup: 0, command: 0, stdbuf: 0, exec: 0,
+  xargs: 0, rtk: 0, 'cargo-lim': 0, timeout: 1, nice: 1, ionice: 1,
+};
+
+/** Reach the executable that the production classifier reads through. The
+ * wrapper is transport, so putting `rtk` or `time` in the corpus profile would
+ * group unlike commands and hide disagreements in the actual Git/rg/cargo
+ * operation. */
+function semanticArgv(argv: string[]): string[] {
+  let rest = argv;
+  for (let pass = 0; pass < 4 && rest.length; pass += 1) {
+    const head = base(rest[0]!.replace(/^\0/, ''));
+    const skipped = WRAPPER_SKIP[head];
+    if (skipped === undefined) break;
+    if (head === 'rtk' && ['gain', 'discover'].includes(rest[1]?.replace(/^\0/, '') ?? '')) break;
+    let from = 1 + skipped;
+    if (head === 'rtk' && rest[1]?.replace(/^\0/, '') === 'proxy') from = 2;
+    rest = rest.slice(from);
+    while (rest.length && rest[0]!.replace(/^\0/, '').startsWith('-')) rest = rest.slice(1);
+  }
+  return rest;
+}
+
 function invocation(command: string): { head: string; argv: string[] } | null {
   const words = simpleWords(command);
   if (!words?.length) return null;
   let at = 0;
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[at] ?? '')) at += 1;
   if (at >= words.length) return null;
-  const argv = words.slice(at);
+  const argv = semanticArgv(words.slice(at));
+  if (!argv.length) return null;
   return { head: base(argv[0]!.replace(/^\0/, '')), argv };
 }
 
@@ -97,7 +128,16 @@ export function commandLabelProfile(command: string, ran: Ran | null): string | 
       break;
     }
   }
-  const sub = SUBCOMMAND_TOOLS.has(head) && argv[at] && !argv[at]!.startsWith('-') ? argv[at]! : '-';
+  let sub = SUBCOMMAND_TOOLS.has(head) && argv[at] && !argv[at]!.startsWith('-') ? argv[at]! : '-';
+  const safe = SAFE_SUBCOMMANDS[head];
+  if (safe && sub !== '-' && !safe.has(sub)) sub = 'other';
+  if ((head === 'docker' && sub === 'compose') || (head === 'bd' && sub === 'dolt')) {
+    const nested = argv.slice(at + 1).find((word) => !word.startsWith('-'));
+    if (nested) sub += `/${nested}`;
+  }
+  if (head === 'systemctl') {
+    sub = argv.slice(1).find((word) => !word.startsWith('-')) ?? '-';
+  }
   const profiledFlags = call.argv.slice(1).flatMap((word) => {
     const quoted = word.startsWith('\0');
     const plain = word.replace(/^\0/, '');

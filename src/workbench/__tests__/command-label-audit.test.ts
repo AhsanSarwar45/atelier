@@ -60,5 +60,11 @@ describe('command label evidence', () => {
     expect(commandLabelProfile('bd update private --notes "--dry"', {
       said: 'Updated private', kind: 'board', grave: false,
     })).toBe('bd|update|value:--dry|Updated|board|ordinary');
+    expect(commandLabelProfile('rtk proxy git -C /private/repo status', {
+      said: 'Checked the working tree', kind: 'vcs', grave: false,
+    })).toBe('git|status|-|Checked|vcs|ordinary');
+    expect(commandLabelProfile('time curl https://private.example/path', {
+      said: 'Fetched private.example/path', kind: 'net', grave: false,
+    })).toBe('curl|-|-|Fetched|net|ordinary');
   });
 });
