@@ -116,6 +116,59 @@ describe('Codex subagents on the common workbench protocol', () => {
     expect(driver.agents.size).toBe(0);
   });
 
+  it.each(['status-first', 'item-first'] as const)(
+    'writes one opening and one ending when native completion is %s',
+    (order) => {
+      const events: BareEvent[] = [];
+      const driver = new CodexDriver() as any;
+      driver.threadId = 'parent';
+      driver.emit = (event: BareEvent) => events.push(event);
+      driver.call = async () => ({});
+      const started = {
+        id: 'call-order', type: 'collabAgentToolCall', tool: 'spawnAgent',
+        prompt: 'Check ordering', model: 'gpt-5.6-luna', receiverThreadIds: ['ordered-child'],
+        agentsStates: { 'ordered-child': { status: 'running', message: null } },
+      };
+      const completed = {
+        ...started,
+        agentsStates: { 'ordered-child': { status: 'completed', message: 'Done.' } },
+      };
+
+      if (order === 'status-first') {
+        driver.event('thread/status/changed', { threadId: 'ordered-child', status: { type: 'idle' } });
+        driver.itemStarted(started);
+        driver.itemCompleted(completed);
+      } else {
+        driver.itemStarted(started);
+        driver.itemCompleted(completed);
+        driver.event('thread/status/changed', { threadId: 'ordered-child', status: { type: 'idle' } });
+      }
+
+      expect(events.filter((event) => event.type === 'agent.started')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'agent.finished')).toHaveLength(1);
+    },
+  );
+
+  it('adds late native usage as final accounting without a second ending', async () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.call = async () => ({ threadUsage: { groups: [{ totalTokens: 321 }] } });
+    const item = {
+      id: 'call-usage', type: 'collabAgentToolCall', tool: 'spawnAgent',
+      prompt: 'Count usage', model: 'gpt-5.6-luna', receiverThreadIds: ['usage-child'],
+      agentsStates: { 'usage-child': { status: 'completed', message: 'Done.' } },
+    };
+    driver.itemStarted({ ...item, agentsStates: { 'usage-child': { status: 'running', message: null } } });
+    driver.itemCompleted(item);
+
+    await vi.waitFor(() => expect(events.some((event: any) => event.type === 'agent.progress' && event.finalUsage)).toBe(true));
+    expect(events.filter((event) => event.type === 'agent.finished')).toHaveLength(1);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'agent.progress', agentId: 'usage-child', tokens: 321, finalUsage: true,
+    }));
+  });
+
   it('still uses the parent thread status for the parent chat', () => {
     const events: BareEvent[] = [];
     const driver = new CodexDriver() as any;
@@ -468,7 +521,10 @@ describe('Codex first-class controls and live work', () => {
   it('stops one Codex subagent by interrupting its active child turn', async () => {
     const calls: any[] = [];
     const driver = new CodexDriver() as any;
-    driver.agents.set('helper', { since: Date.now(), model: null, calls: 0 });
+    driver.itemStarted({
+      id: 'activity-helper', type: 'subAgentActivity', kind: 'started',
+      agentThreadId: 'helper', agentPath: '/repo/.codex/agents/helper.toml',
+    });
     driver.call = async (method: string, params: any) => {
       calls.push([method, params]);
       return method === 'thread/read' ? { thread: { turns: [{ id: 'child-turn', status: 'inProgress' }] } } : {};

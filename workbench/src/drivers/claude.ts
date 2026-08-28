@@ -9,7 +9,16 @@
  * Sign-in is whatever the owner already did in the terminal: no API key is
  * ever set or read here, and `--bare` (which forces API-key auth) is never used.
  */
-import { query, type PermissionResult, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
+import {
+  query,
+  type PermissionResult,
+  type PermissionUpdate,
+  type SDKBackgroundTasksChangedMessage,
+  type SDKTaskNotificationMessage,
+  type SDKTaskProgressMessage,
+  type SDKTaskStartedMessage,
+  type SDKTaskUpdatedMessage,
+} from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 
 import { claudeProgram } from '../claude-program.ts';
@@ -40,6 +49,7 @@ import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench
 import { rawTitle, toolTitle, whileItRuns } from '../../../src/workbench/said-what-it-ran.ts';
 import { fullness, WINDOW, windowNamed } from '../../../src/workbench/context-window.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
+import { AgentLifecycle, type ProviderAgentAdapter } from './agent-lifecycle.ts';
 import { advertisedSlashCommands, offeredSlashCommand } from './slash-commands.ts';
 
 /**
@@ -249,8 +259,6 @@ function kindOfTask(taskType: unknown, agentType: unknown): AgentKind {
  * shape reached one of them and the other went on building a row without it
  * (bw-6jq5.3).
  */
-const NOTHING_YET = { seconds: 0, tokens: 0, calls: 0, model: null as string | null, state: 'running' as AgentState, what: '' };
-
 /** The states a row never leaves: the work is over, however it went. */
 const OVER = new Set<AgentState>(['done', 'failed', 'stopped']);
 
@@ -264,46 +272,6 @@ type FinishedState = Extract<AgentState, 'done' | 'failed' | 'stopped'>;
  */
 function isOver(state: AgentState): state is FinishedState {
   return OVER.has(state);
-}
-
-/** One field from the task-notification envelope Claude queues as a user turn. */
-function notificationField(body: string, name: string): string {
-  const found = body.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
-  return found?.[1]?.trim() ?? '';
-}
-
-/**
- * The completion edge for work Claude was allowed to leave in the background.
- *
- * Foreground work comes back as `system/task_notification`. Background work
- * is queued into the conversation as a synthetic user turn carrying the same
- * fields in a task-notification envelope. Treat both as one lifecycle shape;
- * otherwise a helper that really came home remains `running` forever.
- */
-function queuedTaskNotification(m: Record<string, any>): Record<string, any> | null {
-  if (m.origin?.kind !== 'task-notification') return null;
-  const content = m.message?.content;
-  const body = typeof content === 'string'
-    ? content
-    : Array.isArray(content)
-      ? content.filter((part) => part?.type === 'text').map((part) => String(part.text ?? '')).join('\n')
-      : '';
-  if (!body.includes('<task-notification>')) return null;
-  const taskId = notificationField(body, 'task-id');
-  if (!taskId) return null;
-  return {
-    type: 'system',
-    subtype: 'task_notification',
-    task_id: taskId,
-    status: notificationField(body, 'status') || 'completed',
-    summary: notificationField(body, 'summary'),
-    result: notificationField(body, 'result'),
-    usage: {
-      total_tokens: Number(notificationField(body, 'subagent_tokens')) || 0,
-      tool_uses: Number(notificationField(body, 'tool_uses')) || 0,
-      duration_ms: Number(notificationField(body, 'duration_ms')) || 0,
-    },
-  };
 }
 
 /** What the kit's own word for a task's state means on a row. */
@@ -802,6 +770,87 @@ function noteBody(m: Record<string, any>, nameOf: (id: string) => string): Note 
   }
 }
 
+type ClaudeTaskSignal =
+  | SDKTaskStartedMessage
+  | SDKTaskProgressMessage
+  | SDKTaskUpdatedMessage
+  | SDKTaskNotificationMessage
+  | SDKBackgroundTasksChangedMessage;
+
+/** Claude's published task-message union translated into the shared ledger. */
+class ClaudeAgentAdapter implements ProviderAgentAdapter<ClaudeTaskSignal> {
+  constructor(
+    private readonly agents: AgentLifecycle,
+    private readonly callsOfHelpers: ReadonlySet<string>,
+    private readonly tasksOfHelpers: Set<string>,
+    private readonly taskOfCall: Map<string, string>,
+    private readonly callOfTask: Map<string, string>,
+  ) {}
+
+  accept(message: ClaudeTaskSignal): boolean {
+    if (message.subtype === 'background_tasks_changed') {
+      // The SDK explicitly defines this as an independent replace-style level
+      // signal whose ordering cannot be correlated with lifecycle bookends.
+      this.agents.replaceLiveSet(message.tasks.map((task) => task.task_id));
+      return false;
+    }
+
+    const id = message.task_id;
+    if (this.tasksOfHelpers.has(id)) return true;
+
+    if (message.subtype === 'task_started') {
+      if (sentAwayByAHelper(message as Record<string, any>, this.callsOfHelpers)) {
+        this.tasksOfHelpers.add(id);
+        return true;
+      }
+      const call = message.tool_use_id || null;
+      if (call) {
+        this.taskOfCall.set(call, id);
+        this.callOfTask.set(id, call);
+      }
+      this.agents.start({
+        agentId: id,
+        toolCallId: call,
+        kind: kindOfTask(message.task_type, message.subagent_type),
+        what: oneLine(message.description ?? message.workflow_name ?? message.prompt ?? ''),
+        agentType: message.subagent_type ?? null,
+        model: null,
+      });
+      return false;
+    }
+
+    if (message.subtype === 'task_progress') {
+      this.agents.progress(id, {
+        seconds: Math.round(message.usage.duration_ms / 1000),
+        tokens: message.usage.total_tokens,
+        calls: message.usage.tool_uses,
+        doing: oneLine(message.summary ?? message.last_tool_name ?? message.description),
+      });
+      return false;
+    }
+
+    if (message.subtype === 'task_updated') {
+      const state = message.patch.is_backgrounded
+        ? 'parked'
+        : message.patch.status && TASK_STATE[message.patch.status];
+      if (!state) return false;
+      if (isOver(state)) this.agents.finish(id, { state, result: message.patch.error ?? null });
+      else this.agents.progress(id, { state });
+      return false;
+    }
+
+    const state = TASK_STATE[message.status];
+    this.agents.finish(id, {
+      state: state && isOver(state) ? state : 'done',
+      seconds: message.usage ? Math.round(message.usage.duration_ms / 1000) : undefined,
+      tokens: message.usage?.total_tokens,
+      calls: message.usage?.tool_uses,
+      result: oneLine(message.summary) || null,
+    });
+    return false;
+  }
+}
+
 export class ClaudeDriver implements Driver {
   private emit!: (e: DriverEvent) => void;
   private cwd = process.cwd();
@@ -859,10 +908,8 @@ export class ClaudeDriver implements Driver {
    * elapsed — and a row that blanked what it was not told again would flicker
    * every time one arrived.
    */
-  private sentAway = new Map<
-    string,
-    { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState; what: string }
-  >();
+  private agents = new AgentLifecycle((event) => this.emit(event));
+  private taskAdapter: ClaudeAgentAdapter | null = null;
   /** Which task a call sent off, so a helper's own words can find its row. */
   private taskOfCall = new Map<string, string>();
   /**
@@ -963,179 +1010,29 @@ export class ClaudeDriver implements Driver {
    * Nothing here is a delta. The kit's messages each carry a different corner
    * of the picture — a status change with no numbers, a result with no elapsed
    * — so what it does not say this time is what it said last time, kept in
-   * `sentAway` rather than blanked.
+   * the shared lifecycle ledger rather than blanked.
    */
   private sawTask(m: Record<string, any>): boolean {
-    // Nothing more is heard about a helper's own work: not its progress, not
-    // its ending. A finish for a row that was never opened opens one.
-    if (this.tasksOfHelpers.has(String(m.task_id ?? ''))) return true;
-    const numbers = (id: string) =>
-      this.sentAway.get(id) ?? { ...NOTHING_YET };
+    if (m.type !== 'system') return false;
+    if (!['task_started', 'task_progress', 'task_updated', 'task_notification', 'background_tasks_changed'].includes(String(m.subtype))) return false;
+    return this.claudeAgents().accept(m as ClaudeTaskSignal);
+  }
 
-    switch (m.subtype) {
-      case 'task_started': {
-        const id = String(m.task_id ?? '');
-        if (!id) return false;
-        if (sentAwayByAHelper(m, this.callsOfHelpers)) {
-          this.tasksOfHelpers.add(id);
-          return true;
-        }
-        const call = typeof m.tool_use_id === 'string' && m.tool_use_id ? m.tool_use_id : null;
-        if (call) {
-          this.taskOfCall.set(call, id);
-          this.callOfTask.set(id, call);
-        }
-        // What it is called, kept as well as sent: every later message about it
-        // carries the id and nothing else, and a line saying an id was stopped
-        // is a line about nothing a reader can name (bw-6jq5.3).
-        const what = oneLine(m.description ?? m.workflow_name ?? m.prompt ?? '');
-        this.sentAway.set(id, { ...numbers(id), what: what || numbers(id).what });
-        this.emit({
-          type: 'agent.started',
-          agentId: id,
-          toolCallId: call,
-          kind: kindOfTask(m.task_type, m.subagent_type),
-          what,
-          agentType: typeof m.subagent_type === 'string' ? m.subagent_type : null,
-          // The kit names no model here. It arrives with the helper's first
-          // words, or with its result — both fill this row in later.
-          model: null,
-        });
-        return false;
-      }
-
-      case 'task_progress': {
-        const id = String(m.task_id ?? '');
-        if (!id) return false;
-        const was = numbers(id);
-        const now = {
-          ...was,
-          seconds: Math.round(Number(m.usage?.duration_ms ?? 0) / 1000) || was.seconds,
-          tokens: Number(m.usage?.total_tokens ?? 0) || was.tokens,
-          calls: Number(m.usage?.tool_uses ?? 0) || was.calls,
-        };
-        this.sentAway.set(id, now);
-        const doing = oneLine(m.summary ?? m.last_tool_name ?? m.description ?? '');
-        this.emit({
-          type: 'agent.progress',
-          agentId: id,
-          seconds: now.seconds,
-          tokens: now.tokens,
-          calls: now.calls,
-          ...(doing ? { doing } : {}),
-          ...(now.model ? { model: now.model } : {}),
-        });
-        return false;
-      }
-
-      case 'task_updated': {
-        // A status change and nothing else: the numbers on the row are the ones
-        // it already had, which is why they are kept here at all.
-        const id = String(m.task_id ?? '');
-        const patch = (m.patch ?? {}) as { status?: string; is_backgrounded?: boolean };
-        if (!id || (!patch.status && patch.is_backgrounded === undefined)) return false;
-        const was = numbers(id);
-        // Over is over. A routine status landing after the work ended — or
-        // after he stopped it — would reopen a finished row as running, or turn
-        // a stop into a clean finish, with nothing on the screen to say so
-        // (bw-7ks.22.30).
-        if (OVER.has(was.state)) return false;
-        // Parked beats the status it is still running under: a helper left to
-        // run in the background is exactly a running one nobody is waiting at.
-        const state: AgentState = patch.is_backgrounded
-          ? 'parked'
-          : (patch.status && TASK_STATE[patch.status]) || was.state;
-        this.sentAway.set(id, { ...was, state });
-        if (isOver(state)) {
-          this.emit({
-            type: 'agent.finished', agentId: id, state,
-            seconds: was.seconds, tokens: was.tokens, calls: was.calls,
-            model: was.model, result: null,
-          });
-        } else {
-          this.emit({
-            type: 'agent.progress',
-            agentId: id,
-            seconds: was.seconds,
-            tokens: was.tokens,
-            calls: was.calls,
-            state,
-          });
-        }
-        return false;
-      }
-
-      case 'task_notification': {
-        const id = String(m.task_id ?? '');
-        if (!id) return false;
-        const was = numbers(id);
-        const said = TASK_STATE[String(m.status ?? '')];
-        // A notification is the kit saying this piece of work is over, so a
-        // word that is not one of the three ways of being over means done.
-        const state: FinishedState = said !== undefined && isOver(said) ? said : 'done';
-        // How it ended, once. A row he stopped stays stopped whatever else
-        // arrives about it afterwards, and the ending is written down here and
-        // not only sent out — the receipt of the dispatching call comes through
-        // a different door and has to be able to see it (bw-7ks.22.27).
-        const ended: FinishedState = was.state === 'stopped' ? 'stopped' : state;
-        this.sentAway.set(id, { ...was, state: ended });
-        this.emit({
-          type: 'agent.finished',
-          agentId: id,
-          state: ended,
-          seconds: Math.round(Number(m.usage?.duration_ms ?? 0) / 1000) || was.seconds,
-          tokens: Number(m.usage?.total_tokens ?? 0) || was.tokens,
-          calls: Number(m.usage?.tool_uses ?? 0) || was.calls,
-          model: was.model,
-          // Its last word, kept on the row. A finished row that throws the
-          // answer away is a row the reader has to go looking for it.
-          result: oneLine(m.result ?? m.summary ?? '') || null,
-        });
-        return false;
-      }
-
-      case 'background_tasks_changed': {
-        // The level list, which is the only place a command left running ever
-        // appears: it was never a call of this chat's own, so no row would be
-        // drawn for it from the edges alone. REPLACE semantics on the kit's
-        // side; here it only ever opens rows, because what closes one is the
-        // edge that says how it ended.
-        for (const task of (m.tasks ?? []) as { task_id: string; task_type: string; description: string }[]) {
-          const id = String(task.task_id ?? '');
-          if (!id || this.sentAway.has(id) || this.tasksOfHelpers.has(id)) continue;
-          // A local agent has a real task_started edge carrying the call that
-          // dispatched it. The level snapshot can arrive first, but opening a
-          // row from it writes an anonymous start and then a second identified
-          // start a moment later. Commands and workflows do not promise that
-          // edge, so the snapshot remains their legitimate opening event.
-          if (String(task.task_type ?? '').toLowerCase().includes('agent')) continue;
-          if (sentAwayByAHelper(task as Record<string, any>, this.callsOfHelpers)) {
-            this.tasksOfHelpers.add(id);
-            continue;
-          }
-          const what = oneLine(task.description ?? '');
-          this.sentAway.set(id, { ...numbers(id), what });
-          this.emit({
-            type: 'agent.started',
-            agentId: id,
-            toolCallId: null,
-            kind: kindOfTask(task.task_type, null),
-            what,
-            agentType: null,
-            model: null,
-          });
-        }
-        return false;
-      }
-
-      default:
-        return false;
-    }
+  private claudeAgents(): ClaudeAgentAdapter {
+    this.taskAdapter ??= new ClaudeAgentAdapter(
+      this.agents,
+      this.callsOfHelpers,
+      this.tasksOfHelpers,
+      this.taskOfCall,
+      this.callOfTask,
+    );
+    return this.taskAdapter;
   }
 
   /** What a row last said about itself, for a message that carries only part of it. */
   private rowNumbers(agentId: string): { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState; what: string } {
-    return this.sentAway.get(agentId) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running', what: '' };
+    const row = this.agents.get(agentId);
+    return row ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running', what: '' };
   }
 
   /**
@@ -1146,7 +1043,7 @@ export class ClaudeDriver implements Driver {
    * dropped its clock every time one arrived would flicker.
    */
   private agentState(agentId: string, state: AgentState): void {
-    if (!this.sentAway.has(agentId)) return;
+    if (!this.agents.has(agentId)) return;
     const was = this.rowNumbers(agentId);
     if (was.state === state) return;
     // The states a row never leaves. Everything that moves a row through this
@@ -1154,8 +1051,8 @@ export class ClaudeDriver implements Driver {
     // running — is about work still going on, and none of it is a reason to
     // reopen work that is over (bw-7ks.22.30).
     if (OVER.has(was.state)) return;
-    this.sentAway.set(agentId, { ...was, state });
-    this.emit({ type: 'agent.progress', agentId, seconds: was.seconds, tokens: was.tokens, calls: was.calls, state });
+    if (isOver(state)) this.agents.finish(agentId, { state, result: null });
+    else this.agents.progress(agentId, { state });
   }
 
   /**
@@ -1186,17 +1083,9 @@ export class ClaudeDriver implements Driver {
   private helperModel(callId: string, model: unknown): void {
     const id = this.taskOfCall.get(callId);
     if (!id || typeof model !== 'string' || !model) return;
-    const was = this.sentAway.get(id);
+    const was = this.agents.get(id);
     if (!was || was.model === model) return;
-    this.sentAway.set(id, { ...was, model });
-    this.emit({
-      type: 'agent.progress',
-      agentId: id,
-      seconds: was.seconds,
-      tokens: was.tokens,
-      calls: was.calls,
-      model,
-    });
+    this.agents.progress(id, { model });
   }
 
   /**
@@ -1211,7 +1100,8 @@ export class ClaudeDriver implements Driver {
   private helperFinished(callId: string, ok: boolean, result: unknown, output: string): void {
     const id = this.taskOfCall.get(callId);
     if (!id) return;
-    const was = this.sentAway.get(id) ?? { ...NOTHING_YET };
+    const was = this.agents.get(id);
+    if (!was) return;
     // He stopped it. The call it was dispatched by comes back interrupted a
     // moment later, and reading that receipt as an ending would rewrite what he
     // did into a clean finish — no error, and nothing on the screen to say the
@@ -1237,23 +1127,12 @@ export class ClaudeDriver implements Driver {
     const spent = Number(totals.totalDurationMs ?? 0) + Number(totals.totalTokens ?? 0) + Number(totals.totalToolUseCount ?? 0);
     if (ok && !spent) {
       if (model && model !== was.model) {
-        this.sentAway.set(id, { ...was, model });
-        this.emit({
-          type: 'agent.progress',
-          agentId: id,
-          seconds: was.seconds,
-          tokens: was.tokens,
-          calls: was.calls,
-          model,
-        });
+        this.agents.progress(id, { model });
       }
       return;
     }
 
-    this.sentAway.set(id, { ...was, model, state: ok ? 'done' : 'failed' });
-    this.emit({
-      type: 'agent.finished',
-      agentId: id,
+    this.agents.finish(id, {
       state: ok ? 'done' : 'failed',
       seconds: Math.round(Number(totals.totalDurationMs ?? 0) / 1000) || was.seconds,
       tokens: Number(totals.totalTokens ?? 0) || was.tokens,
@@ -1356,6 +1235,8 @@ export class ClaudeDriver implements Driver {
   async start(opts: StartOptions): Promise<void> {
     this.effort = opts.effort ?? null;
     this.emit = opts.emit;
+    this.agents = new AgentLifecycle(this.emit);
+    this.taskAdapter = null;
     this.cwd = opts.cwd;
     this.mode = opts.permissionMode ?? '';
 
@@ -1911,7 +1792,7 @@ export class ClaudeDriver implements Driver {
           this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
         } else if (!helpers) {
           // Every other thing the session says about itself.
-          const note = noteFor(m, (id) => this.sentAway.get(id)?.what ?? '');
+          const note = noteFor(m, (id) => this.agents.get(id)?.what ?? '');
           if (note) this.note(note);
         }
         break;
@@ -2066,13 +1947,6 @@ export class ClaudeDriver implements Driver {
       }
 
       case 'user':
-        // The edge that closes a background helper arrives through this arm,
-        // unlike the foreground system/task_notification shape. Feed both to
-        // the same state machine so they cannot drift again (bw-n856.1).
-        {
-          const notification = queuedTaskNotification(m);
-          if (notification) this.sawTask(notification);
-        }
         // A turn the kit wrote in his name — an interrupt notice, a queued
         // message — says something he should read. A turn HE typed is
         // already in the log from the moment he sent it, and `isSynthetic`
@@ -2142,7 +2016,7 @@ export class ClaudeDriver implements Driver {
       // kit sends is drawn, because a whitelist is exactly what dropped the
       // manager's /compact answer (§8.2.4).
       default: {
-        const note = noteFor(m, (id) => this.sentAway.get(id)?.what ?? '');
+        const note = noteFor(m, (id) => this.agents.get(id)?.what ?? '');
         if (note) this.note(note);
       }
     }

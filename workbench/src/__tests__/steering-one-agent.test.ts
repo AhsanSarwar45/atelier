@@ -270,7 +270,7 @@ describe('and the row is told at once, not when the kit gets round to it', () =>
 
     await driver.stopAgent('afa98b872c4df37bc');
 
-    expect(states(events)).toEqual(['stopped']);
+    expect(endings(events)).toEqual([{ state: 'stopped', result: null }]);
   });
 
   it('and a stop asked for after it finished does not un-finish it', async () => {

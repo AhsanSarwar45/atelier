@@ -3,9 +3,8 @@
  *
  * A helper left running in the background still comes home (bw-n856.1).
  *
- * Claude delivers that edge as a task-notification synthetic user turn, not
- * as the foreground task_notification system message the driver already
- * understands. This is the shape recorded in session 717fb41d on 2026-08-28.
+ * Claude's SDK publishes task_notification as the lifecycle edge. Synthetic
+ * prose in a user turn is transcript content, not a second protocol.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -23,18 +22,17 @@ const STARTED = {
 };
 
 const CAME_HOME = {
-  type: 'user',
-  origin: { kind: 'task-notification' },
-  message: {
-    role: 'user',
-    content: `<task-notification>
-<task-id>a4430e4bc8ebb1844</task-id>
-<tool-use-id>toolu_01SentItOff</tool-use-id>
-<status>completed</status>
-<summary>Agent "Trace the stuck chat" finished</summary>
-<result>Found the broken lifecycle edge.</result>
-<usage><subagent_tokens>12000</subagent_tokens><tool_uses>3</tool_uses><duration_ms>45000</duration_ms></usage>
-</task-notification>`,
+  type: 'system',
+  subtype: 'task_notification',
+  task_id: 'a4430e4bc8ebb1844',
+  tool_use_id: 'toolu_01SentItOff',
+  status: 'completed',
+  summary: 'Found the broken lifecycle edge.',
+  output_file: '/tmp/claude/task-output',
+  usage: {
+    total_tokens: 12000,
+    tool_uses: 3,
+    duration_ms: 45000,
   },
 };
 

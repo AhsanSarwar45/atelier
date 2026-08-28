@@ -11,11 +11,37 @@ import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
+import { AgentLifecycle, type ProviderAgentAdapter } from './agent-lifecycle.ts';
 import { commandExecution, offeredSlashCommand } from './slash-commands.ts';
 
 type Bag = Record<string, any>;
 type Pending = { resolve: (value: any) => void; reject: (reason: Error) => void };
 type PendingAsk = { answer: (choice: string, value?: string) => void };
+
+// Narrow projections of the installed app-server schema (`codex app-server
+// generate-ts`). Provider-specific wire types stop here; the lifecycle ledger
+// below never needs to know which app-server item supplied a fact.
+type CodexCollabStatus = 'pendingInit' | 'running' | 'interrupted' | 'completed' | 'errored' | 'shutdown' | 'notFound';
+interface CodexCollabAgentToolCall {
+  id: string;
+  type: 'collabAgentToolCall';
+  tool: 'spawnAgent' | 'sendInput' | 'resumeAgent' | 'wait' | 'closeAgent';
+  receiverThreadIds: string[];
+  prompt: string | null;
+  model: string | null;
+  agentsStates: Record<string, { status: CodexCollabStatus; message: string | null }>;
+}
+interface CodexSubAgentActivity {
+  id: string;
+  type: 'subAgentActivity';
+  agentThreadId: string;
+  kind: 'started' | 'interacted' | 'interrupted';
+  agentPath?: string;
+}
+type CodexAgentSignal =
+  | { type: 'thread/status/changed'; threadId: string; status: { type: 'active' | 'idle' | 'systemError' } }
+  | { type: 'item/subAgentActivity'; item: CodexSubAgentActivity }
+  | { type: 'item/collabAgentToolCall'; item: CodexCollabAgentToolCall; completed: boolean };
 
 const MODES = ['untrusted', 'on-request', 'never'];
 const BEADS_SANDBOX_CONFIG = { sandbox_workspace_write: { network_access: true } };
@@ -549,6 +575,81 @@ export function replayCodexRollout(text: string, emit: (event: DriverEvent) => v
   for (const line of text.split('\n')) codexRolloutLine(line, driver, emit);
 }
 
+class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
+  constructor(
+    private readonly agents: AgentLifecycle,
+    private readonly readUsage: (agentId: string) => Promise<number>,
+  ) {}
+
+  accept(signal: CodexAgentSignal): boolean {
+    if (signal.type === 'thread/status/changed') {
+      const row = this.agents.get(signal.threadId);
+      const seconds = row ? Math.max(0, Math.round((Date.now() - row.since) / 1000)) : undefined;
+      if (signal.status.type === 'active') this.agents.progress(signal.threadId, { seconds, state: 'running' });
+      else this.agents.finish(signal.threadId, {
+        state: signal.status.type === 'idle' ? 'done' : 'failed', seconds, result: null,
+      });
+      return true;
+    }
+
+    if (signal.type === 'item/subAgentActivity') {
+      const item = signal.item;
+      const agentType = basename(item.agentPath || '', '.toml') || null;
+      if (item.kind === 'started') {
+        this.agents.start({
+          agentId: item.agentThreadId,
+          toolCallId: item.id,
+          kind: 'helper',
+          what: agentType || 'Subagent',
+          agentType,
+          model: null,
+        });
+        if (agentType) this.agents.identify(item.agentThreadId, agentType);
+      } else if (item.kind === 'interacted') {
+        const row = this.agents.get(item.agentThreadId);
+        this.agents.progress(item.agentThreadId, { calls: (row?.calls ?? 0) + 1, state: 'running' });
+      } else {
+        this.agents.finish(item.agentThreadId, { state: 'stopped', result: null });
+      }
+      return true;
+    }
+
+    const { item, completed } = signal;
+    const states = item.agentsStates ?? {};
+    for (const agentId of item.receiverThreadIds ?? Object.keys(states)) {
+      if (item.tool === 'spawnAgent') {
+        this.agents.start({
+          agentId,
+          toolCallId: item.id,
+          kind: 'helper',
+          what: item.prompt || 'Subagent',
+          agentType: null,
+          model: item.model,
+        });
+      }
+      const row = this.agents.get(agentId);
+      const native = states[agentId];
+      const status = native?.status ?? (completed ? 'completed' : 'running');
+      const calls = (row?.calls ?? 0) + (completed ? 1 : 0);
+      if (['completed', 'errored', 'interrupted', 'shutdown', 'notFound'].includes(status)) {
+        const state = status === 'completed' ? 'done'
+          : status === 'interrupted' || status === 'shutdown' ? 'stopped' : 'failed';
+        this.agents.finish(agentId, { state, calls, result: native?.message ?? null });
+        void this.readUsage(agentId).then((tokens) => {
+          if (tokens > 0) this.agents.finalUsage(agentId, { tokens, calls });
+        }).catch(() => {});
+      } else {
+        this.agents.progress(agentId, {
+          calls,
+          doing: native?.message ?? undefined,
+          state: status === 'running' || status === 'pendingInit' ? 'running' : 'parked',
+        });
+      }
+    }
+    return true;
+  }
+}
+
 export class CodexDriver implements Driver {
   private child: ChildProcessWithoutNullStreams | null = null;
   emit: (event: DriverEvent) => void = () => {};
@@ -558,7 +659,8 @@ export class CodexDriver implements Driver {
   private completedMessages = new Set<string>();
   private tools = new Map<string, string>();
   private toolOutput = new Map<string, string>();
-  private agents = new Map<string, { since: number; model: string | null; calls: number; agentType?: string | null }>();
+  private agents = new AgentLifecycle((event) => this.emit(event));
+  private agentAdapter = new CodexAgentAdapter(this.agents, (agentId) => this.agentUsage(agentId));
   private nextId = 1;
   private threadId: string | null = null;
   private turnId: string | null = null;
@@ -1042,22 +1144,11 @@ export class CodexDriver implements Driver {
       const status = p.status ?? p.thread?.status ?? {};
       const changedThread = p.threadId ?? p.thread?.id;
       if (changedThread && changedThread !== this.threadId) {
-        const known = this.agents.get(changedThread);
-        if (!known) return;
-        const seconds = Math.max(0, Math.round((Date.now() - known.since) / 1000));
-        if (status.type === 'active') {
-          this.emit({
-            type: 'agent.progress', agentId: changedThread, seconds, tokens: 0,
-            calls: known.calls, state: 'running',
-          });
-        } else if (status.type === 'idle' || status.type === 'systemError') {
-          this.emit({
-            type: 'agent.finished', agentId: changedThread,
-            state: status.type === 'idle' ? 'done' : 'failed', seconds, tokens: 0,
-            calls: known.calls, model: known.model, result: null,
-          });
-          this.agents.delete(changedThread);
-        }
+        if (['active', 'idle', 'systemError'].includes(String(status.type))) this.agentAdapter.accept({
+          type: 'thread/status/changed',
+          threadId: changedThread,
+          status: { type: status.type },
+        } as CodexAgentSignal);
         return;
       }
       const waiting = status.activeFlags?.includes('waitingOnApproval') || status.activeFlags?.includes('waitingOnUserInput');
@@ -1145,25 +1236,11 @@ export class CodexDriver implements Driver {
       return;
     }
     if (item.type === 'subAgentActivity') {
-      const agentType = basename(item.agentPath || '', '.toml') || null;
-      let known = this.agents.get(item.agentThreadId);
-      if (item.kind === 'started' && !known) {
-        known = { since: Date.now(), model: null, calls: 0, agentType };
-        this.agents.set(item.agentThreadId, known);
-        this.emit({ type: 'agent.started', agentId: item.agentThreadId, toolCallId: item.id, kind: 'helper', what: agentType || 'Subagent', agentType, model: null });
-      } else if (item.kind === 'started' && known && agentType && known.agentType !== agentType) {
-        known.agentType = agentType;
-        this.emit({ type: 'agent.identified', agentId: item.agentThreadId, agentType });
-      } else if (item.kind === 'interacted' && known) {
-        this.emit({ type: 'agent.progress', agentId: item.agentThreadId, seconds: Math.round((Date.now() - known.since) / 1000), tokens: 0, calls: ++known.calls, state: 'running' });
-      } else if (item.kind === 'interrupted' && known) {
-        this.emit({ type: 'agent.finished', agentId: item.agentThreadId, state: 'stopped', seconds: Math.round((Date.now() - known.since) / 1000), tokens: 0, calls: known.calls, model: known.model, result: null });
-        this.agents.delete(item.agentThreadId);
-      }
+      this.agentAdapter.accept({ type: 'item/subAgentActivity', item } as CodexAgentSignal);
       return;
     }
     if (item.type === 'collabAgentToolCall') {
-      this.collab(item, false);
+      this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: false } as CodexAgentSignal);
       return;
     }
     const action = (item.commandActions ?? [])[0] ?? {};
@@ -1198,14 +1275,10 @@ export class CodexDriver implements Driver {
     const active = new Set((list ?? '').split('\n').map((line) =>
       /^\s*-\s*([^:]+)(?::|$)/.exec(line)?.[1]?.trim(),
     ).filter((name): name is string => Boolean(name)));
-    for (const [agentId, known] of [...this.agents]) {
+    for (const known of this.agents.active()) {
+      const agentId = known.agentId;
       if (list !== null && known.agentType && active.has(known.agentType)) continue;
-      const seconds = Math.max(0, Math.round((Date.now() - known.since) / 1000));
-      this.emit({
-        type: 'agent.finished', agentId, state: 'done', seconds, tokens: 0,
-        calls: known.calls, model: known.model, result: null,
-      });
-      this.agents.delete(agentId);
+      this.agents.finish(agentId, { state: 'done', result: null });
     }
   }
 
@@ -1227,7 +1300,7 @@ export class CodexDriver implements Driver {
     }
     if (['reasoning', 'plan', 'hookPrompt', 'subAgentActivity', 'contextCompaction', 'enteredReviewMode', 'exitedReviewMode'].includes(item.type)) return;
     if (item.type === 'collabAgentToolCall') {
-      this.collab(item, true);
+      this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: true } as CodexAgentSignal);
       return;
     }
     if (!this.tools.has(item.id)) return;
@@ -1238,49 +1311,12 @@ export class CodexDriver implements Driver {
     this.toolOutput.delete(item.id);
   }
 
-  /** Translate Codex's native subagent item into the workbench's agent row. */
-  private collab(item: Bag, completed: boolean): void {
-    const states = item.agentsStates ?? {};
-    for (const agentId of item.receiverThreadIds ?? Object.keys(states)) {
-      const state = states[agentId] ?? {};
-      let known = this.agents.get(agentId);
-      if (!known && item.tool === 'spawnAgent') {
-        known = { since: Date.now(), model: item.model ?? null, calls: 0, agentType: null };
-        this.agents.set(agentId, known);
-        this.emit({
-          type: 'agent.started', agentId, toolCallId: item.id, kind: 'helper',
-          what: item.prompt || 'Subagent', agentType: known.agentType ?? null, model: known.model,
-        });
-      }
-      if (!known) continue;
-      known.calls += completed ? 1 : 0;
-      const seconds = Math.max(0, Math.round((Date.now() - known.since) / 1000));
-      const status = String(state.status ?? (completed ? 'completed' : 'running'));
-      const over = ['completed', 'errored', 'interrupted', 'shutdown', 'notFound'].includes(status);
-      if (over) {
-        const final: 'done' | 'failed' | 'stopped' = status === 'completed'
-          ? 'done'
-          : status === 'interrupted' || status === 'shutdown' ? 'stopped' : 'failed';
-        this.emit({
-          type: 'agent.finished', agentId, state: final, seconds, tokens: 0,
-          calls: known.calls, model: known.model, result: state.message ?? null,
-        });
-        void this.call('account/usage/read', { threadId: agentId }).then((usage) => {
-          const tokens = (usage.threadUsage?.groups ?? []).reduce((sum: number, group: Bag) => sum + Number(group.totalTokens ?? 0), 0);
-          if (tokens > 0) this.emit({
-            type: 'agent.finished', agentId, state: final, seconds, tokens,
-            calls: known!.calls, model: known!.model, result: state.message ?? null,
-          });
-        }).catch(() => {});
-        this.agents.delete(agentId);
-      } else {
-        const rowState: AgentState = status === 'running' || status === 'pendingInit' ? 'running' : 'parked';
-        this.emit({
-          type: 'agent.progress', agentId, seconds, tokens: 0, calls: known.calls,
-          ...(state.message ? { doing: state.message } : {}), state: rowState,
-        });
-      }
-    }
+  private async agentUsage(agentId: string): Promise<number> {
+    const usage = await this.call('account/usage/read', { threadId: agentId });
+    return (usage.threadUsage?.groups ?? []).reduce(
+      (sum: number, group: Bag) => sum + Number(group.totalTokens ?? 0),
+      0,
+    );
   }
 
   private note(kind: string, text: string, rank: 'note' | 'detail'): void {

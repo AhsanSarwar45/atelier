@@ -274,6 +274,8 @@ export type WbpEvent = EventBase &
         tokens: number;
         /** How many calls it has made of its own. */
         calls: number;
+        /** Provider-confirmed final accounting that arrived after completion. */
+        finalUsage?: boolean;
         doing?: string;
         model?: string;
         /** Set when the kit says this row is now running elsewhere, or is now in the background. */

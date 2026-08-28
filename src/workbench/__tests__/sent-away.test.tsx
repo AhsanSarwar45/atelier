@@ -352,22 +352,19 @@ describe('the panel', () => {
  */
 describe('the driver, which is where these rows come from', () => {
   const source = readFileSync(resolve(__dirname, '../../../workbench/src/drivers/claude.ts'), 'utf8');
+  const lifecycle = readFileSync(resolve(__dirname, '../../../workbench/src/drivers/agent-lifecycle.ts'), 'utf8');
 
   /** Every task message the kit sends, from the SDK's own list. */
   const KIT_SAYS = ['task_started', 'task_progress', 'task_updated', 'task_notification', 'background_tasks_changed'];
 
   it('puts all three of these on the wire', () => {
     for (const word of ['agent.started', 'agent.progress', 'agent.finished']) {
-      expect(source, `the driver never sends ${word}, so no row could ever appear`).toContain(`type: '${word}'`);
+      expect(lifecycle, `the shared provider ledger never sends ${word}, so no row could ever appear`).toContain(`type: '${word}'`);
     }
   });
 
   it('reads every task message the kit sends', () => {
-    const from = source.indexOf('private sawTask(');
-    expect(from, 'the driver no longer reads task messages under that name').toBeGreaterThan(-1);
-    const block = source.slice(from, source.indexOf('\n  private ', from + 1));
-    const heard = Array.from(block.matchAll(/case '(\w+)':/g)).map((m) => m[1]!);
-    expect(KIT_SAYS.filter((word) => !heard.includes(word)), 'the kit says these and the driver ignores them').toEqual(
+    expect(KIT_SAYS.filter((word) => !source.includes(`'${word}'`)), 'the kit says these and the native adapter ignores them').toEqual(
       [],
     );
   });
@@ -455,6 +452,13 @@ describe.each(bothWays)('a row that is over, down %s', (_name, build) => {
   it('keeps the numbers it ended with rather than whatever the late word carries', () => {
     const view = after(finished, { type: 'agent.progress', agentId: 'late-1', seconds: 0, tokens: 0, calls: 0 });
     expect(view.agents[0]).toMatchObject({ seconds: 45, tokens: 12_000, calls: 6 });
+  });
+
+  it('accepts higher final usage without writing another ending or reopening the row', () => {
+    const view = after(finished, { type: 'agent.progress', agentId: 'late-1', seconds: 50, tokens: 14_000, calls: 7, finalUsage: true });
+    expect(view.agents[0]).toMatchObject({
+      state: 'done', result: 'All 412 rows counted.', seconds: 50, tokens: 14_000, calls: 7,
+    });
   });
 
   it('still learns which model it ran, which is the one fact that arrives late by design', () => {
