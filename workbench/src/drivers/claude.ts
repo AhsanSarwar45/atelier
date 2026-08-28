@@ -36,7 +36,7 @@ import {
   whoFor,
   workerStopped,
 } from '../../../src/workbench/machine-words.ts';
-import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, ImagePayload, ModelChoice, NoteRank, PlanResponse, TodoItem } from '../../../src/workbench/protocol.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 
@@ -77,6 +77,11 @@ interface PendingAsk {
   resolve: (r: PermissionResult) => void;
   /** The SDK's own "so you are not asked again" payload, handed back for allow-always. */
   suggestions: PermissionUpdate[] | undefined;
+  input: Record<string, unknown>;
+}
+
+interface PendingPlan {
+  resolve: (r: PermissionResult) => void;
   input: Record<string, unknown>;
 }
 
@@ -881,6 +886,7 @@ export class ClaudeDriver implements Driver {
   private wake: (() => void) | null = null;
   private closed = false;
   private asks = new Map<string, PendingAsk>();
+  private plans = new Map<string, PendingPlan>();
   /** Tools whose result we are still waiting for, so a completion can name them. */
   private liveTools = new Map<string, string>();
   /** The assistant message currently being streamed. */
@@ -1409,6 +1415,27 @@ export class ClaudeDriver implements Driver {
     // question is answered on the helper's row and inside the helper's own
     // conversation, not in the middle of its owner's (§8.2.7).
     const asker = this.whoAsked(o.toolUseID);
+    if (toolName === 'ExitPlanMode' && typeof input.plan === 'string' && input.plan.trim()) {
+      const markdown = input.plan.trim();
+      return new Promise<PermissionResult>((resolve) => {
+        this.plans.set(askId, { resolve, input });
+        this.emit({
+          type: 'plan.proposed', proposalId: askId, markdown,
+          actions: [
+            {
+              id: 'approve', kind: 'approve', label: 'Approve plan',
+              description: 'Approve Claude’s plan and continue through its native plan-mode control.',
+            },
+            {
+              id: 'request_changes', kind: 'request_changes', label: 'Request changes', acceptsFeedback: true,
+              description: 'Keep planning and tell Claude what should change.',
+            },
+          ],
+          ...(asker ? { parentToolCallId: asker.sentBy } : {}),
+        });
+        this.emit({ type: 'session.state', state: 'waiting_permission', label: 'Waiting for your plan decision' });
+      });
+    }
     return new Promise<PermissionResult>((resolve) => {
       this.asks.set(askId, { resolve, suggestions: o.suggestions, input });
       // The row stops reading as working while nobody is answering it. That is
@@ -1444,6 +1471,28 @@ export class ClaudeDriver implements Driver {
       });
       this.emit({ type: 'session.state', state: 'waiting_permission', label: `Asking about ${toolName}` });
     });
+  }
+
+  async respondToPlan(proposalId: string, response: PlanResponse): Promise<void> {
+    const pending = this.plans.get(proposalId);
+    if (!pending) throw new Error('This Claude plan is no longer awaiting a response');
+    this.plans.delete(proposalId);
+    if (response.actionId === 'approve') {
+      pending.resolve({ behavior: 'allow', updatedInput: pending.input });
+      this.emit({ type: 'plan.resolved', proposalId, status: 'approved', actionId: response.actionId });
+    } else if (response.actionId === 'request_changes') {
+      const feedback = response.feedback?.trim();
+      if (!feedback) {
+        this.plans.set(proposalId, pending);
+        throw new Error('Plan feedback is required');
+      }
+      pending.resolve({ behavior: 'deny', message: feedback });
+      this.emit({ type: 'plan.resolved', proposalId, status: 'changes_requested', actionId: response.actionId, feedback });
+    } else {
+      this.plans.set(proposalId, pending);
+      throw new Error(`Unknown Claude plan action "${response.actionId}"`);
+    }
+    this.emit({ type: 'session.state', state: 'thinking', label: 'Working' });
   }
 
   /**
@@ -1650,6 +1699,11 @@ export class ClaudeDriver implements Driver {
       this.emit({ type: 'ask.resolved', askId, chosen: 'deny' });
     }
     this.asks.clear();
+    for (const [proposalId, plan] of this.plans) {
+      plan.resolve({ behavior: 'deny', message: 'Stopped by the owner.', interrupt: true });
+      this.emit({ type: 'plan.resolved', proposalId, status: 'rejected', actionId: 'interrupt' });
+    }
+    this.plans.clear();
     await this.q?.interrupt();
     this.awaitingAnswer = false;
     this.emit({ type: 'session.state', state: 'stopped', label: 'Stopped' });
@@ -1696,6 +1750,8 @@ export class ClaudeDriver implements Driver {
     this.wake?.();
     for (const ask of this.asks.values()) ask.resolve({ behavior: 'deny', message: 'Session closed.' });
     this.asks.clear();
+    for (const plan of this.plans.values()) plan.resolve({ behavior: 'deny', message: 'Session closed.' });
+    this.plans.clear();
     this.q?.close();
   }
 

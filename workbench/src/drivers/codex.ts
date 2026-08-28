@@ -6,9 +6,10 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
-import type { AgentControl, AgentState, CommandInfo, ExecutionContext } from '../../../src/workbench/protocol.ts';
+import type { AgentControl, AgentState, CommandInfo, ExecutionContext, PlanResponse } from '../../../src/workbench/protocol.ts';
 import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
+import { proposedPlanSpecs } from '../../../src/workbench/proposed-plan.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 import { AgentLifecycle, type ProviderAgentAdapter } from './agent-lifecycle.ts';
@@ -720,6 +721,7 @@ export class CodexDriver implements Driver {
   private asks = new Map<string, PendingAsk>();
   private messages = new Set<string>();
   private completedMessages = new Set<string>();
+  private plans = new Set<string>();
   private messageParents = new Map<string, string>();
   private childResults = new Map<string, string>();
   private tools = new Map<string, string>();
@@ -1463,6 +1465,22 @@ export class CodexDriver implements Driver {
         this.emit({ type: 'image.compare', messageId: item.id, comparison });
       }
       for (const widget of widgetSpecs(String(item.text ?? ''))) this.emit({ type: 'widget', messageId: item.id, widget });
+      proposedPlanSpecs(String(item.text ?? '')).forEach((plan, index) => {
+        const proposalId = `${item.id}:plan:${index}`;
+        this.plans.add(proposalId);
+        this.emit({
+          type: 'plan.proposed', proposalId, markdown: plan.markdown, actions: [
+          {
+            id: 'implement', kind: 'implement', label: 'Implement plan',
+            description: 'Leave Plan mode and ask Codex to implement this plan.',
+          },
+          {
+            id: 'request_changes', kind: 'request_changes', label: 'Request changes', acceptsFeedback: true,
+            description: 'Keep planning and tell Codex what should change.',
+          },
+          ],
+        });
+      });
       this.completedMessages.add(item.id);
       return;
     }
@@ -1492,6 +1510,28 @@ export class CodexDriver implements Driver {
     if (ok) emitToolImage(this, item);
     this.tools.delete(item.id);
     this.toolOutput.delete(item.id);
+  }
+
+  async respondToPlan(proposalId: string, response: PlanResponse): Promise<void> {
+    if (!this.plans.has(proposalId)) throw new Error('This Codex plan is no longer awaiting a response');
+    if (response.actionId === 'implement') {
+      if (this.collaborationPresets.has('default') && this.collaborationMode !== 'default') {
+        await this.setCollaborationMode('default');
+      }
+      await this.send({ text: 'Implement the approved proposed plan.', images: [] });
+      this.plans.delete(proposalId);
+      this.emit({ type: 'plan.resolved', proposalId, status: 'approved', actionId: response.actionId });
+      return;
+    }
+    if (response.actionId === 'request_changes') {
+      const feedback = response.feedback?.trim();
+      if (!feedback) throw new Error('Plan feedback is required');
+      await this.send({ text: `Revise the proposed plan with this feedback:\n\n${feedback}`, images: [] });
+      this.plans.delete(proposalId);
+      this.emit({ type: 'plan.resolved', proposalId, status: 'changes_requested', actionId: response.actionId, feedback });
+      return;
+    }
+    throw new Error(`Unknown Codex plan action "${response.actionId}"`);
   }
 
   private collabTool(

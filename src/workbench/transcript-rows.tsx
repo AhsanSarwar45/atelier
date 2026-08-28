@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { Doing } from '@/workbench/chat-state';
 import { forHowLong } from '@/workbench/elapsed';
@@ -33,6 +34,7 @@ import { diffLines } from '@/workbench/line-diff';
 import { opensOn, saidBy, type MachineRow } from '@/workbench/machine-lines';
 import { lookOf, markOf } from '@/workbench/machine-look';
 import { PictureGrid } from '@/workbench/picture-grid';
+import { withoutProposedPlans } from '@/workbench/proposed-plan';
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { comparisonSpecs } from '@/workbench/chat-media';
 import { ChatWidgetView } from '@/workbench/chat-widget-view';
@@ -872,8 +874,9 @@ function RichMessageContent({ item, mentions, onLook }: {
     if (text) parts.push(<MarkdownBody key={`words-${part++}`} className="text-sm" mentions={mentions}>{text}</MarkdownBody>);
   };
 
-  while ((match = blocks.exec(item.text)) !== null) {
-    words(item.text.slice(textAt, match.index));
+  const visibleText = withoutProposedPlans(item.text);
+  while ((match = blocks.exec(visibleText)) !== null) {
+    words(visibleText.slice(textAt, match.index));
     const source = match[0];
     if (match[1] === 'atelier-widget' && widgetSpecs(source).length > 0 && widgets[widgetIndex]) {
       parts.push(<ChatWidgetView key={`widget-${part++}`} widget={widgets[widgetIndex++]!} />);
@@ -884,9 +887,87 @@ function RichMessageContent({ item, mentions, onLook }: {
     }
     textAt = blocks.lastIndex;
   }
-  words(item.text.slice(textAt));
+  words(visibleText.slice(textAt));
   return <>{parts}</>;
 }
+
+export const PlanProposalCard = memo(function PlanProposalCard({
+  item,
+  sessionId,
+}: {
+  item: Extract<TranscriptItem, { kind: 'plan' }>;
+  sessionId: string;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const [pending, setPending] = useState(false);
+  const action = item.actions.find((candidate) => candidate.id === selected) ?? null;
+
+  if (item.status !== 'proposed') {
+    const resolved = item.actions.find((candidate) => candidate.id === item.actionId);
+    return (
+      <Panel data-testid="plan-card" data-plan-state={item.status} className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-foreground">Proposed plan</span>
+          <Badge variant="secondary">{item.status === 'changes_requested' ? 'Changes requested' : item.status}</Badge>
+        </div>
+        <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
+        <div className="text-xs text-muted-foreground">{resolved?.label ?? item.actionId}</div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel tone="attention" inset="md" data-testid="plan-card" data-plan-state="proposed">
+      <div className="text-sm font-medium text-foreground">Proposed plan</div>
+      <div className="mt-3 rounded-md border border-border/70 bg-background/50 px-4 py-3">
+        <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {item.actions.map((candidate) => (
+          <button
+            key={candidate.id}
+            type="button"
+            className={cn(
+              'rounded-md border px-3 py-2 text-left transition-colors',
+              selected === candidate.id ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/60',
+            )}
+            aria-pressed={selected === candidate.id}
+            onClick={() => setSelected(candidate.id)}
+          >
+            <span className="block text-sm font-medium text-foreground">{candidate.label}</span>
+            {candidate.description && <span className="mt-0.5 block text-xs text-muted-foreground">{candidate.description}</span>}
+          </button>
+        ))}
+      </div>
+      {action?.acceptsFeedback && (
+        <Textarea
+          className="mt-3 min-h-24"
+          aria-label="Requested plan changes"
+          placeholder="Describe what should change"
+          value={feedback}
+          onChange={(event) => setFeedback(event.target.value)}
+        />
+      )}
+      <div className="mt-3 flex justify-end">
+        <Button
+          size="sm"
+          disabled={!action || pending || (action.acceptsFeedback === true && !feedback.trim())}
+          onClick={() => {
+            if (!action) return;
+            setPending(true);
+            void sendCommand({
+              type: 'plan.respond', sessionId, proposalId: item.id,
+              response: { actionId: action.id, ...(feedback.trim() ? { feedback: feedback.trim() } : {}) },
+            }).catch(() => setPending(false));
+          }}
+        >
+          {pending ? 'Sending…' : 'Continue'}
+        </Button>
+      </div>
+    </Panel>
+  );
+});
 
 /**
  * One row of the conversation, whatever kind it is.
@@ -932,8 +1013,9 @@ export const TranscriptRow = memo(function TranscriptRow({
     // visual work items. Keeping the fold exhaustive makes the provider seam
     // land independently without pretending either is a permission.
     case 'question':
-    case 'plan':
       return null;
+    case 'plan':
+      return <PlanProposalCard item={item} sessionId={sessionId} />;
     // Notes, asides, and the lines the kit writes in the reader's name never
     // reach here: the chat folds them into machine lines before it draws, which
     // is the only shape they have.
