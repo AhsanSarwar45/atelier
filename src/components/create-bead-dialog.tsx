@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -105,6 +106,9 @@ export function CreateBeadDialog({
       <DialogContent className="sm:max-w-2xl w-[90vw] bg-surface-raised border-b-default">
         <DialogHeader>
           <DialogTitle className="text-t-primary">{parentId ? "New Subtask" : "New Card"}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {parentId ? "Add a task beneath this card." : "Add a card to this project."}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -148,9 +152,9 @@ export function CreateBeadDialog({
           <div className={parentId ? "" : "grid grid-cols-2 gap-3"}>
             {!parentId && (
               <div className="grid gap-1.5">
-                <label className="text-sm font-medium text-t-secondary">Type</label>
+                <label htmlFor="new-card-type" className="text-sm font-medium text-t-secondary">Type</label>
                 <Select value={issueType} onValueChange={setIssueType}>
-                  <SelectTrigger className="bg-surface-overlay/50 border-b-strong text-t-primary">
+                  <SelectTrigger id="new-card-type" className="bg-surface-overlay/50 border-b-strong text-t-primary">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-surface-raised border-b-default">
@@ -171,9 +175,9 @@ export function CreateBeadDialog({
             )}
 
             <div className="grid gap-1.5">
-              <label className="text-sm font-medium text-t-secondary">Priority</label>
+              <label htmlFor="new-card-priority" className="text-sm font-medium text-t-secondary">Priority</label>
               <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger className="bg-surface-overlay/50 border-b-strong text-t-primary">
+                <SelectTrigger id="new-card-priority" className="bg-surface-overlay/50 border-b-strong text-t-primary">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-surface-raised border-b-default">

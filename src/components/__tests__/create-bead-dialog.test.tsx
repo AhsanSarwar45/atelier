@@ -25,6 +25,9 @@ describe('CreateBeadDialog', () => {
   it('renders with title "New Card" when parentId is not set', () => {
     render(<CreateBeadDialog {...defaultProps} />);
     expect(screen.getByText('New Card')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription('Add a card to this project.');
+    expect(screen.getByRole('combobox', { name: 'Type' })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Priority' })).toBeVisible();
   });
 
   it('renders with title "New Subtask" when parentId is set', () => {
