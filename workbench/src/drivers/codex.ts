@@ -576,10 +576,16 @@ export function replayCodexRollout(text: string, emit: (event: DriverEvent) => v
 }
 
 class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
+  private readonly agents: AgentLifecycle;
+  private readonly readUsage: (agentId: string) => Promise<number>;
+
   constructor(
-    private readonly agents: AgentLifecycle,
-    private readonly readUsage: (agentId: string) => Promise<number>,
-  ) {}
+    agents: AgentLifecycle,
+    readUsage: (agentId: string) => Promise<number>,
+  ) {
+    this.agents = agents;
+    this.readUsage = readUsage;
+  }
 
   accept(signal: CodexAgentSignal): boolean {
     if (signal.type === 'thread/status/changed') {

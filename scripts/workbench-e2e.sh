@@ -39,6 +39,7 @@ export REPORTS_DIR="${REPORTS_DIR:-$ROOT/tests/.workbench-run-links/reporting}"
 # Where the real one is is remembered first, so the fixture can refuse it by
 # name wherever it has been moved to (bw-jaoz.11).
 export BEADS_E2E_REAL_CONFIG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+export BEADS_E2E_REAL_CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 export CLAUDE_CONFIG_DIR="$RUN/claude"
 export CODEX_HOME="$RUN/codex"
 export BEADS_E2E_MARKERS="$CLAUDE_CONFIG_DIR/sessions"
@@ -57,30 +58,66 @@ SERVER_LOG="$RUN/server.log"
 # machine. A run that leaves a helper behind, or a hand-started instance, keeps
 # its port — and the server we are about to start cannot bind it, so the browser
 # is served by yesterday's code while every log here says the run is fresh.
-free_port() {
-  local pid
-  # `|| true` on the assignment: nothing listening means grep exits non-zero,
-  # and this script runs under `set -e`.
-  pid=$(ss -lntpH "sport = :$1" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2) || true
-  [ -n "$pid" ] && kill "$pid" 2>/dev/null && sleep 0.5 || true
-}
-free_port "$BEADS_WEB_PORT"
-free_port "$BEADS_WORKBENCH_PORT"
+# An occupied port belongs to someone else. Fail rather than trying to make it
+# ours; this harness has authority only over the process tree it starts below.
 for p in "$BEADS_WEB_PORT" "$BEADS_WORKBENCH_PORT"; do
   if ss -lntH "sport = :$p" 2>/dev/null | grep -q .; then
-    echo "port $p is still held by something this run cannot stop"; exit 1
+    echo "port $p is occupied; choose a different isolated E2E port"; exit 1
   fi
 done
 
+# Real-provider cases opt in explicitly. They receive copies of only the two
+# bearer credential files, never the owner's settings, transcripts, sockets,
+# or writable config homes. Refreshes made by a test therefore cannot modify
+# the credentials the owner is using. Copy only after the non-owned port check,
+# so an early refusal cannot leave credentials behind.
+if [ "${BEADS_E2E_LIVE_PROVIDERS:-0}" = 1 ]; then
+  claude_auth="$BEADS_E2E_REAL_CONFIG/.credentials.json"
+  codex_auth="$BEADS_E2E_REAL_CODEX_HOME/auth.json"
+  [ -f "$claude_auth" ] || { echo "live provider E2E needs $claude_auth"; exit 1; }
+  [ -f "$codex_auth" ] || { echo "live provider E2E needs $codex_auth"; exit 1; }
+  install -m 600 "$claude_auth" "$CLAUDE_CONFIG_DIR/.credentials.json"
+  install -m 600 "$codex_auth" "$CODEX_HOME/auth.json"
+fi
+
 "$ROOT/server/target/debug/atelier" >> "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
-# By port, never by name: another Atelier serves the owner's board on this
-# machine. A test may also have restarted the instance, so the pid we spawned
-# is not necessarily the one still listening.
+# Print descendants leaves-first so providers stop before the sidecar and the
+# sidecar before the app. Every PID comes from the server we started above.
+descendants_of() {
+  local parent="$1" child
+  while read -r child; do
+    [ -n "$child" ] || continue
+    descendants_of "$child"
+    printf '%s\n' "$child"
+  done < <(pgrep -P "$parent" 2>/dev/null || true)
+}
+
 cleanup() {
-  kill "$SERVER_PID" 2>/dev/null || true
-  free_port "$BEADS_WEB_PORT"
-  free_port "$BEADS_WORKBENCH_PORT"
+  local code=$? pid p held=0
+  local owned=()
+  trap - EXIT
+  mapfile -t owned < <(descendants_of "$SERVER_PID")
+  owned+=("$SERVER_PID")
+  for pid in "${owned[@]}"; do kill "$pid" 2>/dev/null || true; done
+  wait "$SERVER_PID" 2>/dev/null || true
+  rm -f "$CLAUDE_CONFIG_DIR/.credentials.json" "$CODEX_HOME/auth.json"
+  for _ in $(seq 1 20); do
+    held=0
+    for p in "$BEADS_WEB_PORT" "$BEADS_WORKBENCH_PORT"; do
+      ss -lntH "sport = :$p" 2>/dev/null | grep -q . && held=1
+    done
+    [ "$held" -eq 0 ] && break
+    sleep 0.1
+  done
+  for p in "$BEADS_WEB_PORT" "$BEADS_WORKBENCH_PORT"; do
+    if ss -lntH "sport = :$p" 2>/dev/null | grep -q .; then
+      echo "isolated E2E port $p is still occupied after owned-process cleanup"
+      held=1
+    fi
+  done
+  [ "$held" -eq 0 ] || code=1
+  exit "$code"
 }
 trap cleanup EXIT
 

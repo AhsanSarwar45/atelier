@@ -119,21 +119,21 @@ function locations(projectPath?: string, home = homedir()): Location[] {
 
 export function discoverAgentFiles(projectPath?: string, home = homedir()): AgentFile[] {
   const seen = new Set<string>();
-  return locations(projectPath, home).flatMap((location) => location.files.map((path) => {
+  return locations(projectPath, home).flatMap<AgentFile>((location) => location.files.flatMap<AgentFile>((path) => {
     const absolute = resolve(path);
-    if (seen.has(`${location.provider}:${location.scope}:${absolute}`)) return null;
+    if (seen.has(`${location.provider}:${location.scope}:${absolute}`)) return [];
     seen.add(`${location.provider}:${location.scope}:${absolute}`);
     let stat;
-    try { stat = statSync(absolute); } catch { return null; }
+    try { stat = statSync(absolute); } catch { return []; }
     const link = lstatSync(absolute).isSymbolicLink();
-    return {
+    return [{
       id: Buffer.from(`${location.provider}\0${location.scope}\0${absolute}`).toString('base64url'),
       provider: location.provider, scope: location.scope, category: location.category,
       name: basename(absolute), path: absolute, relativePath: relative(location.root, absolute) || basename(absolute),
       format: formatOf(absolute), legacy: location.legacy, size: stat.size, modifiedAt: stat.mtime.toISOString(),
       ...(link ? { symlinkTarget: realpathSync(absolute) } : {}),
-    } satisfies AgentFile;
-  }).filter((file): file is AgentFile => file !== null)).sort((a, b) => a.provider.localeCompare(b.provider) || a.scope.localeCompare(b.scope) || a.category.localeCompare(b.category) || a.relativePath.localeCompare(b.relativePath));
+    } satisfies AgentFile];
+  })).sort((a, b) => a.provider.localeCompare(b.provider) || a.scope.localeCompare(b.scope) || a.category.localeCompare(b.category) || a.relativePath.localeCompare(b.relativePath));
 }
 
 export function readAgentFile(path: string, projectPath?: string): { content: string; truncated: boolean } {

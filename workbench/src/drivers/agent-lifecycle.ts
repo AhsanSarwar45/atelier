@@ -64,11 +64,16 @@ const number = (value: number | undefined, fallback: number): number =>
 export class AgentLifecycle {
   private readonly rows = new Map<string, PendingRow>();
   private live = new Set<string>();
+  private readonly emit: (event: DriverEvent) => void;
+  private readonly now: () => number;
 
   constructor(
-    private readonly emit: (event: DriverEvent) => void,
-    private readonly now: () => number = Date.now,
-  ) {}
+    emit: (event: DriverEvent) => void,
+    now: () => number = Date.now,
+  ) {
+    this.emit = emit;
+    this.now = now;
+  }
 
   /** Active rows only. Terminal tombstones remain private so late starts cannot reopen them. */
   get size(): number {

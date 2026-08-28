@@ -779,13 +779,25 @@ type ClaudeTaskSignal =
 
 /** Claude's published task-message union translated into the shared ledger. */
 class ClaudeAgentAdapter implements ProviderAgentAdapter<ClaudeTaskSignal> {
+  private readonly agents: AgentLifecycle;
+  private readonly callsOfHelpers: ReadonlySet<string>;
+  private readonly tasksOfHelpers: Set<string>;
+  private readonly taskOfCall: Map<string, string>;
+  private readonly callOfTask: Map<string, string>;
+
   constructor(
-    private readonly agents: AgentLifecycle,
-    private readonly callsOfHelpers: ReadonlySet<string>,
-    private readonly tasksOfHelpers: Set<string>,
-    private readonly taskOfCall: Map<string, string>,
-    private readonly callOfTask: Map<string, string>,
-  ) {}
+    agents: AgentLifecycle,
+    callsOfHelpers: ReadonlySet<string>,
+    tasksOfHelpers: Set<string>,
+    taskOfCall: Map<string, string>,
+    callOfTask: Map<string, string>,
+  ) {
+    this.agents = agents;
+    this.callsOfHelpers = callsOfHelpers;
+    this.tasksOfHelpers = tasksOfHelpers;
+    this.taskOfCall = taskOfCall;
+    this.callOfTask = callOfTask;
+  }
 
   accept(message: ClaudeTaskSignal): boolean {
     if (message.subtype === 'background_tasks_changed') {
