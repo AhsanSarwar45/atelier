@@ -26,6 +26,23 @@ describe('provider-native proposed plans', () => {
     }));
   });
 
+  it('turns a Codex native plan item into the same shared plan event', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    driver.itemStarted({ id: 'plan-1', type: 'plan', text: '# The native plan' });
+    driver.itemCompleted({ id: 'plan-1', type: 'plan', text: '# The native plan' });
+    driver.itemCompleted({ id: 'plan-1', type: 'plan', text: '# The native plan' });
+
+    expect(events.filter((event) => event.type === 'plan.proposed')).toEqual([
+      expect.objectContaining({
+        type: 'plan.proposed', proposalId: 'plan-1:plan:0', markdown: '# The native plan',
+        actions: expect.arrayContaining([expect.objectContaining({ id: 'implement' }), expect.objectContaining({ id: 'request_changes' })]),
+      }),
+    ]);
+  });
+
   it('answers Claude ExitPlanMode through its native permission promise without a generic permission event', async () => {
     const events: BareEvent[] = [];
     const driver = new ClaudeDriver() as any;

@@ -1474,6 +1474,12 @@ export class CodexDriver implements Driver {
     actorAgentId: string | null = null,
   ): void {
     if (!item) return;
+    if (item.type === 'plan') {
+      const markdown = String(item.text ?? '').trim();
+      if (!markdown) return;
+      this.proposePlan(`${item.id}:plan:0`, markdown);
+      return;
+    }
     if (item.type === 'agentMessage') {
       if (this.completedMessages.has(item.id)) return;
       const opened = this.messages.has(item.id);
@@ -1491,20 +1497,7 @@ export class CodexDriver implements Driver {
       }
       for (const widget of widgetSpecs(String(item.text ?? ''))) this.emit({ type: 'widget', messageId: item.id, widget });
       proposedPlanSpecs(String(item.text ?? '')).forEach((plan, index) => {
-        const proposalId = `${item.id}:plan:${index}`;
-        this.plans.add(proposalId);
-        this.emit({
-          type: 'plan.proposed', proposalId, markdown: plan.markdown, actions: [
-          {
-            id: 'implement', kind: 'implement', label: 'Implement plan',
-            description: 'Leave Plan mode and ask Codex to implement this plan.',
-          },
-          {
-            id: 'request_changes', kind: 'request_changes', label: 'Request changes', acceptsFeedback: true,
-            description: 'Keep planning and tell Codex what should change.',
-          },
-          ],
-        });
+        this.proposePlan(`${item.id}:plan:${index}`, plan.markdown);
       });
       this.completedMessages.add(item.id);
       return;
@@ -1535,6 +1528,23 @@ export class CodexDriver implements Driver {
     if (ok) emitToolImage(this, item);
     this.tools.delete(item.id);
     this.toolOutput.delete(item.id);
+  }
+
+  private proposePlan(proposalId: string, markdown: string): void {
+    if (this.plans.has(proposalId)) return;
+    this.plans.add(proposalId);
+    this.emit({
+      type: 'plan.proposed', proposalId, markdown, actions: [
+        {
+          id: 'implement', kind: 'implement', label: 'Implement plan',
+          description: 'Leave Plan mode and ask Codex to implement this plan.',
+        },
+        {
+          id: 'request_changes', kind: 'request_changes', label: 'Request changes', acceptsFeedback: true,
+          description: 'Keep planning and tell Codex what should change.',
+        },
+      ],
+    });
   }
 
   async respondToPlan(proposalId: string, response: PlanResponse): Promise<void> {
