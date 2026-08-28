@@ -76,7 +76,20 @@ video as a file link. Do not use a widget for one fact or a short list.
 ## Visual proof
 
 For every visual change, capture the relevant screen before editing and again
-afterward, then include both in an `atelier-image-compare` block. For a newly added visual
-with no meaningful before state, capture and include the finished result as an
-ordinary inline image. Do this before handing the work back;
-do not wait for the manager to ask.
+afterward, then include both in an `atelier-image-compare` block. Its body must
+be one JSON object with this exact shape:
+
+```atelier-image-compare
+{"mode":"side_by_side","before":{"path":"shots/before.png","caption":"Before"},"after":{"path":"shots/after.png","caption":"After"}}
+```
+
+`mode` is optional and must be `"side_by_side"` (the default) or `"wipe"`.
+`before` and `after` each require a non-empty `path`; their `caption` is
+optional. Paths must resolve inside the current project. Images supplied to a
+Codex chat under an absolute `/tmp/atelier-codex-images-*/` attachment directory
+are also accepted; other outside or arbitrary `/tmp` paths are rejected. Use
+PNG, JPEG, GIF, or WebP files.
+
+For a newly added visual with no meaningful before state, capture and include
+the finished result as an ordinary inline image. Do this before handing the
+work back; do not wait for the manager to ask.
