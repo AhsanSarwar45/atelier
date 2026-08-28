@@ -36,6 +36,8 @@
  * load-bearing rather than tidy: no icon and no Tailwind class is named here.
  */
 
+import { isCodeModeEnvelope, normalizeCommands } from './command-normalization';
+
 /**
  * The kinds a call can be. The kind decides the mark and the colour, so these
  * are what a reader tells apart at a glance rather than every verb there is.
@@ -1289,10 +1291,47 @@ function agentEnvelopeDid(text: string, shellDepth: number): Ran | null {
   return null;
 }
 
+/** Several semantic commands carried by one provider call, as one result. */
+function commandsDid(commands: string[], shellDepth: number): Ran | null {
+  const ran = commands
+    .map((command) => whatACommandDid(command, shellDepth + 1))
+    .filter((result): result is Ran => result !== null);
+  if (!ran.length) return null;
+  if (ran.length === 1) return ran[0]!;
+
+  // The provider made these calls in this order. Grave work takes one of the
+  // visible slots even when several harmless calls came before it, exactly as
+  // it does for a shell chain below.
+  const grave = ran.some((result) => result.grave);
+  const wanted = ran.filter((result) => result.grave)
+    .concat(ran.filter((result) => !result.grave))
+    .slice(0, MOST_SHOWN);
+  const shown = ran.filter((result) => wanted.includes(result));
+  let said = shown.map((result, i) => i === 0 ? result.said : joined(result.said)).join(', then ');
+  const left = ran.length - shown.length;
+  if (left) said += `, and ${left} more`;
+  return { said, kind: grave ? 'grave' : shown[0]!.kind, grave };
+}
+
 /** One shell command, as a sentence. Null when no rule here can name it. */
 export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
   const text = command.trim();
   if (!text) return null;
+
+  // Decode provider code mode and peel process/shell/remote/container wrappers
+  // before any semantic rule sees the command. `Bash`, `exec`, JavaScript and
+  // `/bin/bash -lc` are transport; the executable beneath them is the work.
+  // Dynamic code and unrecognised wrappers stay on the old raw/fallback path.
+  if (shellDepth < 8) {
+    const source = isCodeModeEnvelope(text) ? 'code-mode' : 'direct';
+    const normalized = normalizeCommands(text, source);
+    const semantic = normalized.commands.map((item) => item.command);
+    const changed = semantic.length > 1 || (semantic.length === 1 && semantic[0]!.trim() !== text);
+    if (changed) {
+      const inner = commandsDid(semantic, shellDepth);
+      if (inner) return inner;
+    }
+  }
 
   const envelope = shellDepth < 4 ? agentEnvelopeDid(text, shellDepth) : null;
   if (envelope) return envelope;

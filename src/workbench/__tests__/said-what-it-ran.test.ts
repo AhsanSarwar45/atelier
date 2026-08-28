@@ -80,6 +80,7 @@ const RULES: Array<[string, string]> = [
   ['bd merge-slot release', 'Gave the merge slot back'],
   ['bd remember "x"', 'Wrote a note to the board'],
   ['const r = await tools.exec_command({"cmd":"git status --short"}); text(r.output)', 'Checked the working tree'],
+  ['const a = await tools.exec_command({"cmd":"npm test"}); const b = await tools.exec_command({"cmd":"git status --short"})', 'Ran the tests, then checked the working tree'],
   ['const r = await tools.write_stdin({"session_id":12,"chars":""}); text(r.output)', 'Waited for a running command'],
   ['const patch = "*** Begin Patch\\n*** Update File: /repo/src/a.ts\\n*** End Patch"; await tools.apply_patch(patch)', 'Changed src/a.ts'],
   ['const r = await tools.view_image({"path":"/tmp/screen.png"})', 'Looked at tmp/screen.png'],
@@ -88,6 +89,7 @@ const RULES: Array<[string, string]> = [
   ["/bin/bash -lc 'sed -n \"1,240p\" .agents/skills/beads/SKILL.md && bd prime'", 'Read part of beads/SKILL.md, then read the board rules'],
   ['/bin/bash -lc "printf \'%s\' \'{\\"tool_name\\":\\"Bash\\"}\' | python3 machinery/hooks/workflow-gate.py"', 'Ran workflow-gate.py'],
   ["/bin/bash -lc \"git status --short; rg -n 'review|merge' AGENTS.md\"", 'Checked the working tree, then searched for review|merge in AGENTS.md'],
+  ["docker exec app sh -lc 'npm test'", 'Ran the tests'],
   ['machinery/board/job new --what x', 'Opened a job'],
   ['machinery/board/job under bw-7ks.24 --do "what to do|how we know"', 'Added the work items'],
   ['machinery/board/land bw-7ks.24', 'Landed bw-7ks.24'],
@@ -345,6 +347,31 @@ describe('a delete is never hidden', () => {
     const ran = whatACommandDid("bash -c 'cd /tmp && rm -rf x'");
     expect(ran?.said).toBe('Deleted x in tmp');
     expect(ran?.grave).toBe(true);
+  });
+
+  it('says so beneath remote and container process boundaries', () => {
+    for (const command of [
+      "ssh host -- sh -c 'rm -rf cache'",
+      "docker exec app sh -lc 'rm -rf cache'",
+      "kubectl exec pod/app -- sh -c 'rm -rf cache'",
+    ]) {
+      const ran = whatACommandDid(command);
+      expect(ran?.said, command).toBe('Deleted cache');
+      expect(ran?.grave, command).toBe(true);
+      expect(ran?.kind, command).toBe('grave');
+    }
+  });
+
+  it('ignores command-looking JavaScript data but keeps a real code-mode delete grave', () => {
+    const code = [
+      `const example = "tools.exec_command({cmd: 'npm test'})";`,
+      `const result = await tools.exec_command({cmd: 'rm -rf cache'});`,
+      'text(result.output);',
+    ].join('\n');
+    const ran = whatACommandDid(code);
+    expect(ran?.said).toBe('Deleted cache');
+    expect(ran?.grave).toBe(true);
+    expect(ran?.kind).toBe('grave');
   });
 
   it('says so from behind an xargs', () => {
