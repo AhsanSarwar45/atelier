@@ -27,6 +27,7 @@ import { Store } from './store.ts';
 import { summaryMemoryOf } from './summary-runs.ts';
 import { readProviderDefaults, writeProviderDefault } from './provider-defaults.ts';
 import { transcriptPage } from './transcript-page.ts';
+import { discoverAgentFiles, readAgentFile } from './agent-files.ts';
 
 // The operating system picks the port unless somebody names one. It used to be
 // 3009 always, and the app forwarded there on trust: whatever program held that
@@ -266,6 +267,12 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
 
 async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void> {
   switch (cmd.type) {
+    case 'agent-files.list':
+      json(res, 200, { files: discoverAgentFiles(cmd.projectPath) });
+      return;
+    case 'agent-files.read':
+      json(res, 200, readAgentFile(cmd.path, cmd.projectPath));
+      return;
     case 'provider-defaults.read':
       json(res, 200, readProviderDefaults(cmd.brand));
       return;

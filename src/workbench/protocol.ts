@@ -490,6 +490,8 @@ export interface Brief {
 }
 
 export type WbpCommand =
+  | { type: 'agent-files.list'; projectPath?: string }
+  | { type: 'agent-files.read'; path: string; projectPath?: string }
   | { type: 'provider-defaults.read'; brand: Brand }
   | { type: 'provider-defaults.write'; brand: Brand; kind: 'model' | 'effort'; value: string }
   | {
