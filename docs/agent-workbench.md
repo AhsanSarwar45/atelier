@@ -1447,7 +1447,7 @@ value shown is the sample's.
 | `system/task_updated` | `completed` | A sent-off agent has finished. | machine |
 | `system/task_updated` | `failed` | A sent-off agent failed. | machine |
 | `system/task_updated` | `killed` | A sent-off agent was stopped. | machine |
-| `system/task_updated` | `paused` | A sent-off agent is parked. | machine |
+| `system/task_updated` | `paused` | A sent-off agent is in background. | machine |
 | `system/task_updated` | `pending` | A sent-off agent is waiting to start. | machine |
 | `system/task_updated` | `running` | A sent-off agent is running. | machine |
 | `system/thinking_tokens` | — | *nothing, on purpose: an estimate twice a second, drawn as the thinking counter* | — |
@@ -1790,6 +1790,7 @@ the row.
 |---|---|---|
 | what | the brief in its own words, one line | `task_started.description` |
 | kind | helper, command, watch, run | the background-work list |
+| agent | the helper definition, such as `screen-check` | `agentType` on the sent-off row |
 | model | which model this one runs | the kit's list of agents, and the model on the helper's own messages |
 | for | how long it has been going, live | `task_progress.usage.duration_ms`, counted from the start where absent |
 | spent | tokens, and how many calls it has made | `task_progress.usage` |
@@ -1811,8 +1812,10 @@ transcript, with the way back where the reader expects it.
 (bw-7ks.22.5). Neither brand gives anyone a private input channel into a running
 helper, so we do not pretend to have one:
 
-1. **Direct** — stop it, or park it and let it run on. Both are the kit's own
-   controls (`stopTask`, `backgroundTasks`) and both are exact.
+1. **Direct** — stop it, or put it in the background and let it run on. Both are
+   the kit's own controls (`stopTask`, `backgroundTasks`) and both are exact;
+   the row says **Background** and then **in background**, not the wire's
+   `parked` token.
 2. **Its own asks** — a permission ask a helper raised is answered on the
    helper's row, attributed to the helper that raised it, not to the parent it
    arrived through.
@@ -1853,11 +1856,11 @@ which is a way of getting it wrong (kit 2.1.237, measured 2026-08-20):
 - **A row waiting to be answered says so itself.** It reads `waiting on you`
   from the moment the ask goes out until it is answered, said by the driver
   rather than waited for from the kit's next report about that task — which is
-  the whole reason a row's state is not a boolean. Parked arrives the other way
-  round, from the kit: `task_updated.is_backgrounded`, which is the ONLY message
-  that carries it — a launch does not, so work started in the background arrives
-  looking exactly like work started in front of you, and the click is what finds
-  out which it was.
+  the whole reason a row's state is not a boolean. In-background state arrives
+  the other way round, from the kit: `task_updated.is_backgrounded`, which is
+  the ONLY message that carries it — a launch does not, so work started in the
+  background arrives looking exactly like work started in front of you, and the
+  click is what finds out which it was.
 - **Which controls exist is a per-session answer**, carried on `session.menu` as
   `agentControls` and defaulting to none. A brand declares only the tiers it
   has, a chat nobody is driving declares none — which is the truth, there is
@@ -2551,6 +2554,10 @@ never re-follows the chat it was reading, so a chat another program is driving
 goes quiet after the first drop (`bw-tous`); and the chat's own working line
 keeps a spinner on a shell command that has already come back, because the line
 is only rewritten when the next call starts (`bw-qxep`).
+
+One display debt remains in that panel: the agent-definition slot is deliberately
+narrow, so a long definition such as `general-purpose` is ellipsized; its full
+word remains in the row's title for hover and assistive reading.
 
 ---
 
