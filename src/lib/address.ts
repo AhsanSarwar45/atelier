@@ -93,7 +93,7 @@ export function addressWith(params: URLSearchParams, patch: Partial<Where>): str
  * Whether the app has a page of its own behind this one.
  *
  * The bar's arrow is a step back through the history, not a jump to the list:
- * a report opened from a chat has to give that chat back, not the front door.
+ * a nested page opened from a chat has to give that chat back, not the front door.
  * It falls back to the list only when nothing of ours is behind — a pasted
  * address, a fresh tab — because stepping back there would leave the app.
  *

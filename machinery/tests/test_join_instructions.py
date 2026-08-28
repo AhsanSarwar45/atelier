@@ -1,5 +1,6 @@
 import importlib.machinery
 import importlib.util
+import json
 import sqlite3
 import subprocess
 import tempfile
@@ -21,6 +22,27 @@ def load_join():
 
 
 class JoinInstructionsTest(unittest.TestCase):
+    def test_project_wiring_removes_the_retired_publish_gate(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            settings = root / ".claude" / "settings.json"
+            settings.parent.mkdir()
+            settings.write_text(json.dumps({
+                "hooks": {
+                    "PreToolUse": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": "python3 /old/reporting/tools/publish-gate.py",
+                        }],
+                    }],
+                },
+            }))
+
+            join.wire(str(root), lambda _: None)
+
+            self.assertNotIn("publish-gate.py", settings.read_text())
+
     def test_beads_review_handoff_names_the_personal_reviewer_contract(self):
         skill = (ROOT / "machinery/skills/beads/SKILL.md").read_text()
         reviewer = (ROOT / ".claude/agents/reviewer.md").read_text()

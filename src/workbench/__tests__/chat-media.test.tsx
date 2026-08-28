@@ -48,6 +48,23 @@ describe('structured image comparisons in chat', () => {
     }));
   });
 
+  it('keeps an unresolved comparison block visible beside one that rendered', () => {
+    const unresolved = `\`\`\`atelier-image-compare
+{"mode":"wipe","before":{"path":"missing-before.png"},"after":{"path":"missing-after.png"}}
+\`\`\``;
+    render(
+      <TranscriptRow
+        item={{ ...message({ mode: 'wipe', before: image('Old'), after: image('New') }), text: `${spec}\n\n${unresolved}` }}
+        sessionId="chat"
+        mentions={mentions}
+        onLook={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('image-comparison')).toBeVisible();
+    expect(screen.getByText(/missing-before\.png/)).toBeVisible();
+  });
+
   it('opens a comparison as two large pictures held side by side', () => {
     render(<PictureViewer image={{ mode: 'side_by_side', before: image('Large before'), after: image('Large after') }} onClose={vi.fn()} />);
 

@@ -63,11 +63,10 @@ fn earlier_data_dir() -> Option<PathBuf> {
 
 /// Carry an install made under the earlier name over to this one.
 ///
-/// A person who upgrades has a settings file, a project list and a shelf of
-/// reports under a folder named after what the product used to be called. Left
-/// alone, the renamed program starts up and finds nothing: an empty project
-/// list, and every report they have written invisible. So the first run under
-/// the new name copies the old folder across.
+/// A person who upgrades has settings, a project list and saved data under a
+/// folder named after what the product used to be called. Left alone, the
+/// renamed program starts up and finds nothing. So the first run under the new
+/// name copies the old folder across.
 ///
 /// The old folder is left where it is. A copy still on the earlier name keeps
 /// working, and a carry-over that deleted what it read from would take their
@@ -163,9 +162,9 @@ mod tests {
     }
 
     fn an_install(at: &Path, projects: &str) {
-        fs::create_dir_all(at.join("reports")).expect("a folder to write into");
+        fs::create_dir_all(at.join("saved-pages")).expect("a folder to write into");
         fs::write(at.join("settings.db"), projects).expect("a settings file");
-        fs::write(at.join("reports").join("a-page.json"), "{}").expect("a report");
+        fs::write(at.join("saved-pages").join("a-page.json"), "{}").expect("saved data");
     }
 
     #[test]
@@ -184,8 +183,8 @@ mod tests {
             "the project list did not come across"
         );
         assert!(
-            now.join("reports").join("a-page.json").exists(),
-            "the reports did not come across"
+            now.join("saved-pages").join("a-page.json").exists(),
+            "the saved data did not come across"
         );
         assert!(before.join("settings.db").exists(), "the earlier install was moved, not copied");
         let _ = fs::remove_dir_all(&tmp);

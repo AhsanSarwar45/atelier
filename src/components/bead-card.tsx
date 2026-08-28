@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type ReactNode } from "react";
+import { memo } from "react";
 
 import { FolderOpen, Link2, MessageSquare } from "lucide-react";
 
@@ -30,8 +30,6 @@ export interface BeadCardProps {
   worktreeStatus?: WorktreeStatus;
   isSelected?: boolean;
   onSelect: (bead: Bead) => void;
-  /** Sits with the card's other facts, beside the comment count. */
-  report?: ReactNode;
 }
 
 /**
@@ -97,7 +95,7 @@ function getStatusBadgeClasses(variant: StatusBadgeInfo['variant']): string {
  * moves, and without this every card on the screen was built again to say
  * exactly what it already said.
  */
-export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSelected = false, onSelect, report }: BeadCardProps) {
+export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber, worktreeStatus, isSelected = false, onSelect }: BeadCardProps) {
   const { layout } = useTheme();
   const blocked = isBlockedBy(bead, statusById);
   const commentCount = (bead.comments ?? []).length;
@@ -201,7 +199,6 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
               {commentCount}
             </span>
           )}
-          {report}
         </div>
         <CardLiveChat beadId={bead.id} />
       </div>
@@ -271,7 +268,6 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
               {commentCount} {commentCount === 1 ? "comment" : "comments"}
             </span>
           )}
-          {report}
         </div>
         <CardLiveChat beadId={bead.id} />
       </div>
@@ -365,8 +361,8 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
           <div className="px-3 pb-3">{worktreeSection}</div>
         )}
 
-        {/* Footer: comment count + related count + this card's report */}
-        {(commentCount > 0 || relatedCount > 0 || report) && (
+        {/* Footer: comment and relationship counts. */}
+        {(commentCount > 0 || relatedCount > 0) && (
           <div className="flex items-center p-3 pt-0 gap-2 text-muted-foreground card-footer-text">
             {commentCount > 0 && (
               <span className="flex items-center gap-1 text-[10px]">
@@ -380,7 +376,6 @@ export const BeadCard = memo(function BeadCard({ bead, statusById, ticketNumber,
                 {relatedCount} related
               </span>
             )}
-            {report}
           </div>
         )}
         <div className="px-3 pb-2">

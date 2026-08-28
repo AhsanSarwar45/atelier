@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useMemo, type ReactNode } from "react";
+import { memo, useState, useMemo } from "react";
 
 import { CheckCircle2, ChevronDown, ChevronRight, Layers, Loader2, MessageSquare } from "lucide-react";
 
@@ -46,8 +46,6 @@ export interface EpicCardProps {
   projectPath?: string;
   /** Callback after epic is closed (to refresh board) */
   onUpdate?: () => void;
-  /** Sits with the card's other facts, beside the comment count. */
-  report?: ReactNode;
 }
 
 /**
@@ -78,8 +76,7 @@ export const EpicCard = memo(function EpicCard({
   onChildClick,
   onNavigateToDependency,
   projectPath,
-  onUpdate,
-  report
+  onUpdate
 }: EpicCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -322,7 +319,6 @@ export const EpicCard = memo(function EpicCard({
             {progressSection}
             {closeButton}
             {childrenSection}
-            {report}
             <CardLiveChat beadId={epic.id} />
           </div>
         </div>
@@ -370,7 +366,6 @@ export const EpicCard = memo(function EpicCard({
             {commentCount > 0 && (
               <span className="text-[10px] text-t-faint">{commentCount} comments</span>
             )}
-            {report}
           </div>
             <CardLiveChat beadId={epic.id} />
 
@@ -438,7 +433,7 @@ export const EpicCard = memo(function EpicCard({
         {closeButton}
         {childrenSection}
 
-        {(commentCount > 0 || report) && (
+        {commentCount > 0 && (
           <div className="flex items-center gap-2 pt-2">
             {commentCount > 0 && (
               <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -446,7 +441,6 @@ export const EpicCard = memo(function EpicCard({
                 {commentCount} {commentCount === 1 ? "comment" : "comments"}
               </span>
             )}
-            {report}
           </div>
         )}
         <div className="px-3 pb-2">
