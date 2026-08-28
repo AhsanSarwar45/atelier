@@ -17,7 +17,7 @@ import { memo, useContext, useEffect, useReducer, useState, type ReactNode } fro
 
 import { request } from '@/lib/api';
 
-import { Brain, ChevronRight, Hand, Loader2 } from 'lucide-react';
+import { Brain, Check, ChevronRight, Hand, Loader2 } from 'lucide-react';
 
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
@@ -969,6 +969,184 @@ export const PlanProposalCard = memo(function PlanProposalCard({
   );
 });
 
+interface DraftQuestionAnswer {
+  optionIds: string[];
+  custom: boolean;
+  customText: string;
+  note: string;
+  noteOpen: boolean;
+}
+
+export const QuestionCard = memo(function QuestionCard({
+  item,
+  sessionId,
+}: {
+  item: Extract<TranscriptItem, { kind: 'question' }>;
+  sessionId: string;
+}) {
+  const [drafts, setDrafts] = useState<Record<string, DraftQuestionAnswer>>(() => Object.fromEntries(
+    item.questions.map((question) => [question.id, {
+      optionIds: [], custom: question.selection === 'text', customText: '', note: '', noteOpen: false,
+    }]),
+  ));
+  const [pending, setPending] = useState(false);
+  const change = (questionId: string, update: (draft: DraftQuestionAnswer) => DraftQuestionAnswer) => {
+    setDrafts((current) => ({ ...current, [questionId]: update(current[questionId]!) }));
+  };
+  const complete = item.questions.every((question) => {
+    const draft = drafts[question.id]!;
+    if (question.selection === 'text') return Boolean(draft.customText.trim());
+    if (draft.custom && !draft.customText.trim()) return false;
+    return draft.optionIds.length > 0 || (draft.custom && Boolean(draft.customText.trim()));
+  });
+
+  if (item.answers) {
+    return (
+      <Panel data-testid="question-card" data-question-state="resolved" className="space-y-2">
+        <div className="text-sm font-medium text-foreground">Answered</div>
+        {item.questions.map((question) => {
+          const answer = item.answers!.find((candidate) => candidate.questionId === question.id);
+          const labels = answer?.optionIds.map((id) => question.options.find((option) => option.id === id)?.label ?? id) ?? [];
+          if (answer?.customText) labels.push(question.secret ? '••••••••' : answer.customText);
+          return (
+            <div key={question.id} className="text-sm">
+              <span className="font-medium text-foreground">{question.header}</span>
+              <span className="text-muted-foreground"> · {labels.join(', ')}</span>
+            </div>
+          );
+        })}
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel tone="attention" inset="md" data-testid="question-card" data-question-state="open">
+      <div className="space-y-6">
+        {item.questions.map((question) => {
+          const draft = drafts[question.id]!;
+          const choose = (optionId: string) => change(question.id, (current) => {
+            const selected = current.optionIds.includes(optionId);
+            return {
+              ...current,
+              optionIds: selected ? current.optionIds.filter((id) => id !== optionId)
+                : question.selection === 'single' ? [optionId] : [...current.optionIds, optionId],
+              ...(question.selection === 'single' && !selected ? { custom: false } : {}),
+            };
+          });
+          return (
+            <fieldset key={question.id} className="min-w-0">
+              <legend className="text-sm font-semibold text-foreground">{question.header}</legend>
+              <div className="mt-1 text-sm text-muted-foreground">{question.prompt}</div>
+              {question.selection !== 'text' && (
+                <div className="mt-3 grid gap-2">
+                  {question.options.map((option) => {
+                    const selected = draft.optionIds.includes(option.id);
+                    return (
+                      <label key={option.id} className={cn(
+                        'flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5',
+                        selected ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50',
+                      )}>
+                        <input
+                          type="checkbox"
+                          className="peer sr-only"
+                          checked={selected}
+                          onChange={() => choose(option.id)}
+                          aria-label={option.label}
+                        />
+                        <span className={cn(
+                          'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border',
+                          selected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/60 bg-background',
+                        )}>{selected && <Check className="size-3" />}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-foreground">{option.label}</span>
+                          {option.description && <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>}
+                          {option.preview && (
+                            <details className="mt-2 text-xs" onClick={(event) => event.stopPropagation()}>
+                              <summary className="cursor-pointer text-primary">Preview</summary>
+                              <MarkdownBody className="mt-2 text-xs">{option.preview}</MarkdownBody>
+                            </details>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {(question.allowCustom || question.selection === 'text') && (
+                <label className={cn(
+                  'mt-2 flex items-start gap-3 rounded-md border px-3 py-2.5',
+                  draft.custom ? 'border-primary bg-primary/10' : 'border-border',
+                )}>
+                  {question.selection !== 'text' && (
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 accent-primary"
+                      checked={draft.custom}
+                      aria-label="Custom answer"
+                      onChange={() => change(question.id, (current) => ({
+                        ...current, custom: !current.custom,
+                        ...(question.selection === 'single' && !current.custom ? { optionIds: [] } : {}),
+                      }))}
+                    />
+                  )}
+                  <Input
+                    type={question.secret ? 'password' : 'text'}
+                    aria-label={question.selection === 'text' ? 'Answer' : 'Custom answer text'}
+                    placeholder={question.selection === 'text' ? 'Type your answer' : 'Something else…'}
+                    value={draft.customText}
+                    onChange={(event) => change(question.id, (current) => ({
+                      ...current, custom: true, customText: event.target.value,
+                      ...(question.selection === 'single' ? { optionIds: [] } : {}),
+                    }))}
+                  />
+                </label>
+              )}
+              <button
+                type="button"
+                className="mt-2 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => change(question.id, (current) => ({ ...current, noteOpen: !current.noteOpen }))}
+              >
+                {draft.noteOpen ? 'Hide note' : 'Add note'}
+              </button>
+              {draft.noteOpen && (
+                <Textarea
+                  className="mt-2 min-h-20"
+                  aria-label={`Note for ${question.header}`}
+                  placeholder="Optional context for this answer"
+                  value={draft.note}
+                  onChange={(event) => change(question.id, (current) => ({ ...current, note: event.target.value }))}
+                />
+              )}
+            </fieldset>
+          );
+        })}
+      </div>
+      <div className="mt-5 flex justify-end">
+        <Button
+          size="sm"
+          disabled={!complete || pending}
+          onClick={() => {
+            setPending(true);
+            void sendCommand({
+              type: 'question.answer', sessionId, requestId: item.id,
+              response: { answers: item.questions.map((question) => {
+                const draft = drafts[question.id]!;
+                return {
+                  questionId: question.id, optionIds: draft.optionIds,
+                  ...(draft.custom && draft.customText.trim() ? { customText: draft.customText.trim() } : {}),
+                  ...(draft.note.trim() ? { note: draft.note.trim() } : {}),
+                };
+              }) },
+            }).catch(() => setPending(false));
+          }}
+        >
+          {pending ? 'Sending…' : 'Answer'}
+        </Button>
+      </div>
+    </Panel>
+  );
+});
+
 /**
  * One row of the conversation, whatever kind it is.
  *
@@ -1013,7 +1191,7 @@ export const TranscriptRow = memo(function TranscriptRow({
     // visual work items. Keeping the fold exhaustive makes the provider seam
     // land independently without pretending either is a permission.
     case 'question':
-      return null;
+      return <QuestionCard item={item} sessionId={sessionId} />;
     case 'plan':
       return <PlanProposalCard item={item} sessionId={sessionId} />;
     // Notes, asides, and the lines the kit writes in the reader's name never
