@@ -4,8 +4,9 @@
 //! [`validate_path_security`], and then shells out to the real `git` binary.
 
 use axum::{
-    extract::Query,
-    http::StatusCode,
+    extract::rejection::{JsonRejection, QueryRejection},
+    extract::{FromRequest, FromRequestParts, Query, Request},
+    http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -50,67 +51,45 @@ pub struct BranchStatusResponse {
 /// # Response
 ///
 /// Returns branch existence, ahead/behind counts, and dirty status.
-pub async fn branch_status(Query(params): Query<GitStatusParams>) -> impl IntoResponse {
-    let repo_path = Path::new(&params.path);
-
-    if let Err(e) = validate_path_security(repo_path) {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": e }))).into_response();
-    }
-
-    // Validate repository path exists
-    if !repo_path.exists() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": format!("Repository path does not exist: {}", params.path)
-            })),
-        )
-            .into_response();
-    }
-
-    if !repo_path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": format!("Path is not a directory: {}", params.path)
-            })),
-        )
-            .into_response();
-    }
+///
+/// Older than the panel's ten routes below, and its answer keeps its own
+/// older shape — but it is turned away the way they are, through [`GitQuery`]
+/// and [`checked_repo`], rather than through a second hand-built `{ error }`
+/// beside a rejection the framework answered in plain text (bw-8dp8.11).
+pub async fn branch_status(GitQuery(params): GitQuery<GitStatusParams>) -> Answer {
+    let repo = checked_repo(&params.path)?;
 
     // Check if branch exists
-    let branch_exists = check_branch_exists(&params.path, &params.branch).await;
-
-    if !branch_exists {
-        return Json(BranchStatusResponse {
+    if !check_branch_exists(&repo, &params.branch).await {
+        return Ok(Json(BranchStatusResponse {
             exists: false,
             ahead: 0,
             behind: 0,
             dirty: false,
         })
-        .into_response();
+        .into_response());
     }
 
     // Get ahead/behind counts relative to main
-    let (ahead, behind) = get_ahead_behind(&params.path, &params.branch).await;
+    let (ahead, behind) = get_ahead_behind(&repo, &params.branch).await;
 
     // Check for uncommitted changes
-    let dirty = check_dirty(&params.path).await;
+    let dirty = check_dirty(&repo).await;
 
-    Json(BranchStatusResponse {
+    Ok(Json(BranchStatusResponse {
         exists: true,
         ahead,
         behind,
         dirty,
     })
-    .into_response()
+    .into_response())
 }
 
 /// Check if a branch exists in the repository.
-async fn check_branch_exists(repo_path: &str, branch: &str) -> bool {
+async fn check_branch_exists(repo: &Path, branch: &str) -> bool {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", branch])
-        .current_dir(repo_path)
+        .current_dir(repo)
         .output()
         .await;
 
@@ -118,7 +97,7 @@ async fn check_branch_exists(repo_path: &str, branch: &str) -> bool {
 }
 
 /// Get the number of commits ahead and behind relative to main.
-async fn get_ahead_behind(repo_path: &str, branch: &str) -> (i32, i32) {
+async fn get_ahead_behind(repo: &Path, branch: &str) -> (i32, i32) {
     // Try both 'main' and 'master' as the base branch
     let base_branches = ["main", "master"];
 
@@ -130,7 +109,7 @@ async fn get_ahead_behind(repo_path: &str, branch: &str) -> (i32, i32) {
                 "--count",
                 &format!("{}...{}", base, branch),
             ])
-            .current_dir(repo_path)
+            .current_dir(repo)
             .output()
             .await;
 
@@ -151,10 +130,10 @@ async fn get_ahead_behind(repo_path: &str, branch: &str) -> (i32, i32) {
 }
 
 /// Check if the repository has uncommitted changes.
-async fn check_dirty(repo_path: &str) -> bool {
+async fn check_dirty(repo: &Path) -> bool {
     let output = Command::new("git")
         .args(["status", "--porcelain"])
-        .current_dir(repo_path)
+        .current_dir(repo)
         .output()
         .await;
 
@@ -192,6 +171,60 @@ impl IntoResponse for Refused {
 /// Either the answer or the refusal; axum turns whichever arrives into the
 /// response, so a handler can hand back the first one it reaches.
 pub type Answer = Result<Response, Refused>;
+
+// ----------------------------------------------------------------------------
+// Requests turned away before a handler runs
+// ----------------------------------------------------------------------------
+
+/// A request body, refused the way everything else in this file is refused.
+///
+/// Plain `Json` answers a body it cannot read with axum's own plain text, so a
+/// malformed body, a missing `path` or the wrong content type reached the panel
+/// as a bare status line — "Unprocessable Entity", with nothing about why —
+/// while every refusal the routes themselves make carries `{ error }`. This is
+/// `Json` with its rejection turned into a [`Refused`], so a request turned
+/// away before a handler ever runs reads exactly like one git turned away
+/// (bw-8dp8.8).
+pub struct GitJson<T>(pub T);
+
+#[axum::async_trait]
+impl<S, T> FromRequest<S> for GitJson<T>
+where
+    S: Send + Sync,
+    Json<T>: FromRequest<S, Rejection = JsonRejection>,
+{
+    type Rejection = Refused;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        Json::<T>::from_request(request, state)
+            .await
+            .map(|Json(body)| GitJson(body))
+            // axum's own words for what was wrong with the request, kept as it
+            // wrote them for the same reason git's are kept: they are the
+            // reason, and the status it chose is the right one to answer with.
+            .map_err(|turned_away| Refused(turned_away.status(), turned_away.body_text()))
+    }
+}
+
+/// Query parameters, refused the same way — the read routes' half of
+/// [`GitJson`]. `?path=` left off used to answer plain text as well.
+pub struct GitQuery<T>(pub T);
+
+#[axum::async_trait]
+impl<S, T> FromRequestParts<S> for GitQuery<T>
+where
+    S: Send + Sync,
+    Query<T>: FromRequestParts<S, Rejection = QueryRejection>,
+{
+    type Rejection = Refused;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Query::<T>::from_request_parts(parts, state)
+            .await
+            .map(|Query(params)| GitQuery(params))
+            .map_err(|turned_away| Refused(turned_away.status(), turned_away.body_text()))
+    }
+}
 
 // ----------------------------------------------------------------------------
 // One lock per repository
@@ -541,7 +574,7 @@ pub fn read_porcelain_v2(raw: &[u8]) -> StatusResponse {
 /// # Endpoint
 ///
 /// `GET /api/git/status?path=...`
-pub async fn status(Query(params): Query<PathParams>) -> Answer {
+pub async fn status(GitQuery(params): GitQuery<PathParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
     let output = spoke_or_refused(
         run_git(
@@ -577,7 +610,7 @@ pub struct FilesRequest {
 /// # Endpoint
 ///
 /// `POST /api/git/stage` — `{ path, files }`
-pub async fn stage(Json(body): Json<FilesRequest>) -> Answer {
+pub async fn stage(GitJson(body): GitJson<FilesRequest>) -> Answer {
     change_the_index(body, &["add", "--"]).await
 }
 
@@ -586,7 +619,7 @@ pub async fn stage(Json(body): Json<FilesRequest>) -> Answer {
 /// # Endpoint
 ///
 /// `POST /api/git/unstage` — `{ path, files }`
-pub async fn unstage(Json(body): Json<FilesRequest>) -> Answer {
+pub async fn unstage(GitJson(body): GitJson<FilesRequest>) -> Answer {
     change_the_index(body, &["restore", "--staged", "--"]).await
 }
 
@@ -637,7 +670,7 @@ pub struct CommitRequest {
 /// # Endpoint
 ///
 /// `POST /api/git/commit` — `{ path, message, amend? }` → `{ sha }`
-pub async fn commit(Json(body): Json<CommitRequest>) -> Answer {
+pub async fn commit(GitJson(body): GitJson<CommitRequest>) -> Answer {
     let repo = checked_repo(&body.path)?;
 
     let turn = repo_lock(&repo);
@@ -688,7 +721,7 @@ async fn distance_from_upstream(repo: &Path) -> (i32, i32) {
 /// # Endpoint
 ///
 /// `POST /api/git/fetch` — `{ path }` → `{ ahead, behind }`
-pub async fn fetch(Json(body): Json<PathRequest>) -> Answer {
+pub async fn fetch(GitJson(body): GitJson<PathRequest>) -> Answer {
     let repo = checked_repo(&body.path)?;
 
     let turn = repo_lock(&repo);
@@ -704,7 +737,7 @@ pub async fn fetch(Json(body): Json<PathRequest>) -> Answer {
 /// # Endpoint
 ///
 /// `POST /api/git/pull` — `{ path }` → `{ ok, output }`
-pub async fn pull(Json(body): Json<PathRequest>) -> Answer {
+pub async fn pull(GitJson(body): GitJson<PathRequest>) -> Answer {
     let repo = checked_repo(&body.path)?;
 
     let turn = repo_lock(&repo);
@@ -734,7 +767,7 @@ pub struct PushRequest {
 /// # Endpoint
 ///
 /// `POST /api/git/push` — `{ path, setUpstream? }` → `{ ok, output }`
-pub async fn push(Json(body): Json<PushRequest>) -> Answer {
+pub async fn push(GitJson(body): GitJson<PushRequest>) -> Answer {
     let repo = checked_repo(&body.path)?;
 
     let turn = repo_lock(&repo);
@@ -811,7 +844,7 @@ fn read_drift(track: &str) -> (i32, i32) {
 /// # Endpoint
 ///
 /// `GET /api/git/branches?path=...`
-pub async fn branches(Query(params): Query<PathParams>) -> Answer {
+pub async fn branches(GitQuery(params): GitQuery<PathParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
 
     let listed = spoke_or_refused(
@@ -888,7 +921,7 @@ pub struct CheckoutRequest {
 /// # Endpoint
 ///
 /// `POST /api/git/checkout` — `{ path, branch, create? }` → `{ ok }`
-pub async fn checkout(Json(body): Json<CheckoutRequest>) -> Answer {
+pub async fn checkout(GitJson(body): GitJson<CheckoutRequest>) -> Answer {
     let repo = checked_repo(&body.path)?;
 
     let turn = repo_lock(&repo);
@@ -956,7 +989,7 @@ const LOG_FORMAT: &str = "--format=%H%x09%h%x09%an%x09%ae%x09%aI%x09%s";
 /// # Endpoint
 ///
 /// `GET /api/git/log?path=...&limit=50`
-pub async fn log(Query(params): Query<LogParams>) -> Answer {
+pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
     let repo = checked_repo(&params.path)?;
 
     let how_many = params.limit.clamp(1, 1000).to_string();

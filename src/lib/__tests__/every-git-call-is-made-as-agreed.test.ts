@@ -18,11 +18,11 @@ vi.stubGlobal('fetch', mockFetch);
 // Import after mocking fetch — must come after vi.stubGlobal
 import * as api from '../api'; // eslint-disable-line import/first
 
-function mockResponse(data: unknown, status = 200) {
+function mockResponse(data: unknown, status = 200, statusText?: string) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    statusText: status === 200 ? 'OK' : 'Error',
+    statusText: statusText ?? (status === 200 ? 'OK' : 'Error'),
     headers: new Headers(),
     json: () => Promise.resolve(data),
   } as Response;
@@ -200,5 +200,37 @@ describe('what git said when it refused', () => {
     mockFetch.mockResolvedValue(mockResponse({ error: stderr }, 500));
 
     await expect(api.git.push(REPO)).rejects.toThrow(/non-fast-forward/);
+  });
+});
+
+describe('what was said when the request never reached git', () => {
+  /**
+   * A request the server turns away before a handler runs — a half-sent body,
+   * a body with no `path` in it, the wrong content type — used to arrive as the
+   * framework's plain text, so the caller fell back to the status line and the
+   * reader was shown "Unprocessable Entity" and nothing about why. The server
+   * now answers those in the same `{ error }` shape as everything else
+   * (bw-8dp8.8); this is the caller's half of that, and it must read the reason
+   * out rather than the status line.
+   */
+  it('surfaces the reason, not the bare status line', async () => {
+    const reason =
+      'Failed to deserialize the JSON body into the target type: missing field `path` at line 1 column 2';
+    mockFetch.mockResolvedValue(mockResponse({ error: reason }, 422, 'Unprocessable Entity'));
+
+    const refused = await api.git.commit(REPO, 'a message').catch((e: Error) => e);
+
+    expect(String(refused)).toContain('missing field `path`');
+    expect(String(refused)).not.toContain('Unprocessable Entity');
+  });
+
+  it('surfaces a body the server could not read at all', async () => {
+    const reason = 'Failed to parse the request body as JSON: EOF while parsing an object';
+    mockFetch.mockResolvedValue(mockResponse({ error: reason }, 400, 'Bad Request'));
+
+    const refused = await api.git.stage(REPO, ['a.ts']).catch((e: Error) => e);
+
+    expect(String(refused)).toContain('Failed to parse the request body as JSON');
+    expect(String(refused)).not.toContain('Bad Request');
   });
 });

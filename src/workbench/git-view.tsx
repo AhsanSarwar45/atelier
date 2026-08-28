@@ -28,6 +28,7 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   ArrowDown,
   ArrowUp,
+  CloudDownload,
   Download,
   GitBranch as BranchIcon,
   Minus,
@@ -98,13 +99,55 @@ function Section({
   );
 }
 
-/** What each state of a file is called on its row. */
-const STATUS_WORDS: Record<GitChange['status'], string> = {
-  modified: 'M',
-  added: 'A',
-  deleted: 'D',
-  renamed: 'R',
-  typechange: 'T',
+/**
+ * Every state a file can be in on a row: its letter, its colour, and the word
+ * the letter stands for.
+ *
+ * The letter used to be the whole of it, and every letter was drawn in the one
+ * grey the section headings were drawn in — RGB(161,161,170), measured off the
+ * screen — so an added file, a changed one and a new one were the same picture
+ * and telling them apart meant reading the heading above the row instead of
+ * glancing at the row (bw-8dp8.10). Every other git client colours these.
+ *
+ * The colours are the theme's own semantic names, never a colour spelled here.
+ * `success`, `warning`, `info` and `destructive` resolve through
+ * `--color-*-accent` in globals.css to `--success` / `--warning` / `--info` /
+ * `--danger`, which all eleven palettes set for themselves — the light ones
+ * around 30-54% lightness, the dark ones 45-83%. So the hue follows whichever
+ * theme is live and this file never learns which one that is, which is the
+ * whole point of bw-lwp.
+ *
+ * Measured across all eleven palettes: the three states stay at least 56
+ * degrees of hue apart in every one of them, so no theme collapses two of them
+ * together. What the tokens do NOT buy is contrast on the four light palettes.
+ * The letter against its own 18% tint runs 4.4-5.1:1 on the seven dark
+ * palettes but only 1.8-2.8:1 on soft-light, notion-warm, github-clean and
+ * catppuccin-latte. That ceiling is those palettes' own accents and not this
+ * row's doing: soft-light's `--warning` cannot clear 2:1 against soft-light's
+ * own page at ANY opacity, so a solid or a ghost chip does not rescue it
+ * either. Every `appearance="light"` chip in the app sits under the same
+ * ceiling, the `detached` badge further down this file included. Lifting it
+ * means changing the light palettes in themes.css, which is a card of its own.
+ *
+ * Colour is therefore never the only signal, and could not be. The letter
+ * stays, the section heading above it stays, and the state's word is on the
+ * chip for a pointer — a reader who cannot tell green from amber loses
+ * nothing.
+ */
+type FileState = GitChange['status'] | 'untracked' | 'conflicted';
+
+const STATUS_LOOK: Record<
+  FileState,
+  { word: string; tone: 'success' | 'warning' | 'info' | 'destructive'; said: string }
+> = {
+  added: { word: 'A', tone: 'success', said: 'Added' },
+  modified: { word: 'M', tone: 'warning', said: 'Modified' },
+  // A mode or a symlink change is modification's rarer cousin, and reads as one.
+  typechange: { word: 'T', tone: 'warning', said: 'Type changed' },
+  renamed: { word: 'R', tone: 'info', said: 'Renamed' },
+  untracked: { word: '?', tone: 'info', said: 'Untracked' },
+  deleted: { word: 'D', tone: 'destructive', said: 'Deleted' },
+  conflicted: { word: 'U', tone: 'destructive', said: 'Conflicted' },
 };
 
 /**
@@ -119,7 +162,7 @@ const STATUS_WORDS: Record<GitChange['status'], string> = {
  */
 function FileLine({
   path,
-  word,
+  state,
   from,
   action,
   label,
@@ -127,13 +170,14 @@ function FileLine({
   onAct,
 }: {
   path: string;
-  word: string;
+  state: FileState;
   from?: string | null;
   action: 'stage' | 'unstage';
   label: string;
   busy: boolean;
   onAct: () => void;
 }) {
+  const { word, tone, said } = STATUS_LOOK[state];
   const cut = path.lastIndexOf('/');
   const name = cut === -1 ? path : path.slice(cut + 1);
   const folder = cut === -1 ? '' : path.slice(0, cut);
@@ -144,12 +188,21 @@ function FileLine({
       data-path={path}
       data-status={word}
     >
-      <span
+      {/* The chip, not a span dressed up as one: the app has one set of parts
+          and `src/components/ui/` is where a pill is allowed to be spelled out
+          (src/lib/__tests__/one-set-of-parts.test.ts). `light` paints the
+          letter in the state's accent on that accent at 18%, so the tint is a
+          second signal beside the letter and both come from the live theme. */}
+      <Badge
+        size="xs"
+        variant={tone}
+        appearance="light"
         aria-hidden="true"
-        className="w-3 shrink-0 text-center font-mono text-[10px] font-medium text-t-tertiary"
+        title={said}
+        className="shrink-0 font-mono"
       >
         {word}
-      </span>
+      </Badge>
       <span
         className="flex min-w-0 flex-1 items-baseline gap-1"
         title={from ? `${from} → ${path}` : path}
@@ -329,20 +382,34 @@ export function GitView({ path }: GitViewProps) {
           </span>
         </div>
         {/* Talking to the shared copy uses the keys and credential helper the
-            user's own setup already carries — the app stores nothing. */}
-        <div className="flex items-center gap-1">
+            user's own setup already carries — the app stores nothing.
+
+            Drawn as outline buttons, at the size the Commit button below them
+            is drawn at. They used to be bare bold words on the panel's own
+            background — one of them without even an icon — sitting directly
+            above a solid filled pill, so the only three things in the view
+            that reach the network did not read as things you could press at
+            all (bw-8dp8.10). Outline gives them an edge, a fill and the same
+            height as Commit; it does not give them Commit's fill, because
+            saving is the action this panel is for and it has to stay the
+            loudest thing in it. Equal thirds of the row, so the three read as
+            one set rather than three stray words. */}
+        <div className="flex items-center gap-1.5">
           <Button
-            size="xs"
-            variant="ghost"
+            size="sm"
+            variant="outline"
+            className="flex-1"
             disabled={busy}
             data-testid="git-fetch"
             onClick={() => void act(() => git.fetch(path))}
           >
+            <CloudDownload aria-hidden="true" />
             Fetch
           </Button>
           <Button
-            size="xs"
-            variant="ghost"
+            size="sm"
+            variant="outline"
+            className="flex-1"
             disabled={busy}
             data-testid="git-pull"
             onClick={() => void act(() => git.pull(path))}
@@ -351,8 +418,9 @@ export function GitView({ path }: GitViewProps) {
             Pull
           </Button>
           <Button
-            size="xs"
-            variant="ghost"
+            size="sm"
+            variant="outline"
+            className="flex-1"
             disabled={busy}
             data-testid="git-push"
             onClick={() => void act(() => git.push(path, status?.upstream === null))}
@@ -380,7 +448,7 @@ export function GitView({ path }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
-                word="U"
+                state="conflicted"
                 action="stage"
                 label="Mark as resolved"
                 busy={busy}
@@ -398,7 +466,7 @@ export function GitView({ path }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
-                word={STATUS_WORDS[file.status]}
+                state={file.status}
                 from={file.origPath}
                 action="unstage"
                 label="Unstage"
@@ -417,7 +485,7 @@ export function GitView({ path }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
-                word={STATUS_WORDS[file.status]}
+                state={file.status}
                 from={file.origPath}
                 action="stage"
                 label="Stage"
@@ -436,7 +504,7 @@ export function GitView({ path }: GitViewProps) {
               <FileLine
                 key={file.path}
                 path={file.path}
-                word="?"
+                state="untracked"
                 action="stage"
                 label="Stage"
                 busy={busy}

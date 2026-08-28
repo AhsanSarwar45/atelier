@@ -8,11 +8,12 @@
 //! rest of the build.
 
 use atelier::routes::git;
+// The routes' own extractors: a request they cannot read is refused in the
+// file's own shape rather than the framework's plain text (bw-8dp8.8).
+use atelier::routes::git::{GitJson, GitQuery};
 use axum::body::to_bytes;
-use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
 use chrono::DateTime;
 use serde_json::Value;
 use std::fs;
@@ -130,16 +131,16 @@ async fn answered(answer: git::Answer) -> (StatusCode, Value) {
 }
 
 async fn status_of(dir: &TempDir) -> (StatusCode, Value) {
-    answered(git::status(Query(git::PathParams { path: here(dir) })).await).await
+    answered(git::status(GitQuery(git::PathParams { path: here(dir) })).await).await
 }
 
 async fn branches_of(dir: &TempDir) -> (StatusCode, Value) {
-    answered(git::branches(Query(git::PathParams { path: here(dir) })).await).await
+    answered(git::branches(GitQuery(git::PathParams { path: here(dir) })).await).await
 }
 
 async fn log_of(dir: &TempDir, limit: u32) -> (StatusCode, Value) {
     answered(
-        git::log(Query(git::LogParams {
+        git::log(GitQuery(git::LogParams {
             path: here(dir),
             limit,
         }))
@@ -150,7 +151,7 @@ async fn log_of(dir: &TempDir, limit: u32) -> (StatusCode, Value) {
 
 async fn stage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
     answered(
-        git::stage(Json(git::FilesRequest {
+        git::stage(GitJson(git::FilesRequest {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
         }))
@@ -161,7 +162,7 @@ async fn stage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
 
 async fn unstage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
     answered(
-        git::unstage(Json(git::FilesRequest {
+        git::unstage(GitJson(git::FilesRequest {
             path: here(dir),
             files: files.iter().map(|f| (*f).to_string()).collect(),
         }))
@@ -172,7 +173,7 @@ async fn unstage(dir: &TempDir, files: &[&str]) -> (StatusCode, Value) {
 
 async fn commit(dir: &TempDir, message: &str, amend: bool) -> (StatusCode, Value) {
     answered(
-        git::commit(Json(git::CommitRequest {
+        git::commit(GitJson(git::CommitRequest {
             path: here(dir),
             message: message.to_string(),
             amend,
@@ -184,7 +185,7 @@ async fn commit(dir: &TempDir, message: &str, amend: bool) -> (StatusCode, Value
 
 async fn push(dir: &TempDir, set_upstream: bool) -> (StatusCode, Value) {
     answered(
-        git::push(Json(git::PushRequest {
+        git::push(GitJson(git::PushRequest {
             path: here(dir),
             set_upstream,
         }))
@@ -337,7 +338,7 @@ async fn a_path_outside_the_home_directory_is_refused_before_git_is_run() {
         return;
     }
     let (code, body) = answered(
-        git::status(Query(git::PathParams {
+        git::status(GitQuery(git::PathParams {
             path: "/etc".to_string(),
         }))
         .await,
@@ -363,7 +364,7 @@ async fn many_mutating_calls_at_one_project_wait_for_each_other_instead_of_colli
     // All at once at the same repository. Without a lock of our own, git's
     // index.lock lets one of these win and kills the rest.
     let calls = names.iter().map(|name| {
-        git::stage(Json(git::FilesRequest {
+        git::stage(GitJson(git::FilesRequest {
             path: here(&repo),
             files: vec![name.clone()],
         }))
@@ -602,7 +603,7 @@ async fn fetch_counts_the_gap_and_pull_closes_it() {
     assert_eq!(code, StatusCode::OK);
 
     let (code, gap) = answered(
-        git::fetch(Json(git::PathRequest {
+        git::fetch(GitJson(git::PathRequest {
             path: here(&theirs),
         }))
         .await,
@@ -618,7 +619,7 @@ async fn fetch_counts_the_gap_and_pull_closes_it() {
     assert_eq!(body["ahead"], 0);
 
     let (code, pulled) = answered(
-        git::pull(Json(git::PathRequest {
+        git::pull(GitJson(git::PathRequest {
             path: here(&theirs),
         }))
         .await,
@@ -715,7 +716,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
 
     // Switching to another line of work moves HEAD.
     let (code, _) = answered(
-        git::checkout(Json(git::CheckoutRequest {
+        git::checkout(GitJson(git::CheckoutRequest {
             path: here(&repo),
             branch: "feature-one".to_string(),
             create: false,
@@ -730,7 +731,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
 
     // Starting one moves HEAD onto it too.
     let (code, _) = answered(
-        git::checkout(Json(git::CheckoutRequest {
+        git::checkout(GitJson(git::CheckoutRequest {
             path: here(&repo),
             branch: "feature-three".to_string(),
             create: true,
@@ -746,7 +747,7 @@ async fn the_lines_of_work_are_listed_switched_and_their_saved_changes_read() {
 
     // A line of work that is not there is refused in git's own words.
     let (code, refused) = answered(
-        git::checkout(Json(git::CheckoutRequest {
+        git::checkout(GitJson(git::CheckoutRequest {
             path: here(&repo),
             branch: "no-such-line".to_string(),
             create: false,
@@ -851,6 +852,11 @@ const CONTRACT: [(&str, &str); 10] = [
     ("get", "/api/git/log"),
 ];
 
+/// The eleventh route, older than the ten the contract names and answering a
+/// shape of its own. A request it turns away before git is reached still has
+/// to read exactly like one the ten turn away (bw-8dp8.11).
+const OLDER: [(&str, &str); 1] = [("get", "/api/git/branch-status")];
+
 #[test]
 fn the_server_registers_every_route_the_contract_names() {
     let handlers = [
@@ -886,7 +892,11 @@ async fn served() -> (String, tokio::task::JoinHandle<()>) {
         .route("/api/git/push", axum::routing::post(git::push))
         .route("/api/git/branches", axum::routing::get(git::branches))
         .route("/api/git/checkout", axum::routing::post(git::checkout))
-        .route("/api/git/log", axum::routing::get(git::log));
+        .route("/api/git/log", axum::routing::get(git::log))
+        .route(
+            "/api/git/branch-status",
+            axum::routing::get(git::branch_status),
+        );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -988,6 +998,287 @@ async fn the_routes_answer_over_http_in_the_shape_the_contract_promises() {
     let refused: Value = answer.json().await.expect("JSON");
     let said = refused["error"].as_str().expect("git's own words");
     assert!(said.contains("origin"), "{said}");
+
+    serving.abort();
+}
+
+// ============================================================================
+// bw-8dp8.8 — a request turned away before it ever reaches git
+// ============================================================================
+
+/// What a refusal has to be, whichever side of the handler it came from: JSON,
+/// carrying a reason, and not the bare status line.
+///
+/// The panel reads `error` out of the body and only falls back to the status
+/// line when there is nothing there, so plain text from the framework showed
+/// the reader "Unprocessable Entity" and nothing about what was wrong.
+async fn a_reason_in_json(answer: reqwest::Response, about: &str) -> String {
+    let code = answer.status();
+    assert!(!code.is_success(), "{about} was accepted");
+
+    let kind = answer
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|kind| kind.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        kind.starts_with("application/json"),
+        "{about} answered {kind:?}, not JSON"
+    );
+
+    let raw = answer.text().await.expect("a body");
+    let body: Value = serde_json::from_str(&raw)
+        .unwrap_or_else(|_| panic!("{about} answered plain text, not JSON: {raw}"));
+    let said = body["error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{about} answered JSON with no error in it: {raw}"))
+        .to_string();
+
+    assert!(!said.is_empty(), "{about} gave an empty reason");
+    // The whole point: what reaches the reader is the reason, not the bare
+    // status line they were being shown instead of one.
+    assert_ne!(
+        said,
+        code.canonical_reason().unwrap_or_default(),
+        "{about} said nothing but its own status"
+    );
+    said
+}
+
+#[tokio::test]
+async fn a_body_that_is_not_json_is_refused_in_the_same_shape_git_is() {
+    let (base, serving) = served().await;
+    let web = reqwest::Client::new();
+
+    for (method, url) in CONTRACT.iter().filter(|(method, _)| *method == "post") {
+        let answer = web
+            .post(format!("{base}{url}"))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            // Cut off mid-way: what a half-sent body looks like.
+            .body("{\"path\": ")
+            .send()
+            .await
+            .expect("an answer");
+        let said = a_reason_in_json(answer, &format!("{method} {url} with a broken body")).await;
+        assert!(
+            said.to_lowercase().contains("json"),
+            "{url} did not say what was wrong with the body: {said}"
+        );
+    }
+
+    serving.abort();
+}
+
+#[tokio::test]
+async fn a_request_that_names_no_project_is_refused_in_the_same_shape_git_is() {
+    let (base, serving) = served().await;
+    let web = reqwest::Client::new();
+
+    for (method, url) in CONTRACT.iter().chain(OLDER.iter()) {
+        let answer = if *method == "post" {
+            // Well-formed JSON, but without the one field every route needs.
+            web.post(format!("{base}{url}"))
+                .json(&serde_json::json!({}))
+                .send()
+                .await
+        } else {
+            // And the read routes' half of the same thing: no `?path=` at all.
+            web.get(format!("{base}{url}")).send().await
+        }
+        .expect("an answer");
+
+        let said = a_reason_in_json(answer, &format!("{method} {url} naming no project")).await;
+        assert!(
+            said.contains("path"),
+            "{url} did not say which field was missing: {said}"
+        );
+    }
+
+    serving.abort();
+}
+
+#[tokio::test]
+async fn a_body_sent_as_something_other_than_json_is_refused_in_the_same_shape_git_is() {
+    let (base, serving) = served().await;
+    let web = reqwest::Client::new();
+
+    let answer = web
+        .post(format!("{base}/api/git/commit"))
+        .header(reqwest::header::CONTENT_TYPE, "text/plain")
+        .body("path=/somewhere&message=hello")
+        .send()
+        .await
+        .expect("an answer");
+
+    let said = a_reason_in_json(answer, "a body sent as text/plain").await;
+    assert!(
+        said.to_lowercase().contains("content-type"),
+        "the reason did not name the content type: {said}"
+    );
+
+    serving.abort();
+}
+
+#[tokio::test]
+async fn the_older_route_named_no_line_of_work_is_refused_in_the_same_shape_git_is() {
+    let (base, serving) = served().await;
+    let web = reqwest::Client::new();
+
+    // branch-status is the one route that needs a second parameter, so it is
+    // the one that can be turned away for a field none of the other ten have.
+    let answer = web
+        .get(format!("{base}/api/git/branch-status"))
+        .query(&[("path", "/tmp")])
+        .send()
+        .await
+        .expect("an answer");
+
+    let said = a_reason_in_json(answer, "branch-status naming no line of work").await;
+    assert!(
+        said.contains("branch"),
+        "branch-status did not say which field was missing: {said}"
+    );
+
+    serving.abort();
+}
+
+// ============================================================================
+// bw-8dp8.12 — the older route, answering what the app already reads
+// ============================================================================
+
+/// Ask the older route about one line of work over real HTTP, exactly the way
+/// `src/lib/api.ts` asks it — `?path=&branch=`, JSON back — and hand over the
+/// body it answered with.
+async fn branch_status_of(base: &str, dir: &TempDir, branch: &str) -> Value {
+    let path = here(dir);
+    let answer = reqwest::Client::new()
+        .get(format!("{base}/api/git/branch-status"))
+        .query(&[("path", path.as_str()), ("branch", branch)])
+        .send()
+        .await
+        .expect("an answer");
+    assert_eq!(answer.status(), 200, "branch-status turned {branch} away");
+    let kind = answer
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|kind| kind.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        kind.starts_with("application/json"),
+        "branch-status answered {kind:?}, not JSON"
+    );
+    answer.json().await.expect("JSON")
+}
+
+#[tokio::test]
+async fn the_older_route_counts_a_known_line_of_works_distance_and_sees_it_go_dirty() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "how it started\n");
+    save_all(at, "seed");
+
+    // Two changes saved on the line of work, one saved on main after it left.
+    // Those two numbers are where the route's ahead and behind have to come
+    // from, and this seeding is the only place they are written down.
+    run(at, &["branch", "feature"]);
+    run(at, &["switch", "-q", "feature"]);
+    put(at, "first.txt", "one\n");
+    save_all(at, "the first thing feature did");
+    put(at, "second.txt", "two\n");
+    save_all(at, "the second thing feature did");
+    run(at, &["switch", "-q", "main"]);
+    put(at, "elsewhere.txt", "main moved on\n");
+    save_all(at, "what main did meanwhile");
+    run(at, &["switch", "-q", "feature"]);
+
+    let (base, serving) = served().await;
+
+    let body = branch_status_of(&base, &repo, "feature").await;
+    let mut keys: Vec<&str> = body
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["ahead", "behind", "dirty", "exists"],
+        "these are the names the app reads out of the body"
+    );
+    assert_eq!(body["exists"], true);
+    assert_eq!(body["ahead"], 2, "feature saved two changes main has not");
+    assert_eq!(body["behind"], 1, "main saved one change feature has not");
+    assert_eq!(body["dirty"], false, "everything is saved");
+
+    // main is its own base, so it is neither ahead of nor behind itself.
+    let body = branch_status_of(&base, &repo, "main").await;
+    assert_eq!(body["exists"], true);
+    assert_eq!(body["ahead"], 0);
+    assert_eq!(body["behind"], 0);
+
+    // The same line of work, the same distance, once a saved file is changed
+    // and left unsaved.
+    put(at, "kept.txt", "how it is going\n");
+    let body = branch_status_of(&base, &repo, "feature").await;
+    assert_eq!(body["dirty"], true, "kept.txt is changed and not saved");
+    assert_eq!(body["exists"], true);
+    assert_eq!(body["ahead"], 2, "changing a file moves nothing");
+    assert_eq!(body["behind"], 1, "changing a file moves nothing");
+
+    serving.abort();
+}
+
+#[tokio::test]
+async fn the_older_route_says_a_line_of_work_that_is_not_there_is_not_there() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "one\n");
+    save_all(at, "seed");
+    put(at, "kept.txt", "one\ntwo\n");
+
+    let (base, serving) = served().await;
+
+    // The project really is changed — the line of work it is on says so.
+    let known = branch_status_of(&base, &repo, "main").await;
+    assert_eq!(known["exists"], true);
+    assert_eq!(known["dirty"], true);
+
+    // The one that is not there still answers 200, with everything at rest.
+    // The app reads this body the same way it reads the one above, so a
+    // missing line of work must not arrive looking like a changed project.
+    let missing = branch_status_of(&base, &repo, "no-such-line-of-work").await;
+    assert_eq!(missing["exists"], false);
+    assert_eq!(missing["ahead"], 0);
+    assert_eq!(missing["behind"], 0);
+    assert_eq!(
+        missing["dirty"], false,
+        "the very same changed project reads clean once the line of work is gone"
+    );
+
+    serving.abort();
+}
+
+#[tokio::test]
+async fn a_project_whose_only_change_is_a_file_git_has_never_heard_of_reads_as_changed() {
+    let repo = a_repo();
+    let at = repo.path();
+    put(at, "kept.txt", "one\n");
+    save_all(at, "seed");
+
+    let (base, serving) = served().await;
+
+    let clean = branch_status_of(&base, &repo, "main").await;
+    assert_eq!(clean["dirty"], false, "nothing has been touched yet");
+
+    put(at, "loose.txt", "git has never heard of this\n");
+    let after = branch_status_of(&base, &repo, "main").await;
+    assert_eq!(
+        after["dirty"], true,
+        "git status --porcelain names an untracked file too, so the project is changed"
+    );
 
     serving.abort();
 }
