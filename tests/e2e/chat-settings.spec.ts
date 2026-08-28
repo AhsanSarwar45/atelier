@@ -93,13 +93,10 @@ test.describe('a chat the app starts', () => {
     const project = await fixtureProject(request);
     // No mode and no model are named here: the whole point is that nobody has
     // to name them, and that the app no longer invents one when nobody does.
-    const started = (await (
-      await request.post('/api/workbench/command', {
-        data: { type: 'session.start', projectId: project.id, projectPath: project.path, brand: 'claude' },
-      })
-    ).json()) as { id: string };
-
-    await page.goto(`/project?id=${project.id}&tab=chat&chat=${started.id}`);
+    await page.goto(`/project?id=${project.id}&tab=chat`);
+    await page.getByTestId('new-chat-tool').click();
+    await page.waitForURL((url) => Boolean(url.searchParams.get('chat')), { timeout: HELLO_MS });
+    const started = { id: new URL(page.url()).searchParams.get('chat')! };
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
 
     const mode = page.getByTestId('mode-picker');
