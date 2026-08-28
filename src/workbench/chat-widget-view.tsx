@@ -1,11 +1,14 @@
 'use client';
 
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Circle, Clock } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play } from 'lucide-react';
 
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
 import { apiUrl } from '@/lib/api-base';
-import type { ChartWidget, ChatWidget } from '@/workbench/chat-widgets';
+import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-widgets';
+import { openLocalPath } from '@/workbench/open-local-path';
 
 const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
 
@@ -52,7 +55,72 @@ function Chart({ widget }: { widget: ChartWidget }) {
   );
 }
 
+function Explainer({ widget }: { widget: ExplainerWidget }) {
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const current = widget.steps[step]!;
+  const active = new Set(current.active);
+
+  useEffect(() => {
+    if (!playing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const timer = window.setInterval(() => setStep((value) => (value + 1) % widget.steps.length), 1800);
+    return () => window.clearInterval(timer);
+  }, [playing, widget.steps.length]);
+
+  return (
+    <Panel data-testid="chat-widget" data-widget="explainer" tone="frame" className="mb-3 max-w-2xl overflow-hidden">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <Heading title={widget.title} />
+          {widget.summary && <p className="-mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">{widget.summary}</p>}
+        </div>
+        {widget.steps.length > 1 && <button type="button" aria-label={playing ? 'Pause explanation' : 'Play explanation'} aria-pressed={playing}
+          onClick={() => setPlaying((value) => !value)} className="grid size-8 shrink-0 place-items-center rounded-full border bg-background text-foreground transition-colors hover:bg-accent motion-reduce:transition-none">
+          {playing ? <Pause className="size-3.5" /> : <Play className="ml-0.5 size-3.5" />}
+        </button>}
+      </div>
+
+      <div role="img" aria-label={`${widget.title ?? 'Concept'} diagram, step ${step + 1} of ${widget.steps.length}`} className="rounded-lg border bg-muted/20 p-3">
+        <div className="flex items-stretch gap-1 overflow-x-auto pb-1">
+          {widget.nodes.map((node, index) => {
+            const lit = active.has(node.id);
+            const edge = index < widget.nodes.length - 1
+              ? widget.edges.find((candidate) => candidate.from === node.id && candidate.to === widget.nodes[index + 1]!.id)
+              : undefined;
+            return <div key={node.id} className="contents">
+              <div data-active={lit} className={`min-w-28 flex-1 rounded-md border p-2.5 transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20' : 'bg-background opacity-55'}`}>
+                <div className="text-xs font-semibold text-foreground">{node.label}</div>
+                {node.detail && <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{node.detail}</div>}
+              </div>
+              {index < widget.nodes.length - 1 && <div className={`flex min-w-7 flex-col items-center justify-center transition-opacity duration-500 motion-reduce:transition-none ${lit ? 'opacity-100' : 'opacity-35'}`}>
+                {edge?.label && <span className="max-w-16 truncate text-[9px] text-muted-foreground">{edge.label}</span>}
+                <ChevronRight className={`size-4 ${lit && playing ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
+              </div>}
+            </div>;
+          })}
+        </div>
+      </div>
+
+      <div className="mt-3" aria-live="polite">
+        <div className="text-sm font-medium text-foreground">{current.label}</div>
+        {current.detail && <p className="mt-0.5 text-xs text-muted-foreground">{current.detail}</p>}
+      </div>
+      <div className="mt-2 flex gap-1" aria-label="Explanation steps">
+        {widget.steps.map((item, index) => <button key={`${item.label}-${index}`} type="button" aria-label={`Step ${index + 1}: ${item.label}`} aria-current={index === step ? 'step' : undefined}
+          onClick={() => { setStep(index); setPlaying(false); }} className={`h-1.5 flex-1 rounded-full transition-colors motion-reduce:transition-none ${index === step ? 'bg-primary' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
+      </div>
+      {widget.evidence && widget.evidence.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
+        {widget.evidence.map((item) => <button type="button" key={`${item.path}:${item.line ?? ''}`} onClick={() => openLocalPath(item.path, 'vscode', item.line)}
+          className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground motion-reduce:transition-none">
+          <FileCode2 className="size-3" />{item.label}{item.line ? `:${item.line}` : ''}
+        </button>)}
+      </div>}
+    </Panel>
+  );
+}
+
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
+  if (widget.type === 'explainer') return <Explainer widget={widget} />;
   if (widget.type === 'video') return (
     <Panel data-testid="chat-widget" data-widget="video" tone="frame" className="mb-3 max-w-2xl">
       <Heading title={widget.title} />

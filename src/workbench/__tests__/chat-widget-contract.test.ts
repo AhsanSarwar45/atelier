@@ -11,6 +11,7 @@ describe('conversation widget contract', () => {
     { type: 'timeline', items: [{ label: 'Released', status: 'done' }] },
     { type: 'table', columns: ['Choice', 'Cost'], rows: [['A', '$2']] },
     { type: 'video', title: 'Proof', src: '/home/me/proof.webm' },
+    { type: 'explainer', title: 'A request', nodes: [{ id: 'web', label: 'Web' }, { id: 'api', label: 'API' }], edges: [{ from: 'web', to: 'api', label: 'HTTP' }], steps: [{ label: 'Send', active: ['web'] }, { label: 'Handle', active: ['api'] }], evidence: [{ label: 'Route', path: '/repo/api.ts', line: 42 }] },
   ])('accepts $type widgets and hides their valid source block', (value) => {
     expect(widgetSpecs(block(value))).toEqual([value]);
     expect(withoutWidgetSpecs(block(value))).toBe('Result');
@@ -22,6 +23,8 @@ describe('conversation widget contract', () => {
     { type: 'progress', items: [{ label: 'x', value: 1, max: 0 }] },
     { type: 'table', columns: ['a', 'b'], rows: [['only one']] },
     { type: 'video', src: 'javascript:alert(1)' },
+    { type: 'explainer', nodes: [{ id: 'one', label: 'One' }, { id: 'two', label: 'Two' }], edges: [{ from: 'one', to: 'missing' }], steps: [{ label: 'Go', active: ['one'] }] },
+    { type: 'explainer', nodes: [{ id: 'same', label: 'One' }, { id: 'same', label: 'Two' }], edges: [{ from: 'same', to: 'same' }], steps: [{ label: 'Go', active: ['same'] }] },
   ])('refuses malformed $type widgets and leaves their source visible', (value) => {
     const source = block(value);
     expect(widgetSpecs(source)).toEqual([]);

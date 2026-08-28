@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ChatWidgetView } from '@/workbench/chat-widget-view';
 import type { ChatWidget } from '@/workbench/chat-widgets';
 
@@ -12,6 +12,7 @@ const widgets: ChatWidget[] = [
   { type: 'timeline', title: 'Next', items: [{ label: 'Built', status: 'done' }, { label: 'Ship', status: 'next' }] },
   { type: 'table', title: 'Options', columns: ['Choice', 'Cost'], rows: [['A', '$2']] },
   { type: 'video', title: 'Proof', src: '/home/me/proof.webm' },
+  { type: 'explainer', title: 'Session recovery', summary: 'Replay without losing a word.', nodes: [{ id: 'drop', label: 'Disconnect' }, { id: 'replay', label: 'Replay' }, { id: 'live', label: 'Live' }], edges: [{ from: 'drop', to: 'replay' }, { from: 'replay', to: 'live' }], steps: [{ label: 'Connection drops', active: ['drop'] }, { label: 'Events replay', active: ['replay'] }, { label: 'Streaming resumes', active: ['live'] }], evidence: [{ label: 'Session store', path: '/repo/store.ts', line: 84 }] },
 ];
 
 describe('chat widget rendering', () => {
@@ -38,5 +39,24 @@ describe('chat widget rendering', () => {
   it('does not crash on a malformed file URL', () => {
     render(<ChatWidgetView widget={{ type: 'video', src: 'file:///%E0%A4%A' }} />);
     expect(document.querySelector('video')).toHaveAttribute('src', '');
+  });
+
+  it('lets the reader move through an explainer and exposes its evidence', () => {
+    render(<ChatWidgetView widget={widgets[7]!} />);
+    expect(screen.getByRole('img', { name: 'Session recovery diagram, step 1 of 3' })).toBeVisible();
+    expect(screen.getByText('Connection drops')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Step 2: Events replay' }));
+    expect(screen.getByRole('img', { name: 'Session recovery diagram, step 2 of 3' })).toBeVisible();
+    expect(screen.getByText('Events replay')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Session store:84' })).toBeVisible();
+  });
+
+  it('offers playback without forcing motion on a reader who asked for less', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+    render(<ChatWidgetView widget={widgets[7]!} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Play explanation' }));
+    expect(screen.getByRole('button', { name: 'Pause explanation' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Session recovery diagram, step 1 of 3' })).toBeVisible();
+    vi.unstubAllGlobals();
   });
 });

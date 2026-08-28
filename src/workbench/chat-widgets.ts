@@ -23,7 +23,16 @@ export type TableWidget = {
 export type VideoWidget = {
   type: 'video'; title?: string; src: string; poster?: string;
 };
-export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget;
+export type ExplainerWidget = {
+  type: 'explainer';
+  title?: string;
+  summary?: string;
+  nodes: Array<{ id: string; label: string; detail?: string }>;
+  edges: Array<{ from: string; to: string; label?: string }>;
+  steps: Array<{ label: string; detail?: string; active: string[] }>;
+  evidence?: Array<{ label: string; path: string; line?: number }>;
+};
+export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ExplainerWidget;
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -32,9 +41,15 @@ const title = (value: unknown) => value === undefined || text(value);
 const mediaSource = (value: unknown): value is string => typeof value === 'string'
   && value.trim().length > 0 && value.length <= 4096
   && (/^(https?:|data:video\/|blob:|file:)/.test(value) || value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value));
+const path = (value: unknown): value is string => typeof value === 'string'
+  && value.trim().length > 0 && value.length <= 4096
+  && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value));
 
 export function widget(value: unknown): ChatWidget | null {
   if (!object(value) || !text(value.type) || !title(value.title)) return null;
+  const nodes = value.nodes;
+  const edges = value.edges;
+  const steps = value.steps;
   if (value.type === 'metrics' && Array.isArray(value.items) && value.items.length > 0 && value.items.length <= 6) {
     const items = value.items;
     if (items.every((item) => object(item) && text(item.label) && text(item.value)
@@ -57,6 +72,24 @@ export function widget(value: unknown): ChatWidget | null {
       && (item.status === undefined || ['done', 'current', 'next'].includes(String(item.status))))) return value as TimelineWidget;
   if (value.type === 'video' && mediaSource(value.src)
     && (value.poster === undefined || mediaSource(value.poster))) return value as VideoWidget;
+  if (value.type === 'explainer' && (value.summary === undefined || text(value.summary))
+    && Array.isArray(nodes) && nodes.length >= 2 && nodes.length <= 12
+    && nodes.every((node) => object(node) && text(node.id) && text(node.label)
+      && (node.detail === undefined || text(node.detail)))
+    && new Set(nodes.map((node) => object(node) ? node.id : null)).size === nodes.length
+    && Array.isArray(edges) && edges.length > 0 && edges.length <= 20
+    && edges.every((edge) => object(edge) && text(edge.from) && text(edge.to)
+      && (edge.label === undefined || text(edge.label))
+      && nodes.some((node) => object(node) && node.id === edge.from)
+      && nodes.some((node) => object(node) && node.id === edge.to))
+    && Array.isArray(steps) && steps.length > 0 && steps.length <= 12
+    && steps.every((step) => object(step) && text(step.label)
+      && (step.detail === undefined || text(step.detail))
+      && Array.isArray(step.active) && step.active.length > 0
+      && step.active.every((id) => text(id) && nodes.some((node) => object(node) && node.id === id)))
+    && (value.evidence === undefined || (Array.isArray(value.evidence) && value.evidence.length <= 12
+      && value.evidence.every((item) => object(item) && text(item.label) && path(item.path)
+        && (item.line === undefined || (Number.isInteger(item.line) && Number(item.line) > 0)))))) return value as ExplainerWidget;
   const columns = value.columns;
   if (value.type === 'table' && Array.isArray(columns) && columns.length > 0 && columns.length <= 8
     && columns.every(text) && Array.isArray(value.rows) && value.rows.length <= 30
