@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
 import { apiUrl } from '@/lib/api-base';
@@ -74,13 +75,13 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
           <Heading title={widget.title} />
           {widget.summary && <p className="-mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">{widget.summary}</p>}
         </div>
-        {widget.steps.length > 1 && <button type="button" aria-label={playing ? 'Pause explanation' : 'Play explanation'} aria-pressed={playing}
-          onClick={() => setPlaying((value) => !value)} className="grid size-8 shrink-0 place-items-center rounded-full border bg-background text-foreground transition-colors hover:bg-accent motion-reduce:transition-none">
+        {widget.steps.length > 1 && <Button type="button" variant="outline" size="icon" radius="full" aria-label={playing ? 'Pause explanation' : 'Play explanation'} aria-pressed={playing}
+          onClick={() => setPlaying((value) => !value)} className="size-8">
           {playing ? <Pause className="size-3.5" /> : <Play className="ml-0.5 size-3.5" />}
-        </button>}
+        </Button>}
       </div>
 
-      <div role="img" aria-label={`${widget.title ?? 'Concept'} diagram, step ${step + 1} of ${widget.steps.length}`} className="rounded-lg border bg-muted/20 p-3">
+      <Panel role="img" aria-label={`${widget.title ?? 'Concept'} diagram, step ${step + 1} of ${widget.steps.length}`} tone="frame" className="bg-muted/20 p-3">
         <div className="flex items-stretch gap-1 overflow-x-auto pb-1">
           {widget.nodes.map((node, index) => {
             const lit = active.has(node.id);
@@ -88,10 +89,10 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
               ? widget.edges.find((candidate) => candidate.from === node.id && candidate.to === widget.nodes[index + 1]!.id)
               : undefined;
             return <div key={node.id} className="contents">
-              <div data-active={lit} className={`min-w-28 flex-1 rounded-md border p-2.5 transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20' : 'bg-background opacity-55'}`}>
+              <Panel data-active={lit} tone="frame" className={`min-w-28 flex-1 p-2.5 transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20' : 'bg-background opacity-55'}`}>
                 <div className="text-xs font-semibold text-foreground">{node.label}</div>
                 {node.detail && <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{node.detail}</div>}
-              </div>
+              </Panel>
               {index < widget.nodes.length - 1 && <div className={`flex min-w-7 flex-col items-center justify-center transition-opacity duration-500 motion-reduce:transition-none ${lit ? 'opacity-100' : 'opacity-35'}`}>
                 {edge?.label && <span className="max-w-16 truncate text-[9px] text-muted-foreground">{edge.label}</span>}
                 <ChevronRight className={`size-4 ${lit && playing ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
@@ -99,21 +100,21 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
             </div>;
           })}
         </div>
-      </div>
+      </Panel>
 
       <div className="mt-3" aria-live="polite">
         <div className="text-sm font-medium text-foreground">{current.label}</div>
         {current.detail && <p className="mt-0.5 text-xs text-muted-foreground">{current.detail}</p>}
       </div>
       <div className="mt-2 flex gap-1" aria-label="Explanation steps">
-        {widget.steps.map((item, index) => <button key={`${item.label}-${index}`} type="button" aria-label={`Step ${index + 1}: ${item.label}`} aria-current={index === step ? 'step' : undefined}
+        {widget.steps.map((item, index) => <Button key={`${item.label}-${index}`} type="button" variant="ghost" aria-label={`Step ${index + 1}: ${item.label}`} aria-current={index === step ? 'step' : undefined}
           onClick={() => { setStep(index); setPlaying(false); }} className={`h-1.5 flex-1 rounded-full transition-colors motion-reduce:transition-none ${index === step ? 'bg-primary' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
       </div>
       {widget.evidence && widget.evidence.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
-        {widget.evidence.map((item) => <button type="button" key={`${item.path}:${item.line ?? ''}`} onClick={() => openLocalPath(item.path, 'vscode', item.line)}
-          className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground motion-reduce:transition-none">
+        {widget.evidence.map((item) => <Button type="button" key={`${item.path}:${item.line ?? ''}`} variant="secondary" size="xs" onClick={() => openLocalPath(item.path, 'vscode', item.line)}
+          className="text-[11px] text-muted-foreground hover:text-foreground">
           <FileCode2 className="size-3" />{item.label}{item.line ? `:${item.line}` : ''}
-        </button>)}
+        </Button>)}
       </div>}
     </Panel>
   );
