@@ -5,6 +5,8 @@
     machinery/checks <card>     the same, against a checks step you name yourself
     machinery/checks --all      every suite the project declares, whatever changed
     machinery/checks --dry      say which suites it would run and why, and touch nothing
+    machinery/checks --record npm-test=412/0
+                                record results already run, without running again
 
 The checks step was four things a session did by hand: read what the branch
 changed, decide which suites that asks for, run them, and write down what came
@@ -27,6 +29,12 @@ landed, and the note still read green.
 and never invents one. A project whose declared line this cannot take apart runs
 the whole line as a single suite, which is the old behaviour and is still right.
 Machinery does not add a suite that grades Machinery itself.
+
+`--record` is the explicit escape hatch for suites already run by hand. It
+writes the same current-tree proof, but marks the note as manually recorded and
+accepts only names from the project's declared checks. The person recording it
+is responsible for the counts; stale-tree and red-result checks remain exactly
+the same.
 """
 import argparse
 import importlib.machinery
@@ -225,6 +233,33 @@ def told(said):
     return out
 
 
+def recorded(said, declared):
+    """Results supplied for suites already run, checked against the declaration.
+
+    This deliberately does not pretend it observed the run. It only makes the
+    manual route precise: a declared suite name, passed/failed integer counts,
+    and the current tree hash written into the note by this tool.
+    """
+    allowed = {suite.name: suite for suite in declared}
+    rows = []
+    for one in said or []:
+        name, sep, counts = one.partition("=")
+        match = re.fullmatch(r"(\d+)/(\d+)", counts.strip()) if sep else None
+        if not match:
+            raise SystemExit("--record must be NAME=PASSED/FAILED, got %r" % one)
+        name = name.strip()
+        if name not in allowed:
+            raise SystemExit("--record names %s, but this project declares only: %s"
+                             % (name or "nothing", ", ".join(sorted(allowed)) or "nothing"))
+        if any(row["name"] == name for row in rows):
+            raise SystemExit("--record names %s more than once" % name)
+        passed, failed = int(match.group(1)), int(match.group(2))
+        rows.append({"name": name, "command": allowed[name].command,
+                     "ok": failed == 0, "out": "", "log": "manually recorded",
+                     "passed": passed, "failed": failed})
+    return rows
+
+
 def changed(where, trunk, job=""):
     """Every file this job has changed, and whether it read them off the trunk.
 
@@ -348,7 +383,7 @@ def run_line(picked, where, log_dir):
     return rows
 
 
-def note(hash_of_tree, rows, log_dir):
+def note(hash_of_tree, rows, log_dir, manual=False):
     """What goes on the card: the line the gate reads, then where to look."""
     said = ["checks: tree %s %s"
             % (hash_of_tree,
@@ -358,7 +393,8 @@ def note(hash_of_tree, rows, log_dir):
         tail = "\n".join(COLOUR.sub("", red["out"]).rstrip().splitlines()[-TAIL:])
         said.append("`%s` went red. The last %d lines of it:\n\n%s"
                     % (red["command"], TAIL, tail))
-    said.append("The full output is in %s" % log_dir)
+    said.append(("These counts were explicitly recorded without rerunning the suites."
+                 if manual else "The full output is in %s" % log_dir))
     return "\n\n".join(said)
 
 
@@ -396,7 +432,12 @@ def main():
                     help="say which suites it would run and why, and touch nothing")
     ap.add_argument("--suites", action="append", metavar="NAME=COMMAND",
                     help="run these instead of the declared line, for the cases")
+    ap.add_argument("--record", action="append", metavar="NAME=PASSED/FAILED",
+                    help="record an already-run declared suite without running it again")
     a = ap.parse_args()
+
+    if a.record and (a.suites or a.dry or a.all):
+        ap.error("--record cannot be combined with --suites, --dry, or --all")
 
     # Project policy is personal metadata shared by the main checkout and all
     # linked worktrees. Commands still run with HERE_TREE as their cwd below.
@@ -411,7 +452,7 @@ def main():
     actor = me()
     cid = a.card
     standalone = a.all and not cid
-    if not cid and not a.suites and not standalone:
+    if not cid and not a.suites and not a.record and not standalone:
         cid, why_not = open_step(actor, session)
         if not cid and not a.dry:
             sys.exit(why_not)
@@ -445,23 +486,29 @@ def main():
     if not cid and not standalone:
         sys.exit("no checks step to run this for: name the card")
 
-    if not picked:
+    if not picked and not a.record:
         sys.exit("nothing this branch changed asks for a suite, so none was run. Write "
                  "that on %s yourself, or run `machinery/checks --all`." % cid)
 
-    log_dir = runs_dir(cid or "all")
     hash_of_tree = tree()
     if not hash_of_tree:
         sys.exit("git could not name the tree in %s, so nothing here could say which "
                  "code the suites ran over. Fix that first." % HERE_TREE)
 
-    print("%s: running %s over tree %s"
-          % (cid or "all", ", ".join(s.name for s in picked), hash_of_tree[:12]))
-    rows = run_line(picked, HERE_TREE, log_dir)
+    manual = bool(a.record)
+    log_dir = runs_dir(cid or "all") if not manual else "manually recorded"
+    if manual:
+        rows = recorded(a.record, every)
+        print("%s: recording %s over tree %s without rerunning"
+              % (cid, ", ".join(r["name"] for r in rows), hash_of_tree[:12]))
+    else:
+        print("%s: running %s over tree %s"
+              % (cid or "all", ", ".join(s.name for s in picked), hash_of_tree[:12]))
+        rows = run_line(picked, HERE_TREE, log_dir)
     for row in rows:
         print("  %-16s %s  %s" % (row["name"], "ok " if row["ok"] else "RED",
                                   token(row["name"], row["passed"], row["failed"])))
-    body = note(hash_of_tree, rows, log_dir)
+    body = note(hash_of_tree, rows, log_dir, manual)
     red = next((r for r in rows if not r["ok"]), None)
     if standalone:
         if red:
