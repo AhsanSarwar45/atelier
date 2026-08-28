@@ -86,6 +86,8 @@ function aChatWithPicturesIn(projectPath: string, count = 1) {
   const dir = recordDir(projectPath);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${chat.id}.jsonl`);
+  const proof = join(projectPath, 'agent-files-screen.png');
+  writeFileSync(proof, quadrantPng(240));
   const markers = Array.from({ length: count }, (_, i) => `[Image #${i + 1}]`).join(' ');
   const asked = row(chat, null, 'user', [
     { type: 'text', text: `${ASKED} ${markers}` },
@@ -93,7 +95,10 @@ function aChatWithPicturesIn(projectPath: string, count = 1) {
     // inheriting one shape from the pictures themselves.
     ...Array.from({ length: count }, (_, i) => picture(120 + i * 40)),
   ]);
-  const answered = row(chat, asked.uuid, 'assistant', [{ type: 'text', text: ANSWERED }]);
+  const answered = row(chat, asked.uuid, 'assistant', [{
+    type: 'text',
+    text: `${ANSWERED}\n\n![Agent files desktop screen](<${proof}>)`,
+  }]);
   writeFileSync(file, `${asked.text}\n${answered.text}\n`);
   return { ...chat, forget: () => rmSync(file, { force: true }) };
 }
@@ -166,6 +171,13 @@ test.describe('a picture in a chat that already happened', () => {
       const thumbnail = page.getByTestId('user-message').getByTestId('message-image').first();
       await expect(thumbnail, 'the picture in the record was not drawn').toBeVisible({ timeout: 60_000 });
       await expect(thumbnail).toHaveJSProperty('naturalWidth', 120);
+
+      // An agent's Markdown image names a host file. The browser receives it
+      // through the guarded media route instead of drawing only its alt label.
+      const markdownPicture = page.getByTestId('markdown-local-image');
+      await expect(markdownPicture).toBeVisible();
+      await expect(markdownPicture).toHaveJSProperty('naturalWidth', 240);
+      await page.screenshot({ path: join(SHOTS, 'chat-local-markdown-image.png'), fullPage: false });
 
       // 2. The marker the harness wrote is gone, and the words around it stand.
       await expect(page.getByTestId('user-message').first()).toContainText(ASKED);

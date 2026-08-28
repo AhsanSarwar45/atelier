@@ -106,6 +106,18 @@ function localTarget(href: string): LocalTarget | null {
   };
 }
 
+/**
+ * A browser cannot read an agent's absolute filesystem path directly. Send
+ * local pictures through the backend's origin-checked, path-checked media
+ * route; the route returns 403/404 for anything the app is not allowed to
+ * expose, leaving the image's alt text as the safe failure state.
+ */
+function localImageSource(src: string): string | null {
+  const target = localTarget(src);
+  if (!target || target.line !== null) return null;
+  return `/api/fs/media?path=${encodeURIComponent(target.path)}`;
+}
+
 export function MarkdownBody({
   children,
   className,
@@ -124,6 +136,18 @@ export function MarkdownBody({
         remarkPlugins={[remarkGfm, remarkBreaks]}
         rehypePlugins={mentions ? [rehypeHighlight, [rehypeMentions, mentions.split]] : [rehypeHighlight]}
         components={{
+          img: ({ node, ...props }) => {
+            const src = String(props.src ?? '');
+            const local = localImageSource(src);
+            return (
+              <img
+                {...props}
+                src={local ?? src}
+                className={cn('max-h-[70vh] max-w-full rounded-lg object-contain', props.className)}
+                data-testid={local ? 'markdown-local-image' : 'markdown-image'}
+              />
+            );
+          },
           // A link leaves for its own tab and cannot reach back into this one —
           // unless it names something of ours, in which case it is a chip, and
           // opens where every other chip opens: inside this window.

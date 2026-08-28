@@ -68,3 +68,26 @@ describe('Markdown file links', () => {
     })));
   });
 });
+
+describe('Markdown images', () => {
+  it('serves an absolute local picture through the guarded media route', () => {
+    render(<MarkdownBody>{'![Agent files desktop screen](</home/me/My Screenshot.png>)'}</MarkdownBody>);
+
+    expect(screen.getByAltText('Agent files desktop screen')).toHaveAttribute(
+      'src',
+      '/api/fs/media?path=%2Fhome%2Fme%2FMy%20Screenshot.png',
+    );
+  });
+
+  it('leaves a web picture at its original address', () => {
+    render(<MarkdownBody>{'![Remote proof](https://example.com/proof.png)'}</MarkdownBody>);
+
+    expect(screen.getByAltText('Remote proof')).toHaveAttribute('src', 'https://example.com/proof.png');
+  });
+
+  it('does not route a forbidden temporary path through local media', () => {
+    render(<MarkdownBody>{'![Private file](</tmp/private.png>)'}</MarkdownBody>);
+
+    expect(screen.getByAltText('Private file')).toHaveAttribute('src', '/tmp/private.png');
+  });
+});
