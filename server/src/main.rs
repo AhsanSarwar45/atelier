@@ -438,6 +438,11 @@ async fn serve(open_browser: bool) {
     // nobody waiting (bw-uiyz.18).
     routes::beads::read_boards_ahead(dolt_manager.clone(), database.clone());
 
+    // Empty at startup and filled by whoever opens a shell. It belongs to the
+    // process rather than to a connection, which is the whole reason a build
+    // left running survives a reload (terminal/register.rs).
+    let shells: terminal::register::Shells = Arc::default();
+
     // Build the router
     let app = Router::new()
         .route("/api/health", get(routes::health))
@@ -494,11 +499,14 @@ async fn serve(open_browser: bool) {
         // the open chat, each event tagged (routes/live.rs, bw-zkh4).
         .route("/api/live", get(routes::live::live))
         .nest("/api/workbench", routes::workbench::router())
-        // The one nest that hands out a shell, so the one nest that first asks
-        // whether the caller is really talking to this machine (local_host.rs).
+        // The shells are held by this process and not by any socket, so a page
+        // that reloads finds what it left running (terminal/register.rs). The
+        // guard that asks whether the caller is really talking to this machine
+        // is fixed to these routes inside `terminal::routes::router`, where
+        // nothing can mount them without it.
         .nest(
-            "/api/terminal",
-            Router::new().layer(middleware::from_fn(local_host::require_local_host)),
+            terminal::routes::MOUNTED_AT,
+            terminal::routes::router(shells),
         )
         .route("/api/version/check", get(routes::version::version_check))
         .route("/api/update", post(routes::version::perform_update))
