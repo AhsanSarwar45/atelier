@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { auditCommandLabel, explicitCommandIntent } from '@/workbench/command-label-audit';
+import { auditCommandLabel, commandLabelProfile, explicitCommandIntent } from '@/workbench/command-label-audit';
 
 describe('command label evidence', () => {
   it('does not mistake a friendly sentence for proof that it is correct', () => {
@@ -15,10 +15,10 @@ describe('command label evidence', () => {
     })).toEqual({ status: 'verified', intent: 'help' });
   });
 
-  it('keeps ordinary friendly labels unverified', () => {
+  it('verifies structural labels with an independent command-family oracle', () => {
     expect(auditCommandLabel('git status', {
       said: 'Checked the working tree', kind: 'vcs', grave: false,
-    })).toEqual({ status: 'unverified' });
+    })).toEqual({ status: 'verified', intent: 'git' });
   });
 
   it('distinguishes uncovered explicit intent from a false label', () => {
@@ -33,7 +33,32 @@ describe('command label evidence', () => {
   it('recognises dry runs and destructive commands independently', () => {
     expect(explicitCommandIntent('npm install --dry-run')).toBe('dry-run');
     expect(explicitCommandIntent('git reset --hard HEAD')).toBe('destructive');
-    expect(explicitCommandIntent('git clean -n')).toBeNull();
+    expect(explicitCommandIntent('git clean -n')).toBe('dry-run');
     expect(explicitCommandIntent('kill -0 123')).toBeNull();
+    expect(explicitCommandIntent('git -C /private/repo branch -d old')).toBe('destructive');
+  });
+
+  it('catches the recurring semantic mismatches found by the profile scan', () => {
+    expect(auditCommandLabel('git -C /private/repo branch -d old', {
+      said: 'Listed the branches', kind: 'vcs', grave: false,
+    }).status).toBe('contradiction');
+    expect(auditCommandLabel('next dev', {
+      said: 'Started the app', kind: 'build', grave: false,
+    }).status).toBe('contradiction');
+    expect(auditCommandLabel('awk "{print $1}" private.tsv', {
+      said: 'Picked fields out of a file', kind: 'edit', grave: false,
+    }).status).toBe('contradiction');
+  });
+
+  it('profiles behavior without retaining command arguments', () => {
+    expect(commandLabelProfile('git -C /private/repo push secret --force-with-lease', {
+      said: 'Force-pushed', kind: 'grave', grave: true,
+    })).toBe('git|push|--force-with-lease|Force-pushed|grave|grave');
+    expect(commandLabelProfile("rg 'private phrase' /private/repo", {
+      said: 'Searched for private phrase', kind: 'search', grave: false,
+    })).toBe('rg|-|-|Searched|search|ordinary');
+    expect(commandLabelProfile('bd update private --notes "--dry"', {
+      said: 'Updated private', kind: 'board', grave: false,
+    })).toBe('bd|update|value:--dry|Updated|board|ordinary');
   });
 });

@@ -17,11 +17,12 @@ import './at-alias.mjs';
 process.removeAllListeners('warning');
 
 const { isCodeModeEnvelope, normalizeCommands } = await import('../src/workbench/command-normalization.ts');
-const { auditCommandLabel } = await import('../src/workbench/command-label-audit.ts');
+const { auditCommandLabel, commandLabelProfile } = await import('../src/workbench/command-label-audit.ts');
 const { normalizeServiceAction } = await import('../src/workbench/service-action.ts');
 const { whatACommandDid, whatItRan } = await import('../src/workbench/said-what-it-ran.ts');
 
 const JSON_OUT = process.argv.includes('--json');
+const VERIFY_LABELS = process.argv.includes('--verify-labels');
 const CLAUDE_ROOT = process.env.CLAUDE_SESSIONS ?? join(homedir(), '.claude', 'projects');
 const CODEX_ROOT = process.env.CODEX_SESSIONS ?? join(homedir(), '.codex', 'sessions');
 
@@ -49,6 +50,7 @@ const report = {
   commandIntents: {},
   contradictions: {},
   contradictionLabels: {},
+  profiles: { commands: {}, services: {} },
   boundaries: {},
   unknown: {},
 };
@@ -77,6 +79,8 @@ function commandCandidate(raw, source = 'direct') {
       report.commandLabels.covered += 1;
     }
     const verdict = auditCommandLabel(command.command, ran);
+    const profile = commandLabelProfile(command.command, ran);
+    if (profile) count(report.profiles.commands, profile);
     if (verdict.status === 'verified') report.commandLabels.verifiedCorrect += 1;
     else if (verdict.status === 'contradiction') {
       report.commandLabels.knownWrong += 1;
@@ -235,6 +239,9 @@ const orderedUnknown = Object.fromEntries(
   Object.entries(report.unknown).sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0])),
 );
 report.unknown = orderedUnknown;
+report.profiles.commands = Object.fromEntries(
+  Object.entries(report.profiles.commands).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+);
 
 if (JSON_OUT) {
   console.log(JSON.stringify(report, null, 2));
@@ -242,6 +249,7 @@ if (JSON_OUT) {
   console.log(`${report.records.claude} Claude and ${report.records.codex} Codex records`);
   console.log(`${report.commands.semantic} semantic commands from ${report.commands.envelopes} envelopes; ${report.commands.named} named, ${report.commands.wrapped} unwrapped, ${report.commands.opaque} opaque`);
   console.log(`${report.commandLabels.covered} command labels covered; ${report.commandLabels.verifiedCorrect} verified intent-correct, ${report.commandLabels.knownWrong} known wrong, ${report.commandLabels.unverified} labelled but unverified, ${report.commandLabels.uncovered} uncovered`);
+  console.log(`${Object.keys(report.profiles.commands).length} privacy-safe command signature groups`);
   for (const [reason, count] of Object.entries(report.contradictions).sort((a, b) => b[1] - a[1])) {
     console.log(`  ${String(count).padStart(7)}  ${reason}`);
   }
@@ -251,3 +259,5 @@ if (JSON_OUT) {
     console.log(`  ${String(held.count).padStart(7)}  ${signature}  (${held.sample})`);
   }
 }
+
+if (VERIFY_LABELS && report.commandLabels.knownWrong > 0) process.exitCode = 1;
