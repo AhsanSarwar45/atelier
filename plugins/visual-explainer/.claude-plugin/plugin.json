@@ -1,0 +1,8 @@
+{
+  "name": "visual-explainer",
+  "version": "0.1.0",
+  "description": "Turns complex concepts into safe, interactive Atelier explainers with animation steps and source evidence.",
+  "author": {
+    "name": "Atelier"
+  }
+}
