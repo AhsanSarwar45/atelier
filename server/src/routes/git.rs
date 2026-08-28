@@ -88,7 +88,12 @@ pub async fn branch_status(GitQuery(params): GitQuery<GitStatusParams>) -> Answe
 /// Check if a branch exists in the repository.
 async fn check_branch_exists(repo: &Path, branch: &str) -> bool {
     let output = Command::new("git")
-        .args(["rev-parse", "--verify", branch])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
         .current_dir(repo)
         .output()
         .await;
@@ -1028,6 +1033,20 @@ pub async fn log(GitQuery(params): GitQuery<LogParams>) -> Answer {
 mod tests {
     use super::*;
 
+    fn git(repo: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
     #[test]
     fn test_branch_status_response_serialization() {
         let response = BranchStatusResponse {
@@ -1041,6 +1060,25 @@ mod tests {
         assert!(json.contains("\"ahead\":5"));
         assert!(json.contains("\"behind\":2"));
         assert!(json.contains("\"dirty\":false"));
+    }
+
+    #[tokio::test]
+    async fn branch_exists_distinguishes_lines_of_work_from_other_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-q"]);
+        git(repo, &["config", "user.name", "Atelier test"]);
+        git(repo, &["config", "user.email", "atelier@example.invalid"]);
+        std::fs::write(repo.join("kept"), "one\n").unwrap();
+        git(repo, &["add", "kept"]);
+        git(repo, &["commit", "-qm", "first"]);
+        git(repo, &["branch", "real-work"]);
+        git(repo, &["tag", "release-name"]);
+        let revision = git(repo, &["rev-parse", "HEAD"]);
+
+        assert!(check_branch_exists(repo, "real-work").await);
+        assert!(!check_branch_exists(repo, "release-name").await);
+        assert!(!check_branch_exists(repo, &revision).await);
     }
 }
 
