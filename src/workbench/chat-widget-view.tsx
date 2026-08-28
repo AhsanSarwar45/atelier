@@ -12,6 +12,11 @@ import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-
 import { openLocalPath } from '@/workbench/open-local-path';
 
 const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
+const EXPLAINER_ACCENTS = ['var(--color-info-accent)', 'var(--color-warning-accent)', 'var(--color-success-accent)', 'var(--color-primary-accent)', 'var(--color-destructive-accent)'];
+
+function explainerAccent(index: number): string {
+  return EXPLAINER_ACCENTS[index % EXPLAINER_ACCENTS.length]!;
+}
 
 function Heading({ title }: { title?: string }) {
   return title ? <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4> : null;
@@ -56,8 +61,17 @@ function Chart({ widget }: { widget: ChartWidget }) {
   );
 }
 
-function NodeCard({ node, lit, className = '' }: { node: ExplainerWidget['nodes'][number]; lit: boolean; className?: string }) {
-  return <Panel data-node={node.id} data-active={lit} tone="frame" className={`p-2.5 transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20' : 'bg-background opacity-45'} ${className}`}>
+function NodeCard({ node, lit, accent, className = '' }: { node: ExplainerWidget['nodes'][number]; lit: boolean; accent: string; className?: string }) {
+  return <Panel data-node={node.id} data-active={lit} data-accent={accent} tone="frame"
+    style={{
+      borderColor: `color-mix(in srgb, ${accent} ${lit ? 85 : 38}%, transparent)`,
+      background: lit
+        ? `linear-gradient(135deg, color-mix(in srgb, ${accent} 25%, var(--color-surface-base)), color-mix(in srgb, ${accent} 10%, var(--color-surface-base)))`
+        : `color-mix(in srgb, ${accent} 7%, var(--color-surface-base))`,
+      boxShadow: lit ? `0 0 0 1px color-mix(in srgb, ${accent} 30%, transparent), 0 8px 24px color-mix(in srgb, ${accent} 18%, transparent)` : undefined,
+    }}
+    className={`relative overflow-hidden p-2.5 transition-all duration-500 motion-reduce:transition-none ${lit ? 'opacity-100' : 'opacity-65'} ${className}`}>
+    <span aria-hidden className="absolute inset-y-0 left-0 w-1" style={{ background: accent }} />
     <div className="text-xs font-semibold text-foreground">{node.label}</div>
     {node.detail && <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{node.detail}</div>}
   </Panel>;
@@ -65,11 +79,13 @@ function NodeCard({ node, lit, className = '' }: { node: ExplainerWidget['nodes'
 
 function FlowDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
   return <div className="grid grid-cols-3 gap-2">
-    {widget.nodes.map((node) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />)}
+    {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />)}
     <div className="col-span-3 flex flex-wrap gap-1.5 pt-1">
-      {widget.edges.map((edge) => <span key={`${edge.from}-${edge.to}`} className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] transition-all duration-500 motion-reduce:transition-none ${active.has(edge.from) || active.has(edge.to) ? 'border-primary/60 bg-primary/10 text-foreground' : 'opacity-35'}`}>
+      {widget.edges.map((edge) => { const accent = explainerAccent(Math.max(0, widget.nodes.findIndex((node) => node.id === edge.from))); const lit = active.has(edge.from) || active.has(edge.to); return <span key={`${edge.from}-${edge.to}`} data-accent={accent}
+        style={{ borderColor: `color-mix(in srgb, ${accent} ${lit ? 75 : 30}%, transparent)`, background: `color-mix(in srgb, ${accent} ${lit ? 15 : 5}%, transparent)` }}
+        className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] transition-all duration-500 motion-reduce:transition-none ${lit ? 'text-foreground' : 'opacity-50'}`}>
         {edge.from}<ChevronRight className="size-3" />{edge.label ?? edge.to}
-      </span>)}
+      </span>; })}
     </div>
   </div>;
 }
@@ -78,15 +94,15 @@ function SequenceDiagram({ widget, active, playing }: { widget: ExplainerWidget;
   const at = (id: string) => Math.max(0, widget.nodes.findIndex((node) => node.id === id));
   return <div className="min-w-[28rem]">
     <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(5rem, 1fr))` }}>
-      {widget.nodes.map((node) => <div key={node.id} className="text-center"><NodeCard node={node} lit={active.has(node.id)} /><div className="mx-auto h-5 w-px border-l border-dashed border-muted-foreground/30" /></div>)}
+      {widget.nodes.map((node, index) => <div key={node.id} className="text-center"><NodeCard node={node} lit={active.has(node.id)} accent={explainerAccent(index)} /><div className="mx-auto h-5 w-px border-l border-dashed" style={{ borderColor: `color-mix(in srgb, ${explainerAccent(index)} 45%, transparent)` }} /></div>)}
     </div>
     <div className="space-y-2">
       {widget.edges.map((edge) => {
-        const from = at(edge.from); const to = at(edge.to); const lit = active.has(edge.from) || active.has(edge.to);
+        const from = at(edge.from); const to = at(edge.to); const lit = active.has(edge.from) || active.has(edge.to); const accent = explainerAccent(from);
         return <div key={`${edge.from}-${edge.to}`} className="grid h-7 items-center" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(5rem, 1fr))` }}>
-          <div className={`relative border-t transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary' : 'border-muted-foreground/20'}`} style={{ gridColumn: `${Math.min(from, to) + 1} / ${Math.max(from, to) + 2}` }}>
+          <div data-accent={accent} className="relative border-t-2 transition-all duration-500 motion-reduce:transition-none" style={{ gridColumn: `${Math.min(from, to) + 1} / ${Math.max(from, to) + 2}`, borderColor: `color-mix(in srgb, ${accent} ${lit ? 90 : 28}%, transparent)` }}>
             <span className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap bg-background px-1 text-[9px] text-muted-foreground">{edge.label ?? `${edge.from} → ${edge.to}`}</span>
-            <span className={`absolute -top-1.5 size-3 rounded-full bg-primary transition-[left] duration-700 motion-reduce:transition-none ${lit && playing ? 'animate-ping motion-reduce:animate-none' : ''}`} style={{ left: lit ? (from <= to ? '100%' : '0%') : (from <= to ? '0%' : '100%') }} />
+            <span className={`absolute -top-1.5 size-3 rounded-full transition-[left] duration-700 motion-reduce:transition-none ${lit && playing ? 'animate-ping motion-reduce:animate-none' : ''}`} style={{ left: lit ? (from <= to ? '100%' : '0%') : (from <= to ? '0%' : '100%'), background: accent, boxShadow: `0 0 12px ${accent}` }} />
           </div>
         </div>;
       })}
@@ -96,12 +112,15 @@ function SequenceDiagram({ widget, active, playing }: { widget: ExplainerWidget;
 
 function CycleDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
   return <div className="relative mx-auto h-64 max-w-md">
-    <div className={`absolute left-1/2 top-1/2 size-24 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-primary/40 ${playing ? 'animate-spin motion-reduce:animate-none' : ''}`} />
+    <div className={`absolute left-1/2 top-1/2 size-24 -translate-x-1/2 -translate-y-1/2 rounded-full p-[2px] ${playing ? 'animate-spin motion-reduce:animate-none' : ''}`}
+      style={{ background: `conic-gradient(${EXPLAINER_ACCENTS.slice(0, 4).join(', ')}, ${EXPLAINER_ACCENTS[0]})`, opacity: playing ? 1 : .65 }}>
+      <div className="size-full rounded-full bg-background" />
+    </div>
     <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Repeat</div>
     {widget.nodes.map((node, index) => {
       const angle = (index / widget.nodes.length) * Math.PI * 2 - Math.PI / 2;
       return <div key={node.id} className="absolute w-28 -translate-x-1/2 -translate-y-1/2" style={{ left: `${50 + Math.cos(angle) * 38}%`, top: `${50 + Math.sin(angle) * 38}%` }}>
-        <NodeCard node={node} lit={active.has(node.id)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />
+        <NodeCard node={node} lit={active.has(node.id)} accent={explainerAccent(index)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />
       </div>;
     })}
   </div>;
@@ -109,7 +128,7 @@ function CycleDiagram({ widget, active, playing }: { widget: ExplainerWidget; ac
 
 function LayersDiagram({ widget, active }: { widget: ExplainerWidget; active: Set<string> }) {
   return <div className="mx-auto flex max-w-md flex-col gap-1.5 py-2">
-    {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} className={`${active.has(node.id) ? 'translate-x-3' : ''}`} />)}
+    {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} accent={explainerAccent(index)} className={`${active.has(node.id) ? 'translate-x-3' : ''}`} />)}
   </div>;
 }
 
@@ -156,7 +175,8 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
       </div>
       <div className="mt-2 flex gap-1" aria-label="Explanation steps">
         {widget.steps.map((item, index) => <Button key={`${item.label}-${index}`} type="button" variant="ghost" aria-label={`Step ${index + 1}: ${item.label}`} aria-current={index === step ? 'step' : undefined}
-          onClick={() => { setStep(index); setPlaying(false); }} className={`h-1.5 flex-1 rounded-full transition-colors motion-reduce:transition-none ${index === step ? 'bg-primary' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
+          onClick={() => { setStep(index); setPlaying(false); }} style={index === step ? { background: explainerAccent(index) } : undefined}
+          className={`h-1.5 flex-1 rounded-full transition-colors motion-reduce:transition-none ${index === step ? '' : 'bg-muted hover:bg-muted-foreground/40'}`} />)}
       </div>
       {widget.evidence && widget.evidence.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
         {widget.evidence.map((item) => <Button type="button" key={`${item.path}:${item.line ?? ''}`} variant="secondary" size="xs" onClick={() => openLocalPath(item.path, 'vscode', item.line)}

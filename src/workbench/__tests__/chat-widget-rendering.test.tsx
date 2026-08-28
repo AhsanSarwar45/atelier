@@ -67,5 +67,7 @@ describe('chat widget rendering', () => {
     expect(diagram).toHaveAttribute('data-layout', layout);
     fireEvent.click(screen.getByRole('button', { name: 'Step 3: Streaming resumes' }));
     expect(diagram.querySelector('[data-node="live"]')).toHaveAttribute('data-active', 'true');
+    expect(diagram.querySelector('[data-node="drop"]')).toHaveAttribute('data-accent', 'var(--color-info-accent)');
+    expect(diagram.querySelector('[data-node="live"]')).toHaveAttribute('data-accent', 'var(--color-success-accent)');
   });
 });

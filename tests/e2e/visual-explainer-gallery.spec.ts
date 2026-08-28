@@ -55,8 +55,10 @@ test('four animated visual languages share one conversation', async ({ page, req
     const sequence = page.getByRole('img', { name: /Message sequence sequence diagram/ });
     await sequence.locator('..').getByRole('button', { name: 'Step 2: Move through the API' }).click();
     await expect(sequence.locator('[data-node="api"]')).toHaveAttribute('data-active', 'true');
+    await expect(sequence.locator('[data-node="client"]')).toHaveAttribute('data-accent', 'var(--color-info-accent)');
+    await expect(sequence.locator('[data-node="api"]')).toHaveAttribute('data-accent', 'var(--color-warning-accent)');
     await page.waitForTimeout(550);
     await page.getByRole('img', { name: /Branching flow flow diagram/ }).scrollIntoViewIfNeeded();
-    await page.screenshot({ path: 'tests/results/visual-explainer-gallery-after.png', fullPage: true });
+    await page.screenshot({ path: 'tests/results/visual-explainer-color-after.png', fullPage: true });
   } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
 });
