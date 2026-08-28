@@ -30,7 +30,7 @@ import { latest, type Recorded, windowNamed } from '../../src/workbench/context-
 import { NOTHING, type Split, type TaskSpend, taskSpend } from '../../src/workbench/token-picture.ts';
 import { NOT_OURS_TO_ASK, readWindow, type TokenPicture } from '../../src/workbench/window-now.ts';
 import { createDriver, defaultPermissionMode } from './drivers/index.ts';
-import { codexMenu, codexRolloutLine, codexRolloutPath, CodexDriver, readCodexThread, readCodexThreadUsage, seedCodexSnapshot } from './drivers/codex.ts';
+import { codexMenu, codexRolloutLine, codexRolloutPath, CodexDriver, readCodexThread, readCodexThreadUsage, replayCodexRollout, seedCodexSnapshot } from './drivers/codex.ts';
 import { toolTitle } from '../../src/workbench/said-what-it-ran.ts';
 import { boundedEvent } from './bounded-event.ts';
 import type { Driver, DriverEvent, PermissionAnswer } from './drivers/types.ts';
@@ -571,8 +571,7 @@ export class Sessions {
             this.publish(summary.id, { type: 'transcript.reset' });
             this.store.forgetImported(summary.id);
           }
-            const driver = new CodexDriver();
-            for (const line of readFileSync(path, 'utf8').split('\n')) codexRolloutLine(line, driver, (event) => this.publish(summary.id, event));
+            replayCodexRollout(readFileSync(path, 'utf8'), (event) => this.publish(summary.id, event));
           this.store.markImported(summary.id, IMPORT_RECIPE);
             this.store.rememberFollowed(summary.id, size, 0, IMPORT_RECIPE);
             return { at: size, through: null, carry: [], drawn: 0 };

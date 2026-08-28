@@ -123,6 +123,35 @@ describe('Codex live-runtime regressions', () => {
     expect(events).toContainEqual({ type: 'message.completed', messageId: 'reply' });
   });
 
+  it('shows persisted user messages with remote and local images', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'codex-user-history-'));
+    const path = join(folder, 'attached.png');
+    writeFileSync(path, Buffer.from('89504e470d0a1a0a', 'hex'));
+    try {
+      const events: BareEvent[] = [];
+      codexRolloutLine(JSON.stringify({
+        timestamp: '2026-08-28T05:00:01.000Z', type: 'event_msg', payload: {
+          type: 'user_message', message: 'Please keep this visible.',
+          images: ['data:image/png;base64,AA=='], local_images: [path],
+        },
+      }), new CodexDriver(), (event) => events.push(event));
+
+      expect(events[0]).toEqual({
+        type: 'message.started',
+        messageId: 'codex-user:2026-08-28T05:00:01.000Z',
+        role: 'user',
+      });
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'text.delta', text: 'Please keep this visible.',
+      }));
+      expect(events.filter((event) => event.type === 'image')).toHaveLength(2);
+      expect(events.at(-1)).toEqual({
+        type: 'message.completed',
+        messageId: 'codex-user:2026-08-28T05:00:01.000Z',
+      });
+    } finally { rmSync(folder, { recursive: true, force: true }); }
+  });
+
   it('does not repeat a reply recorded in both rollout shapes', () => {
     const events: BareEvent[] = [];
     const driver = new CodexDriver();

@@ -450,6 +450,33 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
     });
     return;
   }
+  if (row.type === 'event_msg' && payload.type === 'user_message') {
+    const messageId = String(payload.id ?? `codex-user:${row.timestamp ?? randomUUID()}`);
+    emit({ type: 'message.started', messageId, role: 'user' });
+    if (typeof payload.message === 'string' && payload.message) {
+      emit({ type: 'text.delta', messageId, text: payload.message });
+    }
+    for (const source of payload.images ?? []) {
+      const url = typeof source === 'string' ? source : source?.url;
+      if (typeof url !== 'string' || !url) continue;
+      emit({
+        type: 'image', messageId,
+        image: {
+          dataUrl: url,
+          mime: /^data:([^;,]+)/.exec(url)?.[1] ?? 'image/*',
+          alt: 'Attached image',
+        },
+      });
+    }
+    for (const source of payload.local_images ?? []) {
+      const path = typeof source === 'string' ? source : source?.path;
+      if (typeof path !== 'string' || !path) continue;
+      const image = localImagePayload(path);
+      if (image) emit({ type: 'image', messageId, image });
+    }
+    emit({ type: 'message.completed', messageId });
+    return;
+  }
   if (row.type === 'world_state' && Object.prototype.hasOwnProperty.call(payload.state?.environments ?? {}, 'subagents')) {
     driver.reconcileRolloutAgents(payload.state.environments.subagents);
     return;
@@ -513,6 +540,13 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
     driver.itemCompleted({ id: payload.call_id, type: 'dynamicToolCall', status: 'completed', result: payload.output });
     if ((driver as any).__rolloutApply === payload.call_id) (driver as any).__rolloutApply = null;
   }
+}
+
+/** Replay one complete rollout through the same line translator used by the
+ * incremental follower. This is the path an old Codex chat takes when opened. */
+export function replayCodexRollout(text: string, emit: (event: DriverEvent) => void): void {
+  const driver = new CodexDriver();
+  for (const line of text.split('\n')) codexRolloutLine(line, driver, emit);
 }
 
 export class CodexDriver implements Driver {
