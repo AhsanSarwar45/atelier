@@ -39,6 +39,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
+import { GitView } from '@/workbench/git-view';
 import type { AgentControl } from '@/workbench/protocol';
 import { SentAwayPanel } from '@/workbench/sent-away';
 
@@ -75,6 +76,45 @@ export function useRightRail(): [boolean, () => void] {
   return [open, flip];
 }
 
+/** Where the rail's choice of view is remembered between visits. */
+const GIT_VIEW = 'workbench.git-panel';
+
+/**
+ * Whether the rail is showing Git rather than what this chat has touched, and
+ * remembered (bw-8dp8.5).
+ *
+ * Remembered for the browser and not for one chat, like the rail's own
+ * open-or-shut above and like the kind filter's switches: it is a way of
+ * looking, and a manager who works out of this panel wants it there in the next
+ * chat too, not just the one he last pressed the button in (bw-qdim).
+ *
+ * Written where it is CHANGED for exactly the reason the rail above is: an
+ * effect that mirrors state back into storage runs once with the value the
+ * screen started at, and overwrites what was remembered before the effect that
+ * reads it has run.
+ *
+ * Shut by default, which the rail itself is not. The rail asks the screen's
+ * width, because a wide screen has room for a column beside the conversation
+ * either way; this asks nothing, because a chat nobody has pressed Git in
+ * should open on the chat.
+ */
+export function useGitPanel(): [boolean, () => void] {
+  const [showing, setShowing] = useState(false);
+
+  useEffect(() => {
+    setShowing(localStorage.getItem(GIT_VIEW) === '1');
+  }, []);
+
+  const flip = useCallback(() => {
+    setShowing((was) => {
+      localStorage.setItem(GIT_VIEW, was ? '0' : '1');
+      return !was;
+    });
+  }, []);
+
+  return [showing, flip];
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5 px-3 py-2">
@@ -83,6 +123,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </div>
   );
 }
+
+/**
+ * The two things the rail can be showing. One column, two views, because a
+ * second column beside this one leaves a phone with no conversation on it.
+ */
+export type RailView = 'chat' | 'git';
 
 export interface ChatRightRailProps {
   projectId: string | null;
@@ -99,6 +145,10 @@ export interface ChatRightRailProps {
   /** Opening one of them onto its own conversation. */
   onOpenAgent: (id: string) => void;
   open: boolean;
+  /** Which view is drawn. What this chat has touched, unless Git was asked for. */
+  view?: RailView;
+  /** The project's working directory — what every git call in the Git view runs against. */
+  projectPath?: string | null;
   /** Width of the in-row desktop column; the phone sheet stays 288px wide. */
   desktopWidth: number;
   /** Pointer is moving the desktop divider, so the column must follow it immediately. */
@@ -120,6 +170,8 @@ export function ChatRightRail({
   agentControls,
   onOpenAgent,
   open,
+  view = 'chat',
+  projectPath = null,
   desktopWidth,
   resizing = false,
   onToggle,
@@ -130,6 +182,7 @@ export function ChatRightRail({
     <div
       data-testid="chat-right-rail"
       data-open={open}
+      data-view={view}
       data-cards={jobs.length}
       data-pieces={cards.length}
       style={{ '--chat-right-rail-width': `${desktopWidth}px` } as React.CSSProperties}
@@ -168,7 +221,9 @@ export function ChatRightRail({
           {/* Only on a phone: on a wide screen this is a column of the row and
               the button on the bar is in plain sight above it (bw-81wt.30). */}
           <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2 md:hidden">
-            <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">This chat</h2>
+            <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {view === 'git' ? 'Git' : 'This chat'}
+            </h2>
             <Button
               size="sm"
               mode="icon"
@@ -180,6 +235,10 @@ export function ChatRightRail({
               <X aria-hidden="true" />
             </Button>
           </div>
+          {view === 'git' && <GitView path={projectPath} />}
+
+          {view === 'chat' && (
+            <>
           {/* First in the column because it is the only part of it that moves.
               Cards are a record and will still be there; a helper
               that has been going four minutes is the thing the reader opened
@@ -220,6 +279,8 @@ export function ChatRightRail({
             <p className="px-3 py-3 text-xs text-muted-foreground" data-testid="rail-empty">
               Nothing from this chat yet.
             </p>
+          )}
+            </>
           )}
       </div>
     </div>

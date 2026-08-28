@@ -21,6 +21,7 @@ import {
   Folder,
   FolderGit2,
   Gauge,
+  GitBranch,
   Loader2,
   ListChecks,
   PanelLeft,
@@ -56,7 +57,7 @@ import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { ChatRightRail, useRightRail } from '@/workbench/chat-right-rail';
+import { ChatRightRail, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
@@ -620,6 +621,24 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   const [railOpen, setRailOpen] = useState(false);
   /** The chat's own column on the right, remembered between visits. */
   const [rightOpen, flipRight] = useRightRail();
+  /** Which of the rail's two views it is on, remembered the same way (bw-8dp8.5). */
+  const [gitOpen, flipGit] = useGitPanel();
+  /**
+   * The way into the Git view.
+   *
+   * A shut rail always opens ON Git: the button is a door, and a door that
+   * opens onto the other room did nothing the reader pressed it for. With the
+   * rail already open the same press swaps the two views, so this is also the
+   * way back to what the chat has touched.
+   */
+  const showGit = useCallback(() => {
+    if (!rightOpen) {
+      flipRight();
+      if (!gitOpen) flipGit();
+      return;
+    }
+    flipGit();
+  }, [rightOpen, gitOpen, flipRight, flipGit]);
   /** The ways in that live in this tab, each a full-screen panel. */
   const [showing, setShowing] = useState<'search' | 'usage' | 'tokens' | 'new-chat' | null>(null);
   const newChat = useCallback((brand?: Brand) => {
@@ -984,6 +1003,19 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           controls is the bar that put "New Chat" off the edge of a 390px
           screen (bw-81wt.5, .8). */}
       <TabTrail tab="chat">
+        {/* What the project has changed, which is the chat's other subject: the
+            agents in this transcript write those files, so the way to look at
+            them belongs on this bar and not in a screen of its own (bw-8dp8). */}
+        {sessionId && projectPath && (
+          <ToolButton
+            icon={<GitBranch />}
+            label={gitOpen && rightOpen ? 'Hide Git' : 'Show Git'}
+            emphasis={gitOpen && rightOpen ? 'loud' : 'quiet'}
+            data-testid="chat-git-toggle"
+            data-open={gitOpen && rightOpen}
+            onClick={showGit}
+          />
+        )}
         {sessionId && (
           <ToolButton
             icon={rightOpen ? <PanelRightClose /> : <PanelRight />}
@@ -1118,6 +1150,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             agentControls={view.menu.agentControls}
             onOpenAgent={setOpenAgent}
             open={rightOpen}
+            view={gitOpen ? 'git' : 'chat'}
+            projectPath={projectPath}
             desktopWidth={rightWidth}
             resizing={resizingRight}
             onToggle={flipRight}

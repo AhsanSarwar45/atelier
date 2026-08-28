@@ -49,6 +49,7 @@ vi.mock('@/workbench/chat-sidebar', () => ({ ChatSidebar: () => null }));
 vi.mock('@/workbench/chat-right-rail', () => ({
   ChatRightRail: () => null,
   useRightRail: (): [boolean, () => void] => [false, () => {}],
+  useGitPanel: (): [boolean, () => void] => [false, () => {}],
 }));
 vi.mock('@/workbench/paths-on-disk', () => ({
   usePathsOnDisk: () => ({ real: () => false, home: '/home/me', ask: () => {} }),

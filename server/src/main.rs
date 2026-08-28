@@ -407,11 +407,8 @@ async fn serve(open_browser: bool) {
         tracing::warn!("  Install: https://github.com/gastownhall/beads");
     }
 
-    let _dolt_supervisor = if let Some(bd) = routes::find_bd() {
-        Some(dolt_lifecycle::supervise(database.clone(), bd.clone()))
-    } else {
-        None
-    };
+    let _dolt_supervisor =
+        routes::find_bd().map(|bd| dolt_lifecycle::supervise(database.clone(), bd.clone()));
 
     // Initialize version check cache
     let version_cache = routes::version::new_cache();
@@ -468,6 +465,18 @@ async fn serve(open_browser: bool) {
         .route("/api/fs/open-external", post(routes::fs::open_external))
         .route("/api/bd/command", post(routes::cli::bd_command))
         .route("/api/git/branch-status", get(routes::git::branch_status))
+        // The Git panel's routes: the read ones answer straight away, the
+        // mutating ones queue behind their repository's own lock (bw-8dp8).
+        .route("/api/git/status", get(routes::git::status))
+        .route("/api/git/stage", post(routes::git::stage))
+        .route("/api/git/unstage", post(routes::git::unstage))
+        .route("/api/git/commit", post(routes::git::commit))
+        .route("/api/git/fetch", post(routes::git::fetch))
+        .route("/api/git/pull", post(routes::git::pull))
+        .route("/api/git/push", post(routes::git::push))
+        .route("/api/git/branches", get(routes::git::branches))
+        .route("/api/git/checkout", post(routes::git::checkout))
+        .route("/api/git/log", get(routes::git::log))
         // Worktree endpoints
         .route(
             "/api/git/worktree-status",

@@ -372,6 +372,114 @@ export interface ListWorktreesResponse {
 }
 
 /**
+ * What a repository has changed, in the shape the server parses out of
+ * `git status --porcelain=v2 -z` (bw-8dp8).
+ *
+ * A file is in `staged` when the index differs from HEAD and in `unstaged` when
+ * the working tree differs from the index, so a file that was picked and then
+ * edited again is in BOTH. That is git's own answer and the panel shows it as
+ * git gives it, rather than picking one group and quietly losing the other half
+ * of what the file is doing.
+ */
+export type GitChangeStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'typechange';
+
+/** One changed file. */
+export interface GitChange {
+  path: string;
+  status: GitChangeStatus;
+  /** Where a renamed file came from. Null for every other status. */
+  origPath: string | null;
+}
+
+/** A file named and nothing more: what is new, and what is in conflict. */
+export interface GitPath {
+  path: string;
+}
+
+/**
+ * Where the repository stands: the line of work it is on, how far that is from
+ * the shared copy, and every file it has changed.
+ */
+export interface GitStatus {
+  branch: string;
+  /** The branch it tracks, or null when it tracks nothing yet. */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  /** No branch at all — sitting on a commit. `branch` is then the sha. */
+  detached: boolean;
+  staged: GitChange[];
+  unstaged: GitChange[];
+  untracked: GitPath[];
+  conflicted: GitPath[];
+}
+
+/** What a mutating call answers when git said nothing else. */
+export interface GitOk {
+  ok: boolean;
+}
+
+/** What a commit leaves behind. */
+export interface GitCommitResponse {
+  sha: string;
+}
+
+/** Where the branch stands against the shared copy, after asking it. */
+export interface GitFetchResponse {
+  ahead: number;
+  behind: number;
+}
+
+/**
+ * A call that talked to the shared copy. `output` is git's own words, kept
+ * whole: a push that was refused explains itself in them.
+ */
+export interface GitRemoteResponse {
+  ok: boolean;
+  output: string;
+}
+
+/** One line of work the repository holds. */
+export interface GitBranch {
+  name: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  isRemote: boolean;
+}
+
+/** Every line of work, and the one it is on. */
+export interface GitBranchesResponse {
+  current: string;
+  branches: GitBranch[];
+}
+
+/** One saved change, as the list draws it. */
+export interface GitCommit {
+  sha: string;
+  shortSha: string;
+  author: string;
+  email: string;
+  /** ISO 8601, as git's own `%aI` gives it. */
+  date: string;
+  subject: string;
+}
+
+/** Recent saved changes, newest first. */
+export interface GitLogResponse {
+  commits: GitCommit[];
+}
+
+/**
+ * How long a call that has to reach the shared copy may take. The 10s a read
+ * gets is the wait a person is sitting in front of; a fetch over a slow link,
+ * or one that stops to ask an ssh agent for a passphrase, is regularly longer
+ * than that and failing it at ten seconds reports a network fault that is not
+ * there.
+ */
+const REMOTE_DEADLINE_MS = 120_000;
+
+/**
  * Git API
  */
 export const git = {
@@ -410,7 +518,82 @@ export const git = {
 
   listWorktrees: (repoPath: string) => fetchApi<ListWorktreesResponse>(
     `/api/git/worktrees?repo_path=${encodeURIComponent(repoPath)}`
-  )
+  ),
+
+  // The chat's own Git view (bw-8dp8). Every one of these takes the project's
+  // working directory — `Project.path`, which `ChatTab` already holds — and the
+  // server runs it through its own path check before it shells out to git.
+  //
+  // The reads take an optional cancel so a panel that is closed, or pointed at
+  // another project, stops waiting on the answer to a question nobody is asking
+  // any more. Handing one over also opts the read out of being shared, which is
+  // what makes a re-read straight after a stage see the new state instead of
+  // joining the read that was already in the air.
+
+  /** What the repository has changed, and where its branch stands. */
+  status: (path: string, signal?: AbortSignal) => fetchApi<GitStatus>(
+    `/api/git/status?path=${encodeURIComponent(path)}`,
+    signal ? { signal } : undefined,
+  ),
+
+  /** Pick whole files to be saved. Per file, never per hunk (bw-8dp8). */
+  stage: (path: string, files: string[]) => fetchApi<GitOk>('/api/git/stage', {
+    method: 'POST',
+    body: JSON.stringify({ path, files }),
+  }),
+
+  /** Put picked files back, leaving what they say on disk alone. */
+  unstage: (path: string, files: string[]) => fetchApi<GitOk>('/api/git/unstage', {
+    method: 'POST',
+    body: JSON.stringify({ path, files }),
+  }),
+
+  /** Save the picked files under a message. `amend` rewrites the last one instead. */
+  commit: (path: string, message: string, amend?: boolean) =>
+    fetchApi<GitCommitResponse>('/api/git/commit', {
+      method: 'POST',
+      body: JSON.stringify({ path, message, ...(amend === undefined ? {} : { amend }) }),
+    }),
+
+  /** Ask the shared copy where it is, without touching the working tree. */
+  fetch: (path: string) => fetchApi<GitFetchResponse>('/api/git/fetch', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+    deadlineMs: REMOTE_DEADLINE_MS,
+  }),
+
+  /** Bring in what the shared copy has. */
+  pull: (path: string) => fetchApi<GitRemoteResponse>('/api/git/pull', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+    deadlineMs: REMOTE_DEADLINE_MS,
+  }),
+
+  /** Send saved changes back. `setUpstream` is for a branch that tracks nothing yet. */
+  push: (path: string, setUpstream?: boolean) => fetchApi<GitRemoteResponse>('/api/git/push', {
+    method: 'POST',
+    body: JSON.stringify({ path, ...(setUpstream === undefined ? {} : { setUpstream }) }),
+    deadlineMs: REMOTE_DEADLINE_MS,
+  }),
+
+  /** Every line of work the repository holds, and the one it is on. */
+  branches: (path: string, signal?: AbortSignal) => fetchApi<GitBranchesResponse>(
+    `/api/git/branches?path=${encodeURIComponent(path)}`,
+    signal ? { signal } : undefined,
+  ),
+
+  /** Move to another line of work. `create` starts one from where it stands. */
+  checkout: (path: string, branch: string, create?: boolean) =>
+    fetchApi<GitOk>('/api/git/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ path, branch, ...(create === undefined ? {} : { create }) }),
+    }),
+
+  /** Recent saved changes, newest first. */
+  log: (path: string, limit = 50, signal?: AbortSignal) => fetchApi<GitLogResponse>(
+    `/api/git/log?path=${encodeURIComponent(path)}&limit=${limit}`,
+    signal ? { signal } : undefined,
+  ),
 };
 
 /**

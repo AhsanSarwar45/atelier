@@ -339,11 +339,11 @@ async fn run_watcher(
                 // (bw-uiyz.17). The telling is the arm above; if the read
                 // could not run we say so ourselves rather than leave the
                 // screen holding an answer the change made wrong.
-                if !refresh_board(&dolt_manager, &db, &watched).await {
-                    if tx.send(frame(tag, &reported_path, change_type)).await.is_err() {
-                        info!("Client disconnected, stopping watcher");
-                        break;
-                    }
+                if !refresh_board(&dolt_manager, &db, &watched).await
+                    && tx.send(frame(tag, &reported_path, change_type)).await.is_err()
+                {
+                    info!("Client disconnected, stopping watcher");
+                    break;
                 }
             }
         }
