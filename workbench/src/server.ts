@@ -294,6 +294,14 @@ async function handleCommand(res: ServerResponse, cmd: WbpCommand): Promise<void
       sessions.answer(cmd.sessionId, cmd.askId, cmd.optionId, cmd.value);
       json(res, 200, { ok: true });
       return;
+    case 'question.answer':
+      sessions.answerQuestions(cmd.sessionId, cmd.requestId, cmd.response);
+      json(res, 200, { ok: true });
+      return;
+    case 'plan.respond':
+      await sessions.respondToPlan(cmd.sessionId, cmd.proposalId, cmd.response);
+      json(res, 200, { ok: true });
+      return;
     case 'session.open': {
       const s = await sessions.open(cmd);
       json(res, 200, s);

@@ -61,6 +61,57 @@ export interface AskOption {
   kind: 'allow_once' | 'allow_always' | 'deny' | 'answer';
 }
 
+/** One provider-neutral choice in a question form. */
+export interface QuestionOption {
+  /** Stable only within its question; provider labels are not assumed unique. */
+  id: string;
+  label: string;
+  description?: string;
+  /** Optional Markdown comparison shown without changing the selected answer. */
+  preview?: string;
+}
+
+/** One field in a provider-neutral question form. */
+export interface QuestionField {
+  id: string;
+  header: string;
+  prompt: string;
+  selection: 'single' | 'multiple' | 'text';
+  options: QuestionOption[];
+  allowCustom: boolean;
+  secret: boolean;
+}
+
+/** What the owner supplied for one question. */
+export interface QuestionAnswer {
+  questionId: string;
+  optionIds: string[];
+  customText?: string;
+  /** One annotation for the question, matching Claude's native note scope. */
+  note?: string;
+}
+
+export interface QuestionResponse {
+  answers: QuestionAnswer[];
+}
+
+export type PlanStatus = 'proposed' | 'approved' | 'changes_requested' | 'rejected' | 'superseded';
+export type PlanActionKind = 'approve' | 'request_changes' | 'reject' | 'implement';
+
+/** An action the provider can actually perform for a proposed plan. */
+export interface PlanAction {
+  id: string;
+  kind: PlanActionKind;
+  label: string;
+  description?: string;
+  acceptsFeedback?: boolean;
+}
+
+export interface PlanResponse {
+  actionId: string;
+  feedback?: string;
+}
+
 /**
  * Cost exactly as the brand reports it (design decision 12). Claude reports
  * dollars, Codex reports tokens; the two are never converted into each other
@@ -385,6 +436,32 @@ export type WbpEvent = EventBase &
         parentToolCallId?: string;
       }
     | { type: 'ask.resolved'; askId: string; chosen: string }
+    | {
+        type: 'question.requested';
+        requestId: string;
+        blocking: boolean;
+        questions: QuestionField[];
+        parentToolCallId?: string;
+      }
+    | {
+        type: 'question.resolved';
+        requestId: string;
+        answers: QuestionAnswer[];
+      }
+    | {
+        type: 'plan.proposed';
+        proposalId: string;
+        markdown: string;
+        actions: PlanAction[];
+        parentToolCallId?: string;
+      }
+    | {
+        type: 'plan.resolved';
+        proposalId: string;
+        status: Exclude<PlanStatus, 'proposed'>;
+        actionId: string;
+        feedback?: string;
+      }
     | { type: 'cost'; cost: Cost }
     /**
      * How full the conversation is: the tokens the model was last sent, against
@@ -554,6 +631,8 @@ export type WbpCommand =
     }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; takeover?: boolean }
   | { type: 'ask.answer'; sessionId: string; askId: string; optionId: string; value?: string }
+  | { type: 'question.answer'; sessionId: string; requestId: string; response: QuestionResponse }
+  | { type: 'plan.respond'; sessionId: string; proposalId: string; response: PlanResponse }
   | { type: 'session.stop'; sessionId: string; retractMessageId?: string }
   /**
    * End the chat itself: the agent is torn down and the row is marked `ended`.

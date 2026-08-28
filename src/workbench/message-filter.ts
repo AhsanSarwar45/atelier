@@ -220,6 +220,8 @@ export function kindOf(item: TranscriptItem): KindId {
     case 'tool':
       return toolKind(item.name);
     case 'ask':
+    case 'question':
+    case 'plan':
       return QUESTIONS;
     // Never reached: a note and a notice both draw as machine lines and were
     // answered above. Kept so the switch stays exhaustive over the kinds.

@@ -928,6 +928,12 @@ export const TranscriptRow = memo(function TranscriptRow({
           askedBy={item.askedBy}
         />
       );
+    // Dedicated interactive renderers replace these placeholders in the two
+    // visual work items. Keeping the fold exhaustive makes the provider seam
+    // land independently without pretending either is a permission.
+    case 'question':
+    case 'plan':
+      return null;
     // Notes, asides, and the lines the kit writes in the reader's name never
     // reach here: the chat folds them into machine lines before it draws, which
     // is the only shape they have.

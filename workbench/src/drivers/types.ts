@@ -5,7 +5,7 @@
  * HTTP, never sees SQLite, and never knows about beads — which is why adding
  * a brand is one file (docs/agent-workbench.md §2.4).
  */
-import type { AgentControl, ImagePayload, WbpEvent } from '../../../src/workbench/protocol.ts';
+import type { AgentControl, ImagePayload, PlanResponse, QuestionResponse, WbpEvent } from '../../../src/workbench/protocol.ts';
 
 /** One user turn: what was typed, and any pictures attached to it. */
 export interface PromptInput {
@@ -47,6 +47,10 @@ export interface Driver {
   send(input: PromptInput): Promise<void>;
   /** Answer an outstanding permission card. */
   answer(askId: string, choice: PermissionAnswer, value?: string): void;
+  /** Answer a provider's ordinary user-question form, never a tool permission. */
+  answerQuestions?(requestId: string, response: QuestionResponse): void;
+  /** Respond to a proposed plan through the provider's own control channel. */
+  respondToPlan?(proposalId: string, response: PlanResponse): Promise<void>;
   /** Change what the RUNNING session is pinned to (docs/agent-workbench.md §8.2.3). */
   setMode(mode: string): Promise<void>;
   setModel(model: string): Promise<void>;

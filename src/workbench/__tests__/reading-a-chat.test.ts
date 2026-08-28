@@ -92,6 +92,17 @@ function aWholeChat(turns: number): WbpEvent[] {
     said({ type: 'notice', text: 'the agent stopped' }),
     said({ type: 'ask.permission', askId: 'a1', toolName: 'Bash', input: {}, title: 'rm -rf', options: [] }),
     said({ type: 'ask.resolved', askId: 'a1', chosen: 'no' }),
+    said({
+      type: 'question.requested', requestId: 'q1', blocking: true,
+      questions: [{
+        id: 'shape', header: 'Shape', prompt: 'Which shapes?', selection: 'multiple',
+        options: [{ id: 'circle', label: 'Circle', description: 'Round' }], allowCustom: true, secret: false,
+      }],
+    }),
+    said({ type: 'question.resolved', requestId: 'q1', answers: [{ questionId: 'shape', optionIds: ['circle'], note: 'Keep it simple' }] }),
+    said({ type: 'plan.proposed', proposalId: 'p1', markdown: '# First plan', actions: [{ id: 'approve', kind: 'approve', label: 'Approve' }] }),
+    said({ type: 'plan.proposed', proposalId: 'p2', markdown: '# Better plan', actions: [{ id: 'implement', kind: 'implement', label: 'Implement' }] }),
+    said({ type: 'plan.resolved', proposalId: 'p2', status: 'approved', actionId: 'implement' }),
     said({ type: 'todo', items: [{ id: '1', text: 'one', status: 'pending' }] }),
     said({ type: 'cost', cost: { kind: 'usd', usd: 1.5 } }),
     said({ type: 'context', used: 10, window: 100 }),
@@ -125,6 +136,19 @@ describe('building a conversation out of its log', () => {
 
     expect(foldAll(log)).toEqual(log.reduce(reduce, EMPTY));
     expect(foldAll(log).items[0]).toMatchObject({ execution });
+  });
+
+  it('keeps grouped question answers and superseded plan state identical live and after restart', () => {
+    const log = aWholeChat(1);
+    const view = foldAll(log);
+    expect(view).toEqual(log.reduce(reduce, EMPTY));
+    expect(view.items.find((item) => item.kind === 'question')).toMatchObject({
+      answers: [{ questionId: 'shape', optionIds: ['circle'], note: 'Keep it simple' }],
+    });
+    expect(view.items.filter((item) => item.kind === 'plan')).toMatchObject([
+      { id: 'p1', status: 'superseded' },
+      { id: 'p2', status: 'approved', actionId: 'implement' },
+    ]);
   });
 
   it('keeps nothing from before the record was read again', () => {

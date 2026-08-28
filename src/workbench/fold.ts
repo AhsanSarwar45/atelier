@@ -36,6 +36,10 @@ import type {
   MachineFamily,
   ModelChoice,
   NoteRank,
+  PlanAction,
+  PlanStatus,
+  QuestionAnswer,
+  QuestionField,
   SessionState,
   TodoItem,
   WbpEvent,
@@ -152,6 +156,30 @@ export interface TranscriptAsk {
   askedBy: string | null;
 }
 
+export interface TranscriptQuestion {
+  kind: 'question';
+  id: string;
+  blocking: boolean;
+  questions: QuestionField[];
+  answers: QuestionAnswer[] | null;
+  parentId: string | null;
+  askedBy: string | null;
+  execution?: ExecutionContext;
+}
+
+export interface TranscriptPlan {
+  kind: 'plan';
+  id: string;
+  markdown: string;
+  actions: PlanAction[];
+  status: PlanStatus;
+  actionId: string | null;
+  feedback: string | null;
+  parentId: string | null;
+  askedBy: string | null;
+  execution?: ExecutionContext;
+}
+
 export interface TranscriptNotice {
   kind: 'notice';
   id: string;
@@ -167,6 +195,8 @@ export type TranscriptItem =
   | TranscriptThinking
   | TranscriptTool
   | TranscriptAsk
+  | TranscriptQuestion
+  | TranscriptPlan
   | TranscriptNote
   | TranscriptNotice;
 
@@ -655,6 +685,42 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.items = items.map((it) => (it.kind === 'ask' && it.id === e.askId ? { ...it, chosen: e.chosen } : it));
       return next;
 
+    case 'question.requested':
+      next.items = [...items, {
+        kind: 'question', id: e.requestId, blocking: e.blocking, questions: e.questions,
+        answers: null, parentId: e.parentToolCallId ?? null,
+        askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
+        ...(e.execution ? { execution: e.execution } : {}),
+      }];
+      return next;
+
+    case 'question.resolved':
+      next.items = items.map((it) => it.kind === 'question' && it.id === e.requestId
+        ? { ...it, answers: e.answers }
+        : it);
+      return next;
+
+    case 'plan.proposed':
+      next.items = [
+        ...items.map((it) => it.kind === 'plan' && it.status === 'proposed'
+          ? { ...it, status: 'superseded' as const }
+          : it),
+        {
+          kind: 'plan', id: e.proposalId, markdown: e.markdown, actions: e.actions,
+          status: 'proposed', actionId: null, feedback: null,
+          parentId: e.parentToolCallId ?? null,
+          askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
+          ...(e.execution ? { execution: e.execution } : {}),
+        },
+      ];
+      return next;
+
+    case 'plan.resolved':
+      next.items = items.map((it) => it.kind === 'plan' && it.id === e.proposalId
+        ? { ...it, status: e.status, actionId: e.actionId, feedback: e.feedback ?? null }
+        : it);
+      return next;
+
     case 'thinking.progress':
       next.thinkingTokens = e.tokens;
       return next;
@@ -1039,6 +1105,45 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       case 'ask.resolved': {
         const at = askAt.get(e.askId);
         if (at !== undefined) (items[at] as TranscriptAsk).chosen = e.chosen;
+        break;
+      }
+
+      case 'question.requested':
+        items.push({
+          kind: 'question', id: e.requestId, blocking: e.blocking, questions: e.questions,
+          answers: null, parentId: e.parentToolCallId ?? null,
+          askedBy: briefOf(agents, e.parentToolCallId ?? null),
+          ...(e.execution ? { execution: e.execution } : {}),
+        });
+        break;
+
+      case 'question.resolved': {
+        const at = items.findIndex((item) => item.kind === 'question' && item.id === e.requestId);
+        if (at !== -1) (items[at] as TranscriptQuestion).answers = e.answers;
+        break;
+      }
+
+      case 'plan.proposed':
+        for (const item of items) {
+          if (item.kind === 'plan' && item.status === 'proposed') item.status = 'superseded';
+        }
+        items.push({
+          kind: 'plan', id: e.proposalId, markdown: e.markdown, actions: e.actions,
+          status: 'proposed', actionId: null, feedback: null,
+          parentId: e.parentToolCallId ?? null,
+          askedBy: briefOf(agents, e.parentToolCallId ?? null),
+          ...(e.execution ? { execution: e.execution } : {}),
+        });
+        break;
+
+      case 'plan.resolved': {
+        const at = items.findIndex((item) => item.kind === 'plan' && item.id === e.proposalId);
+        if (at !== -1) {
+          const plan = items[at] as TranscriptPlan;
+          plan.status = e.status;
+          plan.actionId = e.actionId;
+          plan.feedback = e.feedback ?? null;
+        }
         break;
       }
 

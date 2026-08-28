@@ -9,7 +9,7 @@ import { getSessionInfo, getSessionMessages, type SessionMessage } from '@anthro
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 
-import type { Brand, ImagePayload, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
+import type { Brand, ImagePayload, PlanResponse, QuestionResponse, SessionState, SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 import { BRAND_DEFAULT_MODEL, DEFAULT_PERMISSION_MODE } from '../../src/workbench/protocol.ts';
 import {
   carryOnAt,
@@ -1526,6 +1526,18 @@ export class Sessions {
 
   answer(sessionId: string, askId: string, optionId: string, value?: string): void {
     this.require(sessionId).answer(askId, optionId as PermissionAnswer, value);
+  }
+
+  answerQuestions(sessionId: string, requestId: string, response: QuestionResponse): void {
+    const driver = this.require(sessionId);
+    if (!driver.answerQuestions) throw new Error('This provider does not support question forms');
+    driver.answerQuestions(requestId, response);
+  }
+
+  async respondToPlan(sessionId: string, proposalId: string, response: PlanResponse): Promise<void> {
+    const driver = this.require(sessionId);
+    if (!driver.respondToPlan) throw new Error('This provider does not support proposed plans');
+    await driver.respondToPlan(proposalId, response);
   }
 
   /**
