@@ -29,6 +29,39 @@ import { MachineLine, TranscriptRow } from '@/workbench/transcript-rows';
  * scroll a page back without waiting for anything to arrive.
  */
 export const SCREENFUL = 40;
+/** Ordinary conversations average one user and one assistant row per turn. */
+export const TURNFUL = 20;
+
+interface SemanticTurn {
+  id: string;
+  rows: DrawnRow[];
+  anchor: number;
+}
+
+/**
+ * Root user prompts are the stable navigation units. Commands, notifications,
+ * thinking and child-agent rows belong to the turn after that prompt; their
+ * volume must not decide how many conversational turns are reachable.
+ */
+export function semanticTurns(rows: DrawnRow[]): SemanticTurn[] {
+  const starts = rows.flatMap((row, index) => row.row === 'other'
+    && row.item.kind === 'message'
+    && row.item.role === 'user'
+    && row.item.parentId === null
+    ? [index]
+    : []);
+  if (!starts.length) return [];
+  return starts.map((start, index) => {
+    const from = index === 0 ? 0 : start;
+    const through = starts[index + 1] ?? rows.length;
+    const prompt = rows[start]!;
+    return {
+      id: prompt.row === 'other' ? prompt.item.id : `turn-${start}`,
+      rows: rows.slice(from, through),
+      anchor: start - from,
+    };
+  });
+}
 
 interface DrawnTranscriptProps {
   rows: DrawnRow[];
@@ -45,17 +78,22 @@ interface DrawnTranscriptProps {
 }
 
 export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held, onOlder = null }: DrawnTranscriptProps) {
-  const [shown, setShown] = useState(SCREENFUL);
+  const turns = semanticTurns(rows);
+  const semantic = turns.length > 0;
+  const many = semantic ? turns.length : rows.length;
+  const batch = semantic ? TURNFUL : SCREENFUL;
+  const [shown, setShown] = useState(batch);
+  const [turnCaps, setTurnCaps] = useState<Record<string, number>>({});
   const head = useRef<HTMLDivElement | null>(null);
   /** How tall the pane's contents were when the last batch was asked for. */
   const wasTall = useRef<number | null>(null);
   /** A visible head is one request, even when prepending rows redraws it. */
   const atHead = useRef(false);
   const loading = useRef(false);
-  const current = useRef({ shown, many: rows.length, onOlder });
-  current.current = { shown, many: rows.length, onOlder };
+  const current = useRef({ shown, many, onOlder, batch });
+  current.current = { shown, many, onOlder, batch };
   /** Which conversation these rows were, and how many of them, on the last frame. */
-  const was = useRef({ sessionId, many: rows.length });
+  const was = useRef({ sessionId, many, semantic });
 
   // A window of the last N rows slides forward as messages arrive: every one
   // that joins the bottom pushes one off the top. For a reader watching the end
@@ -65,11 +103,13 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
   // So while he is away the window's TOP is what is held still, and it takes
   // back whatever arrived; coming back to the end lets it start sliding again.
   let count = shown;
-  if (was.current.sessionId !== sessionId) count = SCREENFUL;
-  else if (!held && rows.length > was.current.many) count = shown + (rows.length - was.current.many);
-  was.current = { sessionId, many: rows.length };
+  if (was.current.sessionId !== sessionId || was.current.semantic !== semantic) count = batch;
+  else if (!held && many > was.current.many) count = shown + (many - was.current.many);
+  was.current = { sessionId, many, semantic };
   if (count !== shown) setShown(count);
-  const hasHead = count < rows.length || onOlder !== null;
+  const hasHead = count < many || onOlder !== null;
+
+  useEffect(() => setTurnCaps({}), [sessionId]);
 
   useEffect(() => {
     atHead.current = false;
@@ -86,7 +126,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
       atHead.current = true;
       wasTall.current = pane.current?.scrollHeight ?? null;
       if (current.current.shown < current.current.many) {
-        setShown((n) => n + SCREENFUL);
+        setShown((n) => n + current.current.batch);
         return;
       }
       if (!current.current.onOlder) return;
@@ -125,29 +165,52 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, held,
     box.scrollTop += box.scrollHeight - before;
   }, [shown, rows.length, pane]);
 
-  const window = count >= rows.length ? rows : rows.slice(rows.length - count);
+  const selectedTurns = semantic
+    ? (count >= turns.length ? turns : turns.slice(turns.length - count))
+    : [];
+  const window = semantic ? [] : count >= rows.length ? rows : rows.slice(rows.length - count);
+
+  const draw = (drawnRow: DrawnRow) =>
+    drawnRow.row === 'machine' ? (
+      <MachineLine key={drawnRow.id} row={drawnRow} />
+    ) : (
+      <TranscriptRow
+        key={drawnRow.item.id}
+        item={drawnRow.item}
+        sessionId={sessionId}
+        mentions={mentions}
+        onLook={onLook}
+      />
+    );
 
   return (
     <>
       {hasHead && (
         <div ref={head} data-testid="older-messages" className="h-px shrink-0" aria-hidden="true" />
       )}
-      {window.map((drawnRow) =>
-        // A machine line and one of the app's own asides are the same shape:
-        // both are the chat talking about itself rather than someone in it, and
-        // a run of one kind arrives here already folded into one row.
-        drawnRow.row === 'machine' ? (
-          <MachineLine key={drawnRow.id} row={drawnRow} />
-        ) : (
-          <TranscriptRow
-            key={drawnRow.item.id}
-            item={drawnRow.item}
-            sessionId={sessionId}
-            mentions={mentions}
-            onLook={onLook}
-          />
-        ),
-      )}
+      {semantic ? selectedTurns.map((turn) => {
+        const cap = turnCaps[turn.id] ?? SCREENFUL;
+        const anchor = turn.rows[turn.anchor]!;
+        const clipped = turn.rows.length > cap;
+        const tail = clipped ? turn.rows.slice(-(cap - 1)) : turn.rows;
+        const shownRows = clipped && !tail.includes(anchor) ? [anchor, ...tail] : tail;
+        const hidden = turn.rows.length - shownRows.length;
+        return (
+          <div key={turn.id} data-testid="semantic-turn" data-turn-id={turn.id} className="contents">
+            {hidden > 0 && (
+              <button
+                type="button"
+                data-testid="hidden-turn-rows"
+                className="w-full py-1 text-left text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setTurnCaps((caps) => ({ ...caps, [turn.id]: cap + SCREENFUL }))}
+              >
+                Show {Math.min(SCREENFUL, hidden)} more of {hidden} earlier operations in this turn
+              </button>
+            )}
+            {shownRows.map(draw)}
+          </div>
+        );
+      }) : window.map(draw)}
     </>
   );
 }

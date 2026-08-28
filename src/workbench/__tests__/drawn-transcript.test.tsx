@@ -13,7 +13,7 @@ import { createRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Mentions } from '@/components/markdown-body';
-import { DrawnTranscript, SCREENFUL } from '@/workbench/drawn-transcript';
+import { DrawnTranscript, SCREENFUL, TURNFUL } from '@/workbench/drawn-transcript';
 import { drawnRows, type DrawnRow } from '@/workbench/machine-lines';
 import type { LookableImage, WbpEvent } from '@/workbench/protocol';
 import { EMPTY, reduce, type SessionView } from '@/workbench/use-session';
@@ -76,9 +76,10 @@ function chat(
   sessionId = 's',
   held = HELD,
   onOlder: (() => Promise<{ added: number; hasOlder: boolean }>) | null = null,
+  givenRows?: DrawnRow[],
 ) {
   const pane = createRef<HTMLDivElement>();
-  const rows = drawnRows(conversation(held).items);
+  const rows = givenRows ?? drawnRows(conversation(held).items);
   const shows = (what: { rows: DrawnRow[]; sessionId: string; watching: boolean }) => (
     <div ref={pane}>
       <DrawnTranscript
@@ -104,7 +105,33 @@ function grownTo(many: number) {
   return drawnRows(conversation(many).items);
 }
 
+function toolHeavyConversation(): DrawnRow[] {
+  let view = EMPTY;
+  for (let turn = 0; turn < 25; turn += 1) {
+    const prompt = `prompt-${turn}`;
+    view = fold(view, { type: 'message.started', messageId: prompt, role: 'user' });
+    view = fold(view, { type: 'text.delta', messageId: prompt, text: `prompt ${turn}` });
+    view = fold(view, { type: 'message.completed', messageId: prompt });
+    if (turn === 24) {
+      for (let tool = 0; tool < 500; tool += 1) {
+        view = fold(view, {
+          type: 'tool.started', toolCallId: `tool-${tool}`, name: 'Read',
+          input: { file_path: `file-${tool}.ts` }, title: `Read file ${tool}`,
+          parentToolCallId: null,
+        });
+        view = fold(view, { type: 'tool.completed', toolCallId: `tool-${tool}`, ok: true, output: '' });
+      }
+    }
+    const answer = `answer-${turn}`;
+    view = fold(view, { type: 'message.started', messageId: answer, role: 'assistant' });
+    view = fold(view, { type: 'text.delta', messageId: answer, text: `answer ${turn}` });
+    view = fold(view, { type: 'message.completed', messageId: answer });
+  }
+  return drawnRows(view.items);
+}
+
 const messages = () => screen.queryAllByTestId(/-message$/);
+const INITIAL_MESSAGES = TURNFUL * 2 - 1;
 
 beforeEach(() => {
   heads = [];
@@ -115,20 +142,33 @@ beforeEach(() => {
 describe('what a chat puts on the page', () => {
   it('draws a screenful of a long conversation, not all of it', () => {
     chat();
-    expect(messages()).toHaveLength(SCREENFUL);
+    expect(messages()).toHaveLength(INITIAL_MESSAGES);
   });
 
   it('draws the newest messages, because that is where the reader is', () => {
     chat();
     const drawn = messages().map((row) => row.textContent);
     expect(drawn[drawn.length - 1]).toContain(`message ${HELD - 1}`);
-    expect(drawn[0]).toContain(`message ${HELD - SCREENFUL}`);
+    expect(drawn[0]).toContain(`message ${HELD - INITIAL_MESSAGES}`);
   });
 
   it('draws another screenful when the reader scrolls up to the older ones', () => {
     chat();
     act(() => heads[heads.length - 1]!.reached());
-    expect(messages()).toHaveLength(SCREENFUL * 2);
+    expect(messages()).toHaveLength(TURNFUL * 4 - 1);
+  });
+
+  it('crosses a tool-heavy turn by prompts instead of expanding hundreds of operation rows', () => {
+    chat('tool-heavy', 0, null, toolHeavyConversation());
+
+    expect(screen.getByText('prompt 5')).toBeVisible();
+    expect(screen.queryByText('prompt 0')).toBeNull();
+    expect(screen.getAllByTestId('tool-row').length).toBeLessThanOrEqual(SCREENFUL - 1);
+    expect(screen.getByTestId('hidden-turn-rows')).toHaveTextContent('earlier operations in this turn');
+
+    act(() => heads[heads.length - 1]!.reached());
+    expect(screen.getByText('prompt 0')).toBeVisible();
+    expect(screen.getAllByTestId('tool-row').length).toBeLessThanOrEqual(SCREENFUL - 1);
   });
 
   it('stops asking for more once the whole conversation is on the page', () => {
@@ -168,10 +208,10 @@ describe('what a chat puts on the page', () => {
   it('opens another chat at its own end, not where the last one had been read to', () => {
     const { again } = chat();
     act(() => heads[heads.length - 1]!.reached());
-    expect(messages()).toHaveLength(SCREENFUL * 2);
+    expect(messages()).toHaveLength(TURNFUL * 4 - 1);
 
     again({ sessionId: 'another' });
-    expect(messages()).toHaveLength(SCREENFUL);
+    expect(messages()).toHaveLength(INITIAL_MESSAGES);
   });
 
   it('asks for one server page while the history head remains visible', async () => {
@@ -222,7 +262,7 @@ describe('what a chat puts on the page', () => {
 
     act(() => heads[heads.length - 1]!.reached());
 
-    expect(messages()).toHaveLength(SCREENFUL * 2);
+    expect(messages()).toHaveLength(TURNFUL * 4 - 1);
     expect(box.scrollTop).toBe(520);
   });
 
@@ -233,20 +273,20 @@ describe('what a chat puts on the page', () => {
     // pane never moving to show it (bw-n6yh.7).
     const { again } = chat();
     const top = messages()[0]!.textContent;
-    expect(top).toContain(`message ${HELD - SCREENFUL}`);
+    expect(top).toContain(`message ${HELD - INITIAL_MESSAGES}`);
 
     again({ rows: grownTo(HELD + 20), watching: false });
     expect(messages()[0]!.textContent).toBe(top);
-    expect(messages()).toHaveLength(SCREENFUL + 20);
+    expect(messages()).toHaveLength(INITIAL_MESSAGES + 20);
   });
 
   it('starts sliding again once he is back at the end', () => {
     const { again } = chat();
     again({ rows: grownTo(HELD + 20), watching: false });
-    expect(messages()).toHaveLength(SCREENFUL + 20);
+    expect(messages()).toHaveLength(INITIAL_MESSAGES + 20);
 
     again({ rows: grownTo(HELD + 40), watching: true });
-    expect(messages()).toHaveLength(SCREENFUL + 20);
+    expect(messages()).toHaveLength(INITIAL_MESSAGES + 20);
     expect(messages()[messages().length - 1]!.textContent).toContain(`message ${HELD + 39}`);
   });
 });
