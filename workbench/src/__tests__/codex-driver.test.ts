@@ -56,7 +56,7 @@ describe('the provider boundary', () => {
 });
 
 describe('Codex subagents on the common workbench protocol', () => {
-  it('draws a native spawned agent and its result as one agent row', () => {
+  it('draws native spawn and wait calls as named agent tools around one agent row', () => {
     const events: BareEvent[] = [];
     const driver = new CodexDriver() as any;
     driver.emit = (event: BareEvent) => events.push(event);
@@ -71,14 +71,60 @@ describe('Codex subagents on the common workbench protocol', () => {
       receiverThreadIds: ['agent-1'],
       agentsStates: { 'agent-1': { status: 'completed', message: 'Registry checked.' } },
     });
+    driver.itemStarted({
+      id: 'wait-1', type: 'collabAgentToolCall', tool: 'wait', status: 'inProgress',
+      receiverThreadIds: ['agent-1'], agentsStates: { 'agent-1': { status: 'running', message: null } },
+    });
+    driver.itemCompleted({
+      id: 'wait-1', type: 'collabAgentToolCall', tool: 'wait', status: 'completed',
+      receiverThreadIds: ['agent-1'],
+      agentsStates: { 'agent-1': { status: 'completed', message: 'Registry checked.' } },
+    });
 
     expect(events[0]).toMatchObject({
       type: 'agent.started', agentId: 'agent-1', toolCallId: 'call-1',
       what: 'Inspect the session registry', model: 'gpt-5.6-luna',
     });
-    expect(events.at(-1)).toMatchObject({
+    expect(events).toContainEqual(expect.objectContaining({
       type: 'agent.finished', agentId: 'agent-1', state: 'done', result: 'Registry checked.',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'call-1', name: 'spawn_agent', title: expect.stringContaining('Sent off'),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'wait-1', name: 'wait_agent',
+      title: 'Waited for helper agent-1',
+    }));
+  });
+
+  it('materializes categorized rows when Codex reports collaboration calls only at completion', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    driver.itemCompleted({
+      id: 'completed-spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', status: 'completed',
+      prompt: 'Inspect the worker', receiverThreadIds: ['completed-child'],
+      agentsStates: { 'completed-child': { status: 'running', message: null } },
     });
+    driver.itemCompleted({
+      id: 'completed-wait', type: 'collabAgentToolCall', tool: 'wait', status: 'completed',
+      receiverThreadIds: ['completed-child'],
+      agentsStates: { 'completed-child': { status: 'completed', message: 'Worker finished.' } },
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'completed-spawn', name: 'spawn_agent',
+      title: expect.stringContaining('Inspect the worker'),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.completed', toolCallId: 'completed-spawn', ok: true,
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'completed-wait', name: 'wait_agent',
+      title: 'Waited for helper complete',
+    }));
+    expect(events.filter((event) => event.type === 'tool.completed')).toHaveLength(2);
   });
 
   it('finishes child threads without changing the parent chat state', () => {
@@ -116,6 +162,52 @@ describe('Codex subagents on the common workbench protocol', () => {
     expect(driver.agents.size).toBe(0);
   });
 
+  it('draws a native sub-agent activity launch as a categorized agent command', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    driver.itemStarted({
+      id: 'native-spawn', type: 'subAgentActivity', kind: 'started',
+      agentThreadId: 'native-child', agentPath: '/repo/.codex/agents/inspector.toml',
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'native-spawn', name: 'spawn_agent',
+      title: 'Sent off an inspector',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.completed', toolCallId: 'native-spawn', ok: true,
+    }));
+
+    driver.itemCompleted({
+      id: 'native-spawn', type: 'collabAgentToolCall', tool: 'spawnAgent',
+      receiverThreadIds: ['native-child'], agentsStates: { 'native-child': { status: 'running', message: null } },
+    });
+    expect(events.filter((event) => event.type === 'tool.started')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'tool.completed')).toHaveLength(1);
+  });
+
+  it('names a native wait from the active helper when Codex omits its receiver list', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.itemStarted({
+      id: 'native-spawn', type: 'subAgentActivity', kind: 'started',
+      agentThreadId: 'native-child', agentPath: '/repo/.codex/agents/inspector.toml',
+    });
+
+    driver.itemStarted({
+      id: 'native-wait', type: 'collabAgentToolCall', tool: 'wait', status: 'inProgress',
+      receiverThreadIds: [], agentsStates: {},
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'native-wait', name: 'wait_agent',
+      title: 'Waited for inspector',
+    }));
+  });
+
   it.each(['status-first', 'item-first'] as const)(
     'writes one opening and one ending when native completion is %s',
     (order) => {
@@ -135,12 +227,14 @@ describe('Codex subagents on the common workbench protocol', () => {
       };
 
       if (order === 'status-first') {
+        driver.event('thread/status/changed', { threadId: 'ordered-child', status: { type: 'active' } });
         driver.event('thread/status/changed', { threadId: 'ordered-child', status: { type: 'idle' } });
         driver.itemStarted(started);
         driver.itemCompleted(completed);
       } else {
         driver.itemStarted(started);
         driver.itemCompleted(completed);
+        driver.event('thread/status/changed', { threadId: 'ordered-child', status: { type: 'active' } });
         driver.event('thread/status/changed', { threadId: 'ordered-child', status: { type: 'idle' } });
       }
 
@@ -161,6 +255,8 @@ describe('Codex subagents on the common workbench protocol', () => {
     };
     driver.itemStarted({ ...item, agentsStates: { 'usage-child': { status: 'running', message: null } } });
     driver.itemCompleted(item);
+    driver.itemStarted({ ...item, id: 'wait-usage', tool: 'wait', agentsStates: { 'usage-child': { status: 'running', message: null } } });
+    driver.itemCompleted({ ...item, id: 'wait-usage', tool: 'wait' });
 
     await vi.waitFor(() => expect(events.some((event: any) => event.type === 'agent.progress' && event.finalUsage)).toBe(true));
     expect(events.filter((event) => event.type === 'agent.finished')).toHaveLength(1);
@@ -182,6 +278,28 @@ describe('Codex subagents on the common workbench protocol', () => {
     expect(events).toContainEqual(expect.objectContaining({
       type: 'session.state', state: 'thinking', label: 'Working',
     }));
+  });
+
+  it('attributes a child thread message to the call that spawned it', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'parent';
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.itemStarted({
+      id: 'spawn-child', type: 'collabAgentToolCall', tool: 'spawnAgent', prompt: 'Inspect',
+      receiverThreadIds: ['child-thread'], agentsStates: { 'child-thread': { status: 'running', message: null } },
+    });
+    driver.event('item/agentMessage/delta', {
+      threadId: 'child-thread', itemId: 'child-answer', delta: 'CHILD ANSWER',
+    });
+    driver.event('item/completed', {
+      threadId: 'child-thread', item: { id: 'child-answer', type: 'agentMessage', text: 'CHILD ANSWER' },
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'message.started', messageId: 'child-answer', parentToolCallId: 'spawn-child',
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'session.state', state: 'streaming' }));
   });
 });
 

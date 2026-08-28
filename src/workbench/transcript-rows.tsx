@@ -416,7 +416,13 @@ export const ToolRow = memo(function ToolRow({
   // What the call did, said in English behind a mark for the kind of thing it
   // was. A command no rule knows keeps the words it was typed in, and that is
   // the only shell text left on a closed row (bw-7ks.24).
-  const ran = whatItRan(shown.name, shown.input);
+  // Paged transcripts intentionally defer command bodies. The server already
+  // classified the bounded input before removing it, so recomputing from `{}`
+  // would degrade a precise persisted title (for example "Waited for child")
+  // to a generic one ("Waited for a helper") after reload.
+  const ran = item.detailsDeferred && !detail && item.ranKind
+    ? { said: item.title, kind: item.ranKind, grave: item.ranGrave ?? false }
+    : whatItRan(shown.name, shown.input);
   const ranKind = ran?.kind ?? item.ranKind;
   const ranGrave = ran?.grave ?? item.ranGrave ?? false;
   const Mark = ranKind && markOfRan(ranKind);

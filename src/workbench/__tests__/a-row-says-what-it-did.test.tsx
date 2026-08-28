@@ -88,6 +88,7 @@ describe('the mark says what kind of thing it was', () => {
     render(<ToolRow item={item} nested={false} sessionId="s" />);
     expect(screen.getByTestId('tool-mark')).toBeInTheDocument();
     expect(screen.getByTestId('tool-row')).toHaveAttribute('data-ran-kind', 'build');
+    expect(screen.getByTestId('tool-toggle')).toHaveTextContent('Built the app');
   });
 
   it('draws a different mark for a different kind', () => {

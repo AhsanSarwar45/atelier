@@ -39,7 +39,7 @@ interface CodexSubAgentActivity {
   agentPath?: string;
 }
 type CodexAgentSignal =
-  | { type: 'thread/status/changed'; threadId: string; status: { type: 'active' | 'idle' | 'systemError' } }
+  | { type: 'thread/status/changed'; threadId: string; status: { type: 'active' | 'idle' | 'systemError' }; result?: string | null }
   | { type: 'item/subAgentActivity'; item: CodexSubAgentActivity }
   | { type: 'item/collabAgentToolCall'; item: CodexCollabAgentToolCall; completed: boolean };
 
@@ -401,7 +401,7 @@ export function replayCodexThread(thread: Bag, emit: (event: DriverEvent) => voi
         driver.itemCompleted(item);
       } else {
         driver.itemStarted(item);
-        if (item.status !== 'inProgress') driver.itemCompleted(item);
+        if (item.status !== 'inProgress') driver.itemCompleted(item, null, true);
       }
     }
   }
@@ -578,6 +578,7 @@ export function replayCodexRollout(text: string, emit: (event: DriverEvent) => v
 class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
   private readonly agents: AgentLifecycle;
   private readonly readUsage: (agentId: string) => Promise<number>;
+  private readonly activeThreads = new Set<string>();
 
   constructor(
     agents: AgentLifecycle,
@@ -591,10 +592,17 @@ class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
     if (signal.type === 'thread/status/changed') {
       const row = this.agents.get(signal.threadId);
       const seconds = row ? Math.max(0, Math.round((Date.now() - row.since) / 1000)) : undefined;
-      if (signal.status.type === 'active') this.agents.progress(signal.threadId, { seconds, state: 'running' });
-      else this.agents.finish(signal.threadId, {
-        state: signal.status.type === 'idle' ? 'done' : 'failed', seconds, result: null,
-      });
+      if (signal.status.type === 'active') {
+        this.activeThreads.add(signal.threadId);
+        this.agents.progress(signal.threadId, { seconds, state: 'running' });
+      } else if (signal.status.type === 'systemError') {
+        this.activeThreads.delete(signal.threadId);
+        this.agents.finish(signal.threadId, { state: 'failed', seconds, result: signal.result ?? null });
+      } else if (this.activeThreads.delete(signal.threadId)) {
+        // A newly spawned thread may report idle before its first turn starts.
+        // Only an idle edge after native activity is a completion edge.
+        this.agents.finish(signal.threadId, { state: 'done', seconds, result: signal.result ?? null });
+      }
       return true;
     }
 
@@ -632,6 +640,15 @@ class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
           agentType: null,
           model: item.model,
         });
+        const row = this.agents.get(agentId);
+        this.agents.progress(agentId, {
+          calls: (row?.calls ?? 0) + (completed ? 1 : 0),
+          doing: states[agentId]?.message ?? undefined,
+          state: 'running',
+        });
+        // Completion here means the spawn CALL returned, not that the child
+        // thread finished. Native thread status or a completed wait says that.
+        continue;
       }
       const row = this.agents.get(agentId);
       const native = states[agentId];
@@ -663,7 +680,10 @@ export class CodexDriver implements Driver {
   private asks = new Map<string, PendingAsk>();
   private messages = new Set<string>();
   private completedMessages = new Set<string>();
+  private messageParents = new Map<string, string>();
+  private childResults = new Map<string, string>();
   private tools = new Map<string, string>();
+  private completedCollabTools = new Set<string>();
   private toolOutput = new Map<string, string>();
   private agents = new AgentLifecycle((event) => this.emit(event));
   private agentAdapter = new CodexAgentAdapter(this.agents, (agentId) => this.agentUsage(agentId));
@@ -1154,6 +1174,7 @@ export class CodexDriver implements Driver {
           type: 'thread/status/changed',
           threadId: changedThread,
           status: { type: status.type },
+          result: this.childResults.get(changedThread) ?? null,
         } as CodexAgentSignal);
         return;
       }
@@ -1163,16 +1184,24 @@ export class CodexDriver implements Driver {
     } else if (method === 'skills/changed') {
       void this.menu();
     } else if (method === 'item/agentMessage/delta') {
-      this.openMessage(p.itemId);
+      this.openMessage(p.itemId, this.sentBy(p.threadId));
       this.emit({ type: 'text.delta', messageId: p.itemId, text: p.delta });
     } else if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
-      this.emit({ type: 'thinking.delta', messageId: p.itemId, text: p.delta });
+      const parentToolCallId = this.sentBy(p.threadId);
+      this.emit({
+        type: 'thinking.delta', messageId: p.itemId, text: p.delta,
+        ...(parentToolCallId ? { parentToolCallId } : {}),
+      });
     } else if (method === 'turn/plan/updated') {
       this.emit({ type: 'todo', items: (p.plan ?? []).map((x: Bag, i: number) => ({ id: String(i), text: x.step, status: x.status })) });
     } else if (method === 'item/started') {
-      this.itemStarted(p.item);
+      this.itemStarted(p.item, this.sentBy(p.threadId));
     } else if (method === 'item/completed') {
-      this.itemCompleted(p.item);
+      if (p.threadId && p.threadId !== this.threadId && p.item?.type === 'agentMessage') {
+        const result = String(p.item.text ?? '').trim();
+        if (result) this.childResults.set(p.threadId, result);
+      }
+      this.itemCompleted(p.item, this.sentBy(p.threadId));
     } else if (method === 'thread/tokenUsage/updated') {
       const u = p.tokenUsage?.last;
       const total = p.tokenUsage?.total;
@@ -1209,11 +1238,20 @@ export class CodexDriver implements Driver {
     }
   }
 
-  private openMessage(id: string): void {
+  private sentBy(threadId: string | undefined): string | null {
+    if (!threadId || threadId === this.threadId) return null;
+    return this.agents.get(threadId)?.toolCallId ?? null;
+  }
+
+  private openMessage(id: string, parentToolCallId: string | null = null): void {
     if (this.messages.has(id)) return;
     this.messages.add(id);
-    this.emit({ type: 'message.started', messageId: id, role: 'assistant' });
-    this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
+    if (parentToolCallId) this.messageParents.set(id, parentToolCallId);
+    this.emit({
+      type: 'message.started', messageId: id, role: 'assistant',
+      ...(parentToolCallId ? { parentToolCallId } : {}),
+    });
+    if (!parentToolCallId) this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
   }
 
   private dropImageDir(dir: string): void {
@@ -1225,12 +1263,15 @@ export class CodexDriver implements Driver {
     for (const dir of [...this.imageDirs]) this.dropImageDir(dir);
   }
 
-  itemStarted(item: Bag): void {
+  itemStarted(item: Bag, parentToolCallId: string | null = null): void {
     if (!item) return;
-    if (item.type === 'agentMessage') return this.openMessage(item.id);
+    if (item.type === 'agentMessage') return this.openMessage(item.id, parentToolCallId);
     if (item.type === 'reasoning') {
       const text = [...(item.summary ?? []), ...(item.content ?? [])].join('\n');
-      if (text) this.emit({ type: 'thinking.delta', messageId: item.id, text });
+      if (text) this.emit({
+        type: 'thinking.delta', messageId: item.id, text,
+        ...(parentToolCallId ? { parentToolCallId } : {}),
+      });
       return;
     }
     if (item.type === 'plan') {
@@ -1243,10 +1284,22 @@ export class CodexDriver implements Driver {
     }
     if (item.type === 'subAgentActivity') {
       this.agentAdapter.accept({ type: 'item/subAgentActivity', item } as CodexAgentSignal);
+      if (item.kind === 'started') {
+        this.collabTool({
+          id: item.id,
+          type: 'collabAgentToolCall',
+          tool: 'spawnAgent',
+          prompt: '',
+          model: null,
+          receiverThreadIds: [item.agentThreadId],
+          agentsStates: { [item.agentThreadId]: { status: 'running', message: null } },
+        }, true);
+      }
       return;
     }
     if (item.type === 'collabAgentToolCall') {
       this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: false } as CodexAgentSignal);
+      this.collabTool(item as unknown as CodexCollabAgentToolCall, false);
       return;
     }
     const action = (item.commandActions ?? [])[0] ?? {};
@@ -1264,7 +1317,7 @@ export class CodexDriver implements Driver {
     this.emit({
       type: 'tool.started', toolCallId: item.id, name,
       input: item.arguments ?? { command: item.command, changes: item.changes, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path, durationMs: item.durationMs },
-      title: toolTitle(name, item.arguments ?? { command: item.command, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path }), parentToolCallId: null,
+      title: toolTitle(name, item.arguments ?? { command: item.command, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path }), parentToolCallId,
     });
     this.emit({ type: 'session.state', state: 'running_tool', label: name });
     if (item.type === 'fileChange') {
@@ -1288,13 +1341,13 @@ export class CodexDriver implements Driver {
     }
   }
 
-  itemCompleted(item: Bag): void {
+  itemCompleted(item: Bag, parentToolCallId: string | null = null, replayed = false): void {
     if (!item) return;
     if (item.type === 'agentMessage') {
       if (this.completedMessages.has(item.id)) return;
       const opened = this.messages.has(item.id);
       if (!opened && !String(item.text ?? '').trim()) return;
-      this.openMessage(item.id);
+      this.openMessage(item.id, parentToolCallId ?? this.messageParents.get(item.id) ?? null);
       if (!opened && item.text) this.emit({ type: 'text.delta', messageId: item.id, text: item.text });
       this.emit({ type: 'message.completed', messageId: item.id });
       for (const comparison of materializeComparisons(String(item.text ?? ''), this.cwd)) {
@@ -1307,6 +1360,16 @@ export class CodexDriver implements Driver {
     if (['reasoning', 'plan', 'hookPrompt', 'subAgentActivity', 'contextCompaction', 'enteredReviewMode', 'exitedReviewMode'].includes(item.type)) return;
     if (item.type === 'collabAgentToolCall') {
       this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: true } as CodexAgentSignal);
+      const collab = item as unknown as CodexCollabAgentToolCall;
+      this.collabTool(collab, true);
+      if (replayed && collab.tool === 'spawnAgent') {
+        for (const [agentId, native] of Object.entries(collab.agentsStates ?? {})) {
+          if (!['completed', 'errored', 'interrupted', 'shutdown', 'notFound'].includes(native.status)) continue;
+          const state = native.status === 'completed' ? 'done'
+            : native.status === 'interrupted' || native.status === 'shutdown' ? 'stopped' : 'failed';
+          this.agents.finish(agentId, { state, result: native.message ?? null });
+        }
+      }
       return;
     }
     if (!this.tools.has(item.id)) return;
@@ -1315,6 +1378,46 @@ export class CodexDriver implements Driver {
     if (ok) emitToolImage(this, item);
     this.tools.delete(item.id);
     this.toolOutput.delete(item.id);
+  }
+
+  private collabTool(item: CodexCollabAgentToolCall, completed: boolean): void {
+    if (this.completedCollabTools.has(item.id)) return;
+    const names: Record<CodexCollabAgentToolCall['tool'], string> = {
+      spawnAgent: 'spawn_agent', sendInput: 'send_message', resumeAgent: 'resume_agent',
+      wait: 'wait_agent', closeAgent: 'close_agent',
+    };
+    const name = names[item.tool];
+    const nativeIds = item.receiverThreadIds?.length
+      ? item.receiverThreadIds
+      : Object.keys(item.agentsStates ?? {}).length
+        ? Object.keys(item.agentsStates ?? {})
+        : item.tool === 'wait'
+          ? this.agents.active().map((row) => row.agentId)
+          : [];
+    const target = nativeIds.map((agentId) => {
+      const row = this.agents.get(agentId);
+      return row?.agentType || `helper ${agentId.slice(0, 8)}`;
+    }).join(', ');
+    const spawnedAs = nativeIds.map((agentId) =>
+      this.agents.get(agentId)?.agentType || `helper ${agentId.slice(0, 8)}`,
+    ).join(', ');
+    const input = item.tool === 'spawnAgent'
+      ? { task_name: spawnedAs || 'helper', prompt: item.prompt ?? '' }
+      : { target: target || 'a helper' };
+    if (!this.tools.has(item.id)) {
+      this.tools.set(item.id, name);
+      this.emit({
+        type: 'tool.started', toolCallId: item.id, name, input,
+        title: toolTitle(name, input), parentToolCallId: null,
+      });
+    }
+    if (!completed) return;
+    const states = Object.entries(item.agentsStates ?? {}).map(([agentId, state]) =>
+      `${this.agents.get(agentId)?.agentType || this.agents.get(agentId)?.what || agentId}: ${state.status}`,
+    ).join('\n');
+    this.emit({ type: 'tool.completed', toolCallId: item.id, ok: true, output: states });
+    this.tools.delete(item.id);
+    this.completedCollabTools.add(item.id);
   }
 
   private async agentUsage(agentId: string): Promise<number> {

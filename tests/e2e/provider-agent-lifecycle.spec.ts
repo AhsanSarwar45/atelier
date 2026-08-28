@@ -12,17 +12,19 @@ const ROOT = join(__dirname, '..', '.workbench-run-provider-lifecycle');
 const SHOTS = 'tests/results';
 const TURN_MS = 600_000;
 
-const cases: { brand: Brand; permissionMode: string; prompt: string; parentAnswer: string }[] = [
+const cases: { brand: Brand; permissionMode: string; prompt: string; parentAnswer: string; childAnswer: string }[] = [
   {
-    brand: 'claude', permissionMode: 'bypassPermissions', parentAnswer: 'CLAUDE PARENT DONE',
+    brand: 'claude', permissionMode: 'bypassPermissions', parentAnswer: 'CLAUDE PARENT DONE', childAnswer: 'CLAUDE CHILD DONE',
     prompt: 'Use the Task tool exactly once with run_in_background=true to launch one general-purpose subagent. ' +
       'Tell it to use no tools and reply exactly CLAUDE CHILD DONE. Wait until that background task finishes. ' +
-      'Do not launch any other subagent or workflow. Then reply exactly CLAUDE PARENT DONE.',
+      'Do not launch any other subagent or workflow, and do not narrate the launch or wait in assistant prose. ' +
+      'Then reply exactly CLAUDE PARENT DONE.',
   },
   {
-    brand: 'codex', permissionMode: 'never', parentAnswer: 'CODEX PARENT DONE',
+    brand: 'codex', permissionMode: 'never', parentAnswer: 'CODEX PARENT DONE', childAnswer: 'CODEX CHILD DONE',
     prompt: 'Call spawn_agent exactly once. Tell that agent to use no tools and reply exactly CODEX CHILD DONE. ' +
-      'Wait for that agent to finish with wait_agent. Do not spawn any other agent. Then reply exactly CODEX PARENT DONE.',
+      'Wait for that agent to finish with wait_agent. Do not spawn any other agent, and do not narrate the launch or wait ' +
+      'in assistant prose. Then reply exactly CODEX PARENT DONE.',
   },
 ];
 
@@ -100,6 +102,23 @@ test.describe('native provider child-agent lifecycle', () => {
         await expect(rows.first()).toHaveAttribute('data-kind', 'helper');
         await expect(rows.first()).toHaveAttribute('data-state', 'done', { timeout: TURN_MS });
 
+        const parentMessages = await page.getByTestId('assistant-message').allInnerTexts();
+        expect(parentMessages.some((text) => text.includes(provider.childAnswer)),
+          `${provider.brand} drew its child's answer as an ordinary parent message`).toBe(false);
+        expect(parentMessages.some((text) => text.includes(provider.parentAnswer))).toBe(true);
+
+        const agentTools = page.locator('[data-testid="tool-row"][data-ran-kind="agent"]');
+        await expect(agentTools.first().getByTestId('tool-mark')).toBeVisible();
+        if (provider.brand === 'codex') {
+          const spawned = page.locator('[data-testid="tool-row"][data-tool-name="spawn_agent"]');
+          const waited = page.locator('[data-testid="tool-row"][data-tool-name="wait_agent"]');
+          await expect(spawned).toHaveCount(1);
+          await expect(spawned).toContainText('Sent off');
+          await expect(waited).toHaveCount(1);
+          await expect(waited).toContainText(/Waited for (child|helper|CODEX|Inspect)/i);
+          await expect(waited.getByTestId('tool-mark')).toBeVisible();
+        }
+
         await expect.poll(() => lifecycleShape(sessionId), {
           timeout: 30_000, message: `${provider.brand} did not persist exactly one start and finish`,
         }).toEqual({ count: 2, types: ['agent.started', 'agent.finished'], oneAgent: true, state: 'done' });
@@ -115,6 +134,16 @@ test.describe('native provider child-agent lifecycle', () => {
         await page.getByTestId('chat-tab').waitFor({ timeout: 120_000 });
         await expect(page.getByTestId('sent-away-row')).toHaveCount(1);
         await expect(page.getByTestId('sent-away-row')).toHaveAttribute('data-state', 'done');
+        await expect(page.getByTestId('sent-away-row')).toContainText('Done');
+        if (provider.brand === 'claude') {
+          await expect(page.locator('[data-testid="tool-row"][data-tool-name="Agent"]'))
+            .toContainText('Sent off a general-purpose');
+        } else {
+          await expect(page.locator('[data-testid="tool-row"][data-tool-name="spawn_agent"]'))
+            .toContainText('Sent off a child');
+          await expect(page.locator('[data-testid="tool-row"][data-tool-name="wait_agent"]'))
+            .toContainText('Waited for child');
+        }
         await page.screenshot({ path: `${SHOTS}/provider-agent-lifecycle-${provider.brand}.png`, fullPage: false });
       } finally {
         if (project) await request.delete(`/api/projects/${project.id}`);

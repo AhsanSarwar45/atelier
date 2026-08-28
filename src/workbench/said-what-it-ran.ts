@@ -1475,7 +1475,8 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
   Agent: (i) => {
     const what = arg(i, 'description', 'prompt', 'message');
     const who = arg(i, 'subagent_type', 'task_name');
-    return { said: `Sent off ${who ? `a ${who}` : 'a helper'}${what ? ` to ${brief(what, 48)}` : ''}`, kind: 'agent', grave: false };
+    const article = who && /^[aeiou]/i.test(who) ? 'an' : 'a';
+    return { said: `Sent off ${who ? `${article} ${who}` : 'a helper'}${what ? ` to ${brief(what, 48)}` : ''}`, kind: 'agent', grave: false };
   },
   Task: (i) => CALLS.Agent!(i),
   SendMessage: (i) => ({ said: `Messaged ${brief(arg(i, 'to')) || 'a helper'}`, kind: 'agent', grave: false }),
@@ -1487,7 +1488,11 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
   close_agent: (i) => ({ said: `Closed ${brief(arg(i, 'target')) || 'a helper'}`, kind: 'grave', grave: true }),
   resume_agent: (i) => ({ said: `Started ${brief(arg(i, 'id')) || 'a helper'} again`, kind: 'agent', grave: false }),
   list_agents: () => ({ said: 'Listed the helpers', kind: 'agent', grave: false }),
-  wait_agent: () => ({ said: 'Waited for a helper', kind: 'agent', grave: false }),
+  wait_agent: (i) => ({
+    said: `Waited for ${brief(arg(i, 'target', 'id')) || 'a helper'}`,
+    kind: 'agent',
+    grave: false,
+  }),
   TaskCreate: (i) => {
     const what = arg(i, 'description', 'title');
     return { said: what ? `Started work on ${brief(what, 48)}` : 'Started a piece of work', kind: 'agent', grave: false };
