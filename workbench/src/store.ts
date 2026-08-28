@@ -29,8 +29,12 @@ function defaultDbPath(): string {
   return join(dataHome(), 'workbench.db');
 }
 
-/** Numbered and applied in order above the recorded version, matching the idiom in server/src/db.rs. */
-const MIGRATIONS: string[] = [
+/**
+ * The original positional migrations. This list is frozen: an ordinal is not
+ * a stable identity once databases can pass between builds from different
+ * branches. New runtime schema belongs in SCHEMA_CAPABILITIES below.
+ */
+const LEGACY_MIGRATIONS: string[] = [
   `CREATE TABLE session (
      id TEXT PRIMARY KEY,
      brand TEXT NOT NULL,
@@ -143,19 +147,44 @@ const MIGRATIONS: string[] = [
   // providers or builds that did not report one.
   `ALTER TABLE session ADD COLUMN effort TEXT;`,
 
-  // One logical provider event may arrive live, from a complete snapshot, and
-  // again from the native record after this process restarts. The transcript
-  // is append-only, but those deliveries are not three transcript events.
-  // Keep their native identity beside the JSON so SQLite — the last boundary
-  // every provider crosses — can enforce exactly-once ingestion. Old rows and
-  // events produced only by Atelier remain nullable and unchanged.
-  `ALTER TABLE event ADD COLUMN provider TEXT;
-   ALTER TABLE event ADD COLUMN provider_thread_id TEXT;
-   ALTER TABLE event ADD COLUMN provider_event_id TEXT;
-   CREATE UNIQUE INDEX event_by_provider_identity
-     ON event(session_id, provider, provider_thread_id, provider_event_id)
-     WHERE provider_event_id IS NOT NULL;`,
+];
 
+type SchemaCapability = {
+  name: string;
+  reconcile(db: DatabaseSync): void;
+};
+
+/**
+ * Stable, named schema promises used by runtime code.
+ *
+ * The legacy migration counter only describes one linear history. Different
+ * builds can legitimately arrive at the same counter through different
+ * migrations, so the number cannot prove that a table has the shape runtime
+ * code requires. Capabilities are therefore inspected and repaired on every
+ * startup, inside the migration transaction. Add future runtime assumptions
+ * here rather than relying on a new array position alone.
+ */
+const SCHEMA_CAPABILITIES: SchemaCapability[] = [
+  {
+    name: 'event.provider-identity.v1',
+    reconcile(db) {
+      // One logical provider event may arrive live, from a complete snapshot,
+      // and again from the native record after this process restarts. Keep its
+      // native identity beside the append-only JSON so the last boundary every
+      // current and future provider crosses can enforce exactly-once ingestion.
+      const columns = new Set(
+        (db.prepare('PRAGMA table_info(event)').all() as Array<{ name: string }>).map((column) => column.name),
+      );
+      for (const column of ['provider', 'provider_thread_id', 'provider_event_id']) {
+        if (!columns.has(column)) db.exec(`ALTER TABLE event ADD COLUMN ${column} TEXT`);
+      }
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS event_by_provider_identity
+           ON event(session_id, provider, provider_thread_id, provider_event_id)
+           WHERE provider_event_id IS NOT NULL`,
+      );
+    },
+  },
 ];
 
 export class Store {
@@ -184,9 +213,16 @@ export class Store {
       const row = this.db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
       let version = row?.version ?? 0;
       if (row === undefined) this.db.prepare('INSERT INTO schema_version VALUES (0)').run();
-      for (let i = version; i < MIGRATIONS.length; i++) {
-        this.db.exec(MIGRATIONS[i]!);
+      for (let i = version; i < LEGACY_MIGRATIONS.length; i++) {
+        this.db.exec(LEGACY_MIGRATIONS[i]!);
         version = i + 1;
+      }
+      for (const capability of SCHEMA_CAPABILITIES) {
+        try {
+          capability.reconcile(this.db);
+        } catch (error) {
+          throw new Error(`failed to reconcile schema capability ${capability.name}`, { cause: error });
+        }
       }
       this.db.prepare('UPDATE schema_version SET version = ?').run(version);
       this.db.exec('COMMIT');
