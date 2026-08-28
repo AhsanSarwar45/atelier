@@ -920,24 +920,27 @@ export const PlanProposalCard = memo(function PlanProposalCard({
   return (
     <Panel tone="attention" inset="md" data-testid="plan-card" data-plan-state="proposed">
       <div className="text-sm font-medium text-foreground">Proposed plan</div>
-      <div className="mt-3 rounded-md border border-border/70 bg-background/50 px-4 py-3">
+      <Panel inset="md" className="mt-3 bg-background/50">
         <MarkdownBody className="text-sm">{item.markdown}</MarkdownBody>
-      </div>
+      </Panel>
       <div className="mt-3 grid gap-2">
         {item.actions.map((candidate) => (
-          <button
+          <Button
             key={candidate.id}
             type="button"
+            variant="outline"
             className={cn(
-              'rounded-md border px-3 py-2 text-left transition-colors',
-              selected === candidate.id ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/60',
+              'h-auto w-full justify-start px-3 py-2 text-left',
+              selected === candidate.id && 'border-primary bg-primary/10',
             )}
             aria-pressed={selected === candidate.id}
             onClick={() => setSelected(candidate.id)}
           >
-            <span className="block text-sm font-medium text-foreground">{candidate.label}</span>
-            {candidate.description && <span className="mt-0.5 block text-xs text-muted-foreground">{candidate.description}</span>}
-          </button>
+            <span className="flex min-w-0 flex-col items-start">
+              <span className="text-sm font-medium text-foreground">{candidate.label}</span>
+              {candidate.description && <span className="mt-0.5 text-xs font-normal text-muted-foreground">{candidate.description}</span>}
+            </span>
+          </Button>
         ))}
       </div>
       {action?.acceptsFeedback && (
@@ -1073,21 +1076,26 @@ export const QuestionCard = memo(function QuestionCard({
                 </div>
               )}
               {(question.allowCustom || question.selection === 'text') && (
-                <label className={cn(
-                  'mt-2 flex items-start gap-3 rounded-md border px-3 py-2.5',
-                  draft.custom ? 'border-primary bg-primary/10' : 'border-border',
+                <Panel inset="sm" className={cn(
+                  'mt-2 flex items-start gap-3 py-2.5',
+                  draft.custom && 'border-primary bg-primary/10',
                 )}>
                   {question.selection !== 'text' && (
-                    <input
-                      type="checkbox"
-                      className="mt-1 size-4 accent-primary"
-                      checked={draft.custom}
+                    <Button
+                      type="button"
+                      role="checkbox"
+                      size="icon"
+                      variant="outline"
+                      className={cn('mt-0.5 size-5 shrink-0 p-0', draft.custom && 'border-primary bg-primary text-primary-foreground')}
+                      aria-checked={draft.custom}
                       aria-label="Custom answer"
-                      onChange={() => change(question.id, (current) => ({
+                      onClick={() => change(question.id, (current) => ({
                         ...current, custom: !current.custom,
                         ...(question.selection === 'single' && !current.custom ? { optionIds: [] } : {}),
                       }))}
-                    />
+                    >
+                      {draft.custom && <Check className="size-3" />}
+                    </Button>
                   )}
                   <Input
                     type={question.secret ? 'password' : 'text'}
@@ -1099,15 +1107,17 @@ export const QuestionCard = memo(function QuestionCard({
                       ...(question.selection === 'single' ? { optionIds: [] } : {}),
                     }))}
                   />
-                </label>
+                </Panel>
               )}
-              <button
+              <Button
                 type="button"
-                className="mt-2 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-7 px-1 text-xs text-muted-foreground"
                 onClick={() => change(question.id, (current) => ({ ...current, noteOpen: !current.noteOpen }))}
               >
                 {draft.noteOpen ? 'Hide note' : 'Add note'}
-              </button>
+              </Button>
               {draft.noteOpen && (
                 <Textarea
                   className="mt-2 min-h-20"
