@@ -109,6 +109,24 @@ describe('building a conversation out of its log', () => {
     expect(foldAll(log)).toEqual(log.reduce(reduce, EMPTY));
   });
 
+  it('keeps recursive message ownership identical live and after restart', () => {
+    const execution = {
+      conversationId: 'child-thread', actorId: 'reviewer', actorName: 'Reviewer',
+      parentActorId: 'root', operationId: 'spawn', parentOperationId: 'spawn',
+    };
+    const log = [
+      said({
+        type: 'message.started', messageId: 'owned', role: 'assistant',
+        parentToolCallId: 'spawn', execution,
+      }),
+      said({ type: 'text.delta', messageId: 'owned', text: 'done', execution }),
+      said({ type: 'message.completed', messageId: 'owned', execution }),
+    ];
+
+    expect(foldAll(log)).toEqual(log.reduce(reduce, EMPTY));
+    expect(foldAll(log).items[0]).toMatchObject({ execution });
+  });
+
   it('keeps nothing from before the record was read again', () => {
     const view = foldAll(aWholeChat(2));
     // The turn published before the reset is gone, and its card with it.

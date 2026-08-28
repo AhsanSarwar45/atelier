@@ -99,6 +99,18 @@ cleanup() {
   trap - EXIT
   mapfile -t owned < <(descendants_of "$SERVER_PID")
   owned+=("$SERVER_PID")
+  # A restart test replaces the original server. Those replacements cannot be
+  # descendants of a process they deliberately stopped, so the restart helper
+  # records each exact PID for this disposable run. Take each replacement's
+  # own children first, then the recorded server — never a name-matched process
+  # and never anything outside this run directory.
+  if [ -f "$RUN/restart-pids" ]; then
+    while read -r pid; do
+      [ -n "$pid" ] || continue
+      mapfile -t restarted < <(descendants_of "$pid")
+      owned+=("${restarted[@]}" "$pid")
+    done < "$RUN/restart-pids"
+  fi
   for pid in "${owned[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait "$SERVER_PID" 2>/dev/null || true
   rm -f "$CLAUDE_CONFIG_DIR/.credentials.json" "$CODEX_HOME/auth.json"

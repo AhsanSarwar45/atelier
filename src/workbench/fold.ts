@@ -776,6 +776,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           widgets: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
+          ...(e.execution ? { execution: e.execution } : {}),
         });
         break;
 

@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { openSync } from 'node:fs';
+import { appendFileSync, openSync } from 'node:fs';
 
 /**
  * Killing and restarting the instance under test, by port.
@@ -56,6 +56,8 @@ export async function restartInstance(opts: {
   // restart with no evidence at all.
   const log = openSync(opts.logFile, 'a');
   const child = spawn(opts.binary, [], { env: opts.env, detached: true, stdio: ['ignore', log, log] });
+  const run = opts.env.WORKBENCH_E2E_RUN;
+  if (run) appendFileSync(`${run}/restart-pids`, `${child.pid}\n`, 'utf8');
   child.unref();
 
   const until = Date.now() + 60_000;
