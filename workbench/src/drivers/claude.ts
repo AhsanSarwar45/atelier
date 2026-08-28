@@ -36,7 +36,7 @@ import {
   whoFor,
   workerStopped,
 } from '../../../src/workbench/machine-words.ts';
-import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, ImagePayload, ModelChoice, NoteRank, PlanResponse, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, ImagePayload, ModelChoice, NoteRank, PlanResponse, QuestionResponse, TodoItem } from '../../../src/workbench/protocol.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 
@@ -83,6 +83,13 @@ interface PendingAsk {
 interface PendingPlan {
   resolve: (r: PermissionResult) => void;
   input: Record<string, unknown>;
+}
+
+interface PendingQuestions {
+  resolve: (r: PermissionResult) => void;
+  input: Record<string, unknown>;
+  questions: Record<string, any>[];
+  agentId?: string;
 }
 
 /** A line for the transcript, and the whole message behind it. */
@@ -887,6 +894,7 @@ export class ClaudeDriver implements Driver {
   private closed = false;
   private asks = new Map<string, PendingAsk>();
   private plans = new Map<string, PendingPlan>();
+  private questions = new Map<string, PendingQuestions>();
   /** Tools whose result we are still waiting for, so a completion can name them. */
   private liveTools = new Map<string, string>();
   /** The assistant message currently being streamed. */
@@ -1415,6 +1423,33 @@ export class ClaudeDriver implements Driver {
     // question is answered on the helper's row and inside the helper's own
     // conversation, not in the middle of its owner's (§8.2.7).
     const asker = this.whoAsked(o.toolUseID);
+    if (toolName === 'AskUserQuestion' && Array.isArray(input.questions) && input.questions.length > 0) {
+      const questions = input.questions.filter((question): question is Record<string, any> =>
+        question !== null && typeof question === 'object' && typeof question.question === 'string');
+      if (questions.length > 0) return new Promise<PermissionResult>((resolve) => {
+        this.questions.set(askId, { resolve, input, questions, ...(asker?.agentId ? { agentId: asker.agentId } : {}) });
+        if (asker?.agentId) this.agentState(asker.agentId, 'waiting');
+        this.emit({
+          type: 'question.requested', requestId: askId, blocking: true,
+          questions: questions.map((question, questionIndex) => ({
+            id: `question:${questionIndex}`,
+            header: String(question.header || 'Question'),
+            prompt: String(question.question),
+            selection: question.multiSelect === true ? 'multiple' as const : 'single' as const,
+            options: (Array.isArray(question.options) ? question.options : []).map((option: Record<string, any>, optionIndex: number) => ({
+              id: `question:${questionIndex}:option:${optionIndex}`,
+              label: String(option.label),
+              ...(typeof option.description === 'string' && option.description ? { description: option.description } : {}),
+              ...(typeof option.preview === 'string' && option.preview ? { preview: option.preview } : {}),
+            })),
+            allowCustom: true,
+            secret: question.isSecret === true,
+          })),
+          ...(asker ? { parentToolCallId: asker.sentBy } : {}),
+        });
+        this.emit({ type: 'session.state', state: 'waiting_permission', label: 'Waiting for your answer' });
+      });
+    }
     if (toolName === 'ExitPlanMode' && typeof input.plan === 'string' && input.plan.trim()) {
       const markdown = input.plan.trim();
       return new Promise<PermissionResult>((resolve) => {
@@ -1471,6 +1506,39 @@ export class ClaudeDriver implements Driver {
       });
       this.emit({ type: 'session.state', state: 'waiting_permission', label: `Asking about ${toolName}` });
     });
+  }
+
+  answerQuestions(requestId: string, response: QuestionResponse): void {
+    const pending = this.questions.get(requestId);
+    if (!pending) throw new Error('This Claude question is no longer awaiting an answer');
+    const byId = new Map(response.answers.map((answer) => [answer.questionId, answer]));
+    const answers: Record<string, string> = {};
+    const annotations: Record<string, { notes?: string; preview?: string }> = {};
+    pending.questions.forEach((question, questionIndex) => {
+      const questionId = `question:${questionIndex}`;
+      const answer = byId.get(questionId);
+      if (!answer) throw new Error(`No answer was supplied for Claude question "${question.question}"`);
+      const options = new Map((Array.isArray(question.options) ? question.options : []).map((option: Record<string, any>, optionIndex: number) => [
+        `${questionId}:option:${optionIndex}`, option,
+      ]));
+      const selected = answer.optionIds.map((id) => options.get(id)).filter((option): option is Record<string, any> => Boolean(option));
+      const values = selected.map((option) => String(option.label));
+      if (answer.customText?.trim()) values.push(answer.customText.trim());
+      answers[String(question.question)] = values.join(', ');
+      const previews = selected.map((option) => option.preview).filter((preview): preview is string => typeof preview === 'string' && preview.length > 0);
+      if (answer.note?.trim() || previews.length) annotations[String(question.question)] = {
+        ...(answer.note?.trim() ? { notes: answer.note.trim() } : {}),
+        ...(previews.length ? { preview: previews.join('\n\n') } : {}),
+      };
+    });
+    this.questions.delete(requestId);
+    if (pending.agentId) this.agentState(pending.agentId, 'running');
+    pending.resolve({
+      behavior: 'allow',
+      updatedInput: { ...pending.input, answers, ...(Object.keys(annotations).length ? { annotations } : {}) },
+    });
+    this.emit({ type: 'question.resolved', requestId, answers: response.answers });
+    this.emit({ type: 'session.state', state: 'thinking', label: 'Working' });
   }
 
   async respondToPlan(proposalId: string, response: PlanResponse): Promise<void> {
@@ -1699,6 +1767,11 @@ export class ClaudeDriver implements Driver {
       this.emit({ type: 'ask.resolved', askId, chosen: 'deny' });
     }
     this.asks.clear();
+    for (const [requestId, question] of this.questions) {
+      question.resolve({ behavior: 'deny', message: 'Stopped by the owner.', interrupt: true });
+      this.emit({ type: 'question.resolved', requestId, answers: [] });
+    }
+    this.questions.clear();
     for (const [proposalId, plan] of this.plans) {
       plan.resolve({ behavior: 'deny', message: 'Stopped by the owner.', interrupt: true });
       this.emit({ type: 'plan.resolved', proposalId, status: 'rejected', actionId: 'interrupt' });
@@ -1750,6 +1823,8 @@ export class ClaudeDriver implements Driver {
     this.wake?.();
     for (const ask of this.asks.values()) ask.resolve({ behavior: 'deny', message: 'Session closed.' });
     this.asks.clear();
+    for (const question of this.questions.values()) question.resolve({ behavior: 'deny', message: 'Session closed.' });
+    this.questions.clear();
     for (const plan of this.plans.values()) plan.resolve({ behavior: 'deny', message: 'Session closed.' });
     this.plans.clear();
     this.q?.close();

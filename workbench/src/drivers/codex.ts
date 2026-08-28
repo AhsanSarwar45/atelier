@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
-import type { AgentControl, AgentState, CommandInfo, ExecutionContext, PlanResponse } from '../../../src/workbench/protocol.ts';
+import type { AgentControl, AgentState, CommandInfo, ExecutionContext, PlanResponse, QuestionResponse } from '../../../src/workbench/protocol.ts';
 import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 import { proposedPlanSpecs } from '../../../src/workbench/proposed-plan.ts';
@@ -18,6 +18,7 @@ import { commandExecution, offeredSlashCommand } from './slash-commands.ts';
 type Bag = Record<string, any>;
 type Pending = { resolve: (value: any) => void; reject: (reason: Error) => void };
 type PendingAsk = { answer: (choice: string, value?: string) => void };
+type PendingQuestions = { messageId: string | number; questions: Bag[] };
 
 // Narrow projections of the installed app-server schema (`codex app-server
 // generate-ts`). Provider-specific wire types stop here; the lifecycle ledger
@@ -719,6 +720,7 @@ export class CodexDriver implements Driver {
   emit: (event: DriverEvent) => void = () => {};
   private pending = new Map<number, Pending>();
   private asks = new Map<string, PendingAsk>();
+  private questions = new Map<string, PendingQuestions>();
   private messages = new Set<string>();
   private completedMessages = new Set<string>();
   private plans = new Set<string>();
@@ -862,6 +864,28 @@ export class CodexDriver implements Driver {
     this.emit({ type: 'ask.resolved', askId, chosen: choice });
   }
 
+  answerQuestions(requestId: string, response: QuestionResponse): void {
+    const pending = this.questions.get(requestId);
+    if (!pending) throw new Error('This Codex question is no longer awaiting an answer');
+    const byId = new Map(response.answers.map((answer) => [answer.questionId, answer]));
+    const answers: Bag = {};
+    for (const question of pending.questions) {
+      const answer = byId.get(String(question.id));
+      if (!answer) throw new Error(`No answer was supplied for Codex question "${String(question.id)}"`);
+      const options = new Map((question.options ?? []).map((option: Bag, index: number) => [
+        `${String(question.id)}:option:${index}`, String(option.label),
+      ]));
+      const values = answer.optionIds.map((id) => options.get(id) ?? id);
+      if (answer.customText?.trim()) values.push(answer.customText.trim());
+      if (answer.note?.trim()) values.push(`Additional note: ${answer.note.trim()}`);
+      answers[question.id] = { answers: values };
+    }
+    this.write({ jsonrpc: '2.0', id: pending.messageId, result: { answers } });
+    this.questions.delete(requestId);
+    this.emit({ type: 'question.resolved', requestId, answers: response.answers });
+    this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
+  }
+
   async setMode(mode: string): Promise<void> {
     if (!MODES.includes(mode)) throw new Error(`Codex does not support approval policy "${mode}"`);
     this.mode = mode;
@@ -904,6 +928,7 @@ export class CodexDriver implements Driver {
 
   async interrupt(): Promise<void> {
     this.resolveAsks('deny');
+    this.questions.clear();
     if (this.threadId && this.turnId) await this.call('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
   }
 
@@ -921,6 +946,7 @@ export class CodexDriver implements Driver {
 
   async close(): Promise<void> {
     this.resolveAsks('deny');
+    this.questions.clear();
     this.child?.kill('SIGTERM');
     this.child = null;
     for (const pending of this.pending.values()) pending.reject(new Error('Codex app-server closed'));
@@ -1119,24 +1145,23 @@ export class CodexDriver implements Driver {
       this.write({ jsonrpc: '2.0', id: message.id, result: { answers: {} } });
       return;
     }
-    const answers: Bag = {};
-    let left = questions.length;
-    for (const question of questions) {
-      const askId = `${String(message.id)}:${question.id}`;
-      this.asks.set(askId, { answer: (choice, value) => {
-        answers[question.id] = { answers: [value ?? choice] };
-        if (--left === 0) {
-          this.write({ jsonrpc: '2.0', id: message.id, result: { answers } });
-          this.emit({ type: 'session.state', state: 'thinking', label: 'Thinking' });
-        }
-      } });
-      this.emit({
-        type: 'ask.permission', askId, toolName: question.header || 'Question',
-        input: { question: question.question }, title: question.question,
-        options: (question.options ?? []).map((option: Bag) => ({ id: option.label, label: option.label, kind: 'answer' as const })),
-        question: true, allowText: question.options == null || question.isOther === true, secret: question.isSecret === true,
-      });
-    }
+    const requestId = String(message.id);
+    this.questions.set(requestId, { messageId: message.id, questions });
+    this.emit({
+      type: 'question.requested', requestId,
+      blocking: message.params?.isBlocking !== false,
+      questions: questions.map((question) => ({
+        id: String(question.id), header: String(question.header || 'Question'), prompt: String(question.question || ''),
+        selection: question.options == null ? 'text' as const : 'single' as const,
+        options: (question.options ?? []).map((option: Bag, index: number) => ({
+          id: `${String(question.id)}:option:${index}`,
+          label: String(option.label),
+          ...(typeof option.description === 'string' && option.description ? { description: option.description } : {}),
+        })),
+        allowCustom: question.options == null || question.isOther === true,
+        secret: question.isSecret === true,
+      })),
+    });
     if (message.params?.isBlocking !== false) this.emit({ type: 'session.state', state: 'waiting_permission', label: 'Waiting for your answer' });
   }
 

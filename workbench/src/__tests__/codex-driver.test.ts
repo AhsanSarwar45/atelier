@@ -513,21 +513,28 @@ describe('Codex app-server requests', () => {
     driver.ask({ id: 9, method: 'item/tool/requestUserInput', params: {
       isBlocking: true,
       questions: [
-        { id: 'shape', header: 'Shape', question: 'Which shape?', options: [{ label: 'Circle' }] },
+        { id: 'shape', header: 'Shape', question: 'Which shape?', options: [{ label: 'Circle', description: 'Round' }] },
         { id: 'name', header: 'Name', question: 'What name?', options: null, isOther: true },
       ],
     } });
-    const asks = events.filter((event: any) => event.type === 'ask.permission') as any[];
-    expect(asks).toHaveLength(2);
-    expect(asks[0]).toMatchObject({ question: true, toolName: 'Shape' });
-    expect(asks[1]).toMatchObject({ question: true, allowText: true });
+    const requested = events.find((event: any) => event.type === 'question.requested') as any;
+    expect(requested).toMatchObject({
+      requestId: '9', blocking: true,
+      questions: [
+        { id: 'shape', selection: 'single', options: [{ id: 'shape:option:0', label: 'Circle', description: 'Round' }] },
+        { id: 'name', selection: 'text', allowCustom: true },
+      ],
+    });
+    expect(events.some((event: any) => event.type === 'ask.permission')).toBe(false);
 
-    driver.answer('9:shape', 'Circle');
-    expect(writes).toHaveLength(0);
-    driver.answer('9:name', 'text', 'Ada');
+    driver.answerQuestions('9', { answers: [
+      { questionId: 'shape', optionIds: ['shape:option:0'], note: 'Prefer simple' },
+      { questionId: 'name', optionIds: [], customText: 'Ada' },
+    ] });
     expect(writes[0]).toEqual({ jsonrpc: '2.0', id: 9, result: {
-      answers: { shape: { answers: ['Circle'] }, name: { answers: ['Ada'] } },
+      answers: { shape: { answers: ['Circle', 'Additional note: Prefer simple'] }, name: { answers: ['Ada'] } },
     } });
+    expect(events).toContainEqual(expect.objectContaining({ type: 'question.resolved', requestId: '9' }));
   });
 
   it('answers expanded permission requests with granted permissions and scope', () => {
