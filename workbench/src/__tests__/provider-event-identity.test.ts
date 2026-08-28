@@ -63,6 +63,7 @@ describe('durable provider event identity', () => {
     expect(store.appendEvent(first)).toBe(true);
     expect(store.appendEvent(second)).toBe(true);
     expect(store.eventsSince('codex-chat', 0)).toHaveLength(2);
+    expect(() => store.appendEvent(second)).toThrow(/UNIQUE constraint failed: event.session_id, event.seq/);
     store.close();
   });
 });

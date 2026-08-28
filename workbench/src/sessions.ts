@@ -15,7 +15,6 @@ import {
   carryOnAt,
   cut,
   diffOf,
-  howToRead,
   IMPORT_RECIPE,
   IMPORTED_MESSAGES,
   linkPast,
@@ -53,6 +52,7 @@ import {
 import { knownSessions, providerHolderPids, providerHoldsNow } from './registry.ts';
 import type { Store } from './store.ts';
 import { conversationTitle } from './conversation-title.ts';
+import { completeHistoryChoice } from './provider-reconciliation.ts';
 
 export { boundedEvent } from './bounded-event.ts';
 
@@ -567,12 +567,30 @@ export class Sessions {
           const size = statSync(path).size;
           const followed = this.store.followedTo(summary.id);
           if (followed === null || followed.at > size) {
-          if (this.store.importedBy(summary.id) !== null) {
-            this.publish(summary.id, { type: 'transcript.reset' });
-            this.store.forgetImported(summary.id);
-          }
+            const readBy = this.store.importedBy(summary.id);
+            const choice = completeHistoryChoice(
+              this.store,
+              summary.id,
+              readBy,
+              false,
+              followed !== null && followed.at > size,
+            );
+            if (choice !== 'read-it') {
+              // A live attachment deliberately invalidates the byte cursor,
+              // because live SDK events do not advance it. After a process
+              // restart, the durable event log still proves that history was
+              // already observed. Resume following at today's EOF rather than
+              // pasting the complete rollout underneath that timeline.
+              if (choice === 'keep-what-it-has') this.store.markImported(summary.id, IMPORT_RECIPE);
+              this.store.rememberFollowed(summary.id, size, 0, IMPORT_RECIPE);
+              return { at: size, through: null, carry: [], drawn: 0 };
+            }
+            if (readBy !== null || this.store.timelineCount(summary.id) > 0) {
+              this.publish(summary.id, { type: 'transcript.reset' });
+              this.store.forgetImported(summary.id);
+            }
             replayCodexRollout(readFileSync(path, 'utf8'), (event) => this.publish(summary.id, event));
-          this.store.markImported(summary.id, IMPORT_RECIPE);
+            this.store.markImported(summary.id, IMPORT_RECIPE);
             this.store.rememberFollowed(summary.id, size, 0, IMPORT_RECIPE);
             return { at: size, through: null, carry: [], drawn: 0 };
           }
@@ -588,7 +606,7 @@ export class Sessions {
         const [thread, usage] = await Promise.all([readCodexThread(summary.externalId, summary.cwd), readCodexThreadUsage(summary.externalId, summary.cwd).catch(() => null)]);
         const seeded = seedCodexSnapshot(thread, {
           importedBy: this.store.importedBy(summary.id),
-          drawn: this.store.messageCount(summary.id),
+          drawn: this.store.timelineCount(summary.id),
           drivenHere: this.store.wasDrivenHere(summary.id),
         }, (event) => this.publish(summary.id, event));
         if (!seeded) return NOTHING_READ;
@@ -625,7 +643,7 @@ export class Sessions {
         // Whether the reader has a copy of this chat in front of him, asked
         // before it is thrown away: he is owed the word to drop it, or the
         // replacement is drawn underneath what it replaces.
-        stale = this.store.importedBy(summary.id) !== null || this.store.messageCount(summary.id) > 0;
+        stale = this.store.importedBy(summary.id) !== null || this.store.timelineCount(summary.id) > 0;
         this.store.forgetImported(summary.id);
         this.store.forgetRead(summary.id);
       }
@@ -642,22 +660,13 @@ export class Sessions {
       if (on) return on;
     }
     // Counted at most once, and only if the choice actually turns on it.
-    let counted: number | null = null;
-    const drawn = () => (counted ??= this.store.messageCount(summary.id));
-    const choice = howToRead({
-      readBy,
-      live,
-      drawn,
-      // Read in by an older build, so it has words and no commands. Its live
-      // turns, if it has any, cannot be re-made from the record.
-      drivenHere: () => this.store.wasDrivenHere(summary.id),
-    });
+    const choice = completeHistoryChoice(this.store, summary.id, readBy, live);
     if (choice === 'leave-it') return NOTHING_READ;
     if (choice === 'keep-what-it-has') {
       this.store.markImported(summary.id, IMPORT_RECIPE);
       return NOTHING_READ;
     }
-    const drawnAlready = stale || readBy !== null || drawn() > 0;
+    const drawnAlready = stale || readBy !== null || this.store.timelineCount(summary.id) > 0;
 
     // Where the record stands before a byte of it is read: what arrives while
     // the reading is going on is the follower's, and it can only know that if

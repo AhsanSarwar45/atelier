@@ -453,9 +453,12 @@ export class Store {
     const identity = e.providerEvent;
     const result = this.db
       .prepare(
-        `INSERT OR IGNORE INTO event
+        `INSERT INTO event
            (session_id, seq, at, type, json, provider, provider_thread_id, provider_event_id)
-         VALUES (?,?,?,?,?,?,?,?)`,
+         VALUES (?,?,?,?,?,?,?,?)
+         ON CONFLICT(session_id, provider, provider_thread_id, provider_event_id)
+           WHERE provider_event_id IS NOT NULL
+         DO NOTHING`,
       )
       .run(
         e.sessionId, e.seq, e.at, e.type, JSON.stringify(e),
@@ -511,6 +514,27 @@ export class Store {
       .prepare('SELECT COUNT(*) AS n FROM message WHERE session_id = ?')
       .get(sessionId) as { n: number };
     return r.n;
+  }
+
+  /**
+   * Semantic rows already owned by this timeline.
+   *
+   * Import policy used to count messages only. A locally-driven chat whose
+   * first turn contained commands or helper notifications therefore looked
+   * empty and accepted a complete native replay underneath those rows.
+   */
+  timelineCount(sessionId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM event
+          WHERE session_id = ?
+            AND type IN (
+              'message.started', 'tool.started', 'note', 'ask.permission',
+              'notice', 'agent.started'
+            )`,
+      )
+      .get(sessionId) as { n: number };
+    return row.n;
   }
 
   /** Starts a message, so the deltas that follow have something to grow. */
