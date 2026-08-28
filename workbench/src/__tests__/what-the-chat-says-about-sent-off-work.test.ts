@@ -4,25 +4,12 @@
  * What a chat says about work it handed to something else, and whether the
  * reader has to turn anything on to read it (bw-7ks.22.6).
  *
- * The panel is a reading of the work; these lines are the record of it, sitting
- * where it happened in the conversation. Both, never one instead of the other:
- * the panel says three helpers are running, and only the conversation says the
- * second one went off between the two commands the reader is looking at.
- *
- * Which is worth nothing if the lines are not IN the record, and both ways of
- * losing them are held here: "Sent off" was dropped from the conversation
- * outright, so a chat that delegated its whole turn read as a chat that fell
- * silent; and the line saying one came back was dropped as a repeat of the
- * helper's own answer, which it quotes on purpose, so the panel said finished
- * and the conversation never said it came home.
- *
- * Being in the record and being on his screen are two different questions, and
- * this file asks both. An agent going and coming home is drawn on the panel —
- * what it is, what it is doing, what it spent — so repeating it in the chat
- * says the same thing twice: those lines are the machine's own and start
- * switched off, and only one that FAILED speaks unasked. That is the manager's
- * ruling of 2026-08-20 (bw-6jq5). Every one of them is still one switch away,
- * which is what `everythingSaid` holds.
+ * Agent lifecycle is a categorized operation record, never assistant prose.
+ * The helper panel and the spawn/wait command rows say who started, finished,
+ * failed, or was waited on. These tests hold the other half of that contract:
+ * Claude's parallel system notifications must not become ordinary notes even
+ * when every machine-message filter is enabled. A service retry remains a note
+ * because it is session status, not a projection of one helper lifecycle.
  *
  * It holds them across the seam rather than either side of it: the real driver reads the kit's real messages, the real reducer folds
  * them into a conversation, and the browser's real filter — with nothing
@@ -130,31 +117,12 @@ describe('what a chat says about the work it sent away', () => {
     ended('t-3', 'stopped', 'Given up on'),
   ];
 
-  it('holds all five in the record, in the order they happened', () => {
-    // Sent off, retrying, finished, failed, given up — in that order, because
-    // the record is the conversation and the conversation is in time.
-    expect(everythingSaid(FIVE)).toEqual([
-      'Sent off: Sleep 45 seconds then report',
-      'Retrying (2 of 5) after HTTP 529',
-      // The line names the agent and then says, in English, what became of it.
-      // It used to end in the kit's own word in brackets — "(completed)" — which
-      // reads as English only for as long as the kit's words happen to be
-      // English (bw-iiv6).
-      'Sleep 45 seconds then report finished: Slept and reported',
-      // These two are other agents, whose going off this chat never heard.
-      'A sent-off agent failed: Could not read the file',
-      'A sent-off agent was stopped: Given up on',
-    ]);
+  it('keeps lifecycle notifications out of prose while retaining session retries', () => {
+    expect(everythingSaid(FIVE)).toEqual(['Retrying (2 of 5) after HTTP 529']);
   });
 
-  it('draws only the two he can act on before he touches a switch', () => {
-    // The service being ridden out is why his chat is sitting there, and the
-    // helper that failed is work he asked for that did not happen. An agent
-    // leaving, arriving home fine, or being given up on is the panel's news.
-    expect(readerSees(FIVE)).toEqual([
-      'Retrying (2 of 5) after HTTP 529',
-      'A sent-off agent failed: Could not read the file',
-    ]);
+  it('shows the session retry without duplicating failed-agent lifecycle prose', () => {
+    expect(readerSees(FIVE)).toEqual(['Retrying (2 of 5) after HTTP 529']);
   });
 
   it('says nothing at all about work a helper sent away', () => {
@@ -163,26 +131,18 @@ describe('what a chat says about the work it sent away', () => {
     expect(everythingSaid([A_HELPER_S, ended('br1aixx0b', 'completed', 'Slept')])).toEqual([]);
   });
 
-  it('says one came back even when its whole answer was one word', () => {
-    // The chat skips a quiet line a line just before it already said, which is
-    // for the kit saying one thing in two shapes. A helper is a second voice,
-    // not a second shape: kept in the same breath, "DONE" from the helper ate
-    // "DONE (completed)" from the chat, and the panel said finished while the
-    // conversation never said it came home.
+  it('keeps a one-word helper result in its child chat and categorized row', () => {
     const said = everythingSaid([SENT_OFF, ANSWERED, ended('afa98b872c4df37bc', 'completed', 'DONE')]);
-    expect(said).toEqual(['Sent off: Sleep 45 seconds then report', 'Sleep 45 seconds then report finished: DONE']);
+    expect(said).toEqual([]);
   });
 
-  it('and still says the chat’s own, with a helper’s work in among it', () => {
+  it('does not leak nested helper bookkeeping into the parent prose', () => {
     const said = everythingSaid([
       SENT_OFF,
       A_HELPER_S,
       ended('br1aixx0b', 'completed', 'Slept'),
       ended('afa98b872c4df37bc', 'completed', 'Slept and reported'),
     ]);
-    expect(said).toEqual([
-      'Sent off: Sleep 45 seconds then report',
-      'Sleep 45 seconds then report finished: Slept and reported',
-    ]);
+    expect(said).toEqual([]);
   });
 });

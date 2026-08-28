@@ -4,12 +4,9 @@
  * Whether a line in the conversation says what happened, or says the name of
  * the wire message it came from (bw-6jq5.3, bw-wasy).
  *
- * `system/task_updated` and `system/background_tasks_changed` printed their own
- * kind into the manager's chat — three lines in his record — because the only
- * words they carry sit a level down, under `patch` and inside `tasks`, and the
- * search for a sentence only ever looked at the top of the message. A reader
- * who opens the machine's own side to find out what happened, and is told
- * `system/task_updated`, has been told nothing.
+ * Agent lifecycle signals are not prose. They feed the categorized helper row
+ * and its command icon; drawing another ordinary note beside that row gives the
+ * parent agent words it never said and duplicates the same transition.
  *
  * Two things are held here, and the second is the one that lasts: the three
  * kinds we now know say what they mean, AND a kind nobody has ever seen says
@@ -45,7 +42,7 @@ const SENT_OFF = {
 };
 
 describe('a line about sent-off work', () => {
-  it('names the agent and what became of it, not the message it came in', () => {
+  it('does not turn an agent stopping into an ordinary transcript line', () => {
     const said = linesFrom([
       SENT_OFF,
       {
@@ -56,21 +53,18 @@ describe('a line about sent-off work', () => {
       },
     ]);
 
-    expect(said).toContain('Idle dummy agent was stopped.');
-    expect(said).not.toContain('system/task_updated');
+    expect(said).toEqual([]);
   });
 
-  // An id is all the kit sends about work this chat never started, so the line
-  // says what it can rather than printing the id at him.
-  it('still says what happened when it never heard the agent go off', () => {
+  it('does not invent parent prose for an agent it never heard start', () => {
     const said = linesFrom([
       { type: 'system', subtype: 'task_updated', task_id: 'unheard-of', patch: { status: 'failed' } },
     ]);
 
-    expect(said).toEqual(['A sent-off agent failed.']);
+    expect(said).toEqual([]);
   });
 
-  it('reads the background list out by name, and says so when it empties', () => {
+  it('keeps background-list bookkeeping out of ordinary transcript lines', () => {
     const said = linesFrom([
       {
         type: 'system',
@@ -80,7 +74,7 @@ describe('a line about sent-off work', () => {
       { type: 'system', subtype: 'background_tasks_changed', tasks: [] },
     ]);
 
-    expect(said).toEqual(['Running in the background: Idle dummy agent', 'Nothing is running in the background now']);
+    expect(said).toEqual([]);
   });
 });
 
