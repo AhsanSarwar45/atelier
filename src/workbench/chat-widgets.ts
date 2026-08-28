@@ -25,6 +25,7 @@ export type VideoWidget = {
 };
 export type ExplainerWidget = {
   type: 'explainer';
+  layout?: 'flow' | 'sequence' | 'cycle' | 'layers';
   title?: string;
   summary?: string;
   nodes: Array<{ id: string; label: string; detail?: string }>;
@@ -72,7 +73,8 @@ export function widget(value: unknown): ChatWidget | null {
       && (item.status === undefined || ['done', 'current', 'next'].includes(String(item.status))))) return value as TimelineWidget;
   if (value.type === 'video' && mediaSource(value.src)
     && (value.poster === undefined || mediaSource(value.poster))) return value as VideoWidget;
-  if (value.type === 'explainer' && (value.summary === undefined || text(value.summary))
+  if (value.type === 'explainer' && (value.layout === undefined || ['flow', 'sequence', 'cycle', 'layers'].includes(String(value.layout)))
+    && (value.summary === undefined || text(value.summary))
     && Array.isArray(nodes) && nodes.length >= 2 && nodes.length <= 12
     && nodes.every((node) => object(node) && text(node.id) && text(node.label)
       && (node.detail === undefined || text(node.detail)))

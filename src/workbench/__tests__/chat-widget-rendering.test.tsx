@@ -43,10 +43,10 @@ describe('chat widget rendering', () => {
 
   it('lets the reader move through an explainer and exposes its evidence', () => {
     render(<ChatWidgetView widget={widgets[7]!} />);
-    expect(screen.getByRole('img', { name: 'Session recovery diagram, step 1 of 3' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Session recovery flow diagram, step 1 of 3' })).toBeVisible();
     expect(screen.getByText('Connection drops')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Step 2: Events replay' }));
-    expect(screen.getByRole('img', { name: 'Session recovery diagram, step 2 of 3' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Session recovery flow diagram, step 2 of 3' })).toBeVisible();
     expect(screen.getByText('Events replay')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Session store:84' })).toBeVisible();
   });
@@ -56,7 +56,16 @@ describe('chat widget rendering', () => {
     render(<ChatWidgetView widget={widgets[7]!} />);
     fireEvent.click(screen.getByRole('button', { name: 'Play explanation' }));
     expect(screen.getByRole('button', { name: 'Pause explanation' })).toBeVisible();
-    expect(screen.getByRole('img', { name: 'Session recovery diagram, step 1 of 3' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Session recovery flow diagram, step 1 of 3' })).toBeVisible();
     vi.unstubAllGlobals();
+  });
+
+  it.each(['flow', 'sequence', 'cycle', 'layers'] as const)('draws and advances the %s visual language', (layout) => {
+    const base = widgets[7] as Extract<ChatWidget, { type: 'explainer' }>;
+    render(<ChatWidgetView widget={{ ...base, layout }} />);
+    const diagram = screen.getByRole('img', { name: `Session recovery ${layout} diagram, step 1 of 3` });
+    expect(diagram).toHaveAttribute('data-layout', layout);
+    fireEvent.click(screen.getByRole('button', { name: 'Step 3: Streaming resumes' }));
+    expect(diagram.querySelector('[data-node="live"]')).toHaveAttribute('data-active', 'true');
   });
 });

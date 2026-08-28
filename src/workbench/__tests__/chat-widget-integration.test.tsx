@@ -38,7 +38,7 @@ describe('chat widget integration', () => {
     ];
     const item = foldAll(events).items.find((entry) => entry.kind === 'message');
     render(<TranscriptRow item={item!} sessionId="chat" mentions={mentions} onLook={vi.fn()} />);
-    expect(screen.getByRole('img', { name: 'Request path diagram, step 1 of 2' })).toBeVisible();
+    expect(screen.getByRole('img', { name: 'Request path flow diagram, step 1 of 2' })).toBeVisible();
     expect(screen.getByText('Send request')).toBeVisible();
   });
 });

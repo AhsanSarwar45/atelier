@@ -56,6 +56,71 @@ function Chart({ widget }: { widget: ChartWidget }) {
   );
 }
 
+function NodeCard({ node, lit, className = '' }: { node: ExplainerWidget['nodes'][number]; lit: boolean; className?: string }) {
+  return <Panel data-node={node.id} data-active={lit} tone="frame" className={`p-2.5 transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20' : 'bg-background opacity-45'} ${className}`}>
+    <div className="text-xs font-semibold text-foreground">{node.label}</div>
+    {node.detail && <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{node.detail}</div>}
+  </Panel>;
+}
+
+function FlowDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
+  return <div className="grid grid-cols-3 gap-2">
+    {widget.nodes.map((node) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />)}
+    <div className="col-span-3 flex flex-wrap gap-1.5 pt-1">
+      {widget.edges.map((edge) => <span key={`${edge.from}-${edge.to}`} className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] transition-all duration-500 motion-reduce:transition-none ${active.has(edge.from) || active.has(edge.to) ? 'border-primary/60 bg-primary/10 text-foreground' : 'opacity-35'}`}>
+        {edge.from}<ChevronRight className="size-3" />{edge.label ?? edge.to}
+      </span>)}
+    </div>
+  </div>;
+}
+
+function SequenceDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
+  const at = (id: string) => Math.max(0, widget.nodes.findIndex((node) => node.id === id));
+  return <div className="min-w-[28rem]">
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(5rem, 1fr))` }}>
+      {widget.nodes.map((node) => <div key={node.id} className="text-center"><NodeCard node={node} lit={active.has(node.id)} /><div className="mx-auto h-5 w-px border-l border-dashed border-muted-foreground/30" /></div>)}
+    </div>
+    <div className="space-y-2">
+      {widget.edges.map((edge) => {
+        const from = at(edge.from); const to = at(edge.to); const lit = active.has(edge.from) || active.has(edge.to);
+        return <div key={`${edge.from}-${edge.to}`} className="grid h-7 items-center" style={{ gridTemplateColumns: `repeat(${widget.nodes.length}, minmax(5rem, 1fr))` }}>
+          <div className={`relative border-t transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary' : 'border-muted-foreground/20'}`} style={{ gridColumn: `${Math.min(from, to) + 1} / ${Math.max(from, to) + 2}` }}>
+            <span className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap bg-background px-1 text-[9px] text-muted-foreground">{edge.label ?? `${edge.from} → ${edge.to}`}</span>
+            <span className={`absolute -top-1.5 size-3 rounded-full bg-primary transition-[left] duration-700 motion-reduce:transition-none ${lit && playing ? 'animate-ping motion-reduce:animate-none' : ''}`} style={{ left: lit ? (from <= to ? '100%' : '0%') : (from <= to ? '0%' : '100%') }} />
+          </div>
+        </div>;
+      })}
+    </div>
+  </div>;
+}
+
+function CycleDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
+  return <div className="relative mx-auto h-64 max-w-md">
+    <div className={`absolute left-1/2 top-1/2 size-24 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-primary/40 ${playing ? 'animate-spin motion-reduce:animate-none' : ''}`} />
+    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Repeat</div>
+    {widget.nodes.map((node, index) => {
+      const angle = (index / widget.nodes.length) * Math.PI * 2 - Math.PI / 2;
+      return <div key={node.id} className="absolute w-28 -translate-x-1/2 -translate-y-1/2" style={{ left: `${50 + Math.cos(angle) * 38}%`, top: `${50 + Math.sin(angle) * 38}%` }}>
+        <NodeCard node={node} lit={active.has(node.id)} className={active.has(node.id) && playing ? 'animate-pulse motion-reduce:animate-none' : ''} />
+      </div>;
+    })}
+  </div>;
+}
+
+function LayersDiagram({ widget, active }: { widget: ExplainerWidget; active: Set<string> }) {
+  return <div className="mx-auto flex max-w-md flex-col gap-1.5 py-2">
+    {widget.nodes.map((node, index) => <NodeCard key={node.id} node={node} lit={active.has(node.id)} className={`${active.has(node.id) ? 'translate-x-3' : ''}`} />)}
+  </div>;
+}
+
+function ExplainerDiagram({ widget, active, playing }: { widget: ExplainerWidget; active: Set<string>; playing: boolean }) {
+  const layout = widget.layout ?? 'flow';
+  if (layout === 'sequence') return <SequenceDiagram widget={widget} active={active} playing={playing} />;
+  if (layout === 'cycle') return <CycleDiagram widget={widget} active={active} playing={playing} />;
+  if (layout === 'layers') return <LayersDiagram widget={widget} active={active} />;
+  return <FlowDiagram widget={widget} active={active} playing={playing} />;
+}
+
 function Explainer({ widget }: { widget: ExplainerWidget }) {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -81,25 +146,8 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
         </Button>}
       </div>
 
-      <Panel role="img" aria-label={`${widget.title ?? 'Concept'} diagram, step ${step + 1} of ${widget.steps.length}`} tone="frame" className="bg-muted/20 p-3">
-        <div className="flex items-stretch gap-1 overflow-x-auto pb-1">
-          {widget.nodes.map((node, index) => {
-            const lit = active.has(node.id);
-            const edge = index < widget.nodes.length - 1
-              ? widget.edges.find((candidate) => candidate.from === node.id && candidate.to === widget.nodes[index + 1]!.id)
-              : undefined;
-            return <div key={node.id} className="contents">
-              <Panel data-active={lit} tone="frame" className={`min-w-28 flex-1 p-2.5 transition-all duration-500 motion-reduce:transition-none ${lit ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20' : 'bg-background opacity-55'}`}>
-                <div className="text-xs font-semibold text-foreground">{node.label}</div>
-                {node.detail && <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{node.detail}</div>}
-              </Panel>
-              {index < widget.nodes.length - 1 && <div className={`flex min-w-7 flex-col items-center justify-center transition-opacity duration-500 motion-reduce:transition-none ${lit ? 'opacity-100' : 'opacity-35'}`}>
-                {edge?.label && <span className="max-w-16 truncate text-[9px] text-muted-foreground">{edge.label}</span>}
-                <ChevronRight className={`size-4 ${lit && playing ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
-              </div>}
-            </div>;
-          })}
-        </div>
+      <Panel role="img" data-layout={widget.layout ?? 'flow'} aria-label={`${widget.title ?? 'Concept'} ${widget.layout ?? 'flow'} diagram, step ${step + 1} of ${widget.steps.length}`} tone="frame" className="overflow-x-auto bg-muted/20 p-3">
+        <ExplainerDiagram widget={widget} active={active} playing={playing} />
       </Panel>
 
       <div className="mt-3" aria-live="polite">
