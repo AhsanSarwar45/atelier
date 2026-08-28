@@ -5,6 +5,7 @@ Emit JSON inside an `atelier-widget` fenced block:
 ```json
 {
   "type": "explainer",
+  "layout": "sequence",
   "title": "How session recovery works",
   "summary": "Only missed events are replayed.",
   "nodes": [
@@ -29,9 +30,11 @@ Emit JSON inside an `atelier-widget` fenced block:
 
 Constraints:
 
+- `layout` is optional and must be `flow`, `sequence`, `cycle`, or `layers`; it defaults to `flow`.
+- Choose `flow` for branching relationships, `sequence` for actor messages, `cycle` for feedback or repetition, and `layers` for stacks or hierarchy.
 - Text and IDs are non-empty strings of at most 200 characters.
 - `nodes` contains 2–12 uniquely identified nodes.
 - `edges` contains 1–20 entries; both endpoints name existing nodes.
 - `steps` contains 1–12 entries. `active` is non-empty and names existing nodes.
 - `evidence` is optional and contains at most 12 entries. Paths are absolute local paths; `line`, when present, is a positive integer.
-- Node order is the primary visual path. An edge label is shown between adjacent nodes when that exact edge exists.
+- Node order defines the reading order, actor order, cycle position, or layer order according to `layout`.

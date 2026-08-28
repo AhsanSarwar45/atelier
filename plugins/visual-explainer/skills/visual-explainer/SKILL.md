@@ -9,9 +9,14 @@ Create an `explainer` Atelier widget when the reader benefits from seeing a conc
 
 ## Choose the visual story
 
+- Choose the layout that matches the relationship, rather than forcing every idea into a left-to-right flow:
+  - `flow` for branches, dependencies, pipelines, and network relationships.
+  - `sequence` for ordered messages or calls between actors over time.
+  - `cycle` for feedback loops, retries, recurring lifecycles, and processes that return to their start.
+  - `layers` for architecture stacks, hierarchy, containment, and boundary crossings.
 - Use 2–12 nodes for the stable things in the concept: systems, states, actors, or data.
-- Use edges for real relationships. Arrange nodes in the primary reading order because Atelier renders that path left to right.
-- Use steps for change over time. Each step activates only the nodes relevant at that moment.
+- Use edges for real relationships. Arrange nodes in the primary reading order for the chosen layout.
+- Use steps for change over time. Each step activates only the nodes relevant at that moment, and playback animates the transition.
 - Link important claims to absolute local source paths when the evidence exists on disk.
 - Prefer a static timeline, table, or ordinary prose when playback would add no meaning.
 
