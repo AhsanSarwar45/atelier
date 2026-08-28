@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileCode2, Trash2 } from "lucide-react";
 
 import { ColorPicker } from "@/components/color-picker";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -110,6 +110,17 @@ export default function SettingsPage() {
 
       {/* Settings Content */}
       <main className="mx-auto max-w-2xl p-6">
+        <section className="mb-8">
+          <h2 className="mb-4 text-lg font-medium text-t-primary">Agent files</h2>
+          <Panel inset="md" className="flex items-center gap-4">
+            <FileCode2 className="size-5 shrink-0 text-t-muted" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-t-secondary">Claude and Codex configuration</p>
+              <p className="text-sm text-t-tertiary">Read personal and project instructions, settings, agents, skills, and related files.</p>
+            </div>
+            <Button asChild size="sm" variant="outline"><a href="/settings/agent-files">Browse <ExternalLink /></a></Button>
+          </Panel>
+        </section>
         {/* Theme Section */}
         <section className="mb-8">
           <h2 className="mb-4 text-lg font-medium text-t-primary">Theme</h2>
