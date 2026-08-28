@@ -78,16 +78,32 @@ function wroteItOut(href: string, written: string): boolean {
   return words === href || `http://${words}` === href || `https://${words}` === href;
 }
 
+interface LocalTarget {
+  path: string;
+  line: number | null;
+}
+
 /** A path the host can open, rather than an address the browser should visit. */
-function localPath(href: string): string | null {
+function localTarget(href: string): LocalTarget | null {
   // A leading slash is also an in-app URL. Limit Unix paths to the locations
   // people can actually link to under the backend's filesystem policy.
-  if (/^\/(home|Users)\//.test(href)) return href;
-  if (/^[A-Za-z]:[\\/]/.test(href)) return href;
+  let path: string;
   if (href.startsWith('file://')) {
-    try { return decodeURIComponent(new URL(href).pathname); } catch { return null; }
+    try { path = decodeURIComponent(new URL(href).pathname); } catch { return null; }
+  } else {
+    try { path = decodeURIComponent(href); } catch { return null; }
   }
-  return null;
+
+  if (!/^\/(home|Users)\//.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return null;
+
+  // Agent file citations conventionally end in :line or :line:column. Keep
+  // the column out of the filename too; editors only need the line here.
+  const location = path.match(/:(\d+)(?::\d+)?$/);
+  if (!location) return { path, line: null };
+  return {
+    path: path.slice(0, -location[0].length),
+    line: Number(location[1]),
+  };
 }
 
 export function MarkdownBody({
@@ -120,14 +136,18 @@ export function MarkdownBody({
             const href = String(props.href ?? '');
             const ours = wroteItOut(href, textOf(props.children)) ? mentions?.link?.(href) : null;
             if (ours) return <>{ours}</>;
-            const path = localPath(href);
-            if (path) return (
+            const local = localTarget(href);
+            if (local) return (
               <a
                 {...props}
                 href={href}
                 onClick={(event) => {
                   event.preventDefault();
-                  openLocalPath(path);
+                  openLocalPath(
+                    local.path,
+                    local.line === null ? 'finder' : 'vscode',
+                    local.line,
+                  );
                 }}
                 data-testid="markdown-file-link"
               />

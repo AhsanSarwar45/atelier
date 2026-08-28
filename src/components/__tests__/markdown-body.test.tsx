@@ -21,6 +21,24 @@ describe('Markdown file links', () => {
     expect(openExternal).toHaveBeenCalledWith('/home/me/proof.webm', 'finder');
   });
 
+  it('opens an absolute path at its cited line in the editor', () => {
+    render(<MarkdownBody>{'[source](</home/me/source.ts:42>)'}</MarkdownBody>);
+    fireEvent.click(screen.getByTestId('markdown-file-link'));
+    expect(openExternal).toHaveBeenCalledWith('/home/me/source.ts', 'vscode', 42);
+  });
+
+  it('removes a cited column while opening at the cited line', () => {
+    render(<MarkdownBody>{'[source](</home/me/source.ts:42:7>)'}</MarkdownBody>);
+    fireEvent.click(screen.getByTestId('markdown-file-link'));
+    expect(openExternal).toHaveBeenCalledWith('/home/me/source.ts', 'vscode', 42);
+  });
+
+  it('keeps spaces in an angle-bracket path while separating a cited line', () => {
+    render(<MarkdownBody>{'[source](</home/me/My Source.ts:42>)'}</MarkdownBody>);
+    fireEvent.click(screen.getByTestId('markdown-file-link'));
+    expect(openExternal).toHaveBeenCalledWith('/home/me/My Source.ts', 'vscode', 42);
+  });
+
   it('leaves web addresses as browser links', () => {
     render(<MarkdownBody>{'[site](https://example.com)'}</MarkdownBody>);
     expect(screen.getByTestId('markdown-link')).toHaveAttribute('target', '_blank');
