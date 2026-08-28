@@ -89,6 +89,29 @@ pub struct Laid {
     pub package: PathBuf,
 }
 
+/// Run the dependency-free presentation helper carried with the chat sidecar.
+pub fn present(rest: &[String]) -> Result<i32, String> {
+    let laid = install()?;
+    let entry = laid.package.join("src/present.ts");
+    let mut refused = None;
+    for word in ["node", "node.exe"] {
+        match std::process::Command::new(word)
+            .args(["--experimental-strip-types", "--disable-warning=ExperimentalWarning"])
+            .arg(&entry)
+            .args(rest)
+            .status()
+        {
+            Ok(status) => return Ok(status.code().unwrap_or(1)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => refused = Some(e),
+            Err(e) => return Err(format!("{word}: {e}")),
+        }
+    }
+    Err(format!(
+        "the presentation command needs node ({})",
+        refused.map(|e| e.to_string()).unwrap_or_default()
+    ))
+}
+
 /// Lay the helper down beside the data.
 ///
 /// Returns what went wrong rather than stopping the program: a copy that
@@ -207,6 +230,7 @@ mod tests {
             "running.ts",
             "token-picture.ts",
             "window-now.ts",
+            "chat-widgets.ts",
         ] {
             assert!(names.iter().any(|n| n == needed), "{needed} is not carried; it has {names:?}");
         }

@@ -350,6 +350,9 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
 /// an arbitrary relative path here would turn a documentation convenience into
 /// a general script runner over application data.
 pub fn tool(name: &str, rest: &[String]) -> Result<i32, String> {
+    if name == "present" {
+        return crate::helper::present(rest);
+    }
     let dir = crate::identity::rules_dir()
         .ok_or_else(|| "this computer names no folder for Atelier's working rules".to_string())?;
     let script = tool_path(name, &dir)?;

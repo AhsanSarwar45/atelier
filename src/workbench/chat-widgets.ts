@@ -99,6 +99,47 @@ export function widget(value: unknown): ChatWidget | null {
   return null;
 }
 
+const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
+  metrics: new Set(['type', 'title', 'items']),
+  chart: new Set(['type', 'title', 'chart', 'series', 'data']),
+  progress: new Set(['type', 'title', 'items']),
+  timeline: new Set(['type', 'title', 'items']),
+  table: new Set(['type', 'title', 'columns', 'rows']),
+  video: new Set(['type', 'title', 'src', 'poster']),
+  explainer: new Set(['type', 'layout', 'title', 'summary', 'nodes', 'edges', 'steps', 'evidence']),
+};
+
+const fieldsAre = (value: Record<string, unknown>, allowed: Set<string>) =>
+  Object.keys(value).every((key) => allowed.has(key));
+
+/** Strict input for the presentation CLI; transcript parsing stays backward-compatible. */
+export function presentableWidget(value: unknown): ChatWidget | null {
+  const parsed = widget(value);
+  if (!parsed || !fieldsAre(parsed as unknown as Record<string, unknown>, TOP_LEVEL_FIELDS[parsed.type])) return null;
+  if (parsed.type === 'metrics') return parsed.items.every((item) => fieldsAre(item, new Set(['label', 'value', 'detail', 'trend']))) ? parsed : null;
+  if (parsed.type === 'chart') return parsed.series.every((item) => fieldsAre(item, new Set(['name', 'color'])))
+    && parsed.data.every((item) => fieldsAre(item, new Set(['label', 'values']))) ? parsed : null;
+  if (parsed.type === 'progress') return parsed.items.every((item) => fieldsAre(item, new Set(['label', 'value', 'max', 'detail']))) ? parsed : null;
+  if (parsed.type === 'timeline') return parsed.items.every((item) => fieldsAre(item, new Set(['label', 'detail', 'status']))) ? parsed : null;
+  if (parsed.type === 'explainer') return parsed.nodes.every((item) => fieldsAre(item, new Set(['id', 'label', 'detail'])))
+    && parsed.edges.every((item) => fieldsAre(item, new Set(['from', 'to', 'label'])))
+    && parsed.steps.every((item) => fieldsAre(item, new Set(['label', 'detail', 'active'])))
+    && (parsed.evidence === undefined || parsed.evidence.every((item) => fieldsAre(item, new Set(['label', 'path', 'line'])))) ? parsed : null;
+  return parsed;
+}
+
+function ordered(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(ordered);
+  if (!object(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, ordered(value[key])]));
+}
+
+/** Exact durable transcript syntax returned by Atelier's bundled presenter. */
+export function widgetBlock(value: unknown): string | null {
+  const parsed = presentableWidget(value);
+  return parsed ? `\`\`\`atelier-widget\n${JSON.stringify(ordered(parsed))}\n\`\`\`` : null;
+}
+
 export function widgetSpecs(message: string): ChatWidget[] {
   const found: ChatWidget[] = [];
   const blocks = new RegExp(BLOCK.source, BLOCK.flags);
