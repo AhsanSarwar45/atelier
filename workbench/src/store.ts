@@ -13,6 +13,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { dataHome } from './data-home.ts';
+import { planCanonicalProjection, type CanonicalProjectionPlan } from './canonical-projection.ts';
 
 import type { SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 
@@ -467,6 +468,73 @@ export class Store {
         identity?.eventId ?? null,
       );
     return result.changes === 1;
+  }
+
+  /** Reports what a canonical rebuild would remove without writing anything. */
+  auditCanonicalProjection(sessionId: string): CanonicalProjectionPlan {
+    if (!this.getSession(sessionId)) throw new Error(`no session ${sessionId}`);
+    return planCanonicalProjection(this.eventsSince(sessionId, 0));
+  }
+
+  /**
+   * Atomically switches the visible transcript to a deduplicated projection.
+   *
+   * Old native and Atelier rows remain untouched before `transcript.reset`.
+   * The reset and replacement rows commit together, so readers see the old
+   * projection or the complete new one, never a half-rebuilt transcript.
+   */
+  rebuildCanonicalProjection(sessionId: string): CanonicalProjectionPlan & { resetSeq: number } {
+    if (!this.getSession(sessionId)) throw new Error(`no session ${sessionId}`);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const plan = planCanonicalProjection(this.eventsSince(sessionId, 0));
+      let seq = this.nextSeq(sessionId);
+      const resetSeq = seq;
+      const reset: WbpEvent = {
+        type: 'transcript.reset', sessionId, seq: seq++, at: new Date().toISOString(),
+      };
+      const insert = this.db.prepare(
+        `INSERT INTO event
+           (session_id, seq, at, type, json, provider, provider_thread_id, provider_event_id)
+         VALUES (?,?,?,?,?,NULL,NULL,NULL)`,
+      );
+      insert.run(sessionId, reset.seq, reset.at, reset.type, JSON.stringify(reset));
+
+      const projected: WbpEvent[] = [];
+      for (const source of plan.projectedEvents) {
+        const copy = { ...source, sessionId, seq: seq++ } as WbpEvent;
+        delete copy.providerEvent;
+        insert.run(sessionId, copy.seq, copy.at, copy.type, JSON.stringify(copy));
+        projected.push(copy);
+      }
+
+      // Search is a disposable projection too. Rebuild it inside the same
+      // switch so search and transcript never disagree about duplicated text.
+      this.db.prepare('DELETE FROM message WHERE session_id = ?').run(sessionId);
+      const opened = new Map<string, { role: string; text: string; at: string }>();
+      for (const event of projected) {
+        if (event.type === 'message.started') {
+          opened.set(event.messageId, { role: event.role, text: '', at: event.at });
+        } else if (event.type === 'text.delta') {
+          const message = opened.get(event.messageId);
+          if (message) message.text += event.text;
+        } else if (event.type === 'message.retracted') {
+          opened.delete(event.messageId);
+        }
+      }
+      const putMessage = this.db.prepare(
+        'INSERT INTO message (session_id, message_id, role, text, at) VALUES (?,?,?,?,?)',
+      );
+      for (const [messageId, message] of opened) {
+        putMessage.run(sessionId, messageId, message.role, message.text, message.at);
+      }
+
+      this.db.exec('COMMIT');
+      return { ...plan, resetSeq };
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   /**
