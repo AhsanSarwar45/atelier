@@ -9,6 +9,7 @@ import { ReadFailed } from '@/components/ui/read-failed';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { fs } from '@/lib/api';
+import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { sendCommand } from '@/workbench/use-session';
 
@@ -61,7 +62,7 @@ export function AgentFilesBrowser({ projects }: { projects: { id: string; name: 
         setFiles(found);
         setSelected((before) => {
           if (found.some((file) => file.id === before)) return before;
-          const wide = typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 768px)').matches;
+          const wide = typeof window.matchMedia !== 'function' || window.matchMedia(NOT_PHONE_SCREEN).matches;
           return wide ? (found.find((file) => file.category === 'instructions') ?? found[0])?.id ?? null : null;
         });
       })

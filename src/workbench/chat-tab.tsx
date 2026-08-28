@@ -58,6 +58,7 @@ import { useHeldAtTheEnd } from '@/hooks/held-at-the-end';
 import { addressWith } from '@/lib/address';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
+import { isPhoneScreen } from '@/lib/screen-width';
 import { ChatRightRail, useGitPanel, useRightRail } from '@/workbench/chat-right-rail';
 import { ChatSidebar } from '@/workbench/chat-sidebar';
 import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
@@ -465,7 +466,7 @@ function costLabel(cost: Cost): string {
 /** Desktop keeps its quick Enter shortcut; phone keyboards always make a new line. */
 export function enterSubmits(
   event: Pick<KeyboardEvent<HTMLTextAreaElement>, 'key' | 'shiftKey'>,
-  mobile = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 767px)').matches),
+  mobile = isPhoneScreen(),
 ): boolean {
   return event.key === 'Enter' && !event.shiftKey && !mobile;
 }

@@ -36,6 +36,7 @@ import { X } from 'lucide-react';
 
 import { BeadChip } from '@/components/bead-chip-row';
 import { Button } from '@/components/ui/button';
+import { NOT_PHONE_SCREEN } from '@/lib/screen-width';
 import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
@@ -63,7 +64,7 @@ export function useRightRail(): [boolean, () => void] {
     // that opens over the transcript on first sight is a rail he shuts once and
     // then reads the app around.
     const chosen = localStorage.getItem(RIGHT_RAIL);
-    setOpen(chosen === null ? window.matchMedia('(min-width: 768px)').matches : chosen !== '0');
+    setOpen(chosen === null ? window.matchMedia(NOT_PHONE_SCREEN).matches : chosen !== '0');
   }, []);
 
   const flip = useCallback(() => {
