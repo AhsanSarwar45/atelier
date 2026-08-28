@@ -12,6 +12,7 @@ mod handover;
 mod helper;
 mod identity;
 mod laid_down;
+mod local_host;
 mod reachable;
 mod routes;
 mod rules;
@@ -483,6 +484,12 @@ async fn serve(open_browser: bool) {
         // the open chat, each event tagged (routes/live.rs, bw-zkh4).
         .route("/api/live", get(routes::live::live))
         .nest("/api/workbench", routes::workbench::router())
+        // The one nest that hands out a shell, so the one nest that first asks
+        // whether the caller is really talking to this machine (local_host.rs).
+        .nest(
+            "/api/terminal",
+            Router::new().layer(middleware::from_fn(local_host::require_local_host)),
+        )
         .route("/api/version/check", get(routes::version::version_check))
         .route("/api/update", post(routes::version::perform_update))
         .fallback(serve_static)
