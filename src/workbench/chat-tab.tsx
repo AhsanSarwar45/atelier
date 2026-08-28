@@ -30,6 +30,7 @@ import {
   Paperclip,
   Plus,
   ShieldCheck,
+  SquareCheck,
   SlidersHorizontal,
   Square,
   Star,
@@ -1052,7 +1053,16 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             ))}
           </div>
           <DialogFooter className="gap-2 sm:space-x-0">
-            <Button variant="secondary" onClick={() => setNewChatDefault(newBrand)}>
+            <Button
+              variant="secondary"
+              role="checkbox"
+              aria-checked={newChatDefault === newBrand}
+              data-testid="new-chat-default"
+              onClick={() => setNewChatDefault(newChatDefault === newBrand ? 'ask' : newBrand)}
+            >
+              {newChatDefault === newBrand
+                ? <SquareCheck aria-hidden="true" />
+                : <Square aria-hidden="true" />}
               Use {newBrand === 'claude' ? 'Claude' : 'Codex'} by default
             </Button>
             <Button variant="primary" disabled={starting} onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand); }}>
