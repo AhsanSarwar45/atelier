@@ -1645,7 +1645,17 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 aria-label="Stop"
                 data-testid="stop-button"
                 className="rounded-full"
-                onClick={() => void sendCommand({ type: 'session.stop', sessionId })}
+                onClick={() => {
+                  setSendError(null);
+                  // A Stop that did not stop anything has to say so. It used to
+                  // fail in silence: the rejection went nowhere, the chip went
+                  // on spinning, and the only chat this ever happens in is one
+                  // already broken enough that Stop is the last thing left to
+                  // try (bw-sxzv.4).
+                  void sendCommand({ type: 'session.stop', sessionId }).catch((e: unknown) => {
+                    setSendError(`The chat could not be stopped. ${e instanceof Error ? e.message : String(e)}`);
+                  });
+                }}
               >
                 <Square className="h-4 w-4" />
               </Button>

@@ -12,7 +12,7 @@ describe('provider conversation names', () => {
     }], [{
       id: 'session-1', externalId: 'provider-1', brand: 'claude', projectId: 'project-1',
       projectPath: '/project', title: 'This chat is idle it was working but got forced close',
-      state: 'idle', activity: null, waitingFor: null, busySince: null,
+      state: 'idle', activity: '', waitingFor: null, busySince: null,
       lastActiveAt: '2026-08-26T10:01:00.000Z', lastSpokeAt: null,
       startedAt: '2026-08-26T10:00:00.000Z', beads: [],
     }], 'project-1');

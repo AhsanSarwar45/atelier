@@ -1,5 +1,10 @@
 {
   "compilerOptions": {
+    // The runtime everything here actually runs on: the browser build, and Node
+    // 22 reading the sidecar's TypeScript as it stands. Left unsaid, tsc checks
+    // against ES5 — which reports `for (const x of aSet)` as an error in every
+    // file the sidecar has, and hid a real one behind them (bw-sxzv.3).
+    "target": "es2022",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
@@ -27,5 +32,9 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "tests", "playwright.config.ts", "worktrees", "workbench"]
+  // `workbench` was here, and while it was, nothing typechecked the chat's own
+  // server at all: a null handed to a rule that measures a string went out and
+  // killed a live conversation before anyone read a type error, because there
+  // was no run that could have printed one (bw-sxzv).
+  "exclude": ["node_modules", "tests", "playwright.config.ts", "worktrees"]
 }

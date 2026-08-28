@@ -6,10 +6,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { WbpEvent } from '../../../src/workbench/protocol.ts';
+import type { DriverEvent } from '../drivers/types.ts';
 import { Store } from '../store.ts';
 import { transcriptPage } from '../transcript-page.ts';
 
-function event(store: Store, seq: number, body: Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>): void {
+// A driver's own event: every field of the one kind, rather than the handful
+// every kind shares. `Omit` over a union keeps only what they all have, so a
+// line saying which message it belonged to was not a line this could write.
+function event(store: Store, seq: number, body: DriverEvent): void {
   store.appendEvent({
     ...body,
     seq,

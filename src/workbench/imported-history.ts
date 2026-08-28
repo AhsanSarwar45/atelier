@@ -381,8 +381,19 @@ export const KEPT = 4000;
  */
 export const COMMAND_KEPT = 20_000;
 
-/** Cut to `KEPT`, saying how much was left out rather than trailing off. */
-export function cut(text: string, kept = KEPT): string {
+/**
+ * Cut to `KEPT`, saying how much was left out rather than trailing off.
+ *
+ * Nothing is kept as nothing. A helper stopped before it answered leaves a
+ * finished line with no result at all, and asking that for its length threw
+ * inside the loop reading the kit's messages — which killed the whole chat over
+ * one cancelled helper (bw-sxzv.1). What comes back is what went in: a body
+ * still absent, never an empty string a row would draw as an answer.
+ */
+export function cut(text: string, kept?: number): string;
+export function cut(text: string | null, kept?: number): string | null;
+export function cut(text: string | null, kept = KEPT): string | null {
+  if (text === null) return null;
   return text.length > kept ? `${text.slice(0, kept)}\n… and ${text.length - kept} more characters` : text;
 }
 

@@ -1761,6 +1761,14 @@ export class Sessions {
 
     this.store.appendEvent(full);
 
+    // A driver that has taken a fatal error is not driving anything any more,
+    // and the only thing that says so is this line. Left in the map it would go
+    // on being handed turns nobody reads: `send` hands a chat to whatever
+    // driver is registered for it, and only an ABSENT one makes the next
+    // message start a fresh run. One cancelled helper used to leave a chat sat
+    // in here forever, answering nothing (bw-sxzv.2).
+    if (full.type === 'error' && full.fatal) this.drivers.delete(sessionId);
+
     // The linker reads OUR vocabulary, not the brand's, so every driver feeds it.
     if (full.type === 'tool.started') {
       this.linkers.get(sessionId)?.observe(full.name, full.input);

@@ -25,7 +25,7 @@ import { join } from 'node:path';
 
 import { asleepHere, byWhatIsWorking, folderOf, laterOf } from '../../src/workbench/protocol.ts';
 import type { RestoreRow, SessionSummary } from '../../src/workbench/protocol.ts';
-import { holdsNow, runningNow } from './running.ts';
+import { holdsNow, readMarkers, runningNow } from './running.ts';
 import type { HeldChat } from '../../src/workbench/chat-state.ts';
 import type { HeldDoing } from '../../src/workbench/chat-state.ts';
 import { lastSpokeAt } from './spoken.ts';

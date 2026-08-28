@@ -254,6 +254,18 @@ const NOTHING_YET = { seconds: 0, tokens: 0, calls: 0, model: null as string | n
 /** The states a row never leaves: the work is over, however it went. */
 const OVER = new Set<AgentState>(['done', 'failed', 'stopped']);
 
+/** The three words a finished line has, which are not every word a row has. */
+type FinishedState = Extract<AgentState, 'done' | 'failed' | 'stopped'>;
+
+/**
+ * Is this row over? Asked as a question that narrows, so nothing can hand a
+ * finished line a state it has no word for — which is what the typechecker
+ * found here the moment it was let into this folder (bw-sxzv.3).
+ */
+function isOver(state: AgentState): state is FinishedState {
+  return OVER.has(state);
+}
+
 /** What the kit's own word for a task's state means on a row. */
 const TASK_STATE: Record<string, AgentState> = {
   pending: 'running',
@@ -994,7 +1006,7 @@ export class ClaudeDriver implements Driver {
           ? 'parked'
           : (patch.status && TASK_STATE[patch.status]) || was.state;
         this.sentAway.set(id, { ...was, state });
-        if (OVER.has(state)) {
+        if (isOver(state)) {
           this.emit({
             type: 'agent.finished', agentId: id, state,
             seconds: was.seconds, tokens: was.tokens, calls: was.calls,
@@ -1017,12 +1029,15 @@ export class ClaudeDriver implements Driver {
         const id = String(m.task_id ?? '');
         if (!id) return false;
         const was = numbers(id);
-        const state = TASK_STATE[String(m.status ?? '')] ?? 'done';
+        const said = TASK_STATE[String(m.status ?? '')];
+        // A notification is the kit saying this piece of work is over, so a
+        // word that is not one of the three ways of being over means done.
+        const state: FinishedState = said !== undefined && isOver(said) ? said : 'done';
         // How it ended, once. A row he stopped stays stopped whatever else
         // arrives about it afterwards, and the ending is written down here and
         // not only sent out — the receipt of the dispatching call comes through
         // a different door and has to be able to see it (bw-7ks.22.27).
-        const ended: AgentState = was.state === 'stopped' ? 'stopped' : state;
+        const ended: FinishedState = was.state === 'stopped' ? 'stopped' : state;
         this.sentAway.set(id, { ...was, state: ended });
         this.emit({
           type: 'agent.finished',
@@ -1073,8 +1088,8 @@ export class ClaudeDriver implements Driver {
   }
 
   /** What a row last said about itself, for a message that carries only part of it. */
-  private rowNumbers(agentId: string): { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState } {
-    return this.sentAway.get(agentId) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running' };
+  private rowNumbers(agentId: string): { seconds: number; tokens: number; calls: number; model: string | null; state: AgentState; what: string } {
+    return this.sentAway.get(agentId) ?? { seconds: 0, tokens: 0, calls: 0, model: null, state: 'running', what: '' };
   }
 
   /**
@@ -1600,6 +1615,10 @@ export class ClaudeDriver implements Driver {
   }
 
   async send(input: PromptInput): Promise<void> {
+    // Nothing is reading the inbox once this driver is down. A turn pushed into
+    // it would sit there forever under a chip saying Thinking, which is the one
+    // thing a chat must never say about a turn nobody has (bw-sxzv.2).
+    if (this.closed) throw new Error('This chat is no longer running.');
     await this.validate(input);
     this.inbox.push(input);
     this.wake?.();
@@ -1717,12 +1736,52 @@ export class ClaudeDriver implements Driver {
     this.q?.close();
   }
 
+  /**
+   * Puts this driver down where it stands, without waiting to be asked.
+   *
+   * Everything here is a promise something else is holding: the run handle the
+   * kit answers on, the turns queued for a generator that is still being read,
+   * the permission cards blocking the kit's own call. When the stream this
+   * driver was reading ends in an error, all four are already dead and none of
+   * them say so — so the chat went on looking alive. It took the next turn into
+   * an inbox with no reader and drew Thinking over it, and his Stop went out
+   * over a transport nobody was on and hung until the browser gave up ten
+   * seconds later (bw-sxzv.2).
+   *
+   * Said in the past tense on purpose: this does not stop anything, it admits
+   * that everything is already stopped.
+   */
+  private putDown(): void {
+    this.closed = true;
+    this.q = null;
+    // The turns nobody will ever read. Dropped rather than kept, because the
+    // chat comes back by starting a fresh run, and a turn replayed into that
+    // one would be a question asked twice.
+    this.inbox = [];
+    this.awaitingAnswer = false;
+    // Lets the generator wake, see that this is over, and end.
+    this.wake?.();
+    this.wake = null;
+    // And any card still on his screen comes down. The call it was blocking is
+    // gone with the transport, so leaving it up asks him to answer nobody.
+    for (const [askId, ask] of this.asks) {
+      ask.resolve({ behavior: 'deny', message: 'This chat stopped answering.' });
+      this.emit({ type: 'ask.resolved', askId, chosen: 'deny' });
+    }
+    this.asks.clear();
+  }
+
   /** Reads the SDK’s message stream and hands every message to `draw`. */
   private async pump(): Promise<void> {
     if (!this.q) return;
     try {
       for await (const m of this.q as AsyncIterable<Record<string, any>>) this.draw(m);
     } catch (err) {
+      // Down first, then the news. `emit` runs the whole publishing path
+      // synchronously — the record, the browser, and the app letting go of this
+      // driver — so anything it reaches must find a driver that has already
+      // stopped claiming to work.
+      this.putDown();
       this.emit({ type: 'error', message: err instanceof Error ? err.message : String(err), fatal: true });
       this.emit({ type: 'session.state', state: 'errored', label: 'Failed' });
     }

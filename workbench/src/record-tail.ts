@@ -29,7 +29,7 @@ import { claudeConfigDir } from './running.ts';
  * the kit's own reader hands back, which is what reads a past chat and what
  * measures how full it stands.
  */
-export interface RecordLine {
+export type RecordLine = {
   type?: string;
   /** The line's own name, which is how a reader says where it stopped. */
   uuid?: string;
@@ -51,7 +51,7 @@ export interface RecordLine {
   /** The reasoning budget in force when this line was written. */
   effort?: string;
   payload?: unknown;
-}
+};
 
 /**
  * What a chat is running, as its own record says it.

@@ -30,7 +30,7 @@ const APPLICATION = 'atelier';
 export const HANDED_DOWN = 'ATELIER_DATA_DIR';
 
 export function dataHome(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
   platform: string = process.platform,
   home: string = homedir(),
 ): string {

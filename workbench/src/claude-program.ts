@@ -53,7 +53,7 @@ const runnable: CanRun = (path) => {
  * all three kinds of machine on whichever one is running the test.
  */
 export function claudeProgram(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
   platform: string = process.platform,
   canRun: CanRun = runnable,
 ): string | undefined {
