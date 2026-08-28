@@ -76,6 +76,10 @@ function aChatWithTwoHelpers(): WbpEvent[] {
       input: { command: 'rg useSession' },
       title: 'rg useSession',
       parentToolCallId: 'call-1',
+      execution: {
+        conversationId: 'task-1', actorId: 'task-1', actorName: 'general-purpose',
+        parentActorId: null, operationId: 'cmd-1', parentOperationId: 'call-1',
+      },
     }),
     said({ type: 'tool.completed', toolCallId: 'cmd-1', ok: true, output: 'four callers' }),
 
@@ -159,6 +163,8 @@ describe.each(bothWays)('a chat %s', (_name, fold) => {
     expect(said.textContent).not.toContain('The tests are green.');
     expect(said.textContent).not.toContain('Sending two helpers off.');
     expect(screen.getByTestId('agent-view').getAttribute('data-said')).toBe('3');
+    expect(screen.getByTestId('subagent-tool-row')).toHaveAttribute('data-actor-id', 'task-1');
+    expect(screen.getByTestId('subagent-tool-row')).toHaveAttribute('data-conversation-id', 'task-1');
   });
 });
 

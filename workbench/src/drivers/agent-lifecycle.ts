@@ -6,7 +6,7 @@
  * That leaves no second map in a driver which can reopen a finished child,
  * announce one twice, or turn a late usage answer into another ending.
  */
-import type { AgentKind, AgentState } from '../../../src/workbench/protocol.ts';
+import type { AgentKind, AgentState, ExecutionContext } from '../../../src/workbench/protocol.ts';
 import type { DriverEvent } from './types.ts';
 
 type FinishedState = Extract<AgentState, 'done' | 'failed' | 'stopped'>;
@@ -18,6 +18,7 @@ export interface NativeAgentStart {
   what: string;
   agentType: string | null;
   model: string | null;
+  execution?: ExecutionContext;
 }
 
 export interface NativeAgentProgress {
@@ -188,6 +189,7 @@ export class AgentLifecycle {
       ...(row.doing && !row.finished ? { doing: row.doing } : {}),
       ...(row.model ? { model: row.model } : {}),
       ...(!row.finished && patch.state ? { state: row.state } : {}),
+      ...(row.execution ? { execution: row.execution } : {}),
     });
   }
 
@@ -227,6 +229,7 @@ export class AgentLifecycle {
       calls: row.calls,
       model: row.model,
       result: finish.result,
+      ...(row.execution ? { execution: row.execution } : {}),
     });
   }
 }

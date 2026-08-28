@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
-import type { AgentControl, AgentState, CommandInfo } from '../../../src/workbench/protocol.ts';
+import type { AgentControl, AgentState, CommandInfo, ExecutionContext } from '../../../src/workbench/protocol.ts';
 import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
@@ -40,8 +40,8 @@ interface CodexSubAgentActivity {
 }
 type CodexAgentSignal =
   | { type: 'thread/status/changed'; threadId: string; status: { type: 'active' | 'idle' | 'systemError' }; result?: string | null }
-  | { type: 'item/subAgentActivity'; item: CodexSubAgentActivity }
-  | { type: 'item/collabAgentToolCall'; item: CodexCollabAgentToolCall; completed: boolean };
+  | { type: 'item/subAgentActivity'; item: CodexSubAgentActivity; actorAgentId: string | null }
+  | { type: 'item/collabAgentToolCall'; item: CodexCollabAgentToolCall; completed: boolean; actorAgentId: string | null };
 
 const MODES = ['untrusted', 'on-request', 'never'];
 const BEADS_SANDBOX_CONFIG = { sandbox_workspace_write: { network_access: true } };
@@ -617,6 +617,7 @@ class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
           what: agentType || 'Subagent',
           agentType,
           model: null,
+          execution: this.execution(item.agentThreadId, signal.actorAgentId, item.id, agentType),
         });
         if (agentType) this.agents.identify(item.agentThreadId, agentType);
       } else if (item.kind === 'interacted') {
@@ -639,6 +640,7 @@ class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
           what: item.prompt || 'Subagent',
           agentType: null,
           model: item.model,
+          execution: this.execution(agentId, signal.actorAgentId, item.id, null),
         });
         const row = this.agents.get(agentId);
         this.agents.progress(agentId, {
@@ -670,6 +672,22 @@ class CodexAgentAdapter implements ProviderAgentAdapter<CodexAgentSignal> {
       }
     }
     return true;
+  }
+
+  private execution(
+    agentId: string,
+    parentAgentId: string | null,
+    operationId: string,
+    actorName: string | null,
+  ): ExecutionContext {
+    return {
+      conversationId: agentId,
+      actorId: agentId,
+      actorName,
+      parentActorId: parentAgentId,
+      operationId,
+      parentOperationId: parentAgentId ? this.agents.get(parentAgentId)?.toolCallId ?? null : null,
+    };
   }
 }
 
@@ -1184,24 +1202,35 @@ export class CodexDriver implements Driver {
     } else if (method === 'skills/changed') {
       void this.menu();
     } else if (method === 'item/agentMessage/delta') {
-      this.openMessage(p.itemId, this.sentBy(p.threadId));
-      this.emit({ type: 'text.delta', messageId: p.itemId, text: p.delta });
+      const actorAgentId = this.actorOf(p.threadId);
+      const parentToolCallId = this.sentBy(p.threadId);
+      this.openMessage(p.itemId, parentToolCallId, actorAgentId);
+      this.emit({
+        type: 'text.delta', messageId: p.itemId, text: p.delta,
+        ...(this.execution(actorAgentId, p.itemId, parentToolCallId)
+          ? { execution: this.execution(actorAgentId, p.itemId, parentToolCallId)! }
+          : {}),
+      });
     } else if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
       const parentToolCallId = this.sentBy(p.threadId);
+      const actorAgentId = this.actorOf(p.threadId);
       this.emit({
         type: 'thinking.delta', messageId: p.itemId, text: p.delta,
         ...(parentToolCallId ? { parentToolCallId } : {}),
+        ...(this.execution(actorAgentId, p.itemId, parentToolCallId)
+          ? { execution: this.execution(actorAgentId, p.itemId, parentToolCallId)! }
+          : {}),
       });
     } else if (method === 'turn/plan/updated') {
       this.emit({ type: 'todo', items: (p.plan ?? []).map((x: Bag, i: number) => ({ id: String(i), text: x.step, status: x.status })) });
     } else if (method === 'item/started') {
-      this.itemStarted(p.item, this.sentBy(p.threadId));
+      this.itemStarted(p.item, this.sentBy(p.threadId), this.actorOf(p.threadId));
     } else if (method === 'item/completed') {
       if (p.threadId && p.threadId !== this.threadId && p.item?.type === 'agentMessage') {
         const result = String(p.item.text ?? '').trim();
         if (result) this.childResults.set(p.threadId, result);
       }
-      this.itemCompleted(p.item, this.sentBy(p.threadId));
+      this.itemCompleted(p.item, this.sentBy(p.threadId), false, this.actorOf(p.threadId));
     } else if (method === 'thread/tokenUsage/updated') {
       const u = p.tokenUsage?.last;
       const total = p.tokenUsage?.total;
@@ -1243,13 +1272,42 @@ export class CodexDriver implements Driver {
     return this.agents.get(threadId)?.toolCallId ?? null;
   }
 
-  private openMessage(id: string, parentToolCallId: string | null = null): void {
+  private actorOf(threadId: string | undefined): string | null {
+    if (!threadId || threadId === this.threadId) return null;
+    return threadId;
+  }
+
+  private execution(
+    actorAgentId: string | null,
+    operationId: string | null,
+    parentOperationId: string | null,
+  ): ExecutionContext | null {
+    if (!actorAgentId) return null;
+    const actor = this.agents.get(actorAgentId);
+    return {
+      conversationId: actorAgentId,
+      actorId: actorAgentId,
+      actorName: actor?.agentType || actor?.what || null,
+      parentActorId: actor?.execution?.parentActorId ?? null,
+      operationId,
+      parentOperationId,
+    };
+  }
+
+  private openMessage(
+    id: string,
+    parentToolCallId: string | null = null,
+    actorAgentId: string | null = null,
+  ): void {
     if (this.messages.has(id)) return;
     this.messages.add(id);
     if (parentToolCallId) this.messageParents.set(id, parentToolCallId);
     this.emit({
       type: 'message.started', messageId: id, role: 'assistant',
       ...(parentToolCallId ? { parentToolCallId } : {}),
+      ...(this.execution(actorAgentId, id, parentToolCallId)
+        ? { execution: this.execution(actorAgentId, id, parentToolCallId)! }
+        : {}),
     });
     if (!parentToolCallId) this.emit({ type: 'session.state', state: 'streaming', label: 'Answering' });
   }
@@ -1263,14 +1321,21 @@ export class CodexDriver implements Driver {
     for (const dir of [...this.imageDirs]) this.dropImageDir(dir);
   }
 
-  itemStarted(item: Bag, parentToolCallId: string | null = null): void {
+  itemStarted(
+    item: Bag,
+    parentToolCallId: string | null = null,
+    actorAgentId: string | null = null,
+  ): void {
     if (!item) return;
-    if (item.type === 'agentMessage') return this.openMessage(item.id, parentToolCallId);
+    if (item.type === 'agentMessage') return this.openMessage(item.id, parentToolCallId, actorAgentId);
     if (item.type === 'reasoning') {
       const text = [...(item.summary ?? []), ...(item.content ?? [])].join('\n');
       if (text) this.emit({
         type: 'thinking.delta', messageId: item.id, text,
         ...(parentToolCallId ? { parentToolCallId } : {}),
+        ...(this.execution(actorAgentId, item.id, parentToolCallId)
+          ? { execution: this.execution(actorAgentId, item.id, parentToolCallId)! }
+          : {}),
       });
       return;
     }
@@ -1283,7 +1348,7 @@ export class CodexDriver implements Driver {
       return;
     }
     if (item.type === 'subAgentActivity') {
-      this.agentAdapter.accept({ type: 'item/subAgentActivity', item } as CodexAgentSignal);
+      this.agentAdapter.accept({ type: 'item/subAgentActivity', item, actorAgentId } as CodexAgentSignal);
       if (item.kind === 'started') {
         this.collabTool({
           id: item.id,
@@ -1293,13 +1358,13 @@ export class CodexDriver implements Driver {
           model: null,
           receiverThreadIds: [item.agentThreadId],
           agentsStates: { [item.agentThreadId]: { status: 'running', message: null } },
-        }, true);
+        }, true, actorAgentId);
       }
       return;
     }
     if (item.type === 'collabAgentToolCall') {
-      this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: false } as CodexAgentSignal);
-      this.collabTool(item as unknown as CodexCollabAgentToolCall, false);
+      this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: false, actorAgentId } as CodexAgentSignal);
+      this.collabTool(item as unknown as CodexCollabAgentToolCall, false, actorAgentId);
       return;
     }
     const action = (item.commandActions ?? [])[0] ?? {};
@@ -1318,6 +1383,9 @@ export class CodexDriver implements Driver {
       type: 'tool.started', toolCallId: item.id, name,
       input: item.arguments ?? { command: item.command, changes: item.changes, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path, durationMs: item.durationMs },
       title: toolTitle(name, item.arguments ?? { command: item.command, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path }), parentToolCallId,
+      ...(this.execution(actorAgentId, item.id, parentToolCallId)
+        ? { execution: this.execution(actorAgentId, item.id, parentToolCallId)! }
+        : {}),
     });
     this.emit({ type: 'session.state', state: 'running_tool', label: name });
     if (item.type === 'fileChange') {
@@ -1341,15 +1409,25 @@ export class CodexDriver implements Driver {
     }
   }
 
-  itemCompleted(item: Bag, parentToolCallId: string | null = null, replayed = false): void {
+  itemCompleted(
+    item: Bag,
+    parentToolCallId: string | null = null,
+    replayed = false,
+    actorAgentId: string | null = null,
+  ): void {
     if (!item) return;
     if (item.type === 'agentMessage') {
       if (this.completedMessages.has(item.id)) return;
       const opened = this.messages.has(item.id);
       if (!opened && !String(item.text ?? '').trim()) return;
-      this.openMessage(item.id, parentToolCallId ?? this.messageParents.get(item.id) ?? null);
-      if (!opened && item.text) this.emit({ type: 'text.delta', messageId: item.id, text: item.text });
-      this.emit({ type: 'message.completed', messageId: item.id });
+      const parent = parentToolCallId ?? this.messageParents.get(item.id) ?? null;
+      const execution = this.execution(actorAgentId, item.id, parent);
+      this.openMessage(item.id, parent, actorAgentId);
+      if (!opened && item.text) this.emit({
+        type: 'text.delta', messageId: item.id, text: item.text,
+        ...(execution ? { execution } : {}),
+      });
+      this.emit({ type: 'message.completed', messageId: item.id, ...(execution ? { execution } : {}) });
       for (const comparison of materializeComparisons(String(item.text ?? ''), this.cwd)) {
         this.emit({ type: 'image.compare', messageId: item.id, comparison });
       }
@@ -1359,9 +1437,9 @@ export class CodexDriver implements Driver {
     }
     if (['reasoning', 'plan', 'hookPrompt', 'subAgentActivity', 'contextCompaction', 'enteredReviewMode', 'exitedReviewMode'].includes(item.type)) return;
     if (item.type === 'collabAgentToolCall') {
-      this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: true } as CodexAgentSignal);
+      this.agentAdapter.accept({ type: 'item/collabAgentToolCall', item, completed: true, actorAgentId } as CodexAgentSignal);
       const collab = item as unknown as CodexCollabAgentToolCall;
-      this.collabTool(collab, true);
+      this.collabTool(collab, true, actorAgentId);
       if (replayed && collab.tool === 'spawnAgent') {
         for (const [agentId, native] of Object.entries(collab.agentsStates ?? {})) {
           if (!['completed', 'errored', 'interrupted', 'shutdown', 'notFound'].includes(native.status)) continue;
@@ -1374,13 +1452,22 @@ export class CodexDriver implements Driver {
     }
     if (!this.tools.has(item.id)) return;
     const ok = !['failed', 'declined'].includes(item.status) && (item.exitCode === null || item.exitCode === undefined || item.exitCode === 0);
-    this.emit({ type: 'tool.completed', toolCallId: item.id, ok, output: outputOf(item) || this.toolOutput.get(item.id) || '' });
+    const execution = this.execution(actorAgentId, item.id, parentToolCallId);
+    this.emit({
+      type: 'tool.completed', toolCallId: item.id, ok,
+      output: outputOf(item) || this.toolOutput.get(item.id) || '',
+      ...(execution ? { execution } : {}),
+    });
     if (ok) emitToolImage(this, item);
     this.tools.delete(item.id);
     this.toolOutput.delete(item.id);
   }
 
-  private collabTool(item: CodexCollabAgentToolCall, completed: boolean): void {
+  private collabTool(
+    item: CodexCollabAgentToolCall,
+    completed: boolean,
+    actorAgentId: string | null = null,
+  ): void {
     if (this.completedCollabTools.has(item.id)) return;
     const names: Record<CodexCollabAgentToolCall['tool'], string> = {
       spawnAgent: 'spawn_agent', sendInput: 'send_message', resumeAgent: 'resume_agent',
@@ -1406,16 +1493,35 @@ export class CodexDriver implements Driver {
       : { target: target || 'a helper' };
     if (!this.tools.has(item.id)) {
       this.tools.set(item.id, name);
+      const parentOperationId = actorAgentId ? this.agents.get(actorAgentId)?.toolCallId ?? null : null;
+      const execution = this.execution(actorAgentId, item.id, parentOperationId);
       this.emit({
         type: 'tool.started', toolCallId: item.id, name, input,
-        title: toolTitle(name, input), parentToolCallId: null,
+        title: toolTitle(name, input), parentToolCallId: parentOperationId,
+        ...(execution ? { execution } : {}),
       });
     }
     if (!completed) return;
     const states = Object.entries(item.agentsStates ?? {}).map(([agentId, state]) =>
       `${this.agents.get(agentId)?.agentType || this.agents.get(agentId)?.what || agentId}: ${state.status}`,
     ).join('\n');
-    this.emit({ type: 'tool.completed', toolCallId: item.id, ok: true, output: states });
+    const nativeStates = Object.values(item.agentsStates ?? {}).map((state) => state.status);
+    const completionTitle = item.tool === 'wait' && nativeStates.length > 0
+      ? nativeStates.every((state) => state === 'completed')
+        ? `${target || 'helper'} finished`
+        : nativeStates.some((state) => state === 'errored' || state === 'notFound')
+          ? `${target || 'helper'} failed`
+          : nativeStates.some((state) => state === 'interrupted' || state === 'shutdown')
+            ? `${target || 'helper'} stopped`
+            : toolTitle(name, input)
+      : undefined;
+    const parentOperationId = actorAgentId ? this.agents.get(actorAgentId)?.toolCallId ?? null : null;
+    const execution = this.execution(actorAgentId, item.id, parentOperationId);
+    this.emit({
+      type: 'tool.completed', toolCallId: item.id, ok: true, output: states,
+      ...(completionTitle ? { title: completionTitle } : {}),
+      ...(execution ? { execution } : {}),
+    });
     this.tools.delete(item.id);
     this.completedCollabTools.add(item.id);
   }

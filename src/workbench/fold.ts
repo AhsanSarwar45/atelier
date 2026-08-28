@@ -30,6 +30,7 @@ import type {
   CollaborationModeChoice,
   Cost,
   EffortChoice,
+  ExecutionContext,
   ImagePayload,
   ImageComparison,
   MachineFamily,
@@ -59,6 +60,7 @@ export interface TranscriptMessage {
   done: boolean;
   /** Set when a sent-off agent said this — the row nests under the call that sent it. */
   parentId: string | null;
+  execution?: ExecutionContext;
 }
 
 /** What the agent worked out on its way to an answer, as it arrived. */
@@ -69,6 +71,7 @@ export interface TranscriptThinking {
   done: boolean;
   /** Set when a sent-off agent was working this out, not the agent you are talking to. */
   parentId: string | null;
+  execution?: ExecutionContext;
 }
 
 export interface TranscriptTool {
@@ -87,6 +90,7 @@ export interface TranscriptTool {
   summary: string | null;
   /** Set when a subagent made this call — the row nests under that call. */
   parentId: string | null;
+  execution?: ExecutionContext;
   diff: { path: string; before: string; after: string } | null;
   /** What it was asked to do, and what it printed. Both open on the row's own click. */
   input: Record<string, unknown>;
@@ -183,6 +187,8 @@ export interface SentAway {
   id: string;
   /** The call that sent it, where there was one. A helper's row opens onto it. */
   toolCallId: string | null;
+  /** Stable recursive ownership, when the provider exposes it. */
+  execution?: ExecutionContext;
   kind: AgentKind;
   what: string;
   agentType: string | null;
@@ -378,6 +384,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           widgets: [],
           done: false,
           parentId: e.parentToolCallId ?? null,
+          ...(e.execution ? { execution: e.execution } : {}),
         },
       ];
       return next;
@@ -420,7 +427,11 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           )
         : [
             ...items,
-            { kind: 'thinking', id: e.messageId, text: e.text, done: false, parentId: e.parentToolCallId ?? null },
+            {
+              kind: 'thinking', id: e.messageId, text: e.text, done: false,
+              parentId: e.parentToolCallId ?? null,
+              ...(e.execution ? { execution: e.execution } : {}),
+            },
           ];
       return next;
     }
@@ -445,6 +456,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
         seconds: 0,
         summary: null,
         parentId: e.parentToolCallId,
+        ...(e.execution ? { execution: e.execution } : {}),
         diff: null,
         input: e.input,
         output: null,
@@ -467,7 +479,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       // here, which is why a command could never be opened (bw-1u1).
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId
-          ? { ...it, status: e.ok ? 'ok' : 'failed', output: e.output }
+          ? { ...it, status: e.ok ? 'ok' : 'failed', output: e.output, title: e.title ?? it.title }
           : it,
       );
       return next;
@@ -517,6 +529,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
               doing: null,
               result: null,
               relayed: [],
+              ...(e.execution ? { execution: e.execution } : {}),
             },
           ];
       return next;
@@ -561,6 +574,20 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       return next;
 
     case 'agent.finished':
+      {
+      const finished = view.agents.find((a) => a.id === e.agentId);
+      const operationId = finished?.toolCallId;
+      const actor = finished?.agentType || finished?.execution?.actorName || `helper ${e.agentId.slice(0, 8)}`;
+      if (operationId) {
+        next.items = next.items.map((item) => item.kind === 'tool' && item.id === operationId
+          ? {
+              ...item,
+              title: e.state === 'done' ? `${actor} finished`
+                : e.state === 'failed' ? `${actor} failed` : `${actor} stopped`,
+              status: e.state === 'done' ? 'ok' : 'failed',
+            }
+          : item);
+      }
       next.agents = view.agents.map((a) =>
         a.id === e.agentId
           ? {
@@ -585,6 +612,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           : a,
       );
       return next;
+      }
 
     case 'diff':
       next.items = items.map((it) =>
@@ -617,6 +645,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
           href: e.href,
           chosen: null,
           parentId: e.parentToolCallId ?? null,
+          ...(e.execution ? { execution: e.execution } : {}),
           askedBy: briefOf(view.agents, e.parentToolCallId ?? null),
         },
       ];
@@ -793,6 +822,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
             text: e.text,
             done: false,
             parentId: e.parentToolCallId ?? null,
+            ...(e.execution ? { execution: e.execution } : {}),
           });
         } else {
           (items[at] as TranscriptThinking).text += e.text;
@@ -832,6 +862,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           seconds: 0,
           summary: null,
           parentId: e.parentToolCallId,
+          ...(e.execution ? { execution: e.execution } : {}),
           diff: null,
           input: e.input,
           output: null,
@@ -853,6 +884,7 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           const it = items[at] as TranscriptTool;
           it.status = e.ok ? 'ok' : 'failed';
           it.output = e.output;
+          if (e.title) it.title = e.title;
         }
         break;
       }
@@ -885,7 +917,8 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
             calls: 0,
             doing: null,
             result: null,
-            relayed: [],
+              relayed: [],
+              ...(e.execution ? { execution: e.execution } : {}),
           });
         } else {
           const row = agents[at]!;
@@ -947,6 +980,16 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
           row.calls = e.calls || row.calls;
           row.model = e.model ?? row.model;
           if (!stopped) row.result = e.result;
+          if (row.toolCallId) {
+            const tool = toolAt.get(row.toolCallId);
+            if (tool !== undefined) {
+              const operation = items[tool] as TranscriptTool;
+              const actor = row.agentType || row.execution?.actorName || `helper ${e.agentId.slice(0, 8)}`;
+              operation.title = e.state === 'done' ? `${actor} finished`
+                : e.state === 'failed' ? `${actor} failed` : `${actor} stopped`;
+              operation.status = e.state === 'done' ? 'ok' : 'failed';
+            }
+          }
         }
         break;
       }

@@ -36,7 +36,7 @@ import {
   whoFor,
   workerStopped,
 } from '../../../src/workbench/machine-words.ts';
-import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, ImagePayload, ModelChoice, NoteRank, TodoItem } from '../../../src/workbench/protocol.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 
@@ -781,22 +781,22 @@ type ClaudeTaskSignal =
 class ClaudeAgentAdapter implements ProviderAgentAdapter<ClaudeTaskSignal> {
   private readonly agents: AgentLifecycle;
   private readonly callsOfHelpers: ReadonlySet<string>;
-  private readonly tasksOfHelpers: Set<string>;
   private readonly taskOfCall: Map<string, string>;
   private readonly callOfTask: Map<string, string>;
+  private readonly parentOfCall: ReadonlyMap<string, string>;
 
   constructor(
     agents: AgentLifecycle,
     callsOfHelpers: ReadonlySet<string>,
-    tasksOfHelpers: Set<string>,
     taskOfCall: Map<string, string>,
     callOfTask: Map<string, string>,
+    parentOfCall: ReadonlyMap<string, string>,
   ) {
     this.agents = agents;
     this.callsOfHelpers = callsOfHelpers;
-    this.tasksOfHelpers = tasksOfHelpers;
     this.taskOfCall = taskOfCall;
     this.callOfTask = callOfTask;
+    this.parentOfCall = parentOfCall;
   }
 
   accept(message: ClaudeTaskSignal): boolean {
@@ -804,17 +804,12 @@ class ClaudeAgentAdapter implements ProviderAgentAdapter<ClaudeTaskSignal> {
       // The SDK explicitly defines this as an independent replace-style level
       // signal whose ordering cannot be correlated with lifecycle bookends.
       this.agents.replaceLiveSet(message.tasks.map((task) => task.task_id));
-      return false;
+      return true;
     }
 
     const id = message.task_id;
-    if (this.tasksOfHelpers.has(id)) return true;
 
     if (message.subtype === 'task_started') {
-      if (sentAwayByAHelper(message as Record<string, any>, this.callsOfHelpers)) {
-        this.tasksOfHelpers.add(id);
-        return true;
-      }
       const call = message.tool_use_id || null;
       if (call) {
         this.taskOfCall.set(call, id);
@@ -827,8 +822,9 @@ class ClaudeAgentAdapter implements ProviderAgentAdapter<ClaudeTaskSignal> {
         what: oneLine(message.description ?? message.workflow_name ?? message.prompt ?? ''),
         agentType: message.subagent_type ?? null,
         model: null,
+        execution: this.execution(id, call, message.subagent_type ?? null),
       });
-      return false;
+      return true;
     }
 
     if (message.subtype === 'task_progress') {
@@ -838,17 +834,17 @@ class ClaudeAgentAdapter implements ProviderAgentAdapter<ClaudeTaskSignal> {
         calls: message.usage.tool_uses,
         doing: oneLine(message.summary ?? message.last_tool_name ?? message.description),
       });
-      return false;
+      return true;
     }
 
     if (message.subtype === 'task_updated') {
       const state = message.patch.is_backgrounded
         ? 'parked'
         : message.patch.status && TASK_STATE[message.patch.status];
-      if (!state) return false;
+      if (!state) return true;
       if (isOver(state)) this.agents.finish(id, { state, result: message.patch.error ?? null });
       else this.agents.progress(id, { state });
-      return false;
+      return true;
     }
 
     const state = TASK_STATE[message.status];
@@ -859,7 +855,20 @@ class ClaudeAgentAdapter implements ProviderAgentAdapter<ClaudeTaskSignal> {
       calls: message.usage?.tool_uses,
       result: oneLine(message.summary) || null,
     });
-    return false;
+    return true;
+  }
+
+  private execution(agentId: string, operationId: string | null, actorName: string | null): ExecutionContext {
+    const parentOperationId = operationId ? this.parentOfCall.get(operationId) ?? null : null;
+    const parentActorId = parentOperationId ? this.taskOfCall.get(parentOperationId) ?? null : null;
+    return {
+      conversationId: agentId,
+      actorId: agentId,
+      actorName,
+      parentActorId,
+      operationId,
+      parentOperationId,
+    };
   }
 }
 
@@ -946,7 +955,6 @@ export class ClaudeDriver implements Driver {
   /** Every call a HELPER made, so work it sends away is not read as this chat's. */
   private callsOfHelpers = new Set<string>();
   /** The tasks that turned out to be a helper's own, so nothing later opens a row for them. */
-  private tasksOfHelpers = new Set<string>();
   /** When the last thinking-progress line was sent, so a long think is not a flood. */
   private lastThinkingAt = 0;
   /**
@@ -1012,12 +1020,10 @@ export class ClaudeDriver implements Driver {
    * panel is a reading of it. One does not replace the other.
    *
    * The exception is work a HELPER sent away, and the answer is true twice.
-   * `true` means this chat has nothing to say about the message: not a row on
-   * its panel, and not a line in its conversation either. A helper's own
-   * command was announced in the parent's transcript as `Sent off: …` with
-   * nobody named as having sent it, and finished there as a second unattributed
-   * line — the same lie the panel was telling, one layer along (bw-7ks.22.6).
-   * That work is on the helper's own conversation, which is where it belongs.
+   * `true` means the shared lifecycle consumed the message. The panel and the
+   * categorized operation row are projections of that record; drawing the
+   * SDK notification again as a quiet machine/assistant line would give one
+   * transition two UI identities.
    *
    * Nothing here is a delta. The kit's messages each carry a different corner
    * of the picture — a status change with no numbers, a result with no elapsed
@@ -1034,9 +1040,9 @@ export class ClaudeDriver implements Driver {
     this.taskAdapter ??= new ClaudeAgentAdapter(
       this.agents,
       this.callsOfHelpers,
-      this.tasksOfHelpers,
       this.taskOfCall,
       this.callOfTask,
+      this.parentOfCall,
     );
     return this.taskAdapter;
   }
@@ -1084,6 +1090,24 @@ export class ClaudeDriver implements Driver {
     const sentBy = toolUseId ? this.parentOfCall.get(toolUseId) : undefined;
     if (!sentBy) return null;
     return { sentBy, agentId: this.taskOfCall.get(sentBy) ?? null };
+  }
+
+  private executionFor(
+    sentBy: string | undefined,
+    operationId: string | null,
+  ): ExecutionContext | undefined {
+    if (!sentBy) return undefined;
+    const actorId = this.taskOfCall.get(sentBy);
+    if (!actorId) return undefined;
+    const actor = this.agents.get(actorId);
+    return {
+      conversationId: actorId,
+      actorId,
+      actorName: actor?.agentType || actor?.what || null,
+      parentActorId: actor?.execution?.parentActorId ?? null,
+      operationId,
+      parentOperationId: sentBy,
+    };
   }
 
   /**
@@ -1855,6 +1879,7 @@ export class ClaudeDriver implements Driver {
         // and every event below is stamped with the call that sent them, so the
         // rows nest instead of interleaving (bw-7ks.22.2).
         const sentBy: string | undefined = m.parent_tool_use_id ?? undefined;
+        const messageExecution = this.executionFor(sentBy, String(m.message?.id ?? m.uuid ?? '') || null);
         // Which model this helper is on. Nothing else in the stream says it.
         if (sentBy) this.helperModel(sentBy, m.message?.model);
 
@@ -1874,8 +1899,9 @@ export class ClaudeDriver implements Driver {
                 messageId: id,
                 text: String(b.thinking),
                 parentToolCallId: sentBy,
+                ...(messageExecution ? { execution: messageExecution } : {}),
               });
-              this.emit({ type: 'message.completed', messageId: id });
+              this.emit({ type: 'message.completed', messageId: id, ...(messageExecution ? { execution: messageExecution } : {}) });
               return;
             }
             if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
@@ -1887,9 +1913,12 @@ export class ClaudeDriver implements Driver {
             // helper had come back, because that line quotes its answer
             // (bw-7ks.22.6).
             if (sentBy === undefined && this.saidAlready(String(b.text))) return;
-            this.emit({ type: 'message.started', messageId: id, role: 'assistant', parentToolCallId: sentBy });
-            this.emit({ type: 'text.delta', messageId: id, text: String(b.text) });
-            this.emit({ type: 'message.completed', messageId: id });
+            this.emit({
+              type: 'message.started', messageId: id, role: 'assistant', parentToolCallId: sentBy,
+              ...(messageExecution ? { execution: messageExecution } : {}),
+            });
+            this.emit({ type: 'text.delta', messageId: id, text: String(b.text), ...(messageExecution ? { execution: messageExecution } : {}) });
+            this.emit({ type: 'message.completed', messageId: id, ...(messageExecution ? { execution: messageExecution } : {}) });
           });
         }
         (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
@@ -1939,6 +1968,7 @@ export class ClaudeDriver implements Driver {
             // copy, and the two have to arrive at the same sentence from it
             // (bw-7ks.24.6).
             const shown = trimInput(input);
+            const execution = this.executionFor(sentBy, String(b.id));
             this.emit({
               type: 'tool.started',
               toolCallId: b.id,
@@ -1947,6 +1977,7 @@ export class ClaudeDriver implements Driver {
               title: toolTitle(b.name, shown),
               // Subagent attribution rides on the MESSAGE, not the block.
               parentToolCallId: m.parent_tool_use_id ?? null,
+              ...(execution ? { execution } : {}),
             });
             this.emitDiff(b.id, b.name, input);
             this.applyChecklistCall(b.id, b.name, input);
@@ -1977,12 +2008,14 @@ export class ClaudeDriver implements Driver {
             // Named and measured rather than pasted in: a result carrying a
             // picture is thousands of characters of encoding (bw-1u1.30).
             const output = resultText(b.content);
+            const resultExecution = this.executionFor(this.parentOfCall.get(String(b.tool_use_id)), String(b.tool_use_id));
             this.absorbChecklistResult(b.tool_use_id, output);
             this.emit({
               type: 'tool.completed',
               toolCallId: b.tool_use_id,
               ok: !b.is_error,
               output: cut(output),
+              ...(resultExecution ? { execution: resultExecution } : {}),
             });
             const pictures = Array.isArray(b.content)
               ? b.content
@@ -1991,9 +2024,9 @@ export class ClaudeDriver implements Driver {
               : [];
             if (pictures.length) {
               const messageId = `${b.tool_use_id}:images`;
-              this.emit({ type: 'message.started', messageId, role: 'assistant' });
-              for (const image of pictures) this.emit({ type: 'image', messageId, image });
-              this.emit({ type: 'message.completed', messageId });
+              this.emit({ type: 'message.started', messageId, role: 'assistant', ...(resultExecution ? { execution: resultExecution } : {}) });
+              for (const image of pictures) this.emit({ type: 'image', messageId, image, ...(resultExecution ? { execution: resultExecution } : {}) });
+              this.emit({ type: 'message.completed', messageId, ...(resultExecution ? { execution: resultExecution } : {}) });
             }
             // A helper's run totals, which the kit sends structured rather than
             // in the words it hands the model: the model it settled on, what it

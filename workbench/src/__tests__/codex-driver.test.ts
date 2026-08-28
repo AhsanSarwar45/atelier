@@ -7,6 +7,7 @@ import { join } from 'node:path';
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({}));
 
 import type { WbpEvent } from '../../../src/workbench/protocol';
+import { foldAll } from '../../../src/workbench/fold';
 import { CodexDriver, codexAgentDefinitions, codexRolloutLine, codexThreadOpenRequest, replayCodexThread } from '../drivers/codex';
 import { createDriver, defaultPermissionMode } from '../drivers';
 
@@ -94,6 +95,9 @@ describe('Codex subagents on the common workbench protocol', () => {
     expect(events).toContainEqual(expect.objectContaining({
       type: 'tool.started', toolCallId: 'wait-1', name: 'wait_agent',
       title: 'Waited for helper agent-1',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.completed', toolCallId: 'wait-1', title: 'helper agent-1 finished',
     }));
   });
 
@@ -206,6 +210,75 @@ describe('Codex subagents on the common workbench protocol', () => {
       type: 'tool.started', toolCallId: 'native-wait', name: 'wait_agent',
       title: 'Waited for inspector',
     }));
+  });
+
+  it('keeps nested commands and agents on one recursive execution graph', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.threadId = 'parent-thread';
+    driver.emit = (event: BareEvent) => events.push(event);
+
+    driver.itemStarted({
+      id: 'outer-spawn', type: 'subAgentActivity', kind: 'started',
+      agentThreadId: 'outer-agent', agentPath: '/repo/.codex/agents/researcher.toml',
+    });
+    driver.event('item/started', {
+      threadId: 'outer-agent',
+      item: {
+        id: 'nested-spawn', type: 'collabAgentToolCall', tool: 'spawnAgent',
+        prompt: 'Inspect the parser', model: 'gpt-5.6-luna',
+        receiverThreadIds: ['nested-agent'],
+        agentsStates: { 'nested-agent': { status: 'running', message: null } },
+      },
+    });
+    driver.event('item/started', {
+      threadId: 'nested-agent',
+      item: { id: 'nested-command', type: 'commandExecution', command: 'rg parser', commandActions: [] },
+    });
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'agent.started', agentId: 'nested-agent',
+      execution: expect.objectContaining({
+        conversationId: 'nested-agent', actorId: 'nested-agent',
+        parentActorId: 'outer-agent', operationId: 'nested-spawn',
+        parentOperationId: 'outer-spawn',
+      }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'nested-spawn', parentToolCallId: 'outer-spawn',
+      execution: expect.objectContaining({
+        conversationId: 'outer-agent', actorId: 'outer-agent',
+        operationId: 'nested-spawn', parentOperationId: 'outer-spawn',
+      }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'nested-command', parentToolCallId: 'nested-spawn',
+      execution: expect.objectContaining({
+        conversationId: 'nested-agent', actorId: 'nested-agent',
+        parentActorId: 'outer-agent', operationId: 'nested-command',
+      }),
+    }));
+  });
+
+  it('projects native completion onto the categorized agent command instead of a message', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.itemStarted({
+      id: 'spawn-reviewer', type: 'subAgentActivity', kind: 'started',
+      agentThreadId: 'reviewer-id', agentPath: '/repo/.codex/agents/reviewer.toml',
+    });
+    driver.event('thread/status/changed', { threadId: 'reviewer-id', status: { type: 'active' } });
+    driver.event('thread/status/changed', { threadId: 'reviewer-id', status: { type: 'idle' } });
+
+    const view = foldAll(events.map((event, index) => ({
+      ...event, seq: index + 1, sessionId: 'chat', at: new Date(index * 1_000).toISOString(),
+    })) as WbpEvent[]);
+    const operation = view.items.find((item) => item.kind === 'tool' && item.id === 'spawn-reviewer');
+    expect(operation).toMatchObject({
+      kind: 'tool', name: 'spawn_agent', title: 'reviewer finished', status: 'ok',
+    });
+    expect(view.items.filter((item) => item.kind === 'message')).toHaveLength(0);
   });
 
   it.each(['status-first', 'item-first'] as const)(

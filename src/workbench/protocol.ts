@@ -159,12 +159,35 @@ export interface ProviderEventIdentity {
   cursor?: string;
 }
 
+/**
+ * Where an event belongs in the recursive execution graph.
+ *
+ * A transcript projection may nest an event, show it in a child conversation,
+ * and raise a notification from it. Those are views of this one ownership
+ * record, not separately ingested assistant messages.
+ */
+export interface ExecutionContext {
+  /** Native or logical conversation that owns the event. */
+  conversationId: string;
+  /** Agent that performed the operation or produced the message. */
+  actorId: string;
+  /** Provider-supplied role/name when known. */
+  actorName: string | null;
+  /** Agent that delegated this actor, null for the conversation root. */
+  parentActorId: string | null;
+  /** Operation this event describes, when it describes one. */
+  operationId: string | null;
+  /** Operation that owns this child conversation/run. */
+  parentOperationId: string | null;
+}
+
 /** Fields every event carries. `seq` is per-session and monotone. */
 interface EventBase {
   seq: number;
   sessionId: string;
   at: string;
   providerEvent?: ProviderEventIdentity;
+  execution?: ExecutionContext;
 }
 
 export type WbpEvent = EventBase &
@@ -243,7 +266,7 @@ export type WbpEvent = EventBase &
         /** Set when the call was made by a subagent; the id of the call that spawned it. */
         parentToolCallId: string | null;
       }
-    | { type: 'tool.completed'; toolCallId: string; ok: boolean; output: string }
+    | { type: 'tool.completed'; toolCallId: string; ok: boolean; output: string; title?: string }
     /**
      * How long this call has been running, as the brand counts it, and — when the call sent an agent
      * away — what that agent is doing now, in its own words. The brand asks the

@@ -443,6 +443,10 @@ export const ToolRow = memo(function ToolRow({
       data-tool-id={item.id}
       data-tool-status={item.status}
       data-tool-name={item.name}
+      data-actor-id={item.execution?.actorId}
+      data-actor-name={item.execution?.actorName ?? undefined}
+      data-conversation-id={item.execution?.conversationId}
+      data-parent-agent-id={item.execution?.parentActorId ?? undefined}
       data-ran-kind={ranKind}
       data-ran-band={ranKind ? lookOfRan(ranKind).band : undefined}
       data-grave={ranGrave ? 'yes' : undefined}
@@ -811,6 +815,10 @@ const MessageRow = memo(function MessageRow({
       // Which call this came from, when it came from a helper rather than from
       // the agent you are talking to (bw-7ks.22.2).
       data-sent-by={sentBy ?? undefined}
+      data-actor-id={item.execution?.actorId}
+      data-actor-name={item.execution?.actorName ?? undefined}
+      data-conversation-id={item.execution?.conversationId}
+      data-parent-agent-id={item.execution?.parentActorId ?? undefined}
       // The answer takes the column; what he typed stays narrower and to
       // the right, which is what tells the two apart without a label.
       //
