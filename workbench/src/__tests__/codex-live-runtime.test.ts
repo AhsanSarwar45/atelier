@@ -17,15 +17,41 @@ describe('Codex live-runtime regressions', () => {
     try {
       writeFileSync(path, [
         JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.4', approval_policy: 'never' } }),
-        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-codex', approval_policy: 'on-request' } }),
+        JSON.stringify({ type: 'turn_context', payload: {
+          model: 'gpt-5.6-codex', approval_policy: 'on-request',
+          collaboration_mode: { mode: 'default', settings: { model: 'gpt-5.6-codex' } },
+        } }),
+        JSON.stringify({ type: 'event_msg', payload: {
+          type: 'thread_settings_applied',
+          thread_settings: {
+            model: 'gpt-5.6-codex', approval_policy: 'on-request',
+            collaboration_mode: { mode: 'plan', settings: { model: 'gpt-5.6-codex' } },
+          },
+        } }),
         JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: {
           total_token_usage: { input_tokens: 800, output_tokens: 200, total_tokens: 1000 },
           last_token_usage: { total_tokens: 100 }, model_context_window: 200_000,
         } } }),
       ].join('\n'));
-      expect(codexThreadSettings({ path })).toEqual({ model: 'gpt-5.6-codex', permissionMode: 'on-request' });
+      expect(codexThreadSettings({ path })).toEqual({
+        model: 'gpt-5.6-codex', permissionMode: 'on-request', collaborationMode: 'plan',
+      });
       expect(codexThreadUsageFromRollout({ path })).toEqual({ input: 800, output: 200, total: 1000, contextUsed: 100, contextWindow: 200_000 });
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('publishes the native collaboration mode found in appended Codex turns', () => {
+    const events: BareEvent[] = [];
+    codexRolloutLine(JSON.stringify({
+      type: 'turn_context',
+      payload: {
+        model: 'gpt-5.6-sol', approval_policy: 'on-request',
+        collaboration_mode: { mode: 'plan', settings: { model: 'gpt-5.6-sol' } },
+      },
+    }), new CodexDriver(), (event) => events.push(event));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'session.pinned', collaborationMode: 'plan',
+    }));
   });
 
   it('uses native command actions and the house command categorizer', () => {

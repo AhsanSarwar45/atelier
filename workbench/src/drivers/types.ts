@@ -27,7 +27,6 @@ export interface StartOptions {
   model?: string;
   permissionMode: string;
   effort?: string;
-  collaborationMode?: string;
   /** Continue this brand-side session instead of opening a new one. */
   resume?: string;
   /** Called for every event the driver produces. */

@@ -222,8 +222,8 @@ export async function readCodexThreadUsage(threadId: string, cwd: string): Promi
 
 /** Latest turn settings are persisted in the rollout even though thread/read
  * omits them. Tail only: large chats must still open promptly. */
-export function codexThreadSettings(thread: Bag): { model: string; permissionMode: string } {
-  const fallback = { model: 'default', permissionMode: 'on-request' };
+export function codexThreadSettings(thread: Bag): { model: string; permissionMode: string; collaborationMode: string | null } {
+  const fallback = { model: 'default', permissionMode: 'on-request', collaborationMode: null };
   if (typeof thread.path !== 'string') return fallback;
   let fd: number | null = null;
   try {
@@ -239,10 +239,18 @@ export function codexThreadSettings(thread: Bag): { model: string; permissionMod
       let row: Bag;
       try { row = JSON.parse(lines[i]); } catch { continue; }
       const payload = row.payload ?? row;
-      if ((row.type ?? payload.type) !== 'turn_context') continue;
+      const settings = (row.type ?? payload.type) === 'turn_context'
+        ? payload
+        : row.type === 'event_msg' && payload.type === 'thread_settings_applied'
+          ? payload.thread_settings
+          : null;
+      if (!settings) continue;
       return {
-        model: payload.model || fallback.model,
-        permissionMode: MODES.includes(payload.approval_policy) ? payload.approval_policy : fallback.permissionMode,
+        model: settings.model || fallback.model,
+        permissionMode: MODES.includes(settings.approval_policy) ? settings.approval_policy : fallback.permissionMode,
+        collaborationMode: typeof settings.collaboration_mode?.mode === 'string'
+          ? settings.collaboration_mode.mode
+          : fallback.collaborationMode,
       };
     }
   } catch {} finally { if (fd !== null) closeSync(fd); }
@@ -455,7 +463,12 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
     return;
   }
   if (row.type === 'turn_context') {
-    emit({ type: 'session.pinned', model: payload.model ?? 'default', permissionMode: MODES.includes(payload.approval_policy) ? payload.approval_policy : 'on-request' });
+    emit({
+      type: 'session.pinned',
+      model: payload.model ?? 'default',
+      permissionMode: MODES.includes(payload.approval_policy) ? payload.approval_policy : 'on-request',
+      collaborationMode: typeof payload.collaboration_mode?.mode === 'string' ? payload.collaboration_mode.mode : null,
+    });
     return;
   }
   if (row.type === 'event_msg' && payload.type === 'token_count' && payload.info) {
@@ -536,7 +549,7 @@ export class CodexDriver implements Driver {
     this.cwd = opts.cwd;
     this.model = opts.model === 'default' ? undefined : opts.model;
     this.effort = opts.effort;
-    this.collaborationMode = opts.collaborationMode ?? null;
+    this.collaborationMode = null;
     this.mode = MODES.includes(opts.permissionMode) ? opts.permissionMode : 'on-request';
     const executable = process.env.CODEX_PATH || 'codex';
     this.child = spawn(executable, ['app-server', '--stdio'], {
@@ -565,6 +578,9 @@ export class CodexDriver implements Driver {
     });
     const opened = await this.call(request.method, request.params);
     this.threadId = opened.thread.id;
+    // Codex owns this setting. On resume, recover it from Codex's persisted
+    // turn context instead of accepting an Atelier-side copy.
+    if (opts.resume) this.collaborationMode = codexThreadSettings(opened.thread).collaborationMode;
     this.model = opened.model || this.model;
     const openedEffort = opened.reasoningEffort ?? opened.effort
       ?? opened.thread?.reasoningEffort ?? opened.thread?.effort;

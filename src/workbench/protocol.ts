@@ -500,7 +500,6 @@ export type WbpCommand =
       model?: string;
       permissionMode?: string;
       effort?: string;
-      collaborationMode?: string;
       brief?: Brief;
     }
   | { type: 'prompt.send'; sessionId: string; text: string; images?: ImagePayload[]; takeover?: boolean }
@@ -750,7 +749,6 @@ export interface SessionSummary {
   model: string | null;
   permissionMode: string;
   effort?: string | null;
-  collaborationMode?: string | null;
   title: string | null;
   state: SessionState;
   createdAt: string;
