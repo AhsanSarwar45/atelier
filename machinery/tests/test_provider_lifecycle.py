@@ -39,6 +39,28 @@ class ProviderLifecycle(unittest.TestCase):
             with self.subTest(transition=transition):
                 self.assertIn(transition, text)
 
+    def test_canonical_workflow_names_the_common_gate_contracts(self):
+        text = (ROOT / "machinery" / "skills" / "beads" / "SKILL.md").read_text()
+        for contract in (
+            "--record npm-test=1799/0",
+            "stale-tree and nonzero-failure refusals",
+            "bd ready`, `bd list`, and `bd search",
+            "--steps design,benchmark,record",
+            "--lands <project>",
+            "command on its own shell line",
+            "One claim covers the job's run",
+            "Claims expire after five minutes",
+            "machinery/board/job under <job-id>",
+            "different cause, system, or scope",
+            "A goal is a container",
+            "commit naming that card",
+            "branch are gone",
+            "--append-notes",
+            "A progress report is not a reason to stop",
+        ):
+            with self.subTest(contract=contract):
+                self.assertIn(contract, text)
+
 
 if __name__ == "__main__":
     unittest.main()
