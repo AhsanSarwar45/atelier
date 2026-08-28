@@ -41,6 +41,7 @@ use tracing_subscriber::FmtSubscriber;
 /// Embedded static files from the Next.js build output.
 #[derive(Embed)]
 #[folder = "../out/"]
+#[allow_missing = true]
 struct Assets;
 
 fn env_flag(name: &str) -> bool {
