@@ -65,4 +65,31 @@ describe('provider-neutral external service actions', () => {
       effect: 'read', risk: 'read-only', confidence: 'schema',
     });
   });
+
+  it('understands recurring MCP browser and exploration capabilities', () => {
+    expect(normalizeServiceAction('chrome-devtools/take_screenshot')).toMatchObject({
+      effect: 'read', risk: 'read-only',
+    });
+    expect(normalizeServiceAction('codegraph/codegraph_explore')).toMatchObject({
+      effect: 'search', risk: 'read-only',
+    });
+    expect(normalizeServiceAction('mcp__claude_ai_notion_notion__notion-fetch')?.server).toBe('Notion');
+  });
+
+  it('classifies delegated Sentry tools by the inner capability', () => {
+    expect(normalizeServiceAction('sentry/execute_sentry_tool', { name: 'search_events', arguments: {} })).toMatchObject({
+      effect: 'search', risk: 'read-only', summary: 'Searched Sentry events',
+    });
+    expect(normalizeServiceAction('sentry/execute_sentry_tool', { name: 'create_uptime_monitor', arguments: {} })).toMatchObject({
+      effect: 'create', risk: 'mutating', summary: 'Created Sentry uptime monitor',
+    });
+  });
+
+  it('distinguishes browser observation, interaction, and artifact writes', () => {
+    expect(normalizeServiceAction('chrome-devtools/click')).toMatchObject({ effect: 'update', risk: 'mutating' });
+    expect(normalizeServiceAction('chrome-devtools/new_page')).toMatchObject({ effect: 'create', risk: 'mutating' });
+    expect(normalizeServiceAction('chrome-devtools/take_screenshot', { filePath: '/tmp/proof.png' })).toMatchObject({
+      effect: 'create', risk: 'mutating', confidence: 'parsed',
+    });
+  });
 });

@@ -614,8 +614,10 @@ describe('the tools that are not commands', () => {
     ['request_user_input', {}, 'Asked you a question'],
     ['SendFeedback', {}, 'Sent feedback'],
     ['mcp__chrome-devtools__take_screenshot', {}, 'Looked at the screen'],
+    ['mcp__chrome-devtools__take_screenshot', { filePath: '/tmp/proof.png' }, 'Saved a screenshot to tmp/proof.png'],
     ['mcp__chrome-devtools__navigate_page', {}, 'Opened a page'],
-    ['mcp__codegraph__codegraph_explore', {}, 'Asked Codegraph to explore'],
+    ['mcp__chrome-devtools__upload_file', {}, 'Uploaded a file to the page'],
+    ['mcp__codegraph__codegraph_explore', {}, 'Searched Codegraph'],
   ];
 
   for (const [name, input, sentence] of CALLS) {

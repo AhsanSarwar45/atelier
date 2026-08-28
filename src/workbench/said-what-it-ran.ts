@@ -1601,6 +1601,7 @@ const BROWSER: Record<string, string> = {
   click: 'Clicked something on the page',
   fill: 'Typed into the page',
   fill_form: 'Filled in a form',
+  upload_file: 'Uploaded a file to the page',
   hover: 'Hovered over something',
   press_key: 'Pressed a key',
   type_text: 'Typed into the page',
@@ -1623,6 +1624,10 @@ function mcpSaid(name: string, input: Record<string, unknown>): Ran | null {
     ? { server: name.split('__')[1] ?? '', method: name.split('__').slice(2).join('__') }
     : { server: name.slice(0, name.indexOf('/')), method: name.slice(name.indexOf('/') + 1) };
   if (identity.server === 'chrome-devtools') {
+    const saved = arg(input, 'filePath', 'requestFilePath', 'responseFilePath');
+    if (saved && identity.method === 'take_screenshot') return { said: `Saved a screenshot to ${brief(place(saved))}`, kind: 'edit', grave: false };
+    if (saved && identity.method === 'take_snapshot') return { said: `Saved a page snapshot to ${brief(place(saved))}`, kind: 'edit', grave: false };
+    if (saved && identity.method === 'get_network_request') return { said: `Saved a network request to ${brief(place(saved))}`, kind: 'edit', grave: false };
     const did = BROWSER[identity.method];
     if (did) return { said: did, kind: 'web', grave: false };
   }

@@ -13,10 +13,10 @@ export interface ServiceAction {
   confidence: 'schema' | 'parsed' | 'heuristic' | 'unknown';
 }
 
-const READ = new Set(['get', 'read', 'fetch', 'list', 'show', 'lookup', 'open', 'inspect', 'view', 'describe', 'download', 'status', 'check', 'validate', 'count', 'history', 'version']);
-const SEARCH = new Set(['search', 'find', 'query']);
-const CREATE = new Set(['create', 'add', 'publish', 'upload']);
-const UPDATE = new Set(['update', 'edit', 'set', 'move', 'copy', 'write', 'change', 'apply', 'label']);
+const READ = new Set(['get', 'read', 'fetch', 'list', 'show', 'lookup', 'open', 'inspect', 'view', 'describe', 'download', 'status', 'check', 'validate', 'count', 'history', 'version', 'screenshot', 'snapshot', 'wait', 'whoami']);
+const SEARCH = new Set(['search', 'find', 'query', 'explore']);
+const CREATE = new Set(['create', 'add', 'publish', 'upload', 'new']);
+const UPDATE = new Set(['update', 'edit', 'set', 'move', 'copy', 'write', 'change', 'apply', 'label', 'navigate', 'click', 'fill', 'type', 'press', 'resize', 'select', 'emulate', 'close', 'start', 'stop']);
 const COMMUNICATE = new Set(['send', 'post', 'comment', 'reply', 'notify']);
 const DELETE = new Set(['delete', 'remove', 'revoke', 'destroy', 'purge']);
 const AUTH = new Set(['authenticate', 'login', 'connect', 'authorize']);
@@ -27,6 +27,7 @@ const displayServer = (value: string): string => value
   .replace(/^(?:claude_ai_|plugin_)/i, '')
   .split(/[_-]+/)
   .filter(Boolean)
+  .filter((part, at, all) => at === 0 || part.toLowerCase() !== all[at - 1]!.toLowerCase())
   .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
   .join(' ');
 
@@ -42,8 +43,10 @@ export function serviceIdentity(name: string): { server: string; method: string 
     : null;
 }
 
-function targetIn(input: Record<string, unknown>): string | undefined {
-  for (const key of ['id', 'issueId', 'issue_id', 'pageId', 'page_id', 'query', 'name', 'path', 'url']) {
+function targetIn(input: Record<string, unknown>, includeName = true): string | undefined {
+  const keys = ['id', 'issueId', 'issue_id', 'pageId', 'page_id', 'query', 'path', 'url'];
+  if (includeName) keys.splice(6, 0, 'name');
+  for (const key of keys) {
     const value = input[key];
     if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 60);
   }
@@ -65,7 +68,9 @@ export function normalizeServiceAction(
   const identity = serviceIdentity(name);
   if (!identity) return null;
   const server = displayServer(identity.server) || 'Service';
-  const methodWords = words(identity.method);
+  const delegated = identity.method === 'execute_sentry_tool' && typeof input.name === 'string' &&
+    /^[A-Za-z0-9_.:-]+$/.test(input.name) ? input.name : '';
+  const methodWords = words(delegated || identity.method);
   // Some servers repeat their name in every method (codegraph_explore).
   if (methodWords[0]?.toLowerCase() === words(identity.server)[0]?.toLowerCase()) methodWords.shift();
   const lower = methodWords.map((word) => word.toLowerCase());
@@ -75,13 +80,21 @@ export function normalizeServiceAction(
   const pick = (set: Set<string>): string => lower.find((word) => set.has(word)) ?? '';
   const verb = pick(DELETE) || pick(CREATE) || pick(UPDATE) || pick(COMMUNICATE) ||
     pick(AUTH) || pick(EXECUTE) || pick(SEARCH) || pick(READ);
-  const target = targetIn(input);
+  const target = targetIn(input, !delegated);
   const object = objectIn(methodWords.join('_'), verb);
+
+  const writesArtifact = identity.server === 'chrome-devtools' && (
+    (['take_screenshot', 'take_snapshot'].includes(identity.method) && typeof input.filePath === 'string') ||
+    (identity.method === 'get_network_request' &&
+      (typeof input.requestFilePath === 'string' || typeof input.responseFilePath === 'string'))
+  );
 
   let effect: ServiceEffect;
   let risk: ServiceRisk;
   let phrase: string;
-  if (DELETE.has(verb) || annotations.destructiveHint) {
+  if (writesArtifact) {
+    effect = 'create'; risk = 'mutating'; phrase = 'Created';
+  } else if (DELETE.has(verb) || annotations.destructiveHint) {
     effect = 'delete'; risk = 'destructive'; phrase = 'Deleted';
   } else if (annotations.readOnlyHint) {
     effect = 'read'; risk = 'read-only'; phrase = verb === 'list' ? 'Listed' : 'Read';
@@ -111,6 +124,6 @@ export function normalizeServiceAction(
   return {
     server, method: identity.method, effect, risk, target,
     summary: `${phrase} ${server}${object === 'data' ? '' : ` ${object}`}${target ? ` ${target}` : ''}`,
-    confidence: annotations.readOnlyHint || annotations.destructiveHint ? 'schema' : 'heuristic',
+    confidence: annotations.readOnlyHint || annotations.destructiveHint ? 'schema' : writesArtifact ? 'parsed' : 'heuristic',
   };
 }

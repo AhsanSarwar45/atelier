@@ -47,6 +47,7 @@ const report = {
   tools: { total: 0, categorized: 0, raw: 0 },
   commands: { envelopes: 0, semantic: 0, named: 0, opaque: 0, wrapped: 0 },
   commandLabels: { covered: 0, verifiedCorrect: 0, knownWrong: 0, unverified: 0, uncovered: 0 },
+  serviceLabels: { observed: 0, contradictions: 0 },
   commandIntents: {},
   contradictions: {},
   contradictionLabels: {},
@@ -92,6 +93,41 @@ function commandCandidate(raw, source = 'direct') {
   }
 }
 
+function serviceCandidate(name, input = {}, annotations = {}) {
+  const action = normalizeServiceAction(name, input, annotations);
+  if (!action) return null;
+  const ran = whatItRan(name, {
+    ...input,
+    readOnlyHint: annotations.readOnlyHint === true,
+    destructiveHint: annotations.destructiveHint === true,
+  });
+  const verb = ran?.said.match(/^[A-Za-z][\w-]*/)?.[0] ?? 'raw';
+  const delegatedValues = [input.tool, input.tool_name, input.function];
+  if (action.method === 'execute_sentry_tool') delegatedValues.push(input.name);
+  const delegated = delegatedValues.find((value) =>
+    typeof value === 'string' && /^[A-Za-z0-9_.:-]+$/.test(value),
+  );
+  const method = delegated ? `${action.method}>${delegated}` : action.method;
+  const profile = `${action.server}/${method}|${verb}|${ran?.kind ?? 'raw'}|${ran?.grave ? 'grave' : 'ordinary'}|${action.effect}|${action.risk}|${action.confidence}`;
+  count(report.profiles.services, profile);
+  report.serviceLabels.observed += 1;
+  const expectedRisk = {
+    read: 'read-only', search: 'read-only', create: 'mutating', update: 'mutating',
+    delete: 'destructive', communicate: 'mutating', authenticate: 'mutating', execute: 'unknown',
+  }[action.effect];
+  const effectVerbs = {
+    read: ['Read', 'Listed', 'Looked', 'Waited'], search: ['Searched'],
+    create: ['Created', 'Published', 'Uploaded', 'Opened', 'Saved'],
+    update: ['Updated', 'Opened', 'Clicked', 'Typed', 'Filled', 'Pressed', 'Resized', 'Switched', 'Pretended', 'Closed', 'Started', 'Stopped'],
+    delete: ['Deleted'], communicate: ['Sent'], authenticate: ['Authenticated'], execute: ['Ran'],
+  }[action.effect];
+  const contradicted = expectedRisk !== action.risk || !effectVerbs.includes(verb) ||
+    (action.risk === 'destructive') !== (ran?.grave === true) ||
+    (ran?.grave === true) !== (ran?.kind === 'grave');
+  if (contradicted) report.serviceLabels.contradictions += 1;
+  return action;
+}
+
 const CLAUDE_BOOKKEEPING = new Set([
   'file-history-snapshot', 'file-history-delta', 'queue-operation', 'last-prompt',
   'title', 'ai-title', 'summary', 'history-suppression', 'atis-latch',
@@ -106,6 +142,7 @@ const CLAUDE_KNOWN = new Set([
 function claudeTool(block, file) {
   report.tools.total += 1;
   const input = block.input && typeof block.input === 'object' ? block.input : {};
+  serviceCandidate(block.name, input);
   if (block.name === 'Bash' && typeof input.command === 'string') {
     commandCandidate(input.command);
     report.tools.categorized += 1;
@@ -176,6 +213,7 @@ function codexTool(payload, file) {
     return;
   }
   const bag = input && typeof input === 'object' ? input : {};
+  serviceCandidate(name, bag);
   if (whatItRan(name, bag)) report.tools.categorized += 1;
   else {
     report.tools.raw += 1;
@@ -198,7 +236,7 @@ function scanCodex(row, file) {
   }
   if (row.type === 'event_msg' && type === 'mcp_tool_call_end') {
     const invocation = payload.invocation ?? {};
-    const action = normalizeServiceAction(
+    const action = serviceCandidate(
       `${invocation.server ?? ''}/${invocation.tool ?? ''}`,
       invocation.arguments ?? {},
       { readOnlyHint: payload.read_only_hint === true, destructiveHint: payload.destructive_hint === true },
@@ -242,6 +280,9 @@ report.unknown = orderedUnknown;
 report.profiles.commands = Object.fromEntries(
   Object.entries(report.profiles.commands).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
 );
+report.profiles.services = Object.fromEntries(
+  Object.entries(report.profiles.services).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+);
 
 if (JSON_OUT) {
   console.log(JSON.stringify(report, null, 2));
@@ -253,6 +294,7 @@ if (JSON_OUT) {
   for (const [reason, count] of Object.entries(report.contradictions).sort((a, b) => b[1] - a[1])) {
     console.log(`  ${String(count).padStart(7)}  ${reason}`);
   }
+  console.log(`${report.serviceLabels.observed} service calls across ${Object.keys(report.profiles.services).length} provider-neutral signature groups; ${report.serviceLabels.contradictions} risk/category contradictions`);
   console.log(`${report.tools.categorized}/${report.tools.total} tool calls categorized; ${report.tools.raw} raw`);
   console.log(`${report.events.unknown} unknown non-bookkeeping events across ${Object.keys(orderedUnknown).length} signatures`);
   for (const [signature, held] of Object.entries(orderedUnknown)) {
@@ -260,4 +302,4 @@ if (JSON_OUT) {
   }
 }
 
-if (VERIFY_LABELS && report.commandLabels.knownWrong > 0) process.exitCode = 1;
+if (VERIFY_LABELS && (report.commandLabels.knownWrong > 0 || report.serviceLabels.contradictions > 0)) process.exitCode = 1;
