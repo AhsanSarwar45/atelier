@@ -529,7 +529,7 @@ describe('the tools that are not commands', () => {
     ['ToolSearch', { query: 'select:Read' }, 'Looked for a tool it could use'],
     ['mcp__chrome-devtools__take_screenshot', {}, 'Looked at the screen'],
     ['mcp__chrome-devtools__navigate_page', {}, 'Opened a page'],
-    ['mcp__codegraph__codegraph_explore', {}, 'Asked codegraph to explore'],
+    ['mcp__codegraph__codegraph_explore', {}, 'Asked Codegraph to explore'],
   ];
 
   for (const [name, input, sentence] of CALLS) {
@@ -537,6 +537,19 @@ describe('the tools that are not commands', () => {
       expect(whatItRan(name, input)?.said, name).toBe(sentence);
     });
   }
+
+  it('gives equivalent Claude and Codex service calls the same action', () => {
+    const input = { id: 'KEY-1309' };
+    expect(whatItRan('mcp__claude_ai_Linear__get_issue', input)).toEqual(
+      whatItRan('linear/get_issue', input),
+    );
+    expect(whatItRan('linear/update_issue', input)).toMatchObject({
+      said: 'Updated Linear issue KEY-1309', kind: 'net', grave: false,
+    });
+    expect(whatItRan('gmail/delete_label', { id: 'old' })).toMatchObject({
+      said: 'Deleted Gmail label old', kind: 'grave', grave: true,
+    });
+  });
 
   it('never prints the kit\'s own name for a tool at him', () => {
     // `Grep`, `Glob`, `MultiEdit` and `BashOutput` are the kit's words for

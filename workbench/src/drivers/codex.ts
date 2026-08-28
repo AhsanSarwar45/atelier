@@ -531,6 +531,28 @@ export function codexRolloutLine(line: string, driver: CodexDriver, emit: (event
     if (payload.info.model_context_window) emit({ type: 'context', used: Number(last.total_tokens ?? 0), window: Number(payload.info.model_context_window) });
     return;
   }
+  if (row.type === 'event_msg' && payload.type === 'mcp_tool_call_end') {
+    const invocation = payload.invocation ?? {};
+    const id = payload.call_id ?? `mcp:${invocation.server ?? 'service'}/${invocation.tool ?? 'call'}`;
+    const input = {
+      ...(invocation.arguments ?? {}),
+      readOnlyHint: payload.read_only_hint === true,
+      destructiveHint: payload.destructive_hint === true,
+    };
+    // Newer rollouts can carry only the native end record. When a matching
+    // app-server begin already opened the row, `itemStarted` is deliberately
+    // skipped so one logical call still draws once.
+    if (!(driver as any).tools.has(id)) driver.itemStarted({
+      id, type: 'mcpToolCall', server: invocation.server, tool: invocation.tool,
+      arguments: input,
+    });
+    driver.itemCompleted({
+      id, type: 'mcpToolCall',
+      status: payload.result?.Err ? 'failed' : 'completed',
+      result: payload.result,
+    }, null, true);
+    return;
+  }
   if (row.type === 'event_msg' && payload.type === 'item_completed') {
     const item = payload.item ?? {};
     if (item.type === 'UserMessage') {
@@ -1379,10 +1401,19 @@ export class CodexDriver implements Driver {
       return;
     }
     this.tools.set(item.id, name);
+    const input = item.arguments ?? {
+      command: item.command, changes: item.changes, query: action.query ?? item.query,
+      pattern: action.query, path: action.path ?? item.path, file_path: action.path,
+      durationMs: item.durationMs,
+    };
+    if (item.type === 'mcpToolCall') {
+      input.readOnlyHint = item.readOnlyHint ?? item.read_only_hint ?? input.readOnlyHint;
+      input.destructiveHint = item.destructiveHint ?? item.destructive_hint ?? input.destructiveHint;
+    }
     this.emit({
       type: 'tool.started', toolCallId: item.id, name,
-      input: item.arguments ?? { command: item.command, changes: item.changes, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path, durationMs: item.durationMs },
-      title: toolTitle(name, item.arguments ?? { command: item.command, query: action.query ?? item.query, pattern: action.query, path: action.path ?? item.path, file_path: action.path }), parentToolCallId,
+      input,
+      title: toolTitle(name, input), parentToolCallId,
       ...(this.execution(actorAgentId, item.id, parentToolCallId)
         ? { execution: this.execution(actorAgentId, item.id, parentToolCallId)! }
         : {}),

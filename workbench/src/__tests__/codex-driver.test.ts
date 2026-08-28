@@ -14,6 +14,53 @@ import { createDriver, defaultPermissionMode } from '../drivers';
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
 
 describe('the provider boundary', () => {
+  it('materializes a native MCP completion once when its begin row already exists', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.itemStarted({
+      id: 'exec-mcp', type: 'mcpToolCall', server: 'linear', tool: 'get_issue',
+      arguments: { id: 'KEY-1309' }, readOnlyHint: true,
+    });
+
+    codexRolloutLine(JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'mcp_tool_call_end', call_id: 'exec-mcp', read_only_hint: true,
+        invocation: { server: 'linear', tool: 'get_issue', arguments: { id: 'KEY-1309' } },
+        result: { Ok: { content: [] } }, duration: { secs: 1, nanos: 0 },
+      },
+    }), driver, (event) => events.push(event as BareEvent));
+
+    expect(events.filter((event) => event.type === 'tool.started')).toEqual([
+      expect.objectContaining({
+        toolCallId: 'exec-mcp', name: 'linear/get_issue', title: 'Read Linear issue KEY-1309',
+      }),
+    ]);
+    expect(events.filter((event) => event.type === 'tool.completed')).toHaveLength(1);
+  });
+
+  it('materializes an MCP row from a native completion with no separate begin', () => {
+    const events: BareEvent[] = [];
+    const driver = new CodexDriver() as any;
+    codexRolloutLine(JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'mcp_tool_call_end', call_id: 'exec-delete', read_only_hint: false,
+        invocation: { server: 'gmail', tool: 'delete_label', arguments: { id: 'old' } },
+        result: { Ok: { content: [] } }, duration: { secs: 0, nanos: 1 },
+      },
+    }), driver, (event) => events.push(event as BareEvent));
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.started', toolCallId: 'exec-delete', name: 'gmail/delete_label',
+      title: 'Deleted Gmail label old',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool.completed', toolCallId: 'exec-delete', ok: true,
+    }));
+  });
+
   it('publishes a plan update immediately as checklist state', () => {
     const events: BareEvent[] = [];
     const driver = new CodexDriver() as any;

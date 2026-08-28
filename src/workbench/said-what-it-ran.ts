@@ -37,6 +37,7 @@
  */
 
 import { isCodeModeEnvelope, normalizeCommands } from './command-normalization';
+import { normalizeServiceAction } from './service-action';
 
 /**
  * The kinds a call can be. The kind decides the mark and the colour, so these
@@ -1459,16 +1460,19 @@ const BROWSER: Record<string, string> = {
 };
 
 /** `mcp__chrome-devtools__take_screenshot` → what that actually is. */
-function mcpSaid(name: string): Ran {
-  const parts = name.split('__');
-  const server = (parts[1] ?? '').replace(/^(?:claude_ai_|plugin_)/, '').replace(/_/g, ' ');
-  const own = parts[1] ?? '';
-  const method = (parts[2] ?? '').replace(new RegExp(`^${own.replace(/[^\w]/g, '.')}[_-]`), '').replace(/[_-]/g, ' ');
-  if (parts[1] === 'chrome-devtools') {
-    const did = BROWSER[parts[2] ?? ''];
-    return { said: did ?? `Used the browser to ${method || 'do something'}`, kind: 'web', grave: false };
+function mcpSaid(name: string, input: Record<string, unknown>): Ran | null {
+  const identity = name.startsWith('mcp__')
+    ? { server: name.split('__')[1] ?? '', method: name.split('__').slice(2).join('__') }
+    : { server: name.slice(0, name.indexOf('/')), method: name.slice(name.indexOf('/') + 1) };
+  if (identity.server === 'chrome-devtools') {
+    const did = BROWSER[identity.method];
+    if (did) return { said: did, kind: 'web', grave: false };
   }
-  return { said: `Asked ${server || 'a service'} to ${method || 'do something'}`, kind: 'net', grave: false };
+  const action = normalizeServiceAction(name, input, {
+    readOnlyHint: input.readOnlyHint === true,
+    destructiveHint: input.destructiveHint === true,
+  });
+  return action ? { said: action.summary, kind: action.risk === 'destructive' ? 'grave' : 'net', grave: action.risk === 'destructive' } : null;
 }
 
 /**
@@ -1594,7 +1598,7 @@ export function whatItRan(name: string, input: Record<string, unknown>): Ran | n
     const command = input.command;
     return typeof command === 'string' ? whatACommandDid(command) : null;
   }
-  if (name.indexOf('mcp__') === 0) return mcpSaid(name);
+  if (name.indexOf('mcp__') === 0 || name.includes('/')) return mcpSaid(name, input);
   const known = CALLS[name];
   return known ? known(input ?? {}) : null;
 }
