@@ -36,8 +36,8 @@
  * load-bearing rather than tidy: no icon and no Tailwind class is named here.
  */
 
-import { isCodeModeEnvelope, normalizeCommands } from './command-normalization';
-import { normalizeServiceAction } from './service-action';
+import { isCodeModeEnvelope, normalizeCommands } from './command-normalization.ts';
+import { normalizeServiceAction } from './service-action.ts';
 
 /**
  * The kinds a call can be. The kind decides the mark and the colour, so these
@@ -103,6 +103,11 @@ const MOST_LINKS = 24;
 
 /** How many are named before the rest are counted. */
 const MOST_SHOWN = 3;
+
+/** Heads whose transport grammar command-normalization knows how to peel. */
+const COMMAND_ENVELOPE = /^\s*(?:\/\S*\/)?(?:bash|sh|zsh|dash|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|env|sudo|doas|command|exec|nohup|setsid|nice|timeout|ssh|docker|podman|kubectl|npx|bunx|pnpm|yarn|rtk)\b/i;
+const SETTING_ENVELOPE = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+(?:\/\S*\/)?(?:bash|sh|zsh|dash|env|sudo|doas|command|exec|nohup|setsid|nice|timeout|ssh|docker|podman|kubectl|npx|bunx|pnpm|yarn|rtk)\b/i;
+const CODE_MODE_START = /^\s*(?:\/\/\s*@exec\b|const\b|let\b|var\b|await\b)/;
 
 /** How long a quoted pattern or a URL may run inside a sentence. */
 const OBJECT = 44;
@@ -1180,55 +1185,6 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   return { text, kind, grave: false };
 }
 
-/**
- * The command handed to a login shell by a provider launcher.
- *
- * Codex commandExecution items carry the faithful command as
- * `/bin/bash -lc '…'`. The shell is transport, not the work. Reading it as an
- * ordinary runner reduced `sed … SKILL.md && bd prime` to the misleading
- * "Ran SKILL.md && bd prime" and reduced `rg --files -g Cargo.toml` to "Ran
- * Cargo.toml". Unwrap only an explicit `c` option; an ordinary script file is
- * still described as a script.
- */
-/** Decode the one shell word following `-c`, including `'…'"'"'…'` joins. */
-function shellWord(text: string): string {
-  let out = '';
-  let quote = '';
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charAt(i);
-    if (!quote) {
-      if (/\s/.test(char)) break;
-      if (char === "'" || char === '"') { quote = char; continue; }
-      if (char === '\\' && i + 1 < text.length) { out += text.charAt(++i); continue; }
-      out += char;
-      continue;
-    }
-    if (char === quote) { quote = ''; continue; }
-    if (quote === '"' && char === '\\' && i + 1 < text.length) {
-      const next = text.charAt(i + 1);
-      if (next === '"' || next === '\\' || next === '$' || next === '`') { out += next; i++; continue; }
-    }
-    out += char;
-  }
-  return out;
-}
-
-function commandHandedToShell(command: string): string | null {
-  // Native Codex commandExecution uses this exact launcher. Read it directly
-  // before tokenising: its double-quoted body often contains escaped JSON,
-  // which is valid shell but deliberately beyond the tiny word reader below.
-  const launched = /^\s*(?:\S*\/)?(?:bash|sh|zsh|dash)\s+-[A-Za-z]*c[A-Za-z]*\s+([\s\S]+)$/.exec(command);
-  if (launched) {
-    const held = launched[1]!.trim();
-    return shellWord(held);
-  }
-  const argv = headOf(stripped(words(command)));
-  const head = named(argv[0] ?? '');
-  if (head !== 'bash' && head !== 'sh' && head !== 'zsh' && head !== 'dash') return null;
-  const at = argv.findIndex((word, i) => i > 0 && /^-[^-]*c/.test(word));
-  return at >= 0 ? (argv[at + 1] ?? null) : null;
-}
-
 /** A JavaScript string literal passed as an object property. */
 function jsStringAfter(text: string, property: string): string | null {
   const at = new RegExp(`(?:\\b${property}|["']${property}["'])\\s*:\\s*`).exec(text);
@@ -1260,14 +1216,15 @@ function jsStringAfter(text: string, property: string): string | null {
  * imports from any provider version that emits the same shape.
  */
 function agentEnvelopeDid(text: string, shellDepth: number): Ran | null {
-  if (/\btools\.(?:exec_command|exec)\s*\(/.test(text)) {
+  const code = CODE_MODE_START.test(text);
+  if (code && /\btools\.(?:exec_command|exec)\s*\(/.test(text)) {
     const command = jsStringAfter(text, 'cmd');
     if (command) return whatACommandDid(command, shellDepth + 1);
   }
-  if (/\btools\.(?:write_stdin|wait)\s*\(/.test(text)) {
+  if (code && /\btools\.(?:write_stdin|wait)\s*\(/.test(text)) {
     return { said: 'Waited for a running command', kind: 'wait', grave: false };
   }
-  if (/\btools\.apply_patch\s*\(|\*\*\* Begin Patch/.test(text)) {
+  if ((code && /\btools\.apply_patch\s*\(/.test(text)) || text.indexOf('*** Begin Patch') >= 0) {
     const paths: string[] = [];
     const pattern = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm;
     const patch = text.replaceAll('\\n', '\n');
@@ -1279,14 +1236,14 @@ function agentEnvelopeDid(text: string, shellDepth: number): Ran | null {
       kind: 'edit', grave: false,
     };
   }
-  if (/\btools\.view_image\s*\(/.test(text)) {
+  if (code && /\btools\.view_image\s*\(/.test(text)) {
     const path = jsStringAfter(text, 'path');
     return { said: path ? `Looked at ${brief(place(path))}` : 'Looked at an image', kind: 'read', grave: false };
   }
-  if (/\btools\.web__run\s*\(/.test(text)) {
+  if (code && /\btools\.web__run\s*\(/.test(text)) {
     return { said: /(?:\bsearch_query|["']search_query["'])\s*:/.test(text) ? 'Searched the web' : 'Used the browser', kind: 'web', grave: false };
   }
-  if (/^(?:const|let|var)\s/.test(text)) {
+  if (code && /^(?:const|let|var)\s/.test(text)) {
     return { said: 'Ran an agent helper script', kind: 'script', grave: false };
   }
   return null;
@@ -1323,8 +1280,12 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
   // before any semantic rule sees the command. `Bash`, `exec`, JavaScript and
   // `/bin/bash -lc` are transport; the executable beneath them is the work.
   // Dynamic code and unrecognised wrappers stay on the old raw/fallback path.
-  if (shellDepth < 8) {
-    const source = isCodeModeEnvelope(text) ? 'code-mode' : 'direct';
+  // Do not search an arbitrary (sometimes 20KB) shell script for JavaScript
+  // call names. Observed code-mode envelopes have a declared pragma or start
+  // as orchestration statements.
+  const codeMode = CODE_MODE_START.test(text) && isCodeModeEnvelope(text);
+  if (shellDepth < 8 && (codeMode || COMMAND_ENVELOPE.test(text) || SETTING_ENVELOPE.test(text))) {
+    const source = codeMode ? 'code-mode' : 'direct';
     const normalized = normalizeCommands(text, source);
     const semantic = normalized.commands.map((item) => item.command);
     const changed = semantic.length > 1 || (semantic.length === 1 && semantic[0]!.trim() !== text);
@@ -1337,20 +1298,16 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
   const envelope = shellDepth < 4 ? agentEnvelopeDid(text, shellDepth) : null;
   if (envelope) return envelope;
 
-  // Provider launchers may nest (for example `env bash -lc …`), but malformed
-  // or adversarial input must not recurse forever.
-  if (shellDepth < 4) {
-    const handed = commandHandedToShell(text);
-    if (handed && handed.trim() !== text) return whatACommandDid(handed, shellDepth + 1);
-  }
-
   const stages: Stage[] = [];
   let missed = 0;
   let where = '';
 
   if (IS_SCRIPT.test(text)) {
     const only = scriptStage(text);
-    if (!only) return null;
+    if (!only) {
+      const hidden = graveBackstop(text);
+      return hidden ? { said: hidden.did, kind: 'grave', grave: true } : null;
+    }
     stages.push(only);
   } else {
     const chain = commandLinks(text);
@@ -1376,7 +1333,10 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
     }
   }
 
-  if (!stages.length) return null;
+  if (!stages.length) {
+    const hidden = graveBackstop(text);
+    return hidden ? { said: hidden.did, kind: 'grave', grave: true } : null;
+  }
 
   // Whatever the chain reader could not see. A `rm` inside `sh -c '…'` is one
   // word to it and a delete to the machine.
@@ -1512,8 +1472,18 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
       grave: false,
     };
   },
+  LSP: (i) => {
+    const operation = arg(i, 'operation').replace(/[_-]/g, ' ');
+    const path = arg(i, 'filePath', 'file_path');
+    return {
+      said: operation ? `${/diagnostic/i.test(operation) ? 'Read' : 'Looked up'} ${brief(operation, 36)}${path ? ` in ${brief(place(path), 28)}` : ''}` : 'Asked the language server',
+      kind: /diagnostic/i.test(operation) ? 'read' : 'search',
+      grave: false,
+    };
+  },
   BashOutput: () => ({ said: 'Checked on a command left running', kind: 'system', grave: false }),
   Wait: () => ({ said: 'Waited for a running command', kind: 'wait', grave: false }),
+  wait: () => ({ said: 'Waited for a running command', kind: 'wait', grave: false }),
   KillShell: () => ({ said: 'Stopped a command left running', kind: 'grave', grave: true }),
   Agent: (i) => {
     const what = arg(i, 'description', 'prompt', 'message');
@@ -1566,6 +1536,8 @@ const CALLS: Record<string, (input: Record<string, unknown>) => Ran | null> = {
   },
   SendUserFile: () => ({ said: 'Sent you a file', kind: 'agent', grave: false }),
   AskUserQuestion: () => ({ said: 'Asked you a question', kind: 'agent', grave: false }),
+  request_user_input: () => ({ said: 'Asked you a question', kind: 'agent', grave: false }),
+  SendFeedback: () => ({ said: 'Sent feedback', kind: 'net', grave: false }),
   ExitPlanMode: () => ({ said: 'Put a plan up for you', kind: 'agent', grave: false }),
   EnterPlanMode: () => ({ said: 'Started planning', kind: 'agent', grave: false }),
   EnterWorktree: () => ({ said: 'Moved into a worktree', kind: 'vcs', grave: false }),

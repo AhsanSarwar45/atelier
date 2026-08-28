@@ -386,6 +386,15 @@ describe('a delete is never hidden', () => {
     expect(ran?.grave).toBe(true);
   });
 
+  it('keeps a delete visible when every other stage is unknown or truncated', () => {
+    expect(whatACommandDid('bash -n machinery/check && git rm -q old.py')).toMatchObject({
+      said: 'Ran check, then deleted old.py', kind: 'grave', grave: true,
+    });
+    expect(whatACommandDid('UNKNOWN=1\nthis-is-not-a-known-stage\nrm -rf cache')).toMatchObject({
+      said: 'Deleted cache, and 1 more', kind: 'grave', grave: true,
+    });
+  });
+
   it('says so when a link of the chain hands the delete to a shell in quotes', () => {
     // The delete sits straight after a double quote, which was not one of the
     // places the backstop read a command as starting. It read this as the
@@ -527,6 +536,9 @@ describe('the tools that are not commands', () => {
     ['BashOutput', { bash_id: '1' }, 'Checked on a command left running'],
     ['Wait', {}, 'Waited for a running command'],
     ['ToolSearch', { query: 'select:Read' }, 'Looked for a tool it could use'],
+    ['LSP', { operation: 'goToDefinition', filePath: '/repo/src/app.ts' }, 'Looked up goToDefinition in src/app.ts'],
+    ['request_user_input', {}, 'Asked you a question'],
+    ['SendFeedback', {}, 'Sent feedback'],
     ['mcp__chrome-devtools__take_screenshot', {}, 'Looked at the screen'],
     ['mcp__chrome-devtools__navigate_page', {}, 'Opened a page'],
     ['mcp__codegraph__codegraph_explore', {}, 'Asked Codegraph to explore'],

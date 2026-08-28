@@ -80,6 +80,20 @@ describe('recognized process wrappers', () => {
   it('does not reinterpret an interpreter program as shell', () => {
     expect(one("python -c 'print(1)'").command).toBe("python -c 'print(1)'");
     expect(one('bash scripts/check.sh').command).toBe('bash scripts/check.sh');
+    expect(one('bash -n check.sh && git -c color.ui=false status').command)
+      .toBe('bash -n check.sh && git -c color.ui=false status');
+  });
+
+  it('does not discard outer work after a wrapped process', () => {
+    const command = "setsid bash -c 'npm test' & sleep 1; rm -rf cache";
+    expect(one(command).command).toBe(command);
+  });
+
+  it('peels leading environment assignments only for one complete invocation', () => {
+    expect(one("CI=1 bash -lc 'npm test'")).toMatchObject({
+      command: 'npm test',
+      boundaries: [{ kind: 'environment' }, { kind: 'shell' }],
+    });
   });
 
   it('leaves quoted command-looking data attached to the program that received it', () => {

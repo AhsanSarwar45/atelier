@@ -120,12 +120,34 @@ const DOCKER_EXEC_VALUE = new Set(['--detach-keys', '--env', '-e', '--env-file',
 const KUBECTL_GLOBAL_VALUE = new Set(['--context', '--namespace', '-n', '--cluster', '--user', '--kubeconfig', '--request-timeout']);
 const KUBECTL_EXEC_VALUE = new Set(['--container', '-c', '--filename', '-f', '--pod-running-timeout']);
 
+/** A shell's own `-c`, before its script/operand; never a later child's flag. */
+function shellCommandAt(words: readonly { value: string }[]): number {
+  for (let at = 1; at < words.length; at++) {
+    const option = words[at]!.value;
+    if (option === '--') return -1;
+    if (!option.startsWith('-') || option === '-') return -1;
+    if (/^-[^-]*c/.test(option)) return at + 1 < words.length ? at + 1 : -1;
+    if (['-O', '-o', '--rcfile', '--init-file'].includes(option)) at++;
+  }
+  return -1;
+}
+
 function directInner(text: string, words: Word[]): { command: string; boundary: CommandBoundary } | null {
   if (!words.length) return null;
+  // Peeling one process out of a compound outer shell would discard the work
+  // after its `;`, `&&`, pipe, or background marker. Compound parsing owns it.
+  if (words[words.length - 1]!.end < text.trimEnd().length) return null;
   const head = basename(words[0]!.value);
 
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(head)) {
+    let at = 0;
+    while (words[at] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[at]!.value)) at++;
+    const command = from(text, words, at);
+    return command ? { command, boundary: { kind: 'environment', via: 'assignment' } } : null;
+  }
+
   if (SHELLS.has(head)) {
-    const flag = words.findIndex((word, i) => i > 0 && /^-[^-]*c/.test(word.value));
+    const flag = shellCommandAt(words) - 1;
     if (flag < 0 || !words[flag + 1]) return null;
     return { command: words[flag + 1]!.value, boundary: { kind: 'shell', via: head } };
   }
@@ -351,7 +373,7 @@ export function normalizeCommands(raw: string | readonly string[], source: 'dire
     const command = raw.map(shellArg).join(' ');
     const head = basename(raw[0]!);
     if (SHELLS.has(head)) {
-      const flag = raw.findIndex((word, i) => i > 0 && /^-[^-]*c/.test(word));
+      const flag = shellCommandAt(raw.map((value) => ({ value }))) - 1;
       if (flag >= 0 && raw[flag + 1]) {
         const semantic = peel(raw[flag + 1]!, [{ kind: 'shell', via: head }]);
         return { raw, commands: [semantic], status: semantic.confidence === 'opaque' ? 'partial' : 'complete' };
