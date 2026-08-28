@@ -17,6 +17,7 @@ import './at-alias.mjs';
 process.removeAllListeners('warning');
 
 const { isCodeModeEnvelope, normalizeCommands } = await import('../src/workbench/command-normalization.ts');
+const { auditCommandLabel } = await import('../src/workbench/command-label-audit.ts');
 const { normalizeServiceAction } = await import('../src/workbench/service-action.ts');
 const { whatACommandDid, whatItRan } = await import('../src/workbench/said-what-it-ran.ts');
 
@@ -44,6 +45,9 @@ const report = {
   events: { claude: 0, codex: 0, categorized: 0, bookkeeping: 0, unknown: 0 },
   tools: { total: 0, categorized: 0, raw: 0 },
   commands: { envelopes: 0, semantic: 0, named: 0, opaque: 0, wrapped: 0 },
+  commandLabels: { covered: 0, verifiedCorrect: 0, knownWrong: 0, unverified: 0, uncovered: 0 },
+  commandIntents: {},
+  contradictions: {},
   boundaries: {},
   unknown: {},
 };
@@ -66,7 +70,19 @@ function commandCandidate(raw, source = 'direct') {
     if (command.confidence === 'opaque') report.commands.opaque += 1;
     if (command.boundaries.length) report.commands.wrapped += 1;
     for (const boundary of command.boundaries) count(report.boundaries, boundary.kind);
-    if (whatACommandDid(command.command)) report.commands.named += 1;
+    const ran = whatACommandDid(command.command);
+    if (ran) {
+      report.commands.named += 1;
+      report.commandLabels.covered += 1;
+    }
+    const verdict = auditCommandLabel(command.command, ran);
+    if (verdict.status === 'verified') report.commandLabels.verifiedCorrect += 1;
+    else if (verdict.status === 'contradiction') {
+      report.commandLabels.knownWrong += 1;
+      count(report.contradictions, `${verdict.intent}: ${verdict.reason}`);
+    } else if (verdict.status === 'unverified') report.commandLabels.unverified += 1;
+    else report.commandLabels.uncovered += 1;
+    if ('intent' in verdict && verdict.intent) count(report.commandIntents, verdict.intent);
   }
 }
 
@@ -223,6 +239,10 @@ if (JSON_OUT) {
 } else {
   console.log(`${report.records.claude} Claude and ${report.records.codex} Codex records`);
   console.log(`${report.commands.semantic} semantic commands from ${report.commands.envelopes} envelopes; ${report.commands.named} named, ${report.commands.wrapped} unwrapped, ${report.commands.opaque} opaque`);
+  console.log(`${report.commandLabels.covered} command labels covered; ${report.commandLabels.verifiedCorrect} verified intent-correct, ${report.commandLabels.knownWrong} known wrong, ${report.commandLabels.unverified} labelled but unverified, ${report.commandLabels.uncovered} uncovered`);
+  for (const [reason, count] of Object.entries(report.contradictions).sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${String(count).padStart(7)}  ${reason}`);
+  }
   console.log(`${report.tools.categorized}/${report.tools.total} tool calls categorized; ${report.tools.raw} raw`);
   console.log(`${report.events.unknown} unknown non-bookkeeping events across ${Object.keys(orderedUnknown).length} signatures`);
   for (const [signature, held] of Object.entries(orderedUnknown)) {
