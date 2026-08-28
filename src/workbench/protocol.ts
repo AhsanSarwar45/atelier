@@ -137,11 +137,34 @@ export interface AgentDefinition {
   source: 'project' | 'user';
 }
 
+/**
+ * The durable identity of one logical event in a provider's own history.
+ *
+ * Providers may deliver the same history live, from a replayed record, or as
+ * a complete snapshot. `eventId` names the logical WBP event rather than that
+ * particular delivery, so all three roads meet at one storage key. A native
+ * record that expands into several WBP events gives each part its own stable
+ * suffix (for example `call-7:started` and `call-7:completed`).
+ *
+ * Optional while the existing drivers are migrated. Events created only by
+ * Atelier, and old persisted rows, have no provider identity and retain their
+ * append-only behaviour.
+ */
+export interface ProviderEventIdentity {
+  provider: Brand;
+  threadId: string;
+  eventId: string;
+  delivery: 'live' | 'replay' | 'snapshot';
+  /** Provider cursor or record position, retained for diagnostics/checkpoints. */
+  cursor?: string;
+}
+
 /** Fields every event carries. `seq` is per-session and monotone. */
 interface EventBase {
   seq: number;
   sessionId: string;
   at: string;
+  providerEvent?: ProviderEventIdentity;
 }
 
 export type WbpEvent = EventBase &

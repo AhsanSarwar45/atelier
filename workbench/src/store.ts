@@ -142,6 +142,19 @@ const MIGRATIONS: string[] = [
   // providers or builds that did not report one.
   `ALTER TABLE session ADD COLUMN effort TEXT;`,
 
+  // One logical provider event may arrive live, from a complete snapshot, and
+  // again from the native record after this process restarts. The transcript
+  // is append-only, but those deliveries are not three transcript events.
+  // Keep their native identity beside the JSON so SQLite — the last boundary
+  // every provider crosses — can enforce exactly-once ingestion. Old rows and
+  // events produced only by Atelier remain nullable and unchanged.
+  `ALTER TABLE event ADD COLUMN provider TEXT;
+   ALTER TABLE event ADD COLUMN provider_thread_id TEXT;
+   ALTER TABLE event ADD COLUMN provider_event_id TEXT;
+   CREATE UNIQUE INDEX event_by_provider_identity
+     ON event(session_id, provider, provider_thread_id, provider_event_id)
+     WHERE provider_event_id IS NOT NULL;`,
+
 ];
 
 export class Store {
@@ -429,10 +442,28 @@ export class Store {
     return r.m + 1;
   }
 
-  appendEvent(e: WbpEvent): void {
-    this.db
-      .prepare('INSERT INTO event (session_id, seq, at, type, json) VALUES (?,?,?,?,?)')
-      .run(e.sessionId, e.seq, e.at, e.type, JSON.stringify(e));
+  /**
+   * Appends one canonical event, or returns false when another delivery of the
+   * same provider event is already present.
+   *
+   * The uniqueness lives here rather than in a driver/import branch: live,
+   * replay, snapshots and future providers all have to cross this method.
+   */
+  appendEvent(e: WbpEvent): boolean {
+    const identity = e.providerEvent;
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO event
+           (session_id, seq, at, type, json, provider, provider_thread_id, provider_event_id)
+         VALUES (?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        e.sessionId, e.seq, e.at, e.type, JSON.stringify(e),
+        identity?.provider ?? null,
+        identity?.threadId ?? null,
+        identity?.eventId ?? null,
+      );
+    return result.changes === 1;
   }
 
   /**

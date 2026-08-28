@@ -1758,7 +1758,11 @@ export class Sessions {
       at: new Date().toISOString(),
     } as WbpEvent;
 
-    this.store.appendEvent(full);
+    // A provider can hand us the same logical event live and later through a
+    // replay or snapshot. SQLite owns that reconciliation boundary. Nothing
+    // below — search projections, lifecycle folds, notifications, or live
+    // subscribers — may observe a duplicate delivery.
+    if (!this.store.appendEvent(full)) return;
 
     // A driver that has taken a fatal error is not driving anything any more,
     // and the only thing that says so is this line. Left in the map it would go
