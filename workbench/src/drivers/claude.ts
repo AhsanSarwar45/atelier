@@ -28,6 +28,7 @@ import { claudeProgram } from '../claude-program.ts';
 
 import {
   ALLOWANCE_WINDOW,
+  effortInWords,
   extraUsage,
   inWords,
   PERMISSION_MODE,
@@ -62,9 +63,6 @@ export type ClaudeModelRow = {
   supportedEffortLevels?: string[];
 };
 
-/** A level whose wire spelling does not read as English on its own. */
-const EFFORT_SAID: Record<string, string> = { xhigh: 'Extra high' };
-
 /**
  * The levels the model now in use announces, in the order it announced them.
  *
@@ -78,7 +76,7 @@ export function claudeEffortMenu(models: ClaudeModelRow[], activeModel: string |
   if (!selected || selected.supportsEffort === false) return [];
   return (selected.supportedEffortLevels ?? []).map((value) => ({
     value,
-    displayName: EFFORT_SAID[value] ?? inWords(value),
+    displayName: effortInWords(value),
   }));
 }
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';

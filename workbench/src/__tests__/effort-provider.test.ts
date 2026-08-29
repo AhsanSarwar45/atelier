@@ -8,7 +8,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: vi.fn() }));
 
 import type { SessionSummary, WbpEvent } from '../../../src/workbench/protocol';
 import { ClaudeDriver, claudeEffortMenu } from '../drivers/claude';
-import { CodexDriver } from '../drivers/codex';
+import { CodexDriver, codexEffortForModel, codexEffortMenu } from '../drivers/codex';
 import { Store } from '../store';
 
 type BareEvent = Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>;
@@ -131,5 +131,65 @@ describe('the effort levels a Claude chat offers', () => {
     const menu = events.filter((event) => event.type === 'session.menu').at(-1) as any;
     expect(menu).toBeTruthy();
     expect(menu.efforts).toEqual([]);
+  });
+});
+
+describe('the effort levels a Codex chat offers', () => {
+  /** Two models that do not think equally deeply, as an app-server describes them. */
+  const catalogue = [
+    {
+      model: 'fast', isDefault: true,
+      supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'medium' }],
+      defaultReasoningEffort: 'low',
+    },
+    {
+      model: 'deep',
+      supportedReasoningEfforts: [{ reasoningEffort: 'high' }, { reasoningEffort: 'xhigh' }],
+      defaultReasoningEffort: 'high',
+    },
+  ];
+
+  it('names the deepest level in words rather than in its wire spelling', () => {
+    const menu = codexEffortMenu(catalogue, 'deep');
+
+    expect(menu.efforts.map((choice) => choice.displayName)).toEqual(['High', 'Extra high']);
+  });
+
+  it('names a level exactly as a Claude chat names it, so one window never says two things', () => {
+    const claude = claudeEffortMenu(
+      [{ value: 'opus', displayName: 'Opus', supportsEffort: true, supportedEffortLevels: ['high', 'xhigh'] }],
+      'opus',
+    );
+    const codex = codexEffortMenu(catalogue, 'deep');
+
+    expect(codex.efforts.map((choice) => choice.displayName))
+      .toEqual(claude.map((choice) => choice.displayName));
+  });
+
+  it('redraws the levels for the model just chosen instead of leaving the last one’s', async () => {
+    const driver = new CodexDriver() as any;
+    const asked: (string | undefined)[] = [];
+    driver.emit = () => {};
+    driver.menu = async () => { asked.push(driver.model); };
+
+    await driver.setModel('deep');
+
+    expect(asked).toEqual(['deep']);
+  });
+
+  it('drops a stored level the newly chosen model does not offer, taking that model’s default', () => {
+    const offered = codexEffortMenu(catalogue, 'deep');
+
+    expect(codexEffortForModel('low', offered.efforts, offered.defaultEffort)).toBe('high');
+  });
+
+  it('keeps a level the newly chosen model still offers', () => {
+    const offered = codexEffortMenu(catalogue, 'deep');
+
+    expect(codexEffortForModel('xhigh', offered.efforts, offered.defaultEffort)).toBe('xhigh');
+  });
+
+  it('keeps what is stored when an app-server announces no levels at all', () => {
+    expect(codexEffortForModel('high', [], null)).toBe('high');
   });
 });

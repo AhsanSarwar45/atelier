@@ -11,6 +11,7 @@ import { toolTitle } from '../../../src/workbench/said-what-it-ran.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 import { proposedPlanSpecs } from '../../../src/workbench/proposed-plan.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
+import { effortInWords } from '../../../src/workbench/machine-words.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 import { AgentLifecycle, type ProviderAgentAdapter } from './agent-lifecycle.ts';
 import { commandExecution, offeredSlashCommand } from './slash-commands.ts';
@@ -325,7 +326,7 @@ export function codexEffortMenu(models: Bag[], activeModel?: string): { efforts:
     const value = choice.reasoningEffort ?? choice.effort;
     return typeof value === 'string' && value ? [{
       value,
-      displayName: value.replace(/(^|[-_])\w/g, (part: string) => part.replace(/[-_]/, '').toUpperCase()),
+      displayName: effortInWords(value),
       description: choice.description,
     }] : [];
   });
@@ -338,6 +339,21 @@ export function codexEffortMenu(models: Bag[], activeModel?: string): { efforts:
 
 export function codexResolvedEffort(current: string | undefined, fallback: string | null): string | undefined {
   return current || fallback || undefined;
+}
+
+/**
+ * The level a chat is on once the model in use has said which it offers.
+ *
+ * A level the model does not offer is not the level this chat is on, whatever
+ * was stored, so the model's own default takes over. An app-server that
+ * announces no levels at all is not read as a model that has none, and what is
+ * stored stands (bw-uxzk.2).
+ */
+export function codexEffortForModel(
+  stored: string | undefined, offered: Bag[], defaultEffort: string | null,
+): string | undefined {
+  const stillOffered = offered.length === 0 || offered.some((choice) => choice.value === stored);
+  return codexResolvedEffort(stillOffered ? stored : undefined, defaultEffort);
 }
 
 export async function codexMenu(cwd: string, activeModel?: string): Promise<Bag> {
@@ -900,6 +916,9 @@ export class CodexDriver implements Driver {
   async setModel(model: string): Promise<void> {
     this.model = model === 'default' ? undefined : model;
     this.emit({ type: 'session.pinned', permissionMode: null, model: this.model ?? model });
+    // The levels belong to the model, so they are asked for again for the one
+    // just chosen rather than left as the last model's (bw-uxzk.2).
+    await this.menu();
   }
 
   async setEffort(effort: string): Promise<void> {
@@ -979,7 +998,7 @@ export class CodexDriver implements Driver {
       this.collaborationMode = null;
     }
     this.skills = new Map(Object.entries(menu.skillPaths ?? {}));
-    const resolvedEffort = codexResolvedEffort(this.effort, menu.defaultEffort);
+    const resolvedEffort = codexEffortForModel(this.effort, (menu.efforts ?? []) as Bag[], menu.defaultEffort);
     if (resolvedEffort !== this.effort) {
       this.effort = resolvedEffort;
       this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort: this.effort });

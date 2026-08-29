@@ -26,6 +26,13 @@ describe('the active effort in the chat status line', () => {
     expect(screen.queryByTestId('chat-effort-chip')).toBeNull();
   });
 
+  it('names the deepest level in words even when the provider announces no name for it', () => {
+    render(<WhatItRuns model={null} permissionMode={null} models={[]} effort="xhigh" efforts={[]} />);
+    const badge = screen.getByTestId('chat-effort-chip');
+    expect(badge).toHaveTextContent('Extra high');
+    expect(badge.textContent).not.toContain('xhigh');
+  });
+
   it('keeps a newly introduced provider value readable before this app knows it', () => {
     render(<WhatItRuns model={null} permissionMode={null} models={[]} effort="extra_deep" efforts={[]} />);
     expect(screen.getByTestId('chat-effort-chip')).toHaveTextContent('Extra deep');

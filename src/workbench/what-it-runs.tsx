@@ -25,7 +25,7 @@ import { Cpu, Gauge, Shield, ShieldAlert, ShieldCheck, ShieldHalf, ShieldOff, Wo
 import { Badge } from '@/components/ui/badge';
 import { hueFor } from '@/lib/bead-labels';
 import { cn } from '@/lib/utils';
-import { inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
+import { effortInWords, inWords, PERMISSION_MODE, UNKNOWN_MODE_TONE } from '@/workbench/machine-words';
 import { BRAND_DEFAULT_MODEL, type CollaborationModeChoice, type EffortChoice, type ModelChoice } from '@/workbench/protocol';
 
 /** The brand's own word for a chat nobody has pinned a model to. */
@@ -223,7 +223,7 @@ export function WhatItRuns({
   // drive has nothing to say until its record answers.
   const modelLabel = named ?? (models.length ? BRAND_DEFAULT_LABEL : null);
   const effortLabel = effort
-    ? efforts.find((choice) => choice.value === effort)?.displayName ?? inWords(effort)
+    ? efforts.find((choice) => choice.value === effort)?.displayName ?? effortInWords(effort)
     : null;
   const collaborationLabel = collaborationMode
     ? collaborationModes.find((choice) => choice.value === collaborationMode)?.displayName ?? inWords(collaborationMode)

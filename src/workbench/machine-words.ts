@@ -271,6 +271,27 @@ export function inWords(wire: string): string {
   return opened ? opened[0].toUpperCase() + opened.slice(1) : wire;
 }
 
+/**
+ * A level whose wire spelling is not a word, and what to say instead.
+ *
+ * `xhigh` is the only one so far. Left to the general rule it came out as
+ * `Xhigh`, which was drawn in the picker and again in the status badge
+ * (bw-uxzk.1).
+ */
+const EFFORT_WORDS: Record<string, string> = { xhigh: 'Extra high' };
+
+/**
+ * What a reasoning level is called on screen.
+ *
+ * Both providers name their levels through here, and the badge falls back to
+ * it, so a level is never called two things in one window — and a level
+ * neither provider has announced yet still arrives as words rather than as
+ * whatever the wire spells it.
+ */
+export function effortInWords(wire: string): string {
+  return EFFORT_WORDS[wire] ?? inWords(wire);
+}
+
 const machine = (said: string | null): StateWord => ({ said, who: 'machine' });
 const his = (said: string | null): StateWord => ({ said, who: 'you' });
 
