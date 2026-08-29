@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { CLAUDE_MODEL_CATALOG, claudeModelMenu, claudeModelRows } from '../drivers/claude-models.ts';
+import {
+  CLAUDE_MODEL_CATALOG,
+  claudeModelMenu,
+  claudeModelRows,
+  describeModel,
+  perMtok,
+} from '../drivers/claude-models.ts';
 import { claudeEffortMenu, type ClaudeModelRow } from '../drivers/claude.ts';
 
 /**
@@ -126,10 +132,77 @@ describe('the models a Claude chat can be switched to', () => {
       .not.toEqual(['low', 'medium', 'high']);
   });
 
-  it('describes every model it lists', () => {
-    for (const entry of CLAUDE_MODEL_CATALOG) {
-      expect(entry.description.length).toBeGreaterThan(0);
-      expect(entry.displayName.length).toBeGreaterThan(0);
-    }
+  /**
+   * The fault: every version's line was prose somebody wrote — 'The Opus before
+   * 4.8', 'Older Opus, still served' — and the install's register holds no
+   * description text at all, so none of it was sourced from anything. The line
+   * is now composed from the three facts the register does keep, which is also
+   * where the price asked for comes from (bw-xtic.5).
+   */
+  describe('what a version says about itself', () => {
+    const hint = (id: string) =>
+      claudeModelMenu(ANNOUNCED).find((row) => row.value === id)?.description;
+
+    it('is the register\'s own window, rate and cutoff, and nothing else', () => {
+      expect(hint('claude-opus-4-8')).toBe('1M context · $5/$25 per Mtok · knowledge to January 2026');
+      expect(hint('claude-opus-4-5')).toBe('200K context · $5/$25 per Mtok · knowledge to May 2025');
+      expect(hint('claude-haiku-4-5')).toBe('200K context · $1/$5 per Mtok · knowledge to February 2025');
+    });
+
+    it('is written the same way for every model, so none can carry an opinion', () => {
+      const shape = /^(1M|200K) context · \$[\d.]+\/\$[\d.]+ per Mtok · knowledge to [A-Z][a-z]+ \d{4}$/;
+
+      for (const entry of CLAUDE_MODEL_CATALOG) {
+        expect(describeModel(entry), entry.id).toMatch(shape);
+        expect(entry.displayName.length, entry.id).toBeGreaterThan(0);
+      }
+    });
+
+    /**
+     * The dearest and the cheapest the install serves, so a tier written into
+     * the wrong row is caught rather than averaged away.
+     */
+    it('charges what the register charges', () => {
+      const rate = (id: string) => perMtok(CLAUDE_MODEL_CATALOG.find((e) => e.id === id)!);
+
+      expect(rate('claude-opus-4-1')).toBe('$15/$75 per Mtok');
+      expect(rate('claude-fable-5')).toBe('$10/$50 per Mtok');
+      expect(rate('claude-sonnet-5')).toBe('$2/$10 per Mtok');
+      expect(rate('claude-haiku-4-5')).toBe('$1/$5 per Mtok');
+    });
+  });
+
+  /**
+   * An alias is the install's own row, so its words stay; the rate is the one
+   * thing it never says. The install pins an alias to a dated build and may add
+   * a window suffix, and neither spelling is a catalogue id — so a lookup that
+   * does not strip them would silently price nothing (bw-xtic.5).
+   */
+  describe('what an alias says about itself', () => {
+    const hint = (value: string) =>
+      claudeModelMenu(ANNOUNCED).find((row) => row.value === value)?.description;
+
+    it('keeps the install\'s words and adds the rate of the model it points at', () => {
+      // `claude-opus-5[1m]` — a window suffix on the end.
+      expect(hint('opus[1m]')).toBe(
+        'Opus 5 with 1M context · Best for everyday, complex tasks · $5/$25 per Mtok',
+      );
+      // `claude-haiku-4-5-20251001` — a dated build.
+      expect(hint('haiku')).toBe('Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok');
+    });
+
+    it('prices every alias the install named', () => {
+      for (const row of ANNOUNCED) {
+        expect(hint(row.value), row.value).toMatch(/\$[\d.]+\/\$[\d.]+ per Mtok$/);
+      }
+    });
+
+    it('leaves an alias alone rather than pricing it from nothing', () => {
+      const menu = claudeModelMenu([
+        { value: 'sonnet', resolvedModel: 'claude-sonnet-9', displayName: 'Sonnet', description: 'Something new' },
+      ]);
+
+      expect(menu[0].description).toBe('Something new');
+    });
   });
 });
