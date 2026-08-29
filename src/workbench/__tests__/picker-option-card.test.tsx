@@ -10,7 +10,9 @@ import { Picker } from '@/workbench/chat-tab';
  * (bw-xtic.1).
  */
 describe('a picker option card', () => {
-  const SONNET_HINT = 'Sonnet 5 · Efficient for routine tasks';
+  // The line the app really composes: the install's own words, then the rate
+  // the register charges — two separators, so gluing one is not enough.
+  const SONNET_HINT = 'Sonnet 5 · Efficient for routine tasks · $2/$10 per Mtok';
   const options = [
     { value: 'opus', label: 'Opus', hint: 'Opus 5 · Best for everyday, complex tasks' },
     { value: 'sonnet', label: 'Sonnet', hint: SONNET_HINT },
@@ -44,6 +46,23 @@ describe('a picker option card', () => {
     openMenu();
 
     expect(cardFor('sonnet')).toContainElement(screen.getByText(SONNET_HINT));
+  });
+
+  /**
+   * The fault: a description wraps in a 288px menu, and a `·` with an ordinary
+   * space each side could be the last thing on a line — so a row ended on a
+   * hanging dot with the clause it introduced stranded on the line below
+   * (bw-xtic.7). The space after each separator is bound, so the separator
+   * travels with its phrase.
+   */
+  it('ties each separator to the phrase it introduces, so no line ends on a dot', () => {
+    openMenu();
+
+    const drawn = cardFor('sonnet').querySelector('[data-testid="model-picker-option-hint"]');
+
+    expect(drawn?.textContent).toBe('Sonnet 5 ·\u00a0Efficient for routine tasks ·\u00a0$2/$10 per Mtok');
+    // Every separator, not just the first, and no ordinary run of " · " left.
+    expect(drawn?.textContent).not.toMatch(/ · /);
   });
 
   it('picks the option when the description itself is clicked', () => {

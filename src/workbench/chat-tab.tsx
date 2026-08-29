@@ -200,6 +200,24 @@ export function agentRespondedSince(items: TranscriptItem[], before: Set<string>
 }
 
 /**
+ * A description with its separators tied to the phrase they introduce.
+ *
+ * These lines wrap — a model's description runs to three lines in a 288px
+ * menu — and a `·` with an ordinary space on both sides is free to end up last
+ * on a line, leaving the row hanging on a dot with its next clause stranded
+ * below. Binding the space *after* each `·` moves the whole separator down with
+ * the phrase it belongs to, which is where a reader looks for it (bw-xtic.7).
+ *
+ * The space before it stays ordinary, so the line still has somewhere to break.
+ *
+ * Takes the description as the option holds it, which is to say possibly not at
+ * all: an option with nothing to say passes straight through.
+ */
+function glued(text: string | undefined): string | undefined {
+  return text?.replace(/ · /g, ' ·\u00a0');
+}
+
+/**
  * One picker on the composer's row. What it lists is what the session itself
  * announced it can do, so it is never a list of guesses (§7).
  *
@@ -285,9 +303,9 @@ export function Picker({
                 {(o.unavailable ?? o.hint) && (
                   <span
                     data-testid={`${testid}-option-hint`}
-                    className="whitespace-normal text-left text-xs text-muted-foreground group-focus:text-accent-foreground"
+                    className="whitespace-normal text-pretty text-left text-xs text-muted-foreground group-focus:text-accent-foreground"
                   >
-                    {o.unavailable ?? o.hint}
+                    {glued(o.unavailable ?? o.hint)}
                   </span>
                 )}
               </DropdownMenuItem>
