@@ -26,7 +26,7 @@ import board_common as bc  # noqa: E402
 
 # What the gates stand aside for, named here so the refusal a session reads and
 # the record on disk cannot say two different things.
-GATES = "board-gate.py, board-status-gate.py"
+GATES = "workflow-gate.py, board-gate.py, board-status-gate.py"
 
 
 def die(message):

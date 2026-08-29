@@ -8,7 +8,27 @@ description: Use Atelier's enforced Beads board lifecycle in a project registere
 
 Atelier uses one shared Beads board. A worktree isolates code; it does not create another board.
 
-For every repository file change, use this path. Do not substitute generic
+## Manager-requested fast track
+
+When the manager explicitly asks in their current message to skip Beads, skip
+the worktree, or make a small change directly, their request is an exemption
+from this workflow for that session. Run this from the main checkout before the
+edit, quoting their exact words:
+
+```bash
+machinery/board/waive "THE MANAGER'S EXACT WORDS"
+```
+
+Then make and verify the requested change directly. Do not create, claim, close,
+commit, or land Beads cards for that waived change unless the manager separately
+asks for those actions. The waiver is session-scoped and expires automatically;
+`machinery/board/waive --off` restores the normal gates sooner. Never infer a
+waiver from urgency, size, or your own judgment—the manager must say it.
+
+Without that explicit request, use the lifecycle below for every repository
+file change.
+
+For every unwaived repository file change, use this path. Do not substitute generic
 `bd create`, `git worktree add`, `bd close`, or a guessed board command.
 
 Before opening a job, use `bd ready`, `bd list`, and `bd search` to make sure an

@@ -270,6 +270,12 @@ def reason(data):
         return "The separate copy names no readable Beads issue %s." % issue
     if not mutates(data):
         return None
+    # The manager may explicitly take the board off one session for a small,
+    # direct change. board/waive records their words against this exact session
+    # and expires the exemption automatically; every other session and every
+    # unwaived turn still follows the normal ticket-worktree lifecycle.
+    if bc.waived(data.get("session_id")):
+        return None
     if (data.get("tool_name") in EDIT_TOOLS and isinstance(patch, str)
             and external_edit_only(patch, cwd)):
         return None

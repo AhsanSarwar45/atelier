@@ -39,6 +39,17 @@ class ProviderLifecycle(unittest.TestCase):
             with self.subTest(transition=transition):
                 self.assertIn(transition, text)
 
+    def test_canonical_workflow_honors_only_an_explicit_manager_fast_track(self):
+        text = (ROOT / "machinery" / "skills" / "beads" / "SKILL.md").read_text()
+        for contract in (
+            "manager explicitly asks in their current message",
+            'machinery/board/waive "THE MANAGER\'S EXACT WORDS"',
+            "Do not create, claim, close,",
+            "Never infer a",
+        ):
+            with self.subTest(contract=contract):
+                self.assertIn(contract, text)
+
     def test_canonical_workflow_names_the_common_gate_contracts(self):
         text = (ROOT / "machinery" / "skills" / "beads" / "SKILL.md").read_text()
         for contract in (

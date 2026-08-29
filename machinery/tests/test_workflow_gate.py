@@ -138,16 +138,25 @@ class ShellClassification(unittest.TestCase):
 
 
 class EditScope(unittest.TestCase):
+    @patch.object(gate.bc, "waived", return_value={"words": "do it directly"})
+    def test_manager_waiver_allows_a_direct_repository_edit(self, _waived):
+        data = edit("/repo/src/app.ts")
+        data["session_id"] = "this-session"
+        self.assertIsNone(gate.reason(data))
+
+    @patch.object(gate.bc, "waived", return_value=None)
     @patch.object(gate, "run", return_value=(True, "/repo/.git"))
-    def test_a_personal_skill_is_not_a_repository_change(self, _run):
+    def test_a_personal_skill_is_not_a_repository_change(self, _run, _waived):
         self.assertIsNone(gate.reason(edit("/home/person/.codex/skills/beads/SKILL.md")))
 
+    @patch.object(gate.bc, "waived", return_value=None)
     @patch.object(gate, "run", return_value=(True, "/repo/.git"))
-    def test_a_repository_edit_still_requires_its_copy(self, _run):
+    def test_a_repository_edit_still_requires_its_copy(self, _run, _waived):
         self.assertIn("dedicated ticket worktree", gate.reason(edit("/repo/src/app.ts")))
 
+    @patch.object(gate.bc, "waived", return_value=None)
     @patch.object(gate, "run", return_value=(True, "/repo/.git"))
-    def test_a_mixed_patch_cannot_hide_a_repository_edit(self, _run):
+    def test_a_mixed_patch_cannot_hide_a_repository_edit(self, _run, _waived):
         result = gate.reason(edit("/home/person/.codex/skills/beads/SKILL.md", "/repo/src/app.ts"))
         self.assertIn("dedicated ticket worktree", result)
 
