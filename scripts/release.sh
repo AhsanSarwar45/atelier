@@ -35,6 +35,7 @@ SOURCE="$OWNER/atelier"      # where the releases are
 TRUNK=ours                   # the line this computer works on
 PUBLISHED=main               # what that line is called online
 WAIT_LIMIT=2400              # seconds to give a build before saying so
+STARTED_SSH_AGENT=0
 
 DRY_RUN=0
 AS=""
@@ -66,6 +67,58 @@ stop() {
     return 0
   fi
   die "$*"
+}
+
+stop_ssh_agent() {
+  if [ "$STARTED_SSH_AGENT" = 1 ]; then
+    ssh-agent -k >/dev/null 2>&1 || true
+  fi
+}
+trap stop_ssh_agent EXIT
+
+# Git owns publishing, and this repository reaches GitHub over SSH. Load the
+# key once, here, so fetch and every later push share the agent instead of each
+# asking for the key's passphrase. The passphrase goes straight from ssh-add to
+# ssh-agent; this script never reads, stores, or prints it.
+prepare_publishing_key() {
+  local remote host key candidate greeting
+  remote=$(git remote get-url --push origin 2>/dev/null) \
+    || die "origin has no push address"
+  case "$remote" in
+    git@*:* ) host=${remote#git@}; host=${host%%:*} ;;
+    ssh://git@*/* ) host=${remote#ssh://git@}; host=${host%%/*} ;;
+    * ) die "origin is not a key-based address: $remote" ;;
+  esac
+
+  if [ -z "${SSH_AUTH_SOCK:-}" ] || ! ssh-add -l >/dev/null 2>&1; then
+    eval "$(ssh-agent -s)" >/dev/null \
+      || die "could not start an agent to remember the publishing key"
+    STARTED_SSH_AGENT=1
+  fi
+
+  key=${RELEASE_SSH_KEY:-}
+  if [ -z "$key" ]; then
+    while read -r candidate; do
+      candidate=${candidate/#\~/$HOME}
+      candidate=${candidate//%d/$HOME}
+      if [ -f "$candidate" ]; then key=$candidate; break; fi
+    done < <(ssh -G "$host" 2>/dev/null | awk '$1 == "identityfile" { print $2 }')
+  fi
+  [ -n "$key" ] \
+    || die "no private key configured for $host (set RELEASE_SSH_KEY to its path)"
+
+  say "unlock the publishing key once; the rest of this release will reuse it"
+  ssh-add -q "$key" \
+    || die "could not load the publishing key into the agent"
+
+  greeting=$(ssh -o BatchMode=yes -T "git@$host" 2>&1 || true)
+  case "$greeting" in
+    *"Hi $OWNER!"*) ;;
+    *"Hi "*"!"*)
+      die "the publishing key belongs to ${greeting#*Hi }; this project publishes only to $OWNER" ;;
+    *) die "the publishing key could not log in to $host" ;;
+  esac
+  ok "$OWNER publishing key unlocked for this run"
 }
 
 # Runs a command, or prints it and does nothing, depending on --dry-run.
@@ -114,13 +167,10 @@ LOCK_AWK='$0 == "name = \"atelier\"" { mine = 1 } mine && $0 == old { $0 = new; 
 # ── 1 of 7 ────────────────────────────────────────────────────────────────
 step "1/7  This computer is ready"
 
-command -v gh >/dev/null 2>&1 || die "there is no gh on this computer to publish with"
+command -v gh >/dev/null 2>&1 || die "there is no gh on this computer to inspect builds with"
 WHO=$(gh api user --jq .login 2>/dev/null) \
-  || die "there is no GitHub login on this computer to push with"
-# The same rule tap.sh and the build are held to: this project publishes to one
-# account, and a login for any other one is a mistake, not an option (D6).
-[ "$WHO" = "$OWNER" ] \
-  || stop "the active login is $WHO, and this project publishes only to $OWNER"
+  || die "there is no GitHub login on this computer to inspect builds with"
+prepare_publishing_key
 
 BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null) \
   || die "this is not a checkout with a branch on it"
@@ -138,7 +188,7 @@ if ! git fetch --quiet origin "$PUBLISHED" 2>/dev/null; then
 elif ! git merge-base --is-ancestor "origin/$PUBLISHED" HEAD; then
   stop "what is online is ahead of this checkout — pull it down before releasing"
 fi
-[ "$BLOCKED" = 0 ] && ok "$WHO, on $TRUNK, nothing unsaved, and up to date with what is online"
+[ "$BLOCKED" = 0 ] && ok "command-line login $WHO, on $TRUNK, nothing unsaved, and up to date with what is online"
 
 # ── 2 of 7 ────────────────────────────────────────────────────────────────
 step "2/7  What is going out"
