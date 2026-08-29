@@ -107,6 +107,31 @@ const MOST_LINKS = 24;
 /** How many are named before the rest are counted. */
 const MOST_SHOWN = 3;
 
+/** Pick the bounded summary without hiding either a destructive action or the
+ * final proof action. Long setup chains commonly end in their test command. */
+function visibleStages<T extends { grave: boolean; kind: RanKind }>(all: T[]): T[] {
+  if (all.length <= MOST_SHOWN) return all;
+  if (!all.some((item) => item.grave)) return all.slice(0, MOST_SHOWN);
+  const wanted: T[] = [];
+  const add = (item: T | undefined) => {
+    if (item && wanted.length < MOST_SHOWN && !wanted.includes(item)) wanted.push(item);
+  };
+  for (const item of all) if (item.grave) add(item);
+  const ordinary = all.filter((item) => !item.grave);
+  add(ordinary[0]);
+  let proof: T | undefined;
+  for (let at = ordinary.length - 1; at >= 0; at -= 1) {
+    if (ordinary[at]!.kind === 'test' || ordinary[at]!.kind === 'lint' || ordinary[at]!.kind === 'build') {
+      proof = ordinary[at];
+      break;
+    }
+  }
+  add(proof);
+  add(ordinary[ordinary.length - 1]);
+  for (const item of all) add(item);
+  return all.filter((item) => wanted.includes(item));
+}
+
 /** Heads whose transport grammar command-normalization knows how to peel. */
 const COMMAND_ENVELOPE = /^\s*(?:\/\S*\/)?(?:bash|sh|zsh|dash|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|env|sudo|doas|command|exec|nohup|setsid|nice|timeout|ssh|docker|podman|kubectl|npx|bunx|pnpm|yarn|rtk)\b/i;
 const SETTING_ENVELOPE = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+(?:\/\S*\/)?(?:bash|sh|zsh|dash|env|sudo|doas|command|exec|nohup|setsid|nice|timeout|ssh|docker|podman|kubectl|npx|bunx|pnpm|yarn|rtk)\b/i;
@@ -1422,6 +1447,10 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
     return { text: said.said, kind: said.kind, grave: false };
   }
 
+  if ((head === 'python' || head === 'python3') && argv.some((word, at) => word === '-m' && argv[at + 1] === 'pytest')) {
+    return { text: 'Ran the Python tests', kind: 'test', grave: false };
+  }
+
   const directTool = TOOLS[head];
   if (directTool) {
     if (head === 'next' || head === 'vite') {
@@ -1541,10 +1570,7 @@ function commandsDid(commands: string[], shellDepth: number): Ran | null {
   // visible slots even when several harmless calls came before it, exactly as
   // it does for a shell chain below.
   const grave = ran.some((result) => result.grave);
-  const wanted = ran.filter((result) => result.grave)
-    .concat(ran.filter((result) => !result.grave))
-    .slice(0, MOST_SHOWN);
-  const shown = ran.filter((result) => wanted.includes(result));
+  const shown = visibleStages(ran);
   let said = shown.map((result, i) => i === 0 ? result.said : joined(result.said)).join(', then ');
   const left = ran.length - shown.length;
   if (left) said += `, and ${left} more`;
@@ -1646,8 +1672,7 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
 
   // Grave stages go in first, so one can never be pushed off the end by three
   // harmless ones in front of it — then the order the reader saw is put back.
-  const wanted = stages.filter((s) => s.grave).concat(stages.filter((s) => !s.grave)).slice(0, MOST_SHOWN);
-  const shown = stages.filter((s) => wanted.indexOf(s) >= 0);
+  const shown = visibleStages(stages);
   const left = stages.length - shown.length + missed;
 
   let said = shown.map((s, i) => (i === 0 ? s.text : joined(s.text))).join(', then ');

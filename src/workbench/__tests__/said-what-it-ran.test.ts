@@ -613,8 +613,10 @@ describe('a script reads as a script', () => {
       '/tmp/venv/bin/python -m pytest tests/test_module.py -q 2>&1 | tail -8',
     ].join('\n');
     const ran = whatACommandDid(command);
-    expect(ran).toMatchObject({ kind: 'grave', grave: true });
-    expect(ran?.said).toContain('Deleted tmp/sandbox');
+    expect(ran).toMatchObject({
+      said: 'Deleted tmp/sandbox, then made tmp/sandbox, then ran the Python tests, and 2 more',
+      kind: 'grave', grave: true,
+    });
     expect(ran?.said).not.toMatch(/Python script.*deletes files/i);
   });
 
