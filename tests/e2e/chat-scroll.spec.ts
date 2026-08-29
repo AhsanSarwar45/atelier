@@ -118,7 +118,10 @@ async function readChat(page: Page, chat: LongChat): Promise<void> {
 async function place(page: Page): Promise<{ top: number; end: number; rows: number }> {
   return page.evaluate(() => {
     const box = document.querySelector('[data-testid="transcript"]') as HTMLElement;
-    const rows = document.querySelectorAll('[data-testid="transcript-rows"] > *').length;
+    // Virtualization keeps one height-bearing wrapper in the DOM. Count the
+    // complete loaded item window, not only its currently mounted row subset.
+    const transcript = document.querySelector('[data-testid="virtual-transcript"]') as HTMLElement | null;
+    const rows = Number(transcript?.dataset.totalItems ?? 0);
     return { top: box.scrollTop, end: box.scrollHeight - box.clientHeight, rows };
   });
 }

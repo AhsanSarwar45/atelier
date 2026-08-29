@@ -36,6 +36,7 @@ const rowKey = (row: DrawnRow): string => row.row === 'machine'
 
 export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOlder = null }: DrawnTranscriptProps) {
   const loading = useRef(false);
+  const historyRequest = useRef(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const lastTop = useRef(0);
   const pendingAnchor = useRef<{ height: number; top: number; key: string | null; viewportTop: number } | null>(null);
@@ -61,11 +62,13 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
 
   if (previous.current.sessionId !== sessionId) {
     previous.current = { sessionId, many: rows.length };
+    historyRequest.current += 1;
     pendingAnchor.current = null;
     if (correcting.current !== null) cancelAnimationFrame(correcting.current);
     correcting.current = null;
     lastTop.current = 0;
     loading.current = false;
+    setLoadingOlder(false);
   }
 
   useLayoutEffect(() => {
@@ -112,6 +115,7 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
       lastTop.current = now;
       if (!upward || now > box.clientHeight || !onOlder || loading.current) return;
       loading.current = true;
+      const request = ++historyRequest.current;
       setLoadingOlder(true);
       const paneTop = box.getBoundingClientRect().top;
       const anchor = Array.from(box.querySelectorAll<HTMLElement>('[data-transcript-key]')).find((row) => {
@@ -129,12 +133,13 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
           // A failed or exhausted cursor must not leave an anchor waiting for
           // an unrelated live row. A successful prepend consumes it in the
           // layout effect above, after React has committed the added rows.
-          if (added === 0) pendingAnchor.current = null;
+          if (request === historyRequest.current && added === 0) pendingAnchor.current = null;
         })
         .catch(() => {
-          pendingAnchor.current = null;
+          if (request === historyRequest.current) pendingAnchor.current = null;
         })
         .finally(() => {
+          if (request !== historyRequest.current) return;
           loading.current = false;
           setLoadingOlder(false);
         });

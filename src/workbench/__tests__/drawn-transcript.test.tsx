@@ -124,6 +124,23 @@ describe('the virtual transcript window', () => {
     await act(async () => finish({ added: SCREENFUL, hasOlder: true }));
   });
 
+  it('drops an older-history loader and ignores its stale completion when the chat changes', async () => {
+    let finish!: (page: { added: number; hasOlder: boolean }) => void;
+    const older = vi.fn(() => new Promise<{ added: number; hasOlder: boolean }>((resolve) => { finish = resolve; }));
+    const { pane, again, queryByTestId } = chat({ onOlder: older });
+    act(() => {
+      scroll(pane.current!, 900);
+      scroll(pane.current!, 500);
+    });
+    expect(queryByTestId('older-loading')).not.toBeNull();
+
+    act(() => again({ sessionId: 'another', rows: rows(40, 'another') }));
+    expect(queryByTestId('older-loading')).toBeNull();
+
+    await act(async () => finish({ added: SCREENFUL, hasOlder: true }));
+    expect(queryByTestId('older-loading')).toBeNull();
+  });
+
   it('preserves the visible position when older items are prepended', async () => {
     let height = 80 * 52;
     let finish!: (page: { added: number; hasOlder: boolean }) => void;
