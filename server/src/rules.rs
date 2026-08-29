@@ -286,21 +286,12 @@ pub fn project_mode(rest: &[String]) -> Result<String, String> {
 }
 
 fn run_python_output(args: &[String]) -> Result<String, String> {
-    let mut refused = None;
-    for word in ["python3", "python"] {
-        match Command::new(word).args(args).output() {
-            Ok(out) if out.status.success() => {
-                return Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-            }
-            Ok(out) => return Err(String::from_utf8_lossy(&out.stderr).into_owned()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => refused = Some(e),
-            Err(e) => return Err(format!("{word}: {e}")),
-        }
+    let python = python()?;
+    match Command::new(&python).args(args).output() {
+        Ok(out) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
+        Ok(out) => Err(String::from_utf8_lossy(&out.stderr).into_owned()),
+        Err(e) => Err(format!("{}: {e}", python.display())),
     }
-    Err(format!(
-        "this computer has no python on its path ({})",
-        refused.map(|e| e.to_string()).unwrap_or_default()
-    ))
 }
 
 /// Run one session gate by name, on behalf of a project wired to a word.
@@ -390,26 +381,33 @@ fn gate_places(name: &str) -> Vec<PathBuf> {
 ///
 /// Python is the reader's own program, the same posture the chat helper takes
 /// with node: a version pinned here would be a second python on their machine
-/// to keep up to date. Both spellings are tried, because the one on a Windows
-/// path is usually the shorter.
+/// to keep up to date.
 fn run_python(args: &[String], env: &[(&str, &str)]) -> Result<i32, String> {
-    let mut refused = None;
-    for word in ["python3", "python"] {
-        let mut cmd = Command::new(word);
-        cmd.args(args);
-        for (name, value) in env {
-            cmd.env(name, value);
-        }
-        match cmd.status() {
-            Ok(status) => return Ok(status.code().unwrap_or(1)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => refused = Some(e),
-            Err(e) => return Err(format!("{word}: {e}")),
-        }
+    let python = python()?;
+    let mut cmd = Command::new(&python);
+    cmd.args(args);
+    for (name, value) in env {
+        cmd.env(name, value);
     }
-    Err(format!(
-        "this computer has no python3 on its path, and the working rules are written in it ({})",
-        refused.map(|e| e.to_string()).unwrap_or_default()
-    ))
+    match cmd.status() {
+        Ok(status) => Ok(status.code().unwrap_or(1)),
+        Err(e) => Err(format!("{}: {e}", python.display())),
+    }
+}
+
+/// The reader's own python, or what to tell them when there is none.
+///
+/// Asked of the one lookup the whole program shares rather than by a bare name
+/// here: both spellings are tried, and the places an installer puts a program
+/// without touching a shell profile as well as the reader's own list — which a
+/// copy the machine starts at login was never handed (bw-oxrg). The remembered
+/// answer is dropped on the way out, so a python installed on this advice is
+/// found without a restart.
+fn python() -> Result<PathBuf, String> {
+    crate::routes::find_python().ok_or_else(|| {
+        crate::routes::forget_tools();
+        "this computer has no python on it, and the working rules are written in it".to_string()
+    })
 }
 
 #[cfg(test)]

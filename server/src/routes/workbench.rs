@@ -13,7 +13,7 @@ use axum::{
     Router,
 };
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
@@ -251,7 +251,30 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
         let mut backoff = Duration::from_secs(1);
         loop {
             info!("workbench: starting sidecar ({entry})");
-            let mut node = tokio::process::Command::new("node");
+            // The runtime is looked for and started by its own path rather
+            // than by a bare name: a copy the machine starts at login was
+            // never handed the reader's own list of places, and the one thing
+            // the Chat tab is made of would be missing on a computer that has
+            // it (bw-oxrg). Asked again on every turn of this loop, and the
+            // remembered answer dropped whenever it is no, so a runtime
+            // installed on the advice below is picked up without a restart.
+            let runtime = match crate::routes::find_node() {
+                Some(runtime) => runtime,
+                None => {
+                    crate::routes::forget_tools();
+                    warn!("workbench: no node on this computer — the Chat tab cannot answer. \
+                           Install Node {NEEDS}+ and it will be picked up here.");
+                    backoff = waited(backoff).await;
+                    continue;
+                }
+            };
+            if let Some(said) = too_old(&runtime).await {
+                crate::routes::forget_tools();
+                warn!("workbench: {said} — the Chat tab cannot answer until there is a newer one.");
+                backoff = waited(backoff).await;
+                continue;
+            }
+            let mut node = tokio::process::Command::new(&runtime);
             node.args([
                 "--experimental-strip-types",
                 "--disable-warning=ExperimentalWarning",
@@ -305,8 +328,78 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
                     warn!("workbench: sidecar exited ({status:?}); restarting in {backoff:?}");
                 }
             }
-            tokio::time::sleep(backoff).await;
-            backoff = (backoff * 2).min(Duration::from_secs(30));
+            backoff = waited(backoff).await;
         }
     });
+}
+
+/// The oldest runtime the helper can be started with, as a reader writes it.
+///
+/// The helper is TypeScript run straight off the disk, with
+/// `--experimental-strip-types`; nothing before this release knows that word.
+const NEEDS: &str = "22.6";
+
+/// The same, to compare a version against.
+const NEEDED: (u32, u32) = (22, 6);
+
+/// Wait out this pause, and give back the next, longer one.
+async fn waited(backoff: Duration) -> Duration {
+    tokio::time::sleep(backoff).await;
+    (backoff * 2).min(Duration::from_secs(30))
+}
+
+/// What to tell a reader whose node is too old for the helper, if it is.
+///
+/// Asked before the start rather than found out from it: a runtime that does
+/// not know `--experimental-strip-types` quits on the spot, so left to the
+/// loop the reader is told the sidecar exited, over and over, and never why
+/// (bw-oxrg). A runtime that will not say what it is gets the benefit of the
+/// doubt and is started anyway.
+async fn too_old(runtime: &Path) -> Option<String> {
+    let said = tokio::process::Command::new(runtime)
+        .arg("--version")
+        .output()
+        .await
+        .ok()?;
+    let version = String::from_utf8_lossy(&said.stdout).trim().to_string();
+    (release(&version)? < NEEDED).then(|| {
+        format!(
+            "node {version} at {} is older than the {NEEDS} the chat helper needs",
+            runtime.display()
+        )
+    })
+}
+
+/// The release a `node --version` line names, if it names one.
+fn release(said: &str) -> Option<(u32, u32)> {
+    let mut parts = said.trim().trim_start_matches('v').split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A runtime is judged on what it says it is, and only turned away when
+    /// what it says is older than the word the helper is started with.
+    #[test]
+    fn a_runtime_older_than_the_helper_needs_is_the_only_one_turned_away() {
+        assert_eq!(release(NEEDS), Some(NEEDED), "the two ways of writing it say the same release");
+        assert_eq!(release("v22.6.0"), Some(NEEDED), "the oldest one that will do");
+        assert!(release("v20.11.1").expect("a release") < NEEDED, "before the word existed");
+        assert!(release("v22.5.9").expect("a release") < NEEDED, "the release just before it");
+        assert!(release("v22.6.0").expect("a release") >= NEEDED);
+        assert!(release("v24.0.1").expect("a release") >= NEEDED, "and everything after");
+    }
+
+    /// Nothing readable, no verdict: a runtime that will not say what it is
+    /// gets started rather than refused on a guess.
+    #[test]
+    fn a_runtime_that_names_no_release_is_not_judged_on_one() {
+        for said in ["", "node", "vNext", "v.6.0", "22"] {
+            assert_eq!(release(said), None, "{said:?} names no release");
+        }
+    }
 }

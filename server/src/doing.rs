@@ -722,25 +722,19 @@ mod tests {
             return None;
         }
         let home = tempfile::tempdir().ok()?;
-        for word in ["python3", "python"] {
-            let mut child = match std::process::Command::new(word)
-                .arg(&script)
-                .env("CLAUDE_CONFIG_DIR", home.path())
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-            {
-                Ok(child) => child,
-                Err(_) => continue,
-            };
-            {
-                let mut fed = child.stdin.take()?;
-                fed.write_all(event.to_string().as_bytes()).ok()?;
-            }
-            child.wait().ok()?;
-            let wrote = home.path().join("sessions").join(format!("{CHAT}.doing.json"));
-            return serde_json::from_str(&std::fs::read_to_string(wrote).ok()?).ok();
+        let mut child = std::process::Command::new(crate::routes::find_python()?)
+            .arg(&script)
+            .env("CLAUDE_CONFIG_DIR", home.path())
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .ok()?;
+        {
+            let mut fed = child.stdin.take()?;
+            fed.write_all(event.to_string().as_bytes()).ok()?;
         }
-        None
+        child.wait().ok()?;
+        let wrote = home.path().join("sessions").join(format!("{CHAT}.doing.json"));
+        serde_json::from_str(&std::fs::read_to_string(wrote).ok()?).ok()
     }
 
     #[test]

@@ -221,6 +221,20 @@ pub fn find_python() -> Option<PathBuf> {
     find_tool("python3", &["python"])
 }
 
+/// Where the chat helper's runtime is, if this computer has it.
+pub fn find_node() -> Option<PathBuf> {
+    find_tool("node", &[])
+}
+
+/// Where npm is, if this computer has it.
+///
+/// The Windows spelling is asked for by name as well. There the file behind
+/// `npm` is `npm.cmd`, and while the lookup this computer answers with knows
+/// that, the install places are walked by file name and would not.
+pub fn find_npm() -> Option<PathBuf> {
+    find_tool("npm", &["npm.cmd"])
+}
+
 /// Validates that a path is safe to access.
 ///
 /// # Security
@@ -367,6 +381,21 @@ mod tests {
             search_in(&dirs, &["python3", "python"]),
             Some(asked_for),
             "and where both are here, the spelling asked for first wins"
+        );
+    }
+
+    /// The fetcher answers to two names too: on Windows the file behind `npm`
+    /// is `npm.cmd`, and a place is walked by the file names in it.
+    #[test]
+    fn the_fetcher_is_found_under_its_windows_spelling() {
+        let place = tempfile::tempdir().expect("a directory of our own");
+        let dirs = [place.path().to_path_buf()];
+
+        let windows = install(place.path(), "npm.cmd");
+        assert_eq!(
+            search_in(&dirs, &["npm", "npm.cmd"]),
+            Some(windows),
+            "the only npm here is the one wearing the ending Windows gives it"
         );
     }
 

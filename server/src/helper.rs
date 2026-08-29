@@ -173,26 +173,36 @@ pub async fn fetch_kit(package: &Path) -> Result<(), String> {
         return Ok(());
     }
 
-    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
-    let run = tokio::process::Command::new(npm)
+    // Found and run by its own path rather than by a bare name: a copy the
+    // machine starts at login has none of the reader's own list of places to
+    // look on, and the chat's kit would go unfetched on a computer that has
+    // npm (bw-oxrg). Forgotten when it is not here, so an npm installed on
+    // this advice is found without a restart.
+    let Some(npm) = crate::routes::find_npm() else {
+        crate::routes::forget_tools();
+        return Err("this computer has no npm on it; the chat needs it once, to fetch its kit"
+            .to_string());
+    };
+    let named = npm.display().to_string();
+    let run = tokio::process::Command::new(&npm)
         .args(["ci", "--omit=optional", "--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"])
         .current_dir(package)
         .stdin(Stdio::null())
         .output()
         .await
-        .map_err(|e| format!("{npm} could not be run ({e}); the chat needs it once, to fetch its kit"))?;
+        .map_err(|e| format!("{named} could not be run ({e}); the chat needs it once, to fetch its kit"))?;
 
     if !run.status.success() {
         let said = String::from_utf8_lossy(&run.stderr);
         return Err(format!(
-            "{npm} could not fetch the chat's kit ({}). It is fetched once, and needs the network \
+            "{named} could not fetch the chat's kit ({}). It is fetched once, and needs the network \
              the first time: {}",
             run.status,
             said.trim()
         ));
     }
     if !package.join(KIT).exists() {
-        return Err(format!("{npm} finished but {KIT} is not there"));
+        return Err(format!("{named} finished but {KIT} is not there"));
     }
     crate::laid_down::write_marker(package, KIT_MARKER, &want)
 }
