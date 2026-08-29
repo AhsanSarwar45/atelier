@@ -171,7 +171,16 @@ def merged(where, span):
 
 
 def carried_by(item_id, made):
-    """The commit of this landing that names this item, if one of them does.
+    """The commit of this landing whose SUBJECT names this item, if one does.
+
+    The subject is where this repo says what a commit finished, one card or
+    several — "bw-8dp8.1 bw-8dp8.2 bw-8dp8.3: a Git view in the chat rail" — and
+    the body is where it explains itself. Prose explains itself by naming
+    siblings, and a name in prose is a mention, not a claim of completion. Read
+    over the whole message it closed bw-8jzg.6 on the landing of bw-8jzg.7, whose
+    body said four times which LATER card would take a temporary allowance back
+    off again ("this allowance comes off with bw-8jzg.6"); the card closed with
+    none of its own work written (bw-sykg.1).
 
     On a word boundary, the way every other reader of a message reads an id: a
     commit naming `x-j.31` does not land `x-j.3`.
@@ -179,20 +188,21 @@ def carried_by(item_id, made):
     # A dot is a word boundary, so without the lookahead a commit naming only a
     # child item (tst-j.1.2) read as naming its parent (tst-j.1) too (bw-aczr.10).
     named = re.compile(r"\b%s\b(?!\.\d)" % re.escape(item_id))
-    return next((c for c in made if named.search(c[2])), None)
+    return next((c for c in made if named.search(c[1])), None)
 
 
 def what_landed(goal_id, where, span):
     """The job's open work items this landing put on the main line, each with
     the commit that carries it.
 
-    Narrower than the close gate on both counts, because a `bd` run from a
+    Narrower than the close gate on every count, because a `bd` run from a
     subprocess never reaches that gate and a check that is looser than the gate
     is the gate switched off. Only a WORK ITEM, never a step card of the job. And
-    only one whose OWN id a commit of THIS landing names, where the gate would
-    also take the name of the step above it (hooks/board-status-gate.py,
-    `landing_names`) and would look at the whole of the main line rather than at
-    what just went onto it.
+    only one whose OWN id the SUBJECT of a commit of THIS landing names, where
+    the gate would also take the name of the step above it
+    (hooks/board-status-gate.py, `landing_names`), would take that name from
+    anywhere in the message, and would look at the whole of the main line rather
+    than at what just went onto it.
 
     The one thing the gate asks that is not asked here is the page: a work item
     is carried by its job's page, the steps and the goal above it still close by
