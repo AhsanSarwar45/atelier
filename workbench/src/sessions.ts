@@ -53,6 +53,7 @@ import { knownSessions, providerHolderPids, providerHoldsNow } from './registry.
 import type { Store } from './store.ts';
 import { conversationTitle } from './conversation-title.ts';
 import { completeHistoryChoice } from './provider-reconciliation.ts';
+import { codexTokenPictureStats } from './codex-token-picture-stats.ts';
 
 export { boundedEvent } from './bounded-event.ts';
 
@@ -1740,15 +1741,13 @@ export class Sessions {
         input: cost.cost.input, cacheWrite: 0, cacheRead: 0, output: cost.cost.output,
         thinking: 0, total: cost.cost.total,
       };
-      const turns = events.filter((event) => event.type === 'message.completed' && events.some(
-        (start) => start.type === 'message.started' && start.messageId === event.messageId && start.role === 'assistant',
-      )).length;
+      const stats = codexTokenPictureStats(events);
       const spent: TaskSpend = {
-        own, helpers: NOTHING, total: own, turns,
-        toolCalls: events.filter((event) => event.type === 'tool.started').length,
-        forgettings: events.filter((event) => event.type === 'note' && (event.kind === 'thread/compacted' || event.kind === 'compact')).length,
-        helperCount: events.filter((event) => event.type === 'agent.started').length,
-        models: [{ model: summary.model ?? 'unnamed', spend: own, turns }],
+        own, helpers: NOTHING, total: own, turns: stats.turns,
+        toolCalls: stats.toolCalls,
+        forgettings: stats.forgettings,
+        helperCount: stats.helperCount,
+        models: [{ model: summary.model ?? 'unnamed', spend: own, turns: stats.turns }],
       };
       return { window, windowNote, spent, spentNote: null };
     }
