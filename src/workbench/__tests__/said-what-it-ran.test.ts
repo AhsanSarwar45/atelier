@@ -106,6 +106,21 @@ const RULES: Array<[string, string]> = [
   ['machinery/board/land bw-7ks.24', 'Landed bw-7ks.24'],
   ['machinery/board/land --help', 'Read the land options'],
   ["/bin/bash -lc 'machinery/board/land --help'", 'Read the land options'],
+  ["/bin/bash -lc 'atelier tool present widget --input /tmp/widget.json'", 'Presented a widget'],
+  ['atelier tool present image --file screen.png --alt screen', 'Presented an image'],
+  ['atelier tool present compare --before old.png --after new.png --before-alt old --after-alt new', 'Presented an image comparison'],
+  ['atelier tool present artifact --file report.json', 'Presented a visual artifact'],
+  ['atelier tool board/job under bw-7ks.24 --do x', 'Added the work items'],
+  ['atelier tool board/land bw-7ks.24', 'Landed bw-7ks.24'],
+  ['atelier tool checks', 'Ran the project checks'],
+  ['atelier init --beads .', 'Set up Atelier for a project'],
+  ['atelier project mode .', 'Checked the project’s Atelier mode'],
+  ['atelier service install', 'Set Atelier to start at login'],
+  ['atelier service uninstall', 'Stopped Atelier from starting at login'],
+  ['atelier service status', 'Checked whether Atelier starts at login'],
+  ['atelier where', 'Read the Atelier addresses'],
+  ['atelier --data-dir', 'Read where Atelier keeps its data'],
+  ['atelier run --no-browser', 'Started Atelier'],
   ['machinery/board/land --dry', 'Checked what land would do'],
   ['machinery/board/review bw-7ks.24', 'Reviewed bw-7ks.24'],
   ['bd --help', 'Read the board options'],
@@ -367,6 +382,17 @@ describe('a chain of commands', () => {
     // His own proxy. 1,315 commands in the record go through it.
     expect(said('rtk git status')).toBe('Checked the working tree');
     expect(said('rtk proxy git status')).toBe('Checked the working tree');
+  });
+
+  it('leaves unknown Atelier commands raw instead of inventing a generic action', () => {
+    expect(whatACommandDid('atelier tool unknown --anything')).toBeNull();
+    expect(toolTitle('Bash', { command: 'atelier tool unknown --anything' }))
+      .toBe('Bash atelier tool unknown --anything');
+  });
+
+  it('does not label an opaque child as the launcher around it', () => {
+    expect(whatACommandDid('env HISTFILE=/dev/null fish_history= bash -c "echo ok"')).toBeNull();
+    expect(whatACommandDid('docker exec app xyzzy --frobnicate')).toBeNull();
   });
 
   it.each([

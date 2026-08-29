@@ -19,13 +19,14 @@ export type ExplicitIntent = 'help' | 'version' | 'dry-run' | 'destructive' | 'b
 
 const SUBCOMMAND_TOOLS = new Set([
   'bd', 'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'job', 'kubectl', 'npm',
-  'npx', 'pnpm', 'report', 'systemctl', 'yarn',
+  'npx', 'pnpm', 'report', 'systemctl', 'yarn', 'atelier',
 ]);
 
 const SAFE_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
   bd: new Set(['blocked', 'children', 'close', 'comments', 'create', 'doctor', 'dolt', 'gate', 'help', 'label', 'list', 'merge-slot', 'note', 'prime', 'ready', 'reclaim', 'remember', 'search', 'set-state', 'show', 'stats', 'supersede', 'unclaim', 'update']),
   job: new Set(['cancel', 'epic', 'find', 'new', 'start', 'under', 'upgrade']),
   report: new Set(['list', 'new']),
+  atelier: new Set(['run', 'init', 'project', 'tool', 'hook', 'where', 'service']),
 };
 
 const BEHAVIOR_FLAGS = new Set([
@@ -185,6 +186,25 @@ export function commandLabelProfile(command: string, ran: Ran | null): string | 
     const nested = argv.slice(at + 1).find((word) => !word.startsWith('-'));
     if (nested) sub += `/${nested}`;
   }
+  if (head === 'atelier') {
+    if (sub === 'project' && argv[at + 1] === 'mode') sub = 'project/mode';
+    else if (sub === 'service') {
+      const action = argv[at + 1] && !argv[at + 1]!.startsWith('-') ? argv[at + 1] : 'status';
+      sub = `service/${['install', 'uninstall', 'remove', 'status'].includes(action) ? action : 'other'}`;
+    } else if (sub === 'hook') sub = 'hook/other';
+    else if (sub === 'tool') {
+      const tool = argv[at + 1] ?? '';
+      if (tool === 'present') {
+        const form = argv[at + 2] ?? '';
+        sub = `tool/present/${['widget', 'image', 'compare', 'artifact'].includes(form) ? form : 'other'}`;
+      } else if (tool === 'board/job') {
+        const action = argv[at + 2] ?? '';
+        sub = `tool/board/job/${['new', 'under', 'epic', 'cancel', 'upgrade'].includes(action) ? action : 'other'}`;
+      } else if (tool === 'board/land') sub = 'tool/board/land';
+      else if (tool === 'checks') sub = 'tool/checks';
+      else sub = 'tool/other';
+    }
+  }
   if (head === 'systemctl') {
     sub = argv.slice(1).find((word) => !word.startsWith('-')) ?? '-';
   }
@@ -312,7 +332,7 @@ const FAMILY_EXPECTATIONS: Record<string, ExpectedLabel> = {
   tsx: family(['run', 'test'], ['Ran']), deno: family(['run', 'test'], ['Ran']), bun: family(['run', 'test'], ['Ran']),
   bash: family(['run', 'script', 'grave'], ['Ran', 'Deleted', 'Killed']), sh: family(['run', 'script', 'grave'], ['Ran', 'Deleted', 'Killed']),
   zsh: family(['run', 'script', 'grave'], ['Ran', 'Deleted', 'Killed']), sleep: family(['wait'], ['Waited']),
-  atelier: family(['run'], ['Ran']), 'beads-server': family(['run'], ['Ran']), 'beads-web': family(['run'], ['Ran']),
+  atelier: family(['run', 'read', 'edit', 'system', 'script', 'agent', 'test', 'board'], ['Started', 'Read', 'Set', 'Checked', 'Stopped', 'Ran', 'Presented', 'Opened', 'Added', 'Dropped', 'Filled', 'Landed']), 'beads-server': family(['run'], ['Ran']), 'beads-web': family(['run'], ['Ran']),
   claude: family(['agent'], ['Ran']), 'external-review': family(['agent'], ['Ran']),
   codex: family(['run', 'build'], ['Ran', 'Started', 'Generated']), docker: family(['system', 'run', 'build'], ['Asked', 'Listed', 'Read', 'Ran', 'Built', 'Started', 'Stopped', 'Worked', 'Pulled', 'Restarted']),
   kubectl: family(['system'], ['Asked', 'Listed', 'Read', 'Ran', 'Described', 'Applied']), man: family(['read'], ['Read']),
@@ -344,6 +364,30 @@ function expectedLabel(command: string): ExpectedLabel | null {
 
   if (['cat', 'echo', 'printf', 'tee'].includes(head) && /(?:^|\s)\d*>>?\s*\S+/.test(command)) {
     return family(['edit'], ['Wrote']);
+  }
+
+  if (head === 'atelier') {
+    const top = args[0] ?? 'run';
+    if (top === 'run') return family(['run'], ['Started']);
+    if (top === 'init') return family(['edit'], ['Set']);
+    if (top === 'where' || top === '--data-dir') return family(['read'], ['Read']);
+    if (top === 'project' && args[1] === 'mode') return family(['read'], ['Checked']);
+    if (top === 'service') {
+      const action = args[1] ?? 'status';
+      if (action === 'status') return family(['system'], ['Checked']);
+      if (action === 'install') return family(['system'], ['Set']);
+      if (action === 'uninstall' || action === 'remove') return family(['system'], ['Stopped']);
+      return null;
+    }
+    if (top === 'hook' && args[1]) return family(['script'], ['Ran']);
+    if (top !== 'tool') return null;
+    if (args[1] === 'present' && ['widget', 'image', 'compare', 'artifact'].includes(args[2] ?? '')) {
+      return family(['agent'], ['Presented']);
+    }
+    if (args[1] === 'checks') return family(['test'], ['Ran']);
+    if (args[1] === 'board/job' && args[2]) return family(['board'], ['Opened', 'Added', 'Dropped', 'Filled', 'Ran']);
+    if (args[1] === 'board/land') return family(['board'], ['Landed']);
+    return null;
   }
 
   if (head === 'bd') {

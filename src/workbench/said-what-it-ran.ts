@@ -1023,6 +1023,59 @@ function redisCommand(argv: string[]): string {
   return '';
 }
 
+/** Atelier is a launcher, not the work. Keep its public command contract here
+ * so a shell-wrapped presentation, board action, or inspection is named for
+ * the action beneath the launcher. Unknown tools deliberately stay raw. */
+function atelierAction(argv: string[]): Stage | null {
+  const command = argv[1] ?? '';
+  if (!command || command === 'run') return { text: 'Started Atelier', kind: 'run', grave: false };
+  if (command === 'init') return { text: 'Set up Atelier for a project', kind: 'edit', grave: false };
+  if (command === 'where') return { text: 'Read the Atelier addresses', kind: 'read', grave: false };
+  if (command === '--data-dir') return { text: 'Read where Atelier keeps its data', kind: 'read', grave: false };
+  if (command === 'project' && argv[2] === 'mode') {
+    return { text: 'Checked the project’s Atelier mode', kind: 'read', grave: false };
+  }
+  if (command === 'service') {
+    const action = argv[2] ?? 'status';
+    if (action === 'status') return { text: 'Checked whether Atelier starts at login', kind: 'system', grave: false };
+    if (action === 'install') return { text: 'Set Atelier to start at login', kind: 'system', grave: false };
+    if (action === 'uninstall' || action === 'remove') {
+      return { text: 'Stopped Atelier from starting at login', kind: 'system', grave: false };
+    }
+    return null;
+  }
+  if (command === 'hook' && argv[2]) {
+    return { text: `Ran the ${brief(argv[2])} gate`, kind: 'script', grave: false };
+  }
+  if (command !== 'tool') return null;
+
+  const tool = argv[2] ?? '';
+  if (tool === 'present') {
+    const form = argv[3] ?? '';
+    const presented: Record<string, string> = {
+      widget: 'Presented a widget',
+      image: 'Presented an image',
+      compare: 'Presented an image comparison',
+      artifact: 'Presented a visual artifact',
+    };
+    return presented[form] ? { text: presented[form]!, kind: 'agent', grave: false } : null;
+  }
+  if (tool === 'checks') return { text: 'Ran the project checks', kind: 'test', grave: false };
+  if (tool === 'board/job') {
+    const sub = argv[3] ?? '';
+    if (sub === 'new') return { text: 'Opened a job', kind: 'board', grave: false };
+    if (sub === 'under') return { text: 'Added the work items', kind: 'board', grave: false };
+    if (sub === 'epic') return { text: 'Opened a container', kind: 'board', grave: false };
+    if (sub === 'cancel') return { text: 'Dropped a card', kind: 'board', grave: false };
+    if (sub === 'upgrade') return { text: 'Filled in a placeholder', kind: 'board', grave: false };
+    return sub ? { text: `Ran job ${brief(sub)}`, kind: 'board', grave: false } : null;
+  }
+  if (tool === 'board/land') {
+    return { text: `Landed ${object(argv, 3) || 'the change'}`, kind: 'board', grave: false };
+  }
+  return null;
+}
+
 /**
  * Every head this can name, and the sentence it gives. A head that is not here
  * leaves its link unnamed; a command whose every link is unnamed comes back
@@ -1288,7 +1341,6 @@ const HEADS: Record<string, Rule> = {
   uv: { kind: 'build', say: dependencySaid },
   poetry: { kind: 'build', say: dependencySaid },
   brew: { kind: 'build', say: dependencySaid },
-  atelier: { kind: 'run', say: () => 'Ran Atelier' },
   'beads-server': { kind: 'run', say: () => 'Ran the board server' },
   'beads-web': { kind: 'run', say: () => 'Ran the workbench' },
   claude: { kind: 'agent', say: () => 'Ran Claude' },
@@ -1734,6 +1786,8 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
     return { text: 'Ran the tests', kind: 'test', grave: false };
   }
 
+  if (head === 'atelier') return atelierAction(argv);
+
   const directTool = toolAction(argv);
   if (directTool) {
     if (head === 'next' || head === 'vite') {
@@ -1880,8 +1934,11 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
     const semantic = normalized.commands.map((item) => item.command);
     const changed = semantic.length > 1 || (semantic.length === 1 && semantic[0]!.trim() !== text);
     if (changed) {
-      const inner = commandsDid(semantic, shellDepth);
-      if (inner) return inner;
+      // Once a known launcher has been peeled, only the work beneath it may
+      // supply the label. Calling an opaque child "Read the environment" or
+      // "Ran Docker" merely because its launcher is known is the same category
+      // error as calling a presentation "Ran Atelier".
+      return commandsDid(semantic, shellDepth);
     }
   }
 
@@ -1938,6 +1995,8 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
       // the whole command misses `prepare && docker exec app pytest` and calls
       // the second stage Docker. Peel this link with the same declared wrapper
       // grammars used at the provider boundary, then classify its real command.
+      const assignmentOnly = substitutions.length > 0 && /^\s*[A-Za-z_][A-Za-z0-9_]*=\$\(/.test(link.text);
+      if (assignmentOnly) continue;
       if (shellDepth < 8) {
         const normalizedLink = normalizeCommands(link.text);
         const semantic = normalizedLink.commands.map((item) => item.command);
@@ -1948,6 +2007,8 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
             stages.push({ text: inner.said, kind: inner.kind, grave: inner.grave });
             continue;
           }
+          missed++;
+          continue;
         }
       }
       const argv = headOf(stripped(words(link.text)));
@@ -1960,8 +2021,7 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
       // Search/read tools after a pipe merely shape the previous command's
       // output. After `&&`, `||`, `;`, or a newline they are real work and
       // must be named in the transcript.
-      const assignmentOnly = substitutions.length > 0 && /^\s*[A-Za-z_][A-Za-z0-9_]*=\$\(/.test(link.text);
-      const stage = assignmentOnly ? DROPPED : linkStage(argv, link.piped && stages.length > 0);
+      const stage = linkStage(argv, link.piped && stages.length > 0);
       if (stage === null) missed++;
       else if (stage !== DROPPED) stages.push(stage);
     }
@@ -2276,7 +2336,7 @@ const UNDER_WAY: Record<string, string> = {
   Labeled: 'Labeling', Landed: 'Landing', Left: 'Leaving', Linked: 'Linking', Linted: 'Linting',
   Listed: 'Listing', Looked: 'Looking', Made: 'Making', Measured: 'Measuring',
   Merged: 'Merging', Messaged: 'Messaging', Moved: 'Moving', Opened: 'Opening',
-  Picked: 'Picking', Published: 'Publishing', Pulled: 'Pulling', Pushed: 'Pushing',
+  Picked: 'Picking', Presented: 'Presenting', Published: 'Publishing', Pulled: 'Pulling', Pushed: 'Pushing',
   Put: 'Putting', Queried: 'Querying', Ran: 'Running', Read: 'Reading',
   Rebased: 'Rebasing', Released: 'Releasing', Removed: 'Removing', Reported: 'Reporting',
   Resolved: 'Resolving', Restarted: 'Restarting', Restored: 'Restoring',

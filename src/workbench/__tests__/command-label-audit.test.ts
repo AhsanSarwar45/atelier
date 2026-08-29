@@ -75,5 +75,17 @@ describe('command label evidence', () => {
     expect(commandLabelProfile('{ printf value > private.txt', {
       said: 'Wrote private.txt', kind: 'edit', grave: false,
     })).toBe('printf|-|-|Wrote|edit|ordinary');
+    expect(commandLabelProfile("/bin/bash -lc 'atelier tool present widget --input /private/widget.json'", {
+      said: 'Presented a widget', kind: 'agent', grave: false,
+    })).toBe('atelier|tool/present/widget|-|Presented|agent|ordinary');
+  });
+
+  it('rejects a generic Atelier label for a concrete presentation action', () => {
+    expect(auditCommandLabel('atelier tool present image --file private.png --alt private', {
+      said: 'Ran Atelier', kind: 'run', grave: false,
+    }).status).toBe('contradiction');
+    expect(auditCommandLabel('atelier tool present image --file private.png --alt private', {
+      said: 'Presented an image', kind: 'agent', grave: false,
+    }).status).toBe('verified');
   });
 });
