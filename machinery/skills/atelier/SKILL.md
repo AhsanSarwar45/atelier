@@ -31,6 +31,16 @@ into Atelier-owned, content-addressed storage before emitting the widget, so the
 visual remains available after reload. Do not invent an asset name or reference
 a temporary path in widget JSON.
 
+Create source images and artifact JSON in the project or a temporary directory
+the agent can already write, then give that path to the presenter. The command
+reads the temporary file and uploads its bytes to the running Atelier app; the
+app validates them, writes its own durable media directory, and returns the
+canonical transcript block. The agent must never create or write
+`ATELIER_DATA_DIR` or `presentation-media`, set a media-directory environment
+variable, or request provider-specific filesystem permission for this flow.
+Codex, Claude, and every other shell-capable provider use the same command and
+need only read access to the source file.
+
 ## Choose the smallest useful presentation
 
 - `metrics` for 2–6 headline values.

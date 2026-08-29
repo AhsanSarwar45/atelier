@@ -24,4 +24,12 @@ describe('visual proof instructions', () => {
     expect(policy).toMatch(/content-addressed storage/i);
     expect(policy).toMatch(/remains available after reload/i);
   });
+
+  it('leaves durable persistence entirely to the running Atelier app', () => {
+    expect(policy).toMatch(/project or a temporary directory/i);
+    expect(policy).toMatch(/uploads its bytes to the running Atelier app/i);
+    expect(policy).toMatch(/app validates them, writes its own durable media directory/i);
+    expect(policy).toMatch(/must never create or write\s+`ATELIER_DATA_DIR` or `presentation-media`/i);
+    expect(policy).toMatch(/never.+request provider-specific filesystem permission/is);
+  });
 });
