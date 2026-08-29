@@ -201,8 +201,12 @@ export function agentRespondedSince(items: TranscriptItem[], before: Set<string>
 /**
  * One picker on the composer's row. What it lists is what the session itself
  * announced it can do, so it is never a list of guesses (§7).
+ *
+ * An option's description belongs to the option, so it is drawn inside the
+ * clickable card rather than beside it: the label and the description light up
+ * together, and a click anywhere over either one picks that option (bw-xtic.1).
  */
-function Picker({
+export function Picker({
   icon,
   label,
   current,
@@ -259,22 +263,30 @@ function Picker({
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
         {options.map((o) => (
           <div key={o.value} className="px-1 py-0.5">
-            <div className="flex items-center gap-1">
+            <div className="flex items-start gap-1">
               <DropdownMenuItem
                 data-testid={`${testid}-option`}
                 data-value={o.value}
                 data-picked={o.value === current}
                 disabled={asleep}
                 onSelect={() => onPick(o.value)}
-                className="h-7 min-w-0 flex-1 px-2 py-1"
+                className="group min-w-0 flex-1 flex-col items-start gap-0.5 px-2 py-1.5"
               >
                 <span className={cn('truncate text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
+                {o.hint && (
+                  <span
+                    data-testid={`${testid}-option-hint`}
+                    className="whitespace-normal text-left text-xs text-muted-foreground group-focus:text-accent-foreground"
+                  >
+                    {o.hint}
+                  </span>
+                )}
               </DropdownMenuItem>
               {onDefault && (
                 <Button
                   size="xs"
                   variant="ghost"
-                  className="h-5 w-5 shrink-0 rounded-sm p-0"
+                  className="mt-1 h-5 w-5 shrink-0 rounded-sm p-0"
                   data-testid={`${testid}-default-${o.value}`}
                   data-default={defaultValue === o.value}
                   aria-pressed={defaultValue === o.value}
@@ -291,7 +303,6 @@ function Picker({
                 </Button>
               )}
             </div>
-            {o.hint && <p className="px-2 pb-1 text-xs text-muted-foreground">{o.hint}</p>}
           </div>
         ))}
       </DropdownMenuContent>
