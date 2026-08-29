@@ -20,7 +20,7 @@ import { resolve } from 'node:path';
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
+import { EMPTY, foldAll, reduce, type SentAway, type SessionView } from '@/workbench/fold';
 import type { WbpEvent } from '@/workbench/protocol';
 import { KINDS, SentAwayPanel, STATES, forHowLong, modelNamed, spend } from '@/workbench/sent-away';
 
@@ -339,6 +339,109 @@ describe('the panel', () => {
     (row.querySelector('[data-testid="sent-away-for"]') as HTMLElement).click();
 
     expect(opened).toEqual(['task-1', 'task-1', 'task-1']);
+  });
+});
+
+/**
+ * What is still going, and only that, until the reader asks for the rest
+ * (bw-pl2v.2).
+ *
+ * A session that sends off forty helpers drew forty rows, and the two still
+ * working were somewhere in the middle of them. The split is `isOver` and
+ * nothing else — done, failed and stopped are all behind the one control,
+ * because a reader who wants the one that failed wants the one that finished.
+ */
+describe('the running ones on top, the finished ones behind a control', () => {
+  /** One still running, and however many endings are asked for. */
+  function ended(...states: ('done' | 'failed' | 'stopped')[]): SentAway[] {
+    return foldAll([
+      said({ type: 'agent.started', agentId: 'live-1', toolCallId: 'c-live', kind: 'helper', what: 'still going', agentType: null, model: null }),
+      ...states.flatMap((state, i) => [
+        said({ type: 'agent.started', agentId: `over-${i}`, toolCallId: `c-${i}`, kind: 'helper', what: `over ${i}`, agentType: null, model: null }),
+        said({ type: 'agent.finished', agentId: `over-${i}`, state, seconds: 3, tokens: 10, calls: 1, model: null, result: null }),
+      ]),
+    ]).agents;
+  }
+
+  const draw = (agents: SentAway[]) =>
+    render(<SentAwayPanel items={[]} agents={agents} sessionId="chat-1" controls={[]} />);
+
+  /** Which agents a group holds, top to bottom. */
+  const inside = (testId: string) =>
+    Array.from(screen.getByTestId(testId).querySelectorAll('[data-testid="sent-away-row"]')).map((el) =>
+      el.getAttribute('data-agent'),
+    );
+
+  const control = () => screen.getByTestId('toggle-stopped-agents');
+
+  it('lists only what is still going, above the control', () => {
+    draw(ended('done', 'failed', 'stopped'));
+
+    expect(inside('sent-away-running')).toEqual(['live-1']);
+    expect(inside('sent-away-stopped')).toEqual(['over-0', 'over-1', 'over-2']);
+    // Shut on arrival, and shut by the class rather than by unmounting: the
+    // rows keep their answers and their stopped clocks behind it.
+    expect(screen.getByTestId('sent-away-stopped')).toHaveClass('hidden');
+    expect(control()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('puts the running group above the finished one', () => {
+    draw(ended('done'));
+    const panel = screen.getByTestId('sent-away-panel');
+    const running = screen.getByTestId('sent-away-running');
+    const over = screen.getByTestId('sent-away-stopped');
+
+    expect(panel.contains(running) && panel.contains(over)).toBe(true);
+    expect(running.compareDocumentPosition(over) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('carries the count in the words, so the reader knows before opening it', () => {
+    draw(ended('stopped'));
+    expect(control()).toHaveTextContent('Show the one that has finished');
+  });
+
+  it('says how many when there is more than one', () => {
+    draw(ended('done', 'failed', 'stopped'));
+    expect(control()).toHaveTextContent('Show the 3 that have finished');
+  });
+
+  it('opens on a click and shuts on the next one', () => {
+    draw(ended('done', 'stopped'));
+
+    act(() => control().click());
+    expect(screen.getByTestId('sent-away-stopped')).toHaveClass('flex');
+    expect(screen.getByTestId('sent-away-stopped')).not.toHaveClass('hidden');
+    expect(control()).toHaveAttribute('aria-expanded', 'true');
+    expect(control()).toHaveTextContent('Hide the 2 that have finished');
+
+    act(() => control().click());
+    expect(screen.getByTestId('sent-away-stopped')).toHaveClass('hidden');
+    expect(control()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('names the group it controls, so a reader not looking at it is told what opened', () => {
+    draw(ended('done'));
+    expect(control().getAttribute('aria-controls')).toBe(screen.getByTestId('sent-away-stopped').id);
+  });
+
+  it('draws no control at all while nothing has finished', () => {
+    draw(ended());
+    expect(inside('sent-away-running')).toEqual(['live-1']);
+    expect(screen.queryByTestId('toggle-stopped-agents')).toBeNull();
+    expect(screen.queryByTestId('sent-away-stopped')).toBeNull();
+  });
+
+  it('keeps the control when everything has finished, over an empty space', () => {
+    // No placeholder under an empty running list: the control below it already
+    // says where the rows went.
+    draw(foldAll([
+      said({ type: 'agent.started', agentId: 'over-a', toolCallId: 'c-a', kind: 'helper', what: 'over', agentType: null, model: null }),
+      said({ type: 'agent.finished', agentId: 'over-a', state: 'stopped', seconds: 3, tokens: 10, calls: 1, model: null, result: null }),
+    ]).agents);
+
+    expect(inside('sent-away-running')).toEqual([]);
+    expect(screen.getByTestId('sent-away-running')).toBeEmptyDOMElement();
+    expect(control()).toHaveTextContent('Show the one that has finished');
   });
 });
 

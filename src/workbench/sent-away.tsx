@@ -20,12 +20,17 @@
  * A finished row goes quiet — dimmed, its live line dropped — and keeps its
  * result, because a row that throws the answer away is a row the reader has to
  * go and find the answer for.
+ *
+ * The finished ones also go BELOW: what is still running is drawn first and on
+ * its own, and the rest sit behind one control that names how many there are.
+ * A session that sends off forty helpers used to draw forty rows, and the two
+ * still working were somewhere in the middle of them (bw-pl2v.2).
  */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
-import { Bot, Clock, Coins, Eye, SendToBack, Square, Terminal, Workflow } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, Clock, Coins, Eye, SendToBack, Square, Terminal, Workflow } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
@@ -394,30 +399,95 @@ export interface SentAwayPanelProps {
   onOpen?: (id: string) => void;
 }
 
+/**
+ * What the control under the running rows says.
+ *
+ * It carries its own count, because the reader's question before opening it is
+ * how many there are, and a bare chevron answers that with nothing. It says
+ * *finished* rather than naming one of the three states behind it: `done`,
+ * `failed` and `stopped` all live in there, and every row still wears its own
+ * word once it is open.
+ */
+export function finishedLabel(showing: boolean, count: number): string {
+  const verb = showing ? 'Hide' : 'Show';
+  return count === 1 ? `${verb} the one that has finished` : `${verb} the ${count} that have finished`;
+}
+
 export function SentAwayPanel({ agents, items, sessionId, controls, onOpen }: SentAwayPanelProps) {
   const now = useNow(agents.some((a) => !isOver(a.state)));
+  // Shut on every mount, and deliberately not remembered: what the reader wants
+  // on opening a chat is what is still moving in it, and a rail that comes back
+  // with forty finished helpers in it is the rail this split was cut to fix.
+  const [showingFinished, setShowingFinished] = useState(false);
+  const finishedId = useId();
 
   if (agents.length === 0) return null;
 
+  // Oldest-first within each group, which is the order they were sent in
+  // (fold.ts appends). The split groups them; it does not sort them.
+  const running = agents.filter((a) => !isOver(a.state));
+  const finished = agents.filter((a) => isOver(a.state));
+
+  const draw = (row: SentAway) => (
+    <AgentRow
+      key={row.id}
+      row={row}
+      items={items}
+      now={now}
+      sessionId={sessionId}
+      controls={controls}
+      onOpen={onOpen}
+    />
+  );
+
   return (
     <div
-      role="list"
       data-testid="sent-away-panel"
       data-rows={agents.length}
-      data-running={agents.filter((a) => !isOver(a.state)).length}
+      data-running={running.length}
+      data-finished={finished.length}
       className="flex flex-col gap-1.5"
     >
-      {agents.map((row) => (
-        <AgentRow
-          key={row.id}
-          row={row}
-          items={items}
-          now={now}
-          sessionId={sessionId}
-          controls={controls}
-          onOpen={onOpen}
-        />
-      ))}
+      {/* Always drawn, even with nothing in it: an empty list under a control
+          reading "show the 3 that have finished" says where they will land. */}
+      <div role="list" data-testid="sent-away-running" className="flex flex-col gap-1.5">
+        {running.map(draw)}
+      </div>
+
+      {finished.length > 0 && (
+        <>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={showingFinished}
+            aria-controls={finishedId}
+            data-testid="toggle-stopped-agents"
+            data-showing={showingFinished}
+            onClick={() => setShowingFinished((was) => !was)}
+            className="h-auto w-full justify-start gap-1.5 px-1 py-1 text-[11px] font-normal text-muted-foreground hover:bg-muted/40"
+          >
+            {showingFinished ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            )}
+            <span className="min-w-0 truncate">{finishedLabel(showingFinished, finished.length)}</span>
+          </Button>
+          {/* Kept mounted so its rows keep their result and their stopped clock,
+              and hidden with the utility rather than the `hidden` attribute:
+              `display:flex` from the class beside it wins over preflight's
+              `[hidden]` rule, so the attribute alone would hide nothing. */}
+          <div
+            role="list"
+            id={finishedId}
+            data-testid="sent-away-stopped"
+            className={cn('flex-col gap-1.5', showingFinished ? 'flex' : 'hidden')}
+          >
+            {finished.map(draw)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
