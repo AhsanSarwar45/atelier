@@ -23,6 +23,7 @@ import {
   somewhereBehind,
   whereFrom,
 } from '@/lib/address';
+import { PRODUCT_NAME } from '@/lib/identity';
 import { cn, projectDir } from '@/lib/utils';
 import ChatTab from '@/workbench/chat-tab';
 import { WorkbenchStatus } from '@/workbench/globals';
@@ -57,6 +58,11 @@ function ProjectTabs() {
   const usesBeads = project?.usesBeads !== false;
   const shownTab = usesBeads ? tab : 'chat';
   const shownCard = usesBeads ? openCard : null;
+
+  useEffect(() => {
+    document.title = project?.name ? `${project.name} | ${PRODUCT_NAME}` : PRODUCT_NAME;
+    return () => { document.title = PRODUCT_NAME; };
+  }, [project?.name]);
 
   // Old bookmarks can still name the board for a project that has since opted
   // out. Draw chat immediately, then clean the address so refresh and Back do
