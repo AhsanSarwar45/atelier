@@ -13,8 +13,10 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { dataHome } from './data-home.ts';
+import { boundedEvent } from './bounded-event.ts';
 import { planCanonicalProjection, type CanonicalProjectionPlan } from './canonical-projection.ts';
 
+import { EMPTY, foldAll, reduce, type SentAway, type TranscriptItem } from '../../src/workbench/fold.ts';
 import type { SessionSummary, WbpEvent } from '../../src/workbench/protocol.ts';
 
 /**
@@ -185,7 +187,51 @@ const SCHEMA_CAPABILITIES: SchemaCapability[] = [
       );
     },
   },
+  {
+    name: 'transcript-item-projection.v1',
+    reconcile(db) {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS transcript_item (
+           session_id TEXT NOT NULL,
+           item_key TEXT NOT NULL,
+           position INTEGER NOT NULL,
+           updated_seq INTEGER NOT NULL,
+           visible INTEGER NOT NULL,
+           json TEXT NOT NULL,
+           PRIMARY KEY (session_id, item_key),
+           UNIQUE (session_id, position)
+         );
+         CREATE INDEX IF NOT EXISTS transcript_item_page
+           ON transcript_item(session_id, visible, position DESC);
+         CREATE TABLE IF NOT EXISTS transcript_projection (
+           session_id TEXT PRIMARY KEY,
+           projected_seq INTEGER NOT NULL,
+           reset_seq INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS transcript_agent (
+           session_id TEXT NOT NULL,
+           agent_id TEXT NOT NULL,
+           tool_call_id TEXT,
+           json TEXT NOT NULL,
+           PRIMARY KEY (session_id, agent_id)
+         );`,
+      );
+    },
+  },
 ];
+
+export interface TranscriptItemPage {
+  items: TranscriptItem[];
+  cursor: number | null;
+  hasOlder: boolean;
+  newestSeq: number;
+}
+
+const itemKey = (item: Pick<TranscriptItem, 'kind' | 'id'>): string => `${item.kind}:${item.id}`;
+
+/** Diagnostic bookkeeping remains available in the event log, but it is not a
+ * transcript row and cannot consume the fixed visible-item page budget. */
+const itemIsVisible = (item: TranscriptItem): boolean => item.kind !== 'note' || item.rank !== 'detail';
 
 export class Store {
   private db: DatabaseSync;
@@ -729,75 +775,243 @@ export class Store {
   }
 
   /**
-   * A bounded slice of transcript events, newest window first.
-   *
-   * A page is counted in user turns, not incidental rows. A single assistant
-   * turn can contain dozens of tools and thinking blocks; counting those as
-   * page anchors can fill the whole window after the user's prompt and make
-   * that prompt appear to have vanished. The query starts at the oldest
-   * selected prompt, so every complete turn after it remains intact.
+   * Materialises complete transcript items once, so a page is selected in the
+   * same units the reader sees instead of by raw events or conversational
+   * turns. The event log remains the source of truth; this table is disposable.
    */
-  transcriptWindow(sessionId: string, before: number | null, limit = 20): {
-    events: WbpEvent[];
-    cursor: number | null;
-    hasOlder: boolean;
-    newestSeq: number;
-  } {
-    const ceiling = before ?? Number.MAX_SAFE_INTEGER;
-    const newest = this.db
-      .prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM event WHERE session_id = ? AND seq < ?')
-      .get(sessionId, ceiling) as { seq: number };
-    const reset = this.db
-      .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM event WHERE session_id = ? AND type = 'transcript.reset' AND seq < ?")
-      .get(sessionId, ceiling) as { seq: number };
-    const turns = this.db
-      .prepare(
-        `SELECT seq FROM event
-          WHERE session_id = ? AND seq > ? AND seq < ?
-            AND type = 'message.started'
-            AND json_extract(json, '$.role') = 'user'
-            AND json_extract(json, '$.parentToolCallId') IS NULL
-          ORDER BY seq DESC LIMIT ?`,
-      )
-      .all(sessionId, reset.seq, ceiling, limit) as { seq: number }[];
-    // Provider/system conversations can contain no user turn. They still page
-    // by messages, at roughly two messages per ordinary user/assistant turn.
-    const messages = turns.length ? [] : this.db
-      .prepare(
-        `SELECT seq FROM event
-          WHERE session_id = ? AND seq > ? AND seq < ?
-            AND type = 'message.started'
-            AND json_extract(json, '$.parentToolCallId') IS NULL
-          ORDER BY seq DESC LIMIT ?`,
-      )
-      .all(sessionId, reset.seq, ceiling, limit * 2) as { seq: number }[];
-    // A transcript made only of notices/tools still pages rather than becoming
-    // unreachable. This final fallback is used only when there is no message.
-    const anchors = turns.length ? turns : messages.length ? messages : this.db
-      .prepare(
-        `SELECT seq FROM event
-          WHERE session_id = ? AND seq > ? AND seq < ?
-            AND type IN ('message.started','tool.started','note','ask.permission','notice')
-          ORDER BY seq DESC LIMIT ?`,
-      )
-      .all(sessionId, reset.seq, ceiling, limit * 2) as { seq: number }[];
-    const start = anchors.length ? anchors[anchors.length - 1]!.seq : Math.max(reset.seq + 1, newest.seq);
+  private rebuildTranscriptItems(sessionId: string, newestSeq: number, resetSeq: number): void {
     const rows = this.db
-      .prepare('SELECT json FROM event WHERE session_id = ? AND seq >= ? AND seq < ? ORDER BY seq')
-      .all(sessionId, start, ceiling) as { json: string }[];
-    const older = this.db
+      .prepare('SELECT json FROM event WHERE session_id = ? AND seq > ? ORDER BY seq')
+      .all(sessionId, resetSeq) as { json: string }[];
+    const view = foldAll(rows.map((row) => boundedEvent(JSON.parse(row.json) as WbpEvent)));
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('DELETE FROM transcript_item WHERE session_id = ?').run(sessionId);
+      this.db.prepare('DELETE FROM transcript_agent WHERE session_id = ?').run(sessionId);
+      const put = this.db.prepare(
+        `INSERT INTO transcript_item
+           (session_id, item_key, position, updated_seq, visible, json)
+         VALUES (?,?,?,?,?,?)`,
+      );
+      view.items.forEach((item, index) => {
+        put.run(
+          sessionId,
+          itemKey(item),
+          index + 1,
+          newestSeq,
+          itemIsVisible(item) ? 1 : 0,
+          JSON.stringify(item),
+        );
+      });
+      const putAgent = this.db.prepare(
+        `INSERT INTO transcript_agent (session_id, agent_id, tool_call_id, json)
+         VALUES (?,?,?,?)`,
+      );
+      view.agents.forEach((agent) => {
+        putAgent.run(sessionId, agent.id, agent.toolCallId, JSON.stringify(agent));
+      });
+      this.db.prepare(
+        `INSERT INTO transcript_projection (session_id, projected_seq, reset_seq)
+         VALUES (?,?,?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           projected_seq = excluded.projected_seq,
+           reset_seq = excluded.reset_seq`,
+      ).run(sessionId, newestSeq, resetSeq);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
+   * The item rows one event can touch. Feeding just these rows and the compact
+   * agent index through the canonical live reducer keeps historical and live
+   * shapes identical without rereading the conversation. Creation events
+   * intentionally start with no item; their ids are canonical and unique.
+   */
+  private eventItems(sessionId: string, event: WbpEvent, agents: SentAway[]): Array<{ position: number; item: TranscriptItem }> {
+    let keys: string[] = [];
+    let all = false;
+    switch (event.type) {
+      case 'image':
+      case 'image.compare':
+      case 'widget':
+      case 'text.delta':
+        keys = [`message:${event.messageId}`];
+        break;
+      case 'thinking.delta':
+        keys = [`thinking:${event.messageId}`];
+        break;
+      case 'message.completed':
+        keys = [`message:${event.messageId}`, `thinking:${event.messageId}`];
+        break;
+      case 'message.retracted':
+        keys = [`message:${event.messageId}`];
+        break;
+      case 'tool.started':
+      case 'tool.completed':
+      case 'tool.progress':
+      case 'diff':
+        keys = [`tool:${event.toolCallId}`];
+        break;
+      case 'agent.finished': {
+        const toolCallId = agents.find((agent) => agent.id === event.agentId)?.toolCallId;
+        if (toolCallId) keys = [`tool:${toolCallId}`];
+        break;
+      }
+      case 'ask.resolved':
+        keys = [`ask:${event.askId}`];
+        break;
+      case 'question.resolved':
+        keys = [`question:${event.requestId}`];
+        break;
+      case 'plan.proposed':
+        return (this.db
+          .prepare("SELECT position, json FROM transcript_item WHERE session_id = ? AND item_key LIKE 'plan:%' ORDER BY position")
+          .all(sessionId) as { position: number; json: string }[])
+          .map((row) => ({ position: row.position, item: JSON.parse(row.json) as TranscriptItem }));
+      case 'plan.resolved':
+        keys = [`plan:${event.proposalId}`];
+        break;
+      case 'transcript.reset':
+        all = true;
+        break;
+      default:
+        break;
+    }
+    if (all) {
+      return (this.db
+        .prepare('SELECT position, json FROM transcript_item WHERE session_id = ? ORDER BY position')
+        .all(sessionId) as { position: number; json: string }[])
+        .map((row) => ({ position: row.position, item: JSON.parse(row.json) as TranscriptItem }));
+    }
+    if (!keys.length) return [];
+    const get = this.db.prepare('SELECT position, json FROM transcript_item WHERE session_id = ? AND item_key = ?');
+    return keys.flatMap((key) => {
+      const row = get.get(sessionId, key) as { position: number; json: string } | undefined;
+      return row ? [{ position: row.position, item: JSON.parse(row.json) as TranscriptItem }] : [];
+    }).sort((a, b) => a.position - b.position);
+  }
+
+  /** Advances an existing durable projection through only the unseen tail. */
+  private catchUpTranscriptItems(
+    sessionId: string,
+    projectedSeq: number,
+    newestSeq: number,
+    resetSeq: number,
+  ): void {
+    const events = this.db
+      .prepare('SELECT json FROM event WHERE session_id = ? AND seq > ? ORDER BY seq')
+      .all(sessionId, projectedSeq) as { json: string }[];
+    if (!events.length) return;
+
+    let agents = (this.db
+      .prepare('SELECT json FROM transcript_agent WHERE session_id = ? ORDER BY rowid')
+      .all(sessionId) as { json: string }[])
+      .map((row) => JSON.parse(row.json) as SentAway);
+    let nextPosition = Number((this.db
+      .prepare('SELECT COALESCE(MAX(position), 0) AS position FROM transcript_item WHERE session_id = ?')
+      .get(sessionId) as { position: number }).position) + 1;
+    const removeItem = this.db.prepare('DELETE FROM transcript_item WHERE session_id = ? AND item_key = ?');
+    const putItem = this.db.prepare(
+      `INSERT INTO transcript_item (session_id, item_key, position, updated_seq, visible, json)
+       VALUES (?,?,?,?,?,?)
+       ON CONFLICT(session_id, item_key) DO UPDATE SET
+         updated_seq = excluded.updated_seq,
+         visible = excluded.visible,
+         json = excluded.json`,
+    );
+    const removeAgents = this.db.prepare('DELETE FROM transcript_agent WHERE session_id = ?');
+    const putAgent = this.db.prepare(
+      `INSERT INTO transcript_agent (session_id, agent_id, tool_call_id, json)
+       VALUES (?,?,?,?)`,
+    );
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of events) {
+        const event = boundedEvent(JSON.parse(row.json) as WbpEvent);
+        const selected = this.eventItems(sessionId, event, agents);
+        const positions = new Map(selected.map(({ item, position }) => [itemKey(item), position]));
+        const beforeKeys = new Set(selected.map(({ item }) => itemKey(item)));
+        const view = reduce({ ...EMPTY, items: selected.map(({ item }) => item), agents }, event);
+        const afterKeys = new Set(view.items.map(itemKey));
+
+        for (const key of beforeKeys) if (!afterKeys.has(key)) removeItem.run(sessionId, key);
+        for (const item of view.items) {
+          const key = itemKey(item);
+          let position = positions.get(key);
+          if (position === undefined) position = nextPosition++;
+          putItem.run(sessionId, key, position, event.seq, itemIsVisible(item) ? 1 : 0, JSON.stringify(item));
+        }
+
+        if (view.agents !== agents) {
+          agents = view.agents;
+          removeAgents.run(sessionId);
+          for (const agent of agents) putAgent.run(sessionId, agent.id, agent.toolCallId, JSON.stringify(agent));
+        }
+      }
+      this.db.prepare(
+        'UPDATE transcript_projection SET projected_seq = ?, reset_seq = ? WHERE session_id = ?',
+      ).run(newestSeq, resetSeq, sessionId);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private ensureTranscriptItems(sessionId: string): number {
+    const newest = this.db
+      .prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM event WHERE session_id = ?')
+      .get(sessionId) as { seq: number };
+    const reset = this.db
+      .prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM event WHERE session_id = ? AND type = 'transcript.reset'")
+      .get(sessionId) as { seq: number };
+    const projected = this.db
+      .prepare('SELECT projected_seq, reset_seq FROM transcript_projection WHERE session_id = ?')
+      .get(sessionId) as { projected_seq: number; reset_seq: number } | undefined;
+    if (!projected) {
+      this.rebuildTranscriptItems(sessionId, newest.seq, reset.seq);
+    } else if (projected.projected_seq !== newest.seq) {
+      // A reset behind the recorded projection means the projection record is
+      // corrupt or came from an incompatible build. Ordinary resets are in the
+      // unseen tail and are handled incrementally by the canonical reducer.
+      if (reset.seq < projected.reset_seq) this.rebuildTranscriptItems(sessionId, newest.seq, reset.seq);
+      else this.catchUpTranscriptItems(sessionId, projected.projected_seq, newest.seq, reset.seq);
+    } else if (projected.reset_seq !== reset.seq) {
+      this.rebuildTranscriptItems(sessionId, newest.seq, reset.seq);
+    }
+    return newest.seq;
+  }
+
+  /** The newest fixed-size page of complete visible items, or the page before
+   * an exclusive item cursor. Pages are always returned in reading order. */
+  transcriptItems(sessionId: string, before: number | null, limit = 40): TranscriptItemPage {
+    const newestSeq = this.ensureTranscriptItems(sessionId);
+    const ceiling = before ?? Number.MAX_SAFE_INTEGER;
+    const rows = this.db
       .prepare(
-        `SELECT 1 AS yes FROM event
-          WHERE session_id = ? AND seq > ? AND seq < ?
-            AND type IN ('message.started','tool.started','note','ask.permission','notice')
-          LIMIT 1`,
+        `SELECT position, json FROM transcript_item
+          WHERE session_id = ? AND visible = 1 AND position < ?
+          ORDER BY position DESC LIMIT ?`,
       )
-      .get(sessionId, reset.seq, start) as { yes: number } | undefined;
+      .all(sessionId, ceiling, limit) as { position: number; json: string }[];
+    rows.reverse();
+    const cursor = rows[0]?.position ?? null;
+    const older = cursor === null ? undefined : this.db
+      .prepare(
+        `SELECT 1 AS yes FROM transcript_item
+          WHERE session_id = ? AND visible = 1 AND position < ? LIMIT 1`,
+      )
+      .get(sessionId, cursor) as { yes: number } | undefined;
     return {
-      events: rows.map((r) => JSON.parse(r.json) as WbpEvent),
-      cursor: older ? start : null,
+      items: rows.map((row) => JSON.parse(row.json) as TranscriptItem),
+      cursor: older ? cursor : null,
       hasOlder: !!older,
-      newestSeq: newest.seq,
+      newestSeq,
     };
   }
 

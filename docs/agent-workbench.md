@@ -430,9 +430,20 @@ Routes, all under the proxy at `/api/workbench`:
 | `GET /spend?from=&to=` | per project per day |
 | `GET /health` | proxy liveness; drives the offline banner |
 
-**The transcript and the live stream are the same code path.** Opening a chat
-is `GET /events?session=X&since=0`: the event log replays, then the connection
-stays open and tails. There is no second renderer for history.
+**The transcript and the live stream have one item vocabulary, not one
+payload.** The append-only event log is folded into durable, stable transcript
+items (one message, thinking block, tool, question, plan, note or notice per
+id). Opening sends only the newest 40 visible items plus an exclusive item
+cursor. The browser folds later live events into those same item shapes. It
+never receives or replays the whole event log on open.
+
+Older pages are requested only after the reader scrolls upward to within one
+viewport of the loaded head. Each request returns at most 40 more complete
+items in chronological order. Prepending preserves the exact visible row; a
+chat switch paints an empty loading shell immediately and replaces it with the
+new chat at its newest end. Loaded pages may accumulate while reading, but the
+DOM is independently virtualized to the viewport plus overscan. There is no
+turn-count page rule, manual history button, or automatic page-filling loop.
 
 The proxy (`server/src/routes/workbench.rs`) is a catch-all `any` handler using
 `reqwest` (already a dependency) that forwards method, path, query, headers and
@@ -458,6 +469,12 @@ session(id PK, brand, external_id, project_id, project_path, cwd,
 event(session_id, seq, at, type, json, PRIMARY KEY(session_id, seq))
 gevent(gseq INTEGER PRIMARY KEY AUTOINCREMENT, session_id, seq)
 
+transcript_item(session_id, item_key, position, updated_seq, visible, json,
+                PRIMARY KEY(session_id, item_key))
+transcript_projection(session_id PK, projected_seq, reset_seq)
+transcript_agent(session_id, agent_id, tool_call_id, json,
+                 PRIMARY KEY(session_id, agent_id))
+
 message(session_id, message_id, role, text, at)   -- flattened, for search
 turn(id PK, session_id, project_id, day, brand,
      usd REAL NULL, tokens_in INT NULL, tokens_out INT NULL, at)
@@ -466,8 +483,12 @@ bead_link(session_id, bead_id, via, first_seen_at, PRIMARY KEY(session_id, bead_
 report_link(session_id, project, slug, at)
 ```
 
-- `event` is append-only and is the transcript. `gevent` gives the
-  cross-project stream a total order.
+- `event` is append-only and remains the source of truth. `transcript_item` and
+  `transcript_agent` are disposable projections. The first read materializes
+  an old chat once; later reads advance only through events after
+  `projected_seq`, even while paging farther backward. Hidden diagnostic detail
+  remains in `event` and does not consume the fixed visible-item page budget.
+- `gevent` gives the cross-project stream a total order.
 - `ask` rows survive a restart, so a session that stopped mid-question comes
   back still asking (and still counted in the tray).
 - `turn` carries only what the brand reported — `usd` is null for Codex,

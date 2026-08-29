@@ -78,6 +78,7 @@ describe('the browser session cache', () => {
 
   it('folds an identical replayed sequence only once', () => {
     const { result } = renderHook(() => useSession('replay-owner'));
+    act(() => listener!.snapshot(JSON.stringify(EMPTY)));
     const start = JSON.stringify({
       type: 'message.started', sessionId: 'replay-owner', seq: 1, at: '', messageId: 'one', role: 'assistant',
     });

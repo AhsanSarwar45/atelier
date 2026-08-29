@@ -1380,21 +1380,32 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             typed moves it without a row being added, and the reader watching
             the end must stay at the end through both. */}
         <div ref={contentRef} data-testid="transcript-rows" className="mx-auto flex w-full max-w-[110ch] flex-col gap-3 px-4 py-4">
+        {view.loading && (
+          <div
+            data-testid="chat-loading"
+            role="status"
+            className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground"
+          >
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            Loading conversation…
+          </div>
+        )}
         {/* Only when what is hidden is his own doing: a chat that has said
             nothing yet holds the machine's own start-up lines and nothing else,
             and the quiet start hides those for him (bw-aqpc). */}
         {rows.length === 0 && hisDoing(view.items, offKinds) && (
           <NothingShowing hidden={view.items.length} onShowAll={() => changeKinds(EVERYTHING)} />
         )}
-        <DrawnTranscript
-          rows={drawn}
-          sessionId={sessionId}
-          mentions={mentions}
-          onLook={setLooking}
-          pane={pane}
-          held={atTheEnd}
-          onOlder={view.loadOlder}
-        />
+        {!view.loading && (
+          <DrawnTranscript
+            rows={drawn}
+            sessionId={sessionId}
+            mentions={mentions}
+            onLook={setLooking}
+            pane={pane}
+            onOlder={view.loadOlder}
+          />
+        )}
         {view.error && <div className="text-sm text-red-500">{view.error}</div>}
         {/* What it is doing, where he is looking. Present exactly while it owes
             an answer (docs/agent-workbench.md §8.2.2) — whoever owes it, which

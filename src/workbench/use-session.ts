@@ -121,11 +121,19 @@ export interface HistoryLoad {
   hasOlder: boolean;
 }
 
-export type LoadedSessionView = SessionView & { loadOlder: (() => Promise<HistoryLoad>) | null };
+export type LoadedSessionView = SessionView & {
+  /** The chat shell is open, but its newest item page has not arrived yet. */
+  loading: boolean;
+  loadOlder: (() => Promise<HistoryLoad>) | null;
+};
 
 interface CachedSession {
   view: SessionView;
+  ready: boolean;
+  /** Live tail frames that arrived before the opening item page. */
+  pending: WbpEvent[];
   listeners: Set<() => void>;
+  notifyFrame: number | null;
   loadingOlder: boolean;
   touched: number;
 }
@@ -136,7 +144,10 @@ const cachedSessions = new Map<string, CachedSession>();
 function cached(id: string): CachedSession {
   let entry = cachedSessions.get(id);
   if (!entry) {
-    entry = { view: EMPTY, listeners: new Set(), loadingOlder: false, touched: Date.now() };
+    entry = {
+      view: EMPTY, ready: false, pending: [], listeners: new Set(), notifyFrame: null,
+      loadingOlder: false, touched: Date.now(),
+    };
     cachedSessions.set(id, entry);
     if (cachedSessions.size > SESSION_CACHE_LIMIT) {
       const oldest = Array.from(cachedSessions.entries())
@@ -149,10 +160,24 @@ function cached(id: string): CachedSession {
   return entry;
 }
 
-function publishCached(id: string, view: SessionView): void {
+function publishCached(id: string, view: SessionView, ready?: boolean, immediate = false): void {
   const entry = cached(id);
   entry.view = view;
-  entry.listeners.forEach((listener) => listener());
+  if (ready !== undefined) entry.ready = ready;
+  const notify = () => {
+    entry.notifyFrame = null;
+    entry.listeners.forEach((listener) => listener());
+  };
+  // A streamed answer can carry dozens of deltas in one paint. Keep folding
+  // every one in order, but let React and the virtualizer observe the final
+  // state once per frame. Snapshots and history prepends are immediate because
+  // they replace the loading shell or preserve a scroll anchor before paint.
+  if (immediate || process.env.NODE_ENV === 'test' || typeof requestAnimationFrame !== 'function') {
+    if (entry.notifyFrame !== null) cancelAnimationFrame(entry.notifyFrame);
+    notify();
+  } else if (entry.notifyFrame === null) {
+    entry.notifyFrame = requestAnimationFrame(notify);
+  }
 }
 
 /** The app-wide feed keeps chats already opened current while another tab is
@@ -160,6 +185,10 @@ function publishCached(id: string, view: SessionView): void {
 export function cacheSessionEvent(event: WbpEvent): void {
   const entry = cachedSessions.get(event.sessionId);
   if (!entry || event.seq <= entry.view.lastSeq) return;
+  if (!entry.ready) {
+    if (!entry.pending.some((pending) => pending.seq === event.seq)) entry.pending.push(event);
+    return;
+  }
   publishCached(event.sessionId, reduce(entry.view, event));
 }
 
@@ -183,7 +212,7 @@ async function loadHistory(id: string): Promise<HistoryLoad> {
       // A cursor that did not move cannot be asked forever. Treat that broken
       // page as the head rather than turning one observer into a replay loop.
       hasOlder,
-    });
+    }, undefined, true);
     return { added: added.length, hasOlder };
   } finally {
     entry.loadingOlder = false;
@@ -210,7 +239,10 @@ export function useSession(sessionId: string | null): LoadedSessionView {
       // What the connection asks from when it is opened, or opened again after
       // a drop. Asking from zero would send the whole conversation a second
       // time, and fold it onto itself.
-      since: () => entry.view.lastSeq,
+      // A live frame may reach the app-wide cache before this chat's opening
+      // page. It is buffered below; asking from its seq would make the server
+      // skip the snapshot and leave the loading shell standing forever.
+      since: () => entry.ready ? entry.view.lastSeq : 0,
 
       // The newest conversation window as the sidecar built it. Older windows
       // are fetched only when the reader reaches the top.
@@ -220,7 +252,12 @@ export function useSession(sessionId: string | null): LoadedSessionView {
           // process that outlives this page, so it can be older than the screen
           // and simply not send a list the screen draws (bw-7ks.22.16).
           const opening = asView(JSON.parse(data) as Partial<SessionView>);
-          if (opening.lastSeq >= entry.view.lastSeq) publishCached(sessionId, opening);
+          const complete = entry.pending
+            .filter((event) => event.seq > opening.lastSeq)
+            .sort((a, b) => a.seq - b.seq)
+            .reduce(reduce, opening);
+          entry.pending = [];
+          publishCached(sessionId, complete, true, true);
           // The snapshot is the newest server-built window. Loading farther
           // back here makes an opened chat grow through its older history
           // before the reader has asked for it, which reads as the transcript
@@ -242,6 +279,10 @@ export function useSession(sessionId: string | null): LoadedSessionView {
         // the frame. A delayed, replayed, or malformed frame cannot enter the
         // selected transcript merely because it arrived on that subscription.
         if (event.sessionId !== sessionId) return;
+        if (!entry.ready) {
+          if (!entry.pending.some((pending) => pending.seq === event.seq)) entry.pending.push(event);
+          return;
+        }
         if (event.seq > entry.view.lastSeq) publishCached(sessionId, reduce(entry.view, event));
       },
     });
@@ -253,6 +294,7 @@ export function useSession(sessionId: string | null): LoadedSessionView {
   );
   return {
     ...view,
+    loading: sessionId ? !cached(sessionId).ready : false,
     loadOlder: sessionId && view.hasOlder && view.historyCursor !== null ? requestOlder : null,
   };
 }

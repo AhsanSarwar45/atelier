@@ -1,10 +1,9 @@
-import { foldAll, type SessionView, type TranscriptTool } from '../../src/workbench/fold.ts';
+import type { SessionView, TranscriptTool } from '../../src/workbench/fold.ts';
 import { whatItRan } from '../../src/workbench/said-what-it-ran.ts';
-import { boundedEvent } from './bounded-event.ts';
 import type { Store } from './store.ts';
 
-/** User turns per server page. Their replies, tools and thinking come intact. */
-export const TRANSCRIPT_WINDOW = 20;
+/** Two ordinary screens of complete transcript items. */
+export const TRANSCRIPT_WINDOW = 40;
 
 /**
  * Fold one storage window without cutting it a second time.
@@ -17,10 +16,9 @@ export const TRANSCRIPT_WINDOW = 20;
 export function transcriptPage(store: Store, sessionId: string, before: number | null): {
   items: SessionView['items']; cursor: number | null; hasOlder: boolean; newestSeq: number;
 } {
-  const page = store.transcriptWindow(sessionId, before, TRANSCRIPT_WINDOW);
-  const folded = foldAll(page.events.map(boundedEvent));
+  const page = store.transcriptItems(sessionId, before, TRANSCRIPT_WINDOW);
   return {
-    items: folded.items.map((item) => {
+    items: page.items.map((item) => {
       if (item.kind !== 'tool') return item;
       const ran = whatItRan(item.name, item.input);
       return {

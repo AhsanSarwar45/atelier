@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { asView, EMPTY, foldAll, reduce, type SessionView } from '@/workbench/fold';
 import { movesTheClock } from '@/workbench/live';
 import type { SessionState, WbpEvent } from '@/workbench/protocol';
-import { useSession } from '@/workbench/use-session';
+import { cacheSessionEvent, useSession } from '@/workbench/use-session';
 
 import { tagged } from './tagged';
 
@@ -242,12 +242,47 @@ describe('a chat opened, and opened again after the stream drops', () => {
     const { result } = renderHook(() => useSession('chat-1'));
     expect(opened).toHaveLength(1);
     expect(opened[0].url).toContain('since=0');
+    expect(result.current.loading).toBe(true);
+    expect(result.current.items).toEqual([]);
 
     const built = foldAll(aWholeChat(2));
     act(() => opened[0].hands(built));
 
     expect(result.current.items).toHaveLength(built.items.length);
     expect(result.current.lastSeq).toBe(built.lastSeq);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('switches immediately to an empty loading shell instead of leaving the previous chat on screen', async () => {
+    const { result, rerender } = renderHook(({ id }) => useSession(id), {
+      initialProps: { id: 'switch-from' },
+    });
+    act(() => opened[0].hands(foldAll(aWholeChat(2))));
+    expect(result.current.items.length).toBeGreaterThan(0);
+
+    rerender({ id: 'switch-to' });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.items).toEqual([]);
+    await act(async () => {});
+    expect(opened[opened.length - 1]!.url).toContain('chat=switch-to');
+    expect(opened[opened.length - 1]!.url).toContain('since=0');
+  });
+
+  it('buffers a live tail received before the opening page and still asks for the snapshot', () => {
+    const sessionId = 'tail-before-snapshot';
+    const { result } = renderHook(() => useSession(sessionId));
+    const opening = foldAll(aWholeChat(1));
+    const tail: WbpEvent = {
+      type: 'notice', text: 'arrived early', seq: opening.lastSeq + 1,
+      sessionId, at: '2026-08-20T00:00:01.000Z',
+    };
+    act(() => cacheSessionEvent(tail));
+
+    expect(opened[0].url).toContain('since=0');
+    expect(result.current.loading).toBe(true);
+    act(() => opened[0].hands(opening));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.items.at(-1)).toMatchObject({ kind: 'notice', text: 'arrived early' });
   });
 
   it('leaves older history unread until the reader reaches the transcript head', () => {

@@ -23,25 +23,6 @@ function event(store: Store, seq: number, body: DriverEvent): void {
 }
 
 describe('paged transcript storage', () => {
-  it('reads only the newest row window and pages backward without replaying the log', () => {
-    const store = new Store(join(mkdtempSync(join(tmpdir(), 'atelier-page-')), 'workbench.db'));
-    let seq = 0;
-    for (let i = 0; i < 75; i++) {
-      event(store, ++seq, { type: 'message.started', messageId: `m-${i}`, role: 'assistant' });
-      event(store, ++seq, { type: 'text.delta', messageId: `m-${i}`, text: `answer ${i}` });
-      event(store, ++seq, { type: 'message.completed', messageId: `m-${i}` });
-    }
-
-    const newest = store.transcriptWindow('chat', null, 20);
-    expect(newest.events).toHaveLength(120);
-    expect(newest.events[0]).toMatchObject({ type: 'message.started', messageId: 'm-35' });
-    expect(newest.hasOlder).toBe(true);
-
-    const older = store.transcriptWindow('chat', newest.cursor, 20);
-    expect(older.events[0]).toMatchObject({ type: 'message.started', messageId: 'm-0' });
-    expect(older.hasOlder).toBe(false);
-  });
-
   it('keeps each selected message beside the thinking row it produced', () => {
     const store = new Store(join(mkdtempSync(join(tmpdir(), 'atelier-speakers-')), 'workbench.db'));
     let seq = 0;
@@ -54,14 +35,15 @@ describe('paged transcript storage', () => {
 
     const newest = transcriptPage(store, 'chat', null);
     const messages = newest.items.filter((item) => item.kind === 'message');
-    expect(messages).toHaveLength(39);
-    expect(messages[0]).toMatchObject({ id: 'm-2', role: 'user' });
-    expect(messages.filter((item) => item.role === 'user')).toHaveLength(20);
-    expect(newest.items.filter((item) => item.kind === 'thinking')).toHaveLength(39);
+    expect(newest.items).toHaveLength(40);
+    expect(messages).toHaveLength(20);
+    expect(messages[0]).toMatchObject({ id: 'm-21', role: 'assistant' });
+    expect(messages.filter((item) => item.role === 'user')).toHaveLength(10);
+    expect(newest.items.filter((item) => item.kind === 'thinking')).toHaveLength(20);
     expect(newest.hasOlder).toBe(true);
   });
 
-  it('keeps the user prompt that began a tool-heavy assistant turn', () => {
+  it('pages a tool-heavy turn in complete items and reaches its user prompt on the next page', () => {
     const store = new Store(join(mkdtempSync(join(tmpdir(), 'atelier-turns-')), 'workbench.db'));
     let seq = 0;
     event(store, ++seq, { type: 'message.started', messageId: 'prompt', role: 'user' });
@@ -79,10 +61,43 @@ describe('paged transcript storage', () => {
     event(store, ++seq, { type: 'message.completed', messageId: 'answer' });
 
     const newest = transcriptPage(store, 'chat', null);
-    expect(newest.items.find((item) => item.kind === 'message' && item.role === 'user')).toMatchObject({
+    expect(newest.items).toHaveLength(40);
+    expect(newest.items.every((item) => item.kind === 'tool')).toBe(true);
+    expect(newest.items.find((item) => item.kind === 'message')).toBeUndefined();
+
+    const older = transcriptPage(store, 'chat', newest.cursor);
+    expect(older.items.find((item) => item.kind === 'message' && item.role === 'user')).toMatchObject({
       id: 'prompt', text: 'Please inspect the whole repository',
     });
-    expect(newest.items.filter((item) => item.kind === 'tool')).toHaveLength(75);
+    expect(older.hasOlder).toBe(false);
+    expect(new Set([...older.items, ...newest.items].map((item) => `${item.kind}:${item.id}`)).size).toBe(77);
+  });
+
+  it('never lets one enormous turn or hidden diagnostics exceed the item limit', () => {
+    const store = new Store(join(mkdtempSync(join(tmpdir(), 'atelier-enormous-turn-')), 'workbench.db'));
+    let seq = 0;
+    event(store, ++seq, { type: 'message.started', messageId: 'prompt', role: 'user' });
+    event(store, ++seq, { type: 'text.delta', messageId: 'prompt', text: 'Inspect everything' });
+    event(store, ++seq, { type: 'message.completed', messageId: 'prompt' });
+    for (let i = 0; i < 200; i++) {
+      event(store, ++seq, {
+        type: 'note', noteId: `hook-${i}`, rank: 'detail', kind: 'hook/completed',
+        text: `hook ${i}`, body: null,
+      });
+      event(store, ++seq, {
+        type: 'tool.started', toolCallId: `tool-${i}`, name: 'Read', title: `Read ${i}`,
+        input: { file_path: `${i}.ts` }, parentToolCallId: null,
+      });
+      for (let progress = 0; progress < 20; progress++) {
+        event(store, ++seq, { type: 'tool.progress', toolCallId: `tool-${i}`, seconds: progress });
+      }
+      event(store, ++seq, { type: 'tool.completed', toolCallId: `tool-${i}`, ok: true, output: 'done' });
+    }
+
+    const newest = transcriptPage(store, 'chat', null);
+    expect(newest.items).toHaveLength(40);
+    expect(newest.items.every((item) => item.kind === 'tool')).toBe(true);
+    expect(newest.hasOlder).toBe(true);
   });
 
   it('fetches a large tool body only by its call id', () => {
