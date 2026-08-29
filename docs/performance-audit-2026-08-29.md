@@ -34,6 +34,28 @@ Target: first board payload under 1 MB; cold response under 250 ms; memo hit
 under 20 ms; one-card delta under 20 KB. This supplies the backend contract for
 `bw-1rwe.5`, `.7`, `.8`, `.13`, `.14`, `.15`, and `.17`.
 
+#### Measured server-memory result
+
+The bounded, shared board cache landed in `48e0a7d`. Comparing that commit with
+its parent `59d911ca` using `BOARD_MEMORY_SAMPLES=9
+scripts/benchmark-board-cache-memory.sh` measured nine fresh release-build
+server processes per revision. Each process loaded eight identical boards of
+3,168 rich cards and then served eight cached full-board reads. Fixtures, data,
+processes, and dynamically selected server/workbench ports were isolated from
+the installed Atelier instance.
+
+| Linux process memory | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Median retained/peak memory | 172.527 MiB | 106.758 MiB | -65.770 MiB (-38.12%) |
+| Median workload memory above idle | 153.914 MiB | 88.230 MiB | -65.684 MiB (-42.68%) |
+
+Idle memory was comparable at about 18.6 MiB. Samples were bimodal because the
+system allocator sometimes retained freed arenas: retained-memory samples were
+135.270–173.762 MiB before and 73.109–107.762 MiB after. Every after sample was
+below the corresponding range maximum before the change. The benchmark reads
+`VmRSS` and `VmHWM` from `/proc/<pid>/status`; it measures the parent server
+process, not its separately spawned chat-helper process or browser memory.
+
 ### 2. Project-page JavaScript is too large and eager
 
 The production manifest loads 16 JavaScript files for `/project`: 1.70 MB raw,
