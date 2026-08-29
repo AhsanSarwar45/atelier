@@ -18,11 +18,13 @@ process.removeAllListeners('warning');
 
 const { isCodeModeEnvelope, normalizeCommands } = await import('../src/workbench/command-normalization.ts');
 const { auditCommandLabel, commandLabelProfile } = await import('../src/workbench/command-label-audit.ts');
+const { commandStructure, topLevelShellCommands } = await import('../src/workbench/command-structure.ts');
 const { normalizeServiceAction } = await import('../src/workbench/service-action.ts');
 const { whatACommandDid, whatItRan } = await import('../src/workbench/said-what-it-ran.ts');
 
 const JSON_OUT = process.argv.includes('--json');
 const VERIFY_LABELS = process.argv.includes('--verify-labels');
+const VERIFY_COMPOUNDS = process.argv.includes('--verify-compounds');
 const CLAUDE_ROOT = process.env.CLAUDE_SESSIONS ?? join(homedir(), '.claude', 'projects');
 const CODEX_ROOT = process.env.CODEX_SESSIONS ?? join(homedir(), '.codex', 'sessions');
 
@@ -46,12 +48,16 @@ const report = {
   events: { claude: 0, codex: 0, categorized: 0, bookkeeping: 0, unknown: 0 },
   tools: { total: 0, categorized: 0, raw: 0 },
   commands: { envelopes: 0, semantic: 0, named: 0, opaque: 0, wrapped: 0 },
+  compoundCommands: { observed: 0, structured: 0, unstructured: 0, contradictions: 0 },
   commandLabels: { covered: 0, verifiedCorrect: 0, knownWrong: 0, unverified: 0, uncovered: 0 },
+  stageLabels: { verifiedCorrect: 0, knownWrong: 0, unverified: 0, uncovered: 0 },
   serviceLabels: { observed: 0, contradictions: 0 },
   commandIntents: {},
   contradictions: {},
+  compoundContradictions: {},
+  stageContradictions: {},
   contradictionLabels: {},
-  profiles: { commands: {}, services: {} },
+  profiles: { commands: {}, compounds: {}, compoundLabels: {}, services: {} },
   boundaries: {},
   unknown: {},
 };
@@ -75,6 +81,42 @@ function commandCandidate(raw, source = 'direct') {
     if (command.boundaries.length) report.commands.wrapped += 1;
     for (const boundary of command.boundaries) count(report.boundaries, boundary.kind);
     const ran = whatACommandDid(command.command);
+    const structure = commandStructure(command.command);
+    if (structure.compound) {
+      report.compoundCommands.observed += 1;
+      if (structure.profile) {
+        report.compoundCommands.structured += 1;
+        count(report.profiles.compounds, structure.profile);
+      } else report.compoundCommands.unstructured += 1;
+      const verb = ran?.said.match(/^[A-Za-z][\w-]*/)?.[0] ?? 'raw';
+      count(report.profiles.compoundLabels, `${structure.profile || 'unstructured'}|${verb}|${ran?.kind ?? 'raw'}|${ran?.grave ? 'grave' : 'ordinary'}`);
+      // `kill -0` only probes liveness, so its head alone cannot prove a
+      // destructive effect. A top-level rm has no corresponding read mode.
+      const visiblyDestructive = structure.stages.includes('rm');
+      const said = ran?.said ?? '';
+      const collapsed = structure.stages.length > 1 && Boolean(ran) && !/, then |, and \d+ more/.test(said);
+      const collapsedIntoScript = structure.heredocs > 0 && collapsed && /^Ran an? .* script(?:\b| )/i.test(said);
+      if (visiblyDestructive && !ran?.grave) {
+        report.compoundCommands.contradictions += 1;
+        count(report.compoundContradictions, `${structure.profile}|hid-delete`);
+      }
+      if (collapsedIntoScript) {
+        report.compoundCommands.contradictions += 1;
+        count(report.compoundContradictions, `${structure.profile}|collapsed-heredoc`);
+      }
+    }
+    for (const link of topLevelShellCommands(command.command)) {
+      const stageRan = whatACommandDid(link.text);
+      const stageVerdict = auditCommandLabel(link.text, stageRan);
+      if (stageVerdict.status === 'verified') report.stageLabels.verifiedCorrect += 1;
+      else if (stageVerdict.status === 'contradiction') {
+        report.stageLabels.knownWrong += 1;
+        const profile = commandLabelProfile(link.text, stageRan) ?? 'unprofiled';
+        count(report.stageContradictions, `${stageVerdict.intent}:${stageVerdict.reason}|${profile}`);
+      }
+      else if (stageVerdict.status === 'unverified') report.stageLabels.unverified += 1;
+      else report.stageLabels.uncovered += 1;
+    }
     if (ran) {
       report.commands.named += 1;
       report.commandLabels.covered += 1;
@@ -280,6 +322,12 @@ report.unknown = orderedUnknown;
 report.profiles.commands = Object.fromEntries(
   Object.entries(report.profiles.commands).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
 );
+report.profiles.compounds = Object.fromEntries(
+  Object.entries(report.profiles.compounds).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+);
+report.profiles.compoundLabels = Object.fromEntries(
+  Object.entries(report.profiles.compoundLabels).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+);
 report.profiles.services = Object.fromEntries(
   Object.entries(report.profiles.services).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
 );
@@ -290,7 +338,9 @@ if (JSON_OUT) {
   console.log(`${report.records.claude} Claude and ${report.records.codex} Codex records`);
   console.log(`${report.commands.semantic} semantic commands from ${report.commands.envelopes} envelopes; ${report.commands.named} named, ${report.commands.wrapped} unwrapped, ${report.commands.opaque} opaque`);
   console.log(`${report.commandLabels.covered} command labels covered; ${report.commandLabels.verifiedCorrect} verified intent-correct, ${report.commandLabels.knownWrong} known wrong, ${report.commandLabels.unverified} labelled but unverified, ${report.commandLabels.uncovered} uncovered`);
+  console.log(`${report.stageLabels.verifiedCorrect} top-level stages verified intent-correct, ${report.stageLabels.knownWrong} known wrong, ${report.stageLabels.unverified} unverified, ${report.stageLabels.uncovered} uncovered`);
   console.log(`${Object.keys(report.profiles.commands).length} privacy-safe command signature groups`);
+  console.log(`${report.compoundCommands.structured}/${report.compoundCommands.observed} compound commands structurally profiled across ${Object.keys(report.profiles.compounds).length} privacy-safe shapes; ${report.compoundCommands.unstructured} unstructured, ${report.compoundCommands.contradictions} composition contradictions`);
   for (const [reason, count] of Object.entries(report.contradictions).sort((a, b) => b[1] - a[1])) {
     console.log(`  ${String(count).padStart(7)}  ${reason}`);
   }
@@ -302,4 +352,5 @@ if (JSON_OUT) {
   }
 }
 
-if (VERIFY_LABELS && (report.commandLabels.knownWrong > 0 || report.serviceLabels.contradictions > 0)) process.exitCode = 1;
+if (VERIFY_LABELS && (report.commandLabels.knownWrong > 0 || report.stageLabels.knownWrong > 0 || report.serviceLabels.contradictions > 0)) process.exitCode = 1;
+if (VERIFY_COMPOUNDS && (report.compoundCommands.unstructured > 0 || report.compoundCommands.contradictions > 0)) process.exitCode = 1;
