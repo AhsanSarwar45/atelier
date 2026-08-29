@@ -430,6 +430,60 @@ mod tests {
         haystack.windows(needle.len()).any(|run| run == needle)
     }
 
+    /// How long a case waits for the pump to stop before it measures it anyway
+    /// and lets the assertions say what went wrong.
+    ///
+    /// Generous on purpose: a pump that is going to stop stops within a second
+    /// of a shell starting, so nothing is gained by waiting less, and the only
+    /// thing reaching this deadline means is that something is wrong in a way
+    /// the case is about to describe better than a deadline could.
+    const PATIENCE: Duration = Duration::from_secs(30);
+
+    /// How long the count has to hold still before the pump is taken to have
+    /// stopped rather than to be between two reads.
+    const STOPPED_FOR: Duration = Duration::from_millis(250);
+
+    /// How often the count is looked at while waiting for it to hold still.
+    const LOOK_EVERY: Duration = Duration::from_millis(20);
+
+    /// How much the pump had taken off the shell by the time it stopped taking
+    /// any more with `viewer`'s queue full.
+    ///
+    /// Waited for rather than sampled after a fixed sleep, and both halves of
+    /// what is waited for matter. That the count has stopped moving is what the
+    /// case is about. That the queue is full while it has stopped is what says
+    /// the pump stopped for want of room rather than for want of a shell that
+    /// has not got going yet — and unlike a number of bytes, it says so
+    /// whatever the machine was doing at the time.
+    ///
+    /// Where the pump stops is not a fixed number and cannot be asserted as
+    /// one. It is however many bytes were in the reads that happened to fill
+    /// those queues: around a megabyte when the shell is running flat out and
+    /// its reads come back full, and a few kilobytes when the same shell is
+    /// trickling and every read is short. Both are the same pump waiting in the
+    /// same way.
+    ///
+    /// Gives up by measuring anyway, so that what is wrong is said by the
+    /// assertions that follow rather than by a deadline that knows less.
+    async fn taken_once_it_stalls_on(pump: &Pump, viewer: &mpsc::Receiver<Message>) -> usize {
+        let giving_up = Instant::now() + PATIENCE;
+        let mut taken = pump.taken();
+        let mut unchanged_since = Instant::now();
+        while Instant::now() < giving_up {
+            tokio::time::sleep(LOOK_EVERY).await;
+            let now = pump.taken();
+            if now != taken {
+                taken = now;
+                unchanged_since = Instant::now();
+            } else if viewer.len() == MESSAGES_PER_VIEWER
+                && unchanged_since.elapsed() >= STOPPED_FOR
+            {
+                break;
+            }
+        }
+        taken
+    }
+
     /// Twenty thousand numbered lines, which comes to a little over a megabyte
     /// once the tty has turned every line break into two bytes.
     ///
@@ -504,13 +558,10 @@ mod tests {
         let room = READ_AT_ONCE * (1 + READS_IN_HAND)
             + (MOST_IN_ONE_MESSAGE + READ_AT_ONCE) * (2 + MESSAGES_PER_VIEWER);
 
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let stalled_at = pump.taken();
-        assert!(
-            stalled_at > READ_AT_ONCE,
-            "the pump took only {stalled_at} bytes in a whole second, so the shell never got \
-             going and this case would prove nothing about what happens when it does"
-        );
+        // Waited for rather than slept over: what is being measured is where the
+        // pump stopped, and it stops when it stops rather than when a second is
+        // up.
+        let stalled_at = taken_once_it_stalls_on(&pump, &viewer).await;
         // Deliberately not phrased in terms of `room`, which grows if somebody
         // grows the constants: a pump that has taken a large fraction of
         // everything offered is buffering it, whatever its queues claim to be.
@@ -524,7 +575,23 @@ mod tests {
             "the pump is holding {stalled_at} bytes, which is more than the {room} bytes its \
              own queues add up to — something in here is buffering without a bound"
         );
+        // What the count alone cannot say: that the pump stopped because this
+        // viewer has nowhere to put another message, rather than because the
+        // shell had not got going yet. How many bytes that took is whatever the
+        // reads that filled the queue happened to hold, so it is this and not a
+        // number of bytes that the rest of the case rests on.
+        assert_eq!(
+            viewer.len(),
+            MESSAGES_PER_VIEWER,
+            "the pump stopped with the viewer holding {} of the {MESSAGES_PER_VIEWER} messages \
+             it can, so it was not waiting for room and this case would prove nothing about \
+             what happens when it is",
+            viewer.len()
+        );
 
+        // Held still for a moment already, and now for a whole second on top of
+        // it: a pump that is waiting for room stays where it is for as long as
+        // nobody makes any.
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(
             pump.taken(),

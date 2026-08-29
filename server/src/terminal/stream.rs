@@ -8,18 +8,28 @@
 //!
 //! ## What is carried, and which way
 //!
-//! Downwards, every frame is binary and every frame is exactly what came off
-//! the pseudo-terminal. Nothing here re-flows it, splits it on lines, or
-//! touches its line endings. `pump.rs` gives the long version; the short one is
-//! that colour, cursor position, character set and screen mode are all carried
-//! by escape sequences that span runs of bytes, and a run cut anywhere inside
-//! one is a screen the terminal draws wrongly and never recovers from, because
-//! nothing later says what the missing half would have said.
+//! Downwards, a binary frame is output, and it is exactly what came off the
+//! pseudo-terminal. Nothing here re-flows it, splits it on lines, or touches
+//! its line endings. `pump.rs` gives the long version; the short one is that
+//! colour, cursor position, character set and screen mode are all carried by
+//! escape sequences that span runs of bytes, and a run cut anywhere inside one
+//! is a screen the terminal draws wrongly and never recovers from, because
+//! nothing later says what the missing half would have said. Where one frame
+//! stops and the next begins says nothing at all, though: a browser hands the
+//! bytes to its terminal in the order they arrived, and two frames there are
+//! the same as one.
 //!
-//! The first frame is everything the viewer missed, and there is always exactly
-//! one of it even when it is empty. That is a promise worth making: a browser
-//! knows the replay is over when the second frame arrives, so it can settle its
-//! scroll once rather than after every frame.
+//! Everything the viewer missed comes first, and it comes in as many frames as
+//! it takes rather than in one. Sending a quarter of a megabyte as a single
+//! frame would put the bound further down — the one that decides a viewer is
+//! gone — around a whole handover instead of around a socket that has stopped
+//! taking bytes, and then how much there is to replay decides who is treated as
+//! gone. So the end of the replay is said rather than counted: one text frame,
+//! `REPLAY_IS_OVER`, after the last of it, and always exactly one of those even
+//! when nothing was missed and no frame came before it. A browser still learns
+//! the boundary in one place and settles its scroll once rather than after
+//! every frame, and it tells that frame from output by the frame's type alone,
+//! without looking inside it.
 //!
 //! Upwards, binary is keystrokes and text is a control message. The split is
 //! the protocol's, not ours. RFC 6455 requires a text frame to be valid UTF-8,
@@ -29,7 +39,10 @@
 //! characters, which is not a slow keystroke but a wrong one. So keystrokes
 //! must be binary, which leaves text free for the handful of small messages
 //! that are ours to shape and are already JSON. Nothing needs an envelope, a
-//! length prefix, or a first byte reserved as a tag.
+//! length prefix, or a first byte reserved as a tag. Downwards the same split
+//! is ours rather than the protocol's, and it is safe to have taken for the
+//! reason the protocol took it: output is bytes and can never be sent as text,
+//! so a text frame going down can only ever be something this file said.
 //!
 //! ## When a viewer stops reading
 //!
@@ -45,6 +58,19 @@
 //! at all for `WEDGED_AFTER` is taken as a viewer that is gone, and the socket
 //! is dropped. Dropping it drops the receiver, which fails the pump's pending
 //! send immediately and lets every other viewer carry on.
+//!
+//! The bound is on one send, so what one send carries has to be small enough
+//! that a viewer still moving finishes it — otherwise the bound is about the
+//! size of the transfer and not about the viewer. The live half is already
+//! bounded, by the gathering in `pump.rs`; the replay is bounded here, by being
+//! handed over in pieces.
+//!
+//! The bill for that is worth saying out loud too. A viewer that takes one
+//! piece and then stops, over and over, is given the window afresh each time,
+//! so it can hold a shell up for `WEDGED_AFTER` a piece rather than
+//! `WEDGED_AFTER` in all. It is bounded by how many pieces a replay comes in,
+//! and it is what asking about progress costs when the only thing that can
+//! actually be measured is whether a send finished.
 //!
 //! That the cut is cheap is what makes it the right answer. A viewer let go of
 //! reconnects and is handed a replay, so the cost of being wrong about a slow
@@ -70,11 +96,37 @@ use uuid::Uuid;
 /// How long one send may make no progress at all before its viewer is taken to
 /// be gone.
 ///
-/// Not a budget for the whole of a slow download: a viewer on a poor link
-/// drains its socket steadily and every send finishes, so this only fires when
-/// nothing has moved for the whole window. Five seconds of a socket that will
-/// not take a byte is already a long time to be holding up a shell.
+/// Not a budget for the whole of a slow download. `SinkExt::send` will not say
+/// how much of a send has moved, so the only way to ask about progress rather
+/// than about the total is to keep what one send carries small enough that a
+/// viewer moving at all gets to the end of it: a replay goes in pieces of
+/// `MOST_IN_ONE_REPLAY_FRAME`, and a live message is whatever `pump.rs`
+/// gathered, which is bounded there. Five seconds of a socket that will not
+/// take a piece that size is already a long time to be holding up a shell.
 const WEDGED_AFTER: Duration = Duration::from_secs(5);
+
+/// How much of a replay one frame carries.
+///
+/// A quarter of a megabyte is what a viewer can have missed, and a send of that
+/// size bounded by `WEDGED_AFTER` asks for fifty kilobytes a second before it
+/// asks whether anything is moving, so everybody under that is cut however
+/// steadily they are reading — and handed the same quarter megabyte when they
+/// come back. In pieces this size the slowest link that finishes one inside the
+/// bound is around six kilobytes a second, which is slower than a link could
+/// hold a socket open over at all, and a whole replay is eight frames rather
+/// than one. Smaller again would cost little and buy nothing: the point is to
+/// be well under what a real link does, not to be as small as possible.
+const MOST_IN_ONE_REPLAY_FRAME: usize = 32 * 1024;
+
+/// What is said when the replay is over.
+///
+/// Text, because downwards a binary frame is output and nothing else, so a
+/// browser tells this from a byte of terminal by the frame's type and never has
+/// to look inside it or count what came before it. JSON with a `type` in it
+/// because that is the shape the messages going the other way already have, and
+/// because a second kind of message down here should cost neither end an
+/// envelope nor a reserved first byte.
+const REPLAY_IS_OVER: &str = "{\"type\":\"replayed\"}";
 
 /// The end of the socket that bytes go out of.
 type ToBrowser = SplitSink<WebSocket, Message>;
@@ -129,7 +181,7 @@ async fn carry(socket: WebSocket, session: Arc<Session>) {
     // lost or shown twice.
     let (missed, mut live) = session.pump.attach();
 
-    if !hand_on(&mut to_browser, missed).await {
+    if !hand_over_the_replay(&mut to_browser, missed).await {
         return;
     }
 
@@ -173,6 +225,35 @@ async fn carry(socket: WebSocket, session: Arc<Session>) {
 async fn hand_on(to_browser: &mut ToBrowser, run: Vec<u8>) -> bool {
     matches!(
         tokio::time::timeout(WEDGED_AFTER, to_browser.send(Message::Binary(run))).await,
+        Ok(Ok(()))
+    )
+}
+
+/// Hands over everything the viewer missed, and then says that it is over.
+///
+/// In pieces because `WEDGED_AFTER` bounds one send: a replay handed over whole
+/// asks a viewer to take a quarter of a megabyte inside that window rather than
+/// asking whether it is taking anything, which cuts people for being slow and
+/// then hands the same quarter megabyte to them again when they reconnect. The
+/// pieces are indistinguishable from the live half once they arrive — a browser
+/// feeds them all to its terminal in order — so where the replay stops is said
+/// with a frame of its own instead of being counted.
+///
+/// False the moment a piece or the marker stops moving, which is the same news
+/// as any other send that stopped: this viewer is gone.
+async fn hand_over_the_replay(to_browser: &mut ToBrowser, missed: Vec<u8>) -> bool {
+    for piece in missed.chunks(MOST_IN_ONE_REPLAY_FRAME) {
+        if !hand_on(to_browser, piece.to_vec()).await {
+            return false;
+        }
+    }
+
+    matches!(
+        tokio::time::timeout(
+            WEDGED_AFTER,
+            to_browser.send(Message::Text(REPLAY_IS_OVER.to_owned())),
+        )
+        .await,
         Ok(Ok(()))
     )
 }
@@ -234,7 +315,7 @@ mod tests {
     use axum::Router;
     use hyper_util::rt::TokioIo;
     use std::time::Instant;
-    use tokio::io::DuplexStream;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
     use tokio::sync::mpsc::Receiver;
     use tokio_tungstenite::tungstenite;
     use tokio_tungstenite::tungstenite::Message as Frame;
@@ -267,6 +348,21 @@ mod tests {
     /// which is what one case needs and no other case can tell apart from a
     /// socket of any other size.
     const PIPE_HOLDS: usize = 16 * 1024;
+
+    /// How much of a slow link's backlog moves at a time.
+    ///
+    /// Sixteen kilobytes every half second is thirty-two a second, which is a
+    /// poor mobile link and is well under the fifty a quarter megabyte in one
+    /// send would demand. The pace is the whole of what one case turns on, so
+    /// it is worked out here rather than left to be inferred: a quarter of a
+    /// megabyte at this rate takes eight seconds, which is longer than
+    /// `WEDGED_AFTER` by enough that it could be nothing else, while each
+    /// thirty-two kilobyte piece of it is a second's work and finishes with
+    /// four to spare.
+    const TRICKLE: usize = 16 * 1024;
+
+    /// How often that much of it moves.
+    const TRICKLE_EVERY: Duration = Duration::from_millis(500);
 
     /// Twenty thousand numbered lines, which is more than every queue between a
     /// shell and a browser could hold at once however generously they were
@@ -321,6 +417,43 @@ mod tests {
         browser
     }
 
+    /// The browser's end of a connection that takes bytes steadily and slowly.
+    ///
+    /// A second pipe with a task in between, because the slowness has to be
+    /// under the websocket rather than over it. A case that simply waited
+    /// between reads would still drain whatever frame it asked for as fast as
+    /// the pipe would give it, so a replay sent as one enormous frame would
+    /// arrive at full speed and the case would prove nothing about the size of
+    /// a frame. Here it is bytes that are slow, which is what is slow about a
+    /// slow link.
+    ///
+    /// Only downwards. Nothing typed matters to the case this is for, and a
+    /// link that was slow both ways would be two things at once for no reason.
+    fn a_slow_connection(app: &Router) -> DuplexStream {
+        let (mut from_server, mut to_server) = tokio::io::split(one_connection(app));
+        let (browser, relayed) = tokio::io::duplex(PIPE_HOLDS);
+        let (mut from_browser, mut to_browser) = tokio::io::split(relayed);
+
+        tokio::spawn(async move {
+            let _ = tokio::io::copy(&mut from_browser, &mut to_server).await;
+        });
+        tokio::spawn(async move {
+            let mut carried = vec![0u8; TRICKLE];
+            loop {
+                let taken = match from_server.read(&mut carried).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(taken) => taken,
+                };
+                if to_browser.write_all(&carried[..taken]).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(TRICKLE_EVERY).await;
+            }
+        });
+
+        browser
+    }
+
     /// Asks to watch one shell as a browser on `host` would, and gives back
     /// either the socket or the refusal that came instead of it.
     async fn watching(app: &Router, id: &str, host: &str) -> Result<Socket, StatusCode> {
@@ -340,12 +473,60 @@ mod tests {
         }
     }
 
+    /// A socket watching one shell over a link that only takes a trickle.
+    async fn watched_slowly(app: &Router, id: &str) -> Socket {
+        let asking = format!("ws://{OURS}{MOUNTED_AT}/{id}/stream");
+        match tokio_tungstenite::client_async(asking, a_slow_connection(app)).await {
+            Ok((socket, _)) => socket,
+            Err(why) => panic!("watching a shell over a slow link was refused: {why}"),
+        }
+    }
+
     /// The one frame that must be there, which must be bytes.
     async fn one_frame(socket: &mut Socket) -> Vec<u8> {
         match tokio::time::timeout(PATIENCE, socket.next()).await {
             Ok(Some(Ok(Frame::Binary(run)))) => run,
             other => panic!("the socket should have carried a frame of bytes, and carried {other:?}"),
         }
+    }
+
+    /// The pieces the replay arrived in, read up to the frame that says it is
+    /// over.
+    ///
+    /// Where the pieces fall is nobody's business, so most cases join these
+    /// back together at once and ask about the bytes. What is worth reading
+    /// here is what is not allowed: a socket that ends, or says goodbye, or
+    /// says anything else at all before it has said the replay is over has
+    /// dropped a viewer part-way through being shown what it missed, which is
+    /// the one thing several of these cases exist to catch. It is said plainly
+    /// here rather than left to confuse whichever case asked.
+    async fn the_replay_in_pieces(socket: &mut Socket) -> Vec<Vec<u8>> {
+        let mut pieces: Vec<Vec<u8>> = Vec::new();
+        loop {
+            match tokio::time::timeout(PATIENCE, socket.next()).await {
+                Ok(Some(Ok(Frame::Binary(piece)))) => pieces.push(piece),
+                Ok(Some(Ok(Frame::Text(said)))) => {
+                    assert_eq!(
+                        said, REPLAY_IS_OVER,
+                        "the only thing a socket says downwards as text is that the replay is \
+                         over, and it said {said:?}"
+                    );
+                    return pieces;
+                }
+                // Ping and pong are answered under the socket and are not output.
+                Ok(Some(Ok(Frame::Ping(_) | Frame::Pong(_)))) => {}
+                other => panic!(
+                    "the socket should have carried the whole replay and then said it was \
+                     over, and carried {other:?} after {} bytes of it",
+                    pieces.concat().len()
+                ),
+            }
+        }
+    }
+
+    /// Everything the viewer missed, put back together.
+    async fn the_whole_replay(socket: &mut Socket) -> Vec<u8> {
+        the_replay_in_pieces(socket).await.concat()
     }
 
     /// Every frame the socket carries until the whole of them satisfies
@@ -373,8 +554,8 @@ mod tests {
         frames
     }
 
-    /// Every frame a socket carries to the end of it, and whether the server
-    /// said goodbye before it went.
+    /// Every frame of output a socket carries to the end of it, and whether the
+    /// server said goodbye before it went.
     ///
     /// The goodbye is the difference between the two ways a socket ends. A
     /// shell that ended is followed by a close frame; a viewer that was cut for
@@ -448,6 +629,28 @@ mod tests {
         )
     }
 
+    /// Waits until the shell has printed `mark`, and says so if it never does.
+    ///
+    /// A fixed sleep in its place is a guess at how long a shell takes to start,
+    /// read its profile and get a command run, which is a few milliseconds on an
+    /// idle machine and can be most of a second with the rest of the suite
+    /// running beside it. Guess low and the case reaches the moment it is about
+    /// before there is anything there; guess high and it walks past it. Neither
+    /// is a fault in what is being tested, so neither should be able to fail a
+    /// case about it.
+    async fn printed_as_far_as(session: &Arc<Session>, mark: &str) {
+        let giving_up = Instant::now() + PATIENCE;
+        while Instant::now() < giving_up {
+            if String::from_utf8_lossy(&session.pump.replay()).contains(mark) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!(
+            "the shell never printed {mark:?}, so this case never reached the moment it is about"
+        )
+    }
+
     /// The one shell a case has opened.
     fn the_shell(shells: &Shells) -> Arc<Session> {
         shells.list().pop().expect("the shell that was just opened")
@@ -475,7 +678,10 @@ mod tests {
         printed.extend_from_slice(&printed_until_quiet(&mut watching_too).await);
 
         let mut socket = watched(&app, &id).await;
-        let replay = one_frame(&mut socket).await;
+        // Joined back together: the replay is handed over in pieces and where
+        // the pieces fall is not what a viewer coming back to a shell cares
+        // about. What it is owed is every byte, in order, and nothing else.
+        let replay = the_whole_replay(&mut socket).await;
 
         assert!(
             printed_until_quiet(&mut watching_too).await.is_empty(),
@@ -505,7 +711,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_shell_that_has_printed_nothing_still_sends_one_empty_replay_frame() {
+    async fn a_shell_that_has_printed_nothing_is_still_told_the_replay_is_over() {
         let (shells, app) = a_register();
         // Opened here rather than through the route, so that nothing but the
         // handshake stands between the shell starting and the socket attaching.
@@ -516,18 +722,18 @@ mod tests {
             .expect("a shell should start");
         let mut socket = watched(&app, &session.id.to_string()).await;
 
-        let replay = one_frame(&mut socket).await;
+        // Nothing missed is no frames of it, and then the marker anyway. That
+        // is the whole promise: a browser settles its scroll when it hears the
+        // replay is over, and one that is never told because there was nothing
+        // to tell would wait for a boundary that never comes.
+        let replay = the_replay_in_pieces(&mut socket).await;
         assert!(
             replay.is_empty(),
             "the shell printed {:?} before the socket could attach, so this case never saw the \
              empty replay it exists to prove",
-            String::from_utf8_lossy(&replay)
+            String::from_utf8_lossy(&replay.concat())
         );
 
-        // The promise is worth making only because the frame is always there: a
-        // browser settles its scroll once, when the second frame arrives, and a
-        // replay that was skipped for being empty would leave it waiting for a
-        // boundary that never comes.
         let live = one_frame(&mut socket).await;
         assert!(
             !live.is_empty(),
@@ -549,9 +755,10 @@ mod tests {
             .type_into(PRINT_A_LOT_THEN_SLOWLY)
             .expect("a shell that just started should take keystrokes");
 
-        // Long enough to be well inside the printing and nowhere near the end
-        // of it.
-        tokio::time::sleep(Duration::from_millis(400)).await;
+        // Well inside the printing and nowhere near the end of it. The burst is
+        // printed and the slow half has begun, which leaves a second and a half
+        // of live output still to come for the seam to be found in.
+        printed_as_far_as(&session, "LINE000").await;
         let mut socket = watched(&app, &id).await;
         // Attached, and then nothing is read from it for a moment, the way a
         // viewer on a slow link reads nothing for a moment. This is what turns
@@ -560,11 +767,11 @@ mod tests {
         // goes on printing throughout. Anything asked for as the past and
         // subscribed to as the future in two steps is lost in this window.
         tokio::time::sleep(Duration::from_millis(250)).await;
+        let replay = the_whole_replay(&mut socket).await;
         let (frames, _) = everything_carried(&mut socket).await;
         let printed = printed.await.expect("the shell's output should have been gathered");
 
-        let carried = frames.concat();
-        let replay = frames.first().expect("a socket should be handed a replay").clone();
+        let carried = [replay.clone(), frames.concat()].concat();
         assert!(
             String::from_utf8_lossy(&replay).contains("LINE00"),
             "this case is about a seam, and the socket attached before the shell had printed \
@@ -578,7 +785,8 @@ mod tests {
         );
         assert!(
             frames.len() > 2,
-            "the live half should be several frames, and the socket carried {} in all",
+            "the live half should be several frames, and the socket carried {} of them after \
+             the replay",
             frames.len()
         );
         assert!(
@@ -676,10 +884,10 @@ mod tests {
         let id = open_one(&app, None).await;
         let mut wedged = watched(&app, &id).await;
         let mut carrying_on = watched(&app, &id).await;
-        // Both replays read, so both viewers are known to be attached before
-        // anything is printed for them to fall behind on.
-        one_frame(&mut wedged).await;
-        one_frame(&mut carrying_on).await;
+        // Both replays read to the end of them, so both viewers are known to be
+        // attached before anything is printed for them to fall behind on.
+        the_replay_in_pieces(&mut wedged).await;
+        the_replay_in_pieces(&mut carrying_on).await;
 
         the_shell(&shells)
             .shell
@@ -727,8 +935,8 @@ mod tests {
         let id = open_one(&app, None).await;
         let mut one = watched(&app, &id).await;
         let mut other = watched(&app, &id).await;
-        one_frame(&mut one).await;
-        one_frame(&mut other).await;
+        the_replay_in_pieces(&mut one).await;
+        the_replay_in_pieces(&mut other).await;
 
         the_shell(&shells)
             .shell
@@ -769,26 +977,84 @@ mod tests {
         );
 
         let mut socket = watched(&app, &id).await;
-        let (frames, goodbye) = everything_carried(&mut socket).await;
+        let replay = the_whole_replay(&mut socket).await;
+        let (afterwards, goodbye) = everything_carried(&mut socket).await;
 
         assert_eq!(
-            frames.first().map(Vec::as_slice),
-            Some(printed.as_slice()),
+            replay,
+            printed,
             "a page reloaded a second after a shell ended still wants the last of what it \
              printed, and was handed {:?}",
-            frames.first().map(|run| String::from_utf8_lossy(run))
+            String::from_utf8_lossy(&replay)
         );
-        assert_eq!(
-            frames.len(),
-            1,
+        assert!(
+            afterwards.is_empty(),
             "a shell that has ended has nothing left to say, so there was nothing to send after \
-             the replay, and {} frames were sent",
-            frames.len()
+             the replay was over, and {} frames came after it",
+            afterwards.len()
         );
         assert!(
             goodbye,
             "a socket attached to a shell that is over should be told the output has ended \
              rather than left open on a shell that will never print again"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_viewer_reading_steadily_but_slowly_is_shown_the_whole_replay_and_is_not_cut() {
+        let (shells, app) = a_register();
+        let id = open_one(&app, None).await;
+        let session = the_shell(&shells);
+        let printed = printed_in_full(&session);
+
+        // Well over a quarter of a megabyte, and read to the end before the
+        // slow socket attaches. What is kept is then the whole of what can be
+        // kept, and the replay is the entire case: no live output arrives
+        // beside it to muddle what was cut off from what was never sent.
+        session
+            .shell
+            .lock()
+            .unwrap()
+            .type_into(PRINT_A_LOT)
+            .expect("a shell that just started should take keystrokes");
+        printed.await.expect("the shell's output should have been gathered");
+
+        let kept = session.pump.replay();
+        assert!(
+            kept.len() > 250_000,
+            "this case is about a replay too large for one send to a slow viewer, and the shell \
+             left only {} bytes of one",
+            kept.len()
+        );
+
+        // Thirty-two kilobytes a second, steadily, with nothing ever stopping.
+        // That is slower than the fifty a single send of this replay would
+        // demand inside `WEDGED_AFTER` and far faster than a wedged socket,
+        // which takes nothing at all — the difference this file has to be able
+        // to tell, and could not when the limit was on the handover rather than
+        // on a frame of it.
+        let mut socket = watched_slowly(&app, &id).await;
+        let started = Instant::now();
+        let replay = the_whole_replay(&mut socket).await;
+        let took = started.elapsed();
+
+        assert!(
+            took > WEDGED_AFTER,
+            "the whole replay reached this viewer in {took:?}, which is inside the window one \
+             send is given, so the link was not slow enough for this case to be about anything"
+        );
+        assert_eq!(
+            replay.len(),
+            kept.len(),
+            "a viewer that never stopped reading was handed {} of the {} bytes kept for it, so \
+             how much there was to send is what decided it was gone",
+            replay.len(),
+            kept.len()
+        );
+        assert!(
+            replay == kept,
+            "the viewer was handed the right number of bytes and the wrong ones, and {}",
+            where_they_part(&kept, &replay)
         );
     }
 
