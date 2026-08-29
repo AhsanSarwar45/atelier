@@ -16,7 +16,7 @@ describe('visual artifact rendering', () => {
   it('renders Mermaid through the library in strict mode', async () => {
     vi.stubGlobal('fetch', response({ version: 1, kind: 'mermaid', title: 'Diagram', source: 'flowchart LR\nA-->B' }));
     render(<VisualArtifactView asset={`${'a'.repeat(64)}.artifact.json`} />);
-    expect(await screen.findByTestId('mermaid-artifact')).toHaveTextContent('Diagram');
+    await waitFor(() => expect(screen.getByTestId('mermaid-artifact')).toHaveTextContent('Diagram'));
   });
   it('renders an automatically laid out interactive flow canvas', async () => {
     vi.stubGlobal('fetch', response({ version: 1, kind: 'flow', title: 'Flow', nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], edges: [{ id: 'ab', from: 'a', to: 'b' }] }));
