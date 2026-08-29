@@ -9,6 +9,7 @@ import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
 import { apiUrl } from '@/lib/api-base';
 import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-widgets';
+import { ImageComparisonView } from '@/workbench/image-comparison';
 import { openLocalPath } from '@/workbench/open-local-path';
 
 const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
@@ -31,6 +32,8 @@ function mediaUrl(src: string): string {
     return '';
   }
 }
+
+const presentationAssetUrl = (asset: string) => apiUrl(`/api/presentation-assets/${encodeURIComponent(asset)}`);
 
 function Chart({ widget }: { widget: ChartWidget }) {
   const values = widget.data.flatMap((point) => point.values);
@@ -190,6 +193,26 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
 
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   if (widget.type === 'explainer') return <Explainer widget={widget} />;
+  if (widget.type === 'image') return (
+    <Panel data-testid="chat-widget" data-widget="image" tone="frame" className="mb-3 max-w-2xl">
+      <Heading title={widget.title} />
+      <figure>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="max-h-[38rem] w-full rounded-md object-contain" />
+        {widget.caption && <figcaption className="mt-2 text-xs text-muted-foreground">{widget.caption}</figcaption>}
+      </figure>
+    </Panel>
+  );
+  if (widget.type === 'image_compare') return (
+    <Panel data-testid="chat-widget" data-widget="image_compare" tone="frame" className="mb-3 max-w-2xl">
+      <Heading title={widget.title} />
+      <ImageComparisonView comparison={{
+        mode: widget.mode,
+        before: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.before.asset), alt: widget.before.alt },
+        after: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.after.asset), alt: widget.after.alt },
+      }} />
+    </Panel>
+  );
   if (widget.type === 'video') return (
     <Panel data-testid="chat-widget" data-widget="video" tone="frame" className="mb-3 max-w-2xl">
       <Heading title={widget.title} />

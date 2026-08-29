@@ -23,6 +23,13 @@ export type TableWidget = {
 export type VideoWidget = {
   type: 'video'; title?: string; src: string; poster?: string;
 };
+export type ImageWidget = {
+  type: 'image'; title?: string; asset: string; alt: string; caption?: string;
+};
+export type ImageCompareWidget = {
+  type: 'image_compare'; title?: string; mode: 'side_by_side' | 'wipe';
+  before: { asset: string; alt: string }; after: { asset: string; alt: string };
+};
 export type ExplainerWidget = {
   type: 'explainer';
   layout?: 'flow' | 'sequence' | 'cycle' | 'layers';
@@ -33,7 +40,7 @@ export type ExplainerWidget = {
   steps: Array<{ label: string; detail?: string; active: string[] }>;
   evidence?: Array<{ label: string; path: string; line?: number }>;
 };
-export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ExplainerWidget;
+export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ExplainerWidget;
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -45,6 +52,8 @@ const mediaSource = (value: unknown): value is string => typeof value === 'strin
 const path = (value: unknown): value is string => typeof value === 'string'
   && value.trim().length > 0 && value.length <= 4096
   && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value));
+const asset = (value: unknown): value is string => typeof value === 'string'
+  && /^[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(value);
 
 export function widget(value: unknown): ChatWidget | null {
   if (!object(value) || !text(value.type) || !title(value.title)) return null;
@@ -73,6 +82,11 @@ export function widget(value: unknown): ChatWidget | null {
       && (item.status === undefined || ['done', 'current', 'next'].includes(String(item.status))))) return value as TimelineWidget;
   if (value.type === 'video' && mediaSource(value.src)
     && (value.poster === undefined || mediaSource(value.poster))) return value as VideoWidget;
+  if (value.type === 'image' && asset(value.asset) && text(value.alt)
+    && (value.caption === undefined || text(value.caption))) return value as ImageWidget;
+  if (value.type === 'image_compare' && (value.mode === 'side_by_side' || value.mode === 'wipe')
+    && object(value.before) && asset(value.before.asset) && text(value.before.alt)
+    && object(value.after) && asset(value.after.asset) && text(value.after.alt)) return value as ImageCompareWidget;
   if (value.type === 'explainer' && (value.layout === undefined || ['flow', 'sequence', 'cycle', 'layers'].includes(String(value.layout)))
     && (value.summary === undefined || text(value.summary))
     && Array.isArray(nodes) && nodes.length >= 2 && nodes.length <= 12
@@ -106,6 +120,8 @@ const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   timeline: new Set(['type', 'title', 'items']),
   table: new Set(['type', 'title', 'columns', 'rows']),
   video: new Set(['type', 'title', 'src', 'poster']),
+  image: new Set(['type', 'title', 'asset', 'alt', 'caption']),
+  image_compare: new Set(['type', 'title', 'mode', 'before', 'after']),
   explainer: new Set(['type', 'layout', 'title', 'summary', 'nodes', 'edges', 'steps', 'evidence']),
 };
 
@@ -125,6 +141,8 @@ export function presentableWidget(value: unknown): ChatWidget | null {
     && parsed.edges.every((item) => fieldsAre(item, new Set(['from', 'to', 'label'])))
     && parsed.steps.every((item) => fieldsAre(item, new Set(['label', 'detail', 'active'])))
     && (parsed.evidence === undefined || parsed.evidence.every((item) => fieldsAre(item, new Set(['label', 'path', 'line'])))) ? parsed : null;
+  if (parsed.type === 'image_compare') return fieldsAre(parsed.before, new Set(['asset', 'alt']))
+    && fieldsAre(parsed.after, new Set(['asset', 'alt'])) ? parsed : null;
   return parsed;
 }
 

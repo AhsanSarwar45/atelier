@@ -4,13 +4,28 @@
 
 use axum::{
     body::Body,
-    extract::Query,
+    extract::{Path, Query},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+const PRESENTATION_ASSET: &str = "presentation asset";
+
+fn valid_presentation_asset(asset: &str) -> bool {
+    asset.split_once('.').is_some_and(|(digest, extension)| digest.len() == 64
+        && digest.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        && matches!(extension, "png" | "jpg" | "gif" | "webp"))
+}
+
+fn presentation_asset_path(directory: &std::path::Path, asset: &str) -> Option<PathBuf> {
+    if !valid_presentation_asset(asset) { return None; }
+    let root = std::fs::canonicalize(directory).ok()?;
+    let path = std::fs::canonicalize(directory.join(asset)).ok()?;
+    (path.starts_with(root) && path.is_file()).then_some(path)
+}
 
 use super::validate_path_security;
 
@@ -60,6 +75,35 @@ pub async fn media(headers: HeaderMap, Query(params): Query<FsExistsParams>) -> 
         .header(header::CONTENT_DISPOSITION, "inline")
         .body(Body::from(bytes))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serve file").into_response())
+}
+
+/// GET /api/presentation-assets/:asset
+pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -> Response {
+    if !media_origin_allowed(&headers) {
+        return (StatusCode::FORBIDDEN, "Cross-origin media reads are not allowed").into_response();
+    }
+    if !valid_presentation_asset(&asset) {
+        return (StatusCode::BAD_REQUEST, format!("Invalid {PRESENTATION_ASSET}")).into_response();
+    }
+    let Some(directory) = crate::identity::presentation_media_dir() else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Presentation storage is unavailable").into_response();
+    };
+    let Some(path) = presentation_asset_path(&directory, &asset) else {
+        return (StatusCode::NOT_FOUND, "Presentation asset does not exist").into_response();
+    };
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read presentation asset: {e}")).into_response(),
+    };
+    let content_type = match asset.rsplit_once('.').map(|(_, extension)| extension).unwrap_or_default() {
+        "png" => "image/png", "jpg" => "image/jpeg", "gif" => "image/gif", "webp" => "image/webp", _ => unreachable!(),
+    };
+    Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_DISPOSITION, "inline")
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serve presentation asset").into_response())
 }
 
 /// Request body for opening a path in an external application.
@@ -401,5 +445,32 @@ mod tests {
         let mut foreign = HeaderMap::new();
         foreign.insert(header::ORIGIN, "https://evil.example".parse().unwrap());
         assert!(!media_origin_allowed(&foreign));
+    }
+
+    #[test]
+    fn presentation_media_accepts_only_content_names() {
+        let digest = "a".repeat(64);
+        assert!(valid_presentation_asset(&format!("{digest}.png")));
+        assert!(valid_presentation_asset(&format!("{digest}.webp")));
+        assert!(!valid_presentation_asset("../secret.png"));
+        assert!(!valid_presentation_asset(&format!("{}.svg", "a".repeat(64))));
+        assert!(!valid_presentation_asset(&format!("{}.png", "A".repeat(64))));
+    }
+
+    #[test]
+    fn presentation_media_stays_inside_its_store() {
+        let root = tempfile::tempdir().unwrap();
+        let media = root.path().join("media");
+        std::fs::create_dir(&media).unwrap();
+        let name = format!("{}.png", "b".repeat(64));
+        std::fs::write(media.join(&name), b"picture").unwrap();
+        assert_eq!(presentation_asset_path(&media, &name), Some(media.join(&name)));
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.path().join("outside.png"), media.join(format!("{}.png", "c".repeat(64)))).unwrap();
+            std::fs::write(root.path().join("outside.png"), b"outside").unwrap();
+            assert!(presentation_asset_path(&media, &format!("{}.png", "c".repeat(64))).is_none());
+        }
     }
 }

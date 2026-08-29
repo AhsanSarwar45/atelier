@@ -93,12 +93,15 @@ pub struct Laid {
 pub fn present(rest: &[String]) -> Result<i32, String> {
     let laid = install()?;
     let entry = laid.package.join("src/present.ts");
+    let media = crate::identity::presentation_media_dir()
+        .ok_or_else(|| "this computer names no folder for presentation media".to_string())?;
     let mut refused = None;
     for word in ["node", "node.exe"] {
         match std::process::Command::new(word)
             .args(["--experimental-strip-types", "--disable-warning=ExperimentalWarning"])
             .arg(&entry)
             .args(rest)
+            .env("ATELIER_PRESENTATION_MEDIA_DIR", &media)
             .status()
         {
             Ok(status) => return Ok(status.code().unwrap_or(1)),

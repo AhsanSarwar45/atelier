@@ -11,7 +11,7 @@ import { INLINE_MEDIA_BOUNDS } from '@/workbench/media-bounds';
 
 export function ImageComparisonView({ comparison, onLook }: {
   comparison: ImageComparison;
-  onLook: (comparison: ImageComparison) => void;
+  onLook?: (comparison: ImageComparison) => void;
 }) {
   const [pct, setPct] = useState(50);
   const frame = useRef<HTMLDivElement>(null);
@@ -30,8 +30,8 @@ export function ImageComparisonView({ comparison, onLook }: {
             <img
               src={image.dataUrl}
               alt={image.alt}
-              onClick={() => onLook(comparison)}
-              className="cursor-zoom-in rounded border border-border/60 object-contain"
+              onClick={() => onLook?.(comparison)}
+              className={`${onLook ? 'cursor-zoom-in' : ''} rounded border border-border/60 object-contain`}
               style={INLINE_MEDIA_BOUNDS}
             />
             <figcaption className="mt-1 text-xs text-muted-foreground">{image.alt}</figcaption>
@@ -79,7 +79,7 @@ export function ImageComparisonView({ comparison, onLook }: {
       <div className="absolute inset-y-0 w-0.5 cursor-ew-resize bg-background" style={{ left: `${pct}%` }} />
       <Badge variant="outline" size="xs" className="absolute bottom-2 left-2 bg-background">{comparison.before.alt}</Badge>
       <Badge variant="outline" size="xs" className="absolute bottom-2 right-2 bg-background">{comparison.after.alt}</Badge>
-      <Button
+      {onLook && <Button
         variant="secondary"
         mode="icon"
         size="sm"
@@ -90,7 +90,7 @@ export function ImageComparisonView({ comparison, onLook }: {
         onClick={() => onLook(comparison)}
       >
         <ZoomIn />
-      </Button>
+      </Button>}
     </div>
     </Panel>
   );

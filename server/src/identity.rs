@@ -130,6 +130,11 @@ pub fn rules_dir() -> Option<PathBuf> {
     resolve_dir(std::env::var("RULES_DIR").ok(), data_dir(), "rules")
 }
 
+/// Content-addressed pictures imported by the presentation command.
+pub fn presentation_media_dir() -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join("presentation-media"))
+}
+
 /// The rule behind them, kept apart from the environment so it can be tested
 /// for the case where the computer names no home.
 fn resolve_dir(override_dir: Option<String>, data: Option<PathBuf>, leaf: &str) -> Option<PathBuf> {

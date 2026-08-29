@@ -12,6 +12,8 @@ const widgets: ChatWidget[] = [
   { type: 'timeline', title: 'Next', items: [{ label: 'Built', status: 'done' }, { label: 'Ship', status: 'next' }] },
   { type: 'table', title: 'Options', columns: ['Choice', 'Cost'], rows: [['A', '$2']] },
   { type: 'video', title: 'Proof', src: '/home/me/proof.webm' },
+  { type: 'image', title: 'Architecture', asset: `${'a'.repeat(64)}.png`, alt: 'Architecture diagram', caption: 'Request path' },
+  { type: 'image_compare', title: 'Visual proof', mode: 'wipe', before: { asset: `${'b'.repeat(64)}.png`, alt: 'Before' }, after: { asset: `${'c'.repeat(64)}.webp`, alt: 'After' } },
   { type: 'explainer', title: 'Session recovery', summary: 'Replay without losing a word.', nodes: [{ id: 'drop', label: 'Disconnect' }, { id: 'replay', label: 'Replay' }, { id: 'live', label: 'Live' }], edges: [{ from: 'drop', to: 'replay' }, { from: 'replay', to: 'live' }], steps: [{ label: 'Connection drops', active: ['drop'] }, { label: 'Events replay', active: ['replay'] }, { label: 'Streaming resumes', active: ['live'] }], evidence: [{ label: 'Session store', path: '/repo/store.ts', line: 84 }] },
 ];
 
@@ -42,7 +44,7 @@ describe('chat widget rendering', () => {
   });
 
   it('lets the reader move through an explainer and exposes its evidence', () => {
-    render(<ChatWidgetView widget={widgets[7]!} />);
+    render(<ChatWidgetView widget={widgets[9]!} />);
     expect(screen.getByRole('img', { name: 'Session recovery flow diagram, step 1 of 3' })).toBeVisible();
     expect(screen.getByText('Connection drops')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Step 2: Events replay' }));
@@ -53,7 +55,7 @@ describe('chat widget rendering', () => {
 
   it('offers playback without forcing motion on a reader who asked for less', () => {
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
-    render(<ChatWidgetView widget={widgets[7]!} />);
+    render(<ChatWidgetView widget={widgets[9]!} />);
     fireEvent.click(screen.getByRole('button', { name: 'Play explanation' }));
     expect(screen.getByRole('button', { name: 'Pause explanation' })).toBeVisible();
     expect(screen.getByRole('img', { name: 'Session recovery flow diagram, step 1 of 3' })).toBeVisible();
@@ -61,7 +63,7 @@ describe('chat widget rendering', () => {
   });
 
   it.each(['flow', 'sequence', 'cycle', 'layers'] as const)('draws and advances the %s visual language', (layout) => {
-    const base = widgets[7] as Extract<ChatWidget, { type: 'explainer' }>;
+    const base = widgets[9] as Extract<ChatWidget, { type: 'explainer' }>;
     render(<ChatWidgetView widget={{ ...base, layout }} />);
     const diagram = screen.getByRole('img', { name: `Session recovery ${layout} diagram, step 1 of 3` });
     expect(diagram).toHaveAttribute('data-layout', layout);
@@ -69,5 +71,13 @@ describe('chat widget rendering', () => {
     expect(diagram.querySelector('[data-node="live"]')).toHaveAttribute('data-active', 'true');
     expect(diagram.querySelector('[data-node="drop"]')).toHaveAttribute('data-accent', 'var(--color-info-accent)');
     expect(diagram.querySelector('[data-node="live"]')).toHaveAttribute('data-accent', 'var(--color-success-accent)');
+  });
+
+  it('renders managed images and wipe comparisons from stable asset routes', () => {
+    const { rerender } = render(<ChatWidgetView widget={widgets[7]!} />);
+    expect(screen.getByRole('img', { name: 'Architecture diagram' })).toHaveAttribute('src', `/api/presentation-assets/${'a'.repeat(64)}.png`);
+    rerender(<ChatWidgetView widget={widgets[8]!} />);
+    expect(screen.getByTestId('image-comparison')).toHaveAttribute('data-mode', 'wipe');
+    expect(screen.getByRole('img', { name: 'After' })).toHaveAttribute('src', `/api/presentation-assets/${'c'.repeat(64)}.webp`);
   });
 });
