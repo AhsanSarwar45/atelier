@@ -12,7 +12,7 @@
  * The panels and lists that load something are in
  * `src/components/__tests__/a-failed-read-says-so.test.tsx`.
  */
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const useProjectsMock = vi.fn();
@@ -32,6 +32,15 @@ vi.mock('@/lib/db', () => ({
   getTags: () => getTagsMock(),
   createTag: vi.fn(),
   deleteTag: vi.fn(),
+}));
+
+// The settings screen also reads the terminal's shell setting from the server,
+// and a section that cannot be read says so with a Try again of its own — so
+// what the tags case asks for has to be asked for inside the tags notice.
+const terminalSettingsMock = vi.fn();
+vi.mock('@/lib/api', () => ({
+  terminalSettings: () => terminalSettingsMock(),
+  saveTerminalSettings: vi.fn(),
 }));
 
 // The shell opens the window's one connection through the status chip, and the
@@ -156,20 +165,45 @@ describe('the board', () => {
 });
 
 describe('the settings screen', () => {
+  const aShellSetting = { shell: null, default: '/bin/bash', available: ['/bin/bash'] };
+
+  beforeEach(() => {
+    terminalSettingsMock.mockReset();
+    terminalSettingsMock.mockResolvedValue(aShellSetting);
+  });
+
   it('says the tags could not be read rather than that there are none', async () => {
     getTagsMock.mockRejectedValue(new Error('the server did not answer'));
 
     render(<SettingsPage />);
 
-    await screen.findByTestId('tags-error');
-    expect(screen.getByText(/the server did not answer/)).toBeInTheDocument();
+    const notice = await screen.findByTestId('tags-error');
+    expect(within(notice).getByText(/the server did not answer/)).toBeInTheDocument();
     expect(screen.queryByText(/no tags yet/i)).not.toBeInTheDocument();
     nothingIsStillSpinning();
 
     getTagsMock.mockResolvedValue([]);
-    fireEvent.click(tryAgain());
+    fireEvent.click(within(notice).getByRole('button', { name: /try again/i }));
 
     await waitFor(() => expect(screen.getByText(/no tags yet/i)).toBeInTheDocument());
     expect(screen.queryByTestId('tags-error')).not.toBeInTheDocument();
+  });
+
+  it("says the terminal's shell setting could not be read rather than showing a blank form", async () => {
+    getTagsMock.mockResolvedValue([]);
+    terminalSettingsMock.mockRejectedValue(new Error('the server did not answer'));
+
+    render(<SettingsPage />);
+
+    const notice = await screen.findByTestId('terminal-shell-error');
+    expect(within(notice).getByText(/the server did not answer/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/system default/i)).not.toBeInTheDocument();
+    nothingIsStillSpinning();
+
+    terminalSettingsMock.mockResolvedValue(aShellSetting);
+    fireEvent.click(within(notice).getByRole('button', { name: /try again/i }));
+
+    await screen.findByPlaceholderText(/system default \(\/bin\/bash\)/i);
+    expect(screen.queryByTestId('terminal-shell-error')).not.toBeInTheDocument();
   });
 });
