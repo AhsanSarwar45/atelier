@@ -32,9 +32,15 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  // `workbench` was here, and while it was, nothing typechecked the chat's own
-  // server at all: a null handed to a rule that measures a string went out and
-  // killed a live conversation before anyone read a type error, because there
-  // was no run that could have printed one (bw-sxzv).
-  "exclude": ["node_modules", "tests", "playwright.config.ts", "worktrees"]
+  // `workbench` is the chat's own server, a package of its own with its own
+  // dependencies. It is typechecked by its own settings file, which extends
+  // this one, and `npm run typecheck` runs both — because while it was read
+  // from here instead, it was checked only where its dependencies happened to
+  // be installed: green on a developer's machine, red in the packaging
+  // sandbox, which installs the app's dependencies and nothing else, so every
+  // push failed the online build (bw-r6mi). Before that, it was excluded here
+  // and typechecked nowhere, and a null handed to a rule that measures a
+  // string killed a live conversation before anyone read a type error
+  // (bw-sxzv).
+  "exclude": ["node_modules", "tests", "playwright.config.ts", "worktrees", "workbench"]
 }

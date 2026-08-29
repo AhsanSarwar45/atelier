@@ -1,14 +1,14 @@
 {
+  // The chat's own server: the same rules as the screens, over its own files.
+  // It extends the app's settings rather than restating them so the two never
+  // drift, and it reads its types from the app's installed packages — the
+  // helper's own `@types/node` is a newer major whose `node:sqlite` typings
+  // fight the shim under src/types that the app's version needs (bw-r6mi).
+  "extends": "../tsconfig.json",
   "compilerOptions": {
-    "target": "es2022",
-    "lib": ["es2023"],
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "types": ["node"]
+    "typeRoots": ["../node_modules/@types"],
+    "plugins": []
   },
-  "include": ["src/**/*.ts", "../src/workbench/protocol.ts", "../src/workbench/machine-words.ts", "../src/workbench/said-what-it-ran.ts"]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "../src/types/**/*.d.ts"],
+  "exclude": ["node_modules"]
 }
