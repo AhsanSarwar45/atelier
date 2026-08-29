@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { widgetBlock } from '../../src/workbench/chat-widgets.ts';
+import { canonicalArtifact, visualArtifact } from '../../src/workbench/visual-artifacts.ts';
 
 function inputFile(args: string[]): string | null {
   const at = args.indexOf('--input');
@@ -57,6 +58,23 @@ function importImage(path: string): string {
   return asset;
 }
 
+function importArtifact(path: string): { asset: string; title: string; kind: string } {
+  const bytes = readFileSync(path);
+  if (bytes.length > 1024 * 1024) throw new Error(`${path} is larger than 1 MiB`);
+  let value: unknown;
+  try { value = JSON.parse(bytes.toString('utf8')); } catch (error) { throw new Error(`artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
+  const artifact = visualArtifact(value); const canonical = canonicalArtifact(value);
+  if (!artifact || !canonical) throw new Error('artifact does not match Atelier’s visual artifact contract or contains unknown fields');
+  const directory = process.env.ATELIER_PRESENTATION_MEDIA_DIR;
+  if (!directory) throw new Error('Atelier did not provide its presentation media directory');
+  mkdirSync(directory, { recursive: true });
+  const asset = `${createHash('sha256').update(canonical).digest('hex')}.artifact.json`;
+  try { writeFileSync(join(directory, asset), canonical, { flag: 'wx' }); } catch (error) {
+    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error;
+  }
+  return { asset, title: artifact.title, kind: artifact.kind };
+}
+
 const block = (value: unknown) => `\`\`\`atelier-widget\n${JSON.stringify(value)}\n\`\`\`\n`;
 
 export function present(args: string[], stdin = ''): string {
@@ -89,7 +107,11 @@ export function present(args: string[], stdin = ''): string {
     if (!['side_by_side', 'wipe'].includes(mode)) throw new Error('--mode must be side_by_side or wipe');
     return block({ type: 'image_compare', mode, before: { asset: before, alt: beforeAlt }, after: { asset: after, alt: afterAlt } });
   }
-  throw new Error('usage: atelier tool present widget|image|compare');
+  if (args[0] === 'artifact') {
+    validateOptions(args, ['--file']);
+    return block({ type: 'artifact', ...importArtifact(option(args, '--file', true)!) });
+  }
+  throw new Error('usage: atelier tool present widget|image|compare|artifact');
 }
 
 export function main(args = process.argv.slice(2)): number {

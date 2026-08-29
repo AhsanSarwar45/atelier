@@ -30,6 +30,7 @@ export type ImageCompareWidget = {
   type: 'image_compare'; title?: string; mode: 'side_by_side' | 'wipe';
   before: { asset: string; alt: string }; after: { asset: string; alt: string };
 };
+export type ArtifactWidget = { type: 'artifact'; title: string; kind: 'mermaid' | 'flow' | 'scene' | 'mockup'; asset: string };
 export type ExplainerWidget = {
   type: 'explainer';
   layout?: 'flow' | 'sequence' | 'cycle' | 'layers';
@@ -40,7 +41,7 @@ export type ExplainerWidget = {
   steps: Array<{ label: string; detail?: string; active: string[] }>;
   evidence?: Array<{ label: string; path: string; line?: number }>;
 };
-export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ExplainerWidget;
+export type ChatWidget = MetricWidget | ChartWidget | ProgressWidget | TimelineWidget | TableWidget | VideoWidget | ImageWidget | ImageCompareWidget | ArtifactWidget | ExplainerWidget;
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -54,6 +55,7 @@ const path = (value: unknown): value is string => typeof value === 'string'
   && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value));
 const asset = (value: unknown): value is string => typeof value === 'string'
   && /^[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(value);
+const artifactAsset = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}\.artifact\.json$/.test(value);
 
 export function widget(value: unknown): ChatWidget | null {
   if (!object(value) || !text(value.type) || !title(value.title)) return null;
@@ -87,6 +89,7 @@ export function widget(value: unknown): ChatWidget | null {
   if (value.type === 'image_compare' && (value.mode === 'side_by_side' || value.mode === 'wipe')
     && object(value.before) && asset(value.before.asset) && text(value.before.alt)
     && object(value.after) && asset(value.after.asset) && text(value.after.alt)) return value as ImageCompareWidget;
+  if (value.type === 'artifact' && artifactAsset(value.asset) && ['mermaid', 'flow', 'scene', 'mockup'].includes(String(value.kind))) return value as ArtifactWidget;
   if (value.type === 'explainer' && (value.layout === undefined || ['flow', 'sequence', 'cycle', 'layers'].includes(String(value.layout)))
     && (value.summary === undefined || text(value.summary))
     && Array.isArray(nodes) && nodes.length >= 2 && nodes.length <= 12
@@ -122,6 +125,7 @@ const TOP_LEVEL_FIELDS: Record<ChatWidget['type'], Set<string>> = {
   video: new Set(['type', 'title', 'src', 'poster']),
   image: new Set(['type', 'title', 'asset', 'alt', 'caption']),
   image_compare: new Set(['type', 'title', 'mode', 'before', 'after']),
+  artifact: new Set(['type', 'title', 'kind', 'asset']),
   explainer: new Set(['type', 'layout', 'title', 'summary', 'nodes', 'edges', 'steps', 'evidence']),
 };
 

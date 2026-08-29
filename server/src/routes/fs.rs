@@ -17,7 +17,7 @@ const PRESENTATION_ASSET: &str = "presentation asset";
 fn valid_presentation_asset(asset: &str) -> bool {
     asset.split_once('.').is_some_and(|(digest, extension)| digest.len() == 64
         && digest.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        && matches!(extension, "png" | "jpg" | "gif" | "webp"))
+        && matches!(extension, "png" | "jpg" | "gif" | "webp" | "artifact.json"))
 }
 
 fn presentation_asset_path(directory: &std::path::Path, asset: &str) -> Option<PathBuf> {
@@ -96,12 +96,13 @@ pub async fn presentation_asset(headers: HeaderMap, Path(asset): Path<String>) -
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read presentation asset: {e}")).into_response(),
     };
     let content_type = match asset.rsplit_once('.').map(|(_, extension)| extension).unwrap_or_default() {
-        "png" => "image/png", "jpg" => "image/jpeg", "gif" => "image/gif", "webp" => "image/webp", _ => unreachable!(),
+        "png" => "image/png", "jpg" => "image/jpeg", "gif" => "image/gif", "webp" => "image/webp", "json" => "application/json", _ => unreachable!(),
     };
     Response::builder()
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_DISPOSITION, "inline")
         .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
         .body(Body::from(bytes))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serve presentation asset").into_response())
 }
@@ -452,6 +453,7 @@ mod tests {
         let digest = "a".repeat(64);
         assert!(valid_presentation_asset(&format!("{digest}.png")));
         assert!(valid_presentation_asset(&format!("{digest}.webp")));
+        assert!(valid_presentation_asset(&format!("{digest}.artifact.json")));
         assert!(!valid_presentation_asset("../secret.png"));
         assert!(!valid_presentation_asset(&format!("{}.svg", "a".repeat(64))));
         assert!(!valid_presentation_asset(&format!("{}.png", "A".repeat(64))));
