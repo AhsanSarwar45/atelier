@@ -4,6 +4,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===== The characters a shell prompt is drawn with =====
+ *
+ * A patched prompt is made of characters in the private use area — the arrow
+ * between two powerline segments, a branch, a folder, a distribution's logo —
+ * and no system font draws any of them. Without a face that does, the terminal
+ * shows a row of hollow boxes where the reader's prompt should be.
+ *
+ * Served by the app rather than asked of the reader. The point of the terminal
+ * in this app is that it is opened from whatever is to hand — a laptop in
+ * another room, a phone — and the fonts on those machines are not ours to
+ * arrange, so the only place this can come from is here.
+ *
+ * The symbols-only face from ryanoasis/nerd-fonts v3.5.1, MIT, licence beside
+ * the file. 2.5 MB, fetched once and then cached, and deliberately not subset:
+ * a subset is a guess at which prompt somebody has, and the glyph it guessed
+ * wrong about is a box again. It is reached for one character at a time and
+ * only for characters the monospace ahead of it cannot draw, which is why it
+ * sits last but one in the stack (src/workbench/terminal-pane.tsx).
+ *
+ * `block` rather than `swap`: what the reader would see in the swap period is
+ * the hollow box this exists to remove, so a moment of nothing is the better
+ * of the two. The pane redraws the grid when the face lands.
+ */
+@font-face {
+  font-family: 'Symbols Nerd Font Mono';
+  src: url('/fonts/SymbolsNerdFontMono-Regular.ttf') format('truetype');
+  font-display: block;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

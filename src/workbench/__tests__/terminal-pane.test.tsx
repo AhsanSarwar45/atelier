@@ -26,6 +26,8 @@
  * the promise the card makes — and not that the arithmetic turning pixels into
  * columns is right. That needs a browser.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { StrictMode } from 'react';
 
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -359,6 +361,37 @@ describe('the pane that draws a live shell', () => {
 
     expect(Socket.attached()).toEqual([Socket.made[1]]);
     expect(screen.getByTestId('terminal-pane').querySelectorAll('.xterm')).toHaveLength(1);
+  });
+
+  it('asks for the icon face before it gives up on a character', () => {
+    const stack = (draw().term.options.fontFamily ?? '')
+      .split(',')
+      .map((name) => name.trim().replace(/^['"]|['"]$/g, ''));
+    const icons = stack.indexOf('Symbols Nerd Font Mono');
+    const generic = stack.indexOf('monospace');
+
+    expect(icons, 'nothing in a system monospace draws a powerline arrow or a branch').toBeGreaterThan(-1);
+    expect(
+      generic,
+      'the icon face has no letters in it, so every real character must find a monospace before it',
+    ).toBeGreaterThan(icons);
+  });
+
+  it('is drawn in a face the app itself serves', () => {
+    // Read rather than rendered: a stack that names a face nobody declares is a
+    // stack of boxes, and only the stylesheet can say whether it is declared.
+    const css = readFileSync(resolve(__dirname, '../../app/globals.css'), 'utf8');
+    const declared = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)]
+      .map((block) => block[1])
+      .find((block) => /font-family:\s*['"]Symbols Nerd Font Mono['"]/.test(block));
+
+    expect(declared, 'the grid names an icon face the stylesheet never declares').toBeDefined();
+    const file = /src:\s*url\(['"]?(\/fonts\/[^'")]+)['"]?\)/.exec(declared ?? '');
+    expect(file, 'a face fetched from anywhere but this app is a face a reader on a phone may not get').not.toBeNull();
+    expect(
+      existsSync(resolve(__dirname, '../../../public', `.${file![1]}`)),
+      `the stylesheet serves ${file?.[1]}, and nothing is there`,
+    ).toBe(true);
   });
 
   it('lets go of the terminal, the socket and the observer when it leaves', () => {

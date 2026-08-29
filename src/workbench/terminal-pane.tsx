@@ -75,10 +75,42 @@ type Shape = { cols: number; rows: number };
 
 /**
  * The face the grid is drawn in: the stack Tailwind's `font-mono` resolves to,
- * so a terminal is the same monospace as every other piece of it in the app.
+ * so a terminal is the same monospace as every other piece of it in the app,
+ * with the icons a shell prompt is drawn with behind it.
+ *
+ * A prompt anybody has taken ten minutes over is built from characters in the
+ * private use area — the arrow between two powerline segments, a branch, a
+ * folder, the logo of the distribution — and nothing in a system font stack
+ * draws a single one of them. What the reader gets instead is a row of hollow
+ * boxes where their prompt should be, which is what this stack is here to fix.
+ *
+ * The icon face goes last but one, and that placement is the whole design. A
+ * browser chooses a font per character and not per line, so every letter,
+ * digit and rule in the output is still drawn by the monospace ahead of it,
+ * and only the characters none of those has fall through to the icons. That
+ * face is icons and nothing else — 10,624 characters, no letters, not even a
+ * space — so put it first and the grid would be sized against a font that
+ * cannot draw one character of what the shell prints.
+ *
+ * It is the app's to serve rather than the reader's to have installed: this
+ * terminal is meant to be opened from the other end of the house, and the
+ * fonts on that machine are not ours to arrange. `src/app/globals.css` holds
+ * the `@font-face`; `public/fonts/` holds the file it names.
  */
 const GRID_FONT =
-  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "Symbols Nerd Font Mono", monospace';
+
+/** The icon face on its own, as a font shorthand, for asking that it be fetched. */
+const ICON_FONT = '12px "Symbols Nerd Font Mono"';
+
+/**
+ * A character to ask for it by: the arrow that ends a powerline segment.
+ *
+ * Named rather than left to default, because the default is a space and this
+ * face has no space in it — asking for a character it certainly has is asking
+ * the question that was meant.
+ */
+const ICON_SAMPLE = '\ue0b0';
 
 /**
  * Where the socket for one shell is.
@@ -125,6 +157,37 @@ export function TerminalPane({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(box);
+
+    /**
+     * The icon face, fetched, and then the grid drawn again.
+     *
+     * A terminal draws a line when the line changes and leaves it alone after
+     * that, and xterm redraws nothing of its own accord when a web font turns
+     * up late. So the prompt printed in the first moments of a shell — which is
+     * every prompt, the one at the top of the screen — keeps whatever was drawn
+     * for it before the file arrived, for as long as it is on the screen. The
+     * second half of this is therefore not a precaution: without it the reader
+     * sees the boxes anyway, and only a line they type themselves comes out
+     * right.
+     *
+     * Nothing happens where there is no font loading API to ask. That is jsdom,
+     * where these are tested, and any browser old enough not to have one — and
+     * a browser that cannot be asked has already drawn the page with what it
+     * had.
+     */
+    let live = true;
+    document.fonts
+      ?.load(ICON_FONT, ICON_SAMPLE)
+      .then(() => {
+        // Only for the mount that is still the live one. React builds this
+        // twice in development, and the terminal the first one made is disposed
+        // long before a two-megabyte file comes back.
+        if (live) term.refresh(0, term.rows - 1);
+      })
+      .catch(() => {
+        // A face that never arrives is a prompt drawn in boxes, which is where
+        // this started. It is not a reason to lose the terminal.
+      });
 
     const socket = new WebSocket(streamUrl(shellId));
     // Set before anything can arrive. Without it a browser hands over each
@@ -192,6 +255,7 @@ export function TerminalPane({
     measure();
 
     return () => {
+      live = false;
       watcher?.disconnect();
       // Unhooked before the close, so a frame already on its way in cannot be
       // written to a terminal that is about to be disposed.
