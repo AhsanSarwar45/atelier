@@ -1,4 +1,0 @@
-interface:
-  display_name: "Visual Explainer"
-  short_description: "Turn complex concepts into interactive Atelier explainers"
-  default_prompt: "Explain this concept visually with a safe interactive Atelier explainer."
