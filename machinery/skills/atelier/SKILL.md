@@ -36,10 +36,14 @@ a temporary path in widget JSON.
 - `progress` for 1–12 bounded completion values.
 - `timeline` for 1–20 ordered events that do not need playback.
 - `table` for exact side-by-side facts with 1–8 columns and at most 30 rows.
-- `video` for video proof. Its `src` is an absolute local path or an `http:`,
-  `https:`, `data:video/`, `blob:`, or `file:` URL.
+- `video`: `{"type":"video","src":"..."}`. Use `video` whenever showing video proof.
+  Its `src` and optional `poster` must be an absolute local path or start with `http:`, `https:`,
+  `data:video/`, `blob:`, or `file:`.
 - `explainer` when motion or relationships carry meaning.
 - `image` and `image_compare` are produced only by the image commands above.
+
+Never present
+video as a file link.
 
 Do not use a widget for one fact or a short list. Use prose when structure does
 not make the answer faster to grasp.
