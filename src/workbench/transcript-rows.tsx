@@ -43,6 +43,7 @@ import { colourOfBand, lookOfRan, markOfRan } from '@/workbench/ran-look';
 import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import type { AskOption, ImagePayload, LookableImage } from '@/workbench/protocol';
 import { Chipped, SplitPaths, withChips } from '@/workbench/split-paths';
+import { PathChip } from '@/workbench/path-chip';
 import { sendCommand, type TranscriptItem } from '@/workbench/use-session';
 
 /**
@@ -192,6 +193,15 @@ function Line({ text, language, html }: { text: string; language: string | null;
  * Before and after in two columns, with only the lines that differ marked, and
  * the language of the file itself coloured through both of them (bw-4wcd.1).
  */
+function EditPath({ path, raw = path, line }: { path: string; raw?: string; line?: number }) {
+  const absolute = path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
+  return absolute ? (
+    <PathChip absolute={path} raw={raw} line={line ?? null} target="editor" />
+  ) : (
+    <Chipped text={raw} line={line} target="editor" />
+  );
+}
+
 function DiffView({ path, before, after, line }: { path: string; before: string; after: string; line?: number }) {
   const rows = diffLines(before, after);
   const language = languageOf(path);
@@ -223,7 +233,7 @@ function DiffView({ path, before, after, line }: { path: string; before: string;
     >
       <div className="flex items-center justify-between bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
         <span className="truncate">
-          <Chipped text={path} line={line} target="editor" />
+          <EditPath path={path} line={line} />
         </span>
         <span className="shrink-0">before → after</span>
       </div>
@@ -486,11 +496,13 @@ export const ToolRow = memo(function ToolRow({
               A span inside a button is fine; the conversation's own listener
               stops a chip's click reaching the toggle (bw-khe.13). */}
           <span className="relative top-px truncate">
-            <Chipped
-              text={says ?? item.title}
-              line={ranKind === 'edit' ? shown.diff?.line : undefined}
-              target={ranKind === 'edit' ? 'editor' : undefined}
-            />
+            {ranKind === 'edit' && shown.diff?.path.startsWith('/') ? (
+              <>
+                Changed <EditPath path={shown.diff.path} raw={(says ?? item.title).replace(/^Changed\s+/, '')} line={shown.diff.line} />
+              </>
+            ) : (
+              <Chipped text={says ?? item.title} />
+            )}
           </span>
           {/* How long it has been running, while it is running: a call that takes a
               minute must not look the same as one that took none. */}

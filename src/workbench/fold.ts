@@ -1064,7 +1064,12 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       case 'diff': {
         const at = toolAt.get(e.toolCallId);
         if (at !== undefined) {
-          (items[at] as TranscriptTool).diff = { path: e.path, before: e.before, after: e.after };
+          (items[at] as TranscriptTool).diff = {
+            path: e.path,
+            before: e.before,
+            after: e.after,
+            ...(e.line ? { line: e.line } : {}),
+          };
         }
         break;
       }
