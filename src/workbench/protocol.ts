@@ -166,6 +166,18 @@ export interface ModelChoice {
   value: string;
   displayName: string;
   description?: string;
+  /**
+   * Which band of the menu this row belongs to. `alias` is a name pinned to
+   * whatever the brand released last; `version` is one numbered release, asked
+   * for by name. The picker rules a line where the band changes.
+   */
+  group?: 'alias' | 'version';
+  /**
+   * Why this model cannot be chosen on this install. A row that says so is
+   * still drawn — a reader looking for a model he remembers deserves to be told
+   * what became of it rather than left to doubt the menu.
+   */
+  unavailable?: string;
 }
 
 /** One provider-supported reasoning budget. Values stay in provider spelling. */

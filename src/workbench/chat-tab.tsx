@@ -7,7 +7,7 @@
  */
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -49,6 +49,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Panel } from '@/components/ui/panel';
@@ -228,7 +229,12 @@ export function Picker({
    * the wire id straight at the reader — `claude-opus-5[1m]` (bw-ja9l.11).
    */
   currentLabel?: string | null;
-  options: { value: string; label: string; hint?: string }[];
+  /**
+   * `group` names the band a row belongs to; the menu rules a line wherever it
+   * changes. `unavailable` says why a row cannot be picked, and is shown in
+   * place of the hint, because why-not is the fact a reader needs first.
+   */
+  options: { value: string; label: string; hint?: string; group?: string; unavailable?: string }[];
   testid: string;
   /** No agent is attached, so there is nothing to change until he writes. */
   asleep: boolean;
@@ -261,24 +267,27 @@ export function Picker({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto" data-testid={`${testid}-menu`}>
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
-        {options.map((o) => (
-          <div key={o.value} className="px-1 py-0.5">
+        {options.map((o, index) => (
+          <Fragment key={o.value}>
+            {index > 0 && o.group !== options[index - 1].group && <DropdownMenuSeparator />}
+            <div className="px-1 py-0.5">
             <div className="flex items-start gap-1">
               <DropdownMenuItem
                 data-testid={`${testid}-option`}
                 data-value={o.value}
                 data-picked={o.value === current}
-                disabled={asleep}
+                data-unavailable={o.unavailable ? true : undefined}
+                disabled={asleep || Boolean(o.unavailable)}
                 onSelect={() => onPick(o.value)}
                 className="group min-w-0 flex-1 flex-col items-start gap-0.5 px-2 py-1.5"
               >
                 <span className={cn('truncate text-sm', o.value === current && 'font-semibold text-foreground')}>{o.label}</span>
-                {o.hint && (
+                {(o.unavailable ?? o.hint) && (
                   <span
                     data-testid={`${testid}-option-hint`}
                     className="whitespace-normal text-left text-xs text-muted-foreground group-focus:text-accent-foreground"
                   >
-                    {o.hint}
+                    {o.unavailable ?? o.hint}
                   </span>
                 )}
               </DropdownMenuItem>
@@ -290,7 +299,7 @@ export function Picker({
                   data-testid={`${testid}-default-${o.value}`}
                   data-default={defaultValue === o.value}
                   aria-pressed={defaultValue === o.value}
-                  disabled={Boolean(cannotDefault?.(o.value))}
+                  disabled={Boolean(o.unavailable) || Boolean(cannotDefault?.(o.value))}
                   aria-label={cannotDefault?.(o.value) ?? (defaultValue === o.value ? `${o.label} is the default` : `Make ${o.label} the default`)}
                   title={cannotDefault?.(o.value) ?? (defaultValue === o.value ? 'Default' : 'Make default')}
                   onPointerDown={(event) => {
@@ -303,7 +312,8 @@ export function Picker({
                 </Button>
               )}
             </div>
-          </div>
+            </div>
+          </Fragment>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -1653,6 +1663,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                 value: m.value,
                 label: modelName(m.value, m.displayName) ?? m.displayName,
                 hint: m.description,
+                group: m.group,
+                unavailable: m.unavailable,
               }))}
               defaultValue={modelDefaults[sessionBrand] ?? null}
               onDefault={(model) => makeProviderDefault('model', model)}
@@ -1811,6 +1823,8 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
                   value: model.value,
                   label: modelName(model.value, model.displayName) ?? model.displayName,
                   hint: model.description,
+                  group: model.group,
+                  unavailable: model.unavailable,
                 }))}
                 defaultValue={modelDefaults[sessionBrand] ?? null}
                 onDefault={(model) => makeProviderDefault('model', model)}

@@ -41,6 +41,7 @@ import {
   workerStopped,
 } from '../../../src/workbench/machine-words.ts';
 import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, EffortChoice, ImagePayload, ModelChoice, NoteRank, PlanResponse, QuestionResponse, TodoItem } from '../../../src/workbench/protocol.ts';
+import { claudeModelMenu, claudeModelRows } from './claude-models.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 
@@ -1645,8 +1646,10 @@ export class ClaudeDriver implements Driver {
 
     // Remembered, because a later push carries neither of them.
     if (rows.length) {
-      this.modelRows = rows;
-      this.models = rows.map((m) => ({ value: m.value, displayName: m.displayName, description: m.description }));
+      // The install advertises only the aliases; every numbered version it
+      // still answers to is folded in beneath them (bw-xtic.2).
+      this.modelRows = claudeModelRows(rows);
+      this.models = claudeModelMenu(rows);
     }
     if (terminalOnly.size) this.terminalOnly = terminalOnly;
     this.emitMenu(described.length ? described : named.map((name) => ({ name, description: '' })));
