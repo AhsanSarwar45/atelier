@@ -70,8 +70,26 @@ async function settled(): Promise<void> {
 }
 
 const SRC = join(__dirname, '..', '..');
-/** The one file allowed to open a connection. */
-const THE_WIRE = 'workbench/live-wire.ts';
+/**
+ * The files allowed to open a connection.
+ *
+ * The rule this list is the exception to is about the app's own news — the
+ * board, the helper, the open chat — and about event streams, which are what
+ * spent the budget of six. Everything that reads news reads it off the one
+ * wire, and nothing else may open a second.
+ *
+ * A shell is the one thing that cannot be carried on it. Its socket belongs to
+ * one shell rather than to the window, it comes and goes with the pane drawing
+ * it rather than with what is on screen, and what it carries is raw bytes both
+ * ways rather than tagged text — so multiplexing it onto the wire would mean
+ * the wire carrying frames it must not decode, for a lifetime that is not its
+ * own. It costs the reads nothing to open it separately, for the reason the
+ * file comment above gives: a browser does not count sockets against the six.
+ *
+ * That is the whole of the exception. A second EventSource is still forbidden
+ * everywhere, and so is a socket opened for anything the wire already carries.
+ */
+const MAY_OPEN_ONE = ['workbench/live-wire.ts', 'workbench/terminal-pane.tsx'];
 
 function sourceFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -101,7 +119,7 @@ describe('one wire', () => {
     const opening: string[] = [];
     for (const file of sourceFiles(SRC)) {
       const where = relative(SRC, file).split('\\').join('/');
-      if (where === THE_WIRE) continue;
+      if (MAY_OPEN_ONE.includes(where)) continue;
       readFileSync(file, 'utf8')
         .split('\n')
         .forEach((line, i) => {
