@@ -63,6 +63,30 @@ const shape = () => {
   };
 };
 
+/**
+ * A press on one of the controls in the bar, as a browser makes one: the
+ * pointer goes down on the button and comes up on it, and the click follows.
+ * All three bubble to the bar underneath, which is the whole of the difficulty
+ * these cases are about — a bar that answered any of them would be a bar that
+ * had taken the press off the button.
+ */
+function press(button: HTMLElement) {
+  fireEvent.pointerDown(button, { pointerId: 1, button: 0, clientX: 420, clientY: 400 });
+  fireEvent.pointerUp(button, { pointerId: 1, clientX: 420, clientY: 400 });
+  fireEvent.click(button);
+}
+
+/**
+ * Two presses in a row, close enough together that the browser finishes them
+ * with a `dblclick` — which is the event a rushed reader generates by accident
+ * and the one the bar used to fill the screen on.
+ */
+function pressTwice(button: HTMLElement) {
+  press(button);
+  press(button);
+  fireEvent.doubleClick(button);
+}
+
 function dragBy(element: HTMLElement, dx: number, dy: number, from = { x: 500, y: 500 }) {
   fireEvent.pointerDown(element, { pointerId: 1, button: 0, clientX: from.x, clientY: from.y });
   fireEvent.pointerMove(element, { pointerId: 1, clientX: from.x + dx, clientY: from.y + dy });
@@ -253,6 +277,84 @@ describe('the floating terminal window', () => {
     draw(closed);
     fireEvent.click(screen.getByRole('button', { name: 'Close Terminal' }));
     expect(closed, 'the visible way out is the one that works').toHaveBeenCalledTimes(1);
+  });
+
+  it('closes on one press of the cross, and does not take the press as a drag', () => {
+    const closed = vi.fn();
+    draw(closed);
+    const bar = grip('terminal-window-handle');
+    const before = shape();
+
+    press(screen.getByTestId('terminal-window-close'));
+
+    expect(closed, 'one press of the cross is one way out taken').toHaveBeenCalledTimes(1);
+    expect(
+      bar.setPointerCapture,
+      'a bar that captures the pointer on a press of the cross never lets the cross have the click',
+    ).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-window').dataset.filled, 'closing is not filling').toBeUndefined();
+    expect(shape(), 'nor is it moving').toEqual(before);
+  });
+
+  it('fills on one press of the switch and comes back on the next', () => {
+    draw();
+    const bar = grip('terminal-window-handle');
+    const before = shape();
+
+    press(screen.getByTestId('terminal-window-fill'));
+    expect(shape(), 'one press fills the screen').toEqual({ x: 0, y: 0, width: 1200, height: 800 });
+    expect(bar.setPointerCapture, 'and is not also a drag of the bar it sits on').not.toHaveBeenCalled();
+
+    press(screen.getByTestId('terminal-window-fill'));
+    expect(shape(), 'and the next press puts it back where it was').toEqual(before);
+  });
+
+  it('closes twice, and never fills, when the cross is pressed twice in a hurry', () => {
+    const closed = vi.fn();
+    draw(closed);
+    grip('terminal-window-handle');
+    const before = shape();
+
+    // Nothing takes this window away between the two presses — `onClose` is
+    // watched rather than acted on — so the second one lands on the same bar
+    // the first did, which is the state the bug needed.
+    pressTwice(screen.getByTestId('terminal-window-close'));
+
+    expect(closed, 'each press of the cross asks to close, and both were asked').toHaveBeenCalledTimes(2);
+    expect(shape(), 'pressing the cross in a hurry is not a request to fill the screen').toEqual(before);
+  });
+
+  it('ends where it started when the switch is pressed twice in a hurry', () => {
+    draw();
+    grip('terminal-window-handle');
+    const before = shape();
+
+    pressTwice(screen.getByTestId('terminal-window-fill'));
+
+    expect(shape(), 'filled and put back is two changes for two presses, not three').toEqual(before);
+  });
+
+  it('does nothing at all when its bar is double clicked', () => {
+    draw();
+    const before = shape();
+
+    fireEvent.doubleClick(grip('terminal-window-handle'));
+
+    expect(shape(), 'the switch that fills the screen is the button, and only the button').toEqual(before);
+    expect(screen.getByTestId('terminal-window').dataset.filled, 'the bar has no shortcut to hit').toBeUndefined();
+  });
+
+  it('leaves Enter on a control in the bar to that control', () => {
+    draw();
+    const before = shape();
+
+    // `fireEvent` answers false when something called `preventDefault`, and the
+    // click a browser makes out of this key press is that press's default — so
+    // a cancelled key press here is a cross that cannot be pressed by keyboard.
+    const wentThrough = fireEvent.keyDown(screen.getByTestId('terminal-window-close'), { key: 'Enter' });
+
+    expect(wentThrough, 'the bar swallowed the key press the browser turns into the click').toBe(true);
+    expect(shape(), 'and Enter on the cross is not a request to fill the screen either').toEqual(before);
   });
 
   it('draws itself in the page rather than where it was written', () => {

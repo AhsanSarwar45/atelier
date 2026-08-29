@@ -9,6 +9,19 @@
  * window that moved when you selected a line of output would be a window you
  * could not read from.
  *
+ * The bar is therefore a handle with two buttons sitting on it, and that is a
+ * conflict it has to settle rather than share. Whatever starts inside a button
+ * belongs to the button: the bar does not drag for it and does not capture the
+ * pointer for it. The capture is why this matters and not merely tidy — a
+ * pointer taken on the way down never hands the button underneath it the click
+ * it was pressed for, so a bar that grabbed every press was a cross you could
+ * press all day with nothing happening.
+ *
+ * Filling the screen is that button and only that button. The bar carries no
+ * shortcut to it, because the bar is what you hit when you aim at a small
+ * control and miss, and a window that filled the screen every time somebody
+ * missed the cross twice is a window arguing with the person closing it.
+ *
  * It draws itself into the body of the page rather than where it was written,
  * because the shell is exactly the height of the screen and clips (see
  * `src/components/shell.tsx`), and because half the app is wrapped in things
@@ -289,6 +302,11 @@ export function TerminalWindow({
     // is selected by the drag because the bar says so in its classes, not
     // because the press was swallowed.
     if (event.button !== 0) return;
+    // The bar carries the fill and the close controls, and a press on one of
+    // them is a press on it and not on the bar behind it. Answered here rather
+    // than by stopping the event on each button, so that the rule lives with
+    // the thing it constrains: the bar takes presses that are its own.
+    if ((event.target as Element).closest?.('button')) return;
     gesture.current = {
       edge,
       from: { x: event.clientX, y: event.clientY },
@@ -362,8 +380,12 @@ export function TerminalWindow({
         onPointerMove: drag,
         onPointerUp: letGo,
         onPointerCancel: letGo,
-        onDoubleClick: toggleFill,
         onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => {
+          // The press rule again, for the keys. Enter and Space on a focused
+          // button are how a browser is asked to click it, and the click is the
+          // key press's default — so a bar that answered them here would cancel
+          // the click below it and fill the screen instead of closing.
+          if ((event.target as Element).closest?.('button')) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             toggleFill();
