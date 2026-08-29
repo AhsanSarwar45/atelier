@@ -25,6 +25,25 @@ case "${1:-}" in
   *) printf 'install-local: unknown option %s\n' "$1" >&2; exit 2 ;;
 esac
 
+# Before anything is built: this cannot run inside the app it replaces. A
+# dry run replaces nothing, so it may look from anywhere.
+#
+# `TERM_PROGRAM` is what the terminal sets to name itself, and the shell this
+# script is in is one the app opened. Step 2 overwrites the very binary that
+# app is running; `server/src/handover.rs` watches that file, sees it change
+# and hands over — and this shell dies with the process that owns its socket.
+if [ "${TERM_PROGRAM:-}" = atelier ] && [ "$DRY_RUN" != 1 ]; then
+  cat >&2 <<'REFUSED'
+install-local: run this from a terminal outside Atelier. It replaces the binary
+of the app whose terminal you are typing in; that app watches its own binary
+(server/src/handover.rs), notices the change and restarts itself, and every
+shell it opened is hung up the moment it goes — including this one. The install
+would be killed by its own work, quite possibly part-way through the copy,
+leaving neither the old build nor the new one in place.
+REFUSED
+  exit 1
+fi
+
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 die()  { printf '  \033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }

@@ -7,7 +7,7 @@
 //! loopback" but "is the caller talking to *this machine*, by one of the names
 //! this machine actually answers to".
 //!
-//! ## Why the `Host` header and not `Origin`
+//! ## Why `Host` decides, and `Origin` only ever adds to it
 //!
 //! A WebSocket handshake is not governed by the same-origin policy. RFC 6455
 //! leaves the decision entirely to the server — the browser sends `Origin` as
@@ -17,19 +17,31 @@
 //! layer this server already installs is not the control surface here; it never
 //! sees the handshake.
 //!
-//! The obvious guard — check that `Origin` matches `Host` — is what ttyd
-//! (`check_host_origin()`) and code-server (`authenticateOrigin()`) both do, and
-//! DNS rebinding walks straight through it. The attacker serves the page from
-//! the very name he is about to rebind, so when the rebind lands on this box the
-//! browser sends `Origin: http://rebind.evil.com` *and*
-//! `Host: rebind.evil.com:3008`. They agree perfectly. Neither header carries
-//! any sign that the connection arrived here.
+//! Which is why `Origin` cannot be the defence on its own. The obvious guard —
+//! check that `Origin` matches `Host` — is what ttyd (`check_host_origin()`)
+//! and code-server (`authenticateOrigin()`) both do, and DNS rebinding walks
+//! straight through it. The attacker serves the page from the very name he is
+//! about to rebind, so when the rebind lands on this box the browser sends
+//! `Origin: http://rebind.evil.com` *and* `Host: rebind.evil.com:3008`. They
+//! agree perfectly. Neither header carries any sign that the connection arrived
+//! here.
 //!
 //! What he cannot do is make the victim's browser claim to be visiting a name
-//! *we* answer to. So the rule is an allowlist of what this machine is, which is
-//! what Vite shipped as `server.allowedHosts` after its own rebinding advisory
-//! (GHSA-vg6x-rcgg-rjx6) and what GitHub's security team recommends. `Origin` is
-//! never consulted.
+//! *we* answer to. So the rule that decides is an allowlist of what this machine
+//! is, applied to `Host`, which is what Vite shipped as `server.allowedHosts`
+//! after its own rebinding advisory (GHSA-vg6x-rcgg-rjx6) and what GitHub's
+//! security team recommends. Rebinding is defeated there and nowhere else.
+//!
+//! `Host` alone, though, answers a narrower question than a browser on a LAN
+//! raises. `Host` names the destination, so a page served by `evil.example.com`
+//! and open on the manager's phone can aim a request — or a handshake, which
+//! CORS never sees — at `nobara.local:3008`, and the `Host` it carries passes
+//! honestly. A stated `Origin` names the page that asked, a browser fills it in
+//! itself and script cannot forge it, so holding it to the same allowlist turns
+//! that request away. It is a second layer and never the first: any caller that
+//! is not a browser simply sends no `Origin` at all, so only requests that state
+//! one are judged by it, and curl, a same-origin `GET` and an address-bar
+//! navigation are unchanged.
 //!
 //! ## Why the address is parsed and never string-matched
 //!
@@ -169,6 +181,21 @@ pub fn host_is_local(host: &str) -> bool {
     own_names().contains(&name)
 }
 
+/// Whether the page a caller says it is acting for was served by this machine.
+///
+/// An origin is `scheme://host[:port]` and nothing more — no userinfo, no path
+/// — so with the scheme off, what remains is the shape `Host` carries and is
+/// judged by exactly the same parser, down to the obfuscated-address handling.
+/// Anything that is not that shape is refused, which is also how the literal
+/// `null` a sandboxed frame or a `data:` URL sends is answered: it has no `://`
+/// to split on, and an origin that names no place is not this machine.
+fn origin_is_local(origin: &str) -> bool {
+    match origin.split_once("://") {
+        Some((_scheme, authority)) => host_is_local(authority),
+        None => false,
+    }
+}
+
 /// Whether an address belongs to this machine or to the network it sits on.
 fn address_is_local(address: IpAddr) -> bool {
     // A four-part address written inside a six-part one is the same address,
@@ -193,7 +220,8 @@ fn address_is_local(address: IpAddr) -> bool {
 ///
 /// A missing `Host` is a refusal too. Every browser sends one and HTTP/1.1
 /// requires it, so its absence means the caller is not the kind of client this
-/// route is for.
+/// route is for. A missing `Origin` is not: most callers that belong here send
+/// none, and only a stated one is held to the allowlist.
 pub async fn require_local_host(request: Request<Body>, next: Next) -> Response {
     let claimed = request
         .headers()
@@ -211,6 +239,27 @@ pub async fn require_local_host(request: Request<Body>, next: Next) -> Response 
             "The terminal answers only to this machine's own names and addresses.",
         )
             .into_response();
+    }
+
+    // A `Host` this machine answers to says where the request went, not who
+    // sent it, and a page on someone else's site can write a good one. Where
+    // the browser has said which page is asking, that has to be one of our
+    // names too — including on the handshake, which CORS never reaches.
+    if let Some(stated) = request.headers().get(header::ORIGIN) {
+        // A header that is not even text names nothing, so it is refused with
+        // the rest rather than skipped.
+        let stated = stated.to_str().unwrap_or_default();
+        if !origin_is_local(stated) {
+            tracing::warn!(
+                origin = %stated,
+                "refused a terminal request made on behalf of a page this machine did not serve"
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                "The terminal answers only to pages this machine served itself.",
+            )
+                .into_response();
+        }
     }
 
     next.run(request).await
@@ -350,6 +399,47 @@ mod tests {
             ask(Some("nobara.local:3008")).await.unwrap().status(),
             StatusCode::OK,
             "the phone on the network is the case this whole feature is for"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stated_origin_has_to_be_local_too() {
+        use axum::{routing::get, Router};
+        use tower::ServiceExt;
+
+        let app = Router::new()
+            .route("/probe", get(|| async { "a shell would be here" }))
+            .layer(axum::middleware::from_fn(require_local_host));
+
+        let ask = |origin: Option<&str>| {
+            let mut request = Request::builder()
+                .uri("/probe")
+                .header(header::HOST, "nobara.local:3008");
+            if let Some(origin) = origin {
+                request = request.header(header::ORIGIN, origin);
+            }
+            app.clone().oneshot(request.body(Body::empty()).unwrap())
+        };
+
+        assert_eq!(
+            ask(Some("https://evil.example.com")).await.unwrap().status(),
+            StatusCode::FORBIDDEN,
+            "a page on someone else's site cannot borrow the browser's good Host"
+        );
+        assert_eq!(
+            ask(Some("null")).await.unwrap().status(),
+            StatusCode::FORBIDDEN,
+            "an opaque origin names no place we answer to"
+        );
+        assert_eq!(
+            ask(Some("http://nobara.local:3008")).await.unwrap().status(),
+            StatusCode::OK,
+            "the app's own page is the case this route is for"
+        );
+        assert_eq!(
+            ask(None).await.unwrap().status(),
+            StatusCode::OK,
+            "curl and a navigation send no Origin and are unchanged"
         );
     }
 

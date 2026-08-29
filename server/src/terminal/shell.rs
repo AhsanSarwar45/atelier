@@ -24,6 +24,16 @@
 //! input at all; the crate's example says so in as many words. It lives here for
 //! the shell's whole life for that reason.
 //!
+//! None of that ordering runs when the program leaves through
+//! `std::process::exit`, which is how it leaves on every path out of `main.rs`
+//! and when a newer build is installed over it (`handover.rs`): that call runs
+//! no `Drop`. What ends the shells there is the operating system closing the
+//! master along with every other handle the process held: the kernel hangs the
+//! terminal up on the way out, and the shell goes. Whether its jobs go with it
+//! is then down to the shell's manners — fish's are good, bash's depend on
+//! whether it was idle when the hangup came (see `sweep`, which is what makes
+//! the ordinary path certain and does not run on this one).
+//!
 //! ## Which shell, and how it is started
 //!
 //! Not ours to decide. `CommandBuilder::new_default_prog()` already reads
@@ -45,14 +55,32 @@ use std::path::Path;
 /// heard of. Anything richer buys nothing a browser can draw.
 const TERM: &str = "xterm-256color";
 
-/// Variables this server runs with that a person's shell has no business
-/// inheriting.
+/// What the shell is told opened it.
+///
+/// `TERM_PROGRAM` is where a script already looks to find out which terminal it
+/// is inside — iTerm.app, vscode and WezTerm all answer there — so a marker
+/// under any other name is a marker nobody reads. It is also the only name
+/// available: anything spelled `ATELIER_...` would be taken straight back off
+/// again by the rule below.
+const TERM_PROGRAM: &str = "atelier";
+
+/// Families of variable this server runs with that a person's shell has no
+/// business inheriting.
 ///
 /// A shell started from the app should feel like a shell, not like a child of
-/// whatever supervises the app. Prefixes rather than whole names, because the
-/// app's own settings all share theirs and enumerating them would go stale the
-/// first time one is added.
-const NOT_THE_SHELLS_BUSINESS: &[&str] = &["ATELIER_", "BEADS_", "RUST_LOG", "PORT"];
+/// whatever supervises the app. Prefixes rather than whole names for these two,
+/// because the app's own settings all share theirs and enumerating them would
+/// go stale the first time one is added.
+const OURS_BY_PREFIX: &[&str] = &["ATELIER_", "BEADS_"];
+
+/// Variables the app reads under a name it does not own.
+///
+/// `RUST_LOG` and `PORT` are borrowed conventions, so the prefix test that is
+/// right for our own families is wrong here: it took `RUST_LOG_STYLE` (which
+/// tells Rust's logging how to colour itself), `RUST_LOGGER`, `PORTABLE_HOME`
+/// and `PORTFOLIO_DIR` out of a person's shell, and none of those was ever
+/// ours. Only the exact name is.
+const OURS_BY_NAME: &[&str] = &["RUST_LOG", "PORT"];
 
 /// A live shell and everything it needs let go of in the right order.
 pub struct Shell {
@@ -80,11 +108,22 @@ impl Shell {
         command.cwd(cwd);
         command.env("TERM", TERM);
         command.env("COLORTERM", "truecolor");
+        command.env("TERM_PROGRAM", TERM_PROGRAM);
+        // Under test the shell is still the person's own login shell, running
+        // as them, so bash and fish would write everything a test typed into
+        // the history file they read from every day. Neither name is anything
+        // this module strips, so it is set rather than removed, and it is set
+        // here rather than in each test because every shell in the suite —
+        // this module's, the pump's, the register's — comes through here.
+        #[cfg(test)]
+        {
+            command.env("HISTFILE", "/dev/null");
+            command.env("fish_history", "");
+        }
         for (name, _) in std::env::vars() {
-            if NOT_THE_SHELLS_BUSINESS
-                .iter()
-                .any(|ours| name.starts_with(ours))
-            {
+            let ours = OURS_BY_PREFIX.iter().any(|ours| name.starts_with(ours))
+                || OURS_BY_NAME.contains(&name.as_str());
+            if ours {
                 command.env_remove(&name);
             }
         }
@@ -156,11 +195,107 @@ impl Shell {
 impl Drop for Shell {
     fn drop(&mut self) {
         // The child first, then this struct's fields in declaration order, which
-        // puts the master last. Waiting after killing so the master outlives a
+        // puts the master last. Waiting after the hangup so the master outlives a
         // child that is still being torn down.
+        //
+        // `kill` is the crate's, and on Unix it is a hangup rather than a
+        // `SIGKILL`: the shell leaves the way it would if the terminal it sat in
+        // had been closed. What it leaves behind is dealt with by `sweep`.
+        let session = self.child.process_id();
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(session) = session {
+            std::thread::spawn(move || sweep(session));
+        }
     }
+}
+
+/// Ends what a shell left running.
+///
+/// A hung-up shell is meant to pass the hangup on to its jobs, and fish does.
+/// Bash does too — but only if it is idle at its prompt when the hangup lands.
+/// Hung up a moment after starting a job, which is exactly what closing a tab
+/// on a build just launched with `&` is, it leaves the job behind: alive,
+/// re-parented to init, with nobody to notice it. Measured on this machine with
+/// `sleep 1000 &`, and the difference between the two outcomes is a few
+/// hundred milliseconds of timing. So the promise that nothing started in a
+/// terminal outlives it is kept here and not by the shell.
+///
+/// The shell was started as a session leader (`new_default_prog` calls
+/// `setsid`), and every process it starts, in whatever process group job
+/// control put it, carries the shell's pid as its session id. That is the one
+/// mark they all share and cannot shed short of a `setsid` of their own — which
+/// is honoured: a job that asked for its own session, or that ignores hangups
+/// the way `nohup` arranges, asked to outlive the terminal and is left alone,
+/// exactly as a terminal emulator closing would leave it. Everything else is
+/// hung up first, so a job that traps the hangup can tidy up, and shot after a
+/// moment if it is still there.
+///
+/// Read from `/proc`, which is why this is Linux only; elsewhere the shell's
+/// manners are all there is. On its own thread because `Drop` runs wherever
+/// the last handle went, which is inside a request, and a request should not
+/// wait on somebody's build noticing it has been hung up on.
+///
+/// The session id is a pid that has just been freed, and a new process could
+/// in principle take it and `setsid` within the grace period; that needs both
+/// to happen inside half a second on a machine with four million pids to hand
+/// out, and the cost would be a hangup to a process that has only just
+/// started. Accepted.
+#[cfg(target_os = "linux")]
+fn sweep(session: u32) {
+    use std::time::Duration;
+
+    for pid in session_members(session) {
+        let _ = unsafe { libc::kill(pid, libc::SIGHUP) };
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    for pid in session_members(session) {
+        if !ignores_hangups(pid) {
+            let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sweep(_session: u32) {}
+
+/// Every live process whose session is `session`.
+#[cfg(target_os = "linux")]
+fn session_members(session: u32) -> Vec<i32> {
+    let Ok(all) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    all.flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|pid| {
+            // `pid (comm) state ppid pgrp session ...`, and `comm` may hold
+            // anything, spaces and brackets included, so the split is after the
+            // last closing bracket rather than on whitespace from the front.
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    let (_, rest) = stat.rsplit_once(") ")?;
+                    rest.split_whitespace().nth(3)?.parse::<u32>().ok()
+                })
+                == Some(session)
+        })
+        .collect()
+}
+
+/// Whether `pid` has set `SIGHUP` to be ignored — what `nohup` does.
+///
+/// `SigIgn` in `/proc/<pid>/status` is a hexadecimal mask with signal 1 in its
+/// lowest bit.
+#[cfg(target_os = "linux")]
+fn ignores_hangups(pid: i32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()
+        .and_then(|status| {
+            let line = status.lines().find(|line| line.starts_with("SigIgn:"))?;
+            let mask = u64::from_str_radix(line.split_whitespace().nth(1)?, 16).ok()?;
+            Some(mask & 1 == 1)
+        })
+        .unwrap_or(false)
 }
 
 fn other(error: impl std::fmt::Display) -> std::io::Error {
@@ -193,6 +328,41 @@ mod tests {
         heard
             .recv_timeout(Duration::from_secs(10))
             .expect("the shell exited but its output never ended — the slave handle was kept")
+    }
+
+    /// Every chunk the shell prints, as it prints it.
+    ///
+    /// For a shell that is meant to still be running afterwards, so it cannot
+    /// wait for the output to end the way the reader above does. The thread
+    /// ends by itself when the shell does, because that is when the read
+    /// returns nothing.
+    fn every_chunk(mut output: Box<dyn Read + Send>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+        let (tell, heard) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 4096];
+            loop {
+                match output.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if tell.send(chunk[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        heard
+    }
+
+    /// The same as `answered`, but nothing until the closing bracket has
+    /// arrived.
+    ///
+    /// Output comes in whatever sized pieces the kernel hands over, so a
+    /// question read halfway through would otherwise answer with half a number.
+    fn fully_answered(said: &str, name: &str) -> Option<String> {
+        let (_, rest) = said.rsplit_once(&format!("{name}["))?;
+        let (inside, _) = rest.split_once(']')?;
+        Some(inside.to_string())
     }
 
     /// What the shell printed between `name[` and `]`, taking the last one.
@@ -341,19 +511,165 @@ mod tests {
     #[test]
     fn the_server_own_settings_do_not_leak_into_the_shell() {
         std::env::set_var("ATELIER_SOMETHING_PRIVATE", "leaked");
+        std::env::set_var("RUST_LOG", "leaked");
+        std::env::set_var("PORT", "leaked");
         let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
         let output = shell.output().unwrap();
 
         shell
-            .type_into(b"printf 'LEAK[%s]\\n' \"$ATELIER_SOMETHING_PRIVATE\"; exit\n")
+            .type_into(
+                b"printf 'PREFIX[%s]LOG[%s]PORT[%s]\\n' \
+                  \"$ATELIER_SOMETHING_PRIVATE\" \"$RUST_LOG\" \"$PORT\"; exit\n",
+            )
             .unwrap();
         let said = read_until_the_shell_is_gone(output);
         std::env::remove_var("ATELIER_SOMETHING_PRIVATE");
+        std::env::remove_var("RUST_LOG");
+        std::env::remove_var("PORT");
 
         assert_eq!(
-            answered(&said, "LEAK"),
+            answered(&said, "PREFIX"),
             "",
             "the app's own settings should not reach a person's shell, said: {said:?}"
+        );
+        // The two borrowed names, which are matched whole rather than by
+        // prefix, still have to go.
+        assert_eq!(
+            answered(&said, "LOG"),
+            "",
+            "RUST_LOG is the app's while it runs, said: {said:?}"
+        );
+        assert_eq!(
+            answered(&said, "PORT"),
+            "",
+            "PORT is the app's while it runs, said: {said:?}"
+        );
+    }
+
+    /// The other half of the rule above, and the one that was wrong.
+    ///
+    /// `RUST_LOG` and `PORT` were matched by prefix like the app's own
+    /// families, so a person who keeps `RUST_LOG_STYLE` or `PORTFOLIO_DIR` in
+    /// their environment lost it every time they opened a terminal here, with
+    /// nothing to say why. Neither name was ever the app's to take.
+    #[test]
+    fn a_setting_that_merely_starts_the_same_way_is_left_alone() {
+        std::env::set_var("RUST_LOG_STYLE_FOR_THIS_TEST", "mine");
+        std::env::set_var("PORTFOLIO_DIR_FOR_THIS_TEST", "mine");
+        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let output = shell.output().unwrap();
+
+        shell
+            .type_into(
+                b"printf 'LOG[%s]PORT[%s]\\n' \
+                  \"$RUST_LOG_STYLE_FOR_THIS_TEST\" \"$PORTFOLIO_DIR_FOR_THIS_TEST\"; exit\n",
+            )
+            .unwrap();
+        let said = read_until_the_shell_is_gone(output);
+        std::env::remove_var("RUST_LOG_STYLE_FOR_THIS_TEST");
+        std::env::remove_var("PORTFOLIO_DIR_FOR_THIS_TEST");
+
+        assert_eq!(
+            answered(&said, "LOG"),
+            "mine",
+            "a person's own RUST_LOG_STYLE is not the app's to remove, said: {said:?}"
+        );
+        assert_eq!(
+            answered(&said, "PORT"),
+            "mine",
+            "a person's own PORTFOLIO_DIR is not the app's to remove, said: {said:?}"
+        );
+    }
+
+    #[test]
+    fn the_shell_is_told_which_program_opened_it() {
+        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let output = shell.output().unwrap();
+
+        shell
+            .type_into(b"printf 'OPENER[%s]\\n' \"$TERM_PROGRAM\"; exit\n")
+            .unwrap();
+        let said = read_until_the_shell_is_gone(output);
+
+        assert_eq!(
+            answered(&said, "OPENER"),
+            TERM_PROGRAM,
+            "a script in here should be able to tell where it is running, said: {said:?}"
+        );
+    }
+
+    /// Nothing a person started in a shell outlives the shell.
+    ///
+    /// The one guarantee the terminal owes the machine it runs on. A build left
+    /// running with an `&`, a dev server, a watch loop — all of them are
+    /// children of a shell that hangs off this process, and if letting the
+    /// shell go left them behind, a day of opening and closing tabs would fill
+    /// the machine with work nobody can see or stop.
+    ///
+    /// Two things have to hold for it, and this pins both at once: `Drop` hangs
+    /// the shell up rather than shooting it, and a shell that has been hung up
+    /// on passes the hangup to its own jobs.
+    ///
+    /// Asked of `/proc` because that is the one way to ask "is this pid still
+    /// there" without a signal crate, and it is only there on Linux.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_background_job_goes_when_the_shell_does() {
+        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let output = shell.output().unwrap();
+        let heard = every_chunk(output);
+
+        // Plain shell syntax, which is what `$SHELL` is on the machines this
+        // runs on. The shell echoes the question before it answers, so the
+        // first `JOB[` holds `$!` unexpanded and only the answer holds digits.
+        shell.type_into(b"sleep 1000 & echo JOB[$!]\n").unwrap();
+
+        let mut said = String::new();
+        let started = Instant::now();
+        let job = loop {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "the shell never said which job it started, said: {said:?}"
+            );
+            if let Ok(chunk) = heard.recv_timeout(Duration::from_millis(200)) {
+                said.push_str(&String::from_utf8_lossy(&chunk));
+            }
+            if let Some(number) = fully_answered(&said, "JOB").and_then(|n| n.parse::<u32>().ok()) {
+                break number;
+            }
+        };
+
+        let footprint = format!("/proc/{job}");
+        assert!(
+            Path::new(&footprint).exists(),
+            "the job should be running before the shell is let go"
+        );
+
+        drop(shell);
+
+        // The kernel takes the entry away once the job has been reaped by
+        // whatever adopted it, which is prompt but not instant.
+        let started = Instant::now();
+        let mut gone = false;
+        while started.elapsed() < Duration::from_secs(2) {
+            if !Path::new(&footprint).exists() {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        if !gone {
+            // Failing is one thing; leaving a `sleep` behind for every future
+            // run of the suite is another.
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(job.to_string())
+                .status();
+        }
+        assert!(
+            gone,
+            "job {job} was still running two seconds after the shell was let go, \
+             so anything started in a terminal outlives the terminal"
         );
     }
 }

@@ -44,6 +44,11 @@ export CLAUDE_CONFIG_DIR="$RUN/claude"
 export CODEX_HOME="$RUN/codex"
 export BEADS_E2E_MARKERS="$CLAUDE_CONFIG_DIR/sessions"
 
+# The terminal cases open real login shells, and bash and fish write history on
+# exit — already into the owner's own. Set here because the shells inherit it.
+export HISTFILE=/dev/null
+export fish_history=
+
 # A run starts from nothing: sessions left in the store by the last one are
 # offered again by the restore list, and a test that resumes one of those is
 # testing last week. The scratch records go the same way, or the chats one run

@@ -89,6 +89,7 @@ dependencies = [
  "futures",
  "hyper",
  "hyper-util",
+ "libc",
  "mime_guess",
  "mysql_async",
  "notify",

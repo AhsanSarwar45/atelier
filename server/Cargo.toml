@@ -32,6 +32,7 @@ mysql_async = "0.34"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
 base64 = "0.22"
 portable-pty = "0.9"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
