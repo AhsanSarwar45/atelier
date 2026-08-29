@@ -205,7 +205,7 @@ async fn main() {
         },
         // A joined project's instructions use this stable word instead of an
         // absolute path into one computer's application-data directory.
-        command_line::Ask::Tool { name, rest } => match rules::tool(&name, &rest) {
+        command_line::Ask::Tool { name, rest } => match rules::tool(&name, &rest).await {
             Ok(code) => std::process::exit(code),
             Err(e) => {
                 eprintln!("{e}");

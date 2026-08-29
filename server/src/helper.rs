@@ -41,6 +41,8 @@
 use rust_embed::Embed;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use base64::Engine;
+use serde::Serialize;
 
 /// The helper's own files: everything it runs, and the two package files that
 /// say what it needs. Its tests stay behind — they are for this repository,
@@ -89,30 +91,54 @@ pub struct Laid {
     pub package: PathBuf,
 }
 
-/// Run the dependency-free presentation helper carried with the chat sidecar.
-pub fn present(rest: &[String]) -> Result<i32, String> {
-    let laid = install()?;
-    let entry = laid.package.join("src/present.ts");
-    let media = crate::identity::presentation_media_dir()
-        .ok_or_else(|| "this computer names no folder for presentation media".to_string())?;
-    let mut refused = None;
-    for word in ["node", "node.exe"] {
-        match std::process::Command::new(word)
-            .args(["--experimental-strip-types", "--disable-warning=ExperimentalWarning"])
-            .arg(&entry)
-            .args(rest)
-            .env("ATELIER_PRESENTATION_MEDIA_DIR", &media)
-            .status()
-        {
-            Ok(status) => return Ok(status.code().unwrap_or(1)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => refused = Some(e),
-            Err(e) => return Err(format!("{word}: {e}")),
+#[derive(Serialize)]
+struct PresentationRequest<'a> {
+    args: &'a [String],
+    stdin: String,
+    files: std::collections::BTreeMap<String, String>,
+}
+
+fn presentation_request(rest: &[String], stdin: String) -> Result<PresentationRequest<'_>, String> {
+    let mut files = std::collections::BTreeMap::new();
+    for (at, word) in rest.iter().enumerate() {
+        if matches!(word.as_str(), "--file" | "--input" | "--before" | "--after") {
+            let path = rest.get(at + 1).ok_or_else(|| format!("missing value for {word}"))?;
+            let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
+            files.insert(path.clone(), base64::engine::general_purpose::STANDARD.encode(bytes));
         }
     }
-    Err(format!(
-        "the presentation command needs node ({})",
-        refused.map(|e| e.to_string()).unwrap_or_default()
-    ))
+    Ok(PresentationRequest { args: rest, stdin, files })
+}
+
+/// Hand temporary files to the running app; only its sidecar writes durable media.
+pub async fn present(rest: &[String]) -> Result<i32, String> {
+    use std::io::Read;
+    let mut stdin = String::new();
+    std::io::stdin().read_to_string(&mut stdin).map_err(|error| format!("stdin: {error}"))?;
+    let port = std::env::var("ATELIER_PORT")
+        .or_else(|_| std::env::var("BEADS_WEB_PORT"))
+        .ok().and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(crate::command_line::PORT);
+    let output = present_to(rest, stdin, &format!("http://127.0.0.1:{port}")).await?;
+    print!("{output}");
+    Ok(0)
+}
+
+async fn present_to(rest: &[String], stdin: String, base: &str) -> Result<String, String> {
+    let request = presentation_request(rest, stdin)?;
+    let response = reqwest::Client::new()
+        .post(format!("{base}/api/workbench/present"))
+        .json(&request)
+        .send().await.map_err(|error| format!("the running Atelier app could not receive the presentation: {error}"))?;
+    let status = response.status();
+    let value: serde_json::Value = response.json().await
+        .map_err(|error| format!("Atelier returned an unreadable presentation response: {error}"))?;
+    if !status.is_success() {
+        return Err(value.get("error").and_then(|error| error.as_str()).unwrap_or("Atelier refused the presentation").to_string());
+    }
+    let output = value.get("output").and_then(|output| output.as_str())
+        .ok_or_else(|| "Atelier returned no presentation output".to_string())?;
+    Ok(output.to_string())
 }
 
 /// Lay the helper down beside the data.
@@ -183,6 +209,33 @@ fn already_fetched(package: &Path, want: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn presentation_files_go_to_the_running_app_instead_of_its_data_directory() {
+        use axum::{routing::post, Json, Router};
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(None));
+        let received = seen.clone();
+        let app = Router::new().route("/api/workbench/present", post(move |Json(body): Json<serde_json::Value>| {
+            *received.lock().unwrap() = Some(body);
+            async { Json(serde_json::json!({ "output": "validated transcript\n" })) }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let temporary = tempfile::tempdir().unwrap();
+        let image = temporary.path().join("agent-picture.png");
+        std::fs::write(&image, b"temporary bytes").unwrap();
+        let args = vec!["image".to_string(), "--file".to_string(), image.display().to_string(), "--alt".to_string(), "Proof".to_string()];
+        let output = present_to(&args, String::new(), &format!("http://{address}")).await.unwrap();
+
+        assert_eq!(output, "validated transcript\n");
+        let request = seen.lock().unwrap().take().unwrap();
+        let uploaded = request["files"][image.display().to_string()].as_str().unwrap();
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(uploaded).unwrap(), b"temporary bytes");
+    }
 
     #[test]
     fn the_build_carries_the_file_that_gets_started() {

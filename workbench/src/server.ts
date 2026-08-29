@@ -8,6 +8,7 @@
  * SSE down, POST up — the same shape server/src/routes/watch.rs already uses.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import { foldAll, reduce, type SessionView } from '../../src/workbench/fold.ts';
 import { folderOf } from '../../src/workbench/protocol.ts';
 import type { WbpCommand } from '../../src/workbench/protocol.ts';
@@ -28,6 +29,7 @@ import { summaryMemoryOf } from './summary-runs.ts';
 import { readProviderDefaults, writeProviderDefault } from './provider-defaults.ts';
 import { transcriptPage } from './transcript-page.ts';
 import { discoverAgentFiles, readAgentFile } from './agent-files.ts';
+import { presentUploaded } from './present.ts';
 
 // The operating system picks the port unless somebody names one. It used to be
 // 3009 always, and the app forwarded there on trust: whatever program held that
@@ -70,10 +72,38 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+async function readBody(req: IncomingMessage, limit = 1024 * 1024): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
+  let size = 0;
+  for await (const c of req) {
+    const chunk = c as Buffer;
+    size += chunk.length;
+    if (size > limit) throw new Error('request body is too large');
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+type PresentationRequest = { args: string[]; stdin: string; files: Record<string, string> };
+
+async function presentFromCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const dataDir = process.env.ATELIER_DATA_DIR;
+  if (!dataDir) return json(res, 500, { error: 'Atelier did not provide its data directory' });
+  let request: PresentationRequest;
+  try {
+    request = JSON.parse(await readBody(req, 70 * 1024 * 1024)) as PresentationRequest;
+    if (!Array.isArray(request.args) || typeof request.stdin !== 'string' || !request.files || typeof request.files !== 'object') {
+      throw new Error('presentation request is malformed');
+    }
+    const files = Object.fromEntries(Object.entries(request.files).map(([path, value]) => {
+      if (typeof value !== 'string') throw new Error(`uploaded file ${path} is malformed`);
+      return [path, Buffer.from(value, 'base64')];
+    }));
+    const output = presentUploaded(request.args, request.stdin, files, join(dataDir, 'presentation-media'));
+    json(res, 200, { output });
+  } catch (error) {
+    json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /**
@@ -366,6 +396,8 @@ const server = createServer((req, res) => {
     try {
       if (path === '/health') {
         json(res, 200, { status: 'ok', sidecar: 'workbench' });
+      } else if (path === '/present' && req.method === 'POST') {
+        await presentFromCommand(req, res);
       } else if (path === '/events' && req.method === 'GET') {
         const sessionId = url.searchParams.get('session');
         if (!sessionId) return json(res, 400, { error: 'session is required' });

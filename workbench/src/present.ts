@@ -43,13 +43,13 @@ function imageKind(bytes: Buffer): 'png' | 'jpg' | 'gif' | 'webp' | null {
   return null;
 }
 
-function importImage(path: string): string {
-  const bytes = readFileSync(path);
+type ReadPresentationFile = (path: string) => Buffer;
+
+function importImage(path: string, read: ReadPresentationFile, directory: string): string {
+  const bytes = read(path);
   if (bytes.length > 25 * 1024 * 1024) throw new Error(`${path} is larger than 25 MiB`);
   const kind = imageKind(bytes);
   if (!kind) throw new Error(`${path} is not a PNG, JPEG, GIF, or WebP image`);
-  const directory = process.env.ATELIER_PRESENTATION_MEDIA_DIR;
-  if (!directory) throw new Error('Atelier did not provide its presentation media directory');
   mkdirSync(directory, { recursive: true });
   const asset = `${createHash('sha256').update(bytes).digest('hex')}.${kind}`;
   try { writeFileSync(join(directory, asset), bytes, { flag: 'wx' }); } catch (error) {
@@ -58,15 +58,13 @@ function importImage(path: string): string {
   return asset;
 }
 
-function importArtifact(path: string): { asset: string; title: string; kind: string } {
-  const bytes = readFileSync(path);
+function importArtifact(path: string, read: ReadPresentationFile, directory: string): { asset: string; title: string; kind: string } {
+  const bytes = read(path);
   if (bytes.length > 1024 * 1024) throw new Error(`${path} is larger than 1 MiB`);
   let value: unknown;
   try { value = JSON.parse(bytes.toString('utf8')); } catch (error) { throw new Error(`artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
   const artifact = visualArtifact(value); const canonical = canonicalArtifact(value);
   if (!artifact || !canonical) throw new Error('artifact does not match Atelier’s visual artifact contract or contains unknown fields');
-  const directory = process.env.ATELIER_PRESENTATION_MEDIA_DIR;
-  if (!directory) throw new Error('Atelier did not provide its presentation media directory');
   mkdirSync(directory, { recursive: true });
   const asset = `${createHash('sha256').update(canonical).digest('hex')}.artifact.json`;
   try { writeFileSync(join(directory, asset), canonical, { flag: 'wx' }); } catch (error) {
@@ -77,10 +75,10 @@ function importArtifact(path: string): { asset: string; title: string; kind: str
 
 const block = (value: unknown) => `\`\`\`atelier-widget\n${JSON.stringify(value)}\n\`\`\`\n`;
 
-export function present(args: string[], stdin = ''): string {
+function rendered(args: string[], stdin: string, read: ReadPresentationFile, directory: string): string {
   if (args[0] === 'widget') {
     const file = inputFile(args);
-    const source = file ? readFileSync(file, 'utf8') : stdin;
+    const source = file ? read(file).toString('utf8') : stdin;
     if (!source.trim()) throw new Error('widget input is empty; pass one object on stdin or with --input FILE');
     let value: unknown;
     try { value = JSON.parse(source); } catch (error) {
@@ -92,15 +90,15 @@ export function present(args: string[], stdin = ''): string {
   }
   if (args[0] === 'image') {
     validateOptions(args, ['--file', '--alt', '--caption']);
-    const asset = importImage(option(args, '--file', true)!);
+    const asset = importImage(option(args, '--file', true)!, read, directory);
     const alt = option(args, '--alt', true)!;
     const caption = option(args, '--caption');
     return block({ type: 'image', asset, alt, ...(caption ? { caption } : {}) });
   }
   if (args[0] === 'compare') {
     validateOptions(args, ['--before', '--after', '--before-alt', '--after-alt', '--mode']);
-    const before = importImage(option(args, '--before', true)!);
-    const after = importImage(option(args, '--after', true)!);
+    const before = importImage(option(args, '--before', true)!, read, directory);
+    const after = importImage(option(args, '--after', true)!, read, directory);
     const beforeAlt = option(args, '--before-alt', true)!;
     const afterAlt = option(args, '--after-alt', true)!;
     const mode = option(args, '--mode') ?? 'side_by_side';
@@ -109,9 +107,24 @@ export function present(args: string[], stdin = ''): string {
   }
   if (args[0] === 'artifact') {
     validateOptions(args, ['--file']);
-    return block({ type: 'artifact', ...importArtifact(option(args, '--file', true)!) });
+    return block({ type: 'artifact', ...importArtifact(option(args, '--file', true)!, read, directory) });
   }
   throw new Error('usage: atelier tool present widget|image|compare|artifact');
+}
+
+export function present(args: string[], stdin = ''): string {
+  const directory = process.env.ATELIER_PRESENTATION_MEDIA_DIR;
+  if (!directory && args[0] !== 'widget') throw new Error('Atelier did not provide its presentation media directory');
+  return rendered(args, stdin, readFileSync, directory ?? '');
+}
+
+/** Run a presentation request inside Atelier from files uploaded by its command. */
+export function presentUploaded(args: string[], stdin: string, files: Record<string, Buffer>, directory: string): string {
+  return rendered(args, stdin, (path) => {
+    const bytes = files[path];
+    if (!bytes) throw new Error(`the presentation command did not upload ${path}`);
+    return bytes;
+  }, directory);
 }
 
 export function main(args = process.argv.slice(2)): number {

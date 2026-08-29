@@ -1,10 +1,10 @@
 /** @vitest-environment node */
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { present } from '../present';
+import { present, presentUploaded } from '../present';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets';
 
 describe('managed presentation media', () => {
@@ -34,6 +34,14 @@ describe('managed presentation media', () => {
     expect(readdirSync(media)).toEqual([(widget as { asset: string }).asset]);
     present(['image', '--file', path, '--alt', 'Again']);
     expect(readdirSync(media)).toHaveLength(1);
+  });
+
+  it('lets the app persist bytes uploaded from an agent temporary path', () => {
+    const path = png();
+    delete process.env.ATELIER_PRESENTATION_MEDIA_DIR;
+    const output = presentUploaded(['image', '--file', path, '--alt', 'Temporary proof'], '', { [path]: readFileSync(path) }, media);
+    const [widget] = widgetSpecs(output);
+    expect(readdirSync(media)).toEqual([(widget as { asset: string }).asset]);
   });
 
   it('imports both sides of a wipe comparison', () => {

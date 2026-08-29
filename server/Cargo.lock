@@ -83,6 +83,7 @@ name = "atelier"
 version = "0.21.2"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "directories",
  "futures",

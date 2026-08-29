@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
@@ -11,7 +12,9 @@ const CHAT = 'managed-presentation-media';
 test('CLI-produced media survives a chat reload', async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 1400 });
   const run = process.env.WORKBENCH_E2E_RUN!;
-  const env = { ...process.env, ATELIER_DATA_DIR: join(run, 'data') };
+  const denied = join(run, 'agent-cannot-own-data');
+  writeFileSync(denied, 'this is a file, so no command can create a media directory beneath it');
+  const env = { ...process.env, ATELIER_DATA_DIR: denied };
   const command = join(process.cwd(), 'server/target/debug/atelier');
   const make = (args: string[]) => widgetSpecs(execFileSync(command, ['tool', 'present', ...args], { env, encoding: 'utf8' }))[0]!;
   const image = make(['image', '--file', 'tests/results/visual-explainer-color-after.png', '--alt', 'Colored explainer gallery', '--caption', 'Four semantic layouts']);
