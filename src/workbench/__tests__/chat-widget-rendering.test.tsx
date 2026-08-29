@@ -80,4 +80,21 @@ describe('chat widget rendering', () => {
     expect(screen.getByTestId('image-comparison')).toHaveAttribute('data-mode', 'wipe');
     expect(screen.getByRole('img', { name: 'After' })).toHaveAttribute('src', `/api/presentation-assets/${'c'.repeat(64)}.webp`);
   });
+
+  it('opens durable images and either side of a comparison in the zoom viewer', () => {
+    const { rerender } = render(<ChatWidgetView widget={widgets[7]!} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open Architecture diagram to zoom' }));
+    expect(screen.getByTestId('picture-viewer')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(screen.getByTestId('picture-zoom-level')).toHaveTextContent('150%');
+    fireEvent.click(screen.getByRole('button', { name: 'Close the picture' }));
+
+    const wipe = widgets[8] as Extract<ChatWidget, { type: 'image_compare' }>;
+    rerender(<ChatWidgetView widget={{ ...wipe, mode: 'side_by_side' }} />);
+    for (const side of ['Before', 'After']) {
+      fireEvent.click(screen.getByRole('button', { name: `Open ${side} comparison to zoom` }));
+      expect(screen.getByTestId('picture-viewer-comparison')).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: 'Close the picture' }));
+    }
+  });
 });

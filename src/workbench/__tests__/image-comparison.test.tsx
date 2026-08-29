@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { ImageComparisonView } from '@/workbench/image-comparison';
 import { PictureViewer } from '@/workbench/picture-viewer';
 import type { ImageComparison, ImagePayload } from '@/workbench/protocol';
 
@@ -8,6 +9,17 @@ const image = (alt: string): ImagePayload => ({ mime: 'image/png', dataUrl: `dat
 const comparison = (mode: ImageComparison['mode']): ImageComparison => ({ mode, before: image('Before'), after: image('After') });
 
 describe('zooming image comparisons', () => {
+  it('makes either inline side a keyboard-native zoom control', () => {
+    const look = vi.fn();
+    render(<ImageComparisonView comparison={comparison('side_by_side')} onLook={look} />);
+    const before = screen.getByRole('button', { name: 'Open Before comparison to zoom' });
+    const after = screen.getByRole('button', { name: 'Open After comparison to zoom' });
+    expect(before.tagName).toBe('BUTTON');
+    expect(after.tagName).toBe('BUTTON');
+    fireEvent.click(after);
+    expect(look).toHaveBeenCalledWith(comparison('side_by_side'));
+  });
+
   it('keeps side-by-side images on one synchronized zoom and pan transform', () => {
     render(<PictureViewer image={comparison('side_by_side')} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));

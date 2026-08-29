@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play, ZoomIn } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
@@ -10,6 +10,8 @@ import { Progress } from '@/components/ui/progress';
 import { apiUrl } from '@/lib/api-base';
 import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-widgets';
 import { ImageComparisonView } from '@/workbench/image-comparison';
+import { PictureViewer } from '@/workbench/picture-viewer';
+import type { LookableImage } from '@/workbench/protocol';
 import { VisualArtifactView } from '@/workbench/visual-artifact-view';
 import { openLocalPath } from '@/workbench/open-local-path';
 
@@ -193,6 +195,7 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
 }
 
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
+  const [looking, setLooking] = useState<LookableImage | null>(null);
   if (widget.type === 'artifact') return (
     <Panel data-testid="chat-widget" data-widget="artifact" data-artifact-kind={widget.kind} tone="frame" className="mb-3 max-w-4xl overflow-hidden">
       <Heading title={widget.title} />
@@ -204,22 +207,29 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
     <Panel data-testid="chat-widget" data-widget="image" tone="frame" className="mb-3 max-w-2xl">
       <Heading title={widget.title} />
       <figure>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="max-h-[38rem] w-full rounded-md object-contain" />
+        <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`} title="Click to see it full size"
+          className="group relative block h-auto w-full whitespace-normal p-0" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={presentationAssetUrl(widget.asset)} alt={widget.alt} className="max-h-[38rem] w-full cursor-zoom-in rounded-md object-contain transition-opacity group-hover:opacity-90" />
+          <span aria-hidden className="absolute right-2 top-2 rounded-full bg-background/90 p-2 shadow"><ZoomIn className="size-4" /></span>
+        </Button>
         {widget.caption && <figcaption className="mt-2 text-xs text-muted-foreground">{widget.caption}</figcaption>}
       </figure>
+      {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
     </Panel>
   );
-  if (widget.type === 'image_compare') return (
-    <Panel data-testid="chat-widget" data-widget="image_compare" tone="frame" className="mb-3 max-w-2xl">
+  if (widget.type === 'image_compare') {
+    const comparison = {
+      mode: widget.mode,
+      before: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.before.asset), alt: widget.before.alt },
+      after: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.after.asset), alt: widget.after.alt },
+    } as const;
+    return <Panel data-testid="chat-widget" data-widget="image_compare" tone="frame" className="mb-3 max-w-2xl">
       <Heading title={widget.title} />
-      <ImageComparisonView comparison={{
-        mode: widget.mode,
-        before: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.before.asset), alt: widget.before.alt },
-        after: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.after.asset), alt: widget.after.alt },
-      }} />
-    </Panel>
-  );
+      <ImageComparisonView comparison={comparison} onLook={setLooking} />
+      {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
+    </Panel>;
+  }
   if (widget.type === 'video') return (
     <Panel data-testid="chat-widget" data-widget="video" tone="frame" className="mb-3 max-w-2xl">
       <Heading title={widget.title} />

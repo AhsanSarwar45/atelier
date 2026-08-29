@@ -26,14 +26,11 @@ export function ImageComparisonView({ comparison, onLook }: {
       <div data-testid="image-comparison" data-mode="side_by_side" className="mb-2 grid max-w-2xl grid-cols-2 gap-2">
         {[comparison.before, comparison.after].map((image) => (
           <figure key={image.dataUrl} className="flex min-w-0 flex-col items-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={image.dataUrl}
-              alt={image.alt}
-              onClick={() => onLook?.(comparison)}
-              className={`${onLook ? 'cursor-zoom-in' : ''} rounded border border-border/60 object-contain`}
-              style={INLINE_MEDIA_BOUNDS}
-            />
+            {onLook ? <Button type="button" variant="foreground" aria-label={`Open ${image.alt} comparison to zoom`}
+              className="block h-auto w-full whitespace-normal p-0" onClick={() => onLook(comparison)}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={image.dataUrl} alt={image.alt} className="cursor-zoom-in rounded border border-border/60 object-contain transition-opacity hover:opacity-90" style={INLINE_MEDIA_BOUNDS} />
+            </Button> : <img src={image.dataUrl} alt={image.alt} className="rounded border border-border/60 object-contain" style={INLINE_MEDIA_BOUNDS} />}
             <figcaption className="mt-1 text-xs text-muted-foreground">{image.alt}</figcaption>
           </figure>
         ))}
