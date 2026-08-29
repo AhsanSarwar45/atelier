@@ -647,6 +647,23 @@ export class Store {
     ).map((r) => r.bead_id);
   }
 
+  /** Every requested chat's card links in one database read. */
+  beadsForSessions(sessionIds: readonly string[]): ReadonlyMap<string, string[]> {
+    const grouped = new Map<string, string[]>();
+    if (sessionIds.length === 0) return grouped;
+    const rows = this.db
+      .prepare(`SELECT session_id, bead_id FROM bead_link
+                WHERE session_id IN (SELECT value FROM json_each(?))
+                ORDER BY first_seen_at`)
+      .all(JSON.stringify(sessionIds)) as { session_id: string; bead_id: string }[];
+    for (const row of rows) {
+      const beads = grouped.get(row.session_id) ?? [];
+      beads.push(row.bead_id);
+      grouped.set(row.session_id, beads);
+    }
+    return grouped;
+  }
+
   /** Sessions this bead is linked to, newest first — the cache side of the join. */
   sessionsForBead(beadId: string): SessionSummary[] {
     const rows = this.db

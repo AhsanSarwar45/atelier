@@ -249,14 +249,16 @@ function streamAll(req: IncomingMessage, res: ServerResponse): void {
   });
 
   const write = (frame: unknown) => res.write(`data: ${JSON.stringify(frame)}\n\n`);
+  const storedSessions = store.listSessions();
+  const beadsBySession = store.beadsForSessions(storedSessions.map((session) => session.id));
   write({
     kind: 'snapshot',
-    sessions: store.listSessions().map((s) => ({
+    sessions: storedSessions.map((s) => ({
       ...s,
       activity: sessions.activity(s.id),
       // The cards each chat has touched, so a board card can show its own live
       // chat without asking about every card on the board.
-      beads: store.beadsForSession(s.id),
+      beads: beadsBySession.get(s.id) ?? [],
     })),
   });
   // Straight after the snapshot, because a chat somebody is working in has no
