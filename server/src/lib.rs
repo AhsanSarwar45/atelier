@@ -7,6 +7,7 @@ pub mod handover;
 pub mod helper;
 pub mod identity;
 pub mod laid_down;
+pub mod published;
 pub mod reachable;
 pub mod routes;
 pub mod service;

@@ -31,6 +31,9 @@ serde_yaml = "0.9"
 mysql_async = "0.34"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
 base64 = "0.22"
+# The fingerprints a release publishes for its own files, checked before
+# anything downloaded is kept (`src/published.rs`).
+sha2 = "0.10"
 portable-pty = "0.9"
 libc = "0.2"
 

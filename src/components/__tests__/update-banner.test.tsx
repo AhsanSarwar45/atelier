@@ -5,12 +5,19 @@ import { UpdateBanner } from '../update-banner';
 
 // Mock the api module
 const mockCheck = vi.fn();
+const mockPerform = vi.fn();
 vi.mock('@/lib/api', () => ({
   version: {
     get check() {
       return mockCheck;
     },
   },
+  update: {
+    get perform() {
+      return mockPerform;
+    },
+  },
+  reachable: () => Promise.resolve(false),
 }));
 
 beforeEach(() => {
@@ -77,6 +84,40 @@ describe('UpdateBanner', () => {
     fireEvent.click(dismissButton);
 
     expect(screen.queryByText('Update available: v0.4.0')).not.toBeInTheDocument();
+  });
+
+  it('says why a download was refused, in the server\'s own words', async () => {
+    // The server turns a download away when the file that arrived is not the
+    // one the release publishes, and hands back why. That sentence is what a
+    // reader needs — a refused replacement is not a hiccup to retry, it is a
+    // reason to distrust the download — so it is shown, not swallowed
+    // (bw-167m.2).
+    mockCheck.mockResolvedValue({
+      current: '0.3.0',
+      latest: '0.4.0',
+      update_available: true,
+      download_url: 'https://github.com/example/releases/v0.4.0',
+      release_notes: null,
+      asset_url: 'https://github.com/example/releases/v0.4.0/atelier-linux-x64',
+      checksums_url: 'https://github.com/example/releases/v0.4.0/SHA256SUMS.txt',
+    });
+    const refusal =
+      'Refused: the downloaded atelier-linux-x64 is not the one we published. ' +
+      'Nothing was replaced and the download was deleted.';
+    mockPerform.mockRejectedValue(new Error(`API error: 502 ${refusal}`));
+
+    render(<UpdateBanner />);
+
+    const update = await screen.findByRole('button', { name: /Update & Restart/i });
+    fireEvent.click(update);
+
+    const said = await screen.findByTestId('update-error');
+    // The server's whole sentence, and not the status number in front of it.
+    expect(said).toHaveTextContent(refusal);
+    expect(said).not.toHaveTextContent('API error');
+    // The refusal replaces the in-progress state rather than sitting beside it.
+    expect(screen.queryByText(/Downloading\.\.\./)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Restarting server\.\.\./)).not.toBeInTheDocument();
   });
 
   it('shows current version text', async () => {

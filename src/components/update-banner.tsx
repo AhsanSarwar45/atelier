@@ -11,6 +11,20 @@ import { reachable } from '@/lib/api';
 
 type UpdateState = "idle" | "downloading" | "restarting" | "error";
 
+/**
+ * What the server said, without the number in front of it.
+ *
+ * A download can be turned away because the file that arrived is not the one
+ * we published, and that sentence is the whole message: it is the difference
+ * between "try again later" and "something answered for the download host".
+ * `API error: 502` in front of it reads as a hiccup and buries the reason, and
+ * the number is the app's business, not the reader's (bw-167m.2).
+ */
+function whatTheServerSaid(trouble: unknown): string {
+  const said = trouble instanceof Error ? trouble.message : "";
+  return said.replace(/^API error: \d+ /, "").trim() || "Update failed";
+}
+
 export function UpdateBanner() {
   const [info, setInfo] = useState<api.VersionCheckResponse | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -68,7 +82,7 @@ export function UpdateBanner() {
       }, 3000);
     } catch (err) {
       setUpdateState("error");
-      setErrorMessage(err instanceof Error ? err.message : "Update failed");
+      setErrorMessage(whatTheServerSaid(err));
     }
   }, []);
 
@@ -111,7 +125,7 @@ export function UpdateBanner() {
           </p>
 
           {updateState === "error" && errorMessage && (
-            <p className="text-xs text-destructive mt-1">
+            <p className="text-xs text-destructive mt-1" data-testid="update-error">
               {errorMessage}
             </p>
           )}

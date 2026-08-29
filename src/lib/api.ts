@@ -668,6 +668,7 @@ export interface VersionCheckResponse {
   download_url: string | null;
   release_notes: string | null;
   asset_url: string | null;
+  checksums_url: string | null;
 }
 
 /**

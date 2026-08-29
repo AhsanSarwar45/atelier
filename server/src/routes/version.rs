@@ -49,6 +49,10 @@ pub struct VersionCheckResponse {
     pub release_notes: Option<String>,
     /// Direct download URL for the platform-specific binary asset
     pub asset_url: Option<String>,
+    /// Direct download URL for the release's own SHA256SUMS.txt, read off the
+    /// same release as `asset_url` so a download can only ever be proved
+    /// against the release it came from
+    pub checksums_url: Option<String>,
 }
 
 /// Minimal GitHub release response.
@@ -142,13 +146,18 @@ async fn check_github_release() -> VersionCheckResponse {
         );
     }
 
-    let asset_url = release.assets.as_ref().and_then(|assets| {
-        let target = current_platform_asset();
-        assets
-            .iter()
-            .find(|a| a.name == target)
-            .map(|a| a.browser_download_url.clone())
-    });
+    // Both addresses are read off this one answer, so the checksums a download
+    // is proved against belong to the release the download itself came from.
+    let asset_named = |name: &str| {
+        release.assets.as_ref().and_then(|assets| {
+            assets
+                .iter()
+                .find(|a| a.name == name)
+                .map(|a| a.browser_download_url.clone())
+        })
+    };
+    let asset_url = asset_named(&current_platform_asset());
+    let checksums_url = asset_named(crate::published::CHECKSUMS_ASSET);
 
     VersionCheckResponse {
         current: CURRENT_VERSION.to_string(),
@@ -167,6 +176,7 @@ async fn check_github_release() -> VersionCheckResponse {
             }
         }),
         asset_url,
+        checksums_url,
     }
 }
 
@@ -191,6 +201,7 @@ fn fallback_response() -> VersionCheckResponse {
         download_url: None,
         release_notes: None,
         asset_url: None,
+        checksums_url: None,
     }
 }
 
@@ -291,7 +302,7 @@ pub async fn perform_update(
 
     info!("Downloading update from: {}", asset_url);
 
-    // 3. Download new binary
+    // 3. Download the new binary, proved against the release's own checksums
     let client = match reqwest::Client::builder()
         .user_agent(crate::identity::NAME)
         .timeout(std::time::Duration::from_secs(300))
@@ -306,51 +317,42 @@ pub async fn perform_update(
         }
     };
 
-    let response = match client.get(&asset_url).send().await {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => {
+    // The download is written beside the running program under its own name and
+    // hashed as it arrives, and it is kept only if it matches the checksum this
+    // same release publishes for it. A download that does not match is deleted
+    // where it lies and the reason is handed back: the running program is not
+    // touched by any of this, because it is only ever replaced by the updater
+    // script below, which a refusal never reaches.
+    let written = match crate::published::download(
+        &client,
+        &asset_url,
+        check.checksums_url.as_deref(),
+        &current_platform_asset(),
+        &new_binary,
+    )
+    .await
+    {
+        Ok(n) => n,
+        Err(problem) => {
+            if problem.is_refusal() {
+                warn!("Refused the update download: {}", problem);
+            } else {
+                warn!("The update download did not finish: {}", problem);
+            }
             return (
                 StatusCode::BAD_GATEWAY,
-                Json(
-                    serde_json::json!({"error": format!("Download failed: HTTP {}", r.status())}),
-                ),
-            )
-        }
-        Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": format!("Download failed: {}", e)})),
-            )
+                Json(serde_json::json!({"error": problem.reason()})),
+            );
         }
     };
 
-    let bytes = match response.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    serde_json::json!({"error": format!("Failed to read download: {}", e)}),
-                ),
-            )
-        }
-    };
-
-    // 4. Write new binary to disk
-    if let Err(e) = std::fs::write(&new_binary, &bytes) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to write binary: {}", e)})),
-        );
-    }
-
+    // 4. Generate and spawn updater script
     info!(
         "Downloaded update: {} bytes -> {}",
-        bytes.len(),
+        written,
         new_binary.display()
     );
 
-    // 5. Generate and spawn updater script
     let port = std::env::var("PORT").unwrap_or_else(|_| "3008".to_string());
     let pid = std::process::id();
 

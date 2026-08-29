@@ -108,6 +108,7 @@ describe('api.version', () => {
       download_url: 'https://example.com',
       release_notes: 'New features',
       asset_url: null,
+      checksums_url: null,
     };
 
     mockFetch.mockResolvedValue(mockResponse(versionData));
