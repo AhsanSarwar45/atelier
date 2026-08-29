@@ -62,6 +62,18 @@ test('CLI-produced media survives a chat reload', async ({ page, request }) => {
     await open();
     await page.reload();
     await open();
+    await page.getByRole('button', { name: 'Open Colored explainer gallery to zoom' }).click();
+    await expect(page.getByTestId('picture-viewer')).toBeVisible();
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await expect(page.getByTestId('picture-zoom-level')).toHaveText('150%');
+    await page.screenshot({ path: 'tests/results/presentation-media-enlarged-after.png', fullPage: true });
+    await page.getByRole('button', { name: 'Close the picture' }).click();
+    await page.getByRole('button', { name: 'Open Monochrome gallery comparison to zoom' }).click();
+    await expect(page.getByTestId('picture-viewer-comparison')).toBeVisible();
+    await page.getByRole('button', { name: 'Zoom in' }).click();
+    await expect(page.getByTestId('picture-zoom-level')).toHaveText('150%');
+    await page.getByRole('button', { name: 'Close the picture' }).click();
+    await expect(page.getByTestId('picture-viewer')).not.toBeVisible();
     await page.getByRole('img', { name: 'Colored explainer gallery' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: 'tests/results/presentation-media-after.png', fullPage: true });
   } finally { if (project) await request.delete(`/api/projects/${project.id}`); }
