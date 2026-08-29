@@ -267,8 +267,10 @@ pub struct Comment {
 ///
 /// Uses `find_bd()` to locate the binary — searches PATH and common install locations.
 async fn run_bd(args: &[&str], cwd: &Path) -> Result<String, String> {
-    let bd_path = super::find_bd()
-        .ok_or_else(|| "bd CLI not found. Install beads (https://github.com/gastownhall/beads) or add bd to PATH.".to_string())?;
+    let Some(bd_path) = super::find_bd() else {
+        super::forget_tools();
+        return Err(super::BD_MISSING.to_string());
+    };
 
     let result = tokio::time::timeout(
         Duration::from_secs(30),
@@ -1130,9 +1132,14 @@ async fn create_bead(
         args.push(format!("--parent={}", parent));
     }
 
+    let Some(bd_path) = super::find_bd() else {
+        super::forget_tools();
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({ "error": super::BD_MISSING })));
+    };
+
     let result = tokio::time::timeout(
         Duration::from_secs(30),
-        Command::new("bd").args(&args).current_dir(&project_path).output(),
+        Command::new(bd_path).args(&args).current_dir(&project_path).output(),
     ).await;
 
     match result {
@@ -1211,7 +1218,11 @@ async fn lifecycle_denial(project: &Path, id: &str, status: &str) -> Option<Stri
         "cwd": project,
         "session_id": "atelier-api"
     });
-    let mut child = match Command::new("python3")
+    let Some(python) = super::find_python() else {
+        super::forget_tools();
+        return Some("Atelier found no python on this computer, and its lifecycle gate is written in it".to_string());
+    };
+    let mut child = match Command::new(python)
         .arg(gate).current_dir(project).stdin(Stdio::piped())
         .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
     {
@@ -1369,9 +1380,14 @@ async fn update_bead(
         args.push(format!("--remove-label={}", l));
     }
 
+    let Some(bd_path) = super::find_bd() else {
+        super::forget_tools();
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({ "error": super::BD_MISSING })));
+    };
+
     let result = tokio::time::timeout(
         Duration::from_secs(30),
-        Command::new("bd").args(&args).current_dir(&project_path).output(),
+        Command::new(bd_path).args(&args).current_dir(&project_path).output(),
     ).await;
 
     match result {

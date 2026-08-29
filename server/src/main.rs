@@ -380,7 +380,7 @@ async fn serve(open_browser: bool) {
     // Check for bd CLI availability and compatibility
     if let Some(bd) = routes::find_bd() {
         info!("bd CLI found: {}", bd.display());
-        if let Ok(output) = std::process::Command::new(bd).arg("--version").output() {
+        if let Ok(output) = std::process::Command::new(&bd).arg("--version").output() {
             if output.status.success() {
                 let version = String::from_utf8_lossy(&output.stdout);
                 info!("bd version: {}", version.trim());
@@ -388,7 +388,7 @@ async fn serve(open_browser: bool) {
         }
         // Verify --json flag works (older bd versions output plain text)
         let test_dir = std::env::temp_dir();
-        if let Ok(output) = std::process::Command::new(bd)
+        if let Ok(output) = std::process::Command::new(&bd)
             .args(["list", "--json", "--limit", "1"])
             .current_dir(&test_dir)
             .output()

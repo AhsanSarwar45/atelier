@@ -21,8 +21,9 @@ pub use watch::watch_beads;
 use axum::{response::IntoResponse, Json};
 use directories::UserDirs;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 /// Health check response structure.
 ///
@@ -59,67 +60,165 @@ pub async fn health() -> impl IntoResponse {
     })
 }
 
-/// Cached path to the `bd` CLI binary.
+/// Every answer the search has given, one to a tool name.
 ///
-/// Resolved once at first use and cached for the process lifetime.
-/// Searches PATH first, then common install locations.
-static BD_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// This was a single `OnceLock` holding the one answer about `bd`, so the first
+/// "not on this computer" outlived the install that fixed it: a reader who
+/// installed the tool while Atelier was up had to restart it before their
+/// boards would load (bw-oxrg). An answer kept here can be dropped.
+static TOOLS: OnceLock<Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
 
-/// Returns the path to the `bd` CLI binary, or `None` if not found.
+/// Drop every remembered answer, so the next lookup searches this computer
+/// afresh.
 ///
-/// Search order:
-/// 1. `bd` in PATH (via `which`/`where`)
-/// 2. `~/.cargo/bin/bd`
-/// 3. `~/.local/bin/bd`
-/// 4. `/usr/local/bin/bd`
-/// 5. `~/.beads/bin/bd`
-pub fn find_bd() -> Option<&'static PathBuf> {
-    BD_PATH.get_or_init(|| {
-        // Try PATH first
-        if let Ok(output) = std::process::Command::new(if cfg!(windows) { "where" } else { "which" })
-            .arg("bd")
-            .output()
-        {
-            if output.status.success() {
-                let path_str = String::from_utf8_lossy(&output.stdout);
-                let path = PathBuf::from(path_str.trim().lines().next().unwrap_or("").trim());
-                if path.exists() {
-                    tracing::info!("Found bd CLI in PATH: {}", path.display());
-                    return Some(path);
+/// This is what makes a tool installed after startup findable without one:
+/// the reader is told what to install, and the attempt after they have done it
+/// must go and look rather than repeat what we knew before.
+pub fn forget_tools() {
+    if let Some(tools) = TOOLS.get() {
+        if let Ok(mut tools) = tools.lock() {
+            tools.clear();
+        }
+    }
+}
+
+/// The remembered answer about a tool, or the one a fresh search gives.
+///
+/// The lock is not held while the search runs: it starts programs and reads
+/// the disk, and two callers asking at once should wait on each other for
+/// neither.
+fn remembered(name: &str, look: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+    let tools = TOOLS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(seen) = tools.lock() {
+        if let Some(answer) = seen.get(name) {
+            return answer.clone();
+        }
+    }
+    let found = look();
+    if let Ok(mut seen) = tools.lock() {
+        seen.insert(name.to_string(), found.clone());
+    }
+    found
+}
+
+/// A tool's name as this computer spells the file behind it: on Windows the
+/// ending is part of the name, and everywhere else it is not.
+fn spelt_here(name: &str) -> Vec<String> {
+    let ending = std::env::consts::EXE_SUFFIX;
+    if ending.is_empty() || name.ends_with(ending) {
+        vec![name.to_string()]
+    } else {
+        vec![format!("{name}{ending}"), name.to_string()]
+    }
+}
+
+/// The places a tool is looked for beyond the reader's own PATH.
+///
+/// Every one of them is somewhere an installer puts a program without asking
+/// anybody to touch a shell profile, which is the case a service started
+/// outside a shell cannot otherwise see.
+fn tool_dirs() -> Vec<PathBuf> {
+    let Some(home) = UserDirs::new().map(|d| d.home_dir().to_path_buf()) else {
+        return vec![];
+    };
+    let mut dirs = vec![
+        home.join(".cargo").join("bin"),
+        home.join(".local").join("bin"),
+        home.join(".beads").join("bin"),
+    ];
+    if !cfg!(windows) {
+        dirs.push(PathBuf::from("/usr/local/bin"));
+    }
+    dirs
+}
+
+/// The search itself, over places handed in rather than the ones this computer
+/// happens to have, so it can be put to a directory a test owns.
+///
+/// A spelling is tried everywhere before the next one is tried anywhere: a
+/// reader with both `python3` and `python` gets the one asked for first,
+/// wherever it sits, rather than whichever of them the earlier directory holds.
+fn search_in(dirs: &[PathBuf], spellings: &[&str]) -> Option<PathBuf> {
+    for name in spellings {
+        for spelt in spelt_here(name) {
+            for dir in dirs {
+                let file = dir.join(&spelt);
+                if file.is_file() {
+                    return Some(file);
                 }
             }
         }
+    }
+    None
+}
 
-        // Search common locations
-        let home = UserDirs::new().map(|d| d.home_dir().to_path_buf());
-        let candidates: Vec<PathBuf> = if let Some(ref home) = home {
-            let mut c = vec![
-                home.join(".cargo").join("bin").join(if cfg!(windows) { "bd.exe" } else { "bd" }),
-                home.join(".local").join("bin").join("bd"),
-                home.join(".beads").join("bin").join("bd"),
-            ];
-            if !cfg!(windows) {
-                c.push(PathBuf::from("/usr/local/bin/bd"));
-            }
-            c
-        } else {
-            vec![]
+/// The reader's own list of places, asked in the way this computer answers it.
+///
+/// The question goes to `which`/`where` rather than being walked here because
+/// on Windows the file behind a name is not the name: `bd` installed the way
+/// we tell people to install it, with npm, is `bd.cmd`, and only that lookup
+/// knows every ending a name may be worn with.
+fn on_path(spellings: &[&str]) -> Option<PathBuf> {
+    let lookup = if cfg!(windows) { "where" } else { "which" };
+    for name in spellings {
+        let Ok(output) = std::process::Command::new(lookup).arg(name).output() else {
+            continue;
         };
-
-        for candidate in &candidates {
-            if candidate.exists() {
-                tracing::info!("Found bd CLI at: {}", candidate.display());
-                return Some(candidate.clone());
-            }
+        if !output.status.success() {
+            continue;
         }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let path = PathBuf::from(text.lines().next().unwrap_or("").trim());
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
 
-        tracing::warn!(
-            "bd CLI not found. Searched PATH and: {}. \
-             Install bd (https://github.com/gastownhall/beads) or add it to PATH.",
-            candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
-        );
-        None
-    }).as_ref()
+/// Where a named tool is on this computer, if it is here at all.
+///
+/// `name` is what we call the tool and what its answer is remembered under;
+/// `others` are the other spellings the same tool wears. PATH is asked first,
+/// then the usual install places.
+pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
+    remembered(name, || {
+        let mut spellings = vec![name];
+        spellings.extend_from_slice(others);
+        let dirs = tool_dirs();
+        let found = on_path(&spellings).or_else(|| search_in(&dirs, &spellings));
+        match &found {
+            Some(path) => tracing::info!("Found {} at: {}", name, path.display()),
+            None => tracing::warn!(
+                "{} not found. Searched PATH and: {}",
+                name,
+                dirs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+            ),
+        }
+        found
+    })
+}
+
+/// What to tell a reader whose computer has no `bd` on it.
+///
+/// One wording, because the two routes that write cards and the one that runs
+/// the tool outright all answer the same question when the answer is no.
+pub const BD_MISSING: &str =
+    "bd CLI not found. Install beads (https://github.com/gastownhall/beads) or add bd to PATH.";
+
+/// Where the `bd` CLI is, if this computer has it.
+pub fn find_bd() -> Option<PathBuf> {
+    find_tool("bd", &[])
+}
+
+/// Where python is, if this computer has it.
+///
+/// Both spellings are tried, because the one on a Windows path is usually the
+/// shorter. With only `python3` asked for, `atelier init` succeeds there and
+/// then every board lifecycle transition is denied by a gate that could not be
+/// started (bw-oxrg).
+pub fn find_python() -> Option<PathBuf> {
+    find_tool("python3", &["python"])
 }
 
 /// Validates that a path is safe to access.
@@ -209,6 +308,73 @@ mod tests {
             // Should either succeed or fail with "Invalid path" (if test doesn't exist)
             assert!(result.is_ok() || result.unwrap_err().contains("Invalid"));
         }
+    }
+
+    /// A file standing in for an installed tool, in a place the test owns.
+    fn install(dir: &Path, name: &str) -> PathBuf {
+        let file = dir.join(name);
+        std::fs::write(&file, "#!/bin/sh\nexit 0\n").expect("write the tool out");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))
+                .expect("make the tool runnable");
+        }
+        file
+    }
+
+    /// A tool installed after the first look is found once the remembered
+    /// answer is dropped, with no restart in between (bw-oxrg).
+    #[test]
+    fn a_tool_installed_late_is_found_once_the_answer_is_dropped() {
+        let place = tempfile::tempdir().expect("a directory of our own");
+        let name = "atelier-tool-installed-late";
+        let look = || search_in(&[place.path().to_path_buf()], &[name]);
+
+        assert_eq!(remembered(name, look), None, "nothing is there to find yet");
+
+        let tool = install(place.path(), name);
+        assert_eq!(
+            remembered(name, look),
+            None,
+            "the answer we gave first is the one we keep giving"
+        );
+
+        forget_tools();
+        assert_eq!(
+            remembered(name, look),
+            Some(tool),
+            "and dropping it sends the next caller looking again"
+        );
+    }
+
+    /// The scripting tool answers to two names, and a computer holding only
+    /// the shorter one still has python on it.
+    #[test]
+    fn the_scripting_tool_is_found_under_either_spelling() {
+        let place = tempfile::tempdir().expect("a directory of our own");
+        let dirs = [place.path().to_path_buf()];
+
+        let shorter = install(place.path(), "python");
+        assert_eq!(
+            search_in(&dirs, &["python3", "python"]),
+            Some(shorter),
+            "the spelling a Windows computer usually has is the only one here"
+        );
+
+        let asked_for = install(place.path(), "python3");
+        assert_eq!(
+            search_in(&dirs, &["python3", "python"]),
+            Some(asked_for),
+            "and where both are here, the spelling asked for first wins"
+        );
+    }
+
+    /// A place that holds nothing is not an answer.
+    #[test]
+    fn an_empty_place_finds_nothing() {
+        let place = tempfile::tempdir().expect("a directory of our own");
+        assert_eq!(search_in(&[place.path().to_path_buf()], &["bd"]), None);
     }
 
     #[test]

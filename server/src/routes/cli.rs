@@ -105,11 +105,10 @@ pub async fn bd_command(Json(req): Json<BdCommandRequest>) -> impl IntoResponse 
     let bd_path = match super::find_bd() {
         Some(p) => p,
         None => {
+            super::forget_tools();
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({
-                    "error": "bd CLI not found. Install beads (https://github.com/gastownhall/beads) or add bd to PATH."
-                })),
+                Json(serde_json::json!({ "error": super::BD_MISSING })),
             ).into_response();
         }
     };
