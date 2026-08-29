@@ -27,7 +27,7 @@ const column = (beads: Bead[]) =>
       status="open"
       title="Todo"
       beads={beads}
-      allBeads={beads}
+      beadById={new Map(beads.map((bead) => [bead.id, bead]))}
       statusById={new Map()}
       onSelectBead={vi.fn()}
     />,

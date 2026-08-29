@@ -41,6 +41,7 @@ import { updateTitle, updateDescription, updateStatus as cliUpdateStatus } from 
 import { ISSUE_TYPES, getIssueTypeMeta } from "@/lib/issue-types";
 import { cn, isDoltProject } from "@/lib/utils";
 import { computeEpicProgress } from "@/lib/epic-parser";
+import { indexBoard } from "@/lib/board-index";
 import { SET_BY, STATES, standing, type Bead, type BeadStatus, type Epic, type WorktreeStatus } from "@/types";
 
 
@@ -184,13 +185,18 @@ export function BeadDetail({
   const hasWorktree = worktreeStatus?.exists ?? false;
   const isEpic = bead.children && bead.children.length > 0;
 
+  const { beadById, statusById } = useMemo(
+    () => indexBoard(allBeads ?? []),
+    [allBeads],
+  );
+
   // Resolve children from IDs
   const childTasks = useMemo(() => {
     if (!isEpic || !allBeads) return [];
     return (bead.children || [])
-      .map(childId => allBeads.find(b => b.id === childId))
+      .map(childId => beadById.get(childId))
       .filter((b): b is Bead => b !== undefined);
-  }, [isEpic, bead.children, allBeads]);
+  }, [isEpic, bead.children, allBeads, beadById]);
 
   /**
    * The job's size, from the one counter the card reads. Working it out here
@@ -200,20 +206,19 @@ export function BeadDetail({
   const progress = useMemo(
     () => computeEpicProgress(
       bead as Epic,
-      allBeads ?? [],
-      new Map((allBeads ?? []).map((b) => [b.id, b.status])),
+      beadById,
+      statusById,
     ),
-    [bead, allBeads],
+    [bead, beadById, statusById],
   );
 
   // Resolve related tasks from IDs
   const relatedTasks = useMemo(() => {
     if (!allBeads || !bead.relates_to || bead.relates_to.length === 0) return [];
-    const beadMap = new Map(allBeads.map(b => [b.id, b]));
     return bead.relates_to
-      .map(id => beadMap.get(id))
+      .map(id => beadById.get(id))
       .filter((b): b is Bead => b !== undefined);
-  }, [bead.relates_to, allBeads]);
+  }, [bead.relates_to, allBeads, beadById]);
 
   return (
     <>

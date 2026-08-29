@@ -24,8 +24,8 @@ import type { Bead, Epic } from "@/types";
 export interface EpicCardProps {
   /** Epic bead with children */
   epic: Epic;
-  /** All beads to resolve children */
-  allBeads: Bead[];
+  /** Every bead by id, built once for the whole board. */
+  beadById: ReadonlyMap<string, Bead>;
   /**
    * Every bead's state by id, for asking whether this card is blocked. The
    * board builds it once; a card that builds its own builds a map of the whole
@@ -68,7 +68,7 @@ function getProgressIndicatorClass(percentage: number): string {
  */
 export const EpicCard = memo(function EpicCard({
   epic,
-  allBeads,
+  beadById,
   statusById,
   ticketNumber,
   isSelected = false,
@@ -84,17 +84,17 @@ export const EpicCard = memo(function EpicCard({
   // Resolve children from IDs (memoized to prevent unnecessary re-fetches)
   const children = useMemo(() =>
     (epic.children || [])
-      .map(childId => allBeads.find(b => b.id === childId))
+      .map(childId => beadById.get(childId))
       .filter((b): b is Bead => b !== undefined),
-    [epic.children, allBeads]
+    [epic.children, beadById]
   );
 
   // Worked out once per change of the board, not once per redraw: this card
   // redraws on every poll, and walking the whole board each time cost more than
   // three times what the walk itself costs.
   const progress = useMemo(
-    () => computeEpicProgress(epic, allBeads, statusById),
-    [epic, allBeads, statusById],
+    () => computeEpicProgress(epic, beadById, statusById),
+    [epic, beadById, statusById],
   );
   const progressPercentage = progressPercent(progress);
 

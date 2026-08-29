@@ -108,7 +108,7 @@ const NOTHING: EpicProgress = {
  * list of states, not spelled again here.
  *
  * @param epic - Epic bead with children
- * @param allBeads - Array of all beads to resolve children from
+ * @param beadById - Every bead by id, built once for the whole board
  * @param statusById - Every bead's state by id, which the board builds once and
  *   hands down. Building it here meant a fresh table of the whole board per job
  *   card on every redraw, on top of a second one for the pieces themselves.
@@ -116,14 +116,14 @@ const NOTHING: EpicProgress = {
  *
  * @example
  * ```typescript
- * const progress = computeEpicProgress(epic, allBeads, statusById);
+ * const progress = computeEpicProgress(epic, beadById, statusById);
  * console.log(`${progress.completed}/${progress.total} children completed`);
  * console.log(`${progress.blocked} children blocked`);
  * ```
  */
 export function computeEpicProgress(
   epic: Epic,
-  allBeads: Bead[],
+  beadById: ReadonlyMap<string, Bead>,
   statusById: ReadonlyMap<string, string>,
 ): EpicProgress {
   if (!epic.children || epic.children.length === 0) {
@@ -134,13 +134,15 @@ export function computeEpicProgress(
   // all which were dropped. Reporting the raw count of references here is the
   // old rule this whole counter exists to remove, and it disagreed with the
   // answer given below once the same empty board is walked properly.
-  if (!allBeads || allBeads.length === 0) {
+  if (beadById.size === 0) {
     return NOTHING;
   }
 
-  // One pass over the board, against the ids this job claims.
-  const wanted = new Set(epic.children);
-  const children = allBeads.filter((bead) => wanted.has(bead.id));
+  // The board already paid for the one whole-board walk that built this
+  // lookup. Each job now reads only its own pieces.
+  const children = epic.children
+    .map((id) => beadById.get(id))
+    .filter((bead): bead is Bead => bead !== undefined);
 
   // The pieces this job is actually made of, and the ones it dropped.
   const pieces = children.filter((c) => counted(c.status));

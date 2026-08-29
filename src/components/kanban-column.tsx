@@ -21,8 +21,8 @@ export interface KanbanColumnProps {
   status: BeadStatus;
   title: string;
   beads: Bead[];
-  /** All beads for resolving epic children */
-  allBeads: Bead[];
+  /** Every bead by id, built once for the whole board. */
+  beadById: ReadonlyMap<string, Bead>;
   /**
    * Every bead's state by id, built once by the board. A card asks it whether
    * it is blocked; building one per card was a fresh map of the whole board
@@ -51,7 +51,7 @@ function isEpic(bead: Bead): bead is Epic {
 
 interface ColumnCardProps {
   bead: Bead;
-  allBeads: Bead[];
+  beadById: ReadonlyMap<string, Bead>;
   statusById: ReadonlyMap<string, string>;
   ticketNumber?: number;
   isSelected: boolean;
@@ -71,7 +71,7 @@ interface ColumnCardProps {
  */
 const ColumnCard = memo(function ColumnCard({
   bead,
-  allBeads,
+  beadById,
   statusById,
   ticketNumber,
   isSelected,
@@ -85,7 +85,7 @@ const ColumnCard = memo(function ColumnCard({
   return isEpic(bead) ? (
     <EpicCard
       epic={bead}
-      allBeads={allBeads}
+      beadById={beadById}
       statusById={statusById}
       ticketNumber={ticketNumber}
       isSelected={isSelected}
@@ -125,7 +125,7 @@ export const KanbanColumn = memo(function KanbanColumn({
   status,
   title,
   beads,
-  allBeads,
+  beadById,
   statusById,
   selectedBeadId,
   ticketNumbers,
@@ -185,7 +185,7 @@ export const KanbanColumn = memo(function KanbanColumn({
               >
                 <ColumnCard
                   bead={beads[index]}
-                  allBeads={allBeads}
+                  beadById={beadById}
                   statusById={statusById}
                   ticketNumber={ticketNumbers?.get(key)}
                   isSelected={selectedBeadId === key}

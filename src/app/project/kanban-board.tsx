@@ -15,6 +15,7 @@ import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { useProject } from "@/hooks/use-project";
 import { addressWith, cardWasPushed, whereFrom } from "@/lib/address";
 import { columnFor, drawnInColumns, oldestFirst } from "@/lib/bead-utils";
+import { indexBoard } from "@/lib/board-index";
 import { getUnknownStatusBeads, getUnknownStatusNames } from "@/lib/beads-parser";
 import { getIssueTypeMeta } from "@/lib/issue-types";
 import type { IssueTypeFilter } from "@/lib/issue-types";
@@ -135,6 +136,8 @@ export default function KanbanBoard() {
    * untouched one is never drawn as waiting on a reader.
    * Defensive: falls back to 'open' for any column not among the 6.
    */
+  const boardIndex = useMemo(() => indexBoard(beads), [beads]);
+
   const filteredBeadsByStatus = useMemo(() => {
     const grouped: Record<BeadStatus, Bead[]> = {
       open: [],
@@ -144,15 +147,14 @@ export default function KanbanBoard() {
       closed: [],
       cancelled: [],
     };
-    const byId = new Map(beads.map(b => [b.id, b]));
     for (const bead of topLevelBeads) {
-      const live = columnFor(bead, byId) as BeadStatus;
+      const live = columnFor(bead, boardIndex.beadById) as BeadStatus;
       const column = grouped[live] ? live : 'open';
       grouped[column].push(bead);
     }
     grouped.manager_review = oldestFirst(grouped.manager_review);
     return grouped;
-  }, [topLevelBeads, beads]);
+  }, [topLevelBeads, boardIndex.beadById]);
 
   /**
    * Every bead's state by id, built once for the whole board.
@@ -160,10 +162,7 @@ export default function KanbanBoard() {
    * Each card asks it whether it is blocked. Building one per card meant a
    * fresh map of the entire board for every card drawn, on every pass.
    */
-  const statusById = useMemo(
-    () => new Map(beads.map(b => [b.id, b.status] as const)),
-    [beads],
-  );
+  const { beadById, statusById } = boardIndex;
 
   /**
    * Detect beads with truly unknown statuses for the warning indicator.
@@ -433,7 +432,7 @@ export default function KanbanBoard() {
                 status={status}
                 title={title}
                 beads={filteredBeadsByStatus[status] || []}
-                allBeads={beads}
+                beadById={beadById}
                 statusById={statusById}
                 selectedBeadId={selectedId}
                 ticketNumbers={ticketNumbers}

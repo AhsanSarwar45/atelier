@@ -39,7 +39,7 @@ const draw = (beads: Bead[]) =>
       status="open"
       title="Todo"
       beads={beads}
-      allBeads={beads}
+      beadById={new Map(beads.map((b) => [b.id, b]))}
       statusById={new Map(beads.map((b) => [b.id, b.status]))}
       onSelectBead={vi.fn()}
     />,

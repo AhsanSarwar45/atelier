@@ -12,6 +12,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { EpicCard } from '../epic-card';
+import { indexBoard } from '@/lib/board-index';
 import { closeBead } from '@/lib/cli';
 import type { CardLayout } from '@/lib/themes';
 import type { Bead, BeadStatus, Epic } from '@/types';
@@ -53,12 +54,14 @@ const epicIn = (status: BeadStatus): Epic => ({
 /** The lookup the board builds once and every card is handed. */
 const lookup = (beads: Bead[]): ReadonlyMap<string, string> =>
   new Map(beads.map(b => [b.id, b.status]));
+const byId = (beads: Bead[]): ReadonlyMap<string, Bead> =>
+  new Map(beads.map(b => [b.id, b]));
 
 const draw = (status: BeadStatus) =>
   render(
     <EpicCard
       epic={epicIn(status)}
-      allBeads={[child]}
+      beadById={byId([child])}
       statusById={lookup([child])}
       onSelect={vi.fn()}
       onChildClick={vi.fn()}
@@ -78,7 +81,7 @@ const withPieces = (status: BeadStatus, done: number, dropped: number) => {
   ];
   return {
     epic: { ...epicIn(status), children: pieces.map((p) => p.id) },
-    allBeads: pieces,
+    beadById: byId(pieces),
     statusById: lookup(pieces),
     onSelect: vi.fn(),
     onChildClick: vi.fn(),
@@ -107,7 +110,7 @@ describe('the button that finishes a job', () => {
     render(
       <EpicCard
         epic={{ ...epicIn('manager_review'), children: [child.id, unfinished.id] }}
-        allBeads={[child, unfinished]}
+        beadById={byId([child, unfinished])}
         statusById={lookup([child, unfinished])}
         onSelect={vi.fn()}
         onChildClick={vi.fn()}
@@ -133,8 +136,8 @@ describe('the button that finishes a job', () => {
       <EpicCard
         {...props}
         epic={{ ...props.epic, children: [...props.epic.children, open.id] }}
-        allBeads={[...props.allBeads, open]}
-        statusById={lookup([...props.allBeads, open])}
+        beadById={byId([...props.beadById.values(), open])}
+        statusById={lookup([...props.beadById.values(), open])}
       />
     );
     expect(screen.getByText('99%')).toBeInTheDocument();
@@ -151,6 +154,49 @@ describe('the button that finishes a job', () => {
 });
 
 describe('what a card says it is made of', () => {
+  it('renders 50 job cards after walking the board once', () => {
+    const epics = Array.from({ length: 50 }, (_, epicIndex) => ({
+      ...epicIn('open'),
+      id: `job-${epicIndex}`,
+      title: `Job ${epicIndex}`,
+      children: Array.from({ length: 12 }, (_, childIndex) =>
+        `job-${epicIndex}.${childIndex}`),
+    }));
+    const pieces = epics.flatMap((epic) => epic.children.map((id) => ({
+      ...child,
+      id,
+    })));
+    const board = [
+      ...epics,
+      ...pieces,
+      ...Array.from({ length: 3168 - epics.length - pieces.length }, (_, index) => ({
+        ...child,
+        id: `unrelated-${index}`,
+      })),
+    ];
+    let walks = 0;
+    const countedBoard: Iterable<Bead> = {
+      *[Symbol.iterator]() {
+        walks += 1;
+        yield* board;
+      },
+    };
+    const { beadById, statusById } = indexBoard(countedBoard);
+
+    render(<>{epics.map((epic) => (
+      <EpicCard
+        key={epic.id}
+        epic={epic}
+        beadById={beadById}
+        statusById={statusById}
+        onSelect={vi.fn()}
+        onChildClick={vi.fn()}
+      />
+    ))}</>);
+
+    expect(walks).toBe(1);
+  });
+
   it('counts only the pieces still part of the job', () => {
     render(<EpicCard {...withPieces('manager_review', 10, 4)} />);
     expect(screen.getByText(/10\/10/)).toBeInTheDocument();
@@ -207,8 +253,8 @@ describe('what a card says it is made of', () => {
       <EpicCard
         {...props}
         epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
-        allBeads={[...props.allBeads, live]}
-        statusById={lookup([...props.allBeads, live])}
+        beadById={byId([...props.beadById.values(), live])}
+        statusById={lookup([...props.beadById.values(), live])}
       />
     );
     const label = screen.getByText(/1 in progress/);
@@ -227,8 +273,8 @@ describe('what a card says it is made of', () => {
       <EpicCard
         {...props}
         epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
-        allBeads={[...props.allBeads, live]}
-        statusById={lookup([...props.allBeads, live])}
+        beadById={byId([...props.beadById.values(), live])}
+        statusById={lookup([...props.beadById.values(), live])}
       />
     );
     expect(screen.getByText(/1 in progress/)).toBeInTheDocument();
@@ -277,8 +323,8 @@ describe('the list of pieces under a card', () => {
       <EpicCard
         {...props}
         epic={{ ...props.epic, children: [...props.epic.children, live.id] }}
-        allBeads={[...props.allBeads, live]}
-        statusById={lookup([...props.allBeads, live])}
+        beadById={byId([...props.beadById.values(), live])}
+        statusById={lookup([...props.beadById.values(), live])}
       />
     );
     const titles = Array.from(container.querySelectorAll('p.text-xs.font-medium'));
@@ -353,7 +399,7 @@ describe('the answer to a press', () => {
     render(
       <EpicCard
         epic={epicIn('manager_review')}
-        allBeads={[child]}
+        beadById={byId([child])}
         statusById={lookup([child])}
         onSelect={vi.fn()}
         onChildClick={vi.fn()}
@@ -374,7 +420,7 @@ describe('the answer to a press', () => {
     render(
       <EpicCard
         epic={epicIn('manager_review')}
-        allBeads={[child]}
+        beadById={byId([child])}
         statusById={lookup([child])}
         onSelect={vi.fn()}
         onChildClick={vi.fn()}
