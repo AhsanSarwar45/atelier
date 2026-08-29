@@ -5,16 +5,29 @@
  * a fenced block or an address looks the same wherever it was written. There is
  * no second renderer; a place that needs different spacing passes `tight`.
  */
-import type { ReactNode } from "react";
+import type { MouseEventHandler, ReactNode } from "react";
 
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import {
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode2,
+  FileImage,
+  FileJson,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  type LucideIcon,
+} from "lucide-react";
 
 import "highlight.js/styles/github-dark.css";
 
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { rehypeMentions, type Piece } from "@/workbench/mentions";
 import { openLocalPath } from "@/workbench/open-local-path";
 
@@ -81,6 +94,45 @@ function wroteItOut(href: string, written: string): boolean {
 interface LocalTarget {
   path: string;
   line: number | null;
+}
+
+type FileKind = 'archive' | 'audio' | 'code' | 'data' | 'image' | 'table' | 'text' | 'video' | 'file';
+
+const FILE_KINDS: Record<FileKind, { extensions: Set<string>; icon: LucideIcon }> = {
+  archive: { extensions: new Set(['7z', 'bz2', 'gz', 'rar', 'tar', 'tgz', 'xz', 'zip']), icon: FileArchive },
+  audio: { extensions: new Set(['aac', 'flac', 'm4a', 'mp3', 'ogg', 'wav']), icon: FileAudio },
+  code: { extensions: new Set(['c', 'cc', 'cpp', 'css', 'go', 'h', 'html', 'java', 'js', 'jsx', 'kt', 'php', 'py', 'rb', 'rs', 'sh', 'sql', 'swift', 'ts', 'tsx', 'vue']), icon: FileCode2 },
+  data: { extensions: new Set(['json', 'jsonl', 'toml', 'xml', 'yaml', 'yml']), icon: FileJson },
+  image: { extensions: new Set(['avif', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp']), icon: FileImage },
+  table: { extensions: new Set(['csv', 'numbers', 'ods', 'tsv', 'xls', 'xlsx']), icon: FileSpreadsheet },
+  text: { extensions: new Set(['log', 'md', 'pdf', 'rtf', 'txt']), icon: FileText },
+  video: { extensions: new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm']), icon: FileVideo },
+  file: { extensions: new Set(), icon: File },
+};
+
+function fileKind(path: string): FileKind {
+  const extension = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  return (Object.entries(FILE_KINDS) as [FileKind, (typeof FILE_KINDS)[FileKind]][])
+    .find(([kind, definition]) => kind !== 'file' && definition.extensions.has(extension))?.[0] ?? 'file';
+}
+
+function FileLinkBadge({ href, target, children, onClick }: {
+  href: string;
+  target: LocalTarget;
+  children: ReactNode;
+  onClick: MouseEventHandler<HTMLAnchorElement>;
+}) {
+  const kind = fileKind(target.path);
+  const Icon = FILE_KINDS[kind].icon;
+  return (
+    <Badge asChild variant="primary" appearance="outline" size="xs" shape="circle" className="mx-0.5 align-middle font-mono no-underline">
+      <a href={href} onClick={onClick} data-testid="markdown-file-link" data-file-kind={kind} title={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
+        <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+        <span>{children}</span>
+        {target.line === null ? null : <span className="text-muted-foreground">:{target.line}</span>}
+      </a>
+    </Badge>
+  );
 }
 
 /** A path the host can open, rather than an address the browser should visit. */
@@ -162,9 +214,9 @@ export function MarkdownBody({
             if (ours) return <>{ours}</>;
             const local = localTarget(href);
             if (local) return (
-              <a
-                {...props}
+              <FileLinkBadge
                 href={href}
+                target={local}
                 onClick={(event) => {
                   event.preventDefault();
                   openLocalPath(
@@ -173,8 +225,9 @@ export function MarkdownBody({
                     local.line,
                   );
                 }}
-                data-testid="markdown-file-link"
-              />
+              >
+                {props.children}
+              </FileLinkBadge>
             );
             return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
           },

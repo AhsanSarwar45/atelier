@@ -185,12 +185,13 @@ interface HastNode {
 const NOT_PROSE = new Set(['a']);
 
 /**
- * Where a card id is not a mention but a file still is: inside a fenced block
- * and inside inline code. Chipping a card id inside a command would break the
- * command as something to copy; the files named in that same command are the
- * reason the reader is looking at it.
+ * Where a card id is not a mention but a file still is: inside a fenced block.
+ * Chipping a card id inside a command would break the command as something to
+ * copy. Inline code is different: providers routinely use it merely to style
+ * an identifier, so suppressing mentions there made provider prose render
+ * differently even though both providers named the same card (bw-nlnq.1).
  */
-const ONLY_FILES = new Set(['code', 'pre']);
+const ONLY_FILES = new Set(['pre']);
 
 /**
  * The rendering step: every run of words in a message is looked at, and the

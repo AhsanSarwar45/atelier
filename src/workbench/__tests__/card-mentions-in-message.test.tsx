@@ -48,4 +48,15 @@ describe('card names in a rendered message', () => {
     expect(chip).toHaveClass('align-middle');
     expect(chip).not.toHaveClass('align-baseline');
   });
+
+  it('draws a card chip when a provider writes the id as inline code', () => {
+    say('Landed `bw-1u1` today');
+    expect(screen.getByTestId('mention-card')).toHaveTextContent('bw-1u1');
+  });
+
+  it('keeps card ids inside fenced commands copyable as code', () => {
+    say('```sh\nbd show bw-1u1\n```');
+    expect(screen.queryByTestId('mention-card')).toBeNull();
+    expect(screen.getByText(/bd show bw-1u1/)).toBeVisible();
+  });
 });
