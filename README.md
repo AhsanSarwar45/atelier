@@ -115,10 +115,16 @@ The first two are once per computer. The third is once per project.
 
 ### Prerequisites
 
+- [Git](https://git-scm.com/) in PATH — Atelier reads and writes your project
+  through it, and cuts the worktree each ticket is worked in
+- [Python](https://www.python.org/) 3.11+ in PATH, as `python3` or `python` —
+  `atelier init` installs the project's rules with it, and every board
+  transition is checked by it
 - [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH only for projects that opt into a board
-- [Node.js](https://nodejs.org/) 20+ in PATH — the board and every other screen
-  run without it, but the chat helper is started with `node`, and `npm` fetches
-  its kit once on first run
+- [Node.js](https://nodejs.org/) 22.6+ in PATH — the board and every other
+  screen run without it, but the chat helper is started with `node
+  --experimental-strip-types`, which no earlier release understands, and `npm`
+  fetches its kit once on first run
 
 ### Homebrew (macOS / Linux)
 
@@ -261,11 +267,11 @@ project registered for Beads receives the separate `beads` workflow skill,
 including from any linked worktree. Inferred project metadata remains in
 Atelier's external data directory rather than the repository.
 
-It needs `bd` and `python3` on your PATH.
+It needs `bd` and Python 3.11+ (as `python3` or `python`) on your PATH.
 
 ## Development
 
-Prerequisites: Node.js 20+, [Rust toolchain](https://rustup.rs/), and the [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH.
+Prerequisites: Node.js 22.6+, Python 3.11+, Git, [Rust toolchain](https://rustup.rs/), and the [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH.
 
 ```bash
 git clone https://github.com/AhsanSarwar45/atelier.git
