@@ -758,6 +758,13 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
     setRecallable(null);
     recallableNow.current = null;
     sending.current = null;
+    // Both lines belong to the chat they were raised in. One tab serves every
+    // chat in the project and is never remounted between them, so a refused
+    // pick stayed drawn over the next chat he opened — a complaint about a
+    // chat he had already left, which no amount of leaving would clear
+    // (bw-o83v).
+    setSteerError(null);
+    setSendError(null);
   }, [sessionId]);
   useEffect(() => {
     if (recallable && agentRespondedSince(view.items, recallable.itemsBeforeSend)) {
