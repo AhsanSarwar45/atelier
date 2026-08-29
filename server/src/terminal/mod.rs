@@ -6,12 +6,15 @@
 //! comes back, and waiting rather than growing when a viewer falls behind.
 //! `register` is every shell this server has open, held by the process so a
 //! shell outlives the page that opened it, and `routes` is how the app opens,
-//! lists and closes one. `stream` is the socket that carries the bytes both
+//! lists and closes one. `settings` is the one thing about a terminal a person
+//! gets to choose — which shell it opens — kept on the server because the
+//! server is what spawns it. `stream` is the socket that carries the bytes both
 //! ways: what the shell printed while nobody was looking, then what it prints
 //! now, and the keystrokes going back the other way.
 
 pub mod pump;
 pub mod register;
 pub mod routes;
+pub mod settings;
 pub mod shell;
 pub mod stream;

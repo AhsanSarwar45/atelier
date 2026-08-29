@@ -718,7 +718,7 @@ mod tests {
         // A shell has to be exec'd and has to read its profile before it can
         // print a prompt, and this connection is a pipe with no kernel in it.
         let session = shells
-            .open(std::path::PathBuf::from("/"), 80, 24)
+            .open(std::path::PathBuf::from("/"), 80, 24, None)
             .expect("a shell should start");
         let mut socket = watched(&app, &session.id.to_string()).await;
 

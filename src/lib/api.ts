@@ -697,6 +697,51 @@ export const update = {
 };
 
 /**
+ * Which shell the terminal opens, as the server holds it.
+ *
+ * `shell` is what was chosen, or null for nothing chosen. `default` is what
+ * this computer would open on its own, and `available` is what it lists in
+ * /etc/shells — a set of suggestions, not a limit, since a shell installed
+ * anywhere else is still a shell.
+ */
+export interface TerminalShell {
+  shell: string | null;
+  default: string;
+  available: string[];
+}
+
+/**
+ * Read the shell setting.
+ *
+ * Through `request` rather than `fetchApi`, for the sake of the refusal: the
+ * server answers a path it cannot run with one sentence naming that path
+ * (server/src/terminal/settings.rs), written for the person who typed it, and
+ * the form under the field draws it as it stands. Anything that reworded it
+ * here would be showing what this file guessed instead of what the server
+ * looked at.
+ */
+export async function terminalSettings(): Promise<TerminalShell> {
+  const answer = await request('/api/settings/terminal');
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as TerminalShell;
+}
+
+/**
+ * Choose the shell, or clear the choice with null. Answers with the setting as
+ * it stands afterwards, so the screen redraws from the server rather than from
+ * what it hoped the server did.
+ */
+export async function saveTerminalSettings(shell: string | null): Promise<TerminalShell> {
+  const answer = await request('/api/settings/terminal', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shell }),
+  });
+  if (!answer.ok) throw new Error((await answer.text()) || `the app answered ${answer.status}`);
+  return (await answer.json()) as TerminalShell;
+}
+
+/**
  * File Watcher.
  *
  * The board is one tag on the window's one connection rather than a stream of

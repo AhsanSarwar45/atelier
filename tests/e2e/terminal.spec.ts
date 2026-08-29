@@ -48,6 +48,21 @@ const SHELL_MS = 60_000;
 /** How far the right edge is pulled in, in pixels — enough to change the width in characters beyond doubt. */
 const PULLED_IN = 320;
 
+/**
+ * The shell the settings case chooses.
+ *
+ * `/bin/sh` because every machine that can run this has one, and because it is
+ * not what this machine opens on its own — the login shell recorded here is
+ * bash — so `$0` saying `-sh` cannot be the system agreeing by accident.
+ */
+const CHOSEN = '/bin/sh';
+
+/** The icon face the app carries, at the address it serves it from. */
+const ICON_FILE = '/fonts/SymbolsNerdFontMono-Regular.ttf';
+
+/** One character out of it: the arrow that ends a powerline segment. */
+const ICON = '\ue0b0';
+
 /** A phone, in the sense the app means it: inside `(max-width: 639px)`. */
 const PHONE = { width: 390, height: 844 };
 
@@ -188,6 +203,11 @@ test.describe('the terminal', () => {
   test.beforeEach(async ({ page, request }) => {
     test.setTimeout(180_000);
     await closeEveryShell(request);
+    // And from no shell chosen. The setting outlives a case the way a shell
+    // does, so a case that ran after the one below without this would be
+    // opening whatever that one left behind rather than what this instance
+    // opens on its own.
+    await request.put('/api/settings/terminal', { data: { shell: null } });
     await page.addInitScript(watchTheShapes);
   });
 
@@ -380,5 +400,221 @@ test.describe('the terminal', () => {
       const said = await drawsEventually(pane, /PHONE\[4242\]/, 'the shell on the phone never answered');
       expect(said, 'what was typed never reached the shell to be echoed back').toMatch(/PH''ONE/);
     });
+  });
+
+  /**
+   * Which shell a tab opens, chosen on the settings screen.
+   *
+   * `-sh` and not `sh` is the assertion. A login shell is started with a dash
+   * in front of its name — that is how it knows to read a profile — and it is
+   * the pty crate's own path for the default program that puts it there. A
+   * shell chosen in settings is handed to that same path rather than run as an
+   * argv of ours, and `$0` is where the difference would show
+   * (server/src/terminal/shell.rs).
+   *
+   * The two halves are a pair. The login shell recorded for whoever runs this
+   * is bash, so `-sh` can only have come from the choice; and once the choice
+   * is cleared, anything that is not `-sh` can only have come from the system
+   * deciding again.
+   */
+  test('the shell chosen in settings is the shell a new tab opens', async ({ page, request }) => {
+    await page.goto(HOME);
+    await expect(page.getByTestId('shell')).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('link', { name: 'Settings', exact: true }).click();
+    await expect(page).toHaveURL(/\/settings\/?$/, { timeout: 30_000 });
+
+    const field = page.getByLabel('Shell', { exact: true });
+    await expect(field, 'the settings screen has no field for the shell').toBeVisible({ timeout: 30_000 });
+    await field.fill(CHOSEN);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+    // Saved, and saved on the server — the shell is spawned there, and a
+    // choice this browser kept to itself would be no choice at all.
+    await expect(page.getByTestId('terminal-shell-refused'), 'the server refused a shell it can run').toHaveCount(0);
+    await expect(field).toHaveValue(CHOSEN);
+    await expect
+      .poll(async () => (await (await request.get('/api/settings/terminal')).json()).shell, {
+        message: 'the server did not keep the shell that was chosen',
+        timeout: 30_000,
+      })
+      .toBe(CHOSEN);
+
+    await page.getByRole('link', { name: 'Go back to home' }).click();
+    await expect(page.getByTestId('shell')).toBeVisible({ timeout: 30_000 });
+
+    const chosen = await openTerminal(page);
+    await typeAt(page, chosen, `printf 'AR''GV0[%s]\\n' "$0"`);
+    const started = await drawsEventually(
+      chosen,
+      /ARGV0\[[^\]]+\]/,
+      'the shell never said what it had been started as',
+    );
+    expect(started, `the tab did not open ${CHOSEN}, or did not open it as a login shell`).toMatch(
+      /ARGV0\[-sh\]/,
+    );
+
+    // And back. A tab opened after the choice is cleared is the system's again.
+    await closeEveryShell(request);
+    await page.goto('/settings');
+    await page.getByRole('button', { name: 'Use system default' }).click();
+    await expect(page.getByLabel('Shell', { exact: true })).toHaveValue('');
+    await expect
+      .poll(async () => (await (await request.get('/api/settings/terminal')).json()).shell, {
+        message: 'the server still holds a shell after the choice was cleared',
+        timeout: 30_000,
+      })
+      .toBeNull();
+
+    await page.goto(HOME);
+    await expect(page.getByTestId('shell')).toBeVisible({ timeout: 30_000 });
+    const restored = await openTerminal(page);
+    await typeAt(page, restored, `printf 'AR''GV0[%s]\\n' "$0"`);
+    const again = await drawsEventually(
+      restored,
+      /ARGV0\[[^\]]+\]/,
+      'the shell opened after the choice was cleared never said what it was',
+    );
+    expect(again, 'clearing the choice left the chosen shell in place').not.toMatch(/ARGV0\[-sh\]/);
+  });
+
+  /**
+   * The icon face the app bundles, drawn in the grid at one cell.
+   *
+   * A prompt full of powerline arrows and language marks is written in the
+   * private use area, and a machine at the other end of the house has no
+   * reason to have a font with those characters in it. So the app carries one
+   * and serves it (`public/fonts`, the `@font-face` in src/app/globals.css,
+   * last but one in the stack in src/workbench/terminal-pane.tsx), and this is
+   * the case that says the whole arrangement is in place in a browser.
+   *
+   * Three things, because any one of them alone would pass while the reader
+   * still saw boxes: the file is served, the browser has the face and has
+   * loaded it, and the character it draws takes exactly one cell so a prompt
+   * using it lines up with everything under it.
+   *
+   * ## Which of the three can actually fail, and which cannot
+   *
+   * The middle one. Take the `@font-face` rule out of `src/app/globals.css`,
+   * rebuild and run this case again, and `document.fonts` goes from one loaded
+   * face to an empty set. That is the assertion that catches it.
+   *
+   * The width does not discriminate, and writing that here is cheaper than
+   * somebody rediscovering it. xterm's DOM renderer gives every span a
+   * `letter-spacing` of `cellWidth - measuredWidth` per character
+   * (`DomRendererRowFactory`), so a span's box is exactly one cell wide per
+   * character whatever font drew them: run without the rule, the same two
+   * numbers came back — 9px for the icon's span, 9.0021px per character for
+   * the ordinary one. It is still worth asserting, because an arrow that shoved
+   * the rest of a prompt sideways is what a reader would complain about, but it
+   * is a promise about the layout rather than evidence about the file.
+   *
+   * The icon is written as bytes rather than typed, which makes the line its
+   * own canary: what the shell echoes is the backslashes, and the character
+   * itself appears only in what the shell printed.
+   */
+  test('the bundled icon face is served, loaded, and drawn at one cell', async ({ page, request }) => {
+    const file = await request.get(ICON_FILE);
+    expect(file.ok(), `the app does not serve ${ICON_FILE}: ${file.status()}`).toBeTruthy();
+    expect(
+      (await file.body()).byteLength,
+      'the icon face is served as something far too small to be a font',
+    ).toBeGreaterThan(100_000);
+
+    await page.goto(HOME);
+    const pane = await openTerminal(page);
+
+    await typeAt(page, pane, `printf 'WI''DTH[MMMMMMMM]\\n'`);
+    await drawsEventually(pane, /WIDTH\[MMMMMMMM\]/, 'the shell never printed the line to measure against');
+    await typeAt(page, pane, `printf '\\xee\\x82\\xb0\\n'`);
+    await drawsEventually(pane, new RegExp(ICON), 'the icon never reached the screen');
+
+    // The face is asked for by the pane on mount and arrives late — 2.5 MB of
+    // it — so this waits for the browser to say it has it rather than assuming.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            Array.from(document.fonts)
+              .filter((face) => face.family.includes('Symbols Nerd Font Mono'))
+              .map((face) => face.status),
+          ),
+        { message: 'the browser never loaded the icon face the app declares', timeout: SHELL_MS },
+      )
+      .toEqual(['loaded']);
+
+    const measured = await pane.evaluate((box, icon: string) => {
+      const rows = Array.from(box.querySelectorAll('.xterm-rows > div'));
+      const per = (span: HTMLElement) => ({
+        text: span.textContent ?? '',
+        chars: (span.textContent ?? '').length,
+        width: span.getBoundingClientRect().width,
+        each: span.getBoundingClientRect().width / (span.textContent ?? '').length,
+      });
+      type Span = ReturnType<typeof per>;
+
+      let drawn: Span | null = null;
+      let drawnRow = -1;
+      let ordinary: Span | null = null;
+      let ordinaryRow = -1;
+      rows.forEach((row, index) => {
+        for (const span of Array.from(row.children) as HTMLElement[]) {
+          const text = span.textContent ?? '';
+          if (!drawn && text.includes(icon)) {
+            drawn = per(span);
+            drawnRow = index;
+          }
+          // The last one, because the shell echoes the line that asks before it
+          // prints the line that answers, and the answer is the lower row.
+          if (text.includes('MMMMMMMM')) {
+            ordinary = per(span);
+            ordinaryRow = index;
+          }
+        }
+      });
+
+      // What the same character measures with the app's stack and without the
+      // bundled face in it. Logged and never asserted, because it asks for the
+      // face by name: a machine that has Symbols Nerd Font Mono installed for
+      // its own terminal answers the same whether the app serves it or not, and
+      // the machine this was written on does. It is here because the two
+      // numbers are worth seeing — 15px against 9.02px is how far outside its
+      // cell the glyph would sit if xterm were not squeezing it in.
+      const style = getComputedStyle(box.querySelector('.xterm-rows')!);
+      const advance = (family: string) => {
+        const probe = document.createElement('span');
+        probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;letter-spacing:normal;font-size:${style.fontSize};font-family:${family}`;
+        probe.textContent = icon;
+        document.body.appendChild(probe);
+        const width = probe.getBoundingClientRect().width;
+        probe.remove();
+        return width;
+      };
+      const stack = style.fontFamily;
+      const stripped = stack
+        .split(',')
+        .filter((one) => !one.includes('Symbols Nerd Font Mono'))
+        .join(',');
+
+      return {
+        drawn: drawn as Span | null,
+        drawnRow,
+        ordinary: ordinary as Span | null,
+        ordinaryRow,
+        advanceWithFace: advance(stack),
+        advanceWithoutFace: advance(stripped),
+      };
+    }, ICON);
+
+    // Printed so the numbers are in the run's own output, and not only in
+    // whichever assertion happened to fail.
+    console.log(`icon width: ${JSON.stringify(measured)}`);
+
+    expect(measured.drawn, 'no span on the screen holds the icon').not.toBeNull();
+    expect(measured.ordinary, 'no span on the screen holds ordinary characters').not.toBeNull();
+    expect(measured.drawnRow, 'the icon and the ordinary characters are in one row').not.toBe(measured.ordinaryRow);
+    expect(
+      Math.abs(measured.drawn!.each - measured.ordinary!.each),
+      `the icon is drawn ${measured.drawn!.each}px wide where an ordinary character is ${measured.ordinary!.each}px`,
+    ).toBeLessThanOrEqual(1);
   });
 });

@@ -20,6 +20,7 @@ import {
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
 } from "@/lib/font-size";
+import { TerminalSettings } from "@/workbench/terminal-settings";
 
 export default function SettingsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -167,6 +168,14 @@ export default function SettingsPage() {
                 Reset
               </Button>
             </div>
+          </Panel>
+        </section>
+
+        {/* Terminal Section */}
+        <section className="mb-8">
+          <h2 className="mb-4 text-lg font-medium text-t-primary">Terminal</h2>
+          <Panel inset="md">
+            <TerminalSettings />
           </Panel>
         </section>
 

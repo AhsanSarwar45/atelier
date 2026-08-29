@@ -4,9 +4,9 @@
 //! Uses rusqlite with Arc<Mutex<>> for thread-safe access from Axum handlers.
 
 use chrono::Utc;
-use rusqlite::{params, Connection, Result as SqliteResult};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use thiserror::Error;
 use uuid::Uuid;
@@ -133,6 +133,12 @@ pub struct ProjectTagInput {
     pub tag_id: String,
 }
 
+/// The name the chosen terminal shell is filed under.
+///
+/// Dotted, so the day there is a second terminal setting the two sit together
+/// in a `SELECT` and nobody has to guess which of them `shell` meant.
+const TERMINAL_SHELL: &str = "terminal.shell";
+
 /// Thread-safe database wrapper
 pub struct Database {
     conn: Mutex<Connection>,
@@ -184,6 +190,17 @@ impl Database {
         // SQLite defaults foreign_keys=OFF per connection.
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
+        // The one table here that is not about projects. It holds what the app
+        // itself was told to do — one row per setting, keyed by name — and it
+        // is in the base batch rather than in a migration because the batch is
+        // run on every start with `IF NOT EXISTS`, so a database made before
+        // there were settings grows the table the next time it is opened.
+        //
+        // The table is the only generic thing about it. Nothing reads a
+        // setting by string: each one has a named accessor below that gives
+        // back the type the setting actually is, so a caller cannot ask for
+        // `terminal.shell` and be handed a `String` it forgot to check.
+        //
         // Base schema (v0 — initial tables)
         conn.execute_batch(
             r"
@@ -216,6 +233,11 @@ impl Database {
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version INTEGER PRIMARY KEY,
                 applied_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );
             ",
         )?;
@@ -296,6 +318,56 @@ impl Database {
             }
         }
 
+        Ok(())
+    }
+
+    // ===== Settings =====
+
+    /// Which shell the terminal opens, or `None` for whatever this computer
+    /// records for the person (`terminal/shell.rs`).
+    ///
+    /// Absent and empty are the same answer, and only one of them is ever
+    /// written: clearing the setting deletes the row rather than storing a
+    /// blank, so "nothing chosen" has one spelling in the file and cannot be
+    /// two states that behave the same until one of them does not.
+    pub fn terminal_shell(&self) -> Result<Option<PathBuf>, DbError> {
+        let conn = self.conn.lock().unwrap();
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![TERMINAL_SHELL],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(stored
+            .map(|named| named.trim().to_string())
+            .filter(|named| !named.is_empty())
+            .map(PathBuf::from))
+    }
+
+    /// Writes which shell the terminal should open, or clears the choice.
+    ///
+    /// Nothing is checked here. Whether a path is one this computer can
+    /// actually run is a question with an answer a person needs to read, and
+    /// the place that can hand them one is the route (`terminal/settings.rs`);
+    /// a refusal from this layer would arrive as a database error.
+    pub fn set_terminal_shell(&self, chosen: Option<&Path>) -> Result<(), DbError> {
+        let conn = self.conn.lock().unwrap();
+        match chosen {
+            Some(chosen) => {
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![TERMINAL_SHELL, chosen.to_string_lossy()],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "DELETE FROM settings WHERE key = ?1",
+                    params![TERMINAL_SHELL],
+                )?;
+            }
+        }
         Ok(())
     }
 

@@ -150,8 +150,19 @@ impl Register {
     /// The caller is trusted about the folder. Whether it is a folder at all is
     /// the route's question, asked there because the answer to a bad one is an
     /// HTTP refusal and not an error out of a pty.
-    pub fn open(&self, cwd: PathBuf, cols: u16, rows: u16) -> std::io::Result<Arc<Session>> {
-        let shell = Shell::open(&cwd, cols, rows)?;
+    ///
+    /// `chosen` is the shell the person picked on the settings screen, carried
+    /// through rather than read here: the register knows nothing about where
+    /// settings live, and a shell already open is never restarted, so a choice
+    /// changed today reaches only the tabs opened after it.
+    pub fn open(
+        &self,
+        cwd: PathBuf,
+        cols: u16,
+        rows: u16,
+        chosen: Option<PathBuf>,
+    ) -> std::io::Result<Arc<Session>> {
+        let shell = Shell::open(&cwd, cols, rows, chosen.as_deref())?;
         let pump = Pump::start(&shell)?;
         let session = Arc::new(Session {
             id: Uuid::new_v4(),

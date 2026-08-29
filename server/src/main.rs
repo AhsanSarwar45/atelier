@@ -451,6 +451,13 @@ async fn serve(open_browser: bool) {
             "/api",
             routes::project_routes().with_state(database.clone()),
         )
+        // What the app was told to do, rather than what it was told about. Its
+        // own guard travels with it (terminal/settings.rs): a PUT here names
+        // the program the terminal will run.
+        .nest(
+            "/api",
+            terminal::settings::settings_routes().with_state(database.clone()),
+        )
         .route("/api/beads", get(routes::beads::read_beads))
         .route(
             "/api/beads/create",

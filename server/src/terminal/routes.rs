@@ -31,7 +31,17 @@
 //! Nothing narrower is checked. A shell can `cd` anywhere its owner can the
 //! moment it opens, so confining where it begins would keep out nobody who got
 //! this far, and what decides who gets this far is the guard above.
+//!
+//! ## Which shell is started
+//!
+//! Whichever one the person chose on the settings screen, and this computer's
+//! own record when they have chosen none (`settings.rs`, `shell.rs`).
+//! The setting is read on every open rather than remembered, which is what
+//! makes the promise on the settings screen true: tabs already open keep the
+//! shell they started with, because nothing restarts a running shell, and the
+//! next tab gets the new choice, because the next tab is the next read.
 
+use crate::db::Database;
 use crate::terminal::register::Shells;
 use axum::{
     extract::{Extension, Path as FromUrl},
@@ -44,6 +54,7 @@ use chrono::{DateTime, Utc};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Where these routes answer, named once so the browser's URLs and the tests'
@@ -102,6 +113,7 @@ struct Listed {
 
 async fn open(
     Extension(shells): Extension<Shells>,
+    Extension(settings): Extension<Arc<Database>>,
     Json(asked): Json<Opening>,
 ) -> Result<Json<Opened>, Refusal> {
     let cwd = match asked.cwd.as_deref().filter(|named| !named.is_empty()) {
@@ -123,12 +135,24 @@ async fn open(
         None => home()?,
     };
 
-    let session = shells.open(cwd, asked.cols, asked.rows).map_err(|why| {
+    // Read here, at every open, rather than held anywhere: a tab opened after
+    // somebody changed the setting should get the new shell, and the tabs
+    // already open keep theirs by the simple fact that nothing restarts them.
+    let chosen = settings.terminal_shell().map_err(|why| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("The shell would not start: {why}"),
+            format!("The shell chosen in Settings could not be read: {why}"),
         )
     })?;
+
+    let session = shells
+        .open(cwd, asked.cols, asked.rows, chosen)
+        .map_err(|why| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("The shell would not start: {why}"),
+            )
+        })?;
 
     Ok(Json(Opened {
         id: session.id.to_string(),
@@ -190,7 +214,6 @@ pub(crate) mod tests {
     use axum::body::Body;
     use axum::http::{header, Method, Request};
     use serde_json::{json, Value};
-    use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tower::ServiceExt;
 
@@ -204,7 +227,14 @@ pub(crate) mod tests {
     /// The server as `main.rs` assembles it, so the URLs under test are the
     /// URLs a browser types and the guard under test is the one that ships.
     fn served_by(shells: &Shells) -> Router {
-        Router::new().nest(MOUNTED_AT, router(Arc::clone(shells)))
+        // The settings database, laid on here as `main.rs` lays the real one on
+        // the whole server: `open` reads the chosen shell out of it. Empty and
+        // in memory, so every case below opens whatever this computer records,
+        // which is what they were all written against.
+        let settings = Arc::new(Database::new_in_memory().expect("an empty settings database"));
+        Router::new()
+            .nest(MOUNTED_AT, router(Arc::clone(shells)))
+            .layer(Extension(settings))
     }
 
     pub(crate) fn a_register() -> (Shells, Router) {

@@ -36,17 +36,45 @@
 //!
 //! ## Which shell, and how it is started
 //!
-//! Not ours to decide. `CommandBuilder::new_default_prog()` already reads
-//! `$SHELL`, checks it is a thing that can actually be executed, and falls back
-//! to the password database when it is not — and it starts it as a login shell
-//! the way a terminal emulator does, by putting a dash in front of the name in
-//! the argument the shell reads its own name from, not by passing a flag. All we
-//! add is what it deliberately leaves alone: what kind of terminal this is, and
-//! that it can show every colour.
+//! The person's to decide; what this computer records is only the default. The
+//! app carries a setting for it (`settings.rs`), because the shell
+//! somebody actually uses and the shell `/etc/passwd` records for them are
+//! routinely not the same one — bash in the password file and fish in every
+//! window of the day — and until there was a setting the app opened the record
+//! and there was nothing to be done about it. It is kept on the server rather
+//! than in the browser because the server is what spawns the shell, and a
+//! choice kept in a browser would be a different choice on every device in the
+//! house.
+//!
+//! With nothing chosen, `CommandBuilder::new_default_prog()` decides, and it
+//! decides well: it reads `$SHELL`, checks it is a thing that can actually be
+//! executed, falls back to the password database when it is not, and starts
+//! what it settles on as a login shell the way a terminal emulator does — by
+//! putting a dash in front of the name in the argument the shell reads its own
+//! name from, not by passing a flag. `system_default` below is that same rule
+//! written out for the settings screen to report, so what a person is told the
+//! default is, is what a spawn would actually open.
+//!
+//! With a shell chosen, the crate is told about it through the builder's own
+//! `SHELL` rather than by handing it an argument vector: `get_shell` reads that
+//! first, so everything after it — the dash-prefixed argv0, the `SHELL` the
+//! child inherits — is the crate's login-shell path walked for the chosen shell
+//! instead of the recorded one. A builder given an explicit argv could not have
+//! the dash at all, because the same string is both what it looks the program
+//! up by and what it passes as argv0, and no program is named `-fish`.
+//!
+//! The one thing not left to the crate is the refusal. `get_shell` falls back
+//! to the password database, quietly, when what it was given cannot be run — so
+//! a person whose chosen shell was uninstalled last week would get bash and no
+//! explanation. It is checked here before the spawn and refused by name
+//! instead.
+//!
+//! All we add is what the crate deliberately leaves alone: what kind of
+//! terminal this is, and that it can show every colour.
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// What the shell is told this terminal is.
 ///
@@ -82,6 +110,134 @@ const OURS_BY_PREFIX: &[&str] = &["ATELIER_", "BEADS_"];
 /// ours. Only the exact name is.
 const OURS_BY_NAME: &[&str] = &["RUST_LOG", "PORT"];
 
+/// Where this computer lists the shells it has.
+///
+/// A plain file of one path per line, `#` for a comment, kept by the package
+/// manager. It is a list of what may be chosen and not a list of what exists,
+/// so every line is checked before it is offered: a shell uninstalled last
+/// month is still named there on most distributions.
+#[cfg(unix)]
+const LISTED_IN: &str = "/etc/shells";
+
+/// Whether this computer will actually run what is at `path`.
+///
+/// Not `exists`. A directory exists, a README exists, and a person who typed
+/// one of those into the setting would find out at the next tab they opened
+/// rather than at the moment they pressed Save — which is the whole difference
+/// this function is here to make.
+pub fn runnable(path: &Path) -> bool {
+    let Ok(what) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !what.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Any of the three bits, not the caller's own access: this asks whether
+        // the file is a program at all, which is the question a person typing a
+        // path is getting wrong when they get it wrong.
+        what.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// What this computer would open if nobody had chosen.
+///
+/// portable-pty's rule written out — `$SHELL` when it is set and can be run,
+/// this user's entry in the password database when it is not, `/bin/sh` when
+/// neither answers. Written out rather than asked of the crate because the
+/// crate only ever answers it on the way into a spawn, and the settings screen
+/// has to be able to say what the default is without starting a shell to find
+/// out. The two answers being the same one is the point; if this drifts from
+/// `cmdbuilder.rs`, the screen is lying about what Save-nothing means.
+#[cfg(unix)]
+pub fn system_default() -> PathBuf {
+    if let Some(named) = std::env::var_os("SHELL") {
+        let named = PathBuf::from(named);
+        if runnable(&named) {
+            return named;
+        }
+    }
+    if let Some(recorded) = recorded_shell() {
+        if runnable(&recorded) {
+            return recorded;
+        }
+    }
+    PathBuf::from("/bin/sh")
+}
+
+/// The shell the password database records for whoever this process is running
+/// as, which on a desktop is the person at the keyboard.
+#[cfg(unix)]
+fn recorded_shell() -> Option<PathBuf> {
+    use std::ffi::{CStr, OsStr};
+    use std::os::unix::ffi::OsStrExt;
+
+    // SAFETY: `getpwuid` hands back a pointer into a static buffer libc owns,
+    // good until this thread calls it again. The bytes are copied out before
+    // this function returns and nothing here calls it twice. A null answer is
+    // "this uid is in no password database", which is what the check is for.
+    let entry = unsafe { libc::getpwuid(libc::getuid()) };
+    if entry.is_null() {
+        return None;
+    }
+    let recorded = unsafe { CStr::from_ptr((*entry).pw_shell) };
+    let recorded = recorded.to_bytes();
+    if recorded.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(OsStr::from_bytes(recorded)))
+}
+
+/// The shells this computer lists, in the order it lists them, with the ones
+/// that are no longer there left out.
+///
+/// Deduplicated because `/etc/shells` routinely names the same program twice
+/// under two paths that are the same path — `/bin/bash` and `/usr/bin/bash` on
+/// anything with a merged `/usr` — and a menu that offers the same shell twice
+/// looks broken rather than thorough. Compared as written and not resolved:
+/// `/bin/bash` is what a person expects to see, and canonicalising them all
+/// would turn the list into symlink targets nobody recognises.
+#[cfg(unix)]
+pub fn listed() -> Vec<PathBuf> {
+    let Ok(file) = std::fs::read_to_string(LISTED_IN) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = Vec::new();
+    for line in file.lines() {
+        let named = line.split('#').next().unwrap_or_default().trim();
+        if named.is_empty() {
+            continue;
+        }
+        let named = PathBuf::from(named);
+        if runnable(&named) && !found.contains(&named) {
+            found.push(named);
+        }
+    }
+    found
+}
+
+/// Windows has no password database and no `/etc/shells`; the shell it opens is
+/// whatever `%ComSpec%` names, which is what the pty crate ends up running too.
+#[cfg(not(unix))]
+pub fn system_default() -> PathBuf {
+    std::env::var_os("ComSpec")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("cmd.exe"))
+}
+
+/// Nothing lists them here, so the setting offers the default alone and a path
+/// typed by hand.
+#[cfg(not(unix))]
+pub fn listed() -> Vec<PathBuf> {
+    Vec::new()
+}
+
 /// A live shell and everything it needs let go of in the right order.
 pub struct Shell {
     /// Held until the child has been waited for, never dropped before it.
@@ -93,8 +249,30 @@ pub struct Shell {
 }
 
 impl Shell {
-    /// Starts the person's own shell in `cwd`, on a terminal of the given size.
-    pub fn open(cwd: &Path, cols: u16, rows: u16) -> std::io::Result<Self> {
+    /// Starts a shell in `cwd`, on a terminal of the given size.
+    ///
+    /// `chosen` is the shell the person picked on the settings screen, and
+    /// `None` is nobody having picked one — in which case this computer's own
+    /// record decides, exactly as it did before there was a setting.
+    pub fn open(
+        cwd: &Path,
+        cols: u16,
+        rows: u16,
+        chosen: Option<&Path>,
+    ) -> std::io::Result<Self> {
+        // Before the pty is opened, so a chosen shell that is no longer there
+        // costs nothing and the person gets a sentence naming it rather than a
+        // silent bash.
+        if let Some(chosen) = chosen {
+            if !runnable(chosen) {
+                return Err(std::io::Error::other(format!(
+                    "{} is the shell chosen in Settings, and there is nothing this \
+                     computer can run at that path. Choose another in Settings.",
+                    chosen.display()
+                )));
+            }
+        }
+
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -105,6 +283,13 @@ impl Shell {
             .map_err(other)?;
 
         let mut command = CommandBuilder::new_default_prog();
+        // The chosen shell is handed over as the builder's own `SHELL`, which is
+        // the first place its `get_shell` looks. Everything that follows is then
+        // the crate's, unchanged: the dash-prefixed argv0 that makes it a login
+        // shell, and the `SHELL` the child itself inherits.
+        if let Some(chosen) = chosen {
+            command.env("SHELL", chosen);
+        }
         command.cwd(cwd);
         command.env("TERM", TERM);
         command.env("COLORTERM", "truecolor");
@@ -128,7 +313,16 @@ impl Shell {
             }
         }
 
-        let child = pair.slave.spawn_command(command).map_err(other)?;
+        let child = pair.slave.spawn_command(command).map_err(|why| match chosen {
+            // Named, because the one thing a person can do about this is change
+            // it, and they cannot change what they are not told.
+            Some(chosen) => std::io::Error::other(format!(
+                "{} is the shell chosen in Settings, and it would not start: {why}. \
+                 Choose another in Settings.",
+                chosen.display()
+            )),
+            None => other(why),
+        })?;
         // The child has its own handle now. Ours is what would keep the reader
         // waiting on a shell that has already gone.
         drop(pair.slave);
@@ -379,7 +573,7 @@ mod tests {
 
     #[test]
     fn the_reader_is_told_when_the_shell_has_ended() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let output = shell.output().expect("a reader should be available");
 
         shell.type_into(b"exit\n").unwrap();
@@ -452,7 +646,7 @@ mod tests {
 
     #[test]
     fn the_shell_is_started_as_a_login_shell() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
 
         // A login shell is one whose own name, as it was handed to it, begins
@@ -471,7 +665,7 @@ mod tests {
     #[test]
     fn the_shell_runs_where_it_was_told_to() {
         let where_to = std::env::temp_dir();
-        let mut shell = Shell::open(&where_to, 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(&where_to, 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
 
         shell.type_into(b"printf 'CWD[%s]\\n' \"$PWD\"; exit\n").unwrap();
@@ -488,7 +682,7 @@ mod tests {
 
     #[test]
     fn the_shell_is_told_what_kind_of_terminal_it_is_on() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
 
         shell
@@ -513,7 +707,7 @@ mod tests {
         std::env::set_var("ATELIER_SOMETHING_PRIVATE", "leaked");
         std::env::set_var("RUST_LOG", "leaked");
         std::env::set_var("PORT", "leaked");
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
 
         shell
@@ -556,7 +750,7 @@ mod tests {
     fn a_setting_that_merely_starts_the_same_way_is_left_alone() {
         std::env::set_var("RUST_LOG_STYLE_FOR_THIS_TEST", "mine");
         std::env::set_var("PORTFOLIO_DIR_FOR_THIS_TEST", "mine");
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
 
         shell
@@ -583,7 +777,7 @@ mod tests {
 
     #[test]
     fn the_shell_is_told_which_program_opened_it() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
 
         shell
@@ -615,7 +809,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn a_background_job_goes_when_the_shell_does() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let output = shell.output().unwrap();
         let heard = every_chunk(output);
 
@@ -671,5 +865,72 @@ mod tests {
             "job {job} was still running two seconds after the shell was let go, \
              so anything started in a terminal outlives the terminal"
         );
+    }
+    #[test]
+    fn the_chosen_shell_is_the_one_that_starts_and_it_starts_as_a_login_shell() {
+        // `/bin/sh` because every machine that can run this suite has one, and
+        // because it is almost never the shell the suite would otherwise open —
+        // so `-sh` is an answer only a chosen shell could have given.
+        let mut shell = Shell::open(Path::new("/"), 80, 24, Some(Path::new("/bin/sh")))
+            .expect("a shell should start");
+        let output = shell.output().unwrap();
+
+        shell
+            .type_into(b"printf 'ARGV0[%s]\\n' \"$0\"; exit\n")
+            .unwrap();
+        let said = read_until_the_shell_is_gone(output);
+
+        // The dash is the whole of the login convention, and it is here for the
+        // chosen shell because the crate put it there: this asserts the choice
+        // and the login start in one string, since either one missing gives a
+        // different answer.
+        assert_eq!(
+            answered(&said, "ARGV0"),
+            "-sh",
+            "the chosen shell should have been started, as a login shell"
+        );
+    }
+
+    #[test]
+    fn a_chosen_shell_that_is_not_there_is_refused_by_name() {
+        // The shape of the bug this prevents: somebody chooses fish, fish is
+        // uninstalled, and the crate's own fallback hands them bash without a
+        // word. A refusal naming the path is the only thing they can act on.
+        let gone = Path::new("/nonexistent/place/fish");
+        let Err(why) = Shell::open(Path::new("/"), 80, 24, Some(gone)) else {
+            panic!("a shell that is not there should not have started");
+        };
+        let why = why.to_string();
+        assert!(
+            why.contains("/nonexistent/place/fish"),
+            "the refusal should name the shell that was chosen, and says {why:?}"
+        );
+        assert!(
+            why.contains("Settings"),
+            "the refusal should say where to change it, and says {why:?}"
+        );
+    }
+
+    #[test]
+    fn the_default_is_a_shell_this_computer_can_actually_run() {
+        let default = system_default();
+        assert!(
+            runnable(&default),
+            "the settings screen would offer {default:?} as the default, and it \
+             is not something this computer will run"
+        );
+    }
+
+    #[test]
+    fn nothing_that_cannot_be_run_is_offered() {
+        // `/etc/shells` is a list of what may be chosen, not of what is there;
+        // it outlives the packages it names. Nothing unrunnable should reach a
+        // menu, or the first thing a person picks may be the thing that is gone.
+        for named in listed() {
+            assert!(
+                runnable(&named),
+                "{named:?} is offered as a shell and this computer will not run it"
+            );
+        }
     }
 }

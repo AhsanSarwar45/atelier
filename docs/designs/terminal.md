@@ -168,7 +168,7 @@ caller with nothing to type, because the writer is what can produce an end of
 input at all — the crate's example says so in as many words. It lives for the
 shell's whole life for that reason.
 
-**Which shell to run is not ours to decide.**
+**Which shell to run, when nobody has chosen one.**
 `CommandBuilder::new_default_prog()` already reads `$SHELL`, checks it is a
 thing that can actually be executed, and falls back to the password database
 when it is not — and it starts it as a login shell the way a terminal emulator
@@ -181,6 +181,53 @@ alone: `TERM=xterm-256color` and `COLORTERM=truecolor`.
 the spawn. The app's own settings do not follow a person into their shell — a
 worktree's port or log level leaking into an interactive shell is the kind of
 thing that is discovered a month later, in something unrelated.
+
+### 4.1 Which shell is opened, once somebody has chosen
+
+The paragraph above was the whole story until someone whose `/etc/passwd` line
+still says bash ran fish for everything. The app opened what the system
+recorded, so it opened the wrong program every time. The choice is a setting
+now, and `new_default_prog()` is what happens when nobody has made one.
+
+**It lives on the server, in sqlite.** One row in a `settings` table (`db.rs`),
+reached through two typed accessors rather than a generic bag — the table is
+the only generic thing about it. On the server because the server is what
+spawns the shell, and because the app is opened from more than one machine in
+the house: a choice kept in a browser is a choice the server never hears about,
+and one that stops applying the moment its owner picks up a phone.
+
+**`GET /api/settings/terminal` answers three things**: what was chosen, or null;
+what this computer would open on its own; and what it lists in `/etc/shells`.
+The default is worked out the way the pty crate works it out — `$SHELL` if it
+names something executable, then the password database, then `/bin/sh` — by one
+function in `shell.rs` that both the report and the spawn call, so the screen
+cannot promise one program while the tab opens another. The listed shells are
+suggestions and not a limit: a build in `~/.local/bin` is a real shell and will
+never be in that file, so the field takes anything typed into it.
+
+**`PUT` refuses before it saves.** An absolute path, an existing regular file,
+something executable — anything else comes back 422 with one sentence naming
+the path, and nothing is written. The alternative is a setting that saves
+cleanly and then fails at the next tab, which is the failure worth removing.
+Empty is not a path; it means nothing chosen, and clears the row.
+
+**A chosen shell goes down the crate's own login path.** It is handed over as
+the builder's `SHELL` rather than as an argv, because `get_shell()` reads that
+first, and everything after it — the dash in front of the name, the `SHELL` the
+child inherits — is then the crate's doing rather than ours. An explicit argv
+could not carry the dash at all: `search_path()` uses the same string both to
+find the program and as the name the shell is given. `$0` reading `-sh` is the
+proof, and the browser case asserts exactly that.
+
+**And a shell that cannot be run is refused by name.** `get_shell()` falls back
+to the password database in silence when what it is given is not executable,
+which would quietly open bash and say nothing about it. So `Shell::open` checks
+first, and a shell that will not start comes back as an error naming the path
+and pointing at Settings.
+
+**Tabs already open keep the shell they started with.** A running shell holds
+somebody's work, and no setting is worth restarting it for. The choice applies
+to the next tab opened, and the form on the settings screen says so.
 
 ## 5. The pump: three volumes on one thread
 
@@ -572,11 +619,33 @@ the whole run is under test at once, from the click through the pseudo-terminal
 and back to the pixels. It needs an instance built from the worktree it runs in,
 because the shells live in the server.
 
-Five cases: the top-bar button opens a window with a live shell; two tabs are
+Seven cases: the top-bar button opens a window with a live shell; two tabs are
 two shells and neither answers the other's canary; a window dragged narrower is
 measured by the app and confirmed by the shell's own `stty size`; a job left
 running is still running after a page reload, its tab restored from the shell
-list; and at phone size the terminal takes the screen and answers what is typed.
+list; at phone size the terminal takes the screen and answers what is typed; a
+shell chosen on the settings screen is the shell the next tab opens, and the
+system's own comes back when the choice is cleared; and the icon face the app
+bundles is served, loaded by the browser, and drawn at one cell.
+
+**The shell case turns on `-sh` rather than `sh`.** The login shell recorded for
+whoever runs it is bash, so `$0` reading `-sh` cannot be the system agreeing by
+accident, and the dash in front is only there if the shell was started the way
+§4.1 describes. The second half is the negative control: with the choice
+cleared, a new tab's `$0` is anything but `-sh`.
+
+**The icon case says plainly which of its three assertions can fail.** The
+loaded face can: take the `@font-face` rule out and `document.fonts` goes from
+one loaded face to an empty set. The width cannot. xterm's DOM renderer gives
+every span a `letter-spacing` of `cellWidth - measuredWidth` per character, so a
+span's box is one cell wide per character whatever font drew it — run without
+the rule, the icon's span still measured 9px against 9.0021px per ordinary
+character. It stays asserted because an arrow that shoved the rest of a prompt
+sideways is what a reader would complain about; it is a promise about layout and
+not evidence about the file. The character's natural advance, 15px against the
+9.02px cell, is logged for the same reason it is not asserted: it asks for the
+family by name, and a machine with the face installed for its own terminal
+answers the same either way.
 
 Three things the file had to get right, and writes down rather than leaving to
 be rediscovered.

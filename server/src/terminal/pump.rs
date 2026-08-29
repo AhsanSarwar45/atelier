@@ -495,7 +495,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn the_kept_output_is_the_most_recent_quarter_megabyte_and_no_more() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let pump = Pump::start(&shell).expect("the pump should take the shell's output");
         let (_, mut viewer) = pump.attach();
 
@@ -539,7 +539,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_viewer_that_stops_reading_stalls_the_pump_instead_of_filling_memory() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let pump = Pump::start(&shell).expect("the pump should take the shell's output");
         // Attached and then deliberately left alone. Nothing reads from this
         // until the last part of the case.
@@ -612,7 +612,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_firehose_is_gathered_into_messages_larger_than_one_read() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let pump = Pump::start(&shell).expect("the pump should take the shell's output");
         let (_, mut viewer) = pump.attach();
 
@@ -648,7 +648,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn an_untrimmed_replay_is_byte_for_byte_what_the_shell_printed() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let pump = Pump::start(&shell).expect("the pump should take the shell's output");
         // A shell prints its prompt the moment it starts, so some of it may
         // already have gone by. What was missed plus what comes next is the
@@ -730,7 +730,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn the_pump_ends_when_the_shell_does() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let pump = Pump::start(&shell).expect("the pump should take the shell's output");
         let (_, mut viewer) = pump.attach();
 
@@ -746,7 +746,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_viewer_arriving_after_the_shell_is_over_is_told_so_at_once() {
-        let mut shell = Shell::open(Path::new("/"), 80, 24).expect("a shell should start");
+        let mut shell = Shell::open(Path::new("/"), 80, 24, None).expect("a shell should start");
         let pump = Pump::start(&shell).expect("the pump should take the shell's output");
         let (_, mut viewer) = pump.attach();
         shell.type_into(b"printf 'THEEND\\n'; exit\n").unwrap();
