@@ -10,17 +10,19 @@ import { motion } from 'motion/react';
 import '@xyflow/react/dist/style.css';
 
 import { Button } from '@/components/ui/button';
-import { apiUrl } from '@/lib/api-base';
+import { Input } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
+import { request } from '@/lib/api';
 import type { FlowArtifact, MermaidArtifact, MockupArtifact, MockupComponent, SceneArtifact, SceneElement, VisualArtifact } from './visual-artifacts';
 import { visualArtifact } from './visual-artifacts';
 
-const artifactUrl = (asset: string) => apiUrl(`/api/presentation-assets/${encodeURIComponent(asset)}`);
+const artifactUrl = (asset: string) => `/api/presentation-assets/${encodeURIComponent(asset)}`;
 
 export function useVisualArtifact(asset: string) {
   const [state, setState] = useState<{ artifact?: VisualArtifact; error?: string }>({});
   useEffect(() => {
     const controller = new AbortController();
-    fetch(artifactUrl(asset), { signal: controller.signal }).then(async (response) => {
+    request(artifactUrl(asset), { signal: controller.signal }).then(async (response) => {
       if (!response.ok) throw new Error(`Artifact could not be loaded (${response.status})`);
       const parsed = visualArtifact(await response.json());
       if (!parsed) throw new Error('Stored artifact failed validation');
@@ -96,9 +98,9 @@ function MockupItem({ item, hidden, onAction }: { item: MockupComponent; hidden:
   if (item.type === 'text') return <p data-component={item.id} className="text-sm leading-relaxed text-muted-foreground">{item.text}</p>;
   if (item.type === 'badge') return <span data-component={item.id} className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${toneClass[item.tone ?? 'neutral']}`}>{item.text}</span>;
   if (item.type === 'divider') return <hr data-component={item.id} className="border-border" />;
-  if (item.type === 'input') return <label data-component={item.id} className="grid gap-1.5 text-sm font-medium">{item.label}<input aria-label={item.label} placeholder={item.placeholder} className="h-10 rounded-lg border bg-background px-3 font-normal outline-none focus:ring-2 focus:ring-primary" /></label>;
+  if (item.type === 'input') return <label data-component={item.id} className="grid gap-1.5 text-sm font-medium">{item.label}<Input aria-label={item.label} placeholder={item.placeholder} className="h-10 font-normal" /></label>;
   if (item.type === 'button') return <Button data-component={item.id} type="button" variant={item.tone === 'neutral' ? 'outline' : 'primary'} onClick={() => onAction(item)}>{item.text}</Button>;
-  if (item.type === 'card') return <section data-component={item.id} className={`grid gap-3 rounded-xl border p-4 shadow-sm ${toneClass[item.tone ?? 'neutral']}`}>{item.text && <h3 className="font-semibold">{item.text}</h3>}{children}</section>;
+  if (item.type === 'card') return <Panel asChild inset="none" data-component={item.id} className={`grid gap-3 rounded-xl p-4 shadow-sm ${toneClass[item.tone ?? 'neutral']}`}><section>{item.text && <h3 className="font-semibold">{item.text}</h3>}{children}</section></Panel>;
   return <div data-component={item.id} className="grid gap-3">{children}</div>;
 }
 
@@ -110,10 +112,10 @@ function MockupView({ artifact }: { artifact: MockupArtifact }) {
     if (nextAction?.type === 'navigate') { setScreenId(nextAction.screen); setHidden(new Set()); }
     if (nextAction?.type === 'toggle') setHidden((current) => { const next = new Set(current); next.has(nextAction.target) ? next.delete(nextAction.target) : next.add(nextAction.target); return next; });
   };
-  return <div data-testid="mockup-artifact" className="mx-auto min-h-80 max-w-4xl overflow-auto rounded-xl border bg-background shadow-2xl" style={{ aspectRatio: `${artifact.viewport?.width ?? 1200} / ${artifact.viewport?.height ?? 760}` }}>
+  return <Panel data-testid="mockup-artifact" tone="overlay" inset="none" className="mx-auto min-h-80 max-w-4xl overflow-auto rounded-xl shadow-2xl" style={{ aspectRatio: `${artifact.viewport?.width ?? 1200} / ${artifact.viewport?.height ?? 760}` }}>
     <header className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2"><span className="size-2.5 rounded-full bg-destructive" /><span className="size-2.5 rounded-full bg-warning" /><span className="size-2.5 rounded-full bg-success" /><span className="ml-2 text-xs text-muted-foreground">{screen.title}</span></header>
     <main className="grid gap-4 p-6">{screen.components.map((item) => <MockupItem key={item.id} item={item} hidden={hidden} onAction={action} />)}</main>
-  </div>;
+  </Panel>;
 }
 
 export function VisualArtifactContent({ artifact }: { artifact: VisualArtifact }) {
@@ -139,10 +141,10 @@ export function VisualArtifactView({ asset }: { asset: string }) {
       <div className="min-h-0 flex-1 overflow-auto p-6"><VisualArtifactContent key={`full-${reset}`} artifact={artifact} /></div>
     </div>, document.body) : null;
   return <div className="relative">
-    <div className="absolute right-2 top-2 z-10 flex gap-1 rounded-lg border bg-background/90 p-1 shadow-sm backdrop-blur">
+    <Panel tone="overlay" inset="none" className="absolute right-2 top-2 z-10 flex gap-1 rounded-lg bg-background/90 p-1 shadow-sm backdrop-blur">
       <Button type="button" size="icon" variant="ghost" aria-label="Reset artifact" onClick={() => setReset((value) => value + 1)}><RotateCcw className="size-4" /></Button>
       <Button type="button" size="icon" variant="ghost" aria-label="Open artifact full screen" onClick={() => setExpanded(true)}><Maximize2 className="size-4" /></Button>
-    </div>
+    </Panel>
     <VisualArtifactContent key={reset} artifact={artifact} />
     {fullScreen}
   </div>;
