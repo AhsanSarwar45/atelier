@@ -571,7 +571,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   const mentions = useMemo<Mentions>(() => {
     const card = (id: string) => (
-      <BeadChip id={id} projectId={projectId} status={knownCardStatuses.get(id)} size="xs" testId="mention-card" className="mx-0.5" />
+      <BeadChip id={id} projectId={projectId} status={knownCardStatuses.get(id)} size="sm" testId="mention-card" className="mx-0.5" />
     );
     return {
       split: (text) =>

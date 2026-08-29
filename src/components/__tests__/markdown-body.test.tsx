@@ -54,10 +54,33 @@ describe('Markdown file links', () => {
     expect(openExternal).toHaveBeenCalledWith('/home/me/My Source.ts', 'vscode', 42);
   });
 
-  it('leaves web addresses as browser links', () => {
+  it('draws an external site immediately with an asynchronously decoded favicon and fallback icon', () => {
     render(<MarkdownBody>{'[site](https://example.com)'}</MarkdownBody>);
-    expect(screen.getByTestId('markdown-link')).toHaveAttribute('target', '_blank');
+    const badge = screen.getByTestId('markdown-web-badge');
+    expect(badge).toHaveAttribute('target', '_blank');
+    expect(badge).toHaveAttribute('data-web-kind', 'site');
+    expect(badge).toHaveClass('h-5');
+    expect(screen.getByTestId('external-favicon')).toHaveAttribute('decoding', 'async');
+    expect(screen.getByTestId('external-favicon')).toHaveAttribute('src', 'https://example.com/favicon.ico');
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['commit', 'https://github.com/openai/codex/commit/1234567890abcdef', 'openai/codex@1234567'],
+    ['pull', 'https://github.com/openai/codex/pull/42', 'openai/codex #42'],
+    ['issue', 'https://github.com/openai/codex/issues/81', 'openai/codex #81'],
+    ['pull', 'https://gitlab.com/group/project/-/merge_requests/7', 'group/project !7'],
+    ['issue', 'https://gitlab.com/group/project/-/issues/9', 'group/project #9'],
+  ])('draws a typed %s badge for %s', (kind, href, label) => {
+    render(<MarkdownBody>{href}</MarkdownBody>);
+    const badge = screen.getByTestId('markdown-web-badge');
+    expect(badge).toHaveAttribute('data-web-kind', kind);
+    expect(badge).toHaveTextContent(label);
+  });
+
+  it('preserves the writer label on a hosted issue badge', () => {
+    render(<MarkdownBody>{'[the regression](https://github.com/openai/codex/issues/81)'}</MarkdownBody>);
+    expect(screen.getByTestId('markdown-web-badge')).toHaveTextContent('the regression');
   });
 
   it('leaves an in-app address in the browser', () => {

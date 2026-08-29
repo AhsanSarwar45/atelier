@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
 const HERE = '7ec315b6-f66e-421e-84ae-a28088bdf16b';
 const MENTIONS: Mentions = {
   split: (text) => mentionsIn(text, { card: (id) => id === 'bw-1u1' }),
-  card: (id) => <BeadChip id={id} projectId={HERE} status="in_progress" size="xs" testId="mention-card" className="mx-0.5 align-middle" />,
+  card: (id) => <BeadChip id={id} projectId={HERE} status="in_progress" size="sm" testId="mention-card" className="mx-0.5 align-middle" />,
   link: (href) => {
     const named = addressedBy(href);
     if (!named || named.kind !== 'card' || (named.project && named.project !== HERE)) return null;
@@ -51,7 +51,22 @@ describe('card names in a rendered message', () => {
 
   it('draws a card chip when a provider writes the id as inline code', () => {
     say('Landed `bw-1u1` today');
-    expect(screen.getByTestId('mention-card')).toHaveTextContent('bw-1u1');
+    const chip = screen.getByTestId('mention-card');
+    expect(chip).toHaveTextContent('bw-1u1');
+    expect(chip.closest('code')).toBeNull();
+    expect(chip).toHaveClass('h-5');
+  });
+
+  it('does not consume a card id that is one directory inside a path', () => {
+    say('See /home/me/worktrees/bw-1u1/src/app.ts');
+    expect(screen.queryByTestId('mention-card')).toBeNull();
+    expect(screen.getByText(/\/home\/me\/worktrees\/bw-1u1\/src\/app\.ts/)).toBeVisible();
+  });
+
+  it('does not consume a card id embedded in a larger token', () => {
+    say('The cache key is prefix_bw-1u1_suffix');
+    expect(screen.queryByTestId('mention-card')).toBeNull();
+    expect(screen.getByText(/prefix_bw-1u1_suffix/)).toBeVisible();
   });
 
   it('uses the existing board status color on a card chip', () => {

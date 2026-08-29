@@ -45,6 +45,9 @@ export type Piece =
  */
 const TOKEN = /[a-z0-9]+(?:[-.][a-z0-9]+)+/g;
 
+/** A matching token beside one of these is part of a path or a larger name. */
+const EMBEDDING = /[A-Za-z0-9_./\\:@]/;
+
 /** What the caller knows to exist. Either may say no to everything. */
 export interface Existing {
   card(id: string): boolean;
@@ -64,6 +67,9 @@ export function mentionsIn(text: string, existing: Existing): Piece[] {
 
   while ((m = scan.exec(text)) !== null) {
     const token = m[0];
+    const before = text[m.index - 1] ?? '';
+    const after = text[m.index + token.length] ?? '';
+    if (EMBEDDING.test(before) || EMBEDDING.test(after)) continue;
     if (!existing.card(token)) continue;
     if (m.index > from) pieces.push({ kind: 'text', text: text.slice(from, m.index) });
     pieces.push({ kind: 'card', id: token });
@@ -215,6 +221,14 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
     if (kid.type === 'element') {
       const tag = kid.tagName ?? '';
       if (!NOT_PROSE.has(tag)) rewrite(kid, split, filesOnly || ONLY_FILES.has(tag));
+      // Providers often put a lone identifier in inline code. Once that
+      // identifier is a real badge, retaining the code element draws a second
+      // capsule around it. Fenced code arrives under `pre` with filesOnly set,
+      // and is deliberately never unwrapped.
+      if (tag === 'code' && !filesOnly && containsMarker(kid)) {
+        kid.tagName = 'span';
+        kid.properties = { 'data-inline-badges': '' };
+      }
       out.push(kid);
       continue;
     }
@@ -238,6 +252,12 @@ function rewrite(node: HastNode, split: (text: string) => Piece[], filesOnly: bo
   }
 
   if (changed) node.children = out;
+}
+
+function containsMarker(node: HastNode): boolean {
+  return node.children?.some((child) =>
+    child.type === 'element'
+    && Boolean(child.properties?.['data-card-mention'] || child.properties?.['data-path-mention'])) ?? false;
 }
 
 /** One piece, as the span the page then draws as a chip. */

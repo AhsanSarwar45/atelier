@@ -21,6 +21,10 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  CircleDot,
+  GitCommitHorizontal,
+  GitPullRequest,
+  Globe2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -125,11 +129,103 @@ function FileLinkBadge({ href, target, children, onClick }: {
   const kind = fileKind(target.path);
   const Icon = FILE_KINDS[kind].icon;
   return (
-    <Badge asChild variant="primary" appearance="outline" size="xs" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', FILE_KINDS[kind].color)}>
+    <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', FILE_KINDS[kind].color)}>
       <a href={href} onClick={onClick} data-testid="markdown-file-link" data-file-kind={kind} title={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
         <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
         <span>{children}</span>
         {target.line === null ? null : <span className="text-muted-foreground">:{target.line}</span>}
+      </a>
+    </Badge>
+  );
+}
+
+type WebKind = 'commit' | 'pull' | 'issue' | 'site';
+
+interface WebTarget {
+  kind: WebKind;
+  host: string;
+  label: string;
+  favicon: string;
+}
+
+const WEB_KINDS: Record<WebKind, { icon: LucideIcon; color: string; title: string }> = {
+  commit: { icon: GitCommitHorizontal, color: 'border-[#e37933]/40 bg-[#e37933]/10 text-[#e37933] hover:bg-[#e37933]/15', title: 'Commit' },
+  pull: { icon: GitPullRequest, color: 'border-[#a074c4]/40 bg-[#a074c4]/10 text-[#a074c4] hover:bg-[#a074c4]/15', title: 'Pull request' },
+  issue: { icon: CircleDot, color: 'border-[#8dc149]/40 bg-[#8dc149]/10 text-[#8dc149] hover:bg-[#8dc149]/15', title: 'Issue' },
+  site: { icon: Globe2, color: 'border-muted-foreground/30 bg-muted/30 text-foreground hover:bg-muted/50', title: 'Website' },
+};
+
+function webTarget(href: string): WebTarget | null {
+  let url: URL;
+  try { url = new URL(href); } catch { return null; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (['localhost', '127.0.0.1', '0.0.0.0', '[::1]'].includes(url.hostname)) return null;
+
+  const parts = url.pathname.split('/').filter(Boolean);
+  let kind: WebKind = 'site';
+  let label = url.hostname.replace(/^www\./, '');
+  if (url.hostname === 'github.com' && parts.length >= 4) {
+    const [owner, repo, entity, value] = parts;
+    if (entity === 'commit') {
+      kind = 'commit';
+      label = `${owner}/${repo}@${value.slice(0, 7)}`;
+    } else if (entity === 'pull' && /^\d+$/.test(value)) {
+      kind = 'pull';
+      label = `${owner}/${repo} #${value}`;
+    } else if (entity === 'issues' && /^\d+$/.test(value)) {
+      kind = 'issue';
+      label = `${owner}/${repo} #${value}`;
+    }
+  } else if (url.hostname === 'gitlab.com') {
+    const marker = parts.indexOf('-');
+    const entity = marker >= 0 ? parts[marker + 1] : '';
+    const value = marker >= 0 ? parts[marker + 2] ?? '' : '';
+    const repo = marker >= 2 ? `${parts[marker - 2]}/${parts[marker - 1]}` : '';
+    if (entity === 'commit') {
+      kind = 'commit';
+      label = `${repo}@${value.slice(0, 7)}`;
+    } else if (entity === 'merge_requests' && /^\d+$/.test(value)) {
+      kind = 'pull';
+      label = `${repo} !${value}`;
+    } else if (entity === 'issues' && /^\d+$/.test(value)) {
+      kind = 'issue';
+      label = `${repo} #${value}`;
+    }
+  }
+  return { kind, host: url.hostname, label, favicon: `${url.origin}/favicon.ico` };
+}
+
+function SiteIcon({ target }: { target: WebTarget }) {
+  if (target.kind !== 'site') {
+    const Icon = WEB_KINDS[target.kind].icon;
+    return <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />;
+  }
+  return (
+    <span className="relative mr-0.5 h-3 w-3 shrink-0" aria-hidden="true">
+      <Globe2 className="absolute inset-0 h-3 w-3" />
+      <img
+        src={target.favicon}
+        alt=""
+        loading="eager"
+        decoding="async"
+        referrerPolicy="no-referrer"
+        className="absolute inset-0 h-3 w-3 rounded-[2px] object-contain"
+        data-testid="external-favicon"
+        onError={(event) => { event.currentTarget.hidden = true; }}
+      />
+    </span>
+  );
+}
+
+function WebLinkBadge({ href, target, children }: { href: string; target: WebTarget; children: ReactNode }) {
+  const written = textOf(children);
+  const label = wroteItOut(href, written) ? target.label : children;
+  const definition = WEB_KINDS[target.kind];
+  return (
+    <Badge asChild variant="primary" appearance="outline" size="sm" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', definition.color)}>
+      <a href={href} target="_blank" rel="noopener noreferrer" data-testid="markdown-web-badge" data-web-kind={target.kind} title={`Open ${definition.title.toLowerCase()} on ${target.host}`}>
+        <SiteIcon target={target} />
+        <span>{label}</span>
       </a>
     </Badge>
   );
@@ -229,6 +325,8 @@ export function MarkdownBody({
                 {props.children}
               </FileLinkBadge>
             );
+            const web = webTarget(href);
+            if (web) return <WebLinkBadge href={href} target={web}>{props.children}</WebLinkBadge>;
             return <a {...props} target="_blank" rel="noopener noreferrer" data-testid="markdown-link" />;
           },
           // A name the rewriting step marked. Everything else drawn as a span
