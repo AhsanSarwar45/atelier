@@ -192,7 +192,7 @@ function Line({ text, language, html }: { text: string; language: string | null;
  * Before and after in two columns, with only the lines that differ marked, and
  * the language of the file itself coloured through both of them (bw-4wcd.1).
  */
-function DiffView({ path, before, after }: { path: string; before: string; after: string }) {
+function DiffView({ path, before, after, line }: { path: string; before: string; after: string; line?: number }) {
   const rows = diffLines(before, after);
   const language = languageOf(path);
   // Each side is coloured whole and only then cut into its rows: painting a
@@ -222,7 +222,9 @@ function DiffView({ path, before, after }: { path: string; before: string; after
       className="mt-1.5 overflow-hidden"
     >
       <div className="flex items-center justify-between bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-        <span className="truncate">{path}</span>
+        <span className="truncate">
+          <Chipped text={path} line={line} target="editor" />
+        </span>
         <span className="shrink-0">before → after</span>
       </div>
       <div className="max-h-64 overflow-auto">
@@ -484,7 +486,11 @@ export const ToolRow = memo(function ToolRow({
               A span inside a button is fine; the conversation's own listener
               stops a chip's click reaching the toggle (bw-khe.13). */}
           <span className="relative top-px truncate">
-            <Chipped text={says ?? item.title} />
+            <Chipped
+              text={says ?? item.title}
+              line={ranKind === 'edit' ? shown.diff?.line : undefined}
+              target={ranKind === 'edit' ? 'editor' : undefined}
+            />
           </span>
           {/* How long it has been running, while it is running: a call that takes a
               minute must not look the same as one that took none. */}
@@ -510,7 +516,14 @@ export const ToolRow = memo(function ToolRow({
           </>
         )}
       </Panel>
-      {shown.diff && <DiffView path={shown.diff.path} before={shown.diff.before} after={shown.diff.after} />}
+      {shown.diff && (
+        <DiffView
+          path={shown.diff.path}
+          before={shown.diff.before}
+          after={shown.diff.after}
+          line={shown.diff.line}
+        />
+      )}
     </div>
   );
 });

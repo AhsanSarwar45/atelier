@@ -19,11 +19,20 @@ describe('the change a call made', () => {
     });
   });
 
+  it('names the first line edited when the surrounding file is available', () => {
+    expect(diffOf(
+      'Edit',
+      { file_path: '/w/a.ts', old_string: 'const a = 1', new_string: 'const a = 2' },
+      'import x from "x";\n\nconst a = 1;\n',
+    )).toMatchObject({ line: 3 });
+  });
+
   it('reads a written file as an addition with nothing before it', () => {
     expect(diffOf('Write', { file_path: '/w/new.ts', content: 'hello' })).toEqual({
       path: '/w/new.ts',
       before: '',
       after: 'hello',
+      line: 1,
     });
   });
 

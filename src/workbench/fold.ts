@@ -95,7 +95,7 @@ export interface TranscriptTool {
   /** Set when a subagent made this call — the row nests under that call. */
   parentId: string | null;
   execution?: ExecutionContext;
-  diff: { path: string; before: string; after: string } | null;
+  diff: { path: string; before: string; after: string; line?: number } | null;
   /** What it was asked to do, and what it printed. Both open on the row's own click. */
   input: Record<string, unknown>;
   output: string | null;
@@ -647,7 +647,7 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
     case 'diff':
       next.items = items.map((it) =>
         it.kind === 'tool' && it.id === e.toolCallId
-          ? { ...it, diff: { path: e.path, before: e.before, after: e.after } }
+          ? { ...it, diff: { path: e.path, before: e.before, after: e.after, ...(e.line ? { line: e.line } : {}) } }
           : it,
       );
       return next;

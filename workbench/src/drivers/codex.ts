@@ -70,9 +70,10 @@ export function codexThreadOpenRequest(opts: {
     : { method: 'thread/start', params: { ...common, sandbox: 'workspace-write', ephemeral: false } };
 }
 
-function patchSides(diff: string): { before: string; after: string } {
+function patchSides(diff: string): { before: string; after: string; line?: number } {
   const before: string[] = [];
   const after: string[] = [];
+  const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/m.exec(diff);
   for (const line of diff.split('\n')) {
     if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) continue;
     if (line.startsWith('-')) before.push(line.slice(1));
@@ -82,7 +83,11 @@ function patchSides(diff: string): { before: string; after: string } {
       before.push(same); after.push(same);
     }
   }
-  return { before: before.join('\n'), after: after.join('\n') };
+  return {
+    before: before.join('\n'),
+    after: after.join('\n'),
+    ...(hunk ? { line: Number(hunk[1]) } : {}),
+  };
 }
 
 function outputOf(item: Bag): string {

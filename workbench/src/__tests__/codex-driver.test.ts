@@ -684,7 +684,7 @@ describe('Codex first-class controls and live work', () => {
       type: 'tool.started', toolCallId: 'edit', name: 'Edit',
     }));
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'diff', toolCallId: 'edit', path: 'src/a.ts', before: 'const a = 1;', after: 'const a = 2;',
+      type: 'diff', toolCallId: 'edit', path: 'src/a.ts', before: 'const a = 1;', after: 'const a = 2;', line: 1,
     }));
   });
 

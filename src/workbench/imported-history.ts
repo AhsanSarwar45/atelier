@@ -569,6 +569,8 @@ export interface ToolDiff {
   path: string;
   before: string;
   after: string;
+  /** First file line touched, when the caller can see the file around the edit. */
+  line?: number;
 }
 
 /**
@@ -583,14 +585,20 @@ export interface ToolDiff {
  * Everything is cut where a command's arguments and its output are cut: a Write
  * carries a whole file in one argument.
  */
-export function diffOf(name: string, input: Record<string, unknown>): ToolDiff | null {
+export function diffOf(name: string, input: Record<string, unknown>, source?: string): ToolDiff | null {
   const path = String(input.file_path ?? '');
   if (!path) return null;
   if (name === 'Edit' && typeof input.old_string === 'string' && typeof input.new_string === 'string') {
-    return { path, before: cut(input.old_string), after: cut(input.new_string) };
+    const at = source?.indexOf(input.old_string) ?? -1;
+    return {
+      path,
+      before: cut(input.old_string),
+      after: cut(input.new_string),
+      ...(at < 0 ? {} : { line: source!.slice(0, at).split('\n').length }),
+    };
   }
   if (name === 'Write' && typeof input.content === 'string') {
-    return { path, before: '', after: cut(input.content) };
+    return { path, before: '', after: cut(input.content), line: 1 };
   }
   // Several edits to one file arrive as a list, and each is a change of its own.
   // Run together they read as one, which is how they were made.
@@ -602,10 +610,12 @@ export function diffOf(name: string, input: Record<string, unknown>): ToolDiff |
         typeof (e as { new_string?: unknown }).new_string === 'string',
     );
     if (!edits.length) return null;
+    const at = source?.indexOf(edits[0]!.old_string) ?? -1;
     return {
       path,
       before: cut(edits.map((e) => e.old_string).join('\n')),
       after: cut(edits.map((e) => e.new_string).join('\n')),
+      ...(at < 0 ? {} : { line: source!.slice(0, at).split('\n').length }),
     };
   }
   return null;

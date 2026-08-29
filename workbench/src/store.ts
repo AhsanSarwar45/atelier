@@ -1066,7 +1066,7 @@ export class Store {
   toolDetails(sessionId: string, toolCallId: string): {
     input: Record<string, unknown>;
     output: string | null;
-    diff: { path: string; before: string; after: string } | null;
+    diff: { path: string; before: string; after: string; line?: number } | null;
   } | null {
     const rows = this.db
       .prepare(
@@ -1080,12 +1080,12 @@ export class Store {
     if (!rows.length) return null;
     let input: Record<string, unknown> = {};
     let output: string | null = null;
-    let diff: { path: string; before: string; after: string } | null = null;
+    let diff: { path: string; before: string; after: string; line?: number } | null = null;
     for (const row of rows) {
       const event = JSON.parse(row.json) as WbpEvent;
       if (event.type === 'tool.started') input = event.input;
       else if (event.type === 'tool.completed') output = event.output;
-      else if (event.type === 'diff') diff = { path: event.path, before: event.before, after: event.after };
+      else if (event.type === 'diff') diff = { path: event.path, before: event.before, after: event.after, ...(event.line ? { line: event.line } : {}) };
     }
     return { input, output, diff };
   }

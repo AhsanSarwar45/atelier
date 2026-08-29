@@ -15,14 +15,29 @@ import { openLocalPath } from '@/workbench/open-local-path';
 import { CHIP_CLASS, TITLE } from '@/workbench/paths-in-html';
 
 /** A file named in a message. Its words are the reader's, not the address. */
-export function PathChip({ absolute, raw, line }: { absolute: string; raw: string; line: number | null }) {
+export function PathChip({
+  absolute,
+  raw,
+  line,
+  target = 'default',
+}: {
+  absolute: string;
+  raw: string;
+  line: number | null;
+  target?: 'default' | 'editor';
+}) {
   return (
     <span
       data-path-mention={absolute}
       {...(line === null ? {} : { 'data-path-line': String(line) })}
+      {...(target === 'editor' ? { 'data-path-target': 'editor' } : {})}
       data-testid="path-chip"
       className={CHIP_CLASS}
-      title={TITLE(line)}
+      title={
+        target === 'editor' && line !== null
+          ? `Click to open this file in your editor at line ${line}`
+          : TITLE(line)
+      }
     >
       {raw}
     </span>
@@ -54,7 +69,7 @@ export function openPathClicked(event: {
   const absolute = chip.getAttribute('data-path-mention') ?? '';
   const at = chip.getAttribute('data-path-line');
   const line = at ? Number(at) : null;
-  const toEditor = event.altKey && line !== null;
+  const toEditor = line !== null && (event.altKey || chip.getAttribute('data-path-target') === 'editor');
 
   openLocalPath(absolute, toEditor ? 'vscode' : 'finder', toEditor ? line : null);
 

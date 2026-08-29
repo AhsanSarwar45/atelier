@@ -20,6 +20,8 @@ import {
   type SDKTaskUpdatedMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { claudeProgram } from '../claude-program.ts';
 
@@ -1278,7 +1280,16 @@ export class ClaudeDriver implements Driver {
    * draw the identical change (src/workbench/imported-history.ts, `diffOf`).
    */
   private emitDiff(toolCallId: string, name: string, input: Record<string, unknown>): void {
-    const change = diffOf(name, input);
+    const path = typeof input.file_path === 'string' ? input.file_path : '';
+    let source: string | undefined;
+    if (path) {
+      try {
+        source = readFileSync(resolve(this.cwd, path), 'utf8');
+      } catch {
+        // The diff still draws without a line.
+      }
+    }
+    const change = diffOf(name, input, source);
     if (change) this.emit({ type: 'diff', toolCallId, ...change });
   }
 

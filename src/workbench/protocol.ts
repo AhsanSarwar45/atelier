@@ -406,7 +406,7 @@ export type WbpEvent = EventBase &
      */
     | { type: 'agent.relayed'; agentId: string; text: string }
     | { type: 'agent.identified'; agentId: string; agentType: string }
-    | { type: 'diff'; toolCallId: string; path: string; before: string; after: string }
+    | { type: 'diff'; toolCallId: string; path: string; before: string; after: string; line?: number }
     | { type: 'todo'; items: TodoItem[] }
     | { type: 'image'; messageId: string; image: ImagePayload }
     | { type: 'image.compare'; messageId: string; comparison: ImageComparison }
