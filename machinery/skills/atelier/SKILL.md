@@ -1,6 +1,6 @@
 ---
 name: atelier
-description: Use Atelier's native presentation tools for validated widgets, animated explainers, durable images, comparisons, and visual proof when they clarify the result.
+description: Use Atelier's native presentation tools for validated widgets, library-powered diagrams, custom animated vector scenes, interactive mockups, durable media, and visual proof when they clarify the result.
 ---
 
 # Atelier
@@ -23,6 +23,8 @@ before they reach chat.
   `atelier tool present image --file PATH --alt TEXT [--caption TEXT]`.
 - For durable before/after proof, run
   `atelier tool present compare --before PATH --after PATH --before-alt TEXT --after-alt TEXT [--mode side_by_side|wipe]`.
+- For a rich diagram, custom animated scene, or interactive mockup, create a
+  visual artifact JSON file, then run `atelier tool present artifact --file FILE`.
 
 Image commands accept PNG, JPEG, GIF, and WebP up to 25 MiB. They import bytes
 into Atelier-owned, content-addressed storage before emitting the widget, so the
@@ -47,6 +49,43 @@ video as a file link.
 
 Do not use a widget for one fact or a short list. Use prose when structure does
 not make the answer faster to grasp.
+
+## Rich visual artifacts
+
+Use a visual artifact when a fixed widget cannot carry the idea. Choose the
+smallest runtime that matches what the reader needs:
+
+- `mermaid` uses Mermaid for a conventional flowchart, sequence, state, class, entity,
+  architecture, timeline, journey, Gantt, mind map, or other standard technical
+  diagram. This is the fastest and most compact choice when custom placement or
+  motion adds no meaning.
+- `flow` for a large relationship map the reader should pan, zoom, inspect, or
+  rearrange. React Flow renders the canvas and ELK lays it out automatically;
+  use it for dependency graphs, service maps, pipelines, and node-based systems.
+- `scene` for a bespoke animated illustration whose shapes, paths, movement,
+  emphasis, or transitions explain the concept. Motion animates safe structured
+  vector primitives between named states. Use it for algorithms, spatial
+  explanations, data movement, transformations, and simulations.
+- `mockup` for a product idea the reader must click through. Use real inputs,
+  buttons, cards, navigation between screens, and toggled states. Every mockup
+  works inline and can open full-screen.
+
+Keep using `explainer` for a small 2–12-node narrated explanation; choose `flow`
+when the canvas itself must be explored, and `scene` when the visual cannot be
+expressed as nodes and edges. Do not turn a result into a mockup unless trying
+the interaction would answer a real design or workflow question.
+
+Before creating one of these artifacts, read
+[the visual artifact contract](references/visual-artifacts.md) for its exact
+schema and a validated example. Write the JSON to a project file, run the
+artifact presenter, and copy stdout byte-for-byte. The presenter rejects
+unknown fields, executable markup, broken references, and files over 1 MiB,
+then stores canonical content under a durable hash.
+
+Artifacts cannot contain JavaScript, HTML, arbitrary style sheets, remote
+resources, or package imports. Their libraries are built into Atelier, which is
+what makes the same artifact safe and identical across Codex, Claude, and other
+shell-capable agents.
 
 Every widget object requires `type`; `title` is optional. All displayed strings
 must be non-empty and at most 200 characters. The presenter rejects unknown
