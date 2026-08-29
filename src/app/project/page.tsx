@@ -23,9 +23,10 @@ import {
   somewhereBehind,
   whereFrom,
 } from '@/lib/address';
-import { cn } from '@/lib/utils';
+import { cn, projectDir } from '@/lib/utils';
 import ChatTab from '@/workbench/chat-tab';
 import { WorkbenchStatus } from '@/workbench/globals';
+import { useShowingFolder } from '@/workbench/terminal-shells';
 
 import { BoardCards } from './board-cards';
 import KanbanBoard from './kanban-board';
@@ -46,6 +47,10 @@ function ProjectTabs() {
   // tab and the Back button (docs/designs/app-shell.md §1.7).
   const { id: projectId, tab, chat: openChat, card: openCard } = whereFrom(params);
   const { project, error: projectError, refetch } = useProject(projectId);
+  // The folder this screen is showing, which is where a shell opened from
+  // its bar starts. `projectDir` and not `project.path`, because a
+  // Dolt-backed board's path is a database address and no folder at all.
+  useShowingFolder(projectDir(project));
   const { theme } = useTheme();
   const terminal = theme.headerVariant === 'terminal';
   const [settingsOpen, setSettingsOpen] = useState(false);

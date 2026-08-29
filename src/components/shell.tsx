@@ -13,13 +13,14 @@
 
 import { createContext, forwardRef, useContext, useState, type ReactNode } from 'react';
 
-import { Loader2 } from 'lucide-react';
+import { Loader2, SquareTerminal } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
 import { GlobalSettingsButton } from '@/components/global-settings-button';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useTerminalShells } from '@/workbench/terminal-shells';
 
 interface Slot {
   node: HTMLElement | null;
@@ -37,6 +38,31 @@ const ToolSlot = createContext<Slot>({ node: null, lead: null, trail: null, acti
  * cannot appear without saying so.
  */
 const BAR = 'flex h-12 shrink-0 items-center gap-2 border-b border-border/40 bg-background/80 px-3';
+
+/**
+ * The way to a shell, beside the way out to settings.
+ *
+ * There is one terminal window in the app and one set of shells in it
+ * (`src/workbench/terminal-shells.tsx`), so this opens rather than creates: on
+ * the board, in the chat and on the project list it is the same window with the
+ * same things still running in it. It closes nothing — that is the cross on a
+ * tab, and only that.
+ *
+ * Written here rather than in a file of its own because a `ToolButton` is the
+ * one-control idiom of these bars and it is declared in this file; a button
+ * next door that reached back for it would put a circle in the imports.
+ *
+ * It carries its own `TooltipProvider` for the same reason `TabLead` does: a
+ * `ToolButton` asks for one on its own account, and the first bar has none.
+ */
+function TerminalButton() {
+  const { show } = useTerminalShells();
+  return (
+    <TooltipProvider delayDuration={250}>
+      <ToolButton icon={<SquareTerminal />} label="Terminal" onClick={show} data-testid="open-terminal" />
+    </TooltipProvider>
+  );
+}
 
 export function Shell({
   bar,
@@ -62,10 +88,17 @@ export function Shell({
     <div data-testid="shell" className="flex h-dvh flex-col overflow-hidden bg-surface-base">
       <div data-shell-bar data-testid="project-bar" className={cn(BAR, barClassName)}>
         {bar}
-        {/* The way out to settings ends every bar, drawn here rather than by
-            each page: a control the pages hand in themselves is one a new page
-            forgets, and one every page places differently. */}
-        <GlobalSettingsButton />
+        {/* The way to a shell and the way out to settings end every bar, drawn
+            here rather than by each page: a control the pages hand in
+            themselves is one a new page forgets, and one every page places
+            differently. The pair is pushed to the right edge together — one
+            `ml-auto` between them and the page's own contents, because two of
+            them would share out the free space and leave the two buttons at
+            opposite ends of the bar. */}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <TerminalButton />
+          <GlobalSettingsButton />
+        </div>
       </div>
       {/* One line on a wide screen. On a phone the tab selector alone fills it,
           so the row is allowed to grow and the tools drop to a second line of

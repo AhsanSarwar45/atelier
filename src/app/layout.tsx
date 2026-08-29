@@ -4,6 +4,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { UpdateBanner } from '@/components/update-banner';
 
 import { PRODUCT_NAME } from '@/lib/identity';
+import { Terminals } from '@/workbench/terminal-tabs';
 
 import type { Metadata } from 'next';
 import './globals.css';
@@ -26,7 +27,12 @@ export default function RootLayout({
         <ThemeInitScript />
       </head>
       <body className="flex min-h-screen flex-col bg-background antialiased transition-colors duration-300">
-        <div className="flex-1">{children}</div>
+        {/* Around the screens rather than beside them: the button that opens a
+            shell is on the bar of every screen that has one, and all of them
+            have to find the same window with the same shells in it. */}
+        <Terminals>
+          <div className="flex-1">{children}</div>
+        </Terminals>
         <UpdateBanner />
         <DevTools />
         <Toaster />
