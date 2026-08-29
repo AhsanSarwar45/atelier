@@ -115,16 +115,25 @@ The first two are once per computer. The third is once per project.
 
 ### Prerequisites
 
-- [Git](https://git-scm.com/) in PATH — Atelier reads and writes your project
+- [Git](https://git-scm.com/) — Atelier reads and writes your project
   through it, and cuts the worktree each ticket is worked in
-- [Python](https://www.python.org/) 3.11+ in PATH, as `python3` or `python` —
+- [Python](https://www.python.org/) 3.11+, as `python3` or `python` —
   `atelier init` installs the project's rules with it, and every board
   transition is checked by it
-- [Beads CLI](https://github.com/gastownhall/beads) (`bd`) in PATH only for projects that opt into a board
-- [Node.js](https://nodejs.org/) 22.6+ in PATH — the board and every other
+- [Beads CLI](https://github.com/gastownhall/beads) (`bd`) only for projects that opt into a board
+- [Node.js](https://nodejs.org/) 22.6+ — the board and every other
   screen run without it, but the chat helper is started with `node
   --experimental-strip-types`, which no earlier release understands, and `npm`
   fetches its kit once on first run
+
+None of them has to be on your PATH. Atelier looks there first, then in the
+ordinary places an installer writes to: `~/.cargo/bin`, `~/.local/bin`,
+`~/.beads/bin`, Homebrew's folder, `/usr/local/bin`, `/usr/bin` and `/bin`,
+and on Windows the folders Git, Node and npm install into, plus `System32`.
+That is what lets the copy your computer starts at login find them, since a
+service inherits no shell and so no PATH at all. What it cannot find is a
+runtime a version manager hides: an `nvm`, `fnm`, `volta` or `asdf` Node is
+picked up only when your own PATH names it.
 
 ### Homebrew (macOS / Linux)
 
@@ -267,7 +276,8 @@ project registered for Beads receives the separate `beads` workflow skill,
 including from any linked worktree. Inferred project metadata remains in
 Atelier's external data directory rather than the repository.
 
-It needs `bd` and Python 3.11+ (as `python3` or `python`) on your PATH.
+It needs `bd` and Python 3.11+ (as `python3` or `python`) installed, on your
+PATH or in one of the ordinary places above.
 
 ## Development
 
