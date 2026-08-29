@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: vi.fn() }));
 
 import type { SessionSummary, WbpEvent } from '../../../src/workbench/protocol';
-import { ClaudeDriver } from '../drivers/claude';
+import { ClaudeDriver, claudeEffortMenu } from '../drivers/claude';
 import { CodexDriver } from '../drivers/codex';
 import { Store } from '../store';
 
@@ -19,7 +19,7 @@ describe('provider-neutral effort', () => {
       const events: BareEvent[] = [];
       (driver as any).emit = (event: BareEvent) => events.push(event);
       if (driver instanceof ClaudeDriver) {
-        (driver as any).q = { setEffort: vi.fn().mockResolvedValue(undefined) };
+        (driver as any).q = { applyFlagSettings: vi.fn().mockResolvedValue(undefined) };
       }
 
       await driver.setEffort('high');
@@ -75,5 +75,61 @@ describe('provider-neutral effort', () => {
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the effort levels a Claude chat offers', () => {
+  const rows = [
+    {
+      value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus',
+      supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    },
+    { value: 'haiku', displayName: 'Haiku', supportsEffort: false },
+  ];
+
+  it('offers every level the running model announces, the deepest one included', () => {
+    const menu = claudeEffortMenu(rows, 'opus');
+
+    expect(menu.map((choice) => choice.value)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(menu.map((choice) => choice.displayName)).toEqual(['Low', 'Medium', 'High', 'Extra high', 'Max']);
+  });
+
+  it('offers nothing for a model that states it does not think', () => {
+    expect(claudeEffortMenu(rows, 'haiku')).toEqual([]);
+  });
+
+  it('offers nothing when an older kit describes its models without saying', () => {
+    expect(claudeEffortMenu([{ value: 'opus', displayName: 'Opus' }], 'opus')).toEqual([]);
+  });
+
+  it('reads a chat pinned to the real model behind a short name', () => {
+    expect(claudeEffortMenu(rows, 'claude-opus-5').map((choice) => choice.value))
+      .toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('applies the picked level as a settings change, the only route the kit listens on', async () => {
+    const driver = new ClaudeDriver() as any;
+    const applyFlagSettings = vi.fn().mockResolvedValue(undefined);
+    driver.q = { applyFlagSettings };
+    driver.emit = () => {};
+
+    await driver.setEffort('xhigh');
+
+    expect(applyFlagSettings).toHaveBeenCalledWith({ effortLevel: 'xhigh' });
+  });
+
+  it('redraws the levels for the model just chosen instead of the one before it', async () => {
+    const driver = new ClaudeDriver() as any;
+    const events: BareEvent[] = [];
+    driver.emit = (event: BareEvent) => events.push(event);
+    driver.q = { setModel: vi.fn().mockResolvedValue(undefined) };
+    driver.modelRows = rows;
+    driver.model = 'opus';
+
+    await driver.setModel('haiku');
+
+    const menu = events.filter((event) => event.type === 'session.menu').at(-1) as any;
+    expect(menu).toBeTruthy();
+    expect(menu.efforts).toEqual([]);
   });
 });

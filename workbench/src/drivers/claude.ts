@@ -11,6 +11,7 @@
  */
 import {
   query,
+  type EffortLevel,
   type PermissionResult,
   type PermissionUpdate,
   type SDKBackgroundTasksChangedMessage,
@@ -38,14 +39,48 @@ import {
   whoFor,
   workerStopped,
 } from '../../../src/workbench/machine-words.ts';
-import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, ImagePayload, ModelChoice, NoteRank, PlanResponse, QuestionResponse, TodoItem } from '../../../src/workbench/protocol.ts';
+import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, ExecutionContext, EffortChoice, ImagePayload, ModelChoice, NoteRank, PlanResponse, QuestionResponse, TodoItem } from '../../../src/workbench/protocol.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 
-const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'max'].map((value) => ({
-  value,
-  displayName: value[0]!.toUpperCase() + value.slice(1),
-}));
+/**
+ * One model as the kit announced it, its thinking included.
+ *
+ * `supportedModels()` states per model whether it thinks at all and which
+ * levels it offers. Four levels used to be written out here instead, so the
+ * picker offered `max` to models that cannot think, never offered `xhigh` at
+ * all, and the pick itself was sent to a method the kit has never had — every
+ * effort pick in a Claude chat failed (bw-1jfs).
+ */
+export type ClaudeModelRow = {
+  value: string;
+  /** The real model an alias row stands for, e.g. `sonnet` -> `claude-sonnet-5`. */
+  resolvedModel?: string;
+  displayName: string;
+  description?: string;
+  supportsEffort?: boolean;
+  supportedEffortLevels?: string[];
+};
+
+/** A level whose wire spelling does not read as English on its own. */
+const EFFORT_SAID: Record<string, string> = { xhigh: 'Extra high' };
+
+/**
+ * The levels the model now in use announces, in the order it announced them.
+ *
+ * Nothing is offered for a model that states it does not think, or for one an
+ * older kit describes without saying: an empty picker is honest, where a list
+ * written here is a promise the chat cannot keep.
+ */
+export function claudeEffortMenu(models: ClaudeModelRow[], activeModel: string | null): EffortChoice[] {
+  const selected = models.find((model) => model.value === activeModel || model.resolvedModel === activeModel)
+    ?? models[0];
+  if (!selected || selected.supportsEffort === false) return [];
+  return (selected.supportedEffortLevels ?? []).map((value) => ({
+    value,
+    displayName: EFFORT_SAID[value] ?? inWords(value),
+  }));
+}
 import { CLAUDE_PERMISSION_MODES } from '../../../src/workbench/protocol.ts';
 import { cut, diffOf, KEPT, resultText, trimInput } from '../../../src/workbench/imported-history.ts';
 import { rawTitle, toolTitle, whileItRuns } from '../../../src/workbench/said-what-it-ran.ts';
@@ -917,6 +952,15 @@ export class ClaudeDriver implements Driver {
    * commands a browser must hide (bw-f1q.13).
    */
   private models: ModelChoice[] = [];
+  /**
+   * The same models as the kit stated them, thinking included.
+   *
+   * Kept beside `models` because the shared menu carries only what a picker
+   * draws, and which levels a model offers is answered per model.
+   */
+  private modelRows: ClaudeModelRow[] = [];
+  /** The model this chat is running, which decides the levels it can be set to. */
+  private model: string | null = null;
   private terminalOnly = new Set<string>();
   /**
    * The window the conversation is measured against, which the kit states only
@@ -1295,6 +1339,7 @@ export class ClaudeDriver implements Driver {
 
   async start(opts: StartOptions): Promise<void> {
     this.effort = opts.effort ?? null;
+    this.model = opts.model ?? null;
     this.emit = opts.emit;
     this.agents = new AgentLifecycle(this.emit);
     this.taskAdapter = null;
@@ -1588,24 +1633,23 @@ export class ClaudeDriver implements Driver {
     const named: string[] = (init?.slash_commands ?? []) as string[];
 
     let described: { name: string; description: string; argumentHint?: string }[] = [];
-    let models: ModelChoice[] = [];
+    let rows: ClaudeModelRow[] = [];
     try {
       const [commands, offered] = await Promise.all([
         this.q?.supportedCommands() ?? Promise.resolve([]),
         this.q?.supportedModels() ?? Promise.resolve([]),
       ]);
       described = commands as typeof described;
-      models = (offered as { value: string; displayName: string; description?: string }[]).map((m) => ({
-        value: m.value,
-        displayName: m.displayName,
-        description: m.description,
-      }));
+      rows = offered as ClaudeModelRow[];
     } catch {
       // An older install answers neither; the names from init still make a menu.
     }
 
     // Remembered, because a later push carries neither of them.
-    if (models.length) this.models = models;
+    if (rows.length) {
+      this.modelRows = rows;
+      this.models = rows.map((m) => ({ value: m.value, displayName: m.displayName, description: m.description }));
+    }
     if (terminalOnly.size) this.terminalOnly = terminalOnly;
     this.emitMenu(described.length ? described : named.map((name) => ({ name, description: '' })));
   }
@@ -1614,15 +1658,25 @@ export class ClaudeDriver implements Driver {
   private emitMenu(commands: { name: string; description: string; argumentHint?: string }[]): void {
     // A command whose whole point is the terminal it was typed in cannot work
     // from a browser, so it is not offered here (§7).
-    const items = advertisedSlashCommands(commands, this.skills, this.terminalOnly);
-    this.commands = items;
+    this.commands = advertisedSlashCommands(commands, this.skills, this.terminalOnly);
+    this.pushMenu();
+  }
+
+  /**
+   * Sends the menu as it now stands.
+   *
+   * Apart from `emitMenu`, because folding the commands a second time would
+   * fold the skills in on top of themselves; a model change needs the levels
+   * redrawn and the commands left exactly as they are.
+   */
+  private pushMenu(): void {
     this.emit({
       type: 'session.menu',
-      commands: items,
+      commands: this.commands,
       skills: this.skills,
       models: this.models,
       permissionModes: [...CLAUDE_PERMISSION_MODES],
-      efforts: CLAUDE_EFFORTS,
+      efforts: claudeEffortMenu(this.modelRows, this.model),
       agentDefinitions: [],
       agentControls: this.agentControls(),
     });
@@ -1669,13 +1723,19 @@ export class ClaudeDriver implements Driver {
 
   async setModel(model: string): Promise<void> {
     await this.q?.setModel(model);
+    this.model = model;
     this.note({ rank: 'note', kind: 'model', text: `Model is now ${model}.`, always: true });
+    // The levels belong to the model, so the picker is redrawn for the one
+    // just chosen rather than left offering the last model's (bw-1jfs.3).
+    this.pushMenu();
   }
 
   async setEffort(effort: string): Promise<void> {
-    const active = this.q as unknown as { setEffort?: (value: string) => Promise<void> } | null;
-    if (!active?.setEffort) throw new Error('This Claude installation cannot change effort while a chat is running');
-    await active.setEffort(effort);
+    if (!this.q) throw new Error('This chat is not running, so its effort cannot be changed');
+    // A level is a settings change that stands for the rest of the session.
+    // The kit has never had a `setEffort` of its own, so guarding on one meant
+    // every pick was refused, in the name of the reader's install (bw-1jfs.2).
+    await this.q.applyFlagSettings({ effortLevel: effort as EffortLevel });
     this.effort = effort;
     this.emit({ type: 'session.pinned', permissionMode: null, model: null, effort });
   }
