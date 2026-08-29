@@ -20,7 +20,9 @@ import { CircleDot } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { addressWith, cardWasPushed } from '@/lib/address';
+import { classesFor } from '@/lib/state-styles';
 import { cn } from '@/lib/utils';
+import type { BeadStatus } from '@/types';
 
 /**
  * One card, as a chip that opens it. Drawn in the chat's rail and wherever a
@@ -34,6 +36,7 @@ export function BeadChip({
   testId = 'bead-chip',
   title,
   className,
+  status,
 }: {
   id: string;
   projectId: string | null;
@@ -42,6 +45,8 @@ export function BeadChip({
   /** What the pointer says, when the chip stands for more than the one card it names. */
   title?: string;
   className?: string;
+  /** Its live board state, whose existing palette colors the chip. */
+  status?: BeadStatus;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -52,12 +57,13 @@ export function BeadChip({
       appearance="outline"
       size={size}
       shape="circle"
-      className={cn('shrink-0 font-mono', className)}
+      className={cn('shrink-0 font-mono', status && classesFor(status).badge, className)}
     >
       <button
         type="button"
         data-testid={testId}
         data-bead-id={id}
+        data-bead-status={status}
         title={title ?? `Open ${id}`}
         onClick={(e) => {
           e.stopPropagation();

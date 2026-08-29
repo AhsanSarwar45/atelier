@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
 const HERE = '7ec315b6-f66e-421e-84ae-a28088bdf16b';
 const MENTIONS: Mentions = {
   split: (text) => mentionsIn(text, { card: (id) => id === 'bw-1u1' }),
-  card: (id) => <BeadChip id={id} projectId={HERE} size="xs" testId="mention-card" className="mx-0.5 align-middle" />,
+  card: (id) => <BeadChip id={id} projectId={HERE} status="in_progress" size="xs" testId="mention-card" className="mx-0.5 align-middle" />,
   link: (href) => {
     const named = addressedBy(href);
     if (!named || named.kind !== 'card' || (named.project && named.project !== HERE)) return null;
@@ -52,6 +52,12 @@ describe('card names in a rendered message', () => {
   it('draws a card chip when a provider writes the id as inline code', () => {
     say('Landed `bw-1u1` today');
     expect(screen.getByTestId('mention-card')).toHaveTextContent('bw-1u1');
+  });
+
+  it('uses the existing board status color on a card chip', () => {
+    say('Working on bw-1u1');
+    expect(screen.getByTestId('mention-card')).toHaveAttribute('data-bead-status', 'in_progress');
+    expect(screen.getByTestId('mention-card')).toHaveClass('text-status-progress');
   });
 
   it('keeps card ids inside fenced commands copyable as code', () => {

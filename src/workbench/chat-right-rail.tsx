@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils';
 import { byJob, jobTitle } from '@/workbench/cards-by-job';
 import type { SentAway, TranscriptItem } from '@/workbench/fold';
 import { GitView } from '@/workbench/git-view';
+import { useKnownCardStatuses } from '@/workbench/known-cards';
 import type { AgentControl } from '@/workbench/protocol';
 import { SentAwayPanel } from '@/workbench/sent-away';
 
@@ -178,6 +179,7 @@ export function ChatRightRail({
   onToggle,
 }: ChatRightRailProps) {
   const jobs = useMemo(() => byJob(cards), [cards]);
+  const cardStatuses = useKnownCardStatuses(projectPath);
   const empty = cards.length === 0 && agents.length === 0;
   return (
     <div
@@ -268,6 +270,7 @@ export function ChatRightRail({
                     key={job.id}
                     id={job.id}
                     projectId={projectId}
+                    status={cardStatuses.get(job.id)}
                     size="sm"
                     title={jobTitle(job)}
                   />

@@ -98,16 +98,16 @@ interface LocalTarget {
 
 type FileKind = 'archive' | 'audio' | 'code' | 'data' | 'image' | 'table' | 'text' | 'video' | 'file';
 
-const FILE_KINDS: Record<FileKind, { extensions: Set<string>; icon: LucideIcon }> = {
-  archive: { extensions: new Set(['7z', 'bz2', 'gz', 'rar', 'tar', 'tgz', 'xz', 'zip']), icon: FileArchive },
-  audio: { extensions: new Set(['aac', 'flac', 'm4a', 'mp3', 'ogg', 'wav']), icon: FileAudio },
-  code: { extensions: new Set(['c', 'cc', 'cpp', 'css', 'go', 'h', 'html', 'java', 'js', 'jsx', 'kt', 'php', 'py', 'rb', 'rs', 'sh', 'sql', 'swift', 'ts', 'tsx', 'vue']), icon: FileCode2 },
-  data: { extensions: new Set(['json', 'jsonl', 'toml', 'xml', 'yaml', 'yml']), icon: FileJson },
-  image: { extensions: new Set(['avif', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp']), icon: FileImage },
-  table: { extensions: new Set(['csv', 'numbers', 'ods', 'tsv', 'xls', 'xlsx']), icon: FileSpreadsheet },
-  text: { extensions: new Set(['log', 'md', 'pdf', 'rtf', 'txt']), icon: FileText },
-  video: { extensions: new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm']), icon: FileVideo },
-  file: { extensions: new Set(), icon: File },
+const FILE_KINDS: Record<FileKind, { extensions: Set<string>; icon: LucideIcon; color: string }> = {
+  archive: { extensions: new Set(['7z', 'bz2', 'gz', 'rar', 'tar', 'tgz', 'xz', 'zip']), icon: FileArchive, color: 'border-[#e37933]/40 bg-[#e37933]/10 text-[#e37933] hover:bg-[#e37933]/15' },
+  audio: { extensions: new Set(['aac', 'flac', 'm4a', 'mp3', 'ogg', 'wav']), icon: FileAudio, color: 'border-[#cbcb41]/40 bg-[#cbcb41]/10 text-[#cbcb41] hover:bg-[#cbcb41]/15' },
+  code: { extensions: new Set(['c', 'cc', 'cpp', 'css', 'go', 'h', 'html', 'java', 'js', 'jsx', 'kt', 'php', 'py', 'rb', 'rs', 'sh', 'sql', 'swift', 'ts', 'tsx', 'vue']), icon: FileCode2, color: 'border-[#519aba]/40 bg-[#519aba]/10 text-[#519aba] hover:bg-[#519aba]/15' },
+  data: { extensions: new Set(['json', 'jsonl', 'toml', 'xml', 'yaml', 'yml']), icon: FileJson, color: 'border-[#cbcb41]/40 bg-[#cbcb41]/10 text-[#cbcb41] hover:bg-[#cbcb41]/15' },
+  image: { extensions: new Set(['avif', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp']), icon: FileImage, color: 'border-[#a074c4]/40 bg-[#a074c4]/10 text-[#a074c4] hover:bg-[#a074c4]/15' },
+  table: { extensions: new Set(['csv', 'numbers', 'ods', 'tsv', 'xls', 'xlsx']), icon: FileSpreadsheet, color: 'border-[#8dc149]/40 bg-[#8dc149]/10 text-[#8dc149] hover:bg-[#8dc149]/15' },
+  text: { extensions: new Set(['log', 'md', 'pdf', 'rtf', 'txt']), icon: FileText, color: 'border-[#6d8086]/40 bg-[#6d8086]/10 text-[#91a3a8] hover:bg-[#6d8086]/15' },
+  video: { extensions: new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm']), icon: FileVideo, color: 'border-[#e06c75]/40 bg-[#e06c75]/10 text-[#e06c75] hover:bg-[#e06c75]/15' },
+  file: { extensions: new Set(), icon: File, color: 'border-muted-foreground/30 bg-muted/30 text-muted-foreground hover:bg-muted/50' },
 };
 
 function fileKind(path: string): FileKind {
@@ -125,7 +125,7 @@ function FileLinkBadge({ href, target, children, onClick }: {
   const kind = fileKind(target.path);
   const Icon = FILE_KINDS[kind].icon;
   return (
-    <Badge asChild variant="primary" appearance="outline" size="xs" shape="circle" className="mx-0.5 align-middle font-mono no-underline">
+    <Badge asChild variant="primary" appearance="outline" size="xs" shape="circle" className={cn('mx-0.5 align-middle font-mono no-underline', FILE_KINDS[kind].color)}>
       <a href={href} onClick={onClick} data-testid="markdown-file-link" data-file-kind={kind} title={`Open ${target.path}${target.line === null ? '' : ` at line ${target.line}`}`}>
         <Icon className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
         <span>{children}</span>

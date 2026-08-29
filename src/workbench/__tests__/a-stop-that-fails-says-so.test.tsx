@@ -54,7 +54,10 @@ vi.mock('@/workbench/chat-right-rail', () => ({
 vi.mock('@/workbench/paths-on-disk', () => ({
   usePathsOnDisk: () => ({ real: () => false, home: '/home/me', ask: () => {} }),
 }));
-vi.mock('@/workbench/known-cards', () => ({ useKnownCards: () => new Set<string>() }));
+vi.mock('@/workbench/known-cards', () => ({
+  useKnownCards: () => new Set<string>(),
+  useKnownCardStatuses: () => new Map<string, string>(),
+}));
 
 const { default: ChatTab } = await import('@/workbench/chat-tab');
 

@@ -65,7 +65,7 @@ import { useUnsentLine, useUnsentPictures } from '@/workbench/drafts';
 import { chatState, heldLine, holderOnly } from '@/workbench/chat-state';
 import { ExternalBadge } from '@/workbench/chat-state-chip';
 import { KindFilter, NothingShowing } from '@/workbench/filter-tree';
-import { useKnownCards } from '@/workbench/known-cards';
+import { useKnownCards, useKnownCardStatuses } from '@/workbench/known-cards';
 import { drawnRows } from '@/workbench/machine-lines';
 import { inWords, PERMISSION_MODE } from '@/workbench/machine-words';
 import { addressedBy, openableIn } from '@/workbench/mentions';
@@ -546,6 +546,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   // like a card id, so the board's own list and the reports this project has
   // is what decides (bw-4wcd.3, src/workbench/mentions.ts).
   const knownCards = useKnownCards(projectPath);
+  const knownCardStatuses = useKnownCardStatuses(projectPath);
 
   // A file the agent named opens from where it is written, the same way. Only
   // ones that are really there: `and/or` and `24/7` are shaped like addresses
@@ -570,7 +571,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
 
   const mentions = useMemo<Mentions>(() => {
     const card = (id: string) => (
-      <BeadChip id={id} projectId={projectId} size="xs" testId="mention-card" className="mx-0.5" />
+      <BeadChip id={id} projectId={projectId} status={knownCardStatuses.get(id)} size="xs" testId="mention-card" className="mx-0.5" />
     );
     return {
       split: (text) =>
@@ -594,7 +595,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         return knownCards.has(named.id) ? card(named.id) : null;
       },
     };
-  }, [knownCards, projectId, where, disk]);
+  }, [knownCards, knownCardStatuses, projectId, where, disk]);
   // Both are held against THIS chat's id, out where the tab bar cannot reach
   // them: leaving the chat for the board takes this whole screen down, and
   // switching chats does not take it down at all (src/workbench/drafts.ts).

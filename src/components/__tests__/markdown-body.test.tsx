@@ -19,6 +19,7 @@ describe('Markdown file links', () => {
     render(<MarkdownBody>{'[proof](</home/me/proof.webm>)'}</MarkdownBody>);
     const link = screen.getByTestId('markdown-file-link');
     expect(link).toHaveAttribute('data-file-kind', 'video');
+    expect(link).toHaveClass('text-[#e06c75]');
     expect(link).toHaveTextContent('proof');
     fireEvent.click(link);
     expect(openExternal).toHaveBeenCalledWith('/home/me/proof.webm', 'finder');
@@ -28,6 +29,7 @@ describe('Markdown file links', () => {
     render(<MarkdownBody>{'[source](</home/me/source.ts:42>)'}</MarkdownBody>);
     const link = screen.getByTestId('markdown-file-link');
     expect(link).toHaveAttribute('data-file-kind', 'code');
+    expect(link).toHaveClass('text-[#519aba]');
     expect(link).toHaveTextContent('source');
     expect(link).toHaveTextContent(':42');
     fireEvent.click(link);
@@ -37,6 +39,7 @@ describe('Markdown file links', () => {
   it('uses the file type rather than the writer label to choose its icon', () => {
     render(<MarkdownBody>{'[download](</home/me/results.csv>)'}</MarkdownBody>);
     expect(screen.getByTestId('markdown-file-link')).toHaveAttribute('data-file-kind', 'table');
+    expect(screen.getByTestId('markdown-file-link')).toHaveClass('text-[#8dc149]');
   });
 
   it('removes a cited column while opening at the cited line', () => {

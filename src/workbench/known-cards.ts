@@ -16,24 +16,26 @@
 import { useEffect, useState } from 'react';
 
 import { loadProjectBeads } from '@/lib/beads-parser';
+import type { BeadStatus } from '@/types';
 
 /** How long an answer stands before the next reader asks again. */
 const KEPT_MS = 60_000;
 
 const EMPTY: ReadonlySet<string> = new Set<string>();
+const EMPTY_STATUSES: ReadonlyMap<string, BeadStatus> = new Map<string, BeadStatus>();
 
-const asked = new Map<string, { at: number; ids: Promise<Set<string>> }>();
+const asked = new Map<string, { at: number; cards: Promise<Map<string, BeadStatus>> }>();
 
-function idsOf(projectPath: string): Promise<Set<string>> {
+function cardsOf(projectPath: string): Promise<Map<string, BeadStatus>> {
   const had = asked.get(projectPath);
-  if (had && Date.now() - had.at < KEPT_MS) return had.ids;
-  const ids = loadProjectBeads(projectPath)
-    .then((beads) => new Set(beads.map((b) => b.id)))
+  if (had && Date.now() - had.at < KEPT_MS) return had.cards;
+  const cards = loadProjectBeads(projectPath)
+    .then((beads) => new Map(beads.map((b) => [b.id, b.status])))
     // A board that cannot be read is a board with no cards to click, which is
     // the text drawn plainly — never an error in the middle of a conversation.
-    .catch(() => new Set<string>());
-  asked.set(projectPath, { at: Date.now(), ids });
-  return ids;
+    .catch(() => new Map<string, BeadStatus>());
+  asked.set(projectPath, { at: Date.now(), cards });
+  return cards;
 }
 
 /** The ids, empty until they arrive. Nothing is chipped while it is empty. */
@@ -46,8 +48,8 @@ export function useKnownCards(projectPath: string | null): ReadonlySet<string> {
       return;
     }
     let alive = true;
-    void idsOf(projectPath).then((found) => {
-      if (alive) setIds(found);
+    void cardsOf(projectPath).then((found) => {
+      if (alive) setIds(new Set(found.keys()));
     });
     return () => {
       alive = false;
@@ -55,4 +57,23 @@ export function useKnownCards(projectPath: string | null): ReadonlySet<string> {
   }, [projectPath]);
 
   return ids;
+}
+
+/** Live status by id, sharing the same one-minute board read as known ids. */
+export function useKnownCardStatuses(projectPath: string | null): ReadonlyMap<string, BeadStatus> {
+  const [statuses, setStatuses] = useState<ReadonlyMap<string, BeadStatus>>(EMPTY_STATUSES);
+
+  useEffect(() => {
+    if (!projectPath) {
+      setStatuses(EMPTY_STATUSES);
+      return;
+    }
+    let alive = true;
+    void cardsOf(projectPath).then((found) => {
+      if (alive) setStatuses(found);
+    });
+    return () => { alive = false; };
+  }, [projectPath]);
+
+  return statuses;
 }

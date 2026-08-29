@@ -13,9 +13,9 @@ test('provider formatting differences share card and typed file badges', async (
   const run = join(process.cwd(), 'tests', '.workbench-run-badges');
   const projectPath = makeFixtureProject(join(run, 'project'), join(run, 'reporting'));
   const text = [
-    `Claude-style prose: ${PARENT_CARD} landed.`,
+    `Open card in prose: ${PARENT_CARD} is ready.`,
     '',
-    `Codex-style Markdown: \`${PARENT_CARD}\` landed.`,
+    'Closed card in Markdown: `wl-kid1` landed.',
     '',
     'Changed [message renderer](</home/ahsan/dev/beads-web/src/components/markdown-body.tsx:132>) and captured [visual proof](</home/ahsan/dev/beads-web/tests/results/chat-badges-after.png>).',
   ].join('\n');
@@ -61,8 +61,10 @@ test('provider formatting differences share card and typed file badges', async (
     project = await made.json();
     await page.goto(`/project?id=${project!.id}&tab=chat`);
     await page.getByTestId('restore-row').filter({ hasText: 'Shared chat badges' }).getByTestId('row-name').click();
-    await expect(page.getByText('Claude-style prose:')).toBeVisible();
+    await expect(page.getByText('Open card in prose:')).toBeVisible();
     await expect(page.getByTestId('mention-card')).toHaveCount(2);
+    await expect(page.locator('[data-bead-status="open"]')).toHaveCount(1);
+    await expect(page.locator('[data-bead-status="closed"]')).toHaveCount(1);
     await expect(page.getByTestId('markdown-file-link')).toHaveCount(2);
     await page.screenshot({ path: process.env.CHAT_BADGES_SCREENSHOT || 'tests/results/chat-badges-after.png', fullPage: false });
   } finally {
