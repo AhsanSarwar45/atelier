@@ -26,7 +26,7 @@ describe('interactive visual mockups', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open artifact full screen' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getAllByTestId('mockup-artifact')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Close full-screen artifact' }));
+    fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
