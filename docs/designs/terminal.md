@@ -104,7 +104,7 @@ in `main.rs`, so there is no way to mount these routes without it: whoever wires
 them up gets the refusal whether they were thinking about it or not. Left in
 `main.rs`, removing the layer would have failed nothing.
 
-### 3.1 Why `Host` and not `Origin`
+### 3.1 Why `Host` decides, and `Origin` only ever adds to it
 
 A WebSocket handshake is not governed by the same-origin policy. RFC 6455 leaves
 the decision entirely to the server — the browser sends `Origin` as information
@@ -122,7 +122,17 @@ any sign that the connection arrived here. What he cannot do is make the
 victim's browser claim to be visiting a name *we* answer to. So the rule is an
 allowlist of what this machine is — what Vite shipped as `server.allowedHosts`
 after its own rebinding advisory (GHSA-vg6x-rcgg-rjx6). `Origin` is never
-consulted.
+what decides.
+
+It is consulted second, though, where a browser sends one. `Host` names the
+destination, and a page on any other site can aim an honest `Host` at this box
+from a browser that is already on the network — a WebSocket handshake is exactly
+the request CORS never sees. A browser fills `Origin` in itself and script
+cannot forge it, so when it is present its host is parsed the same way and has
+to pass the same allowlist; `null` and anything unparseable are refused. A
+request with no `Origin` at all — `curl`, a navigation, a same-origin `GET` — is
+judged on `Host` alone, which is why `Origin` can add to the rule and never be
+it: a caller that is not a browser simply leaves it out.
 
 The allowlist is `localhost` and anything under it, anything ending `.local`
 (reserved to multicast DNS by RFC 6762 and answered by the responder on this
@@ -174,13 +184,41 @@ thing that can actually be executed, and falls back to the password database
 when it is not — and it starts it as a login shell the way a terminal emulator
 does, by putting a dash in front of the name in the argument the shell reads its
 own name from, not by passing a flag. We add only what it deliberately leaves
-alone: `TERM=xterm-256color` and `COLORTERM=truecolor`.
+alone: `TERM=xterm-256color`, `COLORTERM=truecolor`, and `TERM_PROGRAM=atelier`
+— the name a terminal gives itself where scripts already look for one (iTerm,
+vscode and WezTerm all answer there). It has one reader so far and it matters:
+`scripts/install-local.sh` refuses to run under it. The install replaces the
+binary of the running app, the app notices and restarts itself
+(`handover.rs`), and every shell it opened is hung up as it goes — so an
+install started inside one of those shells would be killed by its own work,
+possibly mid-copy. A dry run is let through; it replaces nothing.
 
 **And take away what it should not have brought.** Everything under the
-`ATELIER_` and `BEADS_` prefixes, plus `RUST_LOG` and `PORT`, is removed before
-the spawn. The app's own settings do not follow a person into their shell — a
-worktree's port or log level leaking into an interactive shell is the kind of
-thing that is discovered a month later, in something unrelated.
+`ATELIER_` and `BEADS_` prefixes is removed before the spawn, and so are
+`RUST_LOG` and `PORT` — by exact name, because those two are borrowed
+conventions and a prefix match took `RUST_LOG_STYLE` and `PORTFOLIO_DIR` out of
+a person's shell along with them. The app's own settings do not follow a person
+into their shell — a worktree's port or log level leaking into an interactive
+shell is the kind of thing that is discovered a month later, in something
+unrelated.
+
+**And when the shell is let go, nothing it started stays behind.** Closing a
+tab hangs the shell up (the crate's `kill` is a `SIGHUP` on Unix) and waits for
+it. That was assumed to be enough, because a hung-up shell passes the hangup to
+its jobs — and fish does, every time. Bash does only when it is idle at its
+prompt; hung up a moment after starting a job, which is exactly what closing a
+tab on a build just launched with `&` is, it exits and leaves the job alive,
+re-parented to init, with nobody to notice. Measured here with `sleep 1000 &`:
+the two outcomes are a few hundred milliseconds of timing apart. So the promise
+is kept by the app and not by the shell. The shell is a session leader
+(`new_default_prog` calls `setsid`), and every process it starts carries its
+pid as session id whatever process group job control put it in; after the
+shell has been waited for, a thread walks `/proc` for that session, sends each
+member `SIGHUP`, waits half a second, and `SIGKILL`s whatever is left that has
+not set `SIGHUP` to be ignored. A job that took its own session (`setsid`) or
+ignores hangups (`nohup`) asked to outlive the terminal, and does — the same
+things that survive a terminal emulator closing. The test starts a job, drops
+the shell, and watches `/proc/<pid>` go. Linux only, because `/proc` is.
 
 ### 4.1 Which shell is opened, once somebody has chosen
 
@@ -734,3 +772,28 @@ a loaded machine. They now wait for the state they were always trying to reach.
   comfortably drive anything interactive.
 - **LAN-open with no authentication.** Anyone already on the network gets a
   shell. Deliberate (§3), and the Host allowlist does not change it.
+- **The sweep does not run when the process itself exits.** Every path out of
+  `main.rs`, and the handover when a new build is installed, is
+  `std::process::exit`, which runs no `Drop`. The kernel closes the master and
+  hangs each shell up; whether a job started in the moments before goes with
+  it is then down to the shell's manners (§4) — fish's are good, bash's depend
+  on it being idle. A sweep of every live session before `exit` would close
+  this; it needs a hook on those exit paths, which today there is none of.
+- **A job that ignores hangups outlives the tab, on purpose.** `nohup` and
+  `setsid` are honoured (§4), which is right for a person who reached for them
+  and wrong for a program that ignores `SIGHUP` for reasons of its own. There
+  is no list of such programs and no way offered to close them from the app.
+- **The icon face is proved served and loaded, not drawn.** xterm pads every
+  glyph to a cell with `letter-spacing`, so the width check in §11 passes with
+  or without the face; and this machine has Nerd Fonts installed system-wide,
+  so even the glyph's natural advance does not tell the two apart here. The
+  assertion that can fail is `document.fonts` reporting the family loaded. A
+  real pixel comparison would need a machine without the fonts.
+- **The shell setting is proved with `/bin/sh` only.** Any shell is accepted,
+  but the browser case picks the one every machine has; a shell with an
+  unusual startup — one that does not honour a dash-prefixed name as a login
+  start, say — is untested.
+- **The setting is validated as a file, not as a shell.** Absolute, present,
+  regular, executable: any program that passes is accepted and opened as a
+  login shell. `/bin/ls` would be saved without complaint and fail at the next
+  tab, with the tab's error as the only explanation.
