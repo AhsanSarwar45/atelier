@@ -161,16 +161,39 @@ def mutates(data):
     return shell_mutates(command)
 
 
-def external_edit_only(patch, cwd):
+def edit_targets(data, supplied, patch):
+    """Every path an edit call names, however this host spells the call.
+
+    Codex sends one `apply_patch` envelope naming its files inside the patch
+    text. Claude Code sends the path beside the content instead, as `file_path`
+    or `notebook_path`. A gate reading only the envelope sees no target at all
+    for those tools, so it can neither recognise a machine-local edit nor let
+    its own repair through, and every edit outside the repository is refused
+    from those sessions.
+    """
+    if data.get("tool_name") not in EDIT_TOOLS:
+        return []
+    named = []
+    if isinstance(patch, str):
+        named.extend(re.findall(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$",
+                                patch, re.M))
+    if isinstance(supplied, dict):
+        for key in ("file_path", "notebook_path"):
+            value = supplied.get(key)
+            if isinstance(value, str) and value.strip():
+                named.append(value)
+    return [path.strip() for path in named]
+
+
+def external_edit_only(edited, cwd):
     """Whether every explicit edit target is outside this Git project.
 
     The hook belongs to one repository. Personal skills and other machine-local
     configuration are not repository changes, even when the host reports the
     session's project cwd for every tool call. Use Git's common directory so a
     linked worktree cannot mistake the shared checkout for an external path.
-    Mixed patches stay guarded.
+    Mixed edits stay guarded.
     """
-    edited = re.findall(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$", patch, re.M)
     if not edited:
         return False
     ok, common = run(
@@ -186,7 +209,7 @@ def external_edit_only(patch, cwd):
         except ValueError:
             return True
 
-    return all(outside(path.strip()) for path in edited)
+    return all(outside(path) for path in edited)
 
 
 def run(args, cwd):
@@ -276,19 +299,16 @@ def reason(data):
     # unwaived turn still follows the normal ticket-worktree lifecycle.
     if bc.waived(data.get("session_id")):
         return None
-    if (data.get("tool_name") in EDIT_TOOLS and isinstance(patch, str)
-            and external_edit_only(patch, cwd)):
+    named = edit_targets(data, supplied, patch)
+    if data.get("tool_name") in EDIT_TOOLS and external_edit_only(named, cwd):
         return None
     # A broken workflow gate must never be able to prevent its own repair.
     # Changes through this escape hatch are limited to tracked policy/config
     # files, so the resulting Git diff is the audit record.
-    if (data.get("tool_name") in EDIT_TOOLS and
-            isinstance(patch, str)):
-        edited = re.findall(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$",
-                            patch, re.M)
+    if data.get("tool_name") in EDIT_TOOLS:
         normalized = {next((part for part in RECOVERY_FILES
-                            if path.endswith(part)), path) for path in edited}
-        if edited and normalized.issubset(RECOVERY_FILES):
+                            if path.endswith(part)), path) for path in named}
+        if named and normalized.issubset(RECOVERY_FILES):
             return None
     removing = copy_to_remove(command)
     targets = (WORKTREE.findall(patch)

@@ -20,6 +20,11 @@ def edit(*paths):
     return {"tool_name": "apply_patch", "tool_input": {"patch": patch_text}, "cwd": "/repo"}
 
 
+def named(tool, key, path):
+    """A host that names the edited file beside the content, not in a patch."""
+    return {"tool_name": tool, "tool_input": {key: path, "content": "x"}, "cwd": "/repo"}
+
+
 class CopyLifecycle(unittest.TestCase):
     @patch.object(gate, "card_for", return_value={"id": "bw-123"})
     def test_a_copy_can_be_cut_before_the_card_is_claimed(self, _card):
@@ -159,6 +164,40 @@ class EditScope(unittest.TestCase):
     def test_a_mixed_patch_cannot_hide_a_repository_edit(self, _run, _waived):
         result = gate.reason(edit("/home/person/.codex/skills/beads/SKILL.md", "/repo/src/app.ts"))
         self.assertIn("dedicated ticket worktree", result)
+
+
+class NamedEditTarget(unittest.TestCase):
+    """Hosts that pass the path beside the content instead of inside a patch."""
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_named_write_outside_the_project_is_not_a_repository_change(self, _run, _waived):
+        data = named("Write", "file_path", "/home/person/.codex/skills/beads/SKILL.md")
+        self.assertIsNone(gate.reason(data))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_named_edit_inside_the_project_still_requires_its_copy(self, _run, _waived):
+        data = named("Edit", "file_path", "/repo/src/app.ts")
+        self.assertIn("dedicated ticket worktree", gate.reason(data))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_the_gate_can_be_repaired_from_a_host_that_names_the_file(self, _run, _waived):
+        data = named("Edit", "file_path", "/repo/machinery/hooks/workflow-gate.py")
+        self.assertIsNone(gate.reason(data))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_named_notebook_outside_the_project_is_not_a_repository_change(self, _run, _waived):
+        data = named("NotebookEdit", "notebook_path", "/home/person/notes/scratch.ipynb")
+        self.assertIsNone(gate.reason(data))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_an_unnamed_edit_call_is_still_guarded(self, _run, _waived):
+        data = {"tool_name": "MultiEdit", "tool_input": {"edits": []}, "cwd": "/repo"}
+        self.assertIn("dedicated ticket worktree", gate.reason(data))
 
 
 if __name__ == "__main__":
