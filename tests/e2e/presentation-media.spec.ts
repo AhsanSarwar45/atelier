@@ -19,7 +19,12 @@ test('CLI-produced media survives a chat reload', async ({ page, request }) => {
   const make = (args: string[]) => widgetSpecs(execFileSync(command, ['tool', 'present', ...args], { env, encoding: 'utf8' }))[0]!;
   const image = make(['image', '--file', 'tests/results/visual-explainer-color-after.png', '--alt', 'Colored explainer gallery', '--caption', 'Four semantic layouts']);
   const comparison = make(['compare', '--before', 'tests/results/visual-explainer-gallery-after.png', '--after', 'tests/results/visual-explainer-color-after.png', '--before-alt', 'Monochrome gallery', '--after-alt', 'Colored gallery', '--mode', 'side_by_side']);
-  const visuals: ChatWidget[] = [image, comparison];
+  const compact: ChatWidget[] = [
+    { type: 'progress', title: 'Delivery confidence', items: [{ label: 'Contract validation', value: 96, detail: 'Strict schemas' }, { label: 'Interaction coverage', value: 84, detail: 'Clicks, inputs, reload' }] },
+    { type: 'timeline', title: 'Artifact journey', items: [{ label: 'Agent creates temporary source', detail: 'Project or temporary directory', status: 'done' }, { label: 'Atelier validates and stores', detail: 'Content-addressed durable media', status: 'current' }] },
+    { type: 'table', title: 'Which renderer should the agent choose?', columns: ['Need', 'Renderer', 'Interaction'], rows: [['Exact comparison', 'Image comparison', 'Zoom either side'], ['Clickable prototype', 'Interactive mockup', 'Full page']] },
+  ];
+  const visuals: ChatWidget[] = [...compact, image, comparison];
 
   const common = { sessionId: CHAT, at: new Date(0).toISOString() };
   const events: WbpEvent[] = [{ ...common, seq: 1, type: 'session.started', brand: 'codex', externalId: 'media', model: 'gpt-5', cwd: process.cwd(), permissionMode: 'on-request' }];
@@ -62,6 +67,22 @@ test('CLI-produced media survives a chat reload', async ({ page, request }) => {
     await open();
     await page.reload();
     await open();
+    const progressFrame = page.locator('[data-widget="progress"]');
+    const timelineFrame = page.locator('[data-widget="timeline"]');
+    const tableFrame = page.locator('[data-widget="table"]');
+    await progressFrame.scrollIntoViewIfNeeded();
+    const [progressBox, timelineBox, tableBox, tableTitleBox] = await Promise.all([
+      progressFrame.boundingBox(), timelineFrame.boundingBox(), tableFrame.boundingBox(),
+      tableFrame.getByText('Which renderer should the agent choose?').boundingBox(),
+    ]);
+    expect(progressBox && timelineBox && timelineBox.y - progressBox.y - progressBox.height).toBeGreaterThanOrEqual(16);
+    expect(timelineBox && tableBox && tableBox.y - timelineBox.y - timelineBox.height).toBeGreaterThanOrEqual(16);
+    expect(tableBox && tableTitleBox && tableTitleBox.x - tableBox.x).toBeGreaterThanOrEqual(12);
+    if (!progressBox || !tableBox) throw new Error('Expected compact widget frames');
+    await page.screenshot({
+      path: 'tests/results/chat-widget-spacing-after.png',
+      clip: { x: progressBox.x, y: progressBox.y, width: Math.max(progressBox.width, tableBox.width), height: tableBox.y + tableBox.height - progressBox.y },
+    });
     await page.getByRole('button', { name: 'Open Colored explainer gallery to zoom' }).click();
     await expect(page.getByTestId('picture-viewer')).toBeVisible();
     await page.getByRole('button', { name: 'Zoom in' }).click();

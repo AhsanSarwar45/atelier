@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, ChevronRight, Circle, Clock, FileCode2, Pause, Play, ZoomIn } from 'lucide-react';
 
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Panel } from '@/components/ui/panel';
 import { Progress } from '@/components/ui/progress';
 import { apiUrl } from '@/lib/api-base';
+import { cn } from '@/lib/utils';
 import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-widgets';
 import { ImageComparisonView } from '@/workbench/image-comparison';
 import { PictureViewer } from '@/workbench/picture-viewer';
@@ -24,6 +25,29 @@ function explainerAccent(index: number): string {
 
 function Heading({ title }: { title?: string }) {
   return title ? <h4 className="mb-3 text-sm font-semibold text-foreground">{title}</h4> : null;
+}
+
+function WidgetFrame({ kind, title, children, wide = false, className, artifactKind }: {
+  kind: ChatWidget['type'];
+  title?: string;
+  children: ReactNode;
+  wide?: boolean;
+  className?: string;
+  artifactKind?: string;
+}) {
+  return (
+    <Panel
+      data-testid="chat-widget"
+      data-widget={kind}
+      data-artifact-kind={artifactKind}
+      tone="frame"
+      inset="md"
+      className={cn('my-4', wide ? 'max-w-4xl' : 'max-w-2xl', className)}
+    >
+      <Heading title={title} />
+      {children}
+    </Panel>
+  );
 }
 
 function mediaUrl(src: string): string {
@@ -159,11 +183,10 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
   }, [playing, widget.steps.length]);
 
   return (
-    <Panel data-testid="chat-widget" data-widget="explainer" tone="frame" className="mb-3 max-w-2xl overflow-hidden">
+    <WidgetFrame kind="explainer" title={widget.title} className="overflow-hidden">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <Heading title={widget.title} />
-          {widget.summary && <p className="-mt-1 mb-3 text-xs leading-relaxed text-muted-foreground">{widget.summary}</p>}
+          {widget.summary && <p className="mb-3 text-xs leading-relaxed text-muted-foreground">{widget.summary}</p>}
         </div>
         {widget.steps.length > 1 && <Button type="button" variant="outline" size="icon" radius="full" aria-label={playing ? 'Pause explanation' : 'Play explanation'} aria-pressed={playing}
           onClick={() => setPlaying((value) => !value)} className="size-8">
@@ -190,22 +213,20 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
           <FileCode2 className="size-3" />{item.label}{item.line ? `:${item.line}` : ''}
         </Button>)}
       </div>}
-    </Panel>
+    </WidgetFrame>
   );
 }
 
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
   const [looking, setLooking] = useState<LookableImage | null>(null);
   if (widget.type === 'artifact') return (
-    <Panel data-testid="chat-widget" data-widget="artifact" data-artifact-kind={widget.kind} tone="frame" className="mb-3 max-w-4xl overflow-hidden">
-      <Heading title={widget.title} />
+    <WidgetFrame kind="artifact" artifactKind={widget.kind} title={widget.title} wide className="overflow-hidden">
       <VisualArtifactView asset={widget.asset} />
-    </Panel>
+    </WidgetFrame>
   );
   if (widget.type === 'explainer') return <Explainer widget={widget} />;
   if (widget.type === 'image') return (
-    <Panel data-testid="chat-widget" data-widget="image" tone="frame" className="mb-3 max-w-2xl">
-      <Heading title={widget.title} />
+    <WidgetFrame kind="image" title={widget.title}>
       <figure>
         <Button type="button" variant="foreground" aria-label={`Open ${widget.alt} to zoom`} title="Click to see it full size"
           className="group relative block h-auto w-full whitespace-normal p-0" onClick={() => setLooking({ mime: 'image/*', dataUrl: presentationAssetUrl(widget.asset), alt: widget.alt })}>
@@ -216,7 +237,7 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
         {widget.caption && <figcaption className="mt-2 text-xs text-muted-foreground">{widget.caption}</figcaption>}
       </figure>
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
-    </Panel>
+    </WidgetFrame>
   );
   if (widget.type === 'image_compare') {
     const comparison = {
@@ -224,37 +245,34 @@ export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
       before: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.before.asset), alt: widget.before.alt },
       after: { mime: 'image/*', dataUrl: presentationAssetUrl(widget.after.asset), alt: widget.after.alt },
     } as const;
-    return <Panel data-testid="chat-widget" data-widget="image_compare" tone="frame" className="mb-3 max-w-2xl">
-      <Heading title={widget.title} />
+    return <WidgetFrame kind="image_compare" title={widget.title}>
       <ImageComparisonView comparison={comparison} onLook={setLooking} />
       {looking && <PictureViewer image={looking} onClose={() => setLooking(null)} />}
-    </Panel>;
+    </WidgetFrame>;
   }
   if (widget.type === 'video') return (
-    <Panel data-testid="chat-widget" data-widget="video" tone="frame" className="mb-3 max-w-2xl">
-      <Heading title={widget.title} />
+    <WidgetFrame kind="video" title={widget.title}>
       <video className="w-full rounded-md bg-black" controls preload="metadata" src={mediaUrl(widget.src)} poster={widget.poster ? mediaUrl(widget.poster) : undefined}>
         Your browser cannot play this video.
       </video>
-    </Panel>
+    </WidgetFrame>
   );
   if (widget.type === 'metrics') return (
-    <div data-testid="chat-widget" data-widget="metrics" className="mb-3 max-w-2xl">
-      <Heading title={widget.title} />
+    <WidgetFrame kind="metrics" title={widget.title}>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{widget.items.map((item) => {
         const Icon = item.trend === 'up' ? ArrowUpRight : item.trend === 'down' ? ArrowDownRight : ArrowRight;
         return <Panel key={item.label} className="min-w-0"><div className="text-xs text-muted-foreground">{item.label}</div><div className="mt-1 flex items-center gap-1 text-xl font-semibold text-foreground">{item.value}{item.trend && <Icon className="size-4" />}</div>{item.detail && <div className="mt-1 text-xs text-muted-foreground">{item.detail}</div>}</Panel>;
       })}</div>
-    </div>
+    </WidgetFrame>
   );
-  if (widget.type === 'chart') return <Panel data-testid="chat-widget" data-widget="chart" tone="frame" className="mb-3 max-w-2xl"><Heading title={widget.title} /><Chart widget={widget} /></Panel>;
+  if (widget.type === 'chart') return <WidgetFrame kind="chart" title={widget.title}><Chart widget={widget} /></WidgetFrame>;
   if (widget.type === 'progress') return (
-    <Panel data-testid="chat-widget" data-widget="progress" className="mb-3 max-w-2xl"><Heading title={widget.title} /><div className="space-y-3">{widget.items.map((item) => { const max = item.max ?? 100; const pct = Math.max(0, Math.min(100, item.value / max * 100)); return <div key={item.label}><div className="mb-1 flex justify-between gap-4 text-xs"><span>{item.label}</span><span className="text-muted-foreground">{item.detail ?? `${item.value}/${max}`}</span></div><Progress value={pct} aria-label={item.label} aria-valuenow={Math.round(pct)} /></div>; })}</div></Panel>
+    <WidgetFrame kind="progress" title={widget.title}><div className="space-y-3">{widget.items.map((item) => { const max = item.max ?? 100; const pct = Math.max(0, Math.min(100, item.value / max * 100)); return <div key={item.label}><div className="mb-1 flex justify-between gap-4 text-xs"><span>{item.label}</span><span className="text-muted-foreground">{item.detail ?? `${item.value}/${max}`}</span></div><Progress value={pct} aria-label={item.label} aria-valuenow={Math.round(pct)} /></div>; })}</div></WidgetFrame>
   );
   if (widget.type === 'timeline') return (
-    <Panel data-testid="chat-widget" data-widget="timeline" className="mb-3 max-w-2xl"><Heading title={widget.title} /><ol className="space-y-3">{widget.items.map((item) => { const Icon = item.status === 'done' ? Check : item.status === 'current' ? Clock : Circle; return <li key={item.label} className="flex gap-2"><Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><div><div className="text-sm font-medium">{item.label}</div>{item.detail && <div className="text-xs text-muted-foreground">{item.detail}</div>}</div></li>; })}</ol></Panel>
+    <WidgetFrame kind="timeline" title={widget.title}><ol className="space-y-3">{widget.items.map((item) => { const Icon = item.status === 'done' ? Check : item.status === 'current' ? Clock : Circle; return <li key={item.label} className="flex gap-2"><Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><div><div className="text-sm font-medium">{item.label}</div>{item.detail && <div className="text-xs text-muted-foreground">{item.detail}</div>}</div></li>; })}</ol></WidgetFrame>
   );
   return (
-    <Panel data-testid="chat-widget" data-widget="table" tone="frame" inset="none" className="mb-3 max-w-2xl overflow-x-auto"><Heading title={widget.title} /><table className="w-full text-left text-xs"><thead className="border-b bg-muted/40"><tr>{widget.columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}</tr></thead><tbody>{widget.rows.map((row, index) => <tr key={index} className="border-b last:border-0">{row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-2 text-muted-foreground">{cell}</td>)}</tr>)}</tbody></table></Panel>
+    <WidgetFrame kind="table" title={widget.title} className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="border-b bg-muted/40"><tr>{widget.columns.map((column) => <th key={column} className="px-3 py-2 font-medium">{column}</th>)}</tr></thead><tbody>{widget.rows.map((row, index) => <tr key={index} className="border-b last:border-0">{row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-2 text-muted-foreground">{cell}</td>)}</tr>)}</tbody></table></WidgetFrame>
   );
 }

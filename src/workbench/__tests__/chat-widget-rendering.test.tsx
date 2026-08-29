@@ -20,7 +20,9 @@ const widgets: ChatWidget[] = [
 describe('chat widget rendering', () => {
   it.each(widgets)('draws $type as a bounded conversation widget', (widget) => {
     render(<ChatWidgetView widget={widget} />);
-    expect(screen.getByTestId('chat-widget')).toHaveAttribute('data-widget', widget.type);
+    const frame = screen.getByTestId('chat-widget');
+    expect(frame).toHaveAttribute('data-widget', widget.type);
+    expect(frame).toHaveClass('my-4', 'px-3', 'py-3', 'border-border/60');
     if (widget.title) expect(screen.getByText(widget.title)).toBeVisible();
   });
 
