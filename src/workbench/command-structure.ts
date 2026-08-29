@@ -73,6 +73,7 @@ function links(command: string): Link[] {
   const out: Link[] = [];
   let start = 0;
   let quote = '';
+  let substitutionDepth = 0;
   let piped = false;
   for (let at = 0; at < command.length; at += 1) {
     const char = command[at]!;
@@ -83,6 +84,13 @@ function links(command: string): Link[] {
     }
     if (char === "'" || char === '"') { quote = char; continue; }
     if (char === '\\') { at += 1; continue; }
+    if (char === '$' && command[at + 1] === '(' && command[at + 2] !== '(') {
+      substitutionDepth += 1;
+      at += 1;
+      continue;
+    }
+    if (char === ')' && substitutionDepth) { substitutionDepth -= 1; continue; }
+    if (substitutionDepth) continue;
     if (char === ';' || char === '\n' || char === '|' || (char === '&' && command[at + 1] === '&')) {
       out.push({ text: command.slice(start, at), piped });
       const doubled = (char === '|' || char === '&') && command[at + 1] === char;
@@ -95,13 +103,68 @@ function links(command: string): Link[] {
   return out;
 }
 
+function commandSubstitutions(text: string): string[] {
+  const found: string[] = [];
+  let quote = '';
+  for (let at = 0; at < text.length - 1; at += 1) {
+    const char = text[at]!;
+    if (quote === "'") { if (char === "'") quote = ''; continue; }
+    if (quote === '"') {
+      if (char === '\\') { at += 1; continue; }
+      if (char === '"') { quote = ''; continue; }
+      if (char !== '$' || text[at + 1] !== '(' || text[at + 2] === '(') continue;
+    }
+    if (char === "'" || char === '"') { quote = char; continue; }
+    if (char === '\\') { at += 1; continue; }
+    if (char !== '$' || text[at + 1] !== '(' || text[at + 2] === '(') continue;
+    const start = at + 2;
+    let depth = 1;
+    let innerQuote = '';
+    for (let end = start; end < text.length; end += 1) {
+      const held = text[end]!;
+      if (innerQuote) {
+        if (held === '\\' && innerQuote === '"') end += 1;
+        else if (held === innerQuote) innerQuote = '';
+        continue;
+      }
+      if (held === "'" || held === '"') { innerQuote = held; continue; }
+      if (held === '\\') { end += 1; continue; }
+      if (held === '$' && text[end + 1] === '(' && text[end + 2] !== '(') { depth += 1; end += 1; continue; }
+      if (held !== ')' || --depth) continue;
+      found.push(text.slice(start, end));
+      at = end;
+      break;
+    }
+  }
+  return found;
+}
+
 /** Top-level executable links with heredoc bodies removed. Intended for
  * in-process auditing only: callers must never persist the returned text. */
 export function topLevelShellCommands(command: string): Link[] {
   const masked = maskHereDocuments(command);
   const syntax = shellSyntax(masked.visible);
-  if (/^\s*(?:for|while|until|if|function)\s|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/.test(syntax)) return [];
-  return links(masked.visible).filter((link) => link.text.trim());
+  if (/^\s*(?:(?:for|while|until|if|function)\s|[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{)|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/.test(syntax)) return [];
+  const out: Link[] = [];
+  const visit = (link: Link, depth: number): void => {
+    const substitutions = commandSubstitutions(link.text);
+    if (substitutions.length && depth < 8) {
+      for (const substitution of substitutions) {
+        for (const inner of links(substitution).filter((item) => item.text.trim())) visit(inner, depth + 1);
+      }
+      return;
+    }
+    // A stored row may be truncated inside `$(`. There is no complete stage
+    // to audit, so do not pretend the outer head alone explains its label.
+    if (!substitutions.length && link.text.includes('$(')) return;
+    // The production label for the outer link composes these inner actions.
+    // Auditing it again against only the outer head compares unlike units.
+    out.push(link);
+  };
+  for (const link of links(masked.visible).filter((item) => item.text.trim())) {
+    visit(link, 0);
+  }
+  return out;
 }
 
 function words(text: string): string[] {
@@ -160,6 +223,8 @@ const KNOWN = new Set([
   'tsx', 'vite', 'vitest', 'wc', 'wget', 'yarn', 'zsh',
 ]);
 const WRAPPERS = new Set(['sudo', 'time', 'setsid', 'nohup', 'command', 'exec', 'xargs', 'rtk', 'timeout', 'nice', 'ionice']);
+const SOURCE_INTERPRETERS = new Set(['python', 'python3', 'node', 'deno', 'bun', 'perl', 'php', 'ruby']);
+const TEST_RUNNERS = new Set(['pytest', 'vitest', 'jest', 'mocha', 'ava', 'tap', 'unittest', 'nose', 'rspec', 'phpunit', 'playwright', 'cypress']);
 
 const base = (word: string) => word.slice(word.lastIndexOf('/') + 1).toLowerCase();
 
@@ -177,20 +242,20 @@ function stageOf(link: Link): string | null {
   if (/^\s*(?:if|for|while|until|function)\b/.test(link.text)) return 'shell-script';
   const safe = KNOWN.has(head) ? head : /\.(?:py|js|mjs|ts|tsx|sh)$/.test(head) ? 'script' : 'other';
   if (link.text.includes('<<')) {
-    if (safe === 'python' || safe === 'python3') return 'python-heredoc';
-    if (safe === 'node' || safe === 'deno' || safe === 'bun') return 'javascript-heredoc';
+    if (SOURCE_INTERPRETERS.has(safe)) return 'interpreter-heredoc';
     if (safe === 'sh' || safe === 'bash' || safe === 'zsh') return 'shell-heredoc';
     if (safe === 'cat' || safe === 'tee') return 'data-heredoc';
     return `${safe}-heredoc`;
   }
-  if ((safe === 'python' || safe === 'python3') && argv.some((word, at) => word === '-m' && argv[at + 1] === 'pytest')) return 'pytest';
+  const moduleAt = argv.indexOf('-m');
+  if (SOURCE_INTERPRETERS.has(safe) && moduleAt >= 0 && TEST_RUNNERS.has(base(argv[moduleAt + 1] ?? ''))) return 'test-runner';
   return safe;
 }
 
 export function commandStructure(command: string): CommandStructure {
   const masked = maskHereDocuments(command);
   const syntax = shellSyntax(masked.visible);
-  const control = /^\s*(?:for|while|until|if|function)\s|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/.test(syntax);
+  const control = /^\s*(?:(?:for|while|until|if|function)\s|[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{)|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/.test(syntax);
   if (control) {
     const suffix = masked.heredocs ? '+heredoc' : '';
     return {

@@ -59,17 +59,33 @@ describe('provider command envelopes', () => {
 });
 
 describe('recognized process wrappers', () => {
+  it('peels quoted path-valued assignments before later wrappers', () => {
+    expect(one('NAME="/private/value" docker exec cache redis-cli GET private:key'))
+      .toMatchObject({ command: 'redis-cli GET private:key', boundaries: [
+        { kind: 'environment', via: 'assignment' },
+        { kind: 'container', via: 'docker exec', target: 'cache' },
+      ] });
+  });
+
   it.each([
     ['bash -lc \'npm test\'', 'npm test', ['shell']],
     ['env CI=1 bash -c \'npm test\'', 'npm test', ['environment', 'shell']],
     ['sudo -u app -- bash -lc \'npm test\'', 'npm test', ['user', 'shell']],
     ['timeout --signal TERM 30s sh -c \'cargo test\'', 'cargo test', ['limit', 'shell']],
     ['docker --context prod exec -u app web bash -lc \'pytest -q\'', 'pytest -q', ['container', 'shell']],
+    ['docker compose exec -u app web pytest -q', 'pytest -q', ['container']],
     ['podman exec api sh -c \'npm test\'', 'npm test', ['container', 'shell']],
     ['kubectl -n api exec pod/web -c web -- sh -c \'rm -rf /tmp/cache\'', 'rm -rf /tmp/cache', ['container', 'shell']],
     ['ssh -p 2222 buildbox -- env CI=1 npm test', 'npm test', ['remote', 'environment']],
     ['npx vitest run src/x.test.ts', 'vitest run src/x.test.ts', ['package']],
     ['pnpm exec eslint .', 'eslint .', ['package']],
+    ['npm exec -- vitest run src/x.test.ts', 'vitest run src/x.test.ts', ['package']],
+    ['uv run pytest -q', 'pytest -q', ['environment']],
+    ['poetry run ruff check .', 'ruff check .', ['environment']],
+    ['bundle exec rspec spec/models', 'rspec spec/models', ['environment']],
+    ['direnv exec . cargo test', 'cargo test', ['environment']],
+    ['mise exec -- npm test', 'npm test', ['environment']],
+    ['nix develop -c cargo test', 'cargo test', ['environment']],
     ['rtk proxy git status --short', 'git status --short', ['proxy']],
   ])('peels %s down to the command that actually runs', (wrapped, command, kinds) => {
     const normalized = one(wrapped);

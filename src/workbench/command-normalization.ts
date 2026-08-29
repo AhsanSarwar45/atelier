@@ -39,7 +39,7 @@ interface Word {
   end: number;
 }
 
-const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash']);
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'fish']);
 const MOST_DEPTH = 8;
 const MOST_CALLS = 64;
 
@@ -68,6 +68,11 @@ function shellWords(text: string): Word[] {
 
   for (let i = 0; i < text.length; i++) {
     const char = text.charAt(i);
+    if (!quote && char === '\\' && (text.charAt(i + 1) === '\n' || text.charAt(i + 1) === '\r')) {
+      if (text.charAt(i + 1) === '\r' && text.charAt(i + 2) === '\n') i++;
+      i++;
+      continue;
+    }
     if (!quote && (char === ';' || char === '|' || char === '&' || char === '\n')) {
       finish(i);
       break;
@@ -119,6 +124,7 @@ const DOCKER_GLOBAL_VALUE = new Set(['--config', '--context', '--host', '-H', '-
 const DOCKER_EXEC_VALUE = new Set(['--detach-keys', '--env', '-e', '--env-file', '--user', '-u', '--workdir', '-w']);
 const KUBECTL_GLOBAL_VALUE = new Set(['--context', '--namespace', '-n', '--cluster', '--user', '--kubeconfig', '--request-timeout']);
 const KUBECTL_EXEC_VALUE = new Set(['--container', '-c', '--filename', '-f', '--pod-running-timeout']);
+const COMPOSE_EXEC_VALUE = new Set(['--detach', '-d', '--env', '-e', '--index', '--privileged', '--user', '-u', '--workdir', '-w']);
 
 /** A shell's own `-c`, before its script/operand; never a later child's flag. */
 function shellCommandAt(words: readonly { value: string }[]): number {
@@ -137,14 +143,16 @@ function directInner(text: string, words: Word[]): { command: string; boundary: 
   // Peeling one process out of a compound outer shell would discard the work
   // after its `;`, `&&`, pipe, or background marker. Compound parsing owns it.
   if (words[words.length - 1]!.end < text.trimEnd().length) return null;
-  const head = basename(words[0]!.value);
-
-  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(head)) {
+  // Test assignments before basename: `NAME=/path/to/value` contains slashes,
+  // but the value is not an executable path.
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]!.value)) {
     let at = 0;
     while (words[at] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[at]!.value)) at++;
     const command = from(text, words, at);
     return command ? { command, boundary: { kind: 'environment', via: 'assignment' } } : null;
   }
+
+  const head = basename(words[0]!.value);
 
   if (SHELLS.has(head)) {
     const flag = shellCommandAt(words) - 1;
@@ -183,8 +191,11 @@ function directInner(text: string, words: Word[]): { command: string; boundary: 
     return command ? { command, boundary: { kind: 'user', via: head } } : null;
   }
 
-  if (head === 'command' || head === 'exec' || head === 'nohup' || head === 'setsid' || head === 'nice') {
-    const at = afterOptions(words, 1, head === 'nice' ? new Set(['-n', '--adjustment']) : new Set());
+  if (head === 'command' || head === 'exec' || head === 'nohup' || head === 'setsid' || head === 'nice' || head === 'stdbuf') {
+    const values = head === 'nice' ? new Set(['-n', '--adjustment'])
+      : head === 'stdbuf' ? new Set(['-i', '--input', '-o', '--output', '-e', '--error'])
+        : new Set<string>();
+    const at = afterOptions(words, 1, values);
     const command = from(text, words, at);
     return command ? { command, boundary: { kind: 'environment', via: head } } : null;
   }
@@ -209,14 +220,21 @@ function directInner(text: string, words: Word[]): { command: string; boundary: 
 
   if (head === 'docker' || head === 'podman') {
     let at = afterOptions(words, 1, DOCKER_GLOBAL_VALUE);
-    if (words[at]?.value !== 'exec') return null;
-    at = afterOptions(words, at + 1, DOCKER_EXEC_VALUE);
+    const operation = words[at]?.value;
+    if (operation === 'compose') {
+      at = afterOptions(words, at + 1, new Set(['--ansi', '--env-file', '-f', '--file', '--profile', '--project-directory', '-p', '--project-name']));
+      if (words[at]?.value !== 'exec') return null;
+      at = afterOptions(words, at + 1, COMPOSE_EXEC_VALUE);
+    } else {
+      if (operation !== 'exec') return null;
+      at = afterOptions(words, at + 1, DOCKER_EXEC_VALUE);
+    }
     const target = words[at]?.value;
     if (!target) return null;
     at++;
     if (words[at]?.value === '--') at++;
     const command = from(text, words, at);
-    return command ? { command, boundary: { kind: 'container', via: `${head} exec`, target } } : null;
+    return command ? { command, boundary: { kind: 'container', via: operation === 'compose' ? `${head} compose exec` : `${head} exec`, target } } : null;
   }
 
   if (head === 'kubectl') {
@@ -240,6 +258,31 @@ function directInner(text: string, words: Word[]): { command: string; boundary: 
   if ((head === 'pnpm' || head === 'yarn') && words[1]?.value === 'exec') {
     const command = from(text, words, 2);
     return command ? { command, boundary: { kind: 'package', via: `${head} exec` } } : null;
+  }
+  if (head === 'npm' && words[1]?.value === 'exec') {
+    const at = afterOptions(words, 2, new Set(['--package', '-p', '--call', '-c']));
+    const command = from(text, words, at);
+    return command ? { command, boundary: { kind: 'package', via: 'npm exec' } } : null;
+  }
+  if (['uv', 'poetry', 'pipenv', 'rye', 'hatch'].includes(head) && words[1]?.value === 'run') {
+    const command = from(text, words, 2);
+    return command ? { command, boundary: { kind: 'environment', via: `${head} run` } } : null;
+  }
+  if (head === 'bundle' && words[1]?.value === 'exec') {
+    const command = from(text, words, 2);
+    return command ? { command, boundary: { kind: 'environment', via: 'bundle exec' } } : null;
+  }
+  if ((head === 'direnv' || head === 'mise') && words[1]?.value === 'exec') {
+    let at = 2;
+    if (head === 'direnv' && words[at]) at++; // directory
+    if (words[at]?.value === '--') at++;
+    const command = from(text, words, at);
+    return command ? { command, boundary: { kind: 'environment', via: `${head} exec` } } : null;
+  }
+  if (head === 'nix' && words[1]?.value === 'develop') {
+    const marker = words.findIndex((word, at) => at > 1 && (word.value === '-c' || word.value === '--command'));
+    const command = marker < 0 ? null : from(text, words, marker + 1);
+    return command ? { command, boundary: { kind: 'environment', via: 'nix develop' } } : null;
   }
   if (head === 'rtk' && words[1]?.value === 'proxy') {
     const command = from(text, words, 2);

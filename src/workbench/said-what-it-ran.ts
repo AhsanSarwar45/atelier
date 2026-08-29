@@ -165,6 +165,7 @@ function commandLinks(command: string): CommandLink[] {
   const out: CommandLink[] = [];
   let start = 0;
   let quote = 0;
+  let substitutionDepth = 0;
   let piped = false;
   for (let i = 0; i < command.length; i++) {
     const c = command.charCodeAt(i);
@@ -181,6 +182,16 @@ function commandLinks(command: string): CommandLink[] {
       i++;
       continue;
     }
+    if (c === 36 && command.charCodeAt(i + 1) === 40) {
+      substitutionDepth++;
+      i++;
+      continue;
+    }
+    if (c === 41 && substitutionDepth) {
+      substitutionDepth--;
+      continue;
+    }
+    if (substitutionDepth) continue;
     if (c === 59 || c === 10 || c === 124 || (c === 38 && command.charCodeAt(i + 1) === 38)) {
       out.push({ text: command.slice(start, i), piped });
       const doubled = (c === 124 || c === 38) && command.charCodeAt(i + 1) === c;
@@ -191,6 +202,45 @@ function commandLinks(command: string): CommandLink[] {
   }
   out.push({ text: command.slice(start), piped });
   return out;
+}
+
+/** Static shell command substitutions, outermost first. The body is command
+ * syntax that really ran; the surrounding assignment/echo is only how its
+ * output was consumed. */
+function commandSubstitutions(text: string): string[] {
+  const found: string[] = [];
+  let quote = '';
+  for (let at = 0; at < text.length - 1; at += 1) {
+    const char = text[at]!;
+    if (quote === "'") { if (char === "'") quote = ''; continue; }
+    if (quote === '"') {
+      if (char === '\\') { at += 1; continue; }
+      if (char === '"') { quote = ''; continue; }
+      if (char !== '$' || text[at + 1] !== '(' || text[at + 2] === '(') continue;
+    }
+    if (char === "'" || char === '"') { quote = char; continue; }
+    if (char === '\\') { at += 1; continue; }
+    if (char !== '$' || text[at + 1] !== '(' || text[at + 2] === '(') continue;
+    const start = at + 2;
+    let depth = 1;
+    let innerQuote = '';
+    for (let end = start; end < text.length; end += 1) {
+      const held = text[end]!;
+      if (innerQuote) {
+        if (held === '\\' && innerQuote === '"') end += 1;
+        else if (held === innerQuote) innerQuote = '';
+        continue;
+      }
+      if (held === "'" || held === '"') { innerQuote = held; continue; }
+      if (held === '\\') { end += 1; continue; }
+      if (held === '$' && text[end + 1] === '(' && text[end + 2] !== '(') { depth++; end++; continue; }
+      if (held !== ')' || --depth) continue;
+      found.push(text.slice(start, end));
+      at = end;
+      break;
+    }
+  }
+  return found;
 }
 
 function links(command: string): string[] {
@@ -238,7 +288,6 @@ const TRIMMERS = [
   'tr',
   'jq',
   'column',
-  'tee',
   'less',
   'more',
   'nl',
@@ -251,7 +300,7 @@ const TRIMMERS = [
 ];
 
 /** Words that never did anything a reader cares about. */
-const PLUMBING = ['cd', 'echo', 'printf', 'export', 'set', 'test', 'true', 'false', 'env', 'source', '.', ':'];
+const PLUMBING = ['cd', 'echo', 'printf', 'export', 'set', 'test', '[', 'true', 'false', 'source', '.', ':'];
 
 /** Every shell word in a link, with quotes removed after they have done their
  * grouping work. Quotes may begin in the middle of a word (`--notes='a b'`),
@@ -362,6 +411,16 @@ function has(argv: string[], ...flags: string[]): boolean {
     }
   }
   return false;
+}
+
+function outputTarget(argv: string[]): string {
+  for (let at = 1; at < argv.length; at += 1) {
+    const word = argv[at]!;
+    if (/^(?:\d*)?>>?$/.test(word)) return argv[at + 1] ?? '';
+    const attached = /^(?:\d*)?>>?(.+)$/.exec(word);
+    if (attached?.[1]) return attached[1];
+  }
+  return '';
 }
 
 /** A path as a reader knows it: the last two segments, and no trailing slash. */
@@ -487,6 +546,15 @@ function graveStage(head: string, argv: string[]): Stage | null {
   }
   if (head === 'gio' && argv[1] === 'trash') {
     return { text: `Deleted ${brief(place(object(argv, 2))) || 'a file'}`, kind: 'grave', grave: true };
+  }
+  if (head === 'curl' && curlRequest(argv).method === 'DELETE') {
+    return { text: curlSaid(argv), kind: 'grave', grave: true };
+  }
+  if (head === 'git-branch' && has(argv, '-d', '-D', '--delete')) {
+    return { text: 'Deleted a branch', kind: 'grave', grave: true };
+  }
+  if (head === 'redis-cli' && REDIS_DELETE.has(redisCommand(argv))) {
+    return { text: 'Deleted data from Redis', kind: 'grave', grave: true };
   }
   // `find … -delete` deletes every match and holds none of the four words the
   // backstop scans for, so nothing else in this file can see it. Read before
@@ -755,20 +823,46 @@ const CARGO_KIND: Record<string, RanKind> = {
 /** Which kind a Go subcommand belongs to. */
 const GO_KIND: Record<string, RanKind> = { test: 'test', run: 'run', vet: 'lint', fmt: 'lint' };
 
-/** The tools `npx`, `npm run` and a bare invocation all reach for. */
-const TOOLS: Record<string, { kind: RanKind; said: string }> = {
+interface ToolRule {
+  kind: RanKind;
+  said: string;
+  check?: { said: string; flags: string[] };
+  write?: { said: string; flags: string[] };
+  fix?: { said: string; flags: string[] };
+  list?: { said: string; flags: string[] };
+}
+
+/**
+ * Conventional tools have the same meaning however they were launched. This
+ * table deliberately does not mention Python/Node/Ruby runners: those runners
+ * delegate to a module or executable first, and only this underlying tool is
+ * categorized.
+ */
+const TOOLS: Record<string, ToolRule> = {
   vitest: { kind: 'test', said: 'Ran the tests' },
   jest: { kind: 'test', said: 'Ran the tests' },
-  playwright: { kind: 'test', said: 'Ran the browser tests' },
+  mocha: { kind: 'test', said: 'Ran the tests' },
+  ava: { kind: 'test', said: 'Ran the tests' },
+  tap: { kind: 'test', said: 'Ran the tests' },
+  unittest: { kind: 'test', said: 'Ran the tests' },
+  nose: { kind: 'test', said: 'Ran the tests' },
+  rspec: { kind: 'test', said: 'Ran the tests' },
+  phpunit: { kind: 'test', said: 'Ran the tests' },
+  playwright: { kind: 'test', said: 'Ran the browser tests', list: { said: 'Listed the browser tests', flags: ['--list'] } },
   cypress: { kind: 'test', said: 'Ran the browser tests' },
-  pytest: { kind: 'test', said: 'Ran the Python tests' },
+  pytest: { kind: 'test', said: 'Ran the tests' },
   tsc: { kind: 'build', said: 'Typechecked' },
-  eslint: { kind: 'lint', said: 'Linted' },
-  prettier: { kind: 'lint', said: 'Formatted' },
-  ruff: { kind: 'lint', said: 'Linted the Python side' },
-  mypy: { kind: 'build', said: 'Typechecked the Python side' },
-  black: { kind: 'lint', said: 'Formatted the Python side' },
-  rustfmt: { kind: 'lint', said: 'Formatted Rust files' },
+  mypy: { kind: 'build', said: 'Typechecked' },
+  pyright: { kind: 'build', said: 'Typechecked' },
+  eslint: { kind: 'lint', said: 'Linted', fix: { said: 'Linted and fixed files', flags: ['--fix'] } },
+  prettier: {
+    kind: 'lint', said: 'Formatted output',
+    check: { said: 'Checked formatting', flags: ['--check'] },
+    write: { said: 'Formatted files', flags: ['--write', '-w'] },
+  },
+  ruff: { kind: 'lint', said: 'Linted', check: { said: 'Checked formatting', flags: ['--check'] } },
+  black: { kind: 'edit', said: 'Formatted files', check: { said: 'Checked formatting', flags: ['--check'] } },
+  rustfmt: { kind: 'edit', said: 'Formatted files', check: { said: 'Checked formatting', flags: ['--check'] } },
   next: { kind: 'build', said: 'Built the app' },
   webpack: { kind: 'build', said: 'Built the app' },
   vite: { kind: 'build', said: 'Built the app' },
@@ -787,16 +881,56 @@ const SCRIPTS: Record<string, { kind: RanKind; said: string }> = {
   workbench: { kind: 'run', said: 'Started the workbench' },
 };
 
+/** Script-name conventions are provider and language independent. */
+function scriptAction(name: string): { kind: RanKind; said: string } | null {
+  const key = name.toLowerCase();
+  const exact = SCRIPTS[key];
+  if (exact) return exact;
+  const words = key.split(/[:/._\s-]+/).filter(Boolean);
+  if (words.some((word) => ['benchmark', 'bench', 'perf', 'performance'].includes(word))) return { kind: 'test', said: 'Benchmarked' };
+  if (words.some((word) => ['test', 'tests', 'spec', 'e2e'].includes(word))) return { kind: 'test', said: 'Ran the tests' };
+  if (words.some((word) => ['lint', 'linting'].includes(word))) {
+    return words.includes('fix') ? { kind: 'edit', said: 'Linted and fixed files' } : { kind: 'lint', said: 'Linted' };
+  }
+  if (words.some((word) => ['typecheck', 'typechecks', 'types'].includes(word))) return { kind: 'build', said: 'Typechecked' };
+  if (words.some((word) => ['build', 'compile'].includes(word))) return { kind: 'build', said: 'Built the app' };
+  if (words.some((word) => ['dev', 'serve', 'server', 'start', 'preview'].includes(word))) return { kind: 'run', said: 'Started the app' };
+  if (words.some((word) => ['format', 'fmt'].includes(word))) return { kind: 'edit', said: 'Formatted files' };
+  return null;
+}
+
+function hasAny(argv: string[], flags: readonly string[]): boolean {
+  return flags.some((flag) => has(argv, flag));
+}
+
+function toolAction(argv: string[]): { kind: RanKind; said: string } | null {
+  const rule = TOOLS[named(argv[0] ?? '')];
+  if (!rule) return null;
+  if (rule.list && hasAny(argv, rule.list.flags)) return { kind: 'read', said: rule.list.said };
+  if (rule.check && hasAny(argv, rule.check.flags)) return { kind: 'lint', said: rule.check.said };
+  if (rule.write && hasAny(argv, rule.write.flags)) return { kind: 'edit', said: rule.write.said };
+  if (rule.fix && hasAny(argv, rule.fix.flags)) return { kind: 'edit', said: rule.fix.said };
+  // `ruff format` writes unless it was explicitly asked only to check.
+  if (named(argv[0] ?? '') === 'ruff' && argv.includes('format')) return { kind: 'edit', said: 'Formatted files' };
+  return { kind: rule.kind, said: rule.said };
+}
+
 function nodePackage(argv: string[]): { kind: RanKind; said: string } {
   const head = named(argv[0] ?? '');
   const sub = argv[1] ?? '';
   if (sub === 'install' || sub === 'i' || sub === 'ci' || sub === 'add') {
     return { kind: 'build', said: 'Installed the dependencies' };
   }
+  if (sub === 'uninstall' || sub === 'remove' || sub === 'rm') return { kind: 'grave', said: 'Removed dependencies' };
+  if (sub === 'list' || sub === 'ls' || sub === 'outdated' || sub === 'view' || sub === 'why') {
+    return { kind: 'read', said: 'Read the dependencies' };
+  }
+  if (sub === 'audit') return { kind: 'read', said: 'Audited the dependencies' };
+  if (sub === 'pack') return { kind: 'build', said: 'Packed the package' };
   if (sub === 'test') return { kind: 'test', said: 'Ran the tests' };
   if (sub === 'run' || sub === 'run-script') {
     const name = object(argv, 2);
-    const known = SCRIPTS[name];
+    const known = scriptAction(name);
     if (known) return known;
     return { kind: 'run', said: name ? `Ran the ${name} step` : 'Ran a step' };
   }
@@ -805,16 +939,9 @@ function nodePackage(argv: string[]): { kind: RanKind; said: string } {
   if (front === 'next' || front === 'vite' || front === 'nuxt' || front === 'astro') {
     return startsOrBuilds(object(argv, 2));
   }
-  const tool = TOOLS[front];
-  if (tool) {
-    if (front === 'prettier' && has(argv, '--check')) return { kind: 'lint', said: 'Checked formatting' };
-    if (front === 'prettier' && has(argv, '--write', '-w')) return { kind: 'edit', said: 'Formatted files' };
-    if (front === 'eslint' && has(argv, '--fix')) return { kind: 'edit', said: 'Linted and fixed files' };
-    if (front === 'ruff' && argv.includes('format') && has(argv, '--check')) return { kind: 'lint', said: 'Checked Python formatting' };
-    if (front === 'black' && has(argv, '--check')) return { kind: 'lint', said: 'Checked Python formatting' };
-    return tool;
-  }
-  const script = SCRIPTS[sub];
+  const tool = toolAction([front, ...argv.slice(2)]);
+  if (tool) return tool;
+  const script = scriptAction(sub);
   if (script) return script;
   if (!sub) return { kind: 'run', said: `Ran ${head}` };
   return { kind: 'run', said: `Ran ${brief(named(sub))}` };
@@ -835,6 +962,65 @@ function address(url: string): string {
   const host = m[1]!;
   const path = m[2] ?? '';
   return brief(path && path !== '/' ? `${host}${path}` : host);
+}
+
+function dependencySaid(argv: string[]): string {
+  const sub = argv.find((word, at) => at > 0 && !word.startsWith('-')) ?? '';
+  if (['list', 'show', 'freeze', 'outdated', 'check', 'tree'].includes(sub)) return 'Read the dependencies';
+  if (['uninstall', 'remove'].includes(sub)) return 'Removed dependencies';
+  if (['update', 'sync', 'lock'].includes(sub)) return 'Updated the dependencies';
+  return 'Installed the dependencies';
+}
+
+interface CurlRequest { method: string; target: string }
+
+function curlRequest(argv: string[]): CurlRequest {
+  let method = '';
+  let target = '';
+  const takesValue = new Set([
+    '-A', '--user-agent', '-b', '--cookie', '-c', '--cookie-jar', '-d', '--data', '--data-raw',
+    '--data-binary', '--data-urlencode', '-e', '--referer', '-F', '--form', '-H', '--header',
+    '-o', '--output', '-u', '--user', '-x', '--proxy', '-X', '--request', '-w', '--write-out',
+  ]);
+  for (let at = 1; at < argv.length; at += 1) {
+    const word = argv[at]!;
+    if ((word === '-X' || word === '--request') && argv[at + 1]) method = argv[at + 1]!.toUpperCase();
+    if (['-d', '--data', '--data-raw', '--data-binary', '--data-urlencode', '-F', '--form'].includes(word) && !method) method = 'POST';
+    if (['-T', '--upload-file'].includes(word) && !method) method = 'PUT';
+    if (word === '-I' || word === '--head') method = 'HEAD';
+    if (takesValue.has(word) || word === '-T' || word === '--upload-file') { at += 1; continue; }
+    if (word.startsWith('-')) continue;
+    if (/^[a-z]+:\/\//i.test(word)) target = word;
+  }
+  return { method: method || 'GET', target };
+}
+
+function curlSaid(argv: string[]): string {
+  const request = curlRequest(argv);
+  const target = address(request.target) || 'a service';
+  if (request.method === 'GET') return `Fetched ${target}`;
+  if (request.method === 'HEAD') return `Read the headers from ${target}`;
+  if (request.method === 'DELETE') return `Deleted data through ${target}`;
+  return `Sent a ${request.method} request to ${target}`;
+}
+
+const REDIS_READ = new Set([
+  'bitcount', 'dbsize', 'exists', 'get', 'getrange', 'hget', 'hgetall', 'hkeys', 'hlen', 'hmget',
+  'info', 'keys', 'lindex', 'llen', 'lrange', 'mget', 'ping', 'pttl', 'scan', 'scard', 'sdiff',
+  'sinter', 'sismember', 'smembers', 'strlen', 'sunion', 'time', 'ttl', 'type', 'xinfo', 'xlen',
+  'xrange', 'xrevrange', 'zcard', 'zcount', 'zrange', 'zrank', 'zrevrange', 'zscore',
+]);
+const REDIS_DELETE = new Set(['del', 'flushall', 'flushdb', 'unlink']);
+const REDIS_OPTION_VALUES = new Set(['-a', '--askpass', '-h', '--host', '-n', '--dbnum', '-p', '--port', '-s', '--socket', '-u', '--user']);
+
+function redisCommand(argv: string[]): string {
+  for (let at = 1; at < argv.length; at += 1) {
+    const word = argv[at]!;
+    if (REDIS_OPTION_VALUES.has(word)) { at += 1; continue; }
+    if (word.startsWith('-')) continue;
+    return word.toLowerCase();
+  }
+  return '';
 }
 
 /**
@@ -944,7 +1130,13 @@ const HEADS: Record<string, Rule> = {
       return sub ? `Ran go ${sub}` : null;
     },
   },
-  pytest: { kind: 'test', say: () => 'Ran the Python tests' },
+  pytest: { kind: 'test', say: () => 'Ran the tests' },
+
+  // Data clients classify the operation, not the process used to reach them.
+  'redis-cli': {
+    kind: 'data',
+    say: (a) => REDIS_READ.has(redisCommand(a)) ? 'Read data from Redis' : 'Changed data in Redis',
+  },
 
   // Reading.
   cat: {
@@ -963,12 +1155,15 @@ const HEADS: Record<string, Rule> = {
       return target ? `Read the end of ${brief(place(target))}` : 'Read the end of the output';
     },
   },
+  tee: { kind: 'edit', say: (a) => `Wrote ${brief(place(object(a, 1))) || 'the output'}` },
   ls: { kind: 'read', say: (a) => `Listed ${worthNaming(object(a, 1)) ? brief(place(object(a, 1))) : 'this folder'}` },
   wc: { kind: 'read', say: (a) => (object(a, 1) ? `Counted ${brief(place(object(a, 1)))}` : 'Counted the lines') },
   stat: { kind: 'read', say: (a) => `Checked ${brief(place(object(a, 1))) || 'a file'}` },
   du: { kind: 'read', say: () => 'Measured what is on disk' },
   df: { kind: 'system', say: () => 'Checked the free space' },
   strings: { kind: 'read', say: (a) => `Read the text out of ${brief(place(object(a, 1))) || 'a file'}` },
+  pdftotext: { kind: 'read', say: (a) => objects(a, 1).at(-1) && objects(a, 1).at(-1) !== '-' ? 'Extracted text from a PDF' : 'Read text from a PDF' },
+  pdfinfo: { kind: 'read', say: () => 'Read PDF information' },
   readlink: { kind: 'read', say: (a) => `Resolved ${brief(place(object(a, 1))) || 'a path'}` },
   realpath: { kind: 'read', say: (a) => `Resolved ${brief(place(object(a, 1))) || 'a path'}` },
   diff: {
@@ -1023,6 +1218,8 @@ const HEADS: Record<string, Rule> = {
   },
   which: { kind: 'system', say: (a) => `Looked for ${brief(object(a, 1)) || 'a program'}` },
   whereis: { kind: 'system', say: (a) => `Looked for ${brief(object(a, 1)) || 'a program'}` },
+  fd: { kind: 'search', say: (a) => `Looked for ${brief(object(a, 1)) || 'files'}` },
+  egrep: { kind: 'search', say: (a) => searchSaid(a, 1) },
 
   // Changing things on disk.
   sed: {
@@ -1059,6 +1256,9 @@ const HEADS: Record<string, Rule> = {
   zip: { kind: 'edit', say: () => 'Packed an archive' },
   unzip: { kind: 'edit', say: () => 'Unpacked an archive' },
   gzip: { kind: 'edit', say: () => 'Compressed a file' },
+  '7z': { kind: 'edit', say: (a) => ['x', 'e'].includes(a[1] ?? '') ? 'Unpacked an archive' : 'Packed an archive' },
+  'rsvg-convert': { kind: 'edit', say: () => 'Converted an SVG' },
+  pdftoppm: { kind: 'edit', say: () => 'Rendered pages from a PDF' },
   patch: { kind: 'edit', say: () => 'Applied a patch' },
   apply_patch: { kind: 'edit', say: () => 'Changed files' },
   install: { kind: 'edit', say: () => 'Installed files' },
@@ -1071,19 +1271,23 @@ const HEADS: Record<string, Rule> = {
   bun: { kind: 'run', say: (a) => runSaid(a, 'Bun') },
   python: { kind: 'run', say: (a) => runSaid(a, 'Python') },
   python3: { kind: 'run', say: (a) => runSaid(a, 'Python') },
+  perl: { kind: 'run', say: (a) => runSaid(a, 'Perl') },
   bash: { kind: 'run', say: (a) => runSaid(a, 'shell') },
   sh: { kind: 'run', say: (a) => runSaid(a, 'shell') },
   zsh: { kind: 'run', say: (a) => runSaid(a, 'shell') },
+  fish: { kind: 'run', say: (a) => runSaid(a, 'shell') },
+  py_compile: { kind: 'build', say: () => 'Checked Python syntax' },
   npm: { kind: 'run', say: () => null },
   pnpm: { kind: 'run', say: () => null },
   yarn: { kind: 'run', say: () => null },
   npx: { kind: 'run', say: () => null },
   next: { kind: 'build', say: (a) => startsOrBuilds(object(a, 1)).said },
   vite: { kind: 'build', say: (a) => startsOrBuilds(object(a, 1)).said },
-  pip: { kind: 'build', say: () => 'Installed the Python dependencies' },
-  pip3: { kind: 'build', say: () => 'Installed the Python dependencies' },
-  uv: { kind: 'build', say: () => 'Installed the Python dependencies' },
-  poetry: { kind: 'build', say: () => 'Installed the Python dependencies' },
+  pip: { kind: 'build', say: dependencySaid },
+  pip3: { kind: 'build', say: dependencySaid },
+  uv: { kind: 'build', say: dependencySaid },
+  poetry: { kind: 'build', say: dependencySaid },
+  brew: { kind: 'build', say: dependencySaid },
   atelier: { kind: 'run', say: () => 'Ran Atelier' },
   'beads-server': { kind: 'run', say: () => 'Ran the board server' },
   'beads-web': { kind: 'run', say: () => 'Ran the workbench' },
@@ -1095,7 +1299,7 @@ const HEADS: Record<string, Rule> = {
   linear: { kind: 'net', say: () => 'Worked in Linear' },
 
   // The network.
-  curl: { kind: 'net', say: (a) => `Fetched ${address(object(a, 1)) || 'a page'}` },
+  curl: { kind: 'net', say: curlSaid },
   wget: { kind: 'net', say: (a) => `Downloaded ${address(object(a, 1)) || 'a page'}` },
   ssh: { kind: 'net', say: (a) => `Ran a command on ${brief(object(a, 1)) || 'another machine'}` },
   scp: { kind: 'net', say: () => 'Copied files to another machine' },
@@ -1163,10 +1367,16 @@ const HEADS: Record<string, Rule> = {
     },
   },
   date: { kind: 'system', say: () => 'Checked the time' },
+  env: { kind: 'system', say: () => 'Read the environment' },
   nslookup: { kind: 'net', say: (a) => `Looked up ${brief(object(a, 1)) || 'DNS'}` },
   dig: { kind: 'net', say: (a) => `Looked up ${brief(object(a, 1)) || 'DNS'}` },
   fuser: { kind: 'system', say: () => 'Checked which process uses a file' },
   printenv: { kind: 'system', say: () => 'Read the environment' },
+  jobs: { kind: 'system', say: () => 'Listed the shell jobs' },
+  disown: { kind: 'system', say: () => 'Detached a shell job' },
+  swapon: { kind: 'system', say: () => 'Checked swap devices' },
+  'fc-list': { kind: 'system', say: () => 'Listed the fonts' },
+  'fc-match': { kind: 'system', say: () => 'Matched a font' },
   type: { kind: 'system', say: (a) => `Looked up ${brief(object(a, 1)) || 'a command'}` },
   magick: { kind: 'edit', say: () => 'Worked on a picture' },
   convert: { kind: 'edit', say: () => 'Worked on a picture' },
@@ -1182,6 +1392,18 @@ const HEADS: Record<string, Rule> = {
   mysql: { kind: 'data', say: () => 'Queried the database' },
   mongosh: { kind: 'data', say: () => 'Queried MongoDB' },
   jq: { kind: 'data', say: () => 'Picked fields out of some JSON' },
+  sort: { kind: 'data', say: () => 'Sorted lines' },
+  uniq: { kind: 'data', say: () => 'Removed duplicate lines' },
+  cut: { kind: 'data', say: () => 'Picked columns out of text' },
+  paste: { kind: 'data', say: () => 'Joined columns of text' },
+  comm: { kind: 'data', say: () => 'Compared sorted text' },
+  column: { kind: 'data', say: () => 'Aligned columns of text' },
+  bc: { kind: 'data', say: () => 'Calculated a value' },
+  xxd: { kind: 'data', say: () => 'Converted binary data' },
+  od: { kind: 'data', say: () => 'Read binary data' },
+  shuf: { kind: 'data', say: () => 'Shuffled lines' },
+  html2text: { kind: 'data', say: () => 'Read text from HTML' },
+  dirname: { kind: 'data', say: () => 'Picked a folder out of a path' },
   base64: { kind: 'data', say: () => 'Converted base64 data' },
   basename: { kind: 'data', say: () => 'Picked a file name out of a path' },
   tr: { kind: 'data', say: () => 'Translated text' },
@@ -1191,6 +1413,21 @@ const HEADS: Record<string, Rule> = {
   sleep: { kind: 'wait', say: (a) => (object(a, 1) ? `Waited ${object(a, 1)}s` : 'Waited') },
   // Only `kill -0` reaches here; a real kill was taken as grave well before.
   kill: { kind: 'wait', say: () => 'Checked whether a process is still running' },
+  wait: { kind: 'wait', say: () => 'Waited for a running process' },
+  getent: { kind: 'system', say: () => 'Read a system database' },
+  free: { kind: 'system', say: () => 'Checked memory use' },
+  journalctl: { kind: 'system', say: () => 'Read the system log' },
+  pstree: { kind: 'system', say: () => 'Listed the process tree' },
+  uptime: { kind: 'system', say: () => 'Checked how long the system has run' },
+  nproc: { kind: 'system', say: () => 'Counted the processors' },
+  findmnt: { kind: 'system', say: () => 'Listed the mounted filesystems' },
+  whoami: { kind: 'system', say: () => 'Checked the current user' },
+  vmstat: { kind: 'system', say: () => 'Checked system activity' },
+  dmesg: { kind: 'system', say: () => 'Read the kernel log' },
+  ip: { kind: 'system', say: () => 'Checked the network configuration' },
+  nc: { kind: 'net', say: () => 'Used a network connection' },
+  'xdg-mime': { kind: 'system', say: () => 'Checked file associations' },
+  man: { kind: 'read', say: (a) => `Read the ${brief(object(a, 1)) || 'command'} manual` },
 };
 
 /** Past tense for the four things anyone does to a service. Spelled out,
@@ -1241,7 +1478,7 @@ function runSaid(argv: string[], tongue: string): string | null {
 /** A loop or a branch is a script, not a chain. Here-documents are different:
  * each body belongs only to its launcher, while commands around it remain
  * independent top-level stages. */
-const IS_SCRIPT = /^\s*(?:for|while|until|if|function)\s|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/;
+const IS_SCRIPT = /^\s*(?:(?:for|while|until|if|function)\s|[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{)|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/;
 
 /** Shell operators and control words, with quoted argument data blanked out.
  * A multiline commit message is still one argument, not a nineteen-line shell
@@ -1289,6 +1526,7 @@ const TONGUE: Record<string, string> = {
   psql: 'SQL',
   mysql: 'SQL',
 };
+const SOURCE_INTERPRETERS = new Set(['python', 'python2', 'python3', 'pypy', 'pypy3', 'node', 'deno', 'bun', 'bash', 'sh', 'zsh', 'dash', 'fish']);
 
 function scriptStage(command: string): Stage | null {
   const written = WRITES_A_FILE.exec(command);
@@ -1346,7 +1584,7 @@ function headOf(argv: string[]): string[] {
 
 const SHORT_HELP = new Set([
   'bd', 'cargo', 'codex', 'docker', 'gh', 'git', 'go', 'job', 'kubectl', 'land',
-  'make', 'npm', 'npx', 'pnpm', 'report', 'review', 'yarn',
+  'make', 'npm', 'npx', 'pnpm', 'report', 'review', 'yarn', 'check',
 ]);
 
 const COMMAND_NAME: Record<string, string> = {
@@ -1406,20 +1644,59 @@ function intentOnlyStage(head: string, argv: string[]): Stage | null {
   if (head === 'cargo' && args[0] === 'fmt' && args.includes('--check')) {
     return { text: 'Checked Rust formatting', kind: 'lint', grave: false, intentOnly: true };
   }
-  if (head === 'prettier' && args.includes('--check')) {
+  if (FORMAT_CHECKERS.has(head) && args.includes('--check')) {
     return { text: 'Checked formatting', kind: 'lint', grave: false, intentOnly: true };
-  }
-  if (head === 'black' && args.includes('--check')) {
-    return { text: 'Checked Python formatting', kind: 'lint', grave: false, intentOnly: true };
-  }
-  if (head === 'ruff' && args[0] === 'format' && args.includes('--check')) {
-    return { text: 'Checked Python formatting', kind: 'lint', grave: false, intentOnly: true };
   }
   return null;
 }
 
+const FORMAT_CHECKERS = new Set(['prettier', 'black', 'ruff', 'rustfmt']);
+
 /** A link that was deliberately passed over rather than one nothing could name. */
 const DROPPED = 'dropped';
+
+interface InvocationDelegate {
+  heads: ReadonlySet<string>;
+  marker: string;
+  kind: 'module' | 'command';
+}
+
+/**
+ * Launchers which place the real executable or module in their argv. The
+ * mechanism is generic; adding another runtime is data, not another branch in
+ * the classifier. Provider/process wrappers are peeled earlier by
+ * command-normalization, while these language/environment runners are peeled
+ * here so behavior flags belong to the command underneath them.
+ */
+const INVOCATION_DELEGATES: InvocationDelegate[] = [
+  { heads: new Set(['python', 'python2', 'python3', 'pypy', 'pypy3']), marker: '-m', kind: 'module' },
+  { heads: new Set(['uv', 'poetry', 'pipenv', 'rye', 'hatch']), marker: 'run', kind: 'command' },
+  { heads: new Set(['bundle']), marker: 'exec', kind: 'command' },
+  { heads: new Set(['npm', 'pnpm', 'yarn']), marker: 'exec', kind: 'command' },
+  { heads: new Set(['npx', 'bunx']), marker: '', kind: 'command' },
+];
+
+function delegatedArgv(argv: string[]): string[] {
+  let current = argv;
+  for (let depth = 0; depth < 4 && current.length; depth += 1) {
+    const head = named(current[0] ?? '');
+    const delegate = INVOCATION_DELEGATES.find((candidate) => candidate.heads.has(head));
+    if (!delegate) break;
+    let at = delegate.marker ? current.indexOf(delegate.marker, 1) : 0;
+    if (at < 0) break;
+    at += 1;
+    while (current[at]?.startsWith('-')) {
+      // Package selectors consume one following value; ordinary flags do not.
+      if (['-p', '--package', '--cache'].includes(current[at]!)) at += 2;
+      else at += 1;
+    }
+    const target = current[at];
+    if (!target) break;
+    const executable = delegate.kind === 'module' ? target.split('.').at(-1)! : named(target);
+    current = [executable, ...current.slice(at + 1)];
+  }
+  return current;
+}
 
 /**
  * What one link did — a stage, DROPPED when the link was never a thing done,
@@ -1431,6 +1708,7 @@ const DROPPED = 'dropped';
  */
 function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED | null {
   if (!argv.length) return DROPPED;
+  argv = delegatedArgv(argv);
   const head = named(argv[0]!);
 
   const intent = intentOnlyStage(head, argv);
@@ -1439,30 +1717,29 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   const heavy = graveStage(head, argv);
   if (heavy) return heavy;
 
+  const redirected = outputTarget(argv);
+  if (redirected && ['cat', 'echo', 'printf', 'tee'].includes(head)) {
+    return { text: `Wrote ${brief(place(redirected))}`, kind: 'edit', grave: false };
+  }
+
   if (PLUMBING.indexOf(head) >= 0) return DROPPED;
   if (alreadyReal && TRIMMERS.indexOf(head) >= 0) return DROPPED;
 
   if (head === 'npm' || head === 'pnpm' || head === 'yarn' || head === 'npx') {
     const said = nodePackage(argv);
-    return { text: said.said, kind: said.kind, grave: false };
+    return { text: said.said, kind: said.kind, grave: said.kind === 'grave' };
   }
 
-  if ((head === 'python' || head === 'python3') && argv.some((word, at) => word === '-m' && argv[at + 1] === 'pytest')) {
-    return { text: 'Ran the Python tests', kind: 'test', grave: false };
+  if ((head === 'node' || head === 'bun' || head === 'deno') && has(argv, '--test', 'test')) {
+    return { text: 'Ran the tests', kind: 'test', grave: false };
   }
 
-  const directTool = TOOLS[head];
+  const directTool = toolAction(argv);
   if (directTool) {
     if (head === 'next' || head === 'vite') {
       const action = startsOrBuilds(object(argv, 1));
       return { text: action.said, kind: action.kind, grave: false };
     }
-    if (head === 'playwright' && has(argv, '--list')) return { text: 'Listed the browser tests', kind: 'read', grave: false };
-    if (head === 'rustfmt' && has(argv, '--check')) return { text: 'Checked Rust formatting', kind: 'lint', grave: false };
-    if (head === 'prettier' && has(argv, '--write', '-w')) return { text: 'Formatted files', kind: 'edit', grave: false };
-    if (head === 'eslint' && has(argv, '--fix')) return { text: 'Linted and fixed files', kind: 'edit', grave: false };
-    if (head === 'ruff' && argv.includes('format') && has(argv, '--check')) return { text: 'Checked Python formatting', kind: 'lint', grave: false };
-    if (head === 'black' && has(argv, '--check')) return { text: 'Checked Python formatting', kind: 'lint', grave: false };
     return { text: directTool.said, kind: directTool.kind, grave: false };
   }
 
@@ -1473,7 +1750,8 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
     if (/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/.test(head) || argv[0]!.includes('machinery/board/')) {
       const stem = head.replace(/\.(?:py|mjs|cjs|js|ts|tsx|sh)$/, '').replaceAll('-', ' ');
       const text = has(argv, '--help', '-h') ? `Read the ${brief(stem)} options` : `Ran ${brief(stem)}`;
-      return { text, kind: has(argv, '--help', '-h') ? 'read' : 'script', grave: false };
+      const conventional = scriptAction(stem);
+      return { text: conventional?.said ?? text, kind: has(argv, '--help', '-h') ? 'read' : conventional?.kind ?? 'script', grave: false };
     }
     return null;
   }
@@ -1491,7 +1769,10 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   if (head === 'next' || head === 'vite') kind = startsOrBuilds(object(argv, 1)).kind;
   if (head === 'node' && (text.startsWith('Checked ') || text.startsWith('Measured '))) kind = 'test';
   if (head === 'codex' && text.startsWith('Generated ')) kind = 'build';
-  return { text, kind, grave: false };
+  if (head === 'pdftotext' && text.startsWith('Extracted ')) kind = 'edit';
+  if (['pip', 'pip3', 'uv', 'poetry', 'brew'].includes(head) && text.startsWith('Read ')) kind = 'read';
+  if (['pip', 'pip3', 'uv', 'poetry', 'brew'].includes(head) && text.startsWith('Removed ')) kind = 'grave';
+  return { text, kind, grave: kind === 'grave' };
 }
 
 /** A JavaScript string literal passed as an object property. */
@@ -1533,7 +1814,10 @@ function agentEnvelopeDid(text: string, shellDepth: number): Ran | null {
   if (code && /\btools\.(?:write_stdin|wait)\s*\(/.test(text)) {
     return { said: 'Waited for a running command', kind: 'wait', grave: false };
   }
-  if ((code && /\btools\.apply_patch\s*\(/.test(text)) || text.indexOf('*** Begin Patch') >= 0) {
+  // A patch envelope must itself be the payload. Merely printing or searching
+  // JSON which contains a patch marker is ordinary command data.
+  const directPatch = /^\s*\*\*\* Begin Patch\b/.test(text);
+  if ((code && /\btools\.apply_patch\s*\(/.test(text)) || directPatch) {
     const paths: string[] = [];
     const pattern = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm;
     const patch = text.replaceAll('\\n', '\n');
@@ -1625,6 +1909,14 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
         break;
       }
       const link = chain[i]!;
+      const substitutions = commandSubstitutions(link.text);
+      if (substitutions.length) {
+        for (const substitution of substitutions) {
+          const inner = whatACommandDid(substitution, shellDepth + 1);
+          if (inner) stages.push({ text: inner.said, kind: inner.kind, grave: inner.grave });
+          else missed++;
+        }
+      }
       const documentCount = hereDocumentOpeners(link.text).length;
       if (documentCount) {
         const documents = masked.documents.slice(documentAt, documentAt + documentCount);
@@ -1634,13 +1926,29 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
         // A heredoc is only a script when its consumer executes the body.
         // Git, kubectl and other programs commonly read ordinary stdin this
         // way; their own action remains the action and the body remains data.
-        const executesBody = Boolean(TONGUE[head]) || head === 'cat' || head === 'tee';
+        const executesBody = SOURCE_INTERPRETERS.has(head);
         const stage = executesBody
           ? hereDocumentStage(link.text, documents)
           : linkStage(argv, link.piped && stages.length > 0);
         if (stage === null) missed++;
         else if (stage !== DROPPED) stages.push(stage);
         continue;
+      }
+      // A wrapper can sit inside one link of a larger chain. Normalizing only
+      // the whole command misses `prepare && docker exec app pytest` and calls
+      // the second stage Docker. Peel this link with the same declared wrapper
+      // grammars used at the provider boundary, then classify its real command.
+      if (shellDepth < 8) {
+        const normalizedLink = normalizeCommands(link.text);
+        const semantic = normalizedLink.commands.map((item) => item.command);
+        const changed = semantic.length === 1 && semantic[0]!.trim() !== link.text.trim();
+        if (changed) {
+          const inner = whatACommandDid(semantic[0]!, shellDepth + 1);
+          if (inner) {
+            stages.push({ text: inner.said, kind: inner.kind, grave: inner.grave });
+            continue;
+          }
+        }
       }
       const argv = headOf(stripped(words(link.text)));
       // A folder change is WHERE a command ran and never WHAT it did. A quarter
@@ -1652,7 +1960,8 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
       // Search/read tools after a pipe merely shape the previous command's
       // output. After `&&`, `||`, `;`, or a newline they are real work and
       // must be named in the transcript.
-      const stage = linkStage(argv, link.piped && stages.length > 0);
+      const assignmentOnly = substitutions.length > 0 && /^\s*[A-Za-z_][A-Za-z0-9_]*=\$\(/.test(link.text);
+      const stage = assignmentOnly ? DROPPED : linkStage(argv, link.piped && stages.length > 0);
       if (stage === null) missed++;
       else if (stage !== DROPPED) stages.push(stage);
     }

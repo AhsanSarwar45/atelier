@@ -69,5 +69,11 @@ describe('command label evidence', () => {
     expect(commandLabelProfile('time curl https://private.example/path', {
       said: 'Fetched private.example/path', kind: 'net', grave: false,
     })).toBe('curl|-|-|Fetched|net|ordinary');
+    expect(commandLabelProfile('NAME="/private/value" docker exec cache redis-cli -p 6390 GET private:key', {
+      said: 'Read data from Redis', kind: 'data', grave: false,
+    })).toBe('redis-cli|-|-|Read|data|ordinary');
+    expect(commandLabelProfile('{ printf value > private.txt', {
+      said: 'Wrote private.txt', kind: 'edit', grave: false,
+    })).toBe('printf|-|-|Wrote|edit|ordinary');
   });
 });

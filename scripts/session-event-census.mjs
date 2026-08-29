@@ -27,6 +27,7 @@ const VERIFY_LABELS = process.argv.includes('--verify-labels');
 const VERIFY_COMPOUNDS = process.argv.includes('--verify-compounds');
 const CLAUDE_ROOT = process.env.CLAUDE_SESSIONS ?? join(homedir(), '.claude', 'projects');
 const CODEX_ROOT = process.env.CODEX_SESSIONS ?? join(homedir(), '.codex', 'sessions');
+const CODE_ORCHESTRATION = /^\s*(?:\/\/\s*@exec\b|const\b|let\b|var\b|await\b)[\s\S]*\btools\./;
 
 function recordsUnder(root) {
   const found = [];
@@ -51,13 +52,14 @@ const report = {
   compoundCommands: { observed: 0, structured: 0, unstructured: 0, contradictions: 0 },
   commandLabels: { covered: 0, verifiedCorrect: 0, knownWrong: 0, unverified: 0, uncovered: 0 },
   stageLabels: { verifiedCorrect: 0, knownWrong: 0, unverified: 0, uncovered: 0 },
+  semanticFamilies: { verified: 0, contradictory: 0, unverified: 0, uncovered: 0, recurringUnverified: 0, recurringUncovered: 0 },
   serviceLabels: { observed: 0, contradictions: 0 },
   commandIntents: {},
   contradictions: {},
   compoundContradictions: {},
   stageContradictions: {},
   contradictionLabels: {},
-  profiles: { commands: {}, compounds: {}, compoundLabels: {}, services: {} },
+  profiles: { commands: {}, stages: {}, compounds: {}, compoundLabels: {}, services: {} },
   boundaries: {},
   unknown: {},
 };
@@ -73,7 +75,8 @@ function unknown(provider, family, name, file) {
 
 function commandCandidate(raw, source = 'direct') {
   report.commands.envelopes += 1;
-  const normalized = normalizeCommands(raw, source);
+  const decodedSource = source === 'direct' && typeof raw === 'string' && isCodeModeEnvelope(raw) ? 'code-mode' : source;
+  const normalized = normalizeCommands(raw, decodedSource);
   if (!normalized.commands.length) report.commands.opaque += 1;
   for (const command of normalized.commands) {
     report.commands.semantic += 1;
@@ -105,14 +108,22 @@ function commandCandidate(raw, source = 'direct') {
         count(report.compoundContradictions, `${structure.profile}|collapsed-heredoc`);
       }
     }
-    for (const link of topLevelShellCommands(command.command)) {
+    // Control-flow bodies are one shell-script action. Splitting their `do`,
+    // function bodies, variables, and braces as executable stages invents
+    // commands which were never launched and invalidates the oracle.
+    const controlScript = structure.profile?.startsWith('control-script');
+    const stageLinks = CODE_ORCHESTRATION.test(command.command) || controlScript ? [] : topLevelShellCommands(command.command);
+    for (const link of stageLinks) {
+      const shaping = link.piped && /^(?:head|tail|wc|sort|uniq|cut|tr|jq|column|less|more|nl|rev|tac|awk|sed|grep|rg|cat)\b/.test(link.text.trim());
+      if (shaping) continue;
       const stageRan = whatACommandDid(link.text);
       const stageVerdict = auditCommandLabel(link.text, stageRan);
+      const stageProfile = commandLabelProfile(link.text, stageRan) ?? 'unprofiled';
+      count(report.profiles.stages, `${stageVerdict.status}|${stageProfile}`);
       if (stageVerdict.status === 'verified') report.stageLabels.verifiedCorrect += 1;
       else if (stageVerdict.status === 'contradiction') {
         report.stageLabels.knownWrong += 1;
-        const profile = commandLabelProfile(link.text, stageRan) ?? 'unprofiled';
-        count(report.stageContradictions, `${stageVerdict.intent}:${stageVerdict.reason}|${profile}`);
+        count(report.stageContradictions, `${stageVerdict.intent}:${stageVerdict.reason}|${stageProfile}`);
       }
       else if (stageVerdict.status === 'unverified') report.stageLabels.unverified += 1;
       else report.stageLabels.uncovered += 1;
@@ -322,6 +333,22 @@ report.unknown = orderedUnknown;
 report.profiles.commands = Object.fromEntries(
   Object.entries(report.profiles.commands).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
 );
+report.profiles.stages = Object.fromEntries(
+  Object.entries(report.profiles.stages).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+);
+for (const [profile, occurrences] of Object.entries(report.profiles.stages)) {
+  const status = profile.slice(0, profile.indexOf('|'));
+  if (profile.endsWith('|unprofiled')) continue;
+  if (status === 'verified') report.semanticFamilies.verified += 1;
+  else if (status === 'contradiction') report.semanticFamilies.contradictory += 1;
+  else if (status === 'unverified') {
+    report.semanticFamilies.unverified += 1;
+    if (occurrences > 1) report.semanticFamilies.recurringUnverified += 1;
+  } else {
+    report.semanticFamilies.uncovered += 1;
+    if (occurrences > 1) report.semanticFamilies.recurringUncovered += 1;
+  }
+}
 report.profiles.compounds = Object.fromEntries(
   Object.entries(report.profiles.compounds).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
 );
@@ -339,6 +366,7 @@ if (JSON_OUT) {
   console.log(`${report.commands.semantic} semantic commands from ${report.commands.envelopes} envelopes; ${report.commands.named} named, ${report.commands.wrapped} unwrapped, ${report.commands.opaque} opaque`);
   console.log(`${report.commandLabels.covered} command labels covered; ${report.commandLabels.verifiedCorrect} verified intent-correct, ${report.commandLabels.knownWrong} known wrong, ${report.commandLabels.unverified} labelled but unverified, ${report.commandLabels.uncovered} uncovered`);
   console.log(`${report.stageLabels.verifiedCorrect} top-level stages verified intent-correct, ${report.stageLabels.knownWrong} known wrong, ${report.stageLabels.unverified} unverified, ${report.stageLabels.uncovered} uncovered`);
+  console.log(`${report.semanticFamilies.verified} semantic families verified, ${report.semanticFamilies.contradictory} contradictory, ${report.semanticFamilies.unverified} unverified (${report.semanticFamilies.recurringUnverified} recurring), ${report.semanticFamilies.uncovered} uncovered (${report.semanticFamilies.recurringUncovered} recurring)`);
   console.log(`${Object.keys(report.profiles.commands).length} privacy-safe command signature groups`);
   console.log(`${report.compoundCommands.structured}/${report.compoundCommands.observed} compound commands structurally profiled across ${Object.keys(report.profiles.compounds).length} privacy-safe shapes; ${report.compoundCommands.unstructured} unstructured, ${report.compoundCommands.contradictions} composition contradictions`);
   for (const [reason, count] of Object.entries(report.contradictions).sort((a, b) => b[1] - a[1])) {
@@ -352,5 +380,5 @@ if (JSON_OUT) {
   }
 }
 
-if (VERIFY_LABELS && (report.commandLabels.knownWrong > 0 || report.stageLabels.knownWrong > 0 || report.serviceLabels.contradictions > 0)) process.exitCode = 1;
+if (VERIFY_LABELS && (report.commandLabels.knownWrong > 0 || report.stageLabels.knownWrong > 0 || report.serviceLabels.contradictions > 0 || report.semanticFamilies.recurringUnverified > 0)) process.exitCode = 1;
 if (VERIFY_COMPOUNDS && (report.compoundCommands.unstructured > 0 || report.compoundCommands.contradictions > 0)) process.exitCode = 1;

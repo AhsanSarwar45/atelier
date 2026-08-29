@@ -175,7 +175,7 @@ const RULES: Array<[string, string]> = [
   ['go test ./...', 'Ran the Go tests'],
   ['go build', 'Built the Go side'],
   ['make all', 'Built all'],
-  ['pytest tests/', 'Ran the Python tests'],
+  ['pytest tests/', 'Ran the tests'],
   ['npm test', 'Ran the tests'],
   ['npm run build', 'Built the app'],
   ['npm run typecheck', 'Typechecked'],
@@ -193,7 +193,7 @@ const RULES: Array<[string, string]> = [
   ['npx eslint . --fix', 'Linted and fixed files'],
   ['npx prettier . --check', 'Checked formatting'],
   ['npx prettier . --write', 'Formatted files'],
-  ['pip install -r requirements.txt', 'Installed the Python dependencies'],
+  ['pip install -r requirements.txt', 'Installed the dependencies'],
   ['next dev', 'Started the app'],
   ['vite build', 'Built the app'],
 
@@ -251,7 +251,7 @@ const RULES: Array<[string, string]> = [
   ['curl -s https://api.github.com/repos/a/b', 'Fetched api.github.com/repos/a/b'],
   ['curl -sS http://localhost:3008/api/issues', 'Fetched localhost:3008/api/issues'],
   ['wget https://example.com/x.tar.gz', 'Downloaded example.com/x.tar.gz'],
-  ['ssh box "uptime"', 'Ran a command on box'],
+  ['ssh box "uptime"', 'Checked how long the system has run'],
   ['rsync -a a/ b/', 'Copied files across'],
 
   // The machine.
@@ -266,7 +266,7 @@ const RULES: Array<[string, string]> = [
   ['docker ps', 'Listed the containers'],
   ['docker logs api', 'Read a container log'],
   ['docker compose up -d', 'Started the containers'],
-  ['docker compose exec api npm test', 'Ran a command in a container'],
+  ['docker compose exec api npm test', 'Ran the tests'],
   ['docker compose ps', 'Listed the containers'],
   ['docker run --rm image', 'Started a container'],
   ['docker build -t x .', 'Built an image'],
@@ -369,9 +369,48 @@ describe('a chain of commands', () => {
     expect(said('rtk proxy git status')).toBe('Checked the working tree');
   });
 
+  it.each([
+    'pytest -q',
+    'python -m pytest -q',
+    'python3 -m pytest -q',
+    'uv run pytest -q',
+    'poetry run pytest -q',
+    'pipenv run pytest -q',
+    'npx vitest run',
+    'pnpm exec vitest run',
+    'npm exec -- vitest run',
+    'bundle exec rspec spec',
+    'docker compose exec app pytest -q',
+    'ssh buildbox -- python -m pytest -q',
+  ])('categorizes the underlying test rather than its runner: %s', (command) => {
+    expect(whatACommandDid(command)).toMatchObject({ said: expect.stringMatching(/^Ran .*tests$/), kind: 'test', grave: false });
+  });
+
+  it('applies behavior flags to the underlying tool after every runner is removed', () => {
+    expect(whatACommandDid('python -m pytest --help')).toMatchObject({ kind: 'read', grave: false });
+    expect(whatACommandDid('uv run ruff format --check .')).toMatchObject({ said: 'Checked formatting', kind: 'lint', grave: false });
+    expect(whatACommandDid('npx prettier --write src')).toMatchObject({ said: 'Formatted files', kind: 'edit', grave: false });
+    expect(whatACommandDid('npm run test:unit')).toMatchObject({ said: 'Ran the tests', kind: 'test', grave: false });
+  });
+
+  it('distinguishes HTTP reads, writes, and explicit deletes', () => {
+    expect(whatACommandDid('curl https://example.test/items')).toMatchObject({ said: 'Fetched example.test/items', kind: 'net', grave: false });
+    expect(whatACommandDid("curl -d 'x=1' https://example.test/items")).toMatchObject({ said: 'Sent a POST request to example.test/items', kind: 'net', grave: false });
+    expect(whatACommandDid('curl -X DELETE https://example.test/items/1')).toMatchObject({ said: 'Deleted data through example.test/items/1', kind: 'grave', grave: true });
+  });
+
   it('reads past the settings in front of a command', () => {
     expect(said('BEADS_WEB_PORT=3011 npx next dev')).toBe('Started the app');
     expect(said('NODE_ENV=test CI=1 npm test')).toBe('Ran the tests');
+  });
+
+  it('classifies commands whose output is captured by shell assignment', () => {
+    expect(whatACommandDid('ip=$(nslookup -type=A example.com 8.8.8.8 | awk "/Address/ {print \\$2}")'))
+      .toMatchObject({ said: 'Looked up example.com', kind: 'net', grave: false });
+    expect(whatACommandDid('result=$(python -m pytest -q)'))
+      .toMatchObject({ said: 'Ran the tests', kind: 'test', grave: false });
+    expect(whatACommandDid('echo "$(python -m pytest -q)"'))
+      .toMatchObject({ said: 'Ran the tests', kind: 'test', grave: false });
   });
 });
 
@@ -470,7 +509,7 @@ describe('a delete is never hidden', () => {
     // places the backstop read a command as starting. It read this as the
     // tests and a one-liner, and said nothing about the rm (bw-7ks.24.8).
     const ran = whatACommandDid('npm test && sh -c "rm -rf x"');
-    expect(ran?.said).toBe('Ran the tests, then ran shell: rm -rf x, then deleted files');
+    expect(ran?.said).toBe('Ran the tests, then deleted x');
     expect(ran?.grave).toBe(true);
   });
 
@@ -604,6 +643,21 @@ describe('a script reads as a script', () => {
       .toBe('Wrote workbench/ran-look.ts');
   });
 
+  it('categorizes output redirection and tee as writes rather than reads or plumbing', () => {
+    expect(whatACommandDid('cat source.txt > copy.txt')).toMatchObject({ said: 'Wrote copy.txt', kind: 'edit', grave: false });
+    expect(whatACommandDid('printf "%s" value > result.txt')).toMatchObject({ said: 'Wrote result.txt', kind: 'edit', grave: false });
+    expect(whatACommandDid("printf '%s\\n' e24479c7a90c24d5f5f4edbba89cfaf284064531 > .git/refs/heads/ours"))
+      .toMatchObject({ said: 'Wrote heads/ours', kind: 'edit', grave: false });
+    expect(whatACommandDid("printf '%s' '{\"tool_name\":\"apply_patch\",\"tool_input\":{\"command\":\"*** Begin Patch\"}}'"))
+      .toBeNull();
+    expect(whatACommandDid('rg TODO src | tee matches.txt')).toMatchObject({ said: 'Searched for TODO in src, then wrote matches.txt', kind: 'search', grave: false });
+  });
+
+  it('keeps data-language here-documents in their data-tool category', () => {
+    expect(whatACommandDid("sqlite3 beads.db <<'SQL'\nselect 1;\nSQL")).toMatchObject({ said: 'Queried beads.db', kind: 'data', grave: false });
+    expect(whatACommandDid("psql app <<'SQL'\nselect 1;\nSQL")).toMatchObject({ said: 'Queried the database', kind: 'data', grave: false });
+  });
+
   it('keeps an outer delete separate from an embedded Python script', () => {
     const command = [
       'rm -rf /tmp/sandbox && mkdir -p /tmp/sandbox && cp -r source /tmp/sandbox && cd /tmp/sandbox && python3 - <<\'EOF\'',
@@ -614,7 +668,7 @@ describe('a script reads as a script', () => {
     ].join('\n');
     const ran = whatACommandDid(command);
     expect(ran).toMatchObject({
-      said: 'Deleted tmp/sandbox, then made tmp/sandbox, then ran the Python tests, and 2 more',
+      said: 'Deleted tmp/sandbox, then made tmp/sandbox, then ran the tests, and 2 more',
       kind: 'grave', grave: true,
     });
     expect(ran?.said).not.toMatch(/Python script.*deletes files/i);
@@ -830,6 +884,32 @@ describe('what is still happening is said in the present', () => {
     expect(whileItRuns('Bash xyzzy --frobnicate')).toBe('Bash xyzzy --frobnicate');
     expect(whileItRuns('')).toBe('');
   });
+});
+
+describe('data clients reached through process wrappers', () => {
+  it('classifies Redis by the operation beneath docker exec', () => {
+    expect(whatACommandDid("docker exec cache redis-cli -p 6390 GET 'private:key'"))
+      .toEqual({ said: 'Read data from Redis', kind: 'data', grave: false });
+    expect(whatACommandDid("docker exec cache redis-cli SET 'private:key' value"))
+      .toEqual({ said: 'Changed data in Redis', kind: 'data', grave: false });
+    expect(whatACommandDid("docker exec cache redis-cli DEL 'private:key'"))
+      .toEqual({ said: 'Deleted data from Redis', kind: 'grave', grave: true });
+  });
+});
+
+describe('recurring utilities keep their semantic family', () => {
+  const cases = [
+    ['python -m py_compile app.py', 'build', 'Checked Python syntax'],
+    ['perl -e "print 1"', 'run', 'Ran Perl: print 1'],
+    ['egrep needle file.txt', 'search', 'Searched for needle in file.txt'],
+    ['html2text page.html', 'data', 'Read text from HTML'],
+    ['env', 'system', 'Read the environment'],
+    ['fc-match sans', 'system', 'Matched a font'],
+    ['pdftoppm in.pdf out', 'edit', 'Rendered pages from a PDF'],
+  ] as const;
+  for (const [command, kind, sentence] of cases) {
+    it(command, () => expect(whatACommandDid(command)).toMatchObject({ said: sentence, kind, grave: false }));
+  }
 });
 
 describe('the card that asks permission', () => {
