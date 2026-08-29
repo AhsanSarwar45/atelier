@@ -23,7 +23,9 @@ use directories::UserDirs;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::sync::{Mutex, OnceLock};
+use tokio::process::Command;
 
 /// Health check response structure.
 ///
@@ -235,6 +237,52 @@ pub fn find_npm() -> Option<PathBuf> {
     find_tool("npm", &["npm.cmd"])
 }
 
+/// What to tell a reader whose computer has no git on it.
+///
+/// git is not optional the way `bd` is: the whole Git panel and every worktree
+/// is git and nothing else, so there is no reduced version of the answer to
+/// give. Saying so outright beats letting the bare "No such file or directory"
+/// of a failed start surface as the reason a push did not go (bw-oxrg.4).
+pub const GIT_MISSING: &str =
+    "git not found. Install git (https://git-scm.com/downloads) or add git to PATH.";
+
+/// Where git is, if this computer has it.
+pub fn find_git() -> Option<PathBuf> {
+    find_tool("git", &[])
+}
+
+/// A git invocation, aimed at the file git actually is on this computer.
+///
+/// Every git this server starts is built here, so that no call site can be
+/// written — or left behind — spelling the bare name, which is the lookup a
+/// copy the machine starts at login does not have. On Windows that is the
+/// everyday case rather than the corner one: Git for Windows installs to
+/// `C:\Program Files\Git\cmd`, which is on nobody's minimal PATH.
+///
+/// With no git here at all this refuses instead of handing back a command that
+/// will fail later, and the refusal carries [`GIT_MISSING`] as its message, so
+/// the callers that already print what went wrong print that. The remembered
+/// answer is dropped on the way out, the way every caller reporting a missing
+/// tool drops it: a reader who installs git while Atelier is up is found on
+/// their next click rather than after a restart.
+pub fn git_command() -> std::io::Result<Command> {
+    match find_git() {
+        Some(git) => Ok(Command::new(git)),
+        None => {
+            forget_tools();
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                GIT_MISSING,
+            ))
+        }
+    }
+}
+
+/// Run git in `dir` and hand back everything it produced.
+pub async fn git_output(dir: impl AsRef<Path>, args: &[&str]) -> std::io::Result<Output> {
+    git_command()?.args(args).current_dir(dir).output().await
+}
+
 /// Validates that a path is safe to access.
 ///
 /// # Security
@@ -396,6 +444,26 @@ mod tests {
             search_in(&dirs, &["npm", "npm.cmd"]),
             Some(windows),
             "the only npm here is the one wearing the ending Windows gives it"
+        );
+    }
+
+    /// The git this server starts is the file git is, not the name it is
+    /// called by. A copy the machine starts at login has no shell's list of
+    /// places to look that name up on, and on Windows the file is somewhere
+    /// no minimal list holds (bw-oxrg.4).
+    #[test]
+    fn git_is_started_by_its_file_and_not_by_its_name() {
+        let git = find_git().expect("git on the computer running these tests");
+        assert!(
+            git.is_absolute(),
+            "{} is not somewhere in particular",
+            git.display()
+        );
+        assert!(git.is_file(), "{} is not a file to start", git.display());
+        assert_eq!(
+            git_command().expect("a git to run").as_std().get_program(),
+            git.as_os_str(),
+            "the command we hand out has to be aimed at that file"
         );
     }
 

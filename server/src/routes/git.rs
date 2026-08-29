@@ -15,7 +15,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::{Arc, Mutex, OnceLock};
-use tokio::process::Command;
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::validate_path_security;
@@ -87,16 +86,16 @@ pub async fn branch_status(GitQuery(params): GitQuery<GitStatusParams>) -> Answe
 
 /// Check if a branch exists in the repository.
 async fn check_branch_exists(repo: &Path, branch: &str) -> bool {
-    let output = Command::new("git")
-        .args([
+    let output = super::git_output(
+        repo,
+        &[
             "show-ref",
             "--verify",
             "--quiet",
             &format!("refs/heads/{branch}"),
-        ])
-        .current_dir(repo)
-        .output()
-        .await;
+        ],
+    )
+    .await;
 
     matches!(output, Ok(o) if o.status.success())
 }
@@ -107,16 +106,16 @@ async fn get_ahead_behind(repo: &Path, branch: &str) -> (i32, i32) {
     let base_branches = ["main", "master"];
 
     for base in base_branches {
-        let output = Command::new("git")
-            .args([
+        let output = super::git_output(
+            repo,
+            &[
                 "rev-list",
                 "--left-right",
                 "--count",
                 &format!("{}...{}", base, branch),
-            ])
-            .current_dir(repo)
-            .output()
-            .await;
+            ],
+        )
+        .await;
 
         if let Ok(output) = output {
             if output.status.success() {
@@ -136,11 +135,7 @@ async fn get_ahead_behind(repo: &Path, branch: &str) -> (i32, i32) {
 
 /// Check if the repository has uncommitted changes.
 async fn check_dirty(repo: &Path) -> bool {
-    let output = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(repo)
-        .output()
-        .await;
+    let output = super::git_output(repo, &["status", "--porcelain"]).await;
 
     match output {
         Ok(o) => !o.stdout.is_empty(),
@@ -289,12 +284,7 @@ fn checked_repo(path: &str) -> Result<PathBuf, Refused> {
 
 /// Run git in `repo` and hand back everything it produced.
 async fn run_git(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
-    Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .await
-        .map_err(could_not_run)
+    super::git_output(repo, args).await.map_err(could_not_run)
 }
 
 /// Run a git command that talks to the shared copy.
@@ -305,7 +295,8 @@ async fn run_git(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
 /// ssh-agent, `credential.helper`, the whole gitconfig — is inherited
 /// untouched, which is the entire reason this shells out to git.
 async fn run_git_remote(repo: &Path, args: &[&str]) -> Result<Output, Refused> {
-    Command::new("git")
+    super::git_command()
+        .map_err(could_not_run)?
         .args(args)
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -1034,7 +1025,8 @@ mod tests {
     use super::*;
 
     fn git(repo: &Path, args: &[&str]) -> String {
-        let output = std::process::Command::new("git")
+        let found = crate::routes::find_git().expect("git on the computer running these tests");
+        let output = std::process::Command::new(found)
             .args(args)
             .current_dir(repo)
             .output()

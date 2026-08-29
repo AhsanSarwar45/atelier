@@ -219,18 +219,18 @@ pub async fn create_worktree(Json(request): Json<CreateWorktreeRequest>) -> impl
     }
 
     // Create the worktree with a new branch
-    let output = Command::new("git")
-        .args([
+    let output = super::git_output(
+        &request.repo_path,
+        &[
             "worktree",
             "add",
             &worktree_path.to_string_lossy(),
             "-b",
             &branch_name,
             &request.base_branch,
-        ])
-        .current_dir(&request.repo_path)
-        .output()
-        .await;
+        ],
+    )
+    .await;
 
     match output {
         Ok(output) if output.status.success() => Json(CreateWorktreeResponse {
@@ -245,16 +245,16 @@ pub async fn create_worktree(Json(request): Json<CreateWorktreeRequest>) -> impl
             // Check if branch already exists (perhaps worktree was removed but branch exists)
             if stderr.contains("already exists") {
                 // Try to add worktree using existing branch
-                let retry_output = Command::new("git")
-                    .args([
+                let retry_output = super::git_output(
+                    &request.repo_path,
+                    &[
                         "worktree",
                         "add",
                         &worktree_path.to_string_lossy(),
                         &branch_name,
-                    ])
-                    .current_dir(&request.repo_path)
-                    .output()
-                    .await;
+                    ],
+                )
+                .await;
 
                 match retry_output {
                     Ok(output) if output.status.success() => Json(CreateWorktreeResponse {
@@ -357,11 +357,11 @@ pub async fn delete_worktree(Json(request): Json<DeleteWorktreeRequest>) -> impl
     }
 
     // Remove the worktree
-    let output = Command::new("git")
-        .args(["worktree", "remove", &worktree_path.to_string_lossy()])
-        .current_dir(&request.repo_path)
-        .output()
-        .await;
+    let output = super::git_output(
+        &request.repo_path,
+        &["worktree", "remove", &worktree_path.to_string_lossy()],
+    )
+    .await;
 
     let worktree_removed = match output {
         Ok(output) if output.status.success() => true,
@@ -369,16 +369,16 @@ pub async fn delete_worktree(Json(request): Json<DeleteWorktreeRequest>) -> impl
             let stderr = String::from_utf8_lossy(&output.stderr);
             // Try force remove if there are untracked changes
             if stderr.contains("contains modified or untracked files") {
-                let force_output = Command::new("git")
-                    .args([
+                let force_output = super::git_output(
+                    &request.repo_path,
+                    &[
                         "worktree",
                         "remove",
                         "--force",
                         &worktree_path.to_string_lossy(),
-                    ])
-                    .current_dir(&request.repo_path)
-                    .output()
-                    .await;
+                    ],
+                )
+                .await;
 
                 match force_output {
                     Ok(output) if output.status.success() => true,
@@ -415,11 +415,7 @@ pub async fn delete_worktree(Json(request): Json<DeleteWorktreeRequest>) -> impl
 
     if worktree_removed {
         // Delete local branch (ignore errors - branch may not exist or be already deleted)
-        let _ = Command::new("git")
-            .args(["branch", "-D", &branch_name])
-            .current_dir(&request.repo_path)
-            .output()
-            .await;
+        let _ = super::git_output(&request.repo_path, &["branch", "-D", &branch_name]).await;
 
         // Close the bead (ignore errors - bead may not exist or already be closed)
         if let Some(bd_path) = super::find_bd() {
@@ -489,11 +485,7 @@ pub async fn list_worktrees(Query(params): Query<ListWorktreesParams>) -> impl I
     }
 
     // List worktrees
-    let output = Command::new("git")
-        .args(["worktree", "list", "--porcelain"])
-        .current_dir(&params.repo_path)
-        .output()
-        .await;
+    let output = super::git_output(&params.repo_path, &["worktree", "list", "--porcelain"]).await;
 
     match output {
         Ok(output) if output.status.success() => {
@@ -609,16 +601,16 @@ async fn get_ahead_behind_worktree(repo_path: &str, branch: &str) -> (i32, i32) 
     let base_branches = ["main", "master"];
 
     for base in base_branches {
-        let output = Command::new("git")
-            .args([
+        let output = super::git_output(
+            repo_path,
+            &[
                 "rev-list",
                 "--left-right",
                 "--count",
                 &format!("{}...{}", base, branch),
-            ])
-            .current_dir(repo_path)
-            .output()
-            .await;
+            ],
+        )
+        .await;
 
         if let Ok(output) = output {
             if output.status.success() {
@@ -638,11 +630,7 @@ async fn get_ahead_behind_worktree(repo_path: &str, branch: &str) -> (i32, i32) 
 
 /// Check if a worktree has uncommitted changes.
 async fn check_worktree_dirty(worktree_path: &str) -> bool {
-    let output = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(worktree_path)
-        .output()
-        .await;
+    let output = super::git_output(worktree_path, &["status", "--porcelain"]).await;
 
     match output {
         Ok(o) => !o.stdout.is_empty(),
