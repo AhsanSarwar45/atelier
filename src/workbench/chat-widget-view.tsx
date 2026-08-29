@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { apiUrl } from '@/lib/api-base';
 import type { ChartWidget, ChatWidget, ExplainerWidget } from '@/workbench/chat-widgets';
 import { ImageComparisonView } from '@/workbench/image-comparison';
+import { VisualArtifactView } from '@/workbench/visual-artifact-view';
 import { openLocalPath } from '@/workbench/open-local-path';
 
 const COLORS = ['var(--color-primary)', 'var(--color-info)', 'var(--color-success)', 'var(--color-warning)'];
@@ -192,6 +193,12 @@ function Explainer({ widget }: { widget: ExplainerWidget }) {
 }
 
 export function ChatWidgetView({ widget }: { widget: ChatWidget }) {
+  if (widget.type === 'artifact') return (
+    <Panel data-testid="chat-widget" data-widget="artifact" data-artifact-kind={widget.kind} tone="frame" className="mb-3 max-w-4xl overflow-hidden">
+      <Heading title={widget.title} />
+      <VisualArtifactView asset={widget.asset} />
+    </Panel>
+  );
   if (widget.type === 'explainer') return <Explainer widget={widget} />;
   if (widget.type === 'image') return (
     <Panel data-testid="chat-widget" data-widget="image" tone="frame" className="mb-3 max-w-2xl">

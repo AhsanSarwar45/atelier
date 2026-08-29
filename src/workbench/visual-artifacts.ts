@@ -35,7 +35,7 @@ const object = (value: unknown): value is Record<string, unknown> => typeof valu
 const text = (value: unknown, max = 200): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const fieldsAre = (value: Record<string, unknown>, fields: string[]) => Object.keys(value).every((key) => fields.includes(key));
-const id = (value: unknown) => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value);
+const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value);
 
 function validComponents(components: unknown, ids: Set<string>, depth = 0): components is MockupComponent[] {
   if (!Array.isArray(components) || components.length > 60 || depth > 5) return false;
