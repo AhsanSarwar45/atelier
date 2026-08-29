@@ -554,6 +554,31 @@ describe('a delete is never hidden', () => {
     expect(ran).toMatchObject({ said: 'Pushed', kind: 'vcs', grave: false });
   });
 
+  it('recognizes continued commands and compact preview flags', () => {
+    expect(whatACommandDid('\\\ngit --version')).toMatchObject({
+      said: 'Checked the Git version', kind: 'read', grave: false,
+    });
+    expect(whatACommandDid('git clean -nd .agents .codex')).toMatchObject({
+      said: 'Checked what Git would do', kind: 'read', grave: false,
+    });
+    expect(whatACommandDid('truncate -s 100 report.pdf')).toMatchObject({
+      said: 'Truncated report.pdf', kind: 'grave', grave: true,
+    });
+  });
+
+  it('categorizes recurring direct tools without their package-runner wrapper', () => {
+    expect(whatACommandDid('vitest run')).toMatchObject({ said: 'Ran the tests', kind: 'test' });
+    expect(whatACommandDid('playwright --list')).toMatchObject({ said: 'Listed the browser tests', kind: 'read' });
+    expect(whatACommandDid('tsc --noEmit')).toMatchObject({ said: 'Typechecked', kind: 'build' });
+    expect(whatACommandDid('eslint src')).toMatchObject({ said: 'Linted', kind: 'lint' });
+    expect(whatACommandDid("awk '{print $1}'")).toMatchObject({ said: 'Picked fields out of input', kind: 'data' });
+    expect(whatACommandDid('mongosh db')).toMatchObject({ said: 'Queried MongoDB', kind: 'data' });
+    expect(whatACommandDid('pwd')).toMatchObject({ said: 'Checked the current folder', kind: 'system' });
+    expect(whatACommandDid('unlink old.txt')).toMatchObject({ said: 'Deleted old.txt', kind: 'grave', grave: true });
+    expect(whatACommandDid('gio trash old.txt')).toMatchObject({ said: 'Deleted old.txt', kind: 'grave', grave: true });
+    expect(whatACommandDid("sed 's/a/b/'")).toMatchObject({ said: 'Processed text', kind: 'read' });
+  });
+
   it('does not call a liveness check a kill', () => {
     // `kill -0` sends no signal at all; 41 of his commands use it to wait for
     // a process. Calling it a kill would cry wolf on every one of them.
@@ -577,6 +602,35 @@ describe('a script reads as a script', () => {
   it('reads a here-document into a file as writing that file', () => {
     expect(said("cat > src/workbench/ran-look.ts <<'EOF'\nconst a = 1;\nEOF"))
       .toBe('Wrote workbench/ran-look.ts');
+  });
+
+  it('keeps an outer delete separate from an embedded Python script', () => {
+    const command = [
+      'rm -rf /tmp/sandbox && mkdir -p /tmp/sandbox && cp -r source /tmp/sandbox && cd /tmp/sandbox && python3 - <<\'EOF\'',
+      'from pathlib import Path',
+      "Path('module.py').write_text('changed')",
+      'EOF',
+      '/tmp/venv/bin/python -m pytest tests/test_module.py -q 2>&1 | tail -8',
+    ].join('\n');
+    const ran = whatACommandDid(command);
+    expect(ran).toMatchObject({ kind: 'grave', grave: true });
+    expect(ran?.said).toContain('Deleted tmp/sandbox');
+    expect(ran?.said).not.toMatch(/Python script.*deletes files/i);
+  });
+
+  it('never executes command-looking data in Python or file here-documents', () => {
+    expect(whatACommandDid("python3 - <<'PY'\nprint('rm -rf cache')\nPY")).toMatchObject({
+      said: 'Ran a Python script (3 lines)', kind: 'script', grave: false,
+    });
+    expect(whatACommandDid("cat > note.txt <<'EOF'\nrm -rf cache\nEOF")).toMatchObject({
+      said: 'Wrote note.txt', kind: 'edit', grave: false,
+    });
+    expect(whatACommandDid("bash <<'SH'\nrm -rf cache\nSH")).toMatchObject({
+      kind: 'grave', grave: true,
+    });
+    expect(whatACommandDid("git commit -F - <<'MSG'\nrm is prose here\nMSG")).toMatchObject({
+      said: 'Committed', kind: 'vcs', grave: false,
+    });
   });
 });
 

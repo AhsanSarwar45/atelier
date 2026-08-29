@@ -38,7 +38,7 @@ const CLI_WITH_SHORT_HELP = new Set([
   'make', 'npm', 'npx', 'pnpm', 'report', 'review', 'yarn',
 ]);
 
-const SAYS_DESTRUCTION = /delet|kill|remov|shred|threw away|formatted|wiped|force-push/i;
+const SAYS_DESTRUCTION = /delet|kill|remov|shred|truncat|threw away|formatted|wiped|force-push/i;
 
 /** A small shell lexer used only by the independent audit. Compound commands
  * have more than one intent and are left unverified rather than guessed at. */
@@ -160,9 +160,9 @@ export function explicitCommandIntent(command: string): ExplicitIntent | null {
   }
   if (args.includes('--version') || args[0] === 'version' || (args.length === 1 && args[0] === '-V')) return 'version';
   if (args.includes('--dry-run') || args.includes('--dry') ||
-    (head === 'git' && args.includes('clean') && args.includes('-n'))) return 'dry-run';
+    (head === 'git' && args.includes('clean') && args.some((arg) => /^-[^-]*n/.test(arg)))) return 'dry-run';
 
-  if (['rm', 'rmdir', 'shred', 'mkfs', 'truncate', 'killall'].includes(head)) return 'destructive';
+  if (['rm', 'rmdir', 'shred', 'mkfs', 'truncate', 'unlink', 'killall'].includes(head)) return 'destructive';
   if ((head === 'kill' || head === 'pkill') && !args.includes('-0')) return 'destructive';
   if (head === 'find' && args.includes('-delete')) return 'destructive';
   if (head === 'git') {
@@ -175,7 +175,8 @@ export function explicitCommandIntent(command: string): ExplicitIntent | null {
     }
     const sub = argv[at]?.replace(/^\0/, '') ?? '';
     const gitArgs = argv.slice(at + 1).map((arg) => arg.replace(/^\0/, ''));
-    if (sub === 'rm' || (sub === 'clean' && !gitArgs.includes('-n') && !gitArgs.includes('--dry-run'))) return 'destructive';
+    const previewsClean = gitArgs.includes('--dry-run') || gitArgs.some((arg) => /^-[^-]*n/.test(arg));
+    if (sub === 'rm' || (sub === 'clean' && !previewsClean)) return 'destructive';
     if (sub === 'reset' && gitArgs.includes('--hard')) return 'destructive';
     if (sub === 'push' && gitArgs.some((arg) => arg === '-f' || arg === '--force' || arg === '--force-with-lease')) return 'destructive';
     if (sub === 'branch' && gitArgs.some((arg) => ['-d', '-D', '--delete'].includes(arg))) return 'destructive';
@@ -186,6 +187,7 @@ export function explicitCommandIntent(command: string): ExplicitIntent | null {
     return 'destructive';
   }
   if (head === 'kubectl' && args[0] === 'delete') return 'destructive';
+  if (head === 'gio' && args[0] === 'trash') return 'destructive';
   return null;
 }
 
@@ -227,7 +229,8 @@ function expectedLabel(command: string): ExpectedLabel | null {
     }
     const sub = argv[at] ?? '';
     const rest = argv.slice(at + 1);
-    const deletes = sub === 'rm' || (sub === 'clean' && !rest.includes('-n') && !rest.includes('--dry-run')) ||
+    const previewsClean = rest.includes('--dry-run') || rest.some((arg) => /^-[^-]*n/.test(arg));
+    const deletes = sub === 'rm' || (sub === 'clean' && !previewsClean) ||
       (sub === 'reset' && rest.includes('--hard')) ||
       (sub === 'push' && rest.some((arg) => ['-f', '--force', '--force-with-lease'].includes(arg))) ||
       (sub === 'branch' && rest.some((arg) => ['-d', '-D', '--delete'].includes(arg))) ||

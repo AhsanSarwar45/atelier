@@ -34,6 +34,9 @@ describe('command label evidence', () => {
     expect(explicitCommandIntent('npm install --dry-run')).toBe('dry-run');
     expect(explicitCommandIntent('git reset --hard HEAD')).toBe('destructive');
     expect(explicitCommandIntent('git clean -n')).toBe('dry-run');
+    expect(explicitCommandIntent('git clean -nd cache')).toBe('dry-run');
+    expect(explicitCommandIntent('unlink old.txt')).toBe('destructive');
+    expect(explicitCommandIntent('gio trash old.txt')).toBe('destructive');
     expect(explicitCommandIntent('kill -0 123')).toBeNull();
     expect(explicitCommandIntent('git -C /private/repo branch -d old')).toBe('destructive');
   });

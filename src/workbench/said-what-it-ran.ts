@@ -37,6 +37,7 @@
  */
 
 import { isCodeModeEnvelope, normalizeCommands } from './command-normalization.ts';
+import { hereDocumentOpeners, maskHereDocuments, type HereDocument } from './command-structure.ts';
 import { normalizeServiceAction } from './service-action.ts';
 
 /**
@@ -225,7 +226,7 @@ const TRIMMERS = [
 ];
 
 /** Words that never did anything a reader cares about. */
-const PLUMBING = ['cd', 'echo', 'printf', 'export', 'set', 'test', 'true', 'false', 'env', 'pwd', 'source', '.', ':'];
+const PLUMBING = ['cd', 'echo', 'printf', 'export', 'set', 'test', 'true', 'false', 'env', 'source', '.', ':'];
 
 /** Every shell word in a link, with quotes removed after they have done their
  * grouping work. Quotes may begin in the middle of a word (`--notes='a b'`),
@@ -257,8 +258,13 @@ function words(link: string): string[] {
       quote = char;
       began = true;
     } else if (char === '\\' && at + 1 < link.length) {
-      word += link[++at]!;
-      began = true;
+      const escaped = link[++at]!;
+      // A backslash-newline is shell line continuation, not a character in
+      // the executable name. `\\\ngit --version` is still `git --version`.
+      if (escaped !== '\n' && escaped !== '\r') {
+        word += escaped;
+        began = true;
+      }
     } else if (/\s/.test(char)) {
       push();
     } else {
@@ -377,6 +383,7 @@ const GRAVE: Record<string, { verb: string; alone: string }> = {
   dd: { verb: 'Overwrote', alone: 'Overwrote a disk' },
   mkfs: { verb: 'Formatted', alone: 'Formatted a disk' },
   truncate: { verb: 'Truncated', alone: 'Truncated a file' },
+  unlink: { verb: 'Deleted', alone: 'Deleted a file' },
   kill: { verb: 'Killed', alone: 'Killed a process' },
   pkill: { verb: 'Killed', alone: 'Killed a process' },
   killall: { verb: 'Killed', alone: 'Killed a process' },
@@ -424,7 +431,8 @@ function graveStage(head: string, argv: string[]): Stage | null {
   if ((head === 'kill' || head === 'pkill') && has(argv, '-0')) return null;
   const heavy = GRAVE[head];
   if (heavy) {
-    const target = object(argv, 1);
+    const candidates = objects(argv, 1);
+    const target = head === 'truncate' ? candidates[candidates.length - 1] ?? '' : candidates[0] ?? '';
     return {
       text: target ? `${heavy.verb} ${brief(place(target))}` : heavy.alone,
       kind: 'grave',
@@ -451,6 +459,9 @@ function graveStage(head: string, argv: string[]): Stage | null {
   }
   if (head === 'kubectl' && argv[1] === 'delete') {
     return { text: `Deleted ${objects(argv, 2).slice(0, 2).join(' ') || 'a resource'}`, kind: 'grave', grave: true };
+  }
+  if (head === 'gio' && argv[1] === 'trash') {
+    return { text: `Deleted ${brief(place(object(argv, 2))) || 'a file'}`, kind: 'grave', grave: true };
   }
   // `find … -delete` deletes every match and holds none of the four words the
   // backstop scans for, so nothing else in this file can see it. Read before
@@ -492,7 +503,21 @@ const A_DELETE_FLAG = /\s--?delete(?![\w-])/;
  * covers the flag.
  */
 function graveBackstop(command: string): { did: string; does: string } | null {
-  const executable = commandText(command);
+  const masked = maskHereDocuments(command);
+  const shellBodies: string[] = [];
+  let documentAt = 0;
+  for (const link of commandLinks(masked.visible)) {
+    const count = hereDocumentOpeners(link.text).length;
+    if (!count) continue;
+    const argv = headOf(stripped(words(link.text)));
+    const head = named(argv[0] ?? '');
+    const executableBody = head === 'sh' || head === 'bash' || head === 'zsh' || head === 'dash';
+    for (let offset = 0; offset < count; offset += 1) {
+      const document = masked.documents[documentAt++];
+      if (executableBody && document) shellBodies.push(document.body);
+    }
+  }
+  const executable = commandText(`${masked.visible}\n${shellBodies.join('\n')}`);
   if (executable.indexOf('delete') >= 0 && A_DELETE_FLAG.test(executable)) {
     return { did: 'Deleted files', does: 'deletes files' };
   }
@@ -718,6 +743,7 @@ const TOOLS: Record<string, { kind: RanKind; said: string }> = {
   ruff: { kind: 'lint', said: 'Linted the Python side' },
   mypy: { kind: 'build', said: 'Typechecked the Python side' },
   black: { kind: 'lint', said: 'Formatted the Python side' },
+  rustfmt: { kind: 'lint', said: 'Formatted Rust files' },
   next: { kind: 'build', said: 'Built the app' },
   webpack: { kind: 'build', said: 'Built the app' },
   vite: { kind: 'build', said: 'Built the app' },
@@ -936,6 +962,11 @@ const HEADS: Record<string, Rule> = {
   },
   join: { kind: 'read', say: () => 'Joined matching lines from files' },
   nl: { kind: 'read', say: (a) => `Read numbered ${brief(place(object(a, 1))) || 'text'}` },
+  pwd: { kind: 'system', say: () => 'Checked the current folder' },
+  file: { kind: 'read', say: (a) => `Identified ${brief(place(object(a, 1))) || 'a file'}` },
+  identify: { kind: 'read', say: (a) => `Inspected ${brief(place(object(a, 1))) || 'an image'}` },
+  md5sum: { kind: 'read', say: () => 'Checksummed files' },
+  sha256sum: { kind: 'read', say: () => 'Checksummed files' },
 
   // Searching.
   grep: { kind: 'search', say: (a) => searchSaid(a, 1) },
@@ -976,10 +1007,10 @@ const HEADS: Record<string, Rule> = {
       if (has(a, '-i')) return `Rewrote ${brief(place(target)) || 'a file'}`;
       // `sed -n '120,180p' file` is how a range of a file gets read.
       if (has(a, '-n') && target) return `Read part of ${brief(place(target))}`;
-      return target ? `Picked lines out of ${brief(place(target))}` : null;
+      return target ? `Picked lines out of ${brief(place(target))}` : 'Processed text';
     },
   },
-  awk: { kind: 'data', say: (a) => (objects(a, 1).length > 1 ? 'Picked fields out of a file' : null) },
+  awk: { kind: 'data', say: (a) => (objects(a, 1).length > 1 ? 'Picked fields out of a file' : 'Picked fields out of input') },
   mkdir: { kind: 'edit', say: (a) => `Made ${brief(place(object(a, 1))) || 'a folder'}` },
   touch: { kind: 'edit', say: (a) => `Made ${brief(place(object(a, 1))) || 'a file'}` },
   cp: {
@@ -1004,6 +1035,9 @@ const HEADS: Record<string, Rule> = {
   unzip: { kind: 'edit', say: () => 'Unpacked an archive' },
   gzip: { kind: 'edit', say: () => 'Compressed a file' },
   patch: { kind: 'edit', say: () => 'Applied a patch' },
+  apply_patch: { kind: 'edit', say: () => 'Changed files' },
+  install: { kind: 'edit', say: () => 'Installed files' },
+  mktemp: { kind: 'edit', say: (a) => has(a, '-d') ? 'Made a temporary folder' : 'Made a temporary file' },
 
   // Running things.
   node: { kind: 'run', say: (a) => runSaid(a, 'Node') },
@@ -1025,6 +1059,15 @@ const HEADS: Record<string, Rule> = {
   pip3: { kind: 'build', say: () => 'Installed the Python dependencies' },
   uv: { kind: 'build', say: () => 'Installed the Python dependencies' },
   poetry: { kind: 'build', say: () => 'Installed the Python dependencies' },
+  atelier: { kind: 'run', say: () => 'Ran Atelier' },
+  'beads-server': { kind: 'run', say: () => 'Ran the board server' },
+  'beads-web': { kind: 'run', say: () => 'Ran the workbench' },
+  claude: { kind: 'agent', say: () => 'Ran Claude' },
+  'external-review': { kind: 'agent', say: () => 'Ran an external review' },
+  'git-branch': { kind: 'run', say: () => 'Ran git-branch' },
+  'git-worktree': { kind: 'vcs', say: () => 'Ran git-worktree' },
+  check: { kind: 'test', say: () => 'Ran a check' },
+  linear: { kind: 'net', say: () => 'Worked in Linear' },
 
   // The network.
   curl: { kind: 'net', say: (a) => `Fetched ${address(object(a, 1)) || 'a page'}` },
@@ -1032,6 +1075,7 @@ const HEADS: Record<string, Rule> = {
   ssh: { kind: 'net', say: (a) => `Ran a command on ${brief(object(a, 1)) || 'another machine'}` },
   scp: { kind: 'net', say: () => 'Copied files to another machine' },
   rsync: { kind: 'net', say: () => 'Copied files across' },
+  cloudflared: { kind: 'net', say: () => 'Ran a Cloudflare tunnel' },
 
   // The machine.
   ps: { kind: 'system', say: () => 'Listed what is running' },
@@ -1094,14 +1138,29 @@ const HEADS: Record<string, Rule> = {
     },
   },
   date: { kind: 'system', say: () => 'Checked the time' },
+  nslookup: { kind: 'net', say: (a) => `Looked up ${brief(object(a, 1)) || 'DNS'}` },
+  dig: { kind: 'net', say: (a) => `Looked up ${brief(object(a, 1)) || 'DNS'}` },
+  fuser: { kind: 'system', say: () => 'Checked which process uses a file' },
+  printenv: { kind: 'system', say: () => 'Read the environment' },
+  type: { kind: 'system', say: (a) => `Looked up ${brief(object(a, 1)) || 'a command'}` },
   magick: { kind: 'edit', say: () => 'Worked on a picture' },
+  convert: { kind: 'edit', say: () => 'Worked on a picture' },
   ffmpeg: { kind: 'edit', say: () => 'Worked on a video' },
+  gio: {
+    kind: 'system',
+    say: (a) => a[1] === 'info' ? 'Read file information' : a[1] === 'open' ? 'Opened a file' : 'Worked with files',
+  },
 
   // Data.
   sqlite3: { kind: 'data', say: (a) => `Queried ${brief(leaf(object(a, 1))) || 'the database'}` },
   psql: { kind: 'data', say: () => 'Queried the database' },
   mysql: { kind: 'data', say: () => 'Queried the database' },
+  mongosh: { kind: 'data', say: () => 'Queried MongoDB' },
   jq: { kind: 'data', say: () => 'Picked fields out of some JSON' },
+  base64: { kind: 'data', say: () => 'Converted base64 data' },
+  basename: { kind: 'data', say: () => 'Picked a file name out of a path' },
+  tr: { kind: 'data', say: () => 'Translated text' },
+  codegraph: { kind: 'search', say: () => 'Searched Codegraph' },
 
   // Waiting.
   sleep: { kind: 'wait', say: (a) => (object(a, 1) ? `Waited ${object(a, 1)}s` : 'Waited') },
@@ -1124,7 +1183,7 @@ const SYSTEMD: Record<string, string> = {
 function searchSaid(argv: string[], from: number): string | null {
   const rest = objects(argv, from);
   const pattern = rest[0];
-  if (!pattern) return null;
+  if (!pattern) return argv.length > from ? 'Searched text' : null;
   const where = rest.slice(1).filter(worthNaming);
   const inside =
     where.length === 0 ? '' : where.length > 1 ? ` across ${where.length} paths` : ` in ${brief(place(where[0]!), 28)}`;
@@ -1154,8 +1213,10 @@ function runSaid(argv: string[], tongue: string): string | null {
 // Scripts, loops and here-documents
 // ---------------------------------------------------------------------------
 
-/** A here-document, a loop or a branch is a script, not a chain. */
-const IS_SCRIPT = /<<[-\s]*['"]?\w|^\s*(?:for|while|until|if|function)\s|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/;
+/** A loop or a branch is a script, not a chain. Here-documents are different:
+ * each body belongs only to its launcher, while commands around it remain
+ * independent top-level stages. */
+const IS_SCRIPT = /^\s*(?:for|while|until|if|function)\s|;\s*(?:do|then)\s|\n\s*(?:do|then)\s/;
 
 /** Shell operators and control words, with quoted argument data blanked out.
  * A multiline commit message is still one argument, not a nineteen-line shell
@@ -1231,6 +1292,12 @@ function scriptStage(command: string): Stage | null {
   return { text: what, kind: 'script', grave: false };
 }
 
+function hereDocumentStage(link: string, documents: HereDocument[]): Stage | null {
+  const body = documents.map((document) => document.body).join('');
+  const endings = documents.map((document) => document.delimiter).join('\n');
+  return scriptStage(`${link}\n${body}${endings}`);
+}
+
 // ---------------------------------------------------------------------------
 // Reading one command
 // ---------------------------------------------------------------------------
@@ -1302,7 +1369,7 @@ function intentOnlyStage(head: string, argv: string[]): Stage | null {
   if (version) return { text: `Checked the ${brief(called)} version`, kind: 'read', grave: false, intentOnly: true };
 
   const dry = args.includes('--dry-run') || args.includes('--dry') ||
-    ((head === 'git' && args[0] === 'clean') || head === 'make') && args.includes('-n');
+    ((head === 'git' && args[0] === 'clean') || head === 'make') && has(args, '-n');
   if (dry) return { text: `Checked what ${brief(called)} would do`, kind: 'read', grave: false, intentOnly: true };
 
   if (head === 'git' && args[0] === 'diff' && args.includes('--check')) {
@@ -1353,6 +1420,21 @@ function linkStage(argv: string[], alreadyReal: boolean): Stage | typeof DROPPED
   if (head === 'npm' || head === 'pnpm' || head === 'yarn' || head === 'npx') {
     const said = nodePackage(argv);
     return { text: said.said, kind: said.kind, grave: false };
+  }
+
+  const directTool = TOOLS[head];
+  if (directTool) {
+    if (head === 'next' || head === 'vite') {
+      const action = startsOrBuilds(object(argv, 1));
+      return { text: action.said, kind: action.kind, grave: false };
+    }
+    if (head === 'playwright' && has(argv, '--list')) return { text: 'Listed the browser tests', kind: 'read', grave: false };
+    if (head === 'rustfmt' && has(argv, '--check')) return { text: 'Checked Rust formatting', kind: 'lint', grave: false };
+    if (head === 'prettier' && has(argv, '--write', '-w')) return { text: 'Formatted files', kind: 'edit', grave: false };
+    if (head === 'eslint' && has(argv, '--fix')) return { text: 'Linted and fixed files', kind: 'edit', grave: false };
+    if (head === 'ruff' && argv.includes('format') && has(argv, '--check')) return { text: 'Checked Python formatting', kind: 'lint', grave: false };
+    if (head === 'black' && has(argv, '--check')) return { text: 'Checked Python formatting', kind: 'lint', grave: false };
+    return { text: directTool.said, kind: directTool.kind, grave: false };
   }
 
   const rule = HEADS[head];
@@ -1500,7 +1582,8 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
   let missed = 0;
   let where = '';
 
-  if (IS_SCRIPT.test(shellSyntax(text))) {
+  const masked = maskHereDocuments(text);
+  if (IS_SCRIPT.test(shellSyntax(masked.visible))) {
     const only = scriptStage(text);
     if (!only) {
       const hidden = graveBackstop(text);
@@ -1508,13 +1591,31 @@ export function whatACommandDid(command: string, shellDepth = 0): Ran | null {
     }
     stages.push(only);
   } else {
-    const chain = commandLinks(text);
+    const chain = commandLinks(masked.visible);
+    let documentAt = 0;
     for (let i = 0; i < chain.length; i++) {
       if (i >= MOST_LINKS) {
         missed += chain.length - i;
         break;
       }
       const link = chain[i]!;
+      const documentCount = hereDocumentOpeners(link.text).length;
+      if (documentCount) {
+        const documents = masked.documents.slice(documentAt, documentAt + documentCount);
+        documentAt += documentCount;
+        const argv = headOf(stripped(words(link.text)));
+        const head = named(argv[0] ?? '');
+        // A heredoc is only a script when its consumer executes the body.
+        // Git, kubectl and other programs commonly read ordinary stdin this
+        // way; their own action remains the action and the body remains data.
+        const executesBody = Boolean(TONGUE[head]) || head === 'cat' || head === 'tee';
+        const stage = executesBody
+          ? hereDocumentStage(link.text, documents)
+          : linkStage(argv, link.piped && stages.length > 0);
+        if (stage === null) missed++;
+        else if (stage !== DROPPED) stages.push(stage);
+        continue;
+      }
       const argv = headOf(stripped(words(link.text)));
       // A folder change is WHERE a command ran and never WHAT it did. A quarter
       // of his commands open with one, and naming it as a stage named nothing.
