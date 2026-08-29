@@ -1733,15 +1733,15 @@ export class Sessions {
     const summary = this.store.getSession(sessionId);
     if (summary?.brand === 'codex') {
       const events = this.store.eventsSince(sessionId, 0);
-      const cost = [...events].reverse().find((event) => event.type === 'cost' && event.cost.kind === 'tokens');
-      if (!cost || cost.type !== 'cost' || cost.cost.kind !== 'tokens') {
+      const stats = codexTokenPictureStats(events);
+      const cost = stats.latestTokenCost;
+      if (!cost) {
         return { window, windowNote, spent: null, spentNote: 'Codex has not reported token usage for this chat yet.' };
       }
       const own: Split = {
-        input: cost.cost.input, cacheWrite: 0, cacheRead: 0, output: cost.cost.output,
-        thinking: 0, total: cost.cost.total,
+        input: cost.input, cacheWrite: 0, cacheRead: 0, output: cost.output,
+        thinking: 0, total: cost.total,
       };
-      const stats = codexTokenPictureStats(events);
       const spent: TaskSpend = {
         own, helpers: NOTHING, total: own, turns: stats.turns,
         toolCalls: stats.toolCalls,

@@ -15,6 +15,9 @@ describe('Codex token-picture statistics', () => {
       { type: 'note', kind: 'thread/compacted' },
       { type: 'message.completed', messageId: 'user-1' },
       { type: 'note', kind: 'ordinary' },
+      { type: 'cost', cost: { kind: 'tokens', input: 5, output: 3, total: 8 } },
+      { type: 'cost', cost: { kind: 'usd', usd: 0.01 } },
+      { type: 'cost', cost: { kind: 'tokens', input: 8, output: 5, total: 13 } },
     ] as WbpEvent[];
 
     expect(codexTokenPictureStats(events)).toEqual({
@@ -22,6 +25,7 @@ describe('Codex token-picture statistics', () => {
       toolCalls: 1,
       forgettings: 2,
       helperCount: 1,
+      latestTokenCost: { kind: 'tokens', input: 8, output: 5, total: 13 },
     });
   });
 });
