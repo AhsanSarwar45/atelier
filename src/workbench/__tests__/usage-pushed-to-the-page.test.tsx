@@ -39,6 +39,11 @@ class FakeStream {
   saysUsage(percent: number): void {
     this.onmessage?.(tagged('workbench', JSON.stringify({ kind: 'usage', usage: reading(percent) })));
   }
+
+  /** The connection dies. */
+  drops(): void {
+    this.onerror?.();
+  }
 }
 
 function reading(percent: number): PlanUsage {
@@ -105,6 +110,24 @@ describe('the plan figure on a silent chat', () => {
     act(() => opened[0].saysUsage(61));
     expect(first.result.current.session?.percent).toBe(61);
     expect(second.result.current.session?.percent).toBe(61);
+  });
+
+  it('lets the figure go when the stream drops, rather than holding it', async () => {
+    const { usePlanUsage } = await freshModule();
+    const { result } = renderHook(() => usePlanUsage());
+
+    act(() => opened[0].saysUsage(47));
+    expect(result.current.session?.percent).toBe(47);
+
+    // The connection dies. Everything else on screen that came down it is let
+    // go here, because a memory drawn as an answer is worse than no answer —
+    // and the figure is the worst of them for it, since a number reads exactly
+    // the same whether it was fetched a moment ago or an hour ago. It was the
+    // one thing the drop left alone, so the chip sat on a dead reading until
+    // somebody reloaded the page (bw-643q.1).
+    act(() => opened[0].drops());
+    expect(result.current.available, 'the chip kept a number nobody was still being told').toBe(false);
+    expect(result.current.session).toBeNull();
   });
 
   it('draws the figure the stream said on the chip itself', async () => {

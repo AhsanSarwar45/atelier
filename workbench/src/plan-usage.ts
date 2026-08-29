@@ -15,10 +15,12 @@
  * down again once nobody is watching for a few minutes, because an idle kit
  * process is a hundred megabytes held for a number that moves in percents.
  *
- * An answer is not believed just because it arrived: the kit falls back to a
- * snapshot it keeps on disk without saying so, so a reading whose window has
- * gone backwards under an unmoved reset time is dropped and the last good one
- * stands (`believable`, bw-dmoe).
+ * Whatever it answers is what the app holds. A guard used to stand here and
+ * refuse a reading whose window had gone backwards under an unmoved reset time,
+ * on the reasoning that the kit falls back to a disk snapshot without saying so.
+ * Forty readings captured from the live endpoint were replayed through it and it
+ * refused none of them, so it caught nothing; what it did do was pin the figure
+ * on screen forever once reads stopped landing at all (bw-643q.1).
  *
  * The shape it hands back is the browser's, not the kit's: `readUsage` in
  * `src/workbench/plan-usage.ts` does the translating, and both sides hold the
@@ -27,7 +29,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { claudeProgram } from './claude-program.ts';
-import { believable, NOTHING_KNOWN, type PlanUsage, type RawPlanUsage, readUsage } from '../../src/workbench/plan-usage.ts';
+import { NOTHING_KNOWN, type PlanUsage, type RawPlanUsage, readUsage } from '../../src/workbench/plan-usage.ts';
 
 /**
  * How often the figure is read while anybody is watching.
@@ -41,15 +43,6 @@ const BEAT_MS = 30_000;
 
 /** How long an answer stands before a page asking outright makes us read again. */
 const FRESH_MS = BEAT_MS;
-
-/**
- * How soon a refused answer is asked for again.
- *
- * A reading dropped for going backwards means the kit served its snapshot; the
- * next live read is usually the true one, and waiting a whole beat for it
- * leaves the chip a half-minute behind for no reason.
- */
-const RETRY_MS = 5_000;
 
 /** How long the prober is kept alive after the last question. */
 const PROBE_IDLE_MS = 4 * 60_000;
@@ -70,7 +63,6 @@ let inFlight: Promise<PlanUsage> | null = null;
 /** Everybody being pushed the figure — one per open page, none when none. */
 const watchers = new Set<(u: PlanUsage) => void>();
 let beat: ReturnType<typeof setInterval> | null = null;
-let retry: ReturnType<typeof setTimeout> | null = null;
 
 let prober: Prober | null = null;
 let proberStop: (() => void) | null = null;
@@ -159,35 +151,15 @@ async function askTheKit(): Promise<unknown | null> {
   }
 }
 
-/**
- * One read, believed or dropped.
- *
- * Returns what the app should hold afterwards, which on a dropped answer is
- * what it already held: a figure that has gone backwards is the kit's snapshot
- * talking, not the account (`believable`).
- */
+/** One read, held exactly as it came back. */
 async function read(): Promise<PlanUsage> {
   const at = new Date().toISOString();
   const raw = await askTheKit();
   const usage = readUsage(raw as RawPlanUsage | null, at);
-  if (!believable(usage, cached)) {
-    askAgainSoon();
-    return cached as PlanUsage;
-  }
   cached = usage;
   cachedAt = now();
   watchers.forEach((tell) => tell(usage));
   return usage;
-}
-
-/** A refused answer is asked for again shortly, once — the beat carries the rest. */
-function askAgainSoon(): void {
-  if (retry !== null || watchers.size === 0) return;
-  retry = setTimeout(() => {
-    retry = null;
-    void refresh();
-  }, RETRY_MS);
-  retry.unref?.();
 }
 
 /** A read that never throws: nothing known beats a crashed stream. */
@@ -242,8 +214,6 @@ export function watchUsage(tell: (u: PlanUsage) => void): () => void {
     if (watchers.size > 0) return;
     if (beat) clearInterval(beat);
     beat = null;
-    if (retry !== null) clearTimeout(retry);
-    retry = null;
   };
 }
 
@@ -252,8 +222,6 @@ export function stopProbing(): void {
   if (proberTimer) clearTimeout(proberTimer);
   if (beat) clearInterval(beat);
   beat = null;
-  if (retry !== null) clearTimeout(retry);
-  retry = null;
   watchers.clear();
   proberStop?.();
   prober = null;

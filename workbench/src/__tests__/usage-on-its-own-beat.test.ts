@@ -102,11 +102,15 @@ describe('the account figure', () => {
     stopProbing();
   });
 
-  it('refuses an answer that has gone backwards, and takes the next good one', async () => {
+  it('draws every reading the poller takes, even one that goes backwards', async () => {
     answers = [
       limits(44, '2026-08-20T22:20:00Z'),
-      // The kit's own snapshot: older, smaller, and the window it belongs to
-      // has not rolled — its reset time is the same one.
+      // Lower, under a reset time that has not moved. A guard used to refuse
+      // exactly this, reasoning that the kit had quietly served its disk
+      // snapshot. Forty readings captured from the live endpoint were replayed
+      // through it and it refused none of them, so it caught nothing — while it
+      // could and did pin the figure on screen for good once reads stopped
+      // landing at all (bw-643q.1). The chip says what the one poller was told.
       limits(38, '2026-08-20T22:20:00Z'),
       limits(47, '2026-08-20T22:20:00Z'),
     ];
@@ -118,13 +122,11 @@ describe('the account figure', () => {
     expect(heard).toEqual([44]);
 
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(heard, 'the snapshot was drawn and the chip walked backwards').toEqual([44]);
-    expect(usageNow()?.session?.percent, 'the last good reading did not stand').toBe(44);
+    expect(heard, 'a reading was swallowed instead of drawn').toEqual([44, 38]);
+    expect(usageNow()?.session?.percent).toBe(38);
 
-    // A refused answer is asked for again shortly rather than leaving the chip
-    // half a minute behind.
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(heard).toEqual([44, 47]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(heard).toEqual([44, 38, 47]);
 
     stop();
     stopProbing();
@@ -150,11 +152,14 @@ describe('the account figure', () => {
     stopProbing();
   });
 
-  it('refuses an answer that has dropped the window altogether', async () => {
+  it('lets the figure go when an answer arrives without it', async () => {
     answers = [
       limits(44, '2026-08-20T22:20:00Z'),
-      // Same loss, dressed differently: rather than a smaller number, the
-      // five-hour figure is simply not in the answer.
+      // The five-hour figure is simply not in the answer. Holding the old one
+      // through this is what froze the chip: once reads stopped carrying the
+      // window, nothing ever replaced the number on screen and only a reload
+      // cleared it (bw-643q.1). Nothing known draws no chip, which is the
+      // truth; a number that has stopped being an answer is not.
       { subscription_type: 'max', rate_limits_available: true, rate_limits: { seven_day: { utilization: 70, resets_at: '2026-08-23T08:00:00Z' } } },
       limits(47, '2026-08-20T22:20:00Z'),
     ];
@@ -164,11 +169,11 @@ describe('the account figure', () => {
     const stop = watchUsage((u) => heard.push(u.session?.percent));
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(heard, 'a known figure was blanked by an answer that omitted it').toEqual([44]);
-    expect(usageNow()?.session?.percent).toBe(44);
+    expect(heard, 'the chip went on painting a figure the answer no longer carried').toEqual([44, undefined]);
+    expect(usageNow()?.session?.percent).toBeUndefined();
 
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(heard).toEqual([44, 47]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(heard).toEqual([44, undefined, 47]);
 
     stop();
     stopProbing();

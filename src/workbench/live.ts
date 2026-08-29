@@ -486,6 +486,19 @@ function dropped(): void {
     holds = null;
     announce();
   }
+  // The plan figure goes the same way, and for the same reason. It is the one
+  // thing on screen that reads exactly the same whether it was fetched a moment
+  // ago or an hour ago, so a dead connection left the chip painting a number
+  // that had stopped being an answer, and nothing but a reload ever moved it
+  // again (bw-643q.1). Back to nothing known, which draws no chip at all rather
+  // than a stale one, the same choice the chip already makes on an API key.
+  let letGo = false;
+  usage.forEach((held, brand) => {
+    if (held === NOTHING_KNOWN) return;
+    usage.set(brand, NOTHING_KNOWN);
+    letGo = true;
+  });
+  if (letGo) announce();
   // Opening it again is the wire's job, and it keeps its own count: this
   // store is one reader of a connection the whole window shares.
 }
