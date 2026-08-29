@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { quadrantPng } from './fixture-png';
@@ -26,20 +29,56 @@ interface Project {
   path: string;
 }
 
+/** Where every worker in this spec keeps its chats. */
+const PROJECT_PATH = process.cwd();
+
+/**
+ * A command of this spec's own, planted in the throwaway settings this run uses.
+ *
+ * The slash menu must prove it read his settings and not just the tool's
+ * built-ins. It used to prove that by demanding a namespaced command, which
+ * only a plugin supplies — and the harness copies the owner's credentials at
+ * most, never his settings, so a run had no plugins and the case could not pass
+ * on any machine but his. It now plants its own command and looks for that, so
+ * what is proved is the settings directory being read, on any machine
+ * (bw-f7tu.3).
+ */
+const PLANTED_COMMAND = 'atelier-e2e-steer-proof';
+
+/**
+ * The project at our path, made if nobody has made it yet.
+ *
+ * Workers run in parallel and each one arrives here at about the same moment,
+ * so looking first is not enough: two can both look, both find nothing, and
+ * both post. One wins and the rest are answered `UNIQUE constraint failed:
+ * projects.path` as a 500. That is not a failure — the project they wanted now
+ * exists — so the loser looks again and adopts it. The five sibling specs are
+ * written this way already (bw-f7tu.1).
+ */
+async function steerProject(request: APIRequestContext): Promise<Project> {
+  const api = backend();
+  const there = async (): Promise<Project | undefined> => {
+    const listed = (await (await request.get(`${api}/api/projects?include_test=true`)).json()) as Project[];
+    return process.env.BEADS_E2E_PROJECT
+      ? listed.find((p) => p.id === process.env.BEADS_E2E_PROJECT)
+      : listed.find((p) => p.path === PROJECT_PATH);
+  };
+  const found = await there();
+  if (found) return found;
+  const made = await request.post(`${api}/api/projects`, {
+    data: { name: 'chat-steer', path: PROJECT_PATH, isTest: true },
+  });
+  if (made.status() === 201) return (await made.json()) as Project;
+  const said = await made.text();
+  const raced = await there();
+  expect(raced, `no project at ${PROJECT_PATH}, and it could not be made: ${said}`).toBeTruthy();
+  return raced!;
+}
+
 /** A chat of its own for this case, with nothing said in it. */
 async function freshChat(request: APIRequestContext, page: Page, brand: 'claude' | 'codex' = 'claude'): Promise<{ project: Project; id: string }> {
   const api = backend();
-  const projects = (await (await request.get(`${api}/api/projects?include_test=true`)).json()) as Project[];
-  if (projects.length === 0) {
-    const created = await request.post(`${api}/api/projects`, {
-      data: { name: 'chat-steer', path: process.cwd(), isTest: true },
-    });
-    expect(created.status(), await created.text()).toBe(201);
-    projects.push((await created.json()) as Project);
-  }
-  const project = process.env.BEADS_E2E_PROJECT
-    ? projects.find((p) => p.id === process.env.BEADS_E2E_PROJECT)!
-    : projects[0]!;
+  const project = await steerProject(request);
 
   const started = (await (
     await request.post(`${api}/api/workbench/command`, {
@@ -55,6 +94,18 @@ async function freshChat(request: APIRequestContext, page: Page, brand: 'claude'
 test.describe('steering the chat you are in', () => {
   // Starting an agent and waiting for it to say what it can do.
   test.describe.configure({ timeout: 300_000 });
+
+  // Written before any chat starts, because a session reads the commands it
+  // will offer as it starts.
+  test.beforeAll(() => {
+    const claude = process.env.CLAUDE_CONFIG_DIR;
+    if (!claude) return;
+    mkdirSync(join(claude, 'commands'), { recursive: true });
+    writeFileSync(
+      join(claude, 'commands', `${PLANTED_COMMAND}.md`),
+      '---\ndescription: Proof for the chat-steering spec\n---\nSay nothing.\n',
+    );
+  });
 
   test.beforeEach(async ({ page }) => {
     await page.route(/\/api\/projects(\?[^/]*)?$/, async (route) => {
@@ -84,7 +135,21 @@ test.describe('steering the chat you are in', () => {
 
     await expect.poll(async () => picker.getAttribute('data-current'), { timeout: 60_000 }).toBe(target);
     // And the chat's own line agrees, because the change came back as an event.
-    await expect(page.getByTestId('session-meta')).toContainText(target, { timeout: 60_000 });
+    //
+    // The badge is asked, not the whole line, and it is asked for the mode it
+    // carries rather than for its words: the words are the human label the app
+    // draws for that mode ('Edit freely' for acceptEdits), so a line searched
+    // for the wire spelling could never match, whatever the chat did
+    // (bw-f7tu.2).
+    const chip = page.getByTestId('chat-mode-chip');
+    await expect.poll(async () => chip.getAttribute('data-mode'), { timeout: 60_000 }).toBe(target);
+    // And what it draws is that mode's label. The badge names the same label in
+    // its title, so the two are held against each other without this spec
+    // keeping its own copy of a table the app owns.
+    const title = (await chip.getAttribute('title')) ?? '';
+    const label = title.replace(/^Permission mode — /, '');
+    expect(label, `the badge names no mode: title was ${title}`).not.toBe('');
+    await expect(chip).toHaveText(label);
   });
 
   test('Codex collaboration mode is separate from permissions and follows this chat', async ({ page, request }) => {
@@ -147,16 +212,16 @@ test.describe('steering the chat you are in', () => {
     // A command whose whole point is the terminal cannot work from a browser.
     expect(names, 'a terminal-only command is offered').not.toContain('login');
     expect(names, 'a terminal-only command is offered').not.toContain('exit');
-    // His OWN commands, not merely the ones the tool ships with. A plugin's
-    // commands are namespaced, and they exist only when the session loads his
-    // settings: measured 2026-08-17, 40 commands and none namespaced without
-    // them, 77 with (bw-f1q).
+    // His OWN commands, not merely the ones the tool ships with: the one this
+    // spec planted in the settings directory the run was given. Its presence is
+    // the settings being read; its absence is them being skipped (bw-f1q,
+    // bw-f7tu.3).
     expect(
-      names.filter((n) => n.includes(':')).length,
+      names,
       'the menu holds only the tool’s own commands — his settings were not loaded',
-    ).toBeGreaterThan(0);
+    ).toContain(PLANTED_COMMAND);
 
-    const wanted = names[0]!;
+    const wanted = PLANTED_COMMAND;
     await page.locator(`[data-testid="command-option"][data-command="${wanted}"]`).click();
     await expect(page.getByTestId('composer')).toHaveValue(`/${wanted} `);
     await expect(page.getByTestId('command-menu')).toBeHidden();
@@ -164,19 +229,36 @@ test.describe('steering the chat you are in', () => {
 
   test('a sleeping chat does not offer to steer what is not running', async ({ page, request }) => {
     const api = backend();
-    const projects = (await (await request.get(`${api}/api/projects`)).json()) as Project[];
-    const project = process.env.BEADS_E2E_PROJECT
-      ? projects.find((p) => p.id === process.env.BEADS_E2E_PROJECT)!
-      : projects[0]!;
-    const q = new URLSearchParams({ project: project.id, path: project.path });
-    const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as {
-      sessionId: string | null;
-      state: string;
-    }[];
-    const asleep = rows.find((r) => r.sessionId && r.state === 'dormant');
-    test.skip(!asleep, 'no sleeping chat on this instance');
+    // A sleeping chat of its own, made by putting one to sleep.
+    //
+    // It used to take whichever sleeping chat the instance happened to have and
+    // step aside when there was none — which, on the clean instance every run
+    // starts from, is always. The case therefore proved nothing on any machine
+    // that had not been used by hand first (bw-f7tu.4). Asking the list here
+    // also asked without `include_test=true`, because the route that adds it is
+    // on the page and not on this request context, so the list came back empty
+    // and the case died reading an id off nothing (bw-f7tu.1).
+    const { project, id } = await freshChat(request, page);
+    await request.post(`${api}/api/workbench/command`, {
+      data: { type: 'session.close', sessionId: id },
+    });
 
-    await page.goto(`/project?id=${project.id}&tab=chat&chat=${asleep!.sessionId}`);
+    // `all=1` because the plain list is a list of OFFERS, and a chat nobody has
+    // typed into is not one (registry.ts restoreList). Every chat in this spec
+    // is silent on purpose — the menus are what a session announces at startup,
+    // so a run costs nothing — which makes the plain list empty of exactly the
+    // chat this case just made.
+    const q = new URLSearchParams({ project: project.id, path: project.path, all: '1' });
+    const stateOf = async (): Promise<string | undefined> => {
+      const rows = (await (await request.get(`${api}/api/workbench/restore?${q}`)).json()) as {
+        sessionId: string | null;
+        state: string;
+      }[];
+      return rows.find((r) => r.sessionId === id)?.state;
+    };
+    await expect.poll(stateOf, { timeout: 60_000 }).toBe('dormant');
+
+    await page.goto(`/project?id=${project.id}&tab=chat&chat=${id}`);
     await page.getByTestId('chat-tab').waitFor({ timeout: HELLO_MS });
     await page.waitForTimeout(3000);
 
