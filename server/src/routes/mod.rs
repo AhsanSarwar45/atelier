@@ -22,6 +22,7 @@ use axum::{response::IntoResponse, Json};
 use directories::UserDirs;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::{Mutex, OnceLock};
@@ -103,35 +104,156 @@ fn remembered(name: &str, look: impl FnOnce() -> Option<PathBuf>) -> Option<Path
     found
 }
 
+/// The endings a name may be worn with here, as this computer's PATHEXT gives
+/// them.
+///
+/// Windows keeps what counts as runnable in that one variable and the reader
+/// never types the ending: `npm` means `npm.cmd`, `node` means `node.exe`.
+/// The text is handed in rather than read here so the rule can be put to a
+/// list of our own, and a computer that hands us no PATHEXT at all — which is
+/// what a service started with a stripped environment gets — falls back to the
+/// endings Windows ships with rather than to nothing.
+fn endings(pathext: Option<&OsStr>) -> Vec<String> {
+    const SHIPPED: &str = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC";
+    let text = pathext
+        .map(|text| text.to_string_lossy().into_owned())
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or_else(|| SHIPPED.to_string());
+    text.split(';')
+        .map(|end| end.trim().to_ascii_lowercase())
+        .filter(|end| end.len() > 1 && end.starts_with('.'))
+        .collect()
+}
+
+/// A name written out under every ending it may wear, the bare name last.
+///
+/// A name that already carries one of the endings is left alone: `npm.cmd` is
+/// a whole file name and not a stem to hang `.exe` off. The bare name stays on
+/// the end because everywhere but Windows it is the only spelling there is.
+fn spellings_of(name: &str, endings: &[String]) -> Vec<String> {
+    let worn = name
+        .rsplit_once('.')
+        .is_some_and(|(_, end)| endings.iter().any(|known| known[1..].eq_ignore_ascii_case(end)));
+    if worn {
+        return vec![name.to_string()];
+    }
+    let mut spellings: Vec<String> = endings.iter().map(|end| format!("{name}{end}")).collect();
+    spellings.push(name.to_string());
+    spellings
+}
+
 /// A tool's name as this computer spells the file behind it: on Windows the
 /// ending is part of the name, and everywhere else it is not.
 fn spelt_here(name: &str) -> Vec<String> {
-    let ending = std::env::consts::EXE_SUFFIX;
-    if ending.is_empty() || name.ends_with(ending) {
-        vec![name.to_string()]
+    if cfg!(windows) {
+        spellings_of(name, &endings(std::env::var_os("PATHEXT").as_deref()))
     } else {
-        vec![format!("{name}{ending}"), name.to_string()]
+        vec![name.to_string()]
     }
+}
+
+/// The places the reader's own list names, as the PATH text spells them.
+///
+/// This used to be a `which`/`where` we started, which is the one thing a
+/// search on a computer with no list of places cannot do: the helper is itself
+/// only findable through that list, so with PATH emptied it could not be
+/// started and this step silently found nothing — for every tool, on every
+/// call (bw-oxrg.6). The text is handed in so the walk can be put to an
+/// emptied list without touching the environment every other test shares.
+///
+/// An empty entry is dropped rather than read as "here": on both platforms it
+/// historically means the working directory, and a server that searches its
+/// own working directory for `git` is a way to be handed somebody else's.
+fn places_on(path: Option<&OsStr>) -> Vec<PathBuf> {
+    let Some(path) = path else {
+        return vec![];
+    };
+    std::env::split_paths(path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .collect()
 }
 
 /// The places a tool is looked for beyond the reader's own PATH.
 ///
-/// Every one of them is somewhere an installer puts a program without asking
-/// anybody to touch a shell profile, which is the case a service started
-/// outside a shell cannot otherwise see.
+/// Two kinds sit here. The first is where an installer puts a program without
+/// asking anybody to touch a shell profile, which is the case a service
+/// started outside a shell cannot otherwise see. The second is the ordinary
+/// system folders — `/usr/bin` and its neighbours, `System32` — where git and
+/// python actually live on a plain machine: without them, a copy started at
+/// login with no PATH at all reported every dependency missing while all of
+/// them were installed (bw-oxrg.6).
 fn tool_dirs() -> Vec<PathBuf> {
-    let Some(home) = UserDirs::new().map(|d| d.home_dir().to_path_buf()) else {
-        return vec![];
-    };
-    let mut dirs = vec![
-        home.join(".cargo").join("bin"),
-        home.join(".local").join("bin"),
-        home.join(".beads").join("bin"),
-    ];
-    if !cfg!(windows) {
+    let mut dirs = vec![];
+    if let Some(home) = UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+        dirs.push(home.join(".cargo").join("bin"));
+        dirs.push(home.join(".local").join("bin"));
+        dirs.push(home.join(".beads").join("bin"));
+        if cfg!(windows) {
+            // Where npm puts what it installs for one person on Windows.
+            dirs.push(home.join("AppData").join("Roaming").join("npm"));
+            dirs.push(
+                home.join("AppData")
+                    .join("Local")
+                    .join("Programs")
+                    .join("Git")
+                    .join("cmd"),
+            );
+        }
+    }
+    if cfg!(windows) {
+        // Git for Windows and Node install here and put nothing on a minimal
+        // PATH, which is why git could not be started at all (bw-oxrg.4).
+        let programs = std::env::var_os("ProgramFiles")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+        dirs.push(programs.join("Git").join("cmd"));
+        dirs.push(programs.join("nodejs"));
+        if let Some(older) = std::env::var_os("ProgramFiles(x86)").map(PathBuf::from) {
+            dirs.push(older.join("Git").join("cmd"));
+            dirs.push(older.join("nodejs"));
+        }
+        let windows = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        dirs.push(windows.join("System32"));
+        dirs.push(windows);
+    } else {
+        if cfg!(target_os = "macos") {
+            // Homebrew on an Apple Silicon machine. On an Intel one it is
+            // `/usr/local`, which is already below.
+            dirs.push(PathBuf::from("/opt/homebrew/bin"));
+            dirs.push(PathBuf::from("/opt/homebrew/sbin"));
+        }
         dirs.push(PathBuf::from("/usr/local/bin"));
+        dirs.push(PathBuf::from("/usr/local/sbin"));
+        dirs.push(PathBuf::from("/usr/bin"));
+        dirs.push(PathBuf::from("/bin"));
+        dirs.push(PathBuf::from("/usr/sbin"));
+        dirs.push(PathBuf::from("/sbin"));
     }
     dirs
+}
+
+/// Whether a file found under a tool's name is one this computer can start.
+///
+/// A name in a place is not a tool. Everywhere but Windows the runnable bit is
+/// the whole difference between `git` and a note somebody left called `git`,
+/// and the check follows a link, because `/usr/bin/python3` is usually one.
+#[cfg(unix)]
+fn runnable(file: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(file).is_ok_and(|about| {
+        about.is_file() && about.permissions().mode() & 0o111 != 0
+    })
+}
+
+/// Whether a file found under a tool's name is one this computer can start.
+///
+/// Windows carries no runnable bit; the ending is what says so, and the name
+/// was already spelt with one.
+#[cfg(not(unix))]
+fn runnable(file: &Path) -> bool {
+    file.is_file()
 }
 
 /// The search itself, over places handed in rather than the ones this computer
@@ -140,12 +262,16 @@ fn tool_dirs() -> Vec<PathBuf> {
 /// A spelling is tried everywhere before the next one is tried anywhere: a
 /// reader with both `python3` and `python` gets the one asked for first,
 /// wherever it sits, rather than whichever of them the earlier directory holds.
+/// Within one spelling the places are walked in turn and each ending tried
+/// there before moving on, which is the order Windows itself resolves a name
+/// in — the nearest directory wins, and inside it the runnable ending does.
 fn search_in(dirs: &[PathBuf], spellings: &[&str]) -> Option<PathBuf> {
     for name in spellings {
-        for spelt in spelt_here(name) {
-            for dir in dirs {
-                let file = dir.join(&spelt);
-                if file.is_file() {
+        let spelt = spelt_here(name);
+        for dir in dirs {
+            for spelling in &spelt {
+                let file = dir.join(spelling);
+                if runnable(&file) {
                     return Some(file);
                 }
             }
@@ -154,45 +280,40 @@ fn search_in(dirs: &[PathBuf], spellings: &[&str]) -> Option<PathBuf> {
     None
 }
 
-/// The reader's own list of places, asked in the way this computer answers it.
+/// Every place a tool is held in, given the reader's own list as text: their
+/// places first, the usual install and system folders after them.
 ///
-/// The question goes to `which`/`where` rather than being walked here because
-/// on Windows the file behind a name is not the name: `bd` installed the way
-/// we tell people to install it, with npm, is `bd.cmd`, and only that lookup
-/// knows every ending a name may be worn with.
-fn on_path(spellings: &[&str]) -> Option<PathBuf> {
-    let lookup = if cfg!(windows) { "where" } else { "which" };
-    for name in spellings {
-        let Ok(output) = std::process::Command::new(lookup).arg(name).output() else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let path = PathBuf::from(text.lines().next().unwrap_or("").trim());
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    None
+/// The text is handed in so the whole list can be built with the reader's
+/// places emptied — the case this search exists for — without emptying the
+/// PATH that every other test in this process shares.
+fn places_from(path: Option<&OsStr>) -> Vec<PathBuf> {
+    let mut dirs = places_on(path);
+    dirs.extend(tool_dirs());
+    dirs
+}
+
+/// Every place this computer holds a tool in.
+fn every_place() -> Vec<PathBuf> {
+    places_from(std::env::var_os("PATH").as_deref())
 }
 
 /// Where a named tool is on this computer, if it is here at all.
 ///
 /// `name` is what we call the tool and what its answer is remembered under;
-/// `others` are the other spellings the same tool wears. PATH is asked first,
-/// then the usual install places.
+/// `others` are the other spellings the same tool wears. The reader's own list
+/// of places is walked first, then the usual install and system folders — one
+/// walk over one list, so that nothing in the search needs a tool to find a
+/// tool.
 pub fn find_tool(name: &str, others: &[&str]) -> Option<PathBuf> {
     remembered(name, || {
         let mut spellings = vec![name];
         spellings.extend_from_slice(others);
-        let dirs = tool_dirs();
-        let found = on_path(&spellings).or_else(|| search_in(&dirs, &spellings));
+        let dirs = every_place();
+        let found = search_in(&dirs, &spellings);
         match &found {
             Some(path) => tracing::info!("Found {} at: {}", name, path.display()),
             None => tracing::warn!(
-                "{} not found. Searched PATH and: {}",
+                "{} not found. Searched: {}",
                 name,
                 dirs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
             ),
@@ -472,6 +593,83 @@ mod tests {
     fn an_empty_place_finds_nothing() {
         let place = tempfile::tempdir().expect("a directory of our own");
         assert_eq!(search_in(&[place.path().to_path_buf()], &["bd"]), None);
+    }
+
+    /// A computer whose list of places is empty still has its tools on it.
+    ///
+    /// This is the case the whole search exists for: a copy the machine starts
+    /// at login inherits no list. Until bw-oxrg.6 that step asked `which` —
+    /// a helper itself only findable through the list it was standing in for —
+    /// so with the list emptied nothing was found, for any tool, and the app
+    /// called every dependency missing while all of them were installed.
+    #[test]
+    fn a_tool_is_found_with_the_readers_places_emptied() {
+        let emptied = places_from(None);
+        assert_eq!(
+            emptied,
+            places_from(Some(OsStr::new(""))),
+            "no list at all and a list naming nothing are the same list"
+        );
+
+        let shell = if cfg!(windows) { "cmd" } else { "sh" };
+        let found = search_in(&emptied, &[shell]).unwrap_or_else(|| {
+            let looked = emptied
+                .iter()
+                .map(|dir| dir.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            panic!("every computer has {shell} on it, and none of {looked} held it")
+        });
+        assert!(
+            found.is_absolute() && found.is_file(),
+            "{} is not a file to start",
+            found.display()
+        );
+    }
+
+    /// An entry naming nothing is dropped rather than read as "here": on both
+    /// platforms an empty one historically means the working directory, and a
+    /// server that searches its own for `git` can be handed somebody else's.
+    #[test]
+    fn a_place_named_by_nothing_is_not_the_working_directory() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let text = format!("/one{sep}{sep}/two");
+        assert_eq!(
+            places_on(Some(OsStr::new(&text))),
+            vec![PathBuf::from("/one"), PathBuf::from("/two")]
+        );
+        assert_eq!(places_on(None), Vec::<PathBuf>::new());
+    }
+
+    /// Windows keeps what counts as runnable in one variable, and a copy
+    /// started with a stripped environment is handed none of it.
+    #[test]
+    fn the_endings_come_from_the_computer_or_else_from_windows() {
+        assert_eq!(
+            endings(Some(OsStr::new(".COM;.EXE;.CMD"))),
+            vec![".com", ".exe", ".cmd"],
+            "the reader's own answer, spelt the way a file name is"
+        );
+        for silent in [None, Some(OsStr::new("")), Some(OsStr::new("   "))] {
+            let shipped = endings(silent);
+            assert!(
+                shipped.contains(&".exe".to_string()) && shipped.contains(&".cmd".to_string()),
+                "a computer that tells us nothing still runs .exe and .cmd"
+            );
+        }
+    }
+
+    /// A name is written out under every ending it may wear, and one already
+    /// wearing an ending is left whole: `npm.cmd` is a file name, not a stem.
+    #[test]
+    fn a_name_already_wearing_an_ending_is_not_given_another() {
+        let known = endings(Some(OsStr::new(".EXE;.CMD")));
+        assert_eq!(
+            spellings_of("npm", &known),
+            vec!["npm.exe", "npm.cmd", "npm"],
+            "the bare name stays last, because off Windows it is the only one"
+        );
+        assert_eq!(spellings_of("npm.cmd", &known), vec!["npm.cmd"]);
     }
 
     #[test]
