@@ -52,31 +52,78 @@ describe('the models a Claude chat can be switched to', () => {
   });
 
   it('still lists a model it cannot run, and says why', () => {
-    const menu = claudeModelMenu(ANNOUNCED);
+    const menu = claudeModelMenu(ANNOUNCED, new Date('2026-08-30T00:00:00Z'));
 
-    expect(menu.find((row) => row.value === 'claude-opus-4-1')?.unavailable).toBe('Retired on 5 August 2026');
+    expect(menu.find((row) => row.value === 'claude-opus-4-1')?.unavailable).toBe(
+      'Reached end of life on 5 August 2026',
+    );
     expect(menu.find((row) => row.value === 'claude-mythos-5')?.unavailable).toBe('Project Glasswing only');
   });
 
   it('leaves every model it can run unmarked', () => {
-    const runnable = claudeModelMenu(ANNOUNCED).filter((row) => row.unavailable === undefined);
+    const menu = claudeModelMenu(ANNOUNCED, new Date('2026-08-30T00:00:00Z'));
+    const runnable = menu.filter((row) => row.unavailable === undefined);
 
     expect(runnable.map((row) => row.value)).toContain('claude-opus-4-8');
     expect(runnable.map((row) => row.value)).not.toContain('claude-opus-4-1');
   });
 
+  /**
+   * The fault: Opus 4 and Sonnet 4 both reached end of life on 15 June 2026 and
+   * were still offered as though they worked, because the marking was a
+   * sentence somebody typed rather than the date the install itself keeps
+   * (bw-xtic.3). Picking either sent the install a model it would refuse.
+   */
+  describe('a model with a last day', () => {
+    const eve = new Date('2026-06-14T23:59:59Z');
+    const after = new Date('2026-06-15T00:00:00Z');
+    const dated = ['claude-opus-4-0', 'claude-sonnet-4-0'];
+    const reason = (at: Date, id: string) =>
+      claudeModelMenu(ANNOUNCED, at).find((row) => row.value === id)?.unavailable;
+
+    it('is offered right up to it', () => {
+      for (const id of dated) expect(reason(eve, id), id).toBeUndefined();
+    });
+
+    it('is shut on the day itself, and says which day that was', () => {
+      for (const id of dated) {
+        expect(reason(after, id), id).toBe('Reached end of life on 15 June 2026');
+      }
+    });
+
+    it('stays shut long afterwards, without anyone editing the list', () => {
+      for (const id of dated) {
+        expect(reason(new Date('2027-03-01T00:00:00Z'), id), id).toBe(
+          'Reached end of life on 15 June 2026',
+        );
+      }
+    });
+
+    /** A date still ahead is not a reason: the model answers until it arrives. */
+    it('does not shut a model whose day has not come', () => {
+      expect(reason(new Date('2026-01-01T00:00:00Z'), 'claude-opus-4-1')).toBeUndefined();
+    });
+  });
+
   it('gives a version picked from the lower band its own reasoning levels', () => {
     const rows = claudeModelRows(ANNOUNCED);
 
-    // Opus 4.6 reasons, but has no `xhigh`; Opus 4.5 takes no level at all.
-    expect(claudeEffortMenu(rows, 'claude-opus-4-6').map((level) => level.value)).toEqual(['low', 'medium', 'high', 'max']);
-    expect(claudeEffortMenu(rows, 'claude-opus-4-8').map((level) => level.value)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
-    expect(claudeEffortMenu(rows, 'claude-opus-4-5')).toEqual([]);
+    const levels = (id: string) => claudeEffortMenu(rows, id).map((level) => level.value);
+
+    // Read off the install's own register, which refuses `xhigh` before Opus
+    // 4.7, `max` before Opus 4.6, and every level to Opus 4.1 and older. Opus
+    // 4.5 is refused the top two and keeps the other three (bw-xtic.3).
+    expect(levels('claude-opus-4-8')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(levels('claude-opus-4-6')).toEqual(['low', 'medium', 'high', 'max']);
+    expect(levels('claude-opus-4-5')).toEqual(['low', 'medium', 'high']);
+    expect(levels('claude-opus-4-1')).toEqual([]);
   });
 
   it('would otherwise hand a picked version the first row\'s levels, which is the wrong answer', () => {
-    // Without a row of its own, the lookup falls through to `models[0]`.
-    expect(claudeEffortMenu(ANNOUNCED, 'claude-opus-4-5')).not.toEqual([]);
+    // Without a row of its own, the lookup falls through to `models[0]` — and
+    // offers Opus 4.5 the two levels it is the one Opus refused.
+    expect(claudeEffortMenu(ANNOUNCED, 'claude-opus-4-5').map((level) => level.value))
+      .not.toEqual(['low', 'medium', 'high']);
   });
 
   it('describes every model it lists', () => {
