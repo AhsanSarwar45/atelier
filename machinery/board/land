@@ -251,6 +251,38 @@ def close_landed(goal_id, found, actor):
     return closed, refused, fresh, said or ""
 
 
+def say_closing(goal_id, found):
+    """Say what the landing closed, including nothing at all.
+
+    The real run used to end without a word when no landed subject named an
+    open work item, while --dry said "would close nothing" out loud. So the
+    landing most worth a second look — one whose subjects name no open card —
+    was the only one that finished in silence, and silence already means too
+    many things here: the board could be down, or every close refused
+    (bw-sykg.2).
+    """
+    if not found:
+        print("closed nothing: no open work item of %s is named by the "
+              "subject of a landed commit" % goal_id)
+        return
+    closed, refused, fresh, held_back = close_landed(goal_id, found, me())
+    if closed:
+        print("closed %d work item(s) of %s: %s"
+              % (len(closed), goal_id,
+                 ", ".join("%s at %s" % (cid, sha) for cid, sha in closed)))
+    for item, why in refused:
+        print("%s stayed open: %s" % (item, why))
+    for row in fresh:
+        print("opened %s %s, held by %s"
+              % (row.get("id"), row.get("title") or "", row.get("assignee") or "nobody"))
+    if held_back:
+        print(held_back)
+    left = items_of(goal_id)
+    if left and not fresh:
+        print("%s still has %d work item(s) open: %s"
+              % (goal_id, len(left), ", ".join(r["id"] for r in left)))
+
+
 def tree():
     """The checkout this command is standing in, and the branch it is on."""
     top, _ = git(["rev-parse", "--show-toplevel"], HERE_TREE)
@@ -290,8 +322,8 @@ def main():
             print("would close %d work item(s): %s"
                   % (len(would), ", ".join("%s at %s" % (i, s) for i, s, _ in would)))
         else:
-            print("would close nothing: no open work item of this job is named by a "
-                  "commit that would land")
+            print("would close nothing: no open work item of this job is named by "
+                  "the subject of a commit that would land")
         return
 
     # The merge happens in the main checkout, into whatever that checkout is
@@ -353,25 +385,7 @@ def main():
     # thing that must be reported whatever the board does next, and a board that
     # is down must not turn a landing that worked into a landing that failed.
     goal = job_of(a.card)
-    found = what_landed(goal, main_tree, "%s..HEAD" % was) if was else []
-    if not found:
-        return
-    closed, refused, fresh, held_back = close_landed(goal, found, me())
-    if closed:
-        print("closed %d work item(s) of %s: %s"
-              % (len(closed), goal,
-                 ", ".join("%s at %s" % (cid, sha) for cid, sha in closed)))
-    for item, why in refused:
-        print("%s stayed open: %s" % (item, why))
-    for row in fresh:
-        print("opened %s %s, held by %s"
-              % (row.get("id"), row.get("title") or "", row.get("assignee") or "nobody"))
-    if held_back:
-        print(held_back)
-    left = items_of(goal)
-    if left and not fresh:
-        print("%s still has %d work item(s) open: %s"
-              % (goal, len(left), ", ".join(r["id"] for r in left)))
+    say_closing(goal, what_landed(goal, main_tree, "%s..HEAD" % was) if was else [])
 
 
 if __name__ == "__main__":

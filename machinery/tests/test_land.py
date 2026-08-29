@@ -1,5 +1,7 @@
+from contextlib import redirect_stdout
 import importlib.machinery
 import importlib.util
+import io
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -81,6 +83,32 @@ class WhatALandingCloses(unittest.TestCase):
         other = commit("eef5678", "tst-k.1: another job\'s work",
                        "Reads a little like tst-j.1, and lands none of it.\n")
         self.assertEqual(self.landing(["tst-j.1"], [other]), [])
+
+
+class SayingTheClose(unittest.TestCase):
+    def said_by(self, found, **patches):
+        out = io.StringIO()
+        with patch.multiple(land, **patches), redirect_stdout(out):
+            land.say_closing("tst-j", found)
+        return out.getvalue()
+
+    def test_a_landing_that_closed_nothing_says_so_without_asking_the_board(self):
+        # close_landed must not even run: an announcement of nothing must not
+        # depend on a board that might be down.
+        def reached(*a):
+            raise AssertionError("reached the board to close nothing")
+        said = self.said_by([], close_landed=reached)
+        self.assertIn("closed nothing", said)
+        self.assertIn("tst-j", said)
+
+    def test_a_landing_that_closed_a_card_reports_the_close_and_not_the_nothing_line(self):
+        said = self.said_by(
+            [("tst-j.1", "abc1234", "tst-j.1: the work itself")],
+            me=lambda: "tester",
+            close_landed=lambda goal, found, actor: ([("tst-j.1", "abc1234")], [], [], ""),
+            items_of=lambda goal: [])
+        self.assertIn("closed 1 work item(s) of tst-j: tst-j.1 at abc1234", said)
+        self.assertNotIn("closed nothing", said)
 
 
 if __name__ == "__main__":
