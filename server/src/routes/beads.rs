@@ -13,17 +13,17 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::io::AsyncWriteExt;
 
 use super::validate_path_security;
-use crate::db::{CachedCounts, Database};
+use crate::db::{CachedCounts, Database, Project};
 use crate::dolt::{self, DoltManager};
 
 /// Resolves the Dolt server port for a project.
@@ -525,12 +525,58 @@ const LIVE_STAGES: [(&str, &[&str]); 3] = [
 /// writes clear what we hold outright, so the read after one of those waits.
 const BOARD_MEMO: Duration = Duration::from_secs(30);
 
+/// How many complete boards the server may retain.
+///
+/// A board is not a small cache record: the manager's board is 3,168 rich
+/// cards and serializes to 6.29 MB before allocator overhead. Keeping every
+/// project read during startup made the server's resting memory proportional
+/// to the sum of every project ever registered. Two keeps the current board
+/// and the one most likely to be switched back to without letting that sum
+/// grow without bound.
+const BOARD_CACHE_CAPACITY: usize = 2;
+
+type SharedBoard = Arc<Vec<Bead>>;
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum BoardAnswer {
+    Cards {
+        #[serde(serialize_with = "serialize_shared_board")]
+        beads: SharedBoard,
+        source: String,
+    },
+    Counts {
+        counts: CachedCounts,
+        source: String,
+    },
+    Error {
+        error: String,
+    },
+}
+
+fn board_error(error: impl Into<String>) -> Json<BoardAnswer> {
+    Json(BoardAnswer::Error { error: error.into() })
+}
+
+fn serialize_shared_board<S>(board: &SharedBoard, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    board.as_slice().serialize(serializer)
+}
+
 /// The answer to a read: the cards themselves, or only how many there are.
-fn board_answer(beads: Vec<Bead>, source: &str, counted: bool) -> Json<serde_json::Value> {
+fn board_answer(beads: SharedBoard, source: &str, counted: bool) -> Json<BoardAnswer> {
     if counted {
-        return Json(serde_json::json!({ "counts": counts_of(&beads, source), "source": source }));
+        return Json(BoardAnswer::Counts {
+            counts: counts_of(&beads, source),
+            source: source.to_string(),
+        });
     }
-    Json(serde_json::json!({ "beads": beads, "source": source }))
+    Json(BoardAnswer::Cards {
+        beads,
+        source: source.to_string(),
+    })
 }
 
 /// The cards of a board that changed after a moment, or all of them if no
@@ -544,15 +590,16 @@ fn board_answer(beads: Vec<Bead>, source: &str, counted: bool) -> Json<serde_jso
 /// A card whose stamp cannot be read counts as changed. Handing back one card
 /// too many costs the screen a redraw of that card; leaving one out leaves the
 /// board wrong until something else happens to it.
-fn changed_since(beads: Vec<Bead>, since: Option<&str>) -> Vec<Bead> {
+fn changed_since(beads: SharedBoard, since: Option<&str>) -> SharedBoard {
     let Some(since) = since else { return beads };
-    beads
-        .into_iter()
+    Arc::new(beads
+        .iter()
         .filter(|bead| {
             let stamp = bead.updated_at.as_deref().or(bead.created_at.as_deref());
             stamp.is_none_or(|stamp| after(stamp, since))
         })
-        .collect()
+        .cloned()
+        .collect())
 }
 
 /// Whether one stamp is later than another.
@@ -570,8 +617,55 @@ fn after(stamp: &str, since: &str) -> bool {
     }
 }
 
-/// A board as it was last read, by the path it was read from.
-type Boards = Mutex<HashMap<String, (Instant, String, Vec<Bead>)>>;
+struct HeldBoard {
+    at: Instant,
+    source: String,
+    beads: SharedBoard,
+}
+
+/// Complete boards kept ready, newest use first.
+#[derive(Default)]
+struct BoardCache {
+    entries: HashMap<String, HeldBoard>,
+    recency: VecDeque<String>,
+}
+
+impl BoardCache {
+    fn get(&mut self, path: &str) -> Option<(SharedBoard, String, bool)> {
+        let held = self.entries.get(path)?;
+        let answer = (
+            Arc::clone(&held.beads),
+            held.source.clone(),
+            held.at.elapsed() < BOARD_MEMO,
+        );
+        self.recency.retain(|held| held != path);
+        self.recency.push_front(path.to_string());
+        Some(answer)
+    }
+
+    fn insert(&mut self, path: String, source: String, beads: SharedBoard) {
+        self.recency.retain(|held| held != &path);
+        self.recency.push_front(path.clone());
+        self.entries.insert(path, HeldBoard { at: Instant::now(), source, beads });
+        while self.entries.len() > BOARD_CACHE_CAPACITY {
+            if let Some(oldest) = self.recency.pop_back() {
+                self.entries.remove(&oldest);
+            }
+        }
+    }
+
+    fn remove_matching(&mut self, path: &str) {
+        self.entries.retain(|held, _| !held.starts_with(path) && !path.starts_with(held.as_str()));
+        self.recency.retain(|held| self.entries.contains_key(held));
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.recency.clear();
+    }
+}
+
+type Boards = Mutex<BoardCache>;
 
 fn boards() -> &'static Boards {
     static BOARDS: OnceLock<Boards> = OnceLock::new();
@@ -595,28 +689,38 @@ pub fn boards_read_again() -> tokio::sync::broadcast::Receiver<String> {
 
 /// One reader per board at a time, so two arriving together cost one `bd` run:
 /// the second waits, and then finds the first one's answer already kept.
-type Gates = Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+type BoardGate = tokio::sync::Mutex<()>;
+type Gates = Mutex<HashMap<String, Weak<BoardGate>>>;
 
-fn gate_for(path: &str) -> Arc<tokio::sync::Mutex<()>> {
+fn gate_for(path: &str) -> Arc<BoardGate> {
     static GATES: OnceLock<Gates> = OnceLock::new();
     let gates = GATES.get_or_init(Gates::default);
     let mut held = gates.lock().unwrap_or_else(|e| e.into_inner());
-    held.entry(path.to_string()).or_default().clone()
+    held.retain(|_, gate| gate.strong_count() > 0);
+    if let Some(gate) = held.get(path).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(BoardGate::default());
+    held.insert(path.to_string(), Arc::downgrade(&gate));
+    gate
 }
 
 /// The board as it was last read, and whether that was recent enough to stand
 /// on its own. An old one is still handed back — waiting for a `bd` run is the
 /// whole of what a board open used to cost — but the caller reads it again
 /// behind the answer (bw-uiyz.17).
-fn kept_board(path: &str) -> Option<(Vec<Bead>, String, bool)> {
-    let kept = boards().lock().unwrap_or_else(|e| e.into_inner());
-    let (at, source, beads) = kept.get(path)?;
-    Some((beads.clone(), source.clone(), at.elapsed() < BOARD_MEMO))
+fn kept_board(path: &str) -> Option<(SharedBoard, String, bool)> {
+    boards().lock().unwrap_or_else(|e| e.into_inner()).get(path)
 }
 
-fn keep_board(path: &str, source: &str, beads: &[Bead]) {
-    let mut kept = boards().lock().unwrap_or_else(|e| e.into_inner());
-    kept.insert(path.to_string(), (Instant::now(), source.to_string(), beads.to_vec()));
+fn keep_board(path: &str, source: &str, beads: Vec<Bead>) -> SharedBoard {
+    let beads = Arc::new(beads);
+    boards().lock().unwrap_or_else(|e| e.into_inner()).insert(
+        path.to_string(),
+        source.to_string(),
+        Arc::clone(&beads),
+    );
+    beads
 }
 
 /// Something changed a board, so what was read of it is no longer the truth.
@@ -625,12 +729,10 @@ fn keep_board(path: &str, source: &str, beads: &[Bead]) {
 /// file move under us, whoever wrote it.
 pub fn forget_board(project_path: &str) {
     let key = project_path.replace('\\', "/");
-    let mut kept = boards().lock().unwrap_or_else(|e| e.into_inner());
-    kept.remove(&key);
     // A path may be named to us in more than one way — a worktree, a symlink,
     // a trailing slash — and a card written under one name must not leave the
     // same board kept under another.
-    kept.retain(|held, _| !held.starts_with(&key) && !key.starts_with(held.as_str()));
+    boards().lock().unwrap_or_else(|e| e.into_inner()).remove_matching(&key);
 }
 
 /// Everything read of every board is thrown away: a command we did not write
@@ -654,18 +756,18 @@ pub async fn read_beads(
         if !dolt_manager.is_available() && !dolt_manager.check_server().await {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({ "error": "Dolt server is not running" })),
+                board_error("Dolt server is not running"),
             );
         }
         return match dolt_manager.read_beads(db_name).await {
             Ok(beads) => {
-                let beads = post_process_beads(beads);
+                let beads = Arc::new(post_process_beads(beads));
                 upsert_counts_cache(&db, &path, "dolt-direct", &beads);
                 (StatusCode::OK, board_answer(beads, "dolt-direct", counted))
             }
             Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
+                board_error(e.to_string()),
             ),
         };
     }
@@ -676,7 +778,7 @@ pub async fn read_beads(
     if let Err(e) = validate_path_security(&project_path) {
         return (
             StatusCode::FORBIDDEN,
-            Json(serde_json::json!({ "error": e })),
+            board_error(e),
         );
     }
 
@@ -685,7 +787,7 @@ pub async fn read_beads(
     if !beads_dir.exists() {
         return (
             StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "No .beads directory found at the specified path" })),
+            board_error("No .beads directory found at the specified path"),
         );
     }
 
@@ -769,7 +871,7 @@ pub fn read_boards_ahead(dolt_manager: Arc<DoltManager>, db: Arc<Database>) {
         };
         let started = Instant::now();
         let mut read = 0usize;
-        for project in &projects {
+        for project in boards_to_read_ahead(&projects) {
             if refresh_board(&dolt_manager, &db, &project.path).await {
                 read += 1;
             }
@@ -780,6 +882,10 @@ pub fn read_boards_ahead(dolt_manager: Arc<DoltManager>, db: Arc<Database>) {
             started.elapsed()
         );
     });
+}
+
+fn boards_to_read_ahead(projects: &[Project]) -> &[Project] {
+    &projects[..projects.len().min(BOARD_CACHE_CAPACITY)]
 }
 
 pub async fn refresh_board(dolt_manager: &Arc<DoltManager>, db: &Arc<Database>, path: &str) -> bool {
@@ -822,7 +928,7 @@ async fn read_board(
     path: &str,
     project_path: &Path,
     beads_dir: &Path,
-) -> Result<(Vec<Bead>, &'static str), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(SharedBoard, &'static str), (StatusCode, Json<BoardAnswer>)> {
     // Tier 0: Try per-project Dolt server via port file or log
     // Tier 0: Try per-project Dolt server via port file or log
     if let Some(port) = resolve_dolt_port(beads_dir) {
@@ -849,7 +955,7 @@ async fn read_board(
                         tracing::info!("Read {} beads from per-project Dolt (port {})", beads.len(), port);
                         let beads = post_process_beads(beads);
                         upsert_counts_cache(db, path, "dolt-project", &beads);
-                        keep_board(path, "dolt-project", &beads);
+                        let beads = keep_board(path, "dolt-project", beads);
                         return Ok((beads, "dolt-project"));
                     }
                     Err(e) => {
@@ -897,7 +1003,7 @@ async fn read_board(
         if !issues_path.exists() {
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "No data source available: Dolt SQL, bd CLI, and JSONL all failed" })),
+                board_error("No data source available: Dolt SQL, bd CLI, and JSONL all failed"),
             ));
         }
         match read_beads_from_jsonl(&issues_path) {
@@ -905,7 +1011,7 @@ async fn read_board(
             Err(e) => {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": e })),
+                    board_error(e),
                 ));
             }
         }
@@ -913,7 +1019,7 @@ async fn read_board(
 
     let beads = post_process_beads(beads);
     upsert_counts_cache(db, path, source, &beads);
-    keep_board(path, source, &beads);
+    let beads = keep_board(path, source, beads);
     Ok((beads, source))
 }
 
@@ -1629,8 +1735,67 @@ mod tests {
         bead
     }
 
-    fn ids(beads: Vec<Bead>) -> Vec<String> {
-        beads.into_iter().map(|b| b.id).collect()
+    fn ids(beads: SharedBoard) -> Vec<String> {
+        beads.iter().map(|b| b.id.clone()).collect()
+    }
+
+    fn one_card(id: &str) -> SharedBoard {
+        Arc::new(vec![stamped(id, Some("2026-08-20T09:00:00Z"))])
+    }
+
+    #[test]
+    fn board_cache_keeps_only_the_two_most_recently_used_boards() {
+        let mut cache = BoardCache::default();
+        cache.insert("one".into(), "cli".into(), one_card("one"));
+        cache.insert("two".into(), "cli".into(), one_card("two"));
+        cache.get("one").expect("using one makes it most recent");
+        cache.insert("three".into(), "cli".into(), one_card("three"));
+
+        assert_eq!(cache.entries.len(), BOARD_CACHE_CAPACITY);
+        assert!(cache.entries.contains_key("one"));
+        assert!(cache.entries.contains_key("three"));
+        assert!(!cache.entries.contains_key("two"), "the least recent board is forgotten");
+
+        let projects = (0..4)
+            .map(|n| Project {
+                id: n.to_string(),
+                name: format!("project-{n}"),
+                path: format!("/project-{n}"),
+                local_path: None,
+                last_opened: format!("2026-08-2{n}T00:00:00Z"),
+                created_at: "2026-08-20T00:00:00Z".into(),
+                archived_at: None,
+                is_test: false,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            boards_to_read_ahead(&projects).iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["0", "1"],
+            "startup reads only the most-recent projects that fit in memory",
+        );
+    }
+
+    #[test]
+    fn cached_board_reuses_the_same_cards_without_a_deep_copy() {
+        let mut cache = BoardCache::default();
+        let original = one_card("large");
+        cache.insert("large".into(), "cli".into(), Arc::clone(&original));
+
+        let (first, _, _) = cache.get("large").expect("held");
+        let (second, _, _) = cache.get("large").expect("held again");
+
+        assert!(Arc::ptr_eq(&original, &first));
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(Arc::strong_count(&original), 4, "one allocation is shared by the cache and callers");
+
+        let encoded = serde_json::to_value(BoardAnswer::Cards {
+            beads: Arc::clone(&original),
+            source: "cli".into(),
+        })
+        .expect("the shared board serializes");
+        assert_eq!(encoded["source"], "cli");
+        assert_eq!(encoded["beads"][0]["id"], "large");
+        assert_eq!(encoded.as_object().expect("object").len(), 2, "the API shape does not change");
     }
 
     #[test]
@@ -1639,7 +1804,7 @@ mod tests {
         keep_board(
             path,
             "cli",
-            &[
+            vec![
                 stamped("old-1", Some("2026-08-19T10:00:00Z")),
                 stamped("moved-1", Some("2026-08-20T09:00:00Z")),
             ],
@@ -1662,11 +1827,11 @@ mod tests {
         // we hold is still handed back at once; it is only marked stale, and
         // the caller reads it again behind the answer (bw-uiyz.17).
         let path = "/tmp/a-board-nobody-has-read-lately";
-        keep_board(path, "cli", &[stamped("still-here", Some("2026-08-19T10:00:00Z"))]);
+        keep_board(path, "cli", vec![stamped("still-here", Some("2026-08-19T10:00:00Z"))]);
         {
             let mut kept = boards().lock().unwrap();
-            let held = kept.get_mut(path).expect("kept");
-            held.0 = Instant::now()
+            let held = kept.entries.get_mut(path).expect("kept");
+            held.at = Instant::now()
                 .checked_sub(BOARD_MEMO + Duration::from_secs(1))
                 .expect("a moment before the memo ran out");
         }
@@ -1679,10 +1844,10 @@ mod tests {
 
     #[test]
     fn no_moment_asked_about_means_the_whole_board() {
-        let board = vec![
+        let board = Arc::new(vec![
             stamped("a", Some("2026-08-19T10:00:00Z")),
             stamped("b", Some("2026-08-20T09:00:00Z")),
-        ];
+        ]);
         assert_eq!(ids(changed_since(board, None)), vec!["a", "b"]);
     }
 
@@ -1690,7 +1855,7 @@ mod tests {
     fn a_card_with_no_stamp_counts_as_changed() {
         // Leaving it out would leave the board wrong until something else
         // happened to that card; one extra card costs one redraw.
-        let board = vec![stamped("nameless", None)];
+        let board = Arc::new(vec![stamped("nameless", None)]);
         assert_eq!(ids(changed_since(board, Some("2026-08-20T00:00:00Z"))), vec!["nameless"]);
     }
 
@@ -1698,9 +1863,9 @@ mod tests {
     fn a_stamp_and_a_moment_in_different_zones_are_still_compared_as_times() {
         // 09:00 in Karachi is 04:00 UTC — earlier than the moment asked about,
         // though the text of it sorts later.
-        let board = vec![stamped("karachi-morning", Some("2026-08-20T09:00:00+05:00"))];
+        let board = Arc::new(vec![stamped("karachi-morning", Some("2026-08-20T09:00:00+05:00"))]);
         assert!(changed_since(board, Some("2026-08-20T06:00:00Z")).is_empty());
-        let board = vec![stamped("karachi-evening", Some("2026-08-20T18:00:00+05:00"))];
+        let board = Arc::new(vec![stamped("karachi-evening", Some("2026-08-20T18:00:00+05:00"))]);
         assert_eq!(
             ids(changed_since(board, Some("2026-08-20T06:00:00Z"))),
             vec!["karachi-evening"]
