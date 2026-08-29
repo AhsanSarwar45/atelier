@@ -242,22 +242,12 @@ export function ChatRightRail({
 
           {view === 'chat' && (
             <>
-          {/* First in the column because it is the only part of it that moves.
-              Cards are a record and will still be there; a helper
-              that has been going four minutes is the thing the reader opened
-              this rail to look at (§8.2.7). */}
-          {agents.length > 0 && (
-            <Section title="Sent away">
-              <SentAwayPanel
-                agents={agents}
-                items={items}
-                sessionId={sessionId}
-                controls={agentControls}
-                onOpen={onOpenAgent}
-              />
-            </Section>
-          )}
-
+          {/* First in the column, and a fixed few lines of it. The helpers used
+              to sit here because they are the part that moves — but they are
+              also the part that grows, and by the fiftieth of them the cards
+              this chat has touched had been pushed off the bottom of the rail
+              (bw-pl2v.1). Wrapped chips are one short block whatever the
+              session has done; the list below them is not. */}
           {jobs.length > 0 && (
             <Section title="Cards it has touched">
               {/* One chip per JOB, and all of them: the column exists so nothing
@@ -276,6 +266,18 @@ export function ChatRightRail({
                   />
                 ))}
               </div>
+            </Section>
+          )}
+
+          {agents.length > 0 && (
+            <Section title="Sent away">
+              <SentAwayPanel
+                agents={agents}
+                items={items}
+                sessionId={sessionId}
+                controls={agentControls}
+                onOpen={onOpenAgent}
+              />
             </Section>
           )}
 

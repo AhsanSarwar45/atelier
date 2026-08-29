@@ -1,11 +1,11 @@
 /**
- * The order of the chat's right-hand column, pinned (bw-7ks.22.33).
+ * The order of the chat's right-hand column, pinned (bw-pl2v.1).
  *
- * Sent away first, then the cards, then the reports — because the agents are
- * the only part of the column that moves. Cards and reports are a record and
- * will still be there in an hour; a helper four minutes into its work is what
- * the reader opened the rail for, and it does not belong under two lists that
- * are finished with (docs/agent-workbench.md §8.2.6).
+ * Cards first, then the agents it sent off, then the reports — because the
+ * cards are the part of the column with a ceiling. Wrapped chips are a few
+ * lines however long the session runs; the agents grow one row at a time and
+ * used to push the cards off the bottom of the rail
+ * (docs/agent-workbench.md §8.2.6).
  *
  * Pinned here because the doc and the built column had drifted into naming two
  * different orders for the same rail, and nothing on either side noticed.
@@ -68,10 +68,10 @@ const rail = (agents: SentAway[], cards: string[]) =>
   );
 
 describe('what the rail holds, in order', () => {
-  it('puts the only moving part at the top', () => {
+  it('puts the part that cannot grow at the top', () => {
     rail(oneAgent(), ['bw-uiyz.1']);
 
-    expect(sections()).toEqual(['Sent away', 'Cards it has touched']);
+    expect(sections()).toEqual(['Cards it has touched', 'Sent away']);
   });
 
   it('keeps that order when a section has nothing in it', () => {
