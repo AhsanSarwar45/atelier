@@ -6,10 +6,12 @@
 //! comes back, and waiting rather than growing when a viewer falls behind.
 //! `register` is every shell this server has open, held by the process so a
 //! shell outlives the page that opened it, and `routes` is how the app opens,
-//! lists and closes one. The socket that carries the bytes both ways is the one
-//! piece still to come.
+//! lists and closes one. `stream` is the socket that carries the bytes both
+//! ways: what the shell printed while nobody was looking, then what it prints
+//! now, and the keystrokes going back the other way.
 
 pub mod pump;
 pub mod register;
 pub mod routes;
 pub mod shell;
+pub mod stream;

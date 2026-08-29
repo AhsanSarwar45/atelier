@@ -2,10 +2,11 @@
 //!
 //! Three ordinary HTTP calls, because a shell existing and a shell being
 //! watched are two different lifetimes. The socket that carries what a shell
-//! prints comes and goes with a tab; the shell itself belongs to the register
-//! and outlives every socket that ever attached to it. Mixing the two — opening
-//! a shell by connecting to it, closing it by disconnecting — is what makes a
-//! terminal that loses your build when the wifi drops.
+//! prints — `stream.rs`, mounted on this same router — comes and goes with a
+//! tab; the shell itself belongs to the register and outlives every socket that
+//! ever attached to it. Mixing the two — opening a shell by connecting to it,
+//! closing it by disconnecting — is what makes a terminal that loses your build
+//! when the wifi drops.
 //!
 //! ## Why the guard is laid on here
 //!
@@ -36,7 +37,7 @@ use axum::{
     extract::{Extension, Path as FromUrl},
     http::StatusCode,
     middleware,
-    routing::{delete, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -52,11 +53,20 @@ pub const MOUNTED_AT: &str = "/api/terminal";
 /// A refusal in the words the person should see, rather than a code alone.
 type Refusal = (StatusCode, String);
 
-/// The three routes, behind the guard that decides who may reach a shell.
+/// Every way to a shell, behind the guard that decides who may reach one.
+///
+/// The socket lives here too, under the same guard and for a reason worth
+/// stating: a WebSocket handshake is an ordinary HTTP GET carrying a `Host`
+/// header, so this middleware sees it and refuses it like anything else. It is
+/// the only thing that does. Handshakes are outside CORS entirely, so the
+/// permissive `allow_origin` this server is mounted behind never gets a say
+/// over them, and a page on any site at all may open one. What keeps that page
+/// out is this and nothing beside it.
 pub fn router(shells: Shells) -> Router {
     Router::new()
         .route("/", post(open).get(list))
         .route("/:id", delete(close))
+        .route("/:id/stream", get(crate::terminal::stream::watch))
         .layer(Extension(shells))
         .layer(middleware::from_fn(crate::local_host::require_local_host))
 }
@@ -174,7 +184,7 @@ fn home() -> Result<PathBuf, Refusal> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::terminal::register::{Register, Session};
     use axum::body::Body;
@@ -185,11 +195,11 @@ mod tests {
     use tower::ServiceExt;
 
     /// This machine, as a browser sitting in front of it names it.
-    const OURS: &str = "localhost:3008";
+    pub(crate) const OURS: &str = "localhost:3008";
 
     /// The rebinding case `local_host.rs` exists for: a name its owner can
     /// point at this machine, sent by a browser that believes it.
-    const THEIRS: &str = "rebind.evil.com";
+    pub(crate) const THEIRS: &str = "rebind.evil.com";
 
     /// The server as `main.rs` assembles it, so the URLs under test are the
     /// URLs a browser types and the guard under test is the one that ships.
@@ -197,7 +207,7 @@ mod tests {
         Router::new().nest(MOUNTED_AT, router(Arc::clone(shells)))
     }
 
-    fn a_register() -> (Shells, Router) {
+    pub(crate) fn a_register() -> (Shells, Router) {
         let shells: Shells = Arc::default();
         let app = served_by(&shells);
         (shells, app)
@@ -236,7 +246,7 @@ mod tests {
     }
 
     /// Opens one shell and gives back its id.
-    async fn open_one(app: &Router, cwd: Option<&str>) -> String {
+    pub(crate) async fn open_one(app: &Router, cwd: Option<&str>) -> String {
         let mut asking = json!({ "cols": 80, "rows": 24 });
         if let Some(cwd) = cwd {
             asking["cwd"] = json!(cwd);
@@ -299,7 +309,7 @@ mod tests {
     /// A terminal echoes what is typed at it, so the command asking the question
     /// appears in the output ahead of the answer. The first match is the
     /// question; the last is the answer.
-    fn answered(said: &str, name: &str) -> String {
+    pub(crate) fn answered(said: &str, name: &str) -> String {
         said.rsplit_once(&format!("{name}["))
             .and_then(|(_, rest)| rest.split(']').next())
             .unwrap_or_default()

@@ -86,6 +86,8 @@ dependencies = [
  "chrono",
  "directories",
  "futures",
+ "hyper",
+ "hyper-util",
  "mime_guess",
  "mysql_async",
  "notify",

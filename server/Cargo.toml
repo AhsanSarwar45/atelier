@@ -40,4 +40,11 @@ tower = { version = "0.4", features = ["util"] }
 # The browser's end of the one connection, so the case that proves the route
 # speaks to it speaks the same protocol the browser does.
 tokio-tungstenite = "0.24"
+# A whole HTTP connection over a pipe rather than a socket. `tower`'s `oneshot`
+# calls the router as a function and so can never upgrade one: the extension
+# that hands a request its side of the connection is put there by hyper when a
+# real connection carried it, and a call that skipped the connection has no such
+# thing. These two give the tests a connection with no port under it.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

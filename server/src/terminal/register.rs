@@ -72,10 +72,9 @@ pub struct Session {
     pub started: DateTime<Utc>,
     /// Locked because a pty master is not `Sync`, for the reason above.
     pub shell: Mutex<Shell>,
-    // Held, not read: what a shell printed only reaches a person through the
-    // socket that arrives with bw-8jzg.6. It is started at open all the same,
-    // because a shell nobody drains is a shell that stops.
-    #[allow(dead_code)]
+    /// Started at open and not at first viewing, because a shell nobody drains
+    /// is a shell that stops: the tty buffer fills and the next write blocks.
+    /// Every socket in `stream.rs` attaches to this one.
     pub pump: Pump,
     /// When the shell was first seen to have ended. Written once, by `ended`.
     ended: OnceLock<Instant>,
@@ -183,6 +182,20 @@ impl Register {
         drop(live);
         all.sort_by_key(|session| session.started);
         all
+    }
+
+    /// One shell by name, or `None` when this server has no such shell.
+    ///
+    /// Gives back a share of the session rather than anything borrowed from
+    /// inside the lock, because whoever asked is about to hold it for as long
+    /// as a person keeps a tab open, and the register cannot be shut for that.
+    pub fn get(&self, id: Uuid) -> Option<Arc<Session>> {
+        let mut live = self
+            .live
+            .lock()
+            .expect("the register lock is never poisoned");
+        forget_the_long_dead(&mut live, self.forget_after);
+        live.get(&id).cloned()
     }
 
     /// Ends a shell and forgets it. `false` when there was no such shell.

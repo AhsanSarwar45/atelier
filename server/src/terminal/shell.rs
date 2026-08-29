@@ -114,9 +114,10 @@ impl Shell {
     }
 
     /// Sends keystrokes to the shell.
-    // Nothing types into a shell until the socket that carries the keystrokes
-    // arrives with bw-8jzg.6; the register only opens, watches and kills them.
-    #[allow(dead_code)]
+    ///
+    /// Blocks until the shell takes them, which is not always at once: a
+    /// program that is not reading its input leaves a write waiting. `stream.rs`
+    /// keeps that off the runtime.
     pub fn type_into(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         self.writer.write_all(bytes)?;
         self.writer.flush()
@@ -127,9 +128,6 @@ impl Shell {
     /// Safe to call while a reader is blocked: it is one ioctl on the master,
     /// touching nothing the reader holds. The kernel raises the window-change
     /// signal on the shell's behalf.
-    // Nobody reshapes a window the server cannot see. The socket that is told
-    // when the browser's did arrives with bw-8jzg.6.
-    #[allow(dead_code)]
     pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
         self.master
             .resize(PtySize {

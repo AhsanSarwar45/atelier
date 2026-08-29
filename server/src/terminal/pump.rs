@@ -206,6 +206,11 @@ impl Kept {
 /// brings all of this down.
 pub struct Pump {
     kept: Arc<Mutex<Kept>>,
+    // Counted in every build and read back only by the cases below, which is
+    // deliberate: making the counting itself conditional would mean the reading
+    // loop under test is not the loop that ships, and that loop is the whole of
+    // what this file is careful about.
+    #[cfg_attr(not(test), allow(dead_code))]
     taken: Arc<AtomicUsize>,
 }
 
@@ -269,10 +274,6 @@ impl Pump {
     /// already ended is not an error and does not need to be handled by the
     /// caller: the receiver simply reports the end straight away, after the
     /// replay it was given.
-    // Every one of the four below is for whoever streams a shell to a browser,
-    // and that socket arrives with bw-8jzg.6. Until it does the pump is started
-    // for its draining alone: what it keeps has no reader yet.
-    #[allow(dead_code)]
     pub fn attach(&self) -> (Vec<u8>, mpsc::Receiver<Message>) {
         let (to_viewer, from_pump) = mpsc::channel(MESSAGES_PER_VIEWER);
         let mut kept = self.kept.lock().expect("the kept output lock is never poisoned");
@@ -284,7 +285,11 @@ impl Pump {
     }
 
     /// What a viewer arriving now would be shown.
-    #[allow(dead_code)]
+    ///
+    /// For cases about what is kept. Nothing streaming a shell wants this on
+    /// its own: `attach` gives the same bytes and the future along with them,
+    /// and asking for them separately is the gap this type exists to close.
+    #[cfg(test)]
     pub fn replay(&self) -> Vec<u8> {
         self.kept
             .lock()
@@ -296,7 +301,7 @@ impl Pump {
     ///
     /// The cap applies to this and not to `replay`, which adds a reset and drops
     /// a partial line on top of it.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn held(&self) -> usize {
         self.kept
             .lock()
@@ -309,13 +314,16 @@ impl Pump {
     /// Not a statistic anybody displays. It is the only way from outside to tell
     /// a pump that is waiting for room from one that is quietly buffering
     /// everything, which is the difference the bounded queue exists to make.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn taken(&self) -> usize {
         self.taken.load(Ordering::Relaxed)
     }
 
     /// Whether the shell's output has ended.
-    #[allow(dead_code)]
+    ///
+    /// Nothing needs to ask before attaching: a pump that is over hands back a
+    /// receiver that reports the end straight away.
+    #[cfg(test)]
     pub fn over(&self) -> bool {
         self.kept
             .lock()
