@@ -258,7 +258,7 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
             // it (bw-oxrg). Asked again on every turn of this loop, and the
             // remembered answer dropped whenever it is no, so a runtime
             // installed on the advice below is picked up without a restart.
-            let runtime = match crate::routes::find_node() {
+            let runtime = match crate::routes::find_runtime() {
                 Some(runtime) => runtime,
                 None => {
                     crate::routes::forget_tools();
