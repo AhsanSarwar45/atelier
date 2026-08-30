@@ -1,9 +1,8 @@
 /** Deterministic capture plus isolated visual judgment for `atelier tool screen-check`. */
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { createServer } from 'node:net';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, isAbsolute, join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { imageKind, importImageBytes } from './present.ts';
 import { captureBrowserRecipe, parseBrowserRecipe } from './screen-check-browser.ts';
@@ -178,96 +177,14 @@ function uploaded(path: string | undefined, files: Uploaded, label: string): Buf
   return bytes;
 }
 
-function executable(names: string[]): string | null {
-  for (const name of names) {
-    if (isAbsolute(name) && existsSync(name)) return name;
-    try { return execFileSync(process.platform === 'win32' ? 'where' : 'which', [name], { encoding: 'utf8' }).trim().split(/\r?\n/)[0] || null; }
-    catch { /* try the next browser */ }
-  }
-  return null;
-}
-
-async function freePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') return reject(new Error('could not allocate a browser port'));
-      const port = address.port; server.close(() => resolvePort(port));
-    });
-  });
-}
-
 async function webCapture(url: string, viewport: string, theme: string): Promise<Capture> {
   if (!/^https?:\/\//.test(url)) throw new Error('web target must be an http or https URL');
-  const browser = executable(process.platform === 'darwin'
-    ? ['google-chrome', 'chromium', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
-    : process.platform === 'win32' ? ['chrome.exe', 'msedge.exe'] : ['google-chrome', 'chromium', 'chromium-browser']);
-  if (!browser || !existsSync(browser)) throw new Error('WEB_CAPTURE_UNAVAILABLE: Chrome or Chromium not found');
   const match = /^(\d+)x(\d+)$/.exec(viewport);
   if (!match) throw new Error('--viewport must be WIDTHxHEIGHT');
-  const port = await freePort(); const profile = mkdtempSync(join(tmpdir(), 'atelier-screen-web-'));
-  const child = spawn(browser, ['--headless=new', '--disable-gpu', `--remote-debugging-port=${port}`,
-    '--remote-allow-origins=*', `--user-data-dir=${profile}`, `--window-size=${match[1]},${match[2]}`, 'about:blank'],
-  { stdio: 'ignore' });
-  try {
-    let tabs: any[] | null = null;
-    for (let n = 0; n < 60 && !tabs; n += 1) {
-      try { tabs = await fetch(`http://127.0.0.1:${port}/json`).then((response) => response.json()) as any[]; }
-      catch { await new Promise((resolveWait) => setTimeout(resolveWait, 100)); }
-    }
-    if (!tabs) throw new Error('WEB_CAPTURE_UNAVAILABLE: debugging endpoint unavailable');
-    const endpoint = tabs.find((tab) => tab.type === 'page')?.webSocketDebuggerUrl;
-    if (!endpoint) throw new Error('WEB_CAPTURE_UNAVAILABLE: browser exposed no page');
-    const Socket = (globalThis as any).WebSocket;
-    if (!Socket) throw new Error('WEB_CAPTURE_UNAVAILABLE: WebSocket unavailable');
-    const ws = new Socket(endpoint); let next = 0;
-    const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-    const diagnostics: string[] = [];
-    await new Promise<void>((resolveOpen, reject) => { ws.onopen = () => resolveOpen(); ws.onerror = reject; });
-    ws.onmessage = (event: any) => {
-      const message = JSON.parse(String(event.data)); const waiting = pending.get(message.id);
-      if (waiting) {
-        clearTimeout(waiting.timer); pending.delete(message.id);
-        if (message.error) waiting.reject(new Error(`browser ${message.error.message ?? 'command failed'}`));
-        else waiting.resolve(message.result ?? {});
-      } else if (message.method === 'Log.entryAdded' && message.params?.entry?.level === 'error') {
-        diagnostics.push(`console-error=${String(message.params.entry.text).slice(0, 500)}`);
-      } else if (message.method === 'Network.loadingFailed') {
-        diagnostics.push(`network-error=${String(message.params?.errorText ?? 'request failed').slice(0, 500)}`);
-      }
-    };
-    const send = (method: string, params: Record<string, unknown> = {}) => new Promise<any>((resolveReply, rejectReply) => {
-      const id = ++next;
-      const timer = setTimeout(() => { pending.delete(id); rejectReply(new Error(`browser timed out during ${method}`)); }, 10_000);
-      pending.set(id, { resolve: resolveReply, reject: rejectReply, timer }); ws.send(JSON.stringify({ id, method, params }));
-    });
-    await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable');
-    await send('Emulation.setDeviceMetricsOverride', { width: Number(match[1]), height: Number(match[2]), deviceScaleFactor: 1, mobile: false });
-    if (theme !== 'system') await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
-    await send('Page.navigate', { url });
-    let readyState = 'unknown';
-    for (let n = 0; n < 50; n += 1) {
-      const state = await send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true });
-      readyState = String(state?.result?.value ?? 'unknown');
-      if (readyState === 'complete') break;
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    }
-    const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    ws.close();
-    return { bytes: Buffer.from(shot.data, 'base64'), label: `Web screen ${url}`,
-      diagnostics: [`viewport=${viewport}`, `theme=${theme}`, `readyState=${readyState}`, ...diagnostics] };
-  } finally {
-    if (child.exitCode === null) {
-      child.kill('SIGTERM');
-      await new Promise<void>((resolveExit) => {
-        const timer = setTimeout(resolveExit, 2_000);
-        child.once('exit', () => { clearTimeout(timer); resolveExit(); });
-      });
-    }
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
+  const width = Number(match[1]); const height = Number(match[2]);
+  if (width < 100 || width > 7680 || height < 100 || height > 4320) throw new Error('--viewport dimensions are out of range');
+  const result = await captureBrowserRecipe({ url, viewport: { width, height }, theme: theme as 'light' | 'dark' | 'system' }, {});
+  return { bytes: result.bytes, label: `Web screen ${result.finalUrl}`, diagnostics: result.diagnostics };
 }
 
 async function windowCapture(id: string | undefined, args: string[]): Promise<Capture> {
@@ -317,10 +234,12 @@ export const SCREEN_CHECK_SCHEMA = {
   actions: ['windows', 'plan', 'capture', 'check', 'compare'], capture_types: ['auto', 'web', 'window', 'image'],
   providers: ['claude', 'codex'], verdicts: ['PASS', 'FAIL', 'INDETERMINATE'],
   required: { capture: ['target or window-id'], check: ['expect', 'target or window-id'], compare: ['expect', 'before', 'after'] },
-  browser_recipe: { required: ['url'], optional: ['timeout_ms', 'viewport', 'theme', 'auth', 'actions'],
+  browser_recipe: { required: ['url'], optional: ['timeout_ms', 'viewport', 'device', 'locale', 'timezone', 'theme', 'auth', 'actions', 'settle', 'capture'],
     auth: ['storage_state', 'headers', 'http_credentials'],
     actions: ['goto', 'click', 'fill', 'type', 'press', 'select', 'check', 'uncheck', 'hover', 'upload', 'wait', 'wait_for', 'wait_for_text'],
-    limits: { actions: 50, timeout_ms: 120000, wait_ms: 30000 } },
+    devices: ['desktop', 'tablet', 'mobile'], capture_modes: ['viewport', 'full_page', 'element', 'clip'],
+    settling: ['load', 'network quiet', 'fonts', 'images', 'selector', 'text', 'animations', 'layout', 'matching frames'],
+    limits: { actions: 50, timeout_ms: 120000, wait_ms: 30000, matching_frames: 5 } },
 };
 
 export const SCREEN_CHECK_HELP = `atelier tool screen-check windows
@@ -330,4 +249,5 @@ atelier tool screen-check capture|check [--type auto|web|window|image] [--target
 atelier tool screen-check compare --before FILE --after FILE --expect TEXT [--provider claude|codex]
 Use plan when the capture route is unclear and --schema for the complete machine-readable contract.
 A browser recipe supports explicit authentication and bounded navigation, click, fill, type, key, selection, check, hover, upload and wait steps.
+Every web capture waits for load, network, fonts, images, layout stability and matching frames. Recipes add semantic waits, device presets and viewport, full-page, element or clipped capture.
 Window capture always requires an explicit window ID. No mode inherits a personal browser profile or captures a whole display.`;

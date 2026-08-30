@@ -214,6 +214,32 @@ Supported actions are `goto`, `click`, `fill`, `type`, `press`, `select`,
 avoid generated classes and screen coordinates. Keep secrets in a temporary
 recipe or storage-state file, never in a shell argument or final response.
 
+Every web route enforces one bounded settling pipeline: complete load, network
+quiet, decoded fonts and images, disabled motion and caret, stable layout, then
+two byte-identical PNG frames. A failure in any required phase stops the tool;
+it never returns an knowingly unstable frame. Recipe `timeout_ms` bounds the
+whole navigation/action/settling operation. Use `settle.selector` and
+`settle.text` for application-specific readiness; tune bounded
+`network_idle_ms`, `layout_stable_ms`, or `matching_frames` only when defaults
+cannot represent the application. Set `disable_animations` to `false` only
+when the animation itself is the evidence.
+
+Recipe capture modes are `viewport` (default), `full_page`, `element` with one
+stable selector, and `clip` with explicit non-negative `x`, `y`, `width`, and
+`height`. Device presets are `desktop`, `tablet`, and `mobile`; they fix the
+viewport, scale, touch, and mobile behavior. Do not combine a device preset
+with `viewport`. Locale and timezone default to `en-US` and `UTC`; specify them
+when the state under test depends on either.
+
+```json
+{
+  "url": "http://127.0.0.1:4173/dashboard",
+  "device": "mobile",
+  "settle": { "selector": "[data-testid=ready]", "text": "Complete" },
+  "capture": { "mode": "element", "selector": "main" }
+}
+```
+
 - Capture without judgment:
   `atelier tool screen-check capture --type web --target URL [--viewport 1280x800] [--theme light|dark|system]`
   or `capture --type image --target FILE`.

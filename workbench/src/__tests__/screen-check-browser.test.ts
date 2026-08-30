@@ -15,10 +15,13 @@ function fakeRuntime() {
     selectOption: async (value: string[]) => calls.push(`select:${value.join(',')}`), check: async () => calls.push('check'),
     uncheck: async () => calls.push('uncheck'), hover: async () => calls.push('hover'), waitFor: async () => calls.push('wait-for'),
     setInputFiles: async (value: any) => calls.push(`upload:${value.name}:${value.buffer.toString()}`),
+    screenshot: async () => PNG,
   };
   const page: any = {
     on: vi.fn(), goto: async (url: string) => calls.push(`goto:${url}`), locator: () => locator,
     getByText: () => locator, waitForTimeout: async (ms: number) => calls.push(`wait:${ms}`),
+    waitForLoadState: async () => calls.push('load'), addStyleTag: async () => calls.push('styles'),
+    evaluate: async (input: unknown) => typeof input === 'string' ? 'stable-layout' : undefined,
     screenshot: async () => PNG, url: () => 'https://app.test/home',
   };
   const context: any = { newPage: async () => page, close: vi.fn() };
@@ -66,6 +69,7 @@ describe('screen-check browser recipes', () => {
         { action: 'wait_for_text', text: 'Welcome' }, { action: 'wait', milliseconds: 10 },
         { action: 'goto', url: 'https://app.test/home' },
       ],
+      settle: { network_idle_ms: 0, layout_stable_ms: 100 },
     })));
     const { runtime, browser, calls } = fakeRuntime();
     const result = await captureBrowserRecipe(recipe, { 'state.json': Buffer.from('{"cookies":[],"origins":[]}'), 'proof.txt': Buffer.from('hello') }, runtime);
