@@ -7,8 +7,10 @@
 //! say so itself: a line beside the marker Claude Code already writes, naming
 //! the state at the moment it begins and gone at the moment it ends.
 //!
-//!     <CLAUDE_CONFIG_DIR>/sessions/<session_id>.doing.json
-//!     {"doing":"summarising","since":1787138400000,"detail":"auto"}
+//! ```text
+//! <CLAUDE_CONFIG_DIR>/sessions/<session_id>.doing.json
+//! {"doing":"summarising","since":1787138400000,"detail":"auto"}
+//! ```
 //!
 //! That line used to be written by `workbench/hooks/session-doing.py`, which
 //! only runs where python3 is on the path. This product ships as one binary
