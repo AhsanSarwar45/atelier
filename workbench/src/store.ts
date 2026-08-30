@@ -36,7 +36,7 @@ function defaultDbPath(): string {
  * a stable identity once databases can pass between builds from different
  * branches. New runtime schema belongs in SCHEMA_CAPABILITIES below.
  */
-const LEGACY_MIGRATIONS: string[] = [
+export const LEGACY_MIGRATIONS: string[] = [
   `CREATE TABLE session (
      id TEXT PRIMARY KEY,
      brand TEXT NOT NULL,
@@ -166,7 +166,7 @@ type SchemaCapability = {
  * startup, inside the migration transaction. Add future runtime assumptions
  * here rather than relying on a new array position alone.
  */
-const SCHEMA_CAPABILITIES: SchemaCapability[] = [
+export const SCHEMA_CAPABILITIES: SchemaCapability[] = [
   {
     name: 'session.collaboration-mode.v1',
     reconcile(db) {
