@@ -5,6 +5,7 @@
 //! services move behind them.
 
 pub mod actor;
+pub mod claude;
 pub mod codex;
 pub mod projection;
 pub mod protocol;
