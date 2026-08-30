@@ -184,6 +184,33 @@ impl Store {
             .map(|version| version.max(0) as usize)
     }
 
+    /// Persist one completed compaction measurement. The key makes repeated
+    /// observation of the same beat idempotent.
+    pub fn note_summary_run(
+        &self,
+        project: &str,
+        session_id: &str,
+        at: &str,
+        ms: i64,
+    ) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "INSERT OR REPLACE INTO summary_run (project, session_id, at, ms) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![project, session_id, at, ms],
+        )?;
+        Ok(())
+    }
+
+    /// Recent compaction lengths for one project, newest first.
+    pub fn summary_runs(&self, project: &str, limit: usize) -> rusqlite::Result<Vec<i64>> {
+        let mut query = self
+            .connection
+            .prepare("SELECT ms FROM summary_run WHERE project = ?1 ORDER BY at DESC LIMIT ?2")?;
+        let rows = query
+            .query_map(rusqlite::params![project, limit as i64], |row| row.get(0))?
+            .collect();
+        rows
+    }
+
     pub fn create_session(&self, session: &Session) -> rusqlite::Result<()> {
         self.connection.execute(
             r#"INSERT INTO session
