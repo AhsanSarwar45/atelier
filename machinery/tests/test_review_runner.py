@@ -3,6 +3,7 @@ import importlib.util
 import tempfile
 import unittest
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest import mock
@@ -101,6 +102,20 @@ class ReviewRunnerTests(unittest.TestCase):
         run.assert_called_once_with("spec", "actor", "goal",
                                     "/foreign/repository", "base-sha",
                                     "head-sha", held)
+
+    def test_large_prompt_reaches_the_runner_by_file(self):
+        review = load_review()
+        prompt = "large review specification\n" * 100_000
+        with tempfile.TemporaryDirectory() as held, \
+             mock.patch.object(review.subprocess, "run",
+                               return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+            review.run_reviewer(prompt, "actor", "goal", str(ROOT),
+                                "base-sha", "head-sha", held)
+
+            command = run.call_args.args[0]
+            self.assertNotIn("--spec", command)
+            spec = Path(command[command.index("--spec-file") + 1])
+            self.assertEqual(prompt, spec.read_text())
 
 
 if __name__ == "__main__":

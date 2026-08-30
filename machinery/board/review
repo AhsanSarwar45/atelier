@@ -301,8 +301,11 @@ def run_reviewer(prompt, actor, goal_id, repo, base, head, here):
     for name in project.env(DECL, "REVIEWER"):
         env[name] = goal_id
     runner = os.path.join(os.path.dirname(HERE), "workers", "review.py")
+    spec = os.path.join(here, "spec.md")
+    with open(spec, "w") as fh:
+        fh.write(prompt)
     cmd = [sys.executable, runner, "--repo", repo, "--base", base, "--head", head,
-           "--spec", prompt, "--evidence", "Atelier ran its declared checks before review.",
+           "--spec-file", spec, "--evidence", "Atelier ran its declared checks before review.",
            "--timeout", "600", "--output-dir", here]
     run = subprocess.run(cmd, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
                          stderr=None, timeout=630)

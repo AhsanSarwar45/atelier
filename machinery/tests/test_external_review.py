@@ -19,14 +19,28 @@ class ExternalReviewTests(unittest.TestCase):
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return path
 
-    def run_review(self, fake, output, timeout="5", provider="claude"):
+    def run_review(self, fake, output, timeout="5", provider="claude", extra=()):
         base = subprocess.check_output(["git", "rev-parse", "HEAD^"], cwd=ROOT, text=True).strip()
         executable = "--claude" if provider == "claude" else "--codex"
         return subprocess.run([sys.executable, str(SCRIPT), "--repo", str(ROOT),
                                "--base", base, "--head", "HEAD", "--provider", provider,
                                executable, str(fake),
                                "--timeout", timeout, "--heartbeat", "0.05",
-                               "--output-dir", str(output)], text=True, capture_output=True)
+                               "--output-dir", str(output), *extra], text=True, capture_output=True)
+
+    def test_large_spec_can_be_read_from_a_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = {"structured_output": {"verdict": "PASS", "summary": "clean",
+                       "findings": [], "verified": ["large specification"]}}
+            fake = self.fake(tmp, "import json\nprint(json.dumps(%r))\n" % verdict)
+            spec = Path(tmp) / "spec.md"
+            spec.write_text("requested behavior\n" * 100_000)
+            output = Path(tmp) / "out"
+
+            result = self.run_review(fake, output, extra=("--spec-file", str(spec)))
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn(spec.read_text(), (output / "packet.md").read_text())
 
     def test_claude_pass_uses_internal_policy_without_personal_customizations(self):
         with tempfile.TemporaryDirectory() as tmp:

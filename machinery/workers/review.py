@@ -76,13 +76,14 @@ def self_test():
     return 2
 
 def main():
-    p=argparse.ArgumentParser(); p.add_argument("--repo",default="."); p.add_argument("--base"); p.add_argument("--head",default="HEAD"); p.add_argument("--spec",default=""); p.add_argument("--evidence",default=""); p.add_argument("--timeout",type=int,default=600); p.add_argument("--heartbeat",type=float,default=15); p.add_argument("--output-dir"); p.add_argument("--provider",choices=("claude","codex"),default=os.environ.get("ATELIER_REVIEW_PROVIDER","claude")); p.add_argument("--claude",default=os.environ.get("EXTERNAL_REVIEW_CLAUDE","claude")); p.add_argument("--codex",default=os.environ.get("EXTERNAL_REVIEW_CODEX","codex")); p.add_argument("--self-test",action="store_true"); a=p.parse_args()
+    p=argparse.ArgumentParser(); p.add_argument("--repo",default="."); p.add_argument("--base"); p.add_argument("--head",default="HEAD"); spec=p.add_mutually_exclusive_group(); spec.add_argument("--spec",default=""); spec.add_argument("--spec-file"); p.add_argument("--evidence",default=""); p.add_argument("--timeout",type=int,default=600); p.add_argument("--heartbeat",type=float,default=15); p.add_argument("--output-dir"); p.add_argument("--provider",choices=("claude","codex"),default=os.environ.get("ATELIER_REVIEW_PROVIDER","claude")); p.add_argument("--claude",default=os.environ.get("EXTERNAL_REVIEW_CLAUDE","claude")); p.add_argument("--codex",default=os.environ.get("EXTERNAL_REVIEW_CODEX","codex")); p.add_argument("--self-test",action="store_true"); a=p.parse_args()
     if a.self_test: return self_test()
     if not a.base: p.error("--base is required")
     try:
         repo=Path(git(Path(a.repo),"rev-parse","--show-toplevel").strip()); base=resolve(repo,a.base); head=resolve(repo,a.head)
+        requested=Path(a.spec_file).read_text(errors="replace") if a.spec_file else a.spec
         out=Path(a.output_dir) if a.output_dir else Path(tempfile.mkdtemp(prefix="external-review-")); out.mkdir(parents=True,exist_ok=True)
-        packet=out/"packet.md"; packet.write_text(make_packet(repo,base,head,a.spec,a.evidence)); raw=out/"raw.json"
+        packet=out/"packet.md"; packet.write_text(make_packet(repo,base,head,requested,a.evidence)); raw=out/"raw.json"
         prompt=f"Review the immutable packet at {packet}. Inspect {repo} as needed. Return only the required structured verdict."
         command,answer=provider_command(a,repo,out,packet,prompt)
         print(f"external-review: {a.provider} {base[:12]}..{head[:12]} (timeout {a.timeout}s)",file=sys.stderr,flush=True)
