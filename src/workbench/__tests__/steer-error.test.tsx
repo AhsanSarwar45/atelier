@@ -40,6 +40,7 @@ vi.mock('@/workbench/use-session', async (real) => {
 });
 
 vi.mock('@/workbench/live', () => ({
+  useHeardFromOutside: () => 0,
   useHeldFactsAreOld: () => false,
   useHeardFromOutside: () => 0,
   useHolds: () => new Map(),
