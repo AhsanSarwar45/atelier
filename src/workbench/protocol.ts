@@ -893,6 +893,7 @@ export interface SessionSummary {
   model: string | null;
   permissionMode: string;
   effort?: string | null;
+  collaborationMode?: string | null;
   title: string | null;
   state: SessionState;
   createdAt: string;

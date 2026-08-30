@@ -1439,6 +1439,9 @@ export class Sessions {
       resume,
       emit: (e) => this.publish(summary.id, e),
     });
+    if (summary.collaborationMode && driver.setCollaborationMode) {
+      await driver.setCollaborationMode(summary.collaborationMode);
+    }
     // Starting the provider may resolve settings that were absent from the row
     // we entered with. Read that row again before publishing the final opening
     // pins; otherwise this event becomes the newest session.pinned fact and a
@@ -1452,6 +1455,7 @@ export class Sessions {
       permissionMode: summary.permissionMode,
       model: model ?? summary.model ?? null,
       effort: started.effort,
+      collaborationMode: started.collaborationMode,
     });
   }
 
@@ -1562,22 +1566,24 @@ export class Sessions {
    * (`start`) — and nothing in the app writes to them any more.
    */
   async pin(sessionId: string, what: { mode?: string; model?: string; effort?: string; collaborationMode?: string }): Promise<void> {
-    const driver = this.require(sessionId);
+    const driver = this.drivers.get(sessionId);
+    if (!this.store.getSession(sessionId)) throw new Error(`session ${sessionId} does not exist`);
     if (what.mode !== undefined) {
-      await driver.setMode(what.mode);
+      if (driver) await driver.setMode(what.mode);
       this.store.updateSession(sessionId, { permissionMode: what.mode });
     }
     if (what.model !== undefined) {
-      await driver.setModel(what.model);
+      if (driver) await driver.setModel(what.model);
       this.store.updateSession(sessionId, { model: what.model === BRAND_DEFAULT_MODEL ? null : what.model });
     }
     if (what.effort !== undefined) {
-      await driver.setEffort(what.effort);
+      if (driver) await driver.setEffort(what.effort);
       this.store.updateSession(sessionId, { effort: what.effort });
     }
     if (what.collaborationMode !== undefined) {
-      if (!driver.setCollaborationMode) throw new Error('This provider does not support collaboration modes');
-      await driver.setCollaborationMode(what.collaborationMode);
+      if (driver && !driver.setCollaborationMode) throw new Error('This provider does not support collaboration modes');
+      if (driver?.setCollaborationMode) await driver.setCollaborationMode(what.collaborationMode);
+      this.store.updateSession(sessionId, { collaborationMode: what.collaborationMode });
     }
     const now = this.store.getSession(sessionId);
     this.publish(sessionId, {
@@ -1585,6 +1591,7 @@ export class Sessions {
       permissionMode: now?.permissionMode ?? null,
       model: now?.model ?? null,
       effort: now?.effort ?? null,
+      collaborationMode: now?.collaborationMode ?? null,
     });
   }
 
@@ -1813,6 +1820,7 @@ export class Sessions {
       // with no model of its own and had one resolved for it (bw-7ojj).
       if (full.model !== null) this.store.updateSession(sessionId, { model: full.model });
       if (full.effort != null) this.store.updateSession(sessionId, { effort: full.effort });
+      if (full.collaborationMode != null) this.store.updateSession(sessionId, { collaborationMode: full.collaborationMode });
     }
 
     // What was said and what it cost, folded out of the log as it goes by, so
