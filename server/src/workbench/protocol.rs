@@ -76,6 +76,7 @@ wire_kinds!(EventKind {
     Cost => "cost",
     Context => "context",
     LinkBead => "link.bead",
+    ReportAvailable => "report.available",
     Error => "error",
     ProviderMessage => "provider.message",
     Notice => "notice",

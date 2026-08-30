@@ -298,7 +298,7 @@ fn land(rest: &[String]) -> Result<i32, String> {
         return Err(format!("no commit subject on {branch} names {id}"));
     }
     let open_work: Vec<Value> = children(&work, &goal)?.into_iter().filter(|row| {
-        row["status"].as_str() != Some("closed") && labels(row).iter().any(|label| *label == "step:work")
+        row["status"].as_str() != Some("closed") && labels(row).contains(&"step:work")
     }).collect();
     let carried: Vec<String> = open_work.iter().filter_map(|row| row["id"].as_str())
         .filter(|work_id| subjects.lines().any(|subject| subject_names(subject, work_id)))
@@ -432,12 +432,12 @@ fn review(rest: &[String]) -> Result<i32, String> {
         .ok_or_else(|| "review needs a job id".to_string())?;
     let root = root()?;
     let asked_card = card(&root, asked)?;
-    let id = if labels(&asked_card).iter().any(|label| *label == "step:review") {
+    let id = if labels(&asked_card).contains(&"step:review") {
         labels(&asked_card).iter().find_map(|label| label.strip_prefix("of:"))
             .ok_or_else(|| format!("review step {asked} names no job"))?.to_string()
     } else { asked.clone() };
     let goal = card(&root, &id)?;
-    if !labels(&goal).iter().any(|label| *label == "job") { return Err(format!("{id} is not a job")); }
+    if !labels(&goal).contains(&"job") { return Err(format!("{id} is not a job")); }
     let children_value: Value = serde_json::from_str(&bd(&root, &["list".into(), "--parent".into(), id.clone(), "--status".into(), "all".into(), "--limit".into(), "0".into(), "--json".into()])?)
         .map_err(|error| error.to_string())?;
     let children = children_value.as_array().cloned().unwrap_or_default();
@@ -462,7 +462,7 @@ fn review(rest: &[String]) -> Result<i32, String> {
     let trunk = landing_name(&root);
     let mut commits = Vec::new();
     for work_id in std::iter::once(id.as_str()).chain(children.iter()
-        .filter(|row| labels(row).iter().any(|label| *label == "step:work"))
+        .filter(|row| labels(row).contains(&"step:work"))
         .filter_map(|row| row["id"].as_str())) {
         commits.extend(git(&root, &["log", &trunk, "--format=%H", "--fixed-strings", "--grep", work_id])?
             .lines().map(str::to_string));
@@ -514,7 +514,7 @@ fn review(rest: &[String]) -> Result<i32, String> {
         bd(&root, &["update".into(), child.clone(), "--append-notes".into(), format!("External review at {where_at}:\n\n{evidence}")])?;
         made.push(child);
     }
-    let review_rows: Vec<&Value> = children.iter().filter(|row| labels(row).iter().any(|label| *label == "step:review")).collect();
+    let review_rows: Vec<&Value> = children.iter().filter(|row| labels(row).contains(&"step:review")).collect();
     for row in review_rows.into_iter().filter(|row| row["status"].as_str() != Some("closed")) {
         if let Some(step_id) = row["id"].as_str() {
             bd(&root, &["close".into(), step_id.into(), "--reason".into(), format!("external review completed via {provider}")])?;

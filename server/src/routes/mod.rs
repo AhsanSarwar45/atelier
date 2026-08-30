@@ -775,7 +775,7 @@ mod tests {
         let file = install(&installed, "git.exe");
 
         assert_eq!(
-            search_in(&windows_endings(), &[installed.clone()], &["git"]),
+            search_in(&windows_endings(), std::slice::from_ref(&installed), &["git"]),
             Some(file),
             "the bare name has to reach the file wearing the ending"
         );

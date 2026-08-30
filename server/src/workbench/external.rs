@@ -91,10 +91,10 @@ fn marker_alive(marker: &ClaudeMarker, proc_root: &Path) -> bool {
     #[cfg(target_os = "linux")]
     {
         let stat = proc_root.join(marker.pid.to_string()).join("stat");
-        return fs::read_to_string(stat)
+        fs::read_to_string(stat)
             .ok()
             .and_then(|line| proc_start(&line).map(str::to_string))
-            .is_some_and(|started| started == marker.proc_start);
+            .is_some_and(|started| started == marker.proc_start)
     }
     #[cfg(all(unix, not(target_os = "linux")))]
     {

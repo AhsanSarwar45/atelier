@@ -6,8 +6,8 @@
 //! `join --personal` is now purely a *removal* — it takes back only the
 //! artifacts a past release demonstrably owned and leaves everything else, the
 //! reader's own work, untouched. This is that same removal in native Rust, so
-//! `atelier init` and `atelier service install` no longer need a Python
-//! interpreter to tidy a machine up (bw-oesd.1.5).
+//! the explicit legacy-cleanup path no longer needs a Python interpreter to
+//! tidy a machine up (bw-oesd.1.5).
 //!
 //! It links NOTHING. Every path here is either removed because Atelier owns it
 //! or kept because it does not.
@@ -546,6 +546,25 @@ mod tests {
         assert!(ours_tree.contains_key(Path::new("claude/agents/scout.md")));
         assert!(ours_tree.contains_key(Path::new("bin/other-tool")));
 
+        for settings in ["claude/settings.json", "codex/hooks.json"] {
+            let value: serde_json::Value = serde_json::from_slice(match &ours_tree[Path::new(settings)] {
+                Node::File(bytes) => bytes,
+                other => panic!("{settings} changed kind: {other:?}"),
+            }).unwrap();
+            assert_eq!(value["permissions"]["defaultMode"], "acceptEdits");
+            assert_eq!(
+                value["hooks"]["SessionStart"],
+                serde_json::json!([{
+                    "matcher": "startup",
+                    "hooks": [{"type": "command", "command": "echo keep-me"}]
+                }]),
+                "{settings} must lose only Atelier's exact legacy hooks"
+            );
+        }
+
+        let once = ours_tree;
+        install(&rules, &homes).expect("the cleanup to be idempotent");
+        assert_eq!(trim(snapshot(ours.path())), once);
     }
 
     #[test]

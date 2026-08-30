@@ -518,9 +518,9 @@ async fn stable_screenshot(
     ))
 }
 
-fn storage_state<'a>(
+fn storage_state(
     recipe: &BrowserRecipe,
-    files: &'a BTreeMap<String, Vec<u8>>,
+    files: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Option<Value>, String> {
     let Some(name) = recipe
         .auth
@@ -658,7 +658,7 @@ pub async fn capture_recipe(
     let viewport = recipe
         .viewport
         .clone()
-        .unwrap_or_else(|| match recipe.device.as_deref() {
+        .unwrap_or(match recipe.device.as_deref() {
             Some("tablet") => Viewport {
                 width: 820,
                 height: 1180,

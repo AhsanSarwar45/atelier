@@ -458,7 +458,7 @@ fn passing_check(text: &str, tree: &str) -> bool {
 }
 
 fn fresh_checks(root: &Path, id: &str, card: &Value) -> bool {
-    if !labels(card).iter().any(|label| *label == "step:checks") { return true; }
+    if !labels(card).contains(&"step:checks") { return true; }
     let Some((tree, ok)) = command(root, "git", &["rev-parse", "HEAD"]) else { return false; };
     if !ok || tree.is_empty() { return false; }
     let comments = bd(root, &["comments", id, "--json"]).map(rows).unwrap_or_default();

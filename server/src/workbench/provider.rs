@@ -130,11 +130,6 @@ impl SessionFactory for NativeProviderFactory {
     }
 }
 
-fn message_id(events: &[Event]) -> String {
-    events.iter().find_map(|event| event.fields.get("messageId").and_then(Value::as_str))
-        .map(str::to_string).unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
-}
-
 async fn record_user(database: &ChatDb, session: &Session, text: &str) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let at = now();

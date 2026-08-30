@@ -3,32 +3,10 @@
 //! An Axum-based HTTP server that serves the screens and answers the API
 //! behind them. The one name the product answers to lives in `identity.rs`.
 
-mod board_gate;
-mod board_push;
-mod board_tools;
-mod command_line;
-mod completion_gate;
-mod db;
-mod doing;
-mod dolt;
-mod dolt_lifecycle;
-mod handover;
-mod identity;
-mod laid_down;
-mod join;
-mod lifecycle;
-mod local_host;
-mod needs;
-mod personal;
-mod project_manifest;
-mod published;
-mod reachable;
-mod routes;
-mod rules;
-mod service;
-mod serving;
-mod terminal;
-mod workbench;
+use atelier::{
+    command_line, db, doing, dolt, dolt_lifecycle, handover, identity, needs, reachable, routes,
+    rules, service, serving, terminal, workbench,
+};
 
 use axum::{
     body::Body,

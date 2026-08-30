@@ -70,7 +70,7 @@ fn valid_id(token: &str) -> bool {
             .chars()
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
         && rest.split('.').all(|part| {
-            part.len() >= 1
+            !part.is_empty()
                 && part
                     .chars()
                     .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())

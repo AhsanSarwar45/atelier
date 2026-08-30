@@ -40,7 +40,6 @@ pub const MACHINERY: &str = "machinery";
 
 /// The word `join` writes into a project's gates instead of a path, when this
 /// program is the one running it.
-
 const RETIRED_RULE_FILES: &[&str] = &[
     ".claude/agents/general-purpose.md",
     ".claude/agents/researcher.md",
@@ -130,7 +129,7 @@ fn init_with(
     input: &mut dyn BufRead,
     output: &mut dyn Write,
 ) -> Result<i32, String> {
-    let dir = install()?;
+    let _dir = install()?;
     let mut said: Vec<String> = Vec::new();
     let mut where_ = None;
     let mut chosen = None;
@@ -175,19 +174,6 @@ fn init_with(
     let root = std::fs::canonicalize(where_.unwrap_or_else(|| ".".to_string()))
         .map_err(|e| format!("that folder cannot be read: {e}"))?;
 
-    // Personal skills and hooks are pure filesystem work. Mirroring the service
-    // install path, failure warns
-    // rather than aborting init when it cannot be done (bw-oesd.1.3).
-    match crate::personal::Homes::resolve() {
-        Ok(homes) => {
-            if let Err(e) = crate::personal::install(&dir, &homes) {
-                eprintln!(
-                    "warning: Atelier's personal skills and hooks could not be installed: {e}"
-                );
-            }
-        }
-        Err(e) => eprintln!("warning: {e}"),
-    }
     let data_dir = crate::identity::data_dir()
         .ok_or_else(|| "this computer names no folder for Atelier's data".to_string())?;
     let existing = crate::project_manifest::locate(&root, &data_dir);
@@ -201,12 +187,13 @@ fn init_with(
     manifest.project.display_name = chosen_name.unwrap_or_else(|| ask_with_default(
         input, output, "Project name", &manifest.project.display_name).unwrap_or_else(|_| manifest.project.display_name.clone()));
     let storage = storage.unwrap_or_else(|| {
-        if existing.as_ref().map(|found| found.storage) == Some(crate::project_manifest::ManifestStorage::Repository) {
+        if existing.as_ref().map(|found| found.storage)
+            == Some(crate::project_manifest::ManifestStorage::Repository)
+            || ask_repository_storage(input, output).unwrap_or(false)
+        {
             crate::project_manifest::ManifestStorage::Repository
         } else {
-            ask_repository_storage(input, output).unwrap_or(false)
-                .then_some(crate::project_manifest::ManifestStorage::Repository)
-                .unwrap_or(crate::project_manifest::ManifestStorage::Personal)
+            crate::project_manifest::ManifestStorage::Personal
         }
     });
     if mode == Mode::Beads {
@@ -457,7 +444,8 @@ mod tests {
 
     #[test]
     fn repository_provider_wiring_stays_behind() {
-        // Provider hooks are installed personally, never copied into a project.
+        // Repository hooks are joined into that repository, never carried in
+        // the rules payload or copied into a provider's personal home.
         let files = carried();
         assert!(!files
             .iter()

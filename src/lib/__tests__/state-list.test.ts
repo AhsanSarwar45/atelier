@@ -40,6 +40,9 @@ const ALLOWED = new Set([
   "src/lib/beads-parser.ts",
   "src/lib/state-styles.ts",
   THE_SERVER,
+  // Native hooks cannot import the browser list and must recognize the board
+  // transitions they protect even when no frontend is present.
+  "server/src/lifecycle.rs",
 ]);
 
 const NAMES = STATES.map((s) => s.id);

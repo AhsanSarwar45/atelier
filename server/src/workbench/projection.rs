@@ -449,6 +449,10 @@ pub fn fold_all(events: &[Event]) -> Projection {
                     beads.push(json!(id));
                 }
             }
+            // Reports are project-level links rather than transcript rows. The
+            // app consumes this durable event from the live stream; replaying
+            // an older chat must still accept it and advance lastSeq.
+            EventKind::ReportAvailable => {}
             EventKind::AskPermission => {
                 let mut row = item("ask", string(event, "askId"));
                 for field in [
@@ -549,9 +553,10 @@ pub fn fold_all(events: &[Event]) -> Projection {
                 let id = signal["id"].as_str().unwrap_or_default();
                 let source = signal["sourceMessageId"].as_str();
                 items.retain(|row| {
-                    !(row["kind"] == "provider_message" && row["id"] == id)
-                        && !source
-                            .is_some_and(|source| row["kind"] == "message" && row["id"] == source)
+                    !(row["kind"] == "provider_message" && row["id"] == id
+                        || source.is_some_and(|source| {
+                            row["kind"] == "message" && row["id"] == source
+                        }))
                 });
                 view.insert("error".into(), Value::Null);
                 if signal["phase"] == "active" {

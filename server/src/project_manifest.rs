@@ -199,8 +199,8 @@ pub fn locate(root: &Path, data_dir: &Path) -> Option<LocatedManifest> {
         (repository, ManifestStorage::Repository)
     } else {
         let personal = personal_path(root, data_dir);
-        if !personal.is_file() {
-            if migrate_legacy(root, data_dir).is_err() { return None; }
+        if !personal.is_file() && migrate_legacy(root, data_dir).is_err() {
+            return None;
         }
         (personal, ManifestStorage::Personal)
     };

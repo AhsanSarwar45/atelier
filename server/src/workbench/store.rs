@@ -1070,6 +1070,29 @@ mod tests {
     }
 
     #[test]
+    fn legacy_report_event_does_not_abort_replay() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store.connection().execute(
+            "INSERT INTO event (session_id, seq, at, type, json) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                "legacy-chat",
+                42_i64,
+                "2026-08-20T00:00:00.000Z",
+                "report.available",
+                r#"{"type":"report.available","sessionId":"legacy-chat","project":"beads-web","slug":"review"}"#,
+            ],
+        ).unwrap();
+
+        let events = store.events_since("legacy-chat", 0).unwrap();
+        assert_eq!(
+            events[0].kind,
+            crate::workbench::protocol::EventKind::ReportAvailable
+        );
+        assert_eq!(fold_all(&events).view["lastSeq"], 42);
+    }
+
+    #[test]
     fn workbench_core_projection_pages_visible_rows_and_persists_agents() {
         let directory = tempfile::tempdir().unwrap();
         let store = Store::open(&directory.path().join("workbench.db")).unwrap();

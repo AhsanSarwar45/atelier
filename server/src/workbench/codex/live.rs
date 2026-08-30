@@ -151,8 +151,7 @@ impl CodexLiveState {
             "thread/status/changed" => {
                 let status = params.get("status").or_else(|| params["thread"].get("status")).cloned().unwrap_or_else(||json!({}));
                 let changed = params["threadId"].as_str().or_else(||params["thread"]["id"].as_str());
-                if changed.is_some() && changed != self.thread_id.as_deref() {
-                    let id=changed.unwrap();
+                if let Some(id) = changed.filter(|id| Some(*id) != self.thread_id.as_deref()) {
                     if self.agents.contains(id) && matches!(status["type"].as_str(),Some("idle"|"systemError")) {
                         events.push(event("agent.finished",[("agentId",json!(id)),("state",json!(if status["type"]=="idle"{"done"}else{"failed"})),("seconds",json!(0)),("tokens",json!(0)),("calls",json!(0)),("model",Value::Null),("result",Value::Null)]));
                         self.agents.remove(id);
