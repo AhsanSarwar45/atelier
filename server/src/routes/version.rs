@@ -207,11 +207,9 @@ fn fallback_response() -> VersionCheckResponse {
 
 /// The release archive this platform downloads to update itself.
 ///
-/// A release no longer publishes a bare program file; it publishes one archive
-/// per platform, each carrying the program together with the Node runtime the
-/// chat tab runs on (bw-oesd.2). The updater fetches this archive and unpacks
-/// the program (and its runtime) out of it, so the name here must be one the
-/// build actually uploads. `.github/workflows/release.yml` names each with its
+/// A release publishes one single-program archive per platform. The updater
+/// fetches this archive and unpacks the program out of it, so the name here
+/// must be one the build actually uploads. `.github/workflows/release.yml` names each with its
 /// matrix `artifact` and appends `.tar.gz`:
 /// - `atelier-darwin-arm64.tar.gz` (macOS ARM)
 /// - `atelier-darwin-x64.tar.gz` (macOS Intel)
@@ -307,7 +305,7 @@ pub async fn perform_update(
     info!("Downloading update from: {}", asset_url);
 
     // 3. Download the platform archive, proved against the release's own
-    //    checksums, then unpack the program and its runtime out of it.
+    //    checksums, then unpack the program out of it.
     let client = match reqwest::Client::builder()
         .user_agent(crate::identity::NAME)
         .timeout(std::time::Duration::from_secs(300))
@@ -351,10 +349,9 @@ pub async fn perform_update(
         }
     };
 
-    // Unpack the program -- and the Node runtime carried beside it -- out of the
-    // proved archive, staged next to the running program for the updater script
-    // to move into place. The archive is removed once its contents are out; only
-    // the staged files remain, so a `.tar.gz` is never installed as the program.
+    // Unpack the program out of the proved archive, staged next to the running
+    // program for the updater script to move into place. The archive is removed
+    // once its contents are out, so a `.tar.gz` is never installed as the program.
     let staged = match stage_from_archive(&archive_path, current_dir) {
         Ok(s) => s,
         Err(e) => {
@@ -370,34 +367,15 @@ pub async fn perform_update(
     let new_binary = staged.program.clone();
 
     // 4. Generate and spawn updater script
-    info!(
-        "Downloaded update: {} bytes -> {} (runtime carried: {})",
-        written,
-        new_binary.display(),
-        staged.runtime.is_some()
-    );
+    info!("Downloaded update: {} bytes -> {}", written, new_binary.display());
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3008".to_string());
     let pid = std::process::id();
 
     let script_result = if cfg!(windows) {
-        generate_windows_update_script(
-            current_dir,
-            &current_exe,
-            &new_binary,
-            staged.runtime.as_deref(),
-            pid,
-            &port,
-        )
+        generate_windows_update_script(current_dir, &current_exe, &new_binary, pid, &port)
     } else {
-        generate_unix_update_script(
-            current_dir,
-            &current_exe,
-            &new_binary,
-            staged.runtime.as_deref(),
-            pid,
-            &port,
-        )
+        generate_unix_update_script(current_dir, &current_exe, &new_binary, pid, &port)
     };
 
     match script_result {
@@ -457,20 +435,18 @@ pub async fn perform_update(
 struct StagedUpdate {
     /// The new program, under a name that is not the running one.
     program: PathBuf,
-    /// The new Node runtime, if the archive carried one beside the program.
-    runtime: Option<PathBuf>,
 }
 
-/// Unpack the proved release archive and stage the program -- and the Node
-/// runtime beside it -- next to the running program.
+/// Unpack the proved release archive and stage the program next to the running
+/// program.
 ///
-/// A release archive is a gzipped tar carrying the program and its runtime as
-/// two flat entries (`.github/workflows/release.yml`, `scripts/bundle-node.sh`).
-/// Only those two names are taken, each written under a `-new` name so the
-/// running program is untouched until the updater script swaps it. The archive
+/// A release archive is a gzipped tar carrying one flat program entry
+/// (`.github/workflows/release.yml`). Only that name is taken and written under
+/// a `-new` name so the running program is untouched until the updater script
+/// swaps it. The archive
 /// is our own and already proved against the release's published checksum, but
 /// it is still read defensively: only a regular file whose name is exactly the
-/// program or the runtime, with no directory part, is unpacked, and to a path
+/// program, with no directory part, is unpacked, and to a path
 /// this function chooses rather than one the archive names -- so a crafted entry
 /// cannot write anywhere else.
 fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String> {
@@ -479,16 +455,10 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
     } else {
         "atelier"
     };
-    let runtime_name = if cfg!(windows) { "node.exe" } else { "node" };
     let staged_program = dir.join(if cfg!(windows) {
         "atelier-new.exe"
     } else {
         "atelier-new"
-    });
-    let staged_runtime = dir.join(if cfg!(windows) {
-        "node-new.exe"
-    } else {
-        "node-new"
     });
 
     let bytes = std::fs::read(archive)
@@ -500,7 +470,6 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
         .map_err(|e| format!("the update archive could not be read: {e}"))?;
 
     let mut got_program = false;
-    let mut got_runtime = false;
     for entry in entries {
         let mut entry =
             entry.map_err(|e| format!("a file in the update archive could not be read: {e}"))?;
@@ -512,7 +481,7 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
             .map_err(|e| format!("a file in the update archive has an unreadable name: {e}"))?
             .into_owned();
         // Only a flat, single-component name is one of ours; anything nested or
-        // with a directory part is not the program or its runtime.
+        // with a directory part is not the program.
         let mut parts = named.components();
         let leaf = match (parts.next(), parts.next()) {
             (Some(std::path::Component::Normal(name)), None) => {
@@ -520,34 +489,22 @@ fn stage_from_archive(archive: &Path, dir: &Path) -> Result<StagedUpdate, String
             }
             _ => continue,
         };
-        let dest = if leaf == program_name {
-            &staged_program
-        } else if leaf == runtime_name {
-            &staged_runtime
-        } else {
+        if leaf != program_name {
             continue;
-        };
-        entry
-            .unpack(dest)
-            .map_err(|e| format!("{}: {e}", dest.display()))?;
-        make_runnable(dest)?;
-        if leaf == program_name {
-            got_program = true;
-        } else {
-            got_runtime = true;
         }
+        entry
+            .unpack(&staged_program)
+            .map_err(|e| format!("{}: {e}", staged_program.display()))?;
+        make_runnable(&staged_program)?;
+        got_program = true;
     }
 
     if !got_program {
         let _ = std::fs::remove_file(&staged_program);
-        let _ = std::fs::remove_file(&staged_runtime);
         return Err("the update archive carried no atelier program".to_string());
     }
 
-    Ok(StagedUpdate {
-        program: staged_program,
-        runtime: got_runtime.then_some(staged_runtime),
-    })
+    Ok(StagedUpdate { program: staged_program })
 }
 
 /// Give a freshly unpacked program the execute bit it needs to be run.
@@ -573,7 +530,6 @@ fn generate_unix_update_script(
     dir: &Path,
     current_exe: &Path,
     new_binary: &Path,
-    new_runtime: Option<&Path>,
     pid: u32,
     port: &str,
 ) -> Result<PathBuf, String> {
@@ -587,28 +543,6 @@ fn generate_unix_update_script(
         .and_then(|n| n.to_str())
         .ok_or("Invalid new binary name")?;
 
-    // The running program finds its Node as a sibling file named `node`
-    // (`find_runtime`), so the staged runtime takes that name. Each block is
-    // empty when the archive carried no runtime.
-    let (runtime_swap, runtime_rollback, runtime_cleanup) = match new_runtime {
-        Some(rt) => {
-            let rt_new = rt
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or("Invalid new runtime name")?;
-            (
-                format!(
-                    "mv \"node\" \"node.old\" 2>/dev/null\nmv \"{rt_new}\" \"node\"\nchmod +x \"node\"\n"
-                ),
-                format!(
-                    "    mv \"node\" \"{rt_new}\" 2>/dev/null\n    mv \"node.old\" \"node\" 2>/dev/null\n"
-                ),
-                "    rm -f \"node.old\"\n".to_string(),
-            )
-        }
-        None => (String::new(), String::new(), String::new()),
-    };
-
     let content = format!(
         r#"#!/bin/sh
 # atelier auto-updater (self-deleting)
@@ -621,11 +555,10 @@ PORT={port}
 echo "Waiting for server (PID $PID) to exit..."
 while kill -0 $PID 2>/dev/null; do sleep 0.5; done
 
-# Replace the program, and the runtime the archive carried beside it
+# Replace the program
 mv "{exe_name}" "{exe_name}.old" 2>/dev/null
 mv "{new_name}" "{exe_name}"
 chmod +x "{exe_name}"
-{runtime_swap}
 # Start new server
 PORT=$PORT ./{exe_name} &
 NEW_PID=$!
@@ -644,13 +577,13 @@ done
 if [ $healthy -eq 1 ]; then
     echo "Update successful! New server running (PID $NEW_PID)"
     rm -f "{exe_name}.old"
-{runtime_cleanup}else
+else
     echo "Health check failed, rolling back..."
     kill $NEW_PID 2>/dev/null
     sleep 1
     mv "{exe_name}" "{new_name}" 2>/dev/null
     mv "{exe_name}.old" "{exe_name}" 2>/dev/null
-{runtime_rollback}    PORT=$PORT ./{exe_name} &
+    PORT=$PORT ./{exe_name} &
 fi
 
 # Self-delete
@@ -675,7 +608,6 @@ fn generate_windows_update_script(
     dir: &Path,
     current_exe: &Path,
     new_binary: &Path,
-    new_runtime: Option<&Path>,
     pid: u32,
     port: &str,
 ) -> Result<PathBuf, String> {
@@ -688,25 +620,6 @@ fn generate_windows_update_script(
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or("Invalid new binary name")?;
-
-    // The runtime the program finds beside it is named `node.exe`; each block is
-    // empty when the archive carried no runtime.
-    let (runtime_swap, runtime_rollback, runtime_cleanup) = match new_runtime {
-        Some(rt) => {
-            let rt_new = rt
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or("Invalid new runtime name")?;
-            (
-                format!(
-                    "if exist \"node.exe.old\" del /f \"node.exe.old\"\r\nrename \"node.exe\" \"node.exe.old\"\r\nrename \"{rt_new}\" \"node.exe\"\r\n"
-                ),
-                "del /f \"node.exe\" 2>nul\r\nrename \"node.exe.old\" \"node.exe\"\r\n".to_string(),
-                "del /f \"node.exe.old\" 2>nul\r\n".to_string(),
-            )
-        }
-        None => (String::new(), String::new(), String::new()),
-    };
 
     let content = format!(
         r#"@echo off
@@ -727,7 +640,6 @@ echo Replacing binary...
 if exist "{exe_name}.old" del /f "{exe_name}.old"
 rename "{exe_name}" "{exe_name}.old"
 rename "{new_name}" "{exe_name}"
-{runtime_swap}
 echo Starting new server...
 set PORT=%PORT%
 start /B "" "{exe_name}"
@@ -747,14 +659,13 @@ echo Health check failed, rolling back...
 taskkill /F /IM "{exe_name}" 2>nul
 del /f "{exe_name}" 2>nul
 rename "{exe_name}.old" "{exe_name}"
-{runtime_rollback}set PORT=%PORT%
+set PORT=%PORT%
 start /B "" "{exe_name}"
 goto cleanup
 
 :health_ok
 echo Update successful!
 del /f "{exe_name}.old" 2>nul
-{runtime_cleanup}
 :cleanup
 rem Self-delete
 (goto) 2>nul & del /f "%~f0"
@@ -845,13 +756,11 @@ mod tests {
     }
 
     /// An update, run against a fixture release, ends as a runnable program at
-    /// the destination -- not the archive it arrived in -- with the carried
-    /// runtime staged beside it.
+    /// the destination -- not the archive it arrived in.
     #[tokio::test]
     async fn an_update_ends_as_a_runnable_program_not_the_archive() {
         use sha2::{Digest, Sha256};
         let program = b"#!/bin/sh\necho atelier-vNEXT\n";
-        let runtime = b"#!/bin/sh\necho v24.20.0\n";
         let asset = if cfg!(windows) {
             "atelier-win-x64.tar.gz"
         } else if cfg!(target_os = "macos") {
@@ -864,11 +773,7 @@ mod tests {
         } else {
             "atelier"
         };
-        let runtime_name = if cfg!(windows) { "node.exe" } else { "node" };
-        let archive = make_flat_archive(&[
-            (program_name, program.as_slice()),
-            (runtime_name, runtime.as_slice()),
-        ]);
+        let archive = make_flat_archive(&[(program_name, program.as_slice())]);
         let sum = format!("{:x}", Sha256::digest(&archive));
         let checksums = format!("{sum}  {asset}\n");
 
@@ -895,7 +800,7 @@ mod tests {
         assert_eq!(written, archive.len() as u64);
 
         let staged = stage_from_archive(&archive_path, dir.path())
-            .expect("the archive unpacks into a staged program and runtime");
+            .expect("the archive unpacks into a staged program");
 
         // The destination holds the program itself, not the archive.
         let landed = std::fs::read(&staged.program).unwrap();
@@ -906,14 +811,6 @@ mod tests {
         assert_ne!(
             landed, archive,
             "the archive must never be installed as the program"
-        );
-        assert!(
-            staged.runtime.is_some(),
-            "the runtime the archive carried must be staged too"
-        );
-        assert_eq!(
-            std::fs::read(staged.runtime.as_ref().unwrap()).unwrap(),
-            runtime
         );
         // The archive itself is consumed by the unpack; only staged files remain.
         assert!(
@@ -934,10 +831,10 @@ mod tests {
     /// A crafted archive cannot make the unpacker write outside the staging
     /// directory, and an archive with no program is refused.
     #[test]
-    fn the_unpacker_takes_only_the_two_flat_files_it_knows() {
+    fn the_unpacker_takes_only_the_flat_program_it_knows() {
         let dir = tempfile::tempdir().unwrap();
         let archive_path = dir.path().join("only-junk.tar.gz");
-        // Names with a directory part are not the flat program/runtime we take.
+        // Names with a directory part are not the flat program we take.
         let archive = make_flat_archive(&[
             ("nested/atelier", b"no".as_slice()),
             ("bin/node", b"no".as_slice()),
@@ -1055,7 +952,6 @@ mod tests {
             dir.path(),
             &current_exe,
             &new_binary,
-            None,
             4242,
             "3008",
         )
@@ -1089,7 +985,7 @@ mod tests {
         let new_binary = dir.path().join("atelier-new");
 
         let script_path =
-            generate_unix_update_script(dir.path(), &current_exe, &new_binary, None, 4242, "3008")
+            generate_unix_update_script(dir.path(), &current_exe, &new_binary, 4242, "3008")
                 .expect("generate unix script");
         let content = std::fs::read_to_string(&script_path).expect("read unix script");
 
@@ -1109,42 +1005,34 @@ mod tests {
         );
     }
     #[test]
-    fn test_unix_update_script_swaps_the_carried_runtime() {
+    fn update_scripts_never_mention_node() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let current_exe = dir.path().join("atelier");
         let new_binary = dir.path().join("atelier-new");
-        let new_runtime = dir.path().join("node-new");
+        let unix = std::fs::read_to_string(
+            generate_unix_update_script(dir.path(), &current_exe, &new_binary, 4242, "3008")
+                .expect("generate unix script"),
+        )
+        .expect("read unix script");
+        assert!(
+            !unix.to_ascii_lowercase().contains("node"),
+            "the Unix updater must not mention Node, got:\n{unix}"
+        );
 
-        let with_node = std::fs::read_to_string(
-            generate_unix_update_script(
+        let windows = std::fs::read_to_string(
+            generate_windows_update_script(
                 dir.path(),
-                &current_exe,
-                &new_binary,
-                Some(&new_runtime),
+                &dir.path().join("atelier.exe"),
+                &dir.path().join("atelier-new.exe"),
                 4242,
                 "3008",
             )
-            .expect("generate unix script with a runtime"),
+            .expect("generate Windows script"),
         )
-        .expect("read unix script");
+        .expect("read Windows script");
         assert!(
-            with_node.contains("mv \"node-new\" \"node\""),
-            "with a carried runtime the script must move it into place, got:\n{with_node}"
-        );
-        assert!(
-            with_node.contains("mv \"node\" \"node.old\""),
-            "the old runtime must be kept for rollback, got:\n{with_node}"
-        );
-
-        // With no runtime, no node lines appear at all.
-        let without = std::fs::read_to_string(
-            generate_unix_update_script(dir.path(), &current_exe, &new_binary, None, 4242, "3008")
-                .expect("generate unix script without a runtime"),
-        )
-        .expect("read unix script");
-        assert!(
-            !without.contains("node"),
-            "with no carried runtime the script must not mention node, got:\n{without}"
+            !windows.to_ascii_lowercase().contains("node"),
+            "the Windows updater must not mention Node, got:\n{windows}"
         );
     }
 }

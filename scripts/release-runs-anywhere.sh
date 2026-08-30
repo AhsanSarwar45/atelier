@@ -12,7 +12,7 @@
 # folder outside every checkout, started with a home directory that did not
 # exist a second ago and an environment stripped of everything a build left
 # behind. Then it asks the program the only questions that matter — does it
-# serve, and is its chat helper running behind it.
+# serve, and are its native chat routes present without installing a runtime.
 #
 #   bash scripts/release-runs-anywhere.sh
 #
@@ -57,6 +57,38 @@ if [ ! -x "$BINARY" ]; then
 fi
 pass "built: $(basename "$BINARY"), $(du -h "$BINARY" | cut -f1)"
 
+# The four release recipes must all package exactly the Rust program. This is
+# checked from the workflow itself so the proof covers macOS ARM, macOS Intel,
+# Linux and Windows even when this script runs on only one of those systems.
+say "Release archive recipes"
+ARCHIVE_RECIPES="$(sed -n '/name: Bundle archive (Unix)/,/name: Upload artifact/p' "$REPO/.github/workflows/release.yml")"
+for artifact in atelier-darwin-arm64 atelier-darwin-x64 atelier-linux-x64 atelier-win-x64; do
+  if grep -q "artifact: $artifact" "$REPO/.github/workflows/release.yml"; then
+    pass "$artifact has a release recipe"
+  else
+    fail "$artifact is missing from the release matrix"
+  fi
+done
+if printf '%s' "$ARCHIVE_RECIPES" | grep -Eqi 'node(\.exe)?|node_modules|npm|bundle-node'; then
+  fail "a release archive recipe still packages or downloads Node/npm"
+else
+  pass "all supported archive recipes package no node, node.exe, node_modules or npm payload"
+fi
+
+# CI can hand the script the archives it produced for a byte-level contents
+# check. A whitespace-separated list is deliberate: release asset names contain
+# no spaces. Each archive must contain one flat atelier program and nothing else.
+for archive in ${ATELIER_ARCHIVES:-}; do
+  names="$(tar -tzf "$archive" | sed 's#^\./##')"
+  expected=atelier
+  case "$archive" in *win*) expected=atelier.exe ;; esac
+  if [ "$names" = "$expected" ]; then
+    pass "$(basename "$archive") contains only $expected"
+  else
+    fail "$(basename "$archive") contains unexpected files: $(printf '%s' "$names" | tr '\n' ' ')"
+  fi
+done
+
 # The maintainer's own checkout, written into the binary, is the exact fault
 # this whole check exists for — and it can be seen without running anything.
 if grep -aqF "$REPO" "$BINARY"; then
@@ -76,24 +108,21 @@ cp "$BINARY" "$WORK/atelier"
 chmod +x "$WORK/atelier"
 pass "one file copied to $WORK, with a home directory made a second ago"
 
-# Three free ports: the one the app serves on, one a stranger holds for the last
-# case below, and one a second copy of the app serves on. They are picked rather
+# A free port for the app. It is picked rather
 # than fixed for the same reason — the reader's own copy of the app sits on
 # 3008, and a fixed port would let this whole check be answered by that copy
 # without the binary under test ever starting. The chat helper's own port is not
 # among them: it asks the machine for one and tells the app which it got, which
 # is what the last case here is about.
-read -r PORT SQUATTED SECOND_PORT <<<"$(python3 - <<'PY'
+read -r PORT <<<"$(python3 - <<'PY'
 import socket
-held = [socket.socket() for _ in range(3)]
-for sock in held:
-    sock.bind(("127.0.0.1", 0))
-print(*(sock.getsockname()[1] for sock in held))
-for sock in held:
-    sock.close()
+sock = socket.socket()
+sock.bind(("127.0.0.1", 0))
+print(sock.getsockname()[1])
+sock.close()
 PY
 )"
-if [ -z "${PORT:-}" ] || [ -z "${SQUATTED:-}" ] || [ -z "${SECOND_PORT:-}" ]; then
+if [ -z "${PORT:-}" ]; then
   fail "could not find free ports to serve on"
   echo; echo "$failures failure(s)"; exit 1
 fi
@@ -112,8 +141,8 @@ trap cleanup EXIT
 
 # `env -i` is the point of the whole check: CARGO_MANIFEST_DIR, every BEADS_*
 # and ATELIER_* switch, and whatever else a build or a session left in the
-# environment are all gone. PATH stays because node and Claude Code are the
-# reader's own programs, not this project's.
+# environment are all gone. PATH stays because git, bd and the selected AI
+# provider are the reader's own programs, not this project's.
 LOG="$WORK/said.txt"
 env -i \
   PATH="$PATH" \
@@ -152,14 +181,12 @@ else
   fail "the screens are not served (/ answers $code)"
 fi
 
-# ------------------------------------------------------------ and its helper
+# --------------------------------------------------------- and its native chat
 
-say "Is the chat helper behind it"
+say "Is native chat behind it"
 
-# The first run fetches the one kit the helper needs, which costs the network
-# once. Three minutes is for that; every run after it is immediate.
 answered=0
-for _ in $(seq 1 180); do
+for _ in $(seq 1 20); do
   code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/workbench/health")
   if [ "$code" = "200" ]; then
     answered=1
@@ -170,123 +197,23 @@ for _ in $(seq 1 180); do
 done
 
 if [ "$answered" = "1" ]; then
-  pass "the chat helper answers (/api/workbench/health returns 200)"
+  pass "native chat answers (/api/workbench/health returns 200)"
 else
-  fail "the chat helper never answered; the program said:"
+  fail "native chat never answered; the program said:"
   sed 's/^/      /' "$LOG"
 fi
 
-# What it wrote, and where — under the home directory made for this run and
-# nowhere near this checkout.
-LAID="$HOME_DIR/.local/share/atelier/helper/workbench/src/server.ts"
-if [ -f "$LAID" ]; then
-  pass "it wrote its helper out for itself, under the home it was given"
+say "No JavaScript runtime was installed"
+if find "$WORK" "$HOME_DIR" -type f \( -name node -o -name node.exe -o -name npm -o -name npm.cmd \) -print | grep -q .; then
+  fail "the release installed a Node/npm executable"
 else
-  fail "no helper was written to $LAID"
+  pass "the release installed no node, node.exe, npm or npm.cmd"
 fi
-
-KIT="$HOME_DIR/.local/share/atelier/helper/workbench/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
-if [ -f "$KIT" ]; then
-  pass "it fetched the one kit it does not carry, into the home it was given"
+if find "$WORK" "$HOME_DIR" -type d -name node_modules -print | grep -q .; then
+  fail "the release installed node_modules"
 else
-  fail "the kit was never fetched to $KIT"
+  pass "the release installed no node_modules"
 fi
-
-TOOLS="$HOME_DIR/.local/share/atelier/tools/build.py"
-if [ -f "$TOOLS" ]; then
-  pass "it wrote the report tools out too"
-else
-  fail "no report tools were written to $TOOLS"
-fi
-
-# ------------------------------------------- and a stranger on the chat's port
-
-say "A stranger holding the chat's port"
-
-# The fault this proves gone: the app forwarded to a fixed local port on trust.
-# Whatever program held it received the reader's conversation and answered the
-# health check in the app's name — a binary whose helper never started once
-# still reported the chat healthy (bw-8um.3.5). Here a stranger answers 200 to
-# everything on the port a second copy of the app is told to put its helper on,
-# so that helper can never bind it, and the app has to say so.
-python3 - "$SQUATTED" >"$WORK/stranger.txt" 2>&1 <<'PY' &
-import http.server, socketserver, sys
-
-class Stranger(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("content-type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"status":"ok","sidecar":"not ours"}')
-
-    def log_message(self, *args):
-        pass
-
-socketserver.TCPServer.allow_reuse_address = True
-socketserver.TCPServer(("127.0.0.1", int(sys.argv[1])), Stranger).serve_forever()
-PY
-STRANGER=$!
-
-held=0
-for _ in $(seq 1 20); do
-  if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SQUATTED/health")" = "200" ]; then
-    held=1
-    break
-  fi
-  sleep 0.5
-done
-
-if [ "$held" != "1" ]; then
-  fail "could not put a stranger on port $SQUATTED, so this case proves nothing"
-else
-  pass "a stranger answers 200 on port $SQUATTED"
-
-  SECOND_LOG="$WORK/second.txt"
-  env -i \
-    PATH="$PATH" \
-    HOME="$HOME_DIR" \
-    ATELIER_HOST=127.0.0.1 \
-    ATELIER_PORT="$SECOND_PORT" \
-    BEADS_WORKBENCH_PORT="$SQUATTED" \
-    "$WORK/atelier" >"$SECOND_LOG" 2>&1 &
-  SECOND=$!
-
-  up=0
-  for _ in $(seq 1 60); do
-    if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SECOND_PORT/api/health")" = "200" ]; then
-      up=1
-      break
-    fi
-    kill -0 "$SECOND" 2>/dev/null || break
-    sleep 1
-  done
-
-  if [ "$up" != "1" ]; then
-    fail "a second copy told to use port $SQUATTED never served at all; it said:"
-    sed 's/^/      /' "$SECOND_LOG"
-  else
-    # Long enough for its helper to have tried, failed to bind and been
-    # restarted at least once, which is when the old code answered 200.
-    sleep 8
-    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SECOND_PORT/api/workbench/health")
-    if [ "$code" = "200" ]; then
-      fail "the chat reported itself healthy out of a stranger's process (/api/workbench/health returned $code)"
-    else
-      pass "the chat says it is not running ($code), and the stranger's answer never reaches the reader"
-    fi
-    if grep -q "answering at" "$SECOND_LOG"; then
-      fail "the second copy claimed a helper was answering when none of its own ever bound"
-    else
-      pass "no address was recorded, because no helper of its own announced one"
-    fi
-  fi
-
-  kill "$SECOND" 2>/dev/null
-  wait "$SECOND" 2>/dev/null
-fi
-
-kill "$STRANGER" 2>/dev/null
-wait "$STRANGER" 2>/dev/null
 
 say "$failures failure(s)"
 [ "$failures" = "0" ]

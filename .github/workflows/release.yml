@@ -56,34 +56,18 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: server
 
-      # Each release archive carries the program and a checked Node 24.20.0
-      # runtime side by side, so the machine that unpacks it needs no Node of its
-      # own for the Chat tab (bw-oesd.2).
       - name: Bundle archive (Unix)
         if: runner.os != 'Windows'
         run: |
-          bash scripts/bundle-node.sh \
-            --target "${{ matrix.target }}" \
-            --binary "server/target/${{ matrix.target }}/release/atelier" \
-            --out "${{ matrix.artifact }}.tar.gz"
+          tar -czf "${{ matrix.artifact }}.tar.gz" \
+            -C "server/target/${{ matrix.target }}/release" atelier
 
       - name: Bundle archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $node = 'v24.20.0'
-          $base = "node-$node-win-x64"
-          Invoke-WebRequest -Uri "https://nodejs.org/dist/$node/$base.zip" -OutFile node.zip
-          Invoke-WebRequest -Uri "https://nodejs.org/dist/$node/SHASUMS256.txt" -OutFile SHASUMS256.txt
-          $want = ((Select-String -Path SHASUMS256.txt -Pattern "  $base.zip$").Line -split '\s+')[0]
-          $got = (Get-FileHash node.zip -Algorithm SHA256).Hash.ToLower()
-          if ($got -ne $want) { throw "node zip does not match Node's published fingerprint" }
-          Expand-Archive node.zip -DestinationPath nodedir
-          New-Item -ItemType Directory -Force -Path stage | Out-Null
-          Copy-Item "server/target/${{ matrix.target }}/release/atelier.exe" stage/atelier.exe
-          Copy-Item "nodedir/$base/node.exe" stage/node.exe
-          tar -czf "${{ matrix.artifact }}.tar.gz" -C stage atelier.exe node.exe
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C "server/target/${{ matrix.target }}/release" atelier.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -4,12 +4,8 @@ class Atelier < Formula
   version "__VERSION__"
   license "MIT"
 
-  # No `depends_on "node"`, and now for a stronger reason than before: the
-  # archive carries its own Node runtime beside the program, so the Chat tab
-  # needs nothing installed for it. Depending on node would have Homebrew install
-  # and link its own ahead of whatever node manager the reader already runs —
-  # which is how most people who have node have it — and quietly change which
-  # node their other work is built with, for a runtime this no longer uses.
+  # Chat is implemented in the Rust program, so Node is neither a dependency nor
+  # a payload hidden inside this package.
 
   on_macos do
     on_arm do
@@ -30,12 +26,7 @@ class Atelier < Formula
   end
 
   def install
-    # The archive carries the program and its Node runtime side by side. Both go
-    # into libexec together so they stay siblings, and a relative symlink puts
-    # the program on the PATH; the program follows that link back to itself and
-    # finds node right beside it (bw-oesd.2).
-    libexec.install "atelier", "node"
-    bin.install_symlink libexec/"atelier"
+    bin.install "atelier"
   end
 
   def caveats
@@ -49,11 +40,9 @@ class Atelier < Formula
       It answers your whole network, so the board opens on your phone —
       starting it prints the address to type there.
 
-      The Chat tab carries its own Node runtime, so you need neither Node nor npm
-      installed for it — the board, the screens, and the chat all work as they
-      come.
+      The Chat tab is part of Atelier itself, so you need neither Node nor npm.
 
-      `init` needs python 3.11+ and the Beads CLI (bd):
+      Project tracking needs git and the Beads CLI (bd):
         https://github.com/gastownhall/beads
 
       None of these has to be on your PATH. Atelier looks there first, then in

@@ -90,8 +90,8 @@ entering the version (e.g. `v0.12.0`) — the commit still has to be online firs
 
 1. **build** job — for each of macOS arm64, macOS x64, Linux x64, Windows x64:
    `npm ci` → `npm run build` (static export → `out/`) → `cargo build --release`
-   → bundle the program and a checked Node 24.20.0 runtime side by side into
-   `atelier-<platform>.tar.gz` → upload the archive as an artifact.
+   → package the single program into `atelier-<platform>.tar.gz` → upload the
+   archive as an artifact.
 2. **release** job (Ubuntu):
    - downloads all four archives,
    - generates `SHA256SUMS.txt`,
