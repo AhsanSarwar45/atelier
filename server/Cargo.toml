@@ -47,6 +47,9 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# `test-util` gives the tests a pausable clock, so the supervisor's growing
+# backoff can be watched go by without the wall-clock waits it names.
+tokio = { version = "1", features = ["test-util"] }
 # Drives a router in-process, so the guard over the terminal can be proved
 # without binding a port on a machine that may be running the real app.
 tower = { version = "0.4", features = ["util"] }

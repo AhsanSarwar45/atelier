@@ -234,106 +234,135 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
     let entry = entry.display().to_string();
 
     tokio::spawn(async move {
-        // The kit the helper talks to Claude with is fetched here rather than
-        // before the server binds, so a first run serves the board while it
-        // happens and only the Chat tab waits.
-        if let Some(package) = package {
-            if let Err(e) = crate::helper::fetch_kit(&package).await {
-                warn!("workbench: {e}");
-                return;
-            }
-        }
-
         // Invented here and told to nobody else, so a program that guesses the
         // port still cannot drive the reader's chat.
         let token = uuid::Uuid::new_v4().to_string();
-
-        let mut backoff = Duration::from_secs(1);
-        loop {
-            info!("workbench: starting sidecar ({entry})");
-            // The runtime is looked for and started by its own path rather
-            // than by a bare name: a copy the machine starts at login was
-            // never handed the reader's own list of places, and the one thing
-            // the Chat tab is made of would be missing on a computer that has
-            // it (bw-oxrg). Asked again on every turn of this loop, and the
-            // remembered answer dropped whenever it is no, so a runtime
-            // installed on the advice below is picked up without a restart.
-            let runtime = match crate::routes::find_runtime() {
-                Some(runtime) => runtime,
-                None => {
-                    crate::routes::forget_tools();
-                    warn!("workbench: no node on this computer — the Chat tab cannot answer. \
-                           Install Node {NEEDS}+ and it will be picked up here.");
-                    backoff = waited(backoff).await;
-                    continue;
-                }
-            };
-            if let Some(said) = too_old(&runtime).await {
-                crate::routes::forget_tools();
-                warn!("workbench: {said} — the Chat tab cannot answer until there is a newer one.");
-                backoff = waited(backoff).await;
-                continue;
-            }
-            let mut node = tokio::process::Command::new(&runtime);
-            node.args([
-                "--experimental-strip-types",
-                "--disable-warning=ExperimentalWarning",
-                "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
-                &entry,
-            ]);
-            node.env("ATELIER_WORKBENCH_TOKEN", &token);
-            // Read, not inherited: the helper's first line says which port it
-            // bound, and that line is the only thing that opens the proxy.
-            node.stdout(Stdio::piped());
-            // Where this machine keeps our data is asked once, here, and told
-            // to the helper. Left to work it out, it knew one kind of machine
-            // and only one, and wrote its chats where nothing reads them
-            // (bw-8um.3.14).
-            if let Some(dir) = crate::identity::data_dir() {
-                node.env("ATELIER_DATA_DIR", dir);
-            }
-            if let Some(dir) = crate::identity::rules_dir() {
-                node.env("ATELIER_RULES_DIR", dir);
-            }
-            let child = node.kill_on_drop(true).spawn();
-
-            match child {
-                Err(e) => {
-                    warn!("workbench: could not start node ({e}) — the Chat tab will be offline");
-                    return;
-                }
-                Ok(mut c) => {
-                    let said = c.stdout.take();
-                    let mine = token.clone();
-                    let listener = tokio::spawn(async move {
-                        let Some(said) = said else { return };
-                        let mut lines = BufReader::new(said).lines();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            match line.strip_prefix(ANNOUNCE) {
-                                Some(address) => {
-                                    let base = format!("http://{}", address.trim());
-                                    info!("workbench: sidecar answering at {base}");
-                                    set_live(Some(Live {
-                                        base,
-                                        token: Some(mine.clone()),
-                                    }));
-                                }
-                                None => info!("workbench: {line}"),
-                            }
-                        }
-                    });
-                    let status = c.wait().await;
-                    // Forgotten before anything else can be reached at that
-                    // port: the operating system is free to hand it out again
-                    // the moment the child is gone.
-                    set_live(None);
-                    listener.abort();
-                    warn!("workbench: sidecar exited ({status:?}); restarting in {backoff:?}");
-                }
-            }
-            backoff = waited(backoff).await;
-        }
+        // Bring the sidecar up and keep it up: whatever goes wrong on one try,
+        // the next is only a growing pause away (bw-oesd.2).
+        keep_alive(move || {
+            let entry = entry.clone();
+            let package = package.clone();
+            let token = token.clone();
+            async move { attempt_sidecar(entry, package, token).await }
+        })
+        .await;
     });
+}
+
+/// Bring an attempt back every time it ends, waiting out a pause that grows with
+/// each failure and caps out, so no single failure -- a kit that would not
+/// fetch, a runtime that would not start, a helper that exited -- ends the Chat
+/// tab for the rest of the run (bw-oesd.2). The pause is the only thing between
+/// tries, so a machine that never comes good is retried gently rather than in a
+/// tight spin.
+async fn keep_alive<F, Fut>(mut attempt: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let mut backoff = Duration::from_secs(1);
+    loop {
+        attempt().await;
+        backoff = waited(backoff).await;
+    }
+}
+
+/// One try at a live sidecar: fetch the kit if it is not there yet, find and
+/// start the runtime, and stay with the helper until it exits. Every way this
+/// can fail returns rather than looping, because the thing above it --
+/// [`keep_alive`] -- turns a return into a wait and another try. Before this,
+/// two of these ways returned straight out of the supervisor instead, and a
+/// single first-run stumble -- the kit's one network fetch, or a runtime that
+/// would not start -- left the Chat tab dead for the rest of the run
+/// (bw-oesd.2).
+async fn attempt_sidecar(entry: String, package: Option<PathBuf>, token: String) {
+    // The kit the helper talks to Claude with is fetched here rather than
+    // before the server binds, so a first run serves the board while it happens
+    // and only the Chat tab waits. The fetch is guarded by a marker, so once it
+    // is done the later tries cost nothing.
+    if let Some(package) = &package {
+        if let Err(e) = crate::helper::fetch_kit(package).await {
+            warn!("workbench: {e} — the Chat tab will try again");
+            return;
+        }
+    }
+
+    info!("workbench: starting sidecar ({entry})");
+    // The runtime is looked for and started by its own path rather than by a
+    // bare name: a copy the machine starts at login was never handed the
+    // reader's own list of places, and the one thing the Chat tab is made of
+    // would be missing on a computer that has it (bw-oxrg). Asked again on every
+    // try, and the remembered answer dropped whenever it is no, so a runtime
+    // installed on the advice below is picked up without a restart.
+    let runtime = match crate::routes::find_runtime() {
+        Some(runtime) => runtime,
+        None => {
+            crate::routes::forget_tools();
+            warn!("workbench: no node on this computer — the Chat tab cannot answer. \
+                   Install Node {NEEDS}+ and it will be picked up here.");
+            return;
+        }
+    };
+    if let Some(said) = too_old(&runtime).await {
+        crate::routes::forget_tools();
+        warn!("workbench: {said} — the Chat tab cannot answer until there is a newer one.");
+        return;
+    }
+    let mut node = tokio::process::Command::new(&runtime);
+    node.args([
+        "--experimental-strip-types",
+        "--disable-warning=ExperimentalWarning",
+        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        &entry,
+    ]);
+    node.env("ATELIER_WORKBENCH_TOKEN", &token);
+    // Read, not inherited: the helper's first line says which port it bound, and
+    // that line is the only thing that opens the proxy.
+    node.stdout(Stdio::piped());
+    // Where this machine keeps our data is asked once, here, and told to the
+    // helper. Left to work it out, it knew one kind of machine and only one, and
+    // wrote its chats where nothing reads them (bw-8um.3.14).
+    if let Some(dir) = crate::identity::data_dir() {
+        node.env("ATELIER_DATA_DIR", dir);
+    }
+    if let Some(dir) = crate::identity::rules_dir() {
+        node.env("ATELIER_RULES_DIR", dir);
+    }
+    let child = node.kill_on_drop(true).spawn();
+
+    match child {
+        Err(e) => {
+            warn!("workbench: could not start node ({e}) — the Chat tab will try again");
+        }
+        Ok(mut c) => {
+            let said = c.stdout.take();
+            let mine = token.clone();
+            let listener = tokio::spawn(async move {
+                let Some(said) = said else { return };
+                let mut lines = BufReader::new(said).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    match line.strip_prefix(ANNOUNCE) {
+                        Some(address) => {
+                            let base = format!("http://{}", address.trim());
+                            info!("workbench: sidecar answering at {base}");
+                            set_live(Some(Live {
+                                base,
+                                token: Some(mine.clone()),
+                            }));
+                        }
+                        None => info!("workbench: {line}"),
+                    }
+                }
+            });
+            let status = c.wait().await;
+            // Forgotten before anything else can be reached at that port: the
+            // operating system is free to hand it out again the moment the child
+            // is gone.
+            set_live(None);
+            listener.abort();
+            warn!("workbench: sidecar exited ({status:?}); the Chat tab will restart it");
+        }
+    }
 }
 
 /// The oldest runtime the helper can be started with, as a reader writes it.
@@ -384,6 +413,48 @@ fn release(said: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bug this guards against: when the very first try to bring the sidecar
+    /// up failed -- the kit's one network fetch, or a runtime that would not
+    /// start -- the supervisor returned and the Chat tab was dead for the rest
+    /// of the run. `keep_alive` is what makes a failed try wait and come round
+    /// again, so a try that always "fails" here (returns at once) must be seen
+    /// more than once; a supervisor that gave up after the first would leave the
+    /// count at one forever.
+    #[tokio::test(start_paused = true)]
+    async fn a_failing_try_is_retried_rather_than_ending_the_chat_tab() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let tries = Arc::new(AtomicUsize::new(0));
+        let counted = tries.clone();
+        let supervisor = tokio::spawn(async move {
+            keep_alive(move || {
+                let counted = counted.clone();
+                async move {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .await;
+        });
+
+        // The test clock is paused, so the growing backoff between tries never
+        // costs wall-clock time: let the supervisor take its first try and
+        // settle onto its sleep, then walk the clock past several backoffs, each
+        // of which lets the next try run.
+        tokio::task::yield_now().await;
+        for _ in 0..6 {
+            tokio::time::advance(Duration::from_secs(60)).await;
+            tokio::task::yield_now().await;
+        }
+        supervisor.abort();
+
+        let seen = tries.load(Ordering::SeqCst);
+        assert!(
+            seen >= 3,
+            "a failing try must be retried, not left to end the Chat tab; saw {seen} tries"
+        );
+    }
 
     /// A runtime is judged on what it says it is, and only turned away when
     /// what it says is older than the word the helper is started with.
