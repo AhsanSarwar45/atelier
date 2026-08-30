@@ -15,6 +15,8 @@ pub mod media;
 pub mod metadata;
 pub mod projection;
 pub mod protocol;
+pub mod provider_defaults;
+pub mod registry;
 pub mod screen_check;
 pub mod store;
 pub mod summary;
