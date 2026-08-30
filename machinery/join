@@ -54,6 +54,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -704,43 +705,32 @@ def same(here, there):
 
 
 def install(say):
-    """Point the machine-wide Claude home at the definitions kept here.
-
-    One link per item rather than one for the whole directory, so a project keeps
-    its own beside them — a subject-flavoured locator or researcher overrides the
-    shared one by name, and the craft definitions stay one file for everybody.
-
-    A link and not a copy, because a copy is the thing this whole home exists to
-    stop: `machinery/copies` reads exactly this and refuses a home that has
-    stopped pointing.
-    """
+    """Remove only personal provider artifacts demonstrably owned by Atelier."""
     for kind in SHARED:
         mine = os.path.join(CRAFT, kind)
         if not os.path.isdir(mine):
             continue
         where = os.path.join(MACHINE, kind)
-        os.makedirs(where, exist_ok=True)
+        if not os.path.isdir(where):
+            continue
         for name in sorted(os.listdir(mine)):
             link, target = os.path.join(where, name), os.path.join(mine, name)
-            if os.path.islink(link):
-                if os.path.realpath(link) == target:
-                    continue
+            if os.path.islink(link) and os.path.realpath(link) == target:
                 os.remove(link)
-            elif os.path.exists(link):
-                # Identical content is the ordinary case: a definition written
-                # into the machine home first and taken in here afterwards. One
-                # that differs is somebody's own and is left exactly where it is.
-                if not same(link, target):
-                    say("kept   %s — it is not what this home keeps; compare them" % link)
-                    continue
-                shutil.rmtree(link) if os.path.isdir(link) else os.remove(link)
-            os.symlink(target, link)
-            say("link   %s -> %s" % (link, target))
-    # Atelier and Beads are ambient policy injected into Atelier-owned sessions.
-    # Publishing them as optional skills duplicates their text and claims generic
-    # names in the user's provider namespace.
-    install_review_skill(say)
-    install_external_review(say)
+                say("removed Atelier-owned %s" % link)
+    for provider in (MACHINE, CODEX_MACHINE):
+        for name in ("atelier", "beads", "external-review"):
+            link = os.path.join(provider, "skills", name)
+            target = os.path.join(HOME, "skills", name)
+            if os.path.islink(link) and os.path.realpath(link) == target:
+                os.remove(link)
+                say("removed Atelier-owned %s" % link)
+    review = os.path.join(PERSONAL_BIN, "external-review")
+    review_target = os.path.join(HOME, "external-review", "scripts", "external_review.py")
+    if os.path.islink(review) and os.path.realpath(review) == review_target:
+        os.remove(review)
+        say("removed Atelier-owned %s" % review)
+    remove_session_hooks(say)
 
 
 def install_tolerantly(say):
@@ -754,86 +744,56 @@ def install_tolerantly(say):
         return False
 
 
-def install_review_skill(say):
-    """Expose only the still-on-demand review skill until its runner migrates."""
-    source = os.path.join(HOME, "skills")
-    for provider in (MACHINE, CODEX_MACHINE):
-        target = os.path.join(provider, "skills")
-        os.makedirs(target, exist_ok=True)
-        for name in ("external-review",):
-            link = os.path.join(target, name)
-            want = os.path.join(source, name)
-            if os.path.islink(link) and os.path.realpath(link) == want:
-                continue
-            if os.path.lexists(link):
-                if not same(link, want):
-                    say("kept   %s — it is not Atelier's skill" % link)
-                    continue
-                shutil.rmtree(link) if os.path.isdir(link) and not os.path.islink(link) \
-                    else os.remove(link)
-            os.symlink(want, link)
-            say("skill  %s -> %s" % (link, want))
+def context_hook(command):
+    """Whether a personal hook command is Atelier's old session-context hook."""
+    try:
+        words = shlex.split(command or "")
+    except ValueError:
+        return False
+    if not any(os.path.basename(word) == "session-context.py" for word in words):
+        return False
+    return HOME in (command or "") or (WORD and words[:2] == [WORD, "hook"])
 
 
-def install_external_review(say):
-    """Expose the provider-neutral bounded runner as a personal command."""
-    want = os.path.join(HOME, "external-review", "scripts", "external_review.py")
-    link = os.path.join(PERSONAL_BIN, "external-review")
-    os.makedirs(PERSONAL_BIN, exist_ok=True)
-    if os.path.islink(link) and os.path.realpath(link) == want:
-        return
-    if os.path.lexists(link):
-        if not same(link, want):
-            say("kept   %s — it is not Atelier's external-review runner" % link)
-            return
-        os.remove(link)
-    os.symlink(want, link)
-    say("review %s -> %s" % (link, want))
-
-
-def install_session_hooks(say):
-    """Merge the conditional context hook into personal provider settings."""
-    command = typed("session-context.py") or \
-        "python3 %s" % os.path.join(HOME, "hooks", "session-context.py")
+def remove_session_hooks(say):
+    """Remove the exact legacy context hook while preserving every neighboring hook."""
     for where in (os.path.join(MACHINE, "settings.json"),
                   os.path.join(CODEX_MACHINE, "hooks.json")):
+        if not os.path.exists(where):
+            continue
         try:
-            if os.path.exists(where):
-                with open(where) as source:
-                    held = json.load(source)
-            else:
-                held = {}
+            with open(where) as source:
+                held = json.load(source)
         except (OSError, ValueError) as why:
-            say("kept   %s — it cannot be merged (%s)" % (where, why))
+            say("kept   %s — legacy hook cannot be removed safely (%s)" % (where, why))
             continue
         if not isinstance(held, dict):
             say("kept   %s — it is not a settings object" % where)
             continue
-        hooks = held.setdefault("hooks", {})
-        if not isinstance(hooks, dict):
-            say("kept   %s — its hooks are not an object" % where)
+        hooks = held.get("hooks")
+        if not isinstance(hooks, dict) or "SessionStart" not in hooks:
             continue
-        blocks = hooks.setdefault("SessionStart", [])
+        blocks = hooks.get("SessionStart")
         if not isinstance(blocks, list):
             say("kept   %s — its SessionStart hooks are not a list" % where)
             continue
+        changed = False
         for block in blocks:
             if isinstance(block, dict):
-                block["hooks"] = [hook for hook in block.get("hooks", [])
-                                  if not runs(hook.get("command"), "session-context.py")]
+                before = block.get("hooks", [])
+                after = [hook for hook in before if not (isinstance(hook, dict)
+                         and context_hook(hook.get("command")))]
+                changed = changed or len(after) != len(before)
+                block["hooks"] = after
         blocks[:] = [block for block in blocks if block.get("hooks")]
-        matcher = "startup|resume|clear" if where.endswith("hooks.json") else ""
-        entry = {"hooks": [{"type": "command", "command": command}]}
-        if matcher:
-            entry["matcher"] = matcher
-        blocks.append(entry)
-        os.makedirs(os.path.dirname(where), exist_ok=True)
+        if not changed:
+            continue
         temporary = where + ".atelier-new"
         with open(temporary, "w") as fh:
             json.dump(held, fh, indent=2)
             fh.write("\n")
         os.replace(temporary, where)
-        say("hook   %s loads conditional Atelier session context" % where)
+        say("removed Atelier-owned session hook from %s" % where)
 
 
 BARE = re.compile(r"^[A-Za-z0-9_-]+$")

@@ -31,8 +31,14 @@ before they reach chat.
   exists in a file.
 - For one durable image, run
   `atelier tool present image --file PATH --alt TEXT [--caption TEXT]`.
+  When another Atelier tool already returned a content-addressed asset, use
+  `atelier tool present image --asset DIGEST.EXT --alt TEXT [--caption TEXT]`
+  without opening or uploading the image again.
 - For durable before/after proof, run
   `atelier tool present compare --before PATH --after PATH --before-alt TEXT --after-alt TEXT [--mode side_by_side|wipe]`.
+  Existing evidence uses `--before-asset DIGEST.EXT --after-asset DIGEST.EXT`
+  with the same alt and mode options. Each side must use either its file option
+  or its asset option, never both.
 - For a rich diagram, custom animated scene, or interactive mockup, create a
   visual artifact JSON file, then run `atelier tool present artifact --file FILE`.
 

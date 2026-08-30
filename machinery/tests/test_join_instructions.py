@@ -66,71 +66,81 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertFalse(join.copy_if_absent(str(legacy), str(personal)))
             self.assertEqual('[projects]\nnew = "/new"\n', personal.read_text())
 
-    def test_personal_install_adds_only_the_on_demand_review_skill(self):
+    def test_personal_install_removes_only_atelier_owned_provider_artifacts(self):
         join = load_join()
         join.WORD = "atelier"
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
-            project = root / "company-project"
-            project.mkdir()
             claude_home = root / ".claude"
             codex_home = root / ".codex"
-            claude_home.mkdir()
-            codex_home.mkdir()
+            personal_bin = root / "bin"
+            (claude_home / "agents").mkdir(parents=True)
+            (claude_home / "skills").mkdir()
+            (codex_home / "skills").mkdir(parents=True)
+            personal_bin.mkdir()
             (claude_home / "CLAUDE.md").write_text("Claude-only personal rule.\n")
             (codex_home / "AGENTS.md").write_text("Codex-only personal rule.\n")
             join.MACHINE = str(claude_home)
             join.CODEX_MACHINE = str(codex_home)
-            join.install_review_skill(lambda _: None)
+            join.PERSONAL_BIN = str(personal_bin)
+            (claude_home / "agents" / "reviewer.md").symlink_to(
+                ROOT / ".claude/agents/reviewer.md")
+            (claude_home / "agents" / "mine.md").symlink_to(root / "mine.md")
+            for provider in (claude_home, codex_home):
+                (provider / "skills" / "atelier").symlink_to(
+                    ROOT / "machinery/skills/atelier", target_is_directory=True)
+                (provider / "skills" / "external-review").mkdir()
+            (personal_bin / "external-review").symlink_to(
+                ROOT / "machinery/external-review/scripts/external_review.py")
+
+            join.install(lambda _: None)
 
             self.assertEqual((claude_home / "CLAUDE.md").read_text(),
                              "Claude-only personal rule.\n")
             self.assertEqual((codex_home / "AGENTS.md").read_text(),
                              "Codex-only personal rule.\n")
             for provider in (claude_home, codex_home):
-                self.assertTrue((provider / "skills" / "external-review").is_symlink())
                 self.assertFalse((provider / "skills" / "atelier").exists())
-                self.assertFalse((provider / "skills" / "beads").exists())
-            self.assertFalse((claude_home / "settings.json").exists())
-            self.assertFalse((codex_home / "hooks.json").exists())
-            self.assertEqual(list(project.iterdir()), [])
+                self.assertTrue((provider / "skills" / "external-review").is_dir())
+            self.assertFalse((claude_home / "agents" / "reviewer.md").exists())
+            self.assertTrue((claude_home / "agents" / "mine.md").is_symlink())
+            self.assertFalse((personal_bin / "external-review").exists())
 
-    def test_personal_install_adds_external_review_command(self):
+    def test_personal_cleanup_removes_only_its_session_hook(self):
         join = load_join()
-        with tempfile.TemporaryDirectory() as held:
-            join.PERSONAL_BIN = str(Path(held) / "bin")
-            join.install_external_review(lambda _: None)
-            command = Path(join.PERSONAL_BIN) / "external-review"
-            self.assertTrue(command.is_symlink())
-            self.assertTrue(command.resolve().samefile(
-                ROOT / "machinery/external-review/scripts/external_review.py"))
-
-    def test_reinstalling_keeps_one_session_hook(self):
-        join = load_join()
-        with tempfile.TemporaryDirectory() as held:
-            root = Path(held)
-            join.MACHINE = str(root / ".claude")
-            join.CODEX_MACHINE = str(root / ".codex")
-            join.install_session_hooks(lambda _: None)
-            join.install_session_hooks(lambda _: None)
-            hooks = (root / ".codex" / "hooks.json").read_text()
-            self.assertEqual(hooks.count("session-context.py"), 1)
-
-    def test_personal_hook_preserves_existing_provider_hooks(self):
-        join = load_join()
+        join.WORD = "atelier"
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
             join.MACHINE = str(root / ".claude")
             join.CODEX_MACHINE = str(root / ".codex")
             Path(join.MACHINE).mkdir()
-            (Path(join.MACHINE) / "settings.json").write_text(
-                '{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"mine"}]}]}}')
+            (Path(join.MACHINE) / "settings.json").write_text(json.dumps({"hooks": {
+                "PreToolUse": [{"hooks": [{"type": "command", "command": "mine"}]}],
+                "SessionStart": [{"hooks": [
+                    {"type": "command", "command": "atelier hook session-context.py"},
+                    {"type": "command", "command": "my-session-context.py"},
+                ]}],
+            }}))
 
-            join.install_session_hooks(lambda _: None)
+            join.remove_session_hooks(lambda _: None)
 
             settings = (Path(join.MACHINE) / "settings.json").read_text()
             self.assertIn('"command": "mine"', settings)
-            self.assertIn("session-context.py", settings)
+            self.assertIn("my-session-context.py", settings)
+            self.assertNotIn('atelier hook session-context.py', settings)
+
+    def test_malformed_personal_settings_are_left_byte_for_byte(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            where = Path(held) / ".claude/settings.json"
+            where.parent.mkdir()
+            where.write_text("not json\n")
+            join.MACHINE = str(where.parent)
+            join.CODEX_MACHINE = str(Path(held) / ".codex")
+            messages = []
+            join.remove_session_hooks(messages.append)
+            self.assertEqual(where.read_text(), "not json\n")
+            self.assertIn("cannot be removed safely", messages[0])
 
     def test_setup_does_not_rewrite_legacy_or_user_project_instructions(self):
         join = load_join()

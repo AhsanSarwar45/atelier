@@ -53,6 +53,36 @@ describe('managed presentation media', () => {
     expect(readdirSync(media)).toHaveLength(2);
   });
 
+  it('presents an existing content-addressed asset without uploading it again', () => {
+    const path = png();
+    const first = widgetSpecs(present(['image', '--file', path, '--alt', 'First']))[0] as { asset: string };
+    const output = present(['image', '--asset', first.asset, '--alt', 'Reused']);
+    expect(widgetSpecs(output)).toEqual([expect.objectContaining({ type: 'image', asset: first.asset, alt: 'Reused' })]);
+    expect(readdirSync(media)).toHaveLength(1);
+  });
+
+  it('compares two existing content-addressed assets', () => {
+    const before = widgetSpecs(present(['image', '--file', png(), '--alt', 'Before']))[0] as { asset: string };
+    const afterPath = join(root, 'after.gif');
+    writeFileSync(afterPath, Buffer.from('GIF89a pixels'));
+    const after = widgetSpecs(present(['image', '--file', afterPath, '--alt', 'After']))[0] as { asset: string };
+    const output = present(['compare', '--before-asset', before.asset, '--after-asset', after.asset,
+      '--before-alt', 'Before', '--after-alt', 'After']);
+    expect(widgetSpecs(output)).toEqual([expect.objectContaining({
+      type: 'image_compare', before: expect.objectContaining({ asset: before.asset }),
+      after: expect.objectContaining({ asset: after.asset }),
+    })]);
+  });
+
+  it('refuses invented, tampered, and ambiguous asset inputs', () => {
+    const path = png();
+    const asset = (widgetSpecs(present(['image', '--file', path, '--alt', 'First']))[0] as { asset: string }).asset;
+    expect(() => present(['image', '--asset', `${'a'.repeat(64)}.png`, '--alt', 'Missing'])).toThrow('does not exist');
+    writeFileSync(join(media, asset), Buffer.from('GIF89a changed'));
+    expect(() => present(['image', '--asset', asset, '--alt', 'Changed'])).toThrow('failed content validation');
+    expect(() => present(['image', '--file', path, '--asset', asset, '--alt', 'Both'])).toThrow('exactly one');
+  });
+
   it('refuses files whose bytes are not a supported image', () => {
     const path = join(root, 'pretend.png');
     writeFileSync(path, 'not an image');

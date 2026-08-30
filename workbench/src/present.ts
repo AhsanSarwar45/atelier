@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -58,6 +58,27 @@ function importImage(path: string, read: ReadPresentationFile, directory: string
   return asset;
 }
 
+const ASSET = /^[0-9a-f]{64}\.(png|jpg|gif|webp)$/;
+
+function existingImage(asset: string, directory: string): string {
+  const match = ASSET.exec(asset);
+  if (!match) throw new Error('--asset must be a lowercase content-addressed PNG, JPEG, GIF, or WebP name');
+  const path = join(directory, asset);
+  if (!existsSync(path)) throw new Error(`presentation asset does not exist: ${asset}`);
+  const bytes = readFileSync(path);
+  const kind = imageKind(bytes);
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (kind !== match[1] || `${digest}.${kind}` !== asset) throw new Error(`presentation asset failed content validation: ${asset}`);
+  return asset;
+}
+
+function imageAsset(args: string[], fileFlag: string, assetFlag: string, read: ReadPresentationFile, directory: string): string {
+  const file = option(args, fileFlag);
+  const asset = option(args, assetFlag);
+  if (Boolean(file) === Boolean(asset)) throw new Error(`provide exactly one of ${fileFlag} or ${assetFlag}`);
+  return asset ? existingImage(asset, directory) : importImage(file!, read, directory);
+}
+
 function importArtifact(path: string, read: ReadPresentationFile, directory: string): { asset: string; title: string; kind: string } {
   const bytes = read(path);
   if (bytes.length > 1024 * 1024) throw new Error(`${path} is larger than 1 MiB`);
@@ -89,16 +110,16 @@ function rendered(args: string[], stdin: string, read: ReadPresentationFile, dir
     return `${rendered}\n`;
   }
   if (args[0] === 'image') {
-    validateOptions(args, ['--file', '--alt', '--caption']);
-    const asset = importImage(option(args, '--file', true)!, read, directory);
+    validateOptions(args, ['--file', '--asset', '--alt', '--caption']);
+    const asset = imageAsset(args, '--file', '--asset', read, directory);
     const alt = option(args, '--alt', true)!;
     const caption = option(args, '--caption');
     return block({ type: 'image', asset, alt, ...(caption ? { caption } : {}) });
   }
   if (args[0] === 'compare') {
-    validateOptions(args, ['--before', '--after', '--before-alt', '--after-alt', '--mode']);
-    const before = importImage(option(args, '--before', true)!, read, directory);
-    const after = importImage(option(args, '--after', true)!, read, directory);
+    validateOptions(args, ['--before', '--before-asset', '--after', '--after-asset', '--before-alt', '--after-alt', '--mode']);
+    const before = imageAsset(args, '--before', '--before-asset', read, directory);
+    const after = imageAsset(args, '--after', '--after-asset', read, directory);
     const beforeAlt = option(args, '--before-alt', true)!;
     const afterAlt = option(args, '--after-alt', true)!;
     const mode = option(args, '--mode') ?? 'side_by_side';
