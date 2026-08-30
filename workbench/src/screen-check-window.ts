@@ -14,6 +14,9 @@ const run: Run = (command, args) => {
 };
 
 function number(value: unknown): number { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
+function windowId(value: string): string {
+  try { return BigInt(value).toString(16); } catch { return value.trim().toLowerCase().replace(/^0x0*/, ''); }
+}
 
 export function parseAppleWindows(stdout: string): NativeWindow[] {
   const rows = JSON.parse(stdout || '[]') as Array<Record<string, any>>;
@@ -23,9 +26,10 @@ export function parseAppleWindows(stdout: string): NativeWindow[] {
 }
 
 export function parseLinuxWindows(stdout: string, foregroundId = ''): NativeWindow[] {
+  const foreground = windowId(foregroundId);
   return stdout.split(/\r?\n/).filter(Boolean).map((line) => {
     const parts = line.trim().split(/\s+/); if (parts.length < 8) throw new Error(`WINDOW_DISCOVERY_UNAVAILABLE: unreadable wmctrl row: ${line}`);
-    return { id: parts[0], minimized: parts[1] === '-1', visible: parts[1] !== '-1', foreground: parts[0].toLowerCase() === foregroundId.toLowerCase(), owner: `pid ${parts[2]}`,
+    return { id: parts[0], minimized: parts[1] === '-1', visible: parts[1] !== '-1', foreground: windowId(parts[0]) === foreground, owner: `pid ${parts[2]}`,
       bounds: { x: Number(parts[3]), y: Number(parts[4]), width: Number(parts[5]), height: Number(parts[6]) }, title: parts.slice(8).join(' ') || parts[7] };
   });
 }

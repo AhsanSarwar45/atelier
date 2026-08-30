@@ -44,4 +44,11 @@ describe('native screen-check windows', () => {
     const changing: WindowAdapter = { ...adapter, capture: vi.fn().mockReturnValueOnce(Buffer.from('a')).mockReturnValueOnce(Buffer.from('b')) };
     await expect(stableWindowCapture('42', changing, 1, 2)).rejects.toThrow('WINDOW_UNSTABLE');
   });
+
+  it('matches the zero-padded wmctrl id to the unpadded active X11 id', async () => {
+    const focused = parseLinuxWindows('0x03c00007 0 123 1 2 300 200 host Focused window', '0x3c00007')[0];
+    expect(focused.foreground).toBe(true);
+    const adapter: WindowAdapter = { name: 'fake-x11', preflight: () => undefined, list: () => [focused], capture: () => Buffer.from('same') };
+    await expect(stableWindowCapture('0x03c00007', adapter, 1, 2)).resolves.toEqual(expect.objectContaining({ window: focused }));
+  });
 });
