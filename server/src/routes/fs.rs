@@ -243,6 +243,40 @@ pub async fn path_exists(Query(params): Query<FsExistsParams>) -> impl IntoRespo
     (StatusCode::OK, Json(serde_json::json!({ "exists": exists })))
 }
 
+/// Runs launcher commands in order and stops at the first one that exits cleanly.
+///
+/// [`open::that`] walks the same list but gives up as soon as a launcher
+/// *spawns*: a launcher that runs and then exits non-zero is turned straight
+/// into an error, so everything behind it is never tried. On a desktop where
+/// the server holds no `DISPLAY`, `xdg-open` cannot work out which desktop it
+/// is on and exits 3, which hid the `gio` behind it that opens the file
+/// manager perfectly well (bw-1hmu.1). This keeps walking, and only reports
+/// failure once every launcher has actually been tried.
+fn first_working_launcher(commands: Vec<std::process::Command>) -> Result<(), String> {
+    let mut failures = Vec::new();
+
+    for mut command in commands {
+        // Named before the run, while the command is still worth printing.
+        let attempted = format!("{command:?}");
+        let status = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        match status {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => failures.push(format!("{attempted} exited with {status}")),
+            Err(e) => failures.push(format!("{attempted} could not be started: {e}")),
+        }
+    }
+
+    Err(match failures.len() {
+        0 => "no launcher was available to try".to_string(),
+        n => format!("all {n} launchers were tried and failed: {}", failures.join("; ")),
+    })
+}
+
 /// POST /api/fs/open-external
 ///
 /// Opens a path in an external application (VS Code, Cursor, or Finder/Explorer).
@@ -313,24 +347,22 @@ pub async fn open_external(Json(request): Json<OpenExternalRequest>) -> impl Int
             }
         }
         "finder" => {
-            // Use the `open` crate for cross-platform support
-            // On macOS: opens Finder, on Linux: file manager, on Windows: Explorer
-            match open::that(&path) {
-                Ok(_) => {
-                    return (
-                        StatusCode::OK,
-                        Json(serde_json::json!({ "success": true })),
-                    );
-                }
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({
-                            "error": format!("Failed to open: {}", e)
-                        })),
-                    );
-                }
-            }
+            // The `open` crate's launcher list gives the cross-platform support
+            // (macOS: Finder, Linux: file manager, Windows: Explorer); walking it
+            // here rather than through `open::that` is what lets a launcher that
+            // exits non-zero fall through to the next one.
+            return match first_working_launcher(open::commands(&path)) {
+                Ok(()) => (
+                    StatusCode::OK,
+                    Json(serde_json::json!({ "success": true })),
+                ),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("Failed to open: {}", e)
+                    })),
+                ),
+            };
         }
         _ => {
             return (
@@ -474,5 +506,82 @@ mod tests {
             std::fs::write(root.path().join("outside.png"), b"outside").unwrap();
             assert!(presentation_asset_path(&media, &format!("{}.png", "c".repeat(64))).is_none());
         }
+    }
+
+    /// The walk must survive a launcher that runs and *then* fails. `xdg-open`
+    /// exits 3 when it cannot work out which desktop it is on, and `open::that`
+    /// reads any launcher that got as far as spawning as the end of the list —
+    /// so the `gio` sitting behind it, which raises the file manager perfectly
+    /// well, was never reached (bw-1hmu.1).
+    #[cfg(unix)]
+    #[test]
+    fn open_external_launcher_walk_carries_on_past_a_non_zero_exit() {
+        let scratch = tempfile::tempdir().unwrap();
+        let reached = scratch.path().join("the-second-launcher-ran");
+
+        let mut exits_three = std::process::Command::new("sh");
+        exits_three.args(["-c", "exit 3"]);
+        let mut leaves_a_mark = std::process::Command::new("sh");
+        leaves_a_mark.args(["-c", "touch \"$1\"", "sh"]).arg(&reached);
+
+        assert_eq!(first_working_launcher(vec![exits_three, leaves_a_mark]), Ok(()));
+        assert!(
+            reached.exists(),
+            "the launcher behind the failing one was never actually run"
+        );
+    }
+
+    /// A launcher that is not installed at all was already stepped over, and
+    /// still is: the walk answers to the exit status and to a missing binary
+    /// alike.
+    #[cfg(unix)]
+    #[test]
+    fn open_external_launcher_walk_steps_over_a_launcher_that_is_absent() {
+        let absent = std::process::Command::new("atelier-no-such-launcher-bw-1hmu");
+        let mut installed = std::process::Command::new("sh");
+        installed.args(["-c", "exit 0"]);
+
+        assert_eq!(first_working_launcher(vec![absent, installed]), Ok(()));
+    }
+
+    /// When nothing works the reader is told the whole list was tried, rather
+    /// than being handed the name of whichever launcher happened to be first
+    /// and left to assume it was the only one.
+    #[cfg(unix)]
+    #[test]
+    fn open_external_launcher_walk_names_every_launcher_when_none_work() {
+        let mut exits_three = std::process::Command::new("sh");
+        exits_three.args(["-c", "exit 3"]);
+        let absent = std::process::Command::new("atelier-no-such-launcher-bw-1hmu");
+
+        let complaint = first_working_launcher(vec![exits_three, absent]).unwrap_err();
+        assert!(complaint.contains("all 2 launchers"), "{complaint}");
+        assert!(complaint.contains("exited with"), "{complaint}");
+        assert!(complaint.contains("atelier-no-such-launcher-bw-1hmu"), "{complaint}");
+    }
+
+    /// The real route, carrying a real request, against whatever launchers this
+    /// machine actually has. Ignored by default because succeeding opens a file
+    /// manager window; run it to watch the fix work:
+    /// `cargo test --manifest-path server/Cargo.toml open_external -- --ignored`
+    #[tokio::test]
+    #[ignore = "a success opens a real file manager window"]
+    async fn open_external_finder_opens_a_real_path() {
+        use tower::ServiceExt;
+
+        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
+        let app = axum::Router::new()
+            .route("/api/fs/open-external", axum::routing::post(open_external));
+
+        let asked = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/fs/open-external")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                serde_json::json!({ "path": home, "target": "finder" }).to_string(),
+            ))
+            .unwrap();
+
+        assert_eq!(app.oneshot(asked).await.unwrap().status(), StatusCode::OK);
     }
 }
