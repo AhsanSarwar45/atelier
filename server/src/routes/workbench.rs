@@ -1,8 +1,8 @@
 //! Native browser routes for the agent workbench.
 //!
-//! These routes deliberately open the helper's existing SQLite database. A
-//! release can therefore stop starting the Node sidecar without making one
-//! saved conversation disappear.
+//! These routes deliberately open the existing SQLite chat database, so the
+//! native implementation preserves every saved conversation across the
+//! runtime cutover.
 
 use axum::{
     body::Body,
@@ -76,8 +76,23 @@ struct SessionsQuery {
 async fn sessions(
     State(state): State<WorkbenchState>,
     Query(query): Query<SessionsQuery>,
-) -> Result<Json<Vec<Session>>, ApiError> {
-    Ok(Json(state.database().list_sessions(query.project).await?))
+) -> Result<Json<Vec<Value>>, ApiError> {
+    Ok(Json(session_summaries(state.database(), query.project).await?))
+}
+
+pub(crate) async fn session_summaries(database: &ChatDb, project: Option<String>) -> Result<Vec<Value>, String> {
+    let sessions = database.list_sessions(project).await?;
+    let ids = sessions.iter().map(|session| session.id.clone()).collect();
+    let mut beads = database.beads_for_sessions(ids).await?;
+    sessions.into_iter().map(|session| {
+        let linked = beads.remove(&session.id).unwrap_or_default();
+        let mut value = serde_json::to_value(session).map_err(|error| error.to_string())?;
+        let object = value.as_object_mut().ok_or_else(|| "session was not an object".to_string())?;
+        object.insert("activity".into(), json!(""));
+        object.insert("busySince".into(), Value::Null);
+        object.insert("beads".into(), json!(linked));
+        Ok(value)
+    }).collect()
 }
 
 #[derive(Deserialize)]
@@ -96,14 +111,14 @@ fn folder_of(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn restore_row(session: Session) -> Value {
+fn restore_row(session: Session, beads: Vec<String>) -> Value {
     let folder = folder_of(&session.cwd);
     json!({
         "sessionId": session.id, "externalId": session.external_id, "brand": session.brand,
         "title": session.title, "lastActiveAt": session.last_active_at,
         "lastSpokeAt": session.last_spoke_at, "state": session.state, "origin": session.origin,
         "projectId": session.project_id, "cwdHint": session.cwd, "folder": folder,
-        "branch": Value::Null, "beads": [], "runningElsewhere": false, "held": Value::Null,
+        "branch": Value::Null, "beads": beads, "runningElsewhere": false, "held": Value::Null,
     })
 }
 
@@ -111,13 +126,13 @@ async fn restore(
     State(state): State<WorkbenchState>,
     Query(query): Query<RestoreQuery>,
 ) -> Result<Json<Vec<Value>>, ApiError> {
-    let rows = state
-        .database()
-        .list_sessions(query.project)
-        .await?
-        .into_iter()
-        .map(restore_row)
-        .collect();
+    let sessions = state.database().list_sessions(query.project).await?;
+    let ids = sessions.iter().map(|session| session.id.clone()).collect();
+    let mut beads = state.database().beads_for_sessions(ids).await?;
+    let rows = sessions.into_iter().map(|session| {
+        let linked = beads.remove(&session.id).unwrap_or_default();
+        restore_row(session, linked)
+    }).collect();
     Ok(Json(rows))
 }
 
@@ -133,10 +148,12 @@ async fn session(
         .find(|session| session.id == id)
         .ok_or_else(|| ApiError::not_found(format!("no session {id}")))?;
     let folder = folder_of(&found.cwd);
+    let mut linked = state.database().beads_for_sessions(vec![found.id.clone()]).await?;
+    let beads = linked.remove(&found.id).unwrap_or_default();
     Ok(Json(json!({
         "sessionId": found.id, "origin": found.origin, "brand": found.brand,
         "externalId": found.external_id, "runningElsewhere": false, "held": Value::Null,
-        "title": found.title, "cwd": found.cwd, "folder": folder, "branch": Value::Null, "beads": [],
+        "title": found.title, "cwd": found.cwd, "folder": folder, "branch": Value::Null, "beads": beads,
     })))
 }
 
@@ -262,7 +279,7 @@ fn all_tail(receiver: broadcast::Receiver<StoreUpdate>) -> EventStream {
 
 async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, ApiError> {
     let receiver = state.database().subscribe_all();
-    let sessions = state.database().list_sessions(None).await?;
+    let sessions = session_summaries(state.database(), None).await?;
     let initial = stream::iter(vec![
         Ok(watch_frame(json!({"kind":"snapshot","sessions":sessions}))),
         Ok(watch_frame(json!({"kind":"running","holds":[]}))),
@@ -498,6 +515,8 @@ mod tests {
         let chunk = first_chunk(response).await;
         assert!(chunk.contains("snapshot"), "{chunk}");
         assert!(chunk.contains("chat-1"), "{chunk}");
+        assert!(chunk.contains("\"beads\":[]"), "{chunk}");
+        assert!(chunk.contains("\"activity\":\"\""), "{chunk}");
     }
 
     #[tokio::test]

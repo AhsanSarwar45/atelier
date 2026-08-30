@@ -2,7 +2,9 @@
 # Runs the workbench end-to-end test against an instance built from THIS
 # worktree, isolated from any other Atelier running on this machine:
 # its own ports and its own XDG_DATA_HOME, so it shares neither settings.db
-# nor workbench.db with them.
+# nor workbench.db with them. Set BEADS_E2E_NO_NODE=1 to launch only the app
+# with a deliberately minimal PATH while Playwright keeps the developer PATH it
+# needs to run the browser.
 #
 # Usage: scripts/workbench-e2e.sh [<spec> ...] [-g <grep>]
 #
@@ -85,10 +87,27 @@ if [ "${BEADS_E2E_LIVE_PROVIDERS:-0}" = 1 ]; then
   install -m 600 "$codex_auth" "$CODEX_HOME/auth.json"
 fi
 
-"$ROOT/server/target/debug/atelier" >> "$SERVER_LOG" 2>&1 &
+SERVER_BINARY="${ATELIER_BINARY:-${CARGO_TARGET_DIR:-$ROOT/server/target}/debug/atelier}"
+[ -x "$SERVER_BINARY" ] || { echo "no Atelier binary at $SERVER_BINARY"; exit 1; }
+SERVER_PATH="$PATH"
+if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
+  SERVER_BIN="$RUN/runtime-bin"
+  mkdir -p "$SERVER_BIN"
+  for tool in git bd dolt; do
+    found="$(command -v "$tool" 2>/dev/null || true)"
+    [ -n "$found" ] && ln -s "$found" "$SERVER_BIN/$tool"
+  done
+  SERVER_PATH="$SERVER_BIN"
+  if PATH="$SERVER_PATH" command -v node >/dev/null 2>&1 || PATH="$SERVER_PATH" command -v npm >/dev/null 2>&1; then
+    echo "the isolated server PATH unexpectedly contains node or npm"; exit 1
+  fi
+  echo "server PATH contains no node or npm"
+fi
+
+env PATH="$SERVER_PATH" "$SERVER_BINARY" >> "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
-# Print descendants leaves-first so providers stop before the sidecar and the
-# sidecar before the app. Every PID comes from the server we started above.
+# Print descendants leaves-first so provider children stop before the app.
+# Every PID comes from the server we started above.
 descendants_of() {
   local parent="$1" child
   while read -r child; do
@@ -148,7 +167,10 @@ for _ in $(seq 1 60); do
   curl -sf "$BEADS_E2E_URL/api/workbench/health" >/dev/null 2>&1 && break
   sleep 0.5
 done
-curl -sf "$BEADS_E2E_URL/api/workbench/health" || { echo "sidecar did not come up"; tail -30 "$SERVER_LOG"; exit 1; }
+curl -sf "$BEADS_E2E_URL/api/workbench/health" || { echo "native chat did not come up"; tail -30 "$SERVER_LOG"; exit 1; }
+if ss -lntH "sport = :$BEADS_WORKBENCH_PORT" 2>/dev/null | grep -q .; then
+  echo "native chat unexpectedly opened the retired helper port $BEADS_WORKBENCH_PORT"; exit 1
+fi
 echo
 
 cd "$ROOT"
@@ -161,6 +183,16 @@ done
 [ ${#specs[@]} -eq 0 ] && specs=(tests/e2e/workbench.spec.ts)
 ran=0
 npx playwright test "${specs[@]}" ${rest[@]+"${rest[@]}"} || ran=$?
+
+if [ "${BEADS_E2E_NO_NODE:-0}" = 1 ]; then
+  node_children="$(for pid in $(descendants_of "$SERVER_PID"); do ps -o args= -p "$pid" 2>/dev/null; done | grep -E '(^|/)(node|npm)( |$)' || true)"
+  if [ -n "$node_children" ]; then
+    echo "the isolated app started a Node/npm child: $node_children"
+    ran=1
+  else
+    echo "isolated app process tree contains no Node/npm child"
+  fi
+fi
 
 # A case that stands up a project of its own takes it away again. One left
 # behind is a row on the reader's own project list for ever, and the cases that

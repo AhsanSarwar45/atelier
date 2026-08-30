@@ -30,6 +30,7 @@ enum Command {
     UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
     MarkSpoke(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
+    BeadsForSessions(Vec<String>, Reply<HashMap<String, Vec<String>>>),
     Append(Event, Reply<Option<Event>>),
     EventsSince(String, i64, Reply<Vec<Event>>),
     TranscriptItems(String, Option<i64>, usize, Reply<TranscriptItemPage>),
@@ -141,6 +142,13 @@ impl ChatDb {
             .await
     }
 
+    pub async fn beads_for_sessions(
+        &self,
+        session_ids: Vec<String>,
+    ) -> Result<HashMap<String, Vec<String>>, String> {
+        self.request(|reply| Command::BeadsForSessions(session_ids, reply)).await
+    }
+
     /// Append a provider event after assigning its durable sequence number.
     /// A duplicate provider identity returns `None` and publishes nothing.
     pub async fn append(&self, event: Event) -> Result<Option<Event>, String> {
@@ -241,6 +249,9 @@ fn run(
             Command::MarkSpoke(id, at, reply) => respond(reply, store.mark_spoke(&id, &at)),
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
+            }
+            Command::BeadsForSessions(ids, reply) => {
+                respond(reply, store.beads_for_sessions(&ids))
             }
             Command::Append(mut event, reply) => {
                 let session_id = event

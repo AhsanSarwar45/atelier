@@ -127,7 +127,7 @@ fn asked(flag: &Option<String>) -> bool {
 /// the native equivalent of relaying the helper's `/watch` SSE stream.
 async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<Tagged>) {
     let mut updates = state.database().subscribe_all();
-    let sessions = match state.database().list_sessions(None).await {
+    let sessions = match workbench::session_summaries(state.database(), None).await {
         Ok(sessions) => sessions,
         Err(_) => return,
     };
