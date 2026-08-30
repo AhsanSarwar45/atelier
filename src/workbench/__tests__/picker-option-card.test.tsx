@@ -12,7 +12,7 @@ import { Picker } from '@/workbench/chat-tab';
 describe('a picker option card', () => {
   // The line the app really composes: the install's own words, then the rate
   // the register charges — two separators, so gluing one is not enough.
-  const SONNET_HINT = 'Sonnet 5 · Efficient for routine tasks · $2/$10 per Mtok';
+  const SONNET_HINT = 'Sonnet 5 · Efficient for routine tasks · fast\n$2/$10 per Mtok';
   const options = [
     { value: 'opus', label: 'Opus', hint: 'Opus 5 · Best for everyday, complex tasks' },
     { value: 'sonnet', label: 'Sonnet', hint: SONNET_HINT },
@@ -36,6 +36,13 @@ describe('a picker option card', () => {
     return onPick;
   }
 
+  /** The description as drawn, which is the thing a reader actually clicks. */
+  function hintOf(value: string): HTMLElement {
+    const hint = cardFor(value).querySelector('[data-testid="model-picker-option-hint"]');
+    if (!hint) throw new Error(`no description drawn for ${value}`);
+    return hint as HTMLElement;
+  }
+
   function cardFor(value: string): HTMLElement {
     const card = screen.getAllByTestId('model-picker-option').find((el) => el.dataset.value === value);
     if (!card) throw new Error(`no option card for ${value}`);
@@ -45,30 +52,48 @@ describe('a picker option card', () => {
   it('draws the description inside the card the reader clicks', () => {
     openMenu();
 
-    expect(cardFor('sonnet')).toContainElement(screen.getByText(SONNET_HINT));
+    expect(cardFor('sonnet')).toContainElement(hintOf('sonnet'));
   });
 
   /**
-   * The fault: a description wraps in a 288px menu, and a `·` with an ordinary
-   * space each side could be the last thing on a line — so a row ended on a
-   * hanging dot with the clause it introduced stranded on the line below
-   * (bw-xtic.7). The space after each separator is bound, so the separator
-   * travels with its phrase.
+   * A description that asks for a break gets one. The rate is composed onto a
+   * line of its own rather than left to wrap there, which is what stopped every
+   * row opening its second line on a stray separator (bw-xtic.10).
    */
-  it('ties each separator to the phrase it introduces, so no line ends on a dot', () => {
+  it('honours a break the description asked for', () => {
     openMenu();
 
     const drawn = cardFor('sonnet').querySelector('[data-testid="model-picker-option-hint"]');
 
-    expect(drawn?.textContent).toBe('Sonnet 5 ·\u00a0Efficient for routine tasks ·\u00a0$2/$10 per Mtok');
+    expect(drawn?.textContent?.split('\n')).toHaveLength(2);
+    // A deliberate break is left alone: no separator is bound across it.
+    expect(drawn?.textContent).toContain('\n$2/$10 per Mtok');
+    expect(drawn?.className).toContain('whitespace-pre-line');
+  });
+
+  /**
+   * The fault: a description wraps in a 288px menu, and a `·` with an ordinary
+   * space each side could fall to the head of the next line — which is exactly
+   * what every alias row on screen did, opening its second line on a stray dot
+   * (bw-xtic.10). The space *before* each separator is bound, so the separator
+   * stays with the clause it closes and the break falls after it.
+   */
+  it('ties each separator to the phrase it closes, so no line opens on a dot', () => {
+    openMenu();
+
+    const drawn = cardFor('sonnet').querySelector('[data-testid="model-picker-option-hint"]');
+
+    expect(drawn?.textContent).toBe('Sonnet 5\u00a0· Efficient for routine tasks\u00a0· fast\n$2/$10 per Mtok');
     // Every separator, not just the first, and no ordinary run of " · " left.
     expect(drawn?.textContent).not.toMatch(/ · /);
+    // Nothing a wrap could carry down: no separator still leads a breakable space.
+    expect(drawn?.textContent).not.toMatch(/ ·/);
   });
 
   it('picks the option when the description itself is clicked', () => {
     const onPick = openMenu();
 
-    fireEvent.click(screen.getByText(SONNET_HINT));
+    fireEvent.click(hintOf('sonnet'));
 
     expect(onPick).toHaveBeenCalledWith('sonnet');
   });

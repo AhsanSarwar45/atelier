@@ -10,19 +10,24 @@ import {
 import { claudeEffortMenu, type ClaudeModelRow } from '../drivers/claude.ts';
 
 /**
- * What `supportedModels()` actually answers on a current install, copied from
- * the answer itself: six rows, all of them aliases pinned to the latest
- * release. Every numbered version the same install still answers to is missing,
- * which is the whole fault (bw-xtic.2).
+ * What `supportedModels()` actually answers on a current install — four rows,
+ * every one an alias pinned to the latest release, copied from the menu a real
+ * 2.1.250 session published (`tests/e2e` writes it into `workbench.db`).
+ * Every numbered version the same install still answers to is missing, which is
+ * the whole fault (bw-xtic.2).
+ *
+ * The descriptions carry their own rate, run into the end of the sentence after
+ * a `·`. That is the install's doing, not ours: 2.1.250 prices its aliases
+ * before it hands them over. An earlier version of this fixture left the rate
+ * off and so tested a row no install ever sends — the menu on screen disagreed
+ * with a green suite until it was copied honestly (bw-xtic.10).
  */
 const FIVE = ['low', 'medium', 'high', 'xhigh', 'max'];
 const ANNOUNCED: ClaudeModelRow[] = [
-  { value: 'default', resolvedModel: 'claude-opus-5[1m]', displayName: 'Default (recommended)', description: 'Opus 5 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: FIVE },
-  { value: 'opus[1m]', resolvedModel: 'claude-opus-5[1m]', displayName: 'Opus (1M context)', description: 'Opus 5 with 1M context · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: FIVE },
-  { value: 'claude-fable-5[1m]', resolvedModel: 'claude-fable-5', displayName: 'Fable', description: 'Fable 5 · Most capable for your hardest and longest-running tasks', supportsEffort: true, supportedEffortLevels: FIVE },
-  { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: 'Sonnet 5 · Efficient for routine tasks', supportsEffort: true, supportedEffortLevels: FIVE },
-  { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku', description: 'Haiku 4.5 · Fastest for quick answers' },
-  { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus', description: 'Opus 5 · Best for everyday, complex tasks', supportsEffort: true, supportedEffortLevels: FIVE },
+  { value: 'default', resolvedModel: 'claude-opus-5[1m]', displayName: 'Default (recommended)', description: 'Use the default model (currently Opus 5 (1M context)) · $5/$25 per Mtok', supportsEffort: true, supportedEffortLevels: FIVE },
+  { value: 'opus[1m]', resolvedModel: 'claude-opus-5[1m]', displayName: 'Opus (1M context)', description: 'Opus 5 with 1M context · Best for everyday, complex tasks · $5/$25 per Mtok', supportsEffort: true, supportedEffortLevels: FIVE },
+  { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: 'Sonnet 5 · Efficient for routine tasks · $2/$10 per Mtok', supportsEffort: true, supportedEffortLevels: FIVE },
+  { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku', description: 'Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok' },
 ];
 
 describe('the models a Claude chat can be switched to', () => {
@@ -144,13 +149,28 @@ describe('the models a Claude chat can be switched to', () => {
       claudeModelMenu(ANNOUNCED).find((row) => row.value === id)?.description;
 
     it('is the register\'s own window, rate and cutoff, and nothing else', () => {
-      expect(hint('claude-opus-4-8')).toBe('1M context · $5/$25 per Mtok · knowledge to January 2026');
-      expect(hint('claude-opus-4-5')).toBe('200K context · $5/$25 per Mtok · knowledge to May 2025');
-      expect(hint('claude-haiku-4-5')).toBe('200K context · $1/$5 per Mtok · knowledge to February 2025');
+      expect(hint('claude-opus-4-8')).toBe('1M context · Knowledge to January 2026\n$5/$25 per Mtok');
+      expect(hint('claude-opus-4-5')).toBe('200K context · Knowledge to May 2025\n$5/$25 per Mtok');
+      expect(hint('claude-haiku-4-5')).toBe('200K context · Knowledge to February 2025\n$1/$5 per Mtok');
+    });
+
+    /**
+     * The rate is broken onto its own line rather than left to wrap there, so
+     * no row opens a line on the separator it happened to break at
+     * (bw-xtic.10). Nothing before the break may carry one either.
+     */
+    it('gives the rate a line of its own, and breaks nowhere else', () => {
+      for (const entry of CLAUDE_MODEL_CATALOG) {
+        const lines = describeModel(entry).split('\n');
+
+        expect(lines, entry.id).toHaveLength(2);
+        expect(lines[1], entry.id).toBe(perMtok(entry));
+        expect(lines[1].startsWith('·'), entry.id).toBe(false);
+      }
     });
 
     it('is written the same way for every model, so none can carry an opinion', () => {
-      const shape = /^(1M|200K) context · \$[\d.]+\/\$[\d.]+ per Mtok · knowledge to [A-Z][a-z]+ \d{4}$/;
+      const shape = /^(1M|200K) context · Knowledge to [A-Z][a-z]+ \d{4}\n\$[\d.]+\/\$[\d.]+ per Mtok$/;
 
       for (const entry of CLAUDE_MODEL_CATALOG) {
         expect(describeModel(entry), entry.id).toMatch(shape);
@@ -173,28 +193,44 @@ describe('the models a Claude chat can be switched to', () => {
   });
 
   /**
-   * An alias is the install's own row, so its words stay; the rate is the one
-   * thing it never says. The install pins an alias to a dated build and may add
-   * a window suffix, and neither spelling is a catalogue id — so a lookup that
-   * does not strip them would silently price nothing (bw-xtic.5).
+   * An alias is the install's own row, so its words stay. Its rate is the
+   * install's too — written into the end of the sentence — and all we do is
+   * give it the line of its own the versions have, so the two bands read alike.
    */
   describe('what an alias says about itself', () => {
     const hint = (value: string) =>
       claudeModelMenu(ANNOUNCED).find((row) => row.value === value)?.description;
 
-    it('keeps the install\'s words and adds the rate of the model it points at', () => {
-      // `claude-opus-5[1m]` — a window suffix on the end.
+    it('keeps the install\'s words and lifts its rate onto a line of its own', () => {
       expect(hint('opus[1m]')).toBe(
-        'Opus 5 with 1M context · Best for everyday, complex tasks · $5/$25 per Mtok',
+        'Opus 5 with 1M context · Best for everyday, complex tasks\n$5/$25 per Mtok',
       );
-      // `claude-haiku-4-5-20251001` — a dated build.
-      expect(hint('haiku')).toBe('Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok');
+      expect(hint('haiku')).toBe('Haiku 4.5 · Fastest for quick answers\n$1/$5 per Mtok');
     });
 
-    it('prices every alias the install named', () => {
+    it('gives every alias a rate, on its own line, exactly once', () => {
       for (const row of ANNOUNCED) {
-        expect(hint(row.value), row.value).toMatch(/\$[\d.]+\/\$[\d.]+ per Mtok$/);
+        const said = hint(row.value) ?? '';
+
+        expect(said, row.value).toMatch(/\n\$[\d.]+\/\$[\d.]+ per Mtok$/);
+        expect(said.match(/per Mtok/g)?.length, row.value).toBe(1);
+        // Lifted, not restated: the sentence no longer runs into its own rate.
+        expect(said, row.value).not.toMatch(/ · \$[\d.]+\/\$/);
       }
+    });
+
+    /**
+     * An install that stops pricing its aliases — or prices them only for some
+     * accounts, which 2.1.250 does behind a flag — still gets a rate, from the
+     * catalogue, in the same place.
+     */
+    it('prices an alias the install left unpriced', () => {
+      const menu = claudeModelMenu([
+        // `claude-haiku-4-5-20251001` — a dated build, which is not a catalogue id.
+        { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku', description: 'Haiku 4.5 · Fastest for quick answers' },
+      ]);
+
+      expect(menu[0].description).toBe('Haiku 4.5 · Fastest for quick answers\n$1/$5 per Mtok');
     });
 
     it('leaves an alias alone rather than pricing it from nothing', () => {

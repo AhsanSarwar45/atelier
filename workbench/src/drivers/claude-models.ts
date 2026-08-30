@@ -151,11 +151,17 @@ export function perMtok(entry: ClaudeCatalogEntry): string {
 }
 
 /**
- * The one line a version gets: the three facts the register keeps about it,
- * in the same order for every model, and nothing else.
+ * What a version says about itself: the three facts the register keeps, in the
+ * same order for every model, and nothing else.
+ *
+ * The rate goes on a line of its own. Written as one run of text it wrapped
+ * anyway in a 288px menu, and wrapped at a separator, so every row opened its
+ * second line on a stray dot (bw-xtic.10). Breaking it deliberately costs no
+ * height — the line was already two — and puts the rates in a column the eye
+ * can run down, which is what asking to see the cost was asking for.
  */
 export function describeModel(entry: ClaudeCatalogEntry): string {
-  return `${windowOf(entry.contextWindow)} context · ${perMtok(entry)} · knowledge to ${entry.knowledgeCutoff}`;
+  return `${windowOf(entry.contextWindow)} context · Knowledge to ${entry.knowledgeCutoff}\n${perMtok(entry)}`;
 }
 
 /** The catalogued versions this install did not already name for itself. */
@@ -177,21 +183,29 @@ function catalogued(resolved: string | undefined): ClaudeCatalogEntry | undefine
   return CLAUDE_MODEL_CATALOG.find((entry) => entry.id === bare);
 }
 
+/** A rate the install already ran into the end of its own sentence. */
+const TRAILING_RATE = /\s*·\s*(\$[\d.]+\/\$[\d.]+ per Mtok)$/;
+
 /**
- * An alias keeps the words the install gave it, with the price of the model it
- * points at added.
+ * An alias keeps the words the install gave it, with its rate on a line of its
+ * own.
  *
- * Its own description is the install's, not ours, so it stays; the rate is the
- * one fact it omits and the one this card was asked to add. An alias whose
- * target is not catalogued keeps its line unchanged rather than gaining a
- * number nothing backs.
+ * The install prices its aliases itself — 2.1.250 builds each description as
+ * `<model> · <blurb> · $in/$out per Mtok` — so in the ordinary case there is
+ * nothing to add and nothing to look up. All this does is break that last
+ * clause onto its own line, so an alias reads the way a version does and the
+ * rates stand in one column (bw-xtic.10).
+ *
+ * An alias the install left unpriced is priced from the catalogue when the
+ * model it points at is one we know, and left exactly as it came when it is
+ * not — a line nothing backs is worse than a line that says less.
  */
 function pricedAlias(row: ClaudeModelRow): string | undefined {
+  const said = row.description?.replace(TRAILING_RATE, '\n$1');
+  if (said?.includes('per Mtok')) return said;
   const entry = catalogued(row.resolvedModel);
-  if (!entry) return row.description;
-  const rate = perMtok(entry);
-  if (!row.description) return rate;
-  return row.description.includes(rate) ? row.description : `${row.description} · ${rate}`;
+  if (!entry) return said;
+  return said ? `${said}\n${perMtok(entry)}` : perMtok(entry);
 }
 
 /**
