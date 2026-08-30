@@ -3,6 +3,7 @@
 import { AlertCircle, Lock } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -57,17 +58,20 @@ export function DependencyBadge({ deps, blockers, isBlocked, onNavigate }: Depen
             <div className="space-y-1">
               <p className="font-semibold">Blocked by:</p>
               {safeDeps.map((depId) => (
-                <button
+                <Button
                   key={depId}
+                  type="button"
+                  variant="foreground"
+                  size="xs"
                   onClick={(e) => {
                     e.stopPropagation();
                     onNavigate?.(depId);
                   }}
                   aria-label={`Navigate to blocker ${depId}`}
-                  className="block text-left hover:underline w-full"
+                  className="h-auto w-full min-h-0 justify-start p-0 text-left font-normal hover:underline"
                 >
                   {depId}
-                </button>
+                </Button>
               ))}
             </div>
           </TooltipContent>
@@ -95,17 +99,20 @@ export function DependencyBadge({ deps, blockers, isBlocked, onNavigate }: Depen
           <div className="space-y-1">
             <p className="font-semibold">Blocking:</p>
             {safeBlockers.map((blockerId) => (
-              <button
+              <Button
                 key={blockerId}
+                type="button"
+                variant="foreground"
+                size="xs"
                 onClick={(e) => {
                   e.stopPropagation();
                   onNavigate?.(blockerId);
                 }}
                 aria-label={`Navigate to blocked task ${blockerId}`}
-                className="block text-left hover:underline w-full"
+                className="h-auto w-full min-h-0 justify-start p-0 text-left font-normal hover:underline"
               >
                 {blockerId}
-              </button>
+              </Button>
             ))}
           </div>
         </TooltipContent>

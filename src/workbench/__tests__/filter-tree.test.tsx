@@ -150,7 +150,7 @@ describe('a switch that is off', () => {
     fireEvent.click(screen.getByTestId('open-kind-filter'));
     fireEvent.click(switchIn('thinking'));
 
-    const box = switchIn('thinking').querySelector('span')!;
+    const box = switchIn('thinking');
     // The faint edge is a shade off the panel behind it: on the dark skins it
     // measured 1px of rgb(39,39,42) against rgb(24,24,27), which is no box.
     expect(box.className).toContain('border-b-strong');
@@ -160,6 +160,6 @@ describe('a switch that is off', () => {
   it('still fills the box in when it is on', () => {
     render(<Panel />);
     fireEvent.click(screen.getByTestId('open-kind-filter'));
-    expect(switchIn('thinking').querySelector('span')!.className).toContain('bg-primary');
+    expect(switchIn('thinking').className).toContain('data-[state=checked]:bg-primary');
   });
 });

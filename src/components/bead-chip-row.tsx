@@ -19,6 +19,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { CircleDot } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { addressWith, cardWasPushed } from '@/lib/address';
 import { classesFor } from '@/lib/state-styles';
 import { cn } from '@/lib/utils';
@@ -59,8 +60,14 @@ export function BeadChip({
       shape="circle"
       className={cn('shrink-0 font-mono', status && classesFor(status).badge, className)}
     >
-      <button
+      <Button
         type="button"
+        variant="foreground"
+        size="xs"
+        className={cn(
+          'relative !min-h-0 !min-w-0 p-0 font-inherit before:absolute before:-inset-2.5 before:content-[\'\']',
+          size === 'sm' ? 'h-5' : 'h-4',
+        )}
         data-testid={testId}
         data-bead-id={id}
         data-bead-status={status}
@@ -77,7 +84,7 @@ export function BeadChip({
             says which is which before either is read (bw-4wcd.7). */}
         <CircleDot className="mr-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
         {id}
-      </button>
+      </Button>
     </Badge>
   );
 }

@@ -30,7 +30,6 @@ import {
   Paperclip,
   Plus,
   ShieldCheck,
-  SquareCheck,
   SlidersHorizontal,
   Square,
   Star,
@@ -43,6 +42,7 @@ import { type Mentions } from '@/components/markdown-body';
 import { TabLead, TabTools, TabTrail, ToolButton } from '@/components/shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   DropdownMenu,
@@ -1117,18 +1117,15 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
             ))}
           </div>
           <DialogFooter className="gap-2 sm:space-x-0">
-            <Button
-              variant="secondary"
-              role="checkbox"
-              aria-checked={newChatDefault === newBrand}
+            <div className="flex min-h-9 items-center gap-2 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground">
+              <Checkbox
+              checked={newChatDefault === newBrand}
               data-testid="new-chat-default"
-              onClick={() => setNewChatDefault(newChatDefault === newBrand ? 'ask' : newBrand)}
-            >
-              {newChatDefault === newBrand
-                ? <SquareCheck aria-hidden="true" />
-                : <Square aria-hidden="true" />}
-              Use {newBrand === 'claude' ? 'Claude' : 'Codex'} by default
-            </Button>
+              aria-label={`Use ${newBrand === 'claude' ? 'Claude' : 'Codex'} by default`}
+              onCheckedChange={(checked) => setNewChatDefault(checked ? newBrand : 'ask')}
+              />
+              <span>Use {newBrand === 'claude' ? 'Claude' : 'Codex'} by default</span>
+            </div>
             <Button variant="primary" disabled={starting} onClick={() => { setShowing(null); setRailOpen(false); void start(newBrand); }}>
               {starting ? 'Starting…' : 'Start chat'}
             </Button>
@@ -1180,8 +1177,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
       />
       {/* Mounted either way and faded, so the darkening arrives with the panel
           instead of snapping on in front of it (bw-7ks.22.12). */}
-      <button
+      <Button
         type="button"
+        variant="foreground"
         aria-hidden={!railOpen}
         tabIndex={railOpen ? 0 : -1}
         aria-label="Close the chat list"
@@ -1195,7 +1193,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // app's own background is 9,9,11, so a light wash over it moves
           // nothing an eye can see — what dims is the WRITING behind the
           // sheet, and 40% left it perfectly readable (bw-81wt.30).
-          'fixed inset-0 z-40 bg-black/80 md:hidden',
+          'fixed inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
           'transition-opacity duration-200 ease-out motion-reduce:transition-none',
           railOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
@@ -1233,8 +1231,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </>
       )}
       {sessionId && (
-        <button
+        <Button
           type="button"
+          variant="foreground"
           aria-hidden={!rightOpen}
           tabIndex={rightOpen ? 0 : -1}
           aria-label="Close what this chat has touched"
@@ -1248,7 +1247,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
           // app's own background is 9,9,11, so a light wash over it moves
           // nothing an eye can see — what dims is the WRITING behind the
           // sheet, and 40% left it perfectly readable (bw-81wt.30).
-          'fixed inset-0 z-40 bg-black/80 md:hidden',
+            'fixed inset-0 z-40 h-auto rounded-none bg-black/80 p-0 md:hidden',
             'transition-opacity duration-200 ease-out motion-reduce:transition-none',
             rightOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
           )}

@@ -202,7 +202,7 @@ export function UsageView({ brand = 'claude', onClose }: { brand?: Brand; onClos
  * string because each carries its OWN colour — a calm session beside a week at
  * 96% is exactly the case a single colour hides.
  *
- * Each is a real <button> inside the badge, which is the pattern the report
+ * Each is a real Button inside the badge, which is the pattern the report
  * chip already uses: a Badge renders a <span>, and a click handler on a span is
  * reachable by mouse and by nothing else — no tab stop, no Enter, and nothing
  * for a screen reader to announce or press. This chip is the only way into the
@@ -229,8 +229,11 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
     <span className="flex items-center gap-1" data-testid="plan-chips">
       {five && (
         <Badge variant={severityVariant(five.severity)} appearance="light" size="sm" className="font-mono">
-          <button
+          <Button
             type="button"
+            variant="foreground"
+            size="xs"
+            className="h-auto min-h-0 p-0 font-mono font-normal"
             data-testid="plan-chip"
             data-percent={five.percent ?? ''}
             data-severity={five.severity}
@@ -239,13 +242,16 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
             onClick={onOpen}
           >
             {sessionChipReads(five)}
-          </button>
+          </Button>
         </Badge>
       )}
       {week && (
         <Badge variant={severityVariant(week.severity)} appearance="light" size="sm" className="font-mono">
-          <button
+          <Button
             type="button"
+            variant="foreground"
+            size="xs"
+            className="h-auto min-h-0 p-0 font-mono font-normal"
             data-testid="plan-chip-week"
             data-percent={week.percent ?? ''}
             data-severity={week.severity}
@@ -254,7 +260,7 @@ export function PlanChip({ usage, onOpen }: { usage: PlanUsage; onOpen: () => vo
             onClick={onOpen}
           >
             {weekChipReads(week)}
-          </button>
+          </Button>
         </Badge>
       )}
     </span>

@@ -24,10 +24,9 @@ describe('model and reasoning defaults', () => {
 describe('new-chat provider default', () => {
   it('draws its saved state as a checkbox and lets the user clear it', () => {
     expect(source).toContain('data-testid="new-chat-default"');
-    expect(source).toContain('role="checkbox"');
-    expect(source).toContain('aria-checked={newChatDefault === newBrand}');
-    expect(source).toContain("setNewChatDefault(newChatDefault === newBrand ? 'ask' : newBrand)");
-    expect(source).toContain('<SquareCheck aria-hidden="true" />');
-    expect(source).toContain('<Square aria-hidden="true" />');
+    expect(source).toContain('<Checkbox');
+    expect(source).toContain('checked={newChatDefault === newBrand}');
+    expect(source).toContain("setNewChatDefault(checked ? newBrand : 'ask')");
+    expect(source).toContain("import { Checkbox } from '@/components/ui/checkbox'");
   });
 });

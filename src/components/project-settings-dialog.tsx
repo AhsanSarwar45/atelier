@@ -147,13 +147,15 @@ export function ProjectSettingsDialog({
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-t-muted">Browse Folders</span>
-            <button
+            <Button
               type="button"
+              variant="foreground"
+              size="xs"
               onClick={() => setBrowsing(null)}
-              className="text-xs text-t-muted hover:text-t-secondary transition-colors"
+              className="h-auto min-h-0 p-0 text-xs font-normal text-t-muted transition-colors hover:text-t-secondary"
             >
               Type path instead
-            </button>
+            </Button>
           </div>
           <FolderBrowser
             currentPath={browserPath}

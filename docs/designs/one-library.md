@@ -82,8 +82,13 @@ turns `npm test` red on the spot, rather than waiting for somebody to remember
 a script. The other cases in that file plant one screen per rule in a throwaway
 folder, so the check itself is proved on markup nobody is about to edit.
 
-As of `1243845`: **0 hand-painted controls across 158 screens**, `npm test`
-1295 passing.
+The gate also rejects visible raw form controls even when they paint nothing.
+Responsive hit targets, focus behavior, and semantics belong to the component
+library just as much as borders and colours do. Invisible mechanisms such as a
+file input behind an attachment button remain permitted because they are not a
+second control presented to the reader.
+
+The current-tree check reports **0 hand-painted or raw visible controls**.
 
 ## 5. Debt
 

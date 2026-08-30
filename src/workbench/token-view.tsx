@@ -421,7 +421,7 @@ export function TokenView({ sessionId, onClose }: { sessionId: string; onClose: 
 /**
  * The gauge itself, which is now a way in rather than a read-only number.
  *
- * A real <button> inside the badge, the pattern the plan chip already uses: a
+ * A real Button inside the badge, the pattern the plan chip already uses: a
  * Badge renders a <span>, and a click handler on a span is reachable by mouse
  * and by nothing else — no tab stop, no Enter, nothing for a screen reader to
  * announce. This chip is the only way into the token picture in the app, so
@@ -452,18 +452,20 @@ export function ContextChip({
       title={`${used.toLocaleString()} of ${room.toLocaleString()} tokens of this conversation are in use\nClick for the whole token picture`}
       className="font-mono"
     >
-      <button
+      <Button
         type="button"
+        variant="foreground"
+        size="xs"
         data-testid="context-chip-open"
         aria-label={`Context — ${used.toLocaleString()} of ${room.toLocaleString()} tokens in use. Opens the whole token picture.`}
-        className="flex items-center gap-1"
+        className="h-auto min-h-0 gap-1 p-0 font-mono font-normal"
         onClick={onOpen}
       >
         {/* Its own mark, like the coins on the cost chip beside it: three bare
             numbers in a row on one line read as one number. */}
         <Gauge />
         {reads(used, room)}
-      </button>
+      </Button>
     </Badge>
   );
 }

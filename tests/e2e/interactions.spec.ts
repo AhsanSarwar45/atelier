@@ -5,9 +5,13 @@ import type { WbpEvent } from '../../src/workbench/protocol';
 
 const CHAT = 'interaction-cards-fixture';
 
+test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
 test('questions and proposed plans share one complete interaction language', async ({ page, request }) => {
   test.setTimeout(60_000);
-  await page.setViewportSize({ width: 1440, height: 1400 });
+  // This card is answered from phones as often as desktops. Keep the fixture
+  // narrow enough to exercise the coarse, single-column presentation that
+  // exposed the custom checkbox growing into a large empty square.
   const bare: Omit<WbpEvent, 'seq' | 'sessionId' | 'at'>[] = [
     { type: 'session.started', brand: 'codex', externalId: 'fixture-thread', model: 'gpt-5', cwd: process.cwd(), permissionMode: 'on-request', effort: 'high', collaborationMode: 'plan' },
     { type: 'question.requested', requestId: 'questions', blocking: true, questions: [
@@ -76,7 +80,11 @@ test('questions and proposed plans share one complete interaction language', asy
     expect(made.status(), await made.text()).toBe(201);
     project = await made.json();
     await page.goto(`/project?id=${project!.id}&tab=chat`);
-    await page.getByTestId('restore-row').filter({ hasText: 'Interaction cards' }).getByTestId('row-name').click();
+    // The phone drawer is translated between frames while it opens; this test
+    // owns the fixture row and is proving the cards after navigation, not the
+    // drawer animation.
+    await page.getByTestId('restore-row').filter({ hasText: 'Interaction cards' }).getByTestId('row-name')
+      .evaluate((button: HTMLButtonElement) => button.click());
     await expect(page.getByTestId('question-card')).toBeVisible();
     await expect(page.getByTestId('plan-card')).toBeVisible();
 
@@ -92,6 +100,6 @@ test('questions and proposed plans share one complete interaction language', asy
     await page.getByTestId('plan-card').screenshot({ path: 'tests/results/plan-card-after.png' });
     await page.screenshot({ path: process.env.INTERACTIONS_SCREENSHOT || 'tests/results/interactions-after.png', fullPage: true });
   } finally {
-    if (project) await request.delete(`/api/projects/${project.id}`);
+    if (project) await request.delete(`/api/projects/${project.id}`).catch(() => undefined);
   }
 });

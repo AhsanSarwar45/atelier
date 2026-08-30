@@ -713,15 +713,17 @@ export function ChatSidebar({
                       them is what puts the clock on the name's own line. */}
                   <div className="flex items-center gap-2">
                     <BrandIcon brand={row.brand} className="text-muted-foreground" />
-                    <button
+                    <Button
                       type="button"
+                      variant="foreground"
+                      size="xs"
                       data-testid="row-name"
-                      className="min-w-0 flex-1 truncate text-left text-foreground"
+                      className="h-auto min-h-0 min-w-0 flex-1 justify-start truncate p-0 text-left font-normal text-foreground"
                       disabled={busy === key}
                       onClick={() => enter(row)}
                     >
                       {row.title ?? 'Untitled chat'}
-                    </button>
+                    </Button>
                     {/*
                       The control is drawn OVER the clock, not beside it. Beside
                       it, a button nobody could see still held its own width and

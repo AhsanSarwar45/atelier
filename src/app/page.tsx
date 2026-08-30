@@ -168,14 +168,17 @@ export default function ProjectsPage() {
                               }
                         }
                       >
-                        <button
+                        <Button
                           type="button"
+                          variant="foreground"
+                          size="xs"
+                          className="h-auto min-h-0 p-0 font-inherit"
                           onClick={() => toggleTag(tag.id)}
                           aria-pressed={isSelected}
                           aria-label={`Filter by ${tag.name}`}
                         >
                           {tag.name}
-                        </button>
+                        </Button>
                       </Badge>
                     );
                   })}

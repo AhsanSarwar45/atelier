@@ -22,6 +22,7 @@ import { Brain, Check, ChevronRight, Hand, Loader2 } from 'lucide-react';
 import { MarkdownBody, type Mentions } from '@/components/markdown-body';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Panel } from '@/components/ui/panel';
 import { Textarea } from '@/components/ui/textarea';
@@ -468,8 +469,10 @@ export const ToolRow = memo(function ToolRow({
       className={cn(nested && SENT_OFF)}
     >
       <Panel inset="none" className="px-2.5 py-1 font-mono text-xs text-muted-foreground md:py-1.5">
-        <button
+        <Button
           type="button"
+          variant="foreground"
+          size="xs"
           data-testid="tool-toggle"
           disabled={!hasBody}
           onClick={() => {
@@ -483,7 +486,7 @@ export const ToolRow = memo(function ToolRow({
               });
             }
           }}
-          className="flex w-full items-center gap-2 text-left enabled:hover:text-foreground"
+          className="h-auto w-full min-h-0 justify-start gap-2 rounded-none p-0 text-left font-mono font-normal enabled:hover:text-foreground"
         >
           <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
           {hasBody && (
@@ -512,7 +515,7 @@ export const ToolRow = memo(function ToolRow({
             </span>
           )}
           <span className="ml-auto shrink-0 uppercase tracking-wide">{item.status}</span>
-        </button>
+        </Button>
         {/* What the agent this call sent away is doing NOW, in its own words.
             Only while it is still going: once the call is over, what it did is
             in its answer and this line is a stale guess (bw-7ks.22.2). */}
@@ -576,13 +579,15 @@ export const MachineLine = memo(
         data-open={open}
       >
         <Panel inset="none" className={cn('px-2.5 py-1 font-mono text-xs md:py-1.5', look.row)}>
-          <button
+          <Button
             type="button"
+            variant="foreground"
+            size="xs"
             data-testid="note-toggle"
             disabled={!opens}
             onClick={() => setOpen(!open)}
             title={row.kind}
-            className="flex w-full items-center gap-2 text-left enabled:hover:brightness-125"
+            className="h-auto w-full min-h-0 justify-start gap-2 rounded-none p-0 text-left font-mono font-normal enabled:hover:brightness-125"
           >
             <Mark className="h-3 w-3 shrink-0" />
             {opens && (
@@ -602,7 +607,7 @@ export const MachineLine = memo(
             {/* Where a command says OK or FAILED, this says which of the six it
                 is — so the colour is never the only thing carrying it. */}
             <span className="ml-auto shrink-0 uppercase tracking-wide">{row.family}</span>
-          </button>
+          </Button>
           {open &&
             row.lines.map((line, i) => (
               <Body
@@ -652,16 +657,18 @@ export const ThinkingBlock = memo(function ThinkingBlock({ item }: { item: Extra
       data-sent-by={item.parentId ?? undefined}
       className={cn('text-sm', sentOff(item.parentId) && SENT_OFF)}
     >
-      <button
+      <Button
         type="button"
+        variant="foreground"
+        size="xs"
         data-testid="thinking-toggle"
         onClick={() => setOpenedByHand(!open)}
-        className="flex w-full items-center gap-2 text-left text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground"
+        className="h-auto w-full min-h-0 justify-start gap-2 rounded-none p-0 text-left text-xs font-normal uppercase tracking-wide text-muted-foreground hover:text-foreground"
       >
         <Brain className="h-3.5 w-3.5 shrink-0" />
         <span className="shrink-0">{item.done ? 'Thought' : 'Thinking'}</span>
         {!open && <span className="truncate font-normal normal-case opacity-70">{firstLine}</span>}
-      </button>
+      </Button>
       {open && (
         <div className="mt-1 whitespace-pre-wrap border-l-2 border-border/60 pl-3 italic leading-relaxed text-muted-foreground">
           {item.text}
@@ -1074,17 +1081,12 @@ export const QuestionCard = memo(function QuestionCard({
                         'flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5',
                         selected ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50',
                       )}>
-                        <input
-                          type="checkbox"
-                          className="peer sr-only"
+                        <Checkbox
+                          className="mt-0.5"
                           checked={selected}
-                          onChange={() => choose(option.id)}
+                          onCheckedChange={() => choose(option.id)}
                           aria-label={option.label}
                         />
-                        <span className={cn(
-                          'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border',
-                          selected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/60 bg-background',
-                        )}>{selected && <Check className="size-3" />}</span>
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium text-foreground">{option.label}</span>
                           {option.description && <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>}
@@ -1106,21 +1108,15 @@ export const QuestionCard = memo(function QuestionCard({
                   draft.custom && 'border-primary bg-primary/10',
                 )}>
                   {question.selection !== 'text' && (
-                    <Button
-                      type="button"
-                      role="checkbox"
-                      size="icon"
-                      variant="outline"
-                      className={cn('mt-0.5 size-5 shrink-0 p-0', draft.custom && 'border-primary bg-primary text-primary-foreground')}
-                      aria-checked={draft.custom}
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={draft.custom}
                       aria-label="Custom answer"
-                      onClick={() => change(question.id, (current) => ({
-                        ...current, custom: !current.custom,
+                      onCheckedChange={(checked) => change(question.id, (current) => ({
+                        ...current, custom: checked === true,
                         ...(question.selection === 'single' && !current.custom ? { optionIds: [] } : {}),
                       }))}
-                    >
-                      {draft.custom && <Check className="size-3" />}
-                    </Button>
+                    />
                   )}
                   <Input
                     type={question.secret ? 'password' : 'text'}

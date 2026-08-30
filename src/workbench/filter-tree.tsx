@@ -16,10 +16,11 @@
  */
 import { useState } from 'react';
 
-import { Check, ChevronRight, ListFilter, Minus } from 'lucide-react';
+import { ChevronRight, ListFilter } from 'lucide-react';
 
 import { ToolButton } from '@/components/shell';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Row } from '@/components/ui/row';
 import { cn } from '@/lib/utils';
@@ -113,42 +114,34 @@ function Line({
         style={{ paddingLeft: indent }}
       >
         {branch ? (
-          <button
+          <Button
             type="button"
+            variant="foreground"
+            size="xs"
             data-testid="kind-fold"
             aria-label={shut ? `Show what is under ${node.label}` : `Fold ${node.label}`}
             onClick={() => onFold(node.id)}
-            className="shrink-0 text-t-tertiary hover:text-t-primary"
+            className="size-4 min-h-0 min-w-0 shrink-0 p-0 text-t-tertiary hover:text-t-primary"
           >
             <ChevronRight className={cn('size-3.5 transition-transform', !shut && 'rotate-90')} />
-          </button>
+          </Button>
         ) : (
           <span className="size-3.5 shrink-0" />
         )}
 
-        <button
-          type="button"
+        <Checkbox
           data-testid="kind-switch"
-          role="checkbox"
-          aria-checked={state === 'half' ? 'mixed' : state === 'on'}
+          checked={state === 'half' ? 'indeterminate' : state === 'on'}
           aria-label={node.label}
+          onCheckedChange={() => onFlip(node)}
+        />
+        <Button
+          type="button"
+          variant="foreground"
+          size="xs"
           onClick={() => onFlip(node)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="h-auto min-h-0 min-w-0 flex-1 justify-start gap-2 p-0 text-left font-normal"
         >
-          {/* An empty box is drawn in the edge the app gives a box you type
-              into. The faint one is a shade off the panel behind it, which on
-              a dark skin is no box at all — and a switch nobody can see is a
-              switch nobody knows they can turn back on (bw-qdim.11). */}
-          <span
-            aria-hidden="true"
-            className={cn(
-              'flex size-4 shrink-0 items-center justify-center rounded-[4px] border',
-              state === 'off' ? 'border-b-strong' : 'border-transparent bg-primary text-primary-foreground',
-            )}
-          >
-            {state === 'on' && <Check className="size-3" />}
-            {state === 'half' && <Minus className="size-3" />}
-          </span>
           <span className={cn('truncate', state === 'off' && 'text-t-tertiary')}>{node.label}</span>
           {/* The count sits at the far end so the numbers line up and the eye
               can run down them; a kind this conversation never used says 0
@@ -156,7 +149,7 @@ function Line({
           <span data-testid="kind-count" className="ml-auto pl-2 tabular-nums text-xs text-t-tertiary">
             {node.count}
           </span>
-        </button>
+        </Button>
       </div>
 
       {branch &&

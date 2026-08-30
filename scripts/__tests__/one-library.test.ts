@@ -51,19 +51,19 @@ describe("the one-library check", () => {
       `export const A = () => <button className="rounded-md border bg-primary px-2">Go</button>;`,
     );
     const { said, failed } = run(path);
-    expect(said).toContain("painted by hand");
+    expect(said).toContain("bypasses shared control behavior");
     expect(said).toContain("<Button>");
     expect(failed).toBe(true);
   });
 
-  it("leaves a click target that paints nothing alone", () => {
+  it("names a click target even when it paints nothing", () => {
     const path = screen(
       "bare-button.tsx",
       `export const A = () => <button className="flex items-center gap-2" onClick={go}>Go</button>;`,
     );
     const { said, failed } = run(path);
-    expect(said).toContain("0 hand-painted");
-    expect(failed).toBe(false);
+    expect(said).toContain("bypasses shared control behavior");
+    expect(failed).toBe(true);
   });
 
   it("names the browser's own picker", () => {
@@ -153,7 +153,7 @@ describe("the one-library check", () => {
        );`,
     );
     const { said } = run(path);
-    expect(said).toContain("painted by hand");
+    expect(said).toContain("bypasses shared control behavior");
   });
 
   it("leaves the library itself alone, because that is where paint lives", () => {

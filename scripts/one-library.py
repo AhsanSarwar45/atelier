@@ -13,8 +13,9 @@ just looks wrong beside everything else. So this reads the screens' own markup,
 names every raw element carrying paint of its own, and exits non-zero, so it can
 stand as a gate.
 
-It reads markup, not intent: a raw <button> with no paint at all is left alone
-(it is a click target, not a control), a circle is left alone because the
+It reads markup, not intent: every visible raw form control is an offence,
+whether or not it paints itself, because shared behavior and responsive hit
+targets are as much a part of the library as paint. A circle is left alone because the
 library's cards and panels are rounded rectangles and a ring is a drawing, a box
 whose only edge runs down one side is left alone because that is a speaker's
 rail down a message and not a card face, a picker the reader can never see is
@@ -148,8 +149,8 @@ def offences_in(text):
         if tag in PICKERS and not unseen(classes) and 'type="hidden"' not in attrs:
             found.append((line, f"a plain <{tag}>, which is the browser's own control",
                           f"<{PICKERS[tag]}> from the library"))
-        elif tag == "button" and painted:
-            found.append((line, "a <button> painted by hand",
+        elif tag == "button" and not unseen(classes):
+            found.append((line, "a plain <button>, which bypasses shared control behavior",
                           "<Button> from the library"))
         elif "fixed inset-0" in classes and painted:
             found.append((line, "a dimmed backdrop painted by hand",
@@ -186,7 +187,7 @@ def main():
     skipped, total = [], 0
     for path in files:
         rel = named(path)
-        if LIBRARY in rel:
+        if LIBRARY in rel or "__tests__" in path.parts:
             continue
         if rel in EXEMPT:
             skipped.append(rel)

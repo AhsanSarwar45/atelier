@@ -262,13 +262,16 @@ export function FolderBrowser({
                   appearance="light"
                   className="font-mono"
                 >
-                  <button
+                  <Button
                     type="button"
+                    variant="foreground"
+                    size="xs"
+                    className="h-auto min-h-0 p-0 font-inherit"
                     onClick={() => navigateToDirectory(root)}
                     title={root}
                   >
                     {root.charAt(0)}:
-                  </button>
+                  </Button>
                 </Badge>
               ))}
             </div>

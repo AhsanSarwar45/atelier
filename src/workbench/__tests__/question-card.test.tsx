@@ -59,6 +59,16 @@ describe('question card', () => {
     }));
   });
 
+  it('keeps the canonical checkbox visual compact on coarse pointers while the whole option remains clickable', () => {
+    render(<QuestionCard item={request()} sessionId="session-1" />);
+    const custom = screen.getAllByRole('checkbox', { name: 'Custom answer' })[0]!;
+    expect(custom.className).toContain('!min-h-0');
+    expect(custom.className).toContain('before:-inset-3');
+
+    fireEvent.click(screen.getByText('Durable relational storage.'));
+    expect(screen.getByRole('checkbox', { name: 'Postgres' })).toBeChecked();
+  });
+
   it('lets typing activate the custom row and keeps secret resolved text masked', async () => {
     const item = request({ questions: [{
       id: 'token', header: 'Token', prompt: 'Supply it', selection: 'text', options: [], allowCustom: true, secret: true,
