@@ -67,6 +67,13 @@
                 binary="target/release/atelier"
               fi
               install -Dm755 "$binary" "$out/bin/atelier"
+              # Carry a Node runtime one folder over in libexec, so the installed
+              # program finds it by its own location with no Node on the reader's
+              # PATH (bw-oesd.2). atelier in $out/bin canonicalizes to itself and
+              # looks in ../libexec; a link into the immutable store is all that
+              # placement needs.
+              mkdir -p "$out/libexec"
+              ln -s ${pkgs.nodejs_24}/bin/node "$out/libexec/node"
               runHook postInstall
             '';
 
