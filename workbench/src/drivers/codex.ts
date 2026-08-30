@@ -61,11 +61,12 @@ const decision = (choice: PermissionAnswer) =>
   choice === 'allow_once' ? 'accept' : choice === 'allow_always' ? 'acceptForSession' : 'decline';
 
 export function codexThreadOpenRequest(opts: {
-  resume?: string; cwd: string; model?: string; approvalPolicy: string; effort?: string;
+  resume?: string; cwd: string; model?: string; approvalPolicy: string; effort?: string; instructions?: string;
 }): { method: 'thread/start' | 'thread/resume'; params: Bag } {
   const common = {
     cwd: opts.cwd, model: opts.model ?? null, approvalPolicy: opts.approvalPolicy,
-    effort: opts.effort ?? null, config: BEADS_SANDBOX_CONFIG,
+    effort: opts.effort ?? null,
+    config: { ...BEADS_SANDBOX_CONFIG, developer_instructions: opts.instructions ?? '' },
   };
   return opts.resume
     ? { method: 'thread/resume', params: { threadId: opts.resume, ...common, excludeTurns: true } }
@@ -759,6 +760,7 @@ export class CodexDriver implements Driver {
   private model: string | undefined;
   private effort: string | undefined;
   private collaborationMode: string | null = null;
+  private instructions = '';
   private collaborationPresets = new Map<string, Bag>();
   private mode = 'on-request';
   private cwd = process.cwd();
@@ -778,6 +780,7 @@ export class CodexDriver implements Driver {
     this.model = opts.model === 'default' ? undefined : opts.model;
     this.effort = opts.effort;
     this.collaborationMode = null;
+    this.instructions = opts.instructions ?? '';
     this.mode = MODES.includes(opts.permissionMode) ? opts.permissionMode : 'on-request';
     const executable = process.env.CODEX_PATH || 'codex';
     this.child = spawn(executable, ['app-server', '--stdio'], {
@@ -802,7 +805,7 @@ export class CodexDriver implements Driver {
 
     const request = codexThreadOpenRequest({
       resume: opts.resume, cwd: opts.cwd, model: this.model,
-      approvalPolicy: this.mode, effort: this.effort,
+      approvalPolicy: this.mode, effort: this.effort, instructions: this.instructions,
     });
     const opened = await this.call(request.method, request.params);
     this.threadId = opened.thread.id;
@@ -946,7 +949,7 @@ export class CodexDriver implements Driver {
       settings: {
         model: preset.model ?? this.model ?? 'default',
         reasoning_effort: preset.reasoning_effort ?? this.effort ?? null,
-        developer_instructions: null,
+        developer_instructions: this.instructions,
       },
     };
   }

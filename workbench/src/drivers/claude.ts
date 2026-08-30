@@ -1403,6 +1403,7 @@ export class ClaudeDriver implements Driver {
       options: {
         cwd: opts.cwd,
         model: opts.model,
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.instructions ?? '' },
         // The reader's own Claude Code, not the copy the kit ships: this
         // helper travels inside a single binary and that copy is a third of a
         // gigabyte, and theirs is the one they signed into and update.

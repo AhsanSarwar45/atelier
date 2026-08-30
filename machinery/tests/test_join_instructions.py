@@ -66,7 +66,7 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertFalse(join.copy_if_absent(str(legacy), str(personal)))
             self.assertEqual('[projects]\nnew = "/new"\n', personal.read_text())
 
-    def test_personal_install_adds_skills_and_hooks_without_instruction_files(self):
+    def test_personal_install_adds_only_the_on_demand_review_skill(self):
         join = load_join()
         join.WORD = "atelier"
         with tempfile.TemporaryDirectory() as held:
@@ -81,20 +81,18 @@ class JoinInstructionsTest(unittest.TestCase):
             (codex_home / "AGENTS.md").write_text("Codex-only personal rule.\n")
             join.MACHINE = str(claude_home)
             join.CODEX_MACHINE = str(codex_home)
-            join.install_skills(lambda _: None)
-            join.install_session_hooks(lambda _: None)
+            join.install_review_skill(lambda _: None)
 
             self.assertEqual((claude_home / "CLAUDE.md").read_text(),
                              "Claude-only personal rule.\n")
             self.assertEqual((codex_home / "AGENTS.md").read_text(),
                              "Codex-only personal rule.\n")
             for provider in (claude_home, codex_home):
-                for skill in ("atelier", "beads", "external-review"):
-                    self.assertTrue((provider / "skills" / skill).is_symlink())
-            claude = (claude_home / "settings.json").read_text()
-            codex = (codex_home / "hooks.json").read_text()
-            self.assertIn("session-context.py", claude)
-            self.assertIn("session-context.py", codex)
+                self.assertTrue((provider / "skills" / "external-review").is_symlink())
+                self.assertFalse((provider / "skills" / "atelier").exists())
+                self.assertFalse((provider / "skills" / "beads").exists())
+            self.assertFalse((claude_home / "settings.json").exists())
+            self.assertFalse((codex_home / "hooks.json").exists())
             self.assertEqual(list(project.iterdir()), [])
 
     def test_personal_install_adds_external_review_command(self):

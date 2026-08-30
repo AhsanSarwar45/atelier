@@ -736,9 +736,11 @@ def install(say):
                 shutil.rmtree(link) if os.path.isdir(link) else os.remove(link)
             os.symlink(target, link)
             say("link   %s -> %s" % (link, target))
-    install_skills(say)
+    # Atelier and Beads are ambient policy injected into Atelier-owned sessions.
+    # Publishing them as optional skills duplicates their text and claims generic
+    # names in the user's provider namespace.
+    install_review_skill(say)
     install_external_review(say)
-    install_session_hooks(say)
 
 
 def install_tolerantly(say):
@@ -752,13 +754,13 @@ def install_tolerantly(say):
         return False
 
 
-def install_skills(say):
-    """Expose the installed session and review skills to both providers."""
+def install_review_skill(say):
+    """Expose only the still-on-demand review skill until its runner migrates."""
     source = os.path.join(HOME, "skills")
     for provider in (MACHINE, CODEX_MACHINE):
         target = os.path.join(provider, "skills")
         os.makedirs(target, exist_ok=True)
-        for name in ("atelier", "beads", "external-review"):
+        for name in ("external-review",):
             link = os.path.join(target, name)
             want = os.path.join(source, name)
             if os.path.islink(link) and os.path.realpath(link) == want:

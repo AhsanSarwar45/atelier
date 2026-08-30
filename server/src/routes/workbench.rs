@@ -292,6 +292,9 @@ pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
             if let Some(dir) = crate::identity::data_dir() {
                 node.env("ATELIER_DATA_DIR", dir);
             }
+            if let Some(dir) = crate::identity::rules_dir() {
+                node.env("ATELIER_RULES_DIR", dir);
+            }
             let child = node.kill_on_drop(true).spawn();
 
             match child {

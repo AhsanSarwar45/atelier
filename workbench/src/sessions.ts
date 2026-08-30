@@ -54,6 +54,7 @@ import type { Store } from './store.ts';
 import { conversationTitle } from './conversation-title.ts';
 import { completeHistoryChoice } from './provider-reconciliation.ts';
 import { codexTokenPictureStats } from './codex-token-picture-stats.ts';
+import { sessionPolicy } from './session-policy.ts';
 
 export { boundedEvent } from './bounded-event.ts';
 
@@ -1431,6 +1432,7 @@ export class Sessions {
     );
     await driver.start({
       cwd: summary.cwd,
+      instructions: sessionPolicy(summary.cwd),
       model,
       permissionMode: summary.permissionMode,
       effort: summary.effort ?? undefined,

@@ -24,6 +24,8 @@ export type DriverEvent = OmitEach<WbpEvent, 'seq' | 'sessionId' | 'at'>;
 
 export interface StartOptions {
   cwd: string;
+  /** Atelier-owned policy appended at runtime; never persisted as provider customization. */
+  instructions?: string;
   model?: string;
   permissionMode: string;
   effort?: string;
