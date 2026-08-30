@@ -67,6 +67,10 @@ function scroll(box: HTMLElement, top: number): void {
   box.dispatchEvent(new Event('scroll'));
 }
 
+function wheel(box: HTMLElement, deltaY: number): void {
+  box.dispatchEvent(new WheelEvent('wheel', { deltaY }));
+}
+
 beforeEach(() => {
   // TanStack Virtual reads real element geometry. jsdom has none, so give the
   // scroll pane one ten-row viewport and measured transcript wrappers their
@@ -98,6 +102,34 @@ describe('the virtual transcript window', () => {
       scroll(pane.current!, 500);
     });
     expect(older).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for older history when upward wheel intent cannot move a pane already at its top', async () => {
+    const older = vi.fn().mockResolvedValue({ added: SCREENFUL, hasOlder: true });
+    const { pane } = chat({ rows: rows(4), onOlder: older });
+    await act(async () => {
+      wheel(pane.current!, -120);
+      wheel(pane.current!, -120);
+    });
+    expect(pane.current!.scrollTop).toBe(0);
+    expect(older).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not treat a downward wheel at the top as a request for older history', async () => {
+    const older = vi.fn().mockResolvedValue({ added: SCREENFUL, hasOlder: true });
+    const { pane } = chat({ rows: rows(4), onOlder: older });
+    await act(async () => wheel(pane.current!, 120));
+    expect(older).not.toHaveBeenCalled();
+  });
+
+  it('can load again after older parents make the drawn projection smaller', async () => {
+    const older = vi.fn().mockResolvedValue({ added: SCREENFUL, hasOlder: true });
+    const { pane, again } = chat({ rows: rows(80), onOlder: older });
+    await act(async () => wheel(pane.current!, -120));
+    await act(async () => again({ rows: rows(10, 'refolded') }));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 60)));
+    await act(async () => wheel(pane.current!, -120));
+    expect(older).toHaveBeenCalledTimes(2);
   });
 
   it('does not load merely because the chat opened, on downward travel, or far from the head', async () => {

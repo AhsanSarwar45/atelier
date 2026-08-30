@@ -74,9 +74,11 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
   useLayoutEffect(() => {
     const box = pane.current;
     const anchor = pendingAnchor.current;
-    const grew = rows.length > previous.current.many;
+    // Adding older parents can collapse formerly orphaned helper rows, so the
+    // drawn projection may grow or shrink even though storage was prepended.
+    const changed = rows.length !== previous.current.many;
     previous.current = { sessionId, many: rows.length };
-    if (!box || !anchor || !grew) return;
+    if (!box || !anchor || !changed) return;
     box.scrollTop = anchor.top + (box.scrollHeight - anchor.height);
     lastTop.current = box.scrollTop;
     // The first correction uses the virtual height estimate and happens before
@@ -103,17 +105,20 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
     else pendingAnchor.current = null;
   }, [rows.length, sessionId, pane]);
 
-  // Loading is caused only by an upward scroll. Merely opening a chat or
-  // laying out a short page never walks its history automatically.
+  // Loading is caused only by the reader travelling or wheeling upward.
+  // A page already at scrollTop 0 cannot emit upward scroll movement, so its
+  // wheel intent is the only signal available. Merely opening or laying out a
+  // short page still never walks history automatically.
   useLayoutEffect(() => {
     const box = pane.current;
     if (!box) return;
     lastTop.current = box.scrollTop;
-    const scrolled = () => {
-      const now = box.scrollTop;
-      const upward = now < lastTop.current - 1;
-      lastTop.current = now;
-      if (!upward || now > box.clientHeight || !onOlder || loading.current) return;
+    const requestOlder = (now: number) => {
+      // Keep the gesture consumed until its prepend anchor has settled. A
+      // fast local response can finish before the browser emits the scroll
+      // event paired with the same wheel input; without the anchor guard that
+      // one gesture asks for two pages.
+      if (now > box.clientHeight || !onOlder || loading.current || pendingAnchor.current) return;
       loading.current = true;
       const request = ++historyRequest.current;
       setLoadingOlder(true);
@@ -144,8 +149,21 @@ export function DrawnTranscript({ rows, sessionId, mentions, onLook, pane, onOld
           setLoadingOlder(false);
         });
     };
+    const scrolled = () => {
+      const now = box.scrollTop;
+      const upward = now < lastTop.current - 1;
+      lastTop.current = now;
+      if (upward) requestOlder(now);
+    };
+    const wheeled = (event: WheelEvent) => {
+      if (event.deltaY < 0) requestOlder(box.scrollTop);
+    };
     box.addEventListener('scroll', scrolled, { passive: true });
-    return () => box.removeEventListener('scroll', scrolled);
+    box.addEventListener('wheel', wheeled, { passive: true });
+    return () => {
+      box.removeEventListener('scroll', scrolled);
+      box.removeEventListener('wheel', wheeled);
+    };
   }, [sessionId, pane, onOlder]);
 
   const draw = (row: DrawnRow) => row.row === 'machine' ? (
