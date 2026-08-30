@@ -327,6 +327,15 @@ mod tests {
             is_test: false,
         })
         .unwrap();
+        let mut manifest = crate::project_manifest::infer(&project);
+        manifest.project.use_beads = true;
+        crate::project_manifest::create(
+            &project,
+            temp.path(),
+            crate::project_manifest::ManifestStorage::Repository,
+            &manifest,
+        )
+        .unwrap();
 
         let began = std::time::Instant::now();
         let supervisor = supervise(db, bd);
