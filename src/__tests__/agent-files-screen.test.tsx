@@ -39,6 +39,6 @@ describe('Agent files browser', () => {
     render(<AgentFilesBrowser projects={[]} />);
     await screen.findByText('CLAUDE.md');
     fireEvent.change(screen.getByLabelText('Search agent files'), { target: { value: 'nothing-here' } });
-    expect(screen.getByText('No agent files found')).toBeInTheDocument();
+    expect(screen.getByText('No agent files')).toBeInTheDocument();
   });
 });

@@ -259,7 +259,7 @@ async function capture(args: string[], files: Uploaded): Promise<Capture> {
   if (type === 'image') return { bytes: uploaded(target, files, '--target'), label: basename(target!), diagnostics: [] };
   if (type === 'web') return webCapture(target ?? '', value(args, '--viewport') ?? '1280x800', value(args, '--theme') ?? 'system');
   if (type === 'window') return windowCapture(value(args, '--window-id'));
-  throw new Error('Specify --type web, window, or image');
+  throw new Error('ambiguous target; use --type web, window, or image');
 }
 
 export async function screenCheckUploaded(args: string[], files: Uploaded, media: string, judge: VisualJudge = defaultVisualJudge): Promise<Record<string, unknown>> {

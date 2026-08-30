@@ -88,7 +88,7 @@ function importArtifact(path: string, read: ReadPresentationFile, directory: str
   let value: unknown;
   try { value = JSON.parse(bytes.toString('utf8')); } catch (error) { throw new Error(`artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`); }
   const artifact = visualArtifact(value); const canonical = canonicalArtifact(value);
-  if (!artifact || !canonical) throw new Error('Invalid visual artifact');
+  if (!artifact || !canonical) throw new Error('Artifact does not match the contract');
   mkdirSync(directory, { recursive: true });
   const asset = `${createHash('sha256').update(canonical).digest('hex')}.artifact.json`;
   try { writeFileSync(join(directory, asset), canonical, { flag: 'wx' }); } catch (error) {
@@ -103,13 +103,13 @@ function rendered(args: string[], stdin: string, read: ReadPresentationFile, dir
   if (args[0] === 'widget') {
     const file = inputFile(args);
     const source = file ? read(file).toString('utf8') : stdin;
-    if (!source.trim()) throw new Error('Widget input required on stdin or with --input');
+    if (!source.trim()) throw new Error('Widget input is empty. Use stdin or --input.');
     let value: unknown;
     try { value = JSON.parse(source); } catch (error) {
       throw new Error(`widget input is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
     const rendered = widgetBlock(value);
-    if (!rendered) throw new Error('Invalid widget input');
+    if (!rendered) throw new Error('Widget contract mismatch or unknown fields');
     return `${rendered}\n`;
   }
   if (args[0] === 'image') {
