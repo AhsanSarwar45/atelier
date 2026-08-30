@@ -442,15 +442,6 @@ fn bundled_runtime(exe: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|c| runnable(c))
 }
 
-/// Where npm is, if this computer has it.
-///
-/// The Windows spelling is asked for by name as well. There the file behind
-/// `npm` is `npm.cmd`, and while the lookup this computer answers with knows
-/// that, the install places are walked by file name and would not.
-pub fn find_npm() -> Option<PathBuf> {
-    find_tool("npm", &["npm.cmd"])
-}
-
 /// What to tell a reader whose computer has no git on it.
 ///
 /// git is not optional the way `bd` is: the whole Git panel and every worktree

@@ -28,10 +28,10 @@
 //!
 //! The kit the helper talks to Claude with. It is Anthropic's, published under
 //! "all rights reserved", so putting a copy inside a binary we hand to somebody
-//! else would be us redistributing their program. It is fetched from npm
-//! instead, on the reader's own machine, against the lock this build carries —
-//! which is where they would have got it anyway, and leaves the licence between
-//! them and its author.
+//! else would be us redistributing their program. It is fetched onto
+//! the reader's own machine instead, straight from where the lock this build
+//! carries says each piece lives — which is where they would have got it
+//! anyway, and leaves the licence between them and its author.
 //!
 //! Claude Code itself is not carried either, for a second reason on top of that
 //! one: the kit ships a copy weighing a third of a gigabyte per platform, and
@@ -42,7 +42,6 @@ use base64::Engine;
 use rust_embed::Embed;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 /// The helper's own files: everything it runs, and the two package files that
 /// say what it needs. Its tests stay behind — they are for this repository,
@@ -260,11 +259,20 @@ pub fn install() -> Result<Laid, String> {
 
 /// Fetch the kit the helper talks to Claude with, if it is not already there.
 ///
-/// Guarded by the lock this build carries, so it is paid once per machine and
-/// again only when the lock changes. `--omit=optional` leaves behind the copy
-/// of Claude Code the kit would otherwise bring — a third of a gigabyte per
-/// platform, for a program the reader already has — and `--omit=dev` leaves
-/// the type declarations, which nothing reads at run time.
+/// The kit is Anthropic's, published under "all rights reserved", so it is
+/// never carried inside this product; it is fetched onto the reader's own
+/// machine instead. It used to be fetched by shelling out to `npm ci`, which
+/// made npm a thing the reader had to install by hand. Now the fetch is done
+/// here, over the network, from the lock this build carries: every package the
+/// lock names is downloaded from where the lock says it lives and checked
+/// against the fingerprint the lock records, so the reader needs no npm at all
+/// (bw-oesd.2).
+///
+/// Guarded by that same lock, so it is paid once per machine and again only
+/// when the lock changes. The packages the lock marks development-only or
+/// optional are left behind, which is what `npm ci --omit=dev --omit=optional`
+/// did before: the type declarations nothing reads at run time, and the
+/// platform copies of Claude Code the reader already has.
 pub async fn fetch_kit(package: &Path) -> Result<(), String> {
     let lock = std::fs::read(package.join("package-lock.json"))
         .map_err(|e| format!("{}: {e}", package.join("package-lock.json").display()))?;
@@ -274,48 +282,171 @@ pub async fn fetch_kit(package: &Path) -> Result<(), String> {
         return Ok(());
     }
 
-    // Found and run by its own path rather than by a bare name: a copy the
-    // machine starts at login has none of the reader's own list of places to
-    // look on, and the chat's kit would go unfetched on a computer that has
-    // npm (bw-oxrg). Forgotten when it is not here, so an npm installed on
-    // this advice is found without a restart.
-    let Some(npm) = crate::routes::find_npm() else {
-        crate::routes::forget_tools();
-        return Err(
-            "npm not found".to_string(),
-        );
-    };
-    let named = npm.display().to_string();
-    let run = tokio::process::Command::new(&npm)
-        .args([
-            "ci",
-            "--omit=optional",
-            "--omit=dev",
-            "--no-audit",
-            "--no-fund",
-            "--loglevel=error",
-        ])
-        .current_dir(package)
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(|e| {
-            format!("Could not run {named}: {e}")
-        })?;
+    fetch_locked_packages(package).await?;
 
-    if !run.status.success() {
-        let said = String::from_utf8_lossy(&run.stderr);
-        return Err(format!(
-            "{named} could not fetch the chat's kit ({}). It is fetched once, and needs the network \
-             the first time: {}",
-            run.status,
-            said.trim()
-        ));
-    }
     if !package.join(KIT).exists() {
-        return Err(format!("{named} finished but {KIT} is not there"));
+        return Err(format!("the chat's kit was fetched but {KIT} is not there"));
     }
     crate::laid_down::write_marker(package, KIT_MARKER, &want)
+}
+
+/// Download and lay down every package the lock names, into the tree it names.
+///
+/// A version-3 lock lists each installed package under the exact path it goes
+/// in, from `node_modules/<name>` down to the nested
+/// `node_modules/<a>/node_modules/<b>` a duplicated version lands in. Each
+/// entry says where its tarball lives (`resolved`) and what it must hash to
+/// (`integrity`). Walking those entries and fetching each in turn is all the
+/// install a run-time kit needs: there is no dependency resolving left to do,
+/// the lock already did it.
+async fn fetch_locked_packages(package: &Path) -> Result<(), String> {
+    let lock_path = package.join("package-lock.json");
+    let text =
+        std::fs::read_to_string(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
+    let lock: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("{} is not readable as a lock: {e}", lock_path.display()))?;
+    let packages = lock
+        .get("packages")
+        .and_then(|p| p.as_object())
+        .ok_or_else(|| format!("{} names no packages to fetch", lock_path.display()))?;
+
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| format!("a fetcher for the chat's kit could not be built: {e}"))?;
+
+    for (where_it_goes, entry) in packages {
+        // The root of the tree is the helper itself, not a package to fetch.
+        if !where_it_goes.starts_with("node_modules/") {
+            continue;
+        }
+        // What `npm ci --omit=dev --omit=optional` left behind: development-only
+        // type declarations, and the platform binaries the reader already has.
+        if entry.get("dev").and_then(|d| d.as_bool()) == Some(true)
+            || entry.get("optional").and_then(|o| o.as_bool()) == Some(true)
+        {
+            continue;
+        }
+        // A package with no tarball to fetch, a workspace link say, is nothing
+        // to download; the lock points such an entry at a folder, not a URL.
+        let Some(resolved) = entry.get("resolved").and_then(|r| r.as_str()) else {
+            continue;
+        };
+        if !(resolved.starts_with("http://") || resolved.starts_with("https://")) {
+            continue;
+        }
+        let integrity = entry
+            .get("integrity")
+            .and_then(|i| i.as_str())
+            .ok_or_else(|| {
+                format!("the lock names {where_it_goes} but no fingerprint to check it by")
+            })?;
+        fetch_one_package(&client, resolved, integrity, &package.join(where_it_goes))
+            .await
+            .map_err(|e| format!("the chat's kit could not be fetched ({where_it_goes}): {e}"))?;
+    }
+    Ok(())
+}
+
+/// Fetch one package's tarball, prove it is the one the lock named, and unpack
+/// it where the lock said it goes.
+async fn fetch_one_package(
+    client: &reqwest::Client,
+    url: &str,
+    integrity: &str,
+    dest: &Path,
+) -> Result<(), String> {
+    let answer =
+        client.get(url).send().await.map_err(|e| {
+            format!("{url}: {e}. Fetching the kit needs the network the first time")
+        })?;
+    if !answer.status().is_success() {
+        return Err(format!("{url} answered {}", answer.status()));
+    }
+    let bytes = answer.bytes().await.map_err(|e| format!("{url}: {e}"))?;
+    verify_integrity(&bytes, integrity)?;
+
+    // gzip-decoding and un-taring are blocking work; kept off the async runtime
+    // so the board this shares a process with keeps answering while the kit
+    // lands.
+    let bytes = bytes.to_vec();
+    let dest = dest.to_path_buf();
+    tokio::task::spawn_blocking(move || unpack_package(&bytes, &dest))
+        .await
+        .map_err(|e| format!("unpacking was interrupted: {e}"))?
+}
+
+/// Prove a downloaded tarball is byte-for-byte the one the lock recorded.
+///
+/// The lock records a Subresource-Integrity string, `sha512-<base64>`, and
+/// sometimes several separated by spaces. A modern lock always carries a
+/// sha512; that is the one checked, because a weaker digest beside it would
+/// only weaken the proof.
+fn verify_integrity(bytes: &[u8], integrity: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha512};
+    let recorded = integrity
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix("sha512-"))
+        .ok_or_else(|| format!("no sha512 fingerprint in {integrity:?} to check against"))?;
+    let want = base64::engine::general_purpose::STANDARD
+        .decode(recorded)
+        .map_err(|e| format!("the recorded fingerprint {recorded:?} is not readable: {e}"))?;
+    let got = Sha512::digest(bytes);
+    if got.as_slice() != want.as_slice() {
+        return Err(
+            "what was fetched does not match the fingerprint the lock recorded".to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Un-tar one npm tarball into `dest`, dropping the wrapping `package/` folder.
+///
+/// Every npm tarball is a gzipped tar whose files all sit under a single
+/// top-level `package/` directory; `dest` is where that directory's contents
+/// belong. Any entry that tries to climb out of `dest` with `..` or an absolute
+/// path is refused rather than followed, so a bad tarball cannot write outside
+/// the folder it was given.
+fn unpack_package(gzipped_tar: &[u8], dest: &Path) -> Result<(), String> {
+    use std::path::Component;
+    let decoder = flate2::read::GzDecoder::new(gzipped_tar);
+    let mut archive = tar::Archive::new(decoder);
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("the tarball could not be read: {e}"))?;
+    for entry in entries {
+        let mut entry =
+            entry.map_err(|e| format!("a file in the tarball could not be read: {e}"))?;
+        let named = entry
+            .path()
+            .map_err(|e| format!("a file in the tarball has an unreadable name: {e}"))?
+            .into_owned();
+        // Drop the leading `package/` component.
+        let mut parts = named.components();
+        parts.next();
+        let relative = parts.as_path();
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        if relative.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
+            return Err(format!(
+                "the tarball holds an unsafe path: {}",
+                named.display()
+            ));
+        }
+        let out = dest.join(relative);
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        entry
+            .unpack(&out)
+            .map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+    Ok(())
 }
 
 /// Whether the kit in `package` is the one `want` names.
@@ -330,6 +461,172 @@ fn already_fetched(package: &Path, want: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a package tarball the way npm publishes one: a gzipped tar whose
+    /// files all sit under a single `package/` folder. Returns the bytes and
+    /// the Subresource-Integrity string the lock would record for them.
+    fn make_tarball(files: &[(&str, &[u8])]) -> (Vec<u8>, String) {
+        use sha2::{Digest, Sha512};
+        use std::io::Write;
+        let mut tarred = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tarred);
+            for (path, content) in files {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(content.len() as u64);
+                header.set_mode(0o644);
+                builder.append_data(&mut header, path, *content).unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&tarred).unwrap();
+        let gzipped = encoder.finish().unwrap();
+        let integrity = format!(
+            "sha512-{}",
+            base64::engine::general_purpose::STANDARD.encode(Sha512::digest(&gzipped))
+        );
+        (gzipped, integrity)
+    }
+
+    /// Serve some already-built tarballs over loopback and return the address.
+    async fn serve_tarballs(routes: Vec<(&'static str, Vec<u8>)>) -> std::net::SocketAddr {
+        use axum::{routing::get, Router};
+        use std::sync::Arc;
+        let mut app = Router::new();
+        for (path, body) in routes {
+            let body = Arc::new(body);
+            app = app.route(
+                path,
+                get(move || {
+                    let body = body.clone();
+                    async move { body.to_vec() }
+                }),
+            );
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        address
+    }
+
+    #[tokio::test]
+    async fn the_kit_and_its_tree_are_fetched_from_the_lock_and_laid_down() {
+        // The whole locked tree is fetched, not just the top package: the kit
+        // and a nested dependency of it both land where node looks for them,
+        // and the entries the lock marks development-only or optional are left
+        // behind exactly as `npm ci --omit=dev --omit=optional` would leave them
+        // (their tarballs are never even served here).
+        let (sdk_tar, sdk_integrity) =
+            make_tarball(&[("package/sdk.mjs", b"export const kit = true;\n")]);
+        let (dep_tar, dep_integrity) =
+            make_tarball(&[("package/index.js", b"module.exports = 1;\n")]);
+        let address = serve_tarballs(vec![("/sdk.tgz", sdk_tar), ("/dep.tgz", dep_tar)]).await;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let package = temporary.path();
+        let lock = serde_json::json!({
+            "name": "workbench",
+            "lockfileVersion": 3,
+            "packages": {
+                "": { "name": "workbench" },
+                "node_modules/@anthropic-ai/claude-agent-sdk": {
+                    "version": "0.3.232",
+                    "resolved": format!("http://{address}/sdk.tgz"),
+                    "integrity": sdk_integrity,
+                },
+                "node_modules/@anthropic-ai/claude-agent-sdk/node_modules/leftpad": {
+                    "version": "1.0.0",
+                    "resolved": format!("http://{address}/dep.tgz"),
+                    "integrity": dep_integrity,
+                },
+                "node_modules/@types/node": {
+                    "version": "20.0.0",
+                    "dev": true,
+                    "resolved": "http://127.0.0.1:9/never.tgz",
+                    "integrity": "sha512-AAAAAAAA",
+                },
+                "node_modules/fsevents": {
+                    "version": "2.3.0",
+                    "optional": true,
+                    "resolved": "http://127.0.0.1:9/never.tgz",
+                    "integrity": "sha512-AAAAAAAA",
+                },
+            }
+        });
+        std::fs::write(
+            package.join("package-lock.json"),
+            serde_json::to_vec(&lock).unwrap(),
+        )
+        .unwrap();
+
+        fetch_locked_packages(package).await.unwrap();
+
+        assert!(
+            package.join(KIT).exists(),
+            "the kit's sdk.mjs did not land where node looks for it"
+        );
+        assert_eq!(
+            std::fs::read(package.join(KIT)).unwrap(),
+            b"export const kit = true;\n"
+        );
+        assert!(
+            package
+                .join("node_modules/@anthropic-ai/claude-agent-sdk/node_modules/leftpad/index.js")
+                .exists(),
+            "the kit's own dependency was not fetched, so the tree is not walked"
+        );
+        assert!(
+            !package.join("node_modules/@types/node").exists(),
+            "a development-only package was fetched and should not have been"
+        );
+        assert!(
+            !package.join("node_modules/fsevents").exists(),
+            "an optional package was fetched and should not have been"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tarball_that_does_not_match_the_locks_fingerprint_is_refused() {
+        // The fetch checks every tarball against the fingerprint the lock
+        // recorded. Here the server hands back a real, valid tarball, but the
+        // lock records the fingerprint of a different one, so the fetch must
+        // fail and nothing must be laid down.
+        let (served_tar, _its_own_integrity) =
+            make_tarball(&[("package/sdk.mjs", b"the bytes actually served\n")]);
+        let (_other_tar, someone_elses_integrity) =
+            make_tarball(&[("package/sdk.mjs", b"bytes the lock was told to expect\n")]);
+        let address = serve_tarballs(vec![("/sdk.tgz", served_tar)]).await;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let package = temporary.path();
+        let lock = serde_json::json!({
+            "lockfileVersion": 3,
+            "packages": {
+                "": { "name": "workbench" },
+                "node_modules/@anthropic-ai/claude-agent-sdk": {
+                    "version": "0.3.232",
+                    "resolved": format!("http://{address}/sdk.tgz"),
+                    "integrity": someone_elses_integrity,
+                },
+            }
+        });
+        std::fs::write(
+            package.join("package-lock.json"),
+            serde_json::to_vec(&lock).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = fetch_locked_packages(package).await;
+        assert!(
+            outcome.is_err(),
+            "a tarball whose hash does not match the lock must be refused"
+        );
+        assert!(
+            !package.join(KIT).exists(),
+            "nothing must be laid down from a tarball that failed its check"
+        );
+    }
 
     #[tokio::test]
     async fn presentation_files_go_to_the_running_app_instead_of_its_data_directory() {
