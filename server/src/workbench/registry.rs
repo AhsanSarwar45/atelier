@@ -40,6 +40,20 @@ pub trait SessionFactory: Send + Sync {
     fn launch<'a>(&'a self, database: ChatDb, command: &'a Command) -> LaunchFuture<'a>;
 }
 
+/// Temporary production seam while provider processes move in-process.
+/// Read-only chat history and provider-independent commands remain available;
+/// starting or resuming a provider reports an honest error instead of falling
+/// back to the Node helper we are removing.
+pub struct UnavailableFactory;
+
+impl SessionFactory for UnavailableFactory {
+    fn launch<'a>(&'a self, _: ChatDb, _: &'a Command) -> LaunchFuture<'a> {
+        Box::pin(async {
+            Err("native provider supervision is not ready in this build".to_string())
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct RegistryPaths {
     pub home: PathBuf,

@@ -1,479 +1,482 @@
-//! Reverse proxy to the agent-workbench sidecar, plus its supervisor.
+//! Native browser routes for the agent workbench.
 //!
-//! Design: docs/agent-workbench.md §1.1.
-//!
-//! The whole Rust surface of the feature. The sidecar binds loopback only, so
-//! every browser request reaches it through here.
+//! These routes deliberately open the helper's existing SQLite database. A
+//! release can therefore stop starting the Node sidecar without making one
+//! saved conversation disappear.
 
 use axum::{
     body::Body,
-    extract::Request,
-    http::{header, HeaderMap, HeaderName, StatusCode, Uri},
-    response::{IntoResponse, Response},
-    Router,
+    extract::{Path, Query, State},
+    http::{Response, StatusCode},
+    response::{
+        sse::{Event as SseEvent, KeepAlive, Sse},
+        IntoResponse,
+    },
+    routing::{get, post},
+    Json, Router,
 };
-use std::env;
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::{OnceLock, RwLock};
-use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tracing::{info, warn};
+use futures::{stream, Stream, StreamExt};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::{convert::Infallible, pin::Pin, sync::Arc, time::Duration};
+use tokio::sync::broadcast;
 
-/// Where the helper THIS process started is answering, and the word that proves
-/// a caller is us.
-///
-/// There used to be a fixed port here — 3009 unless told otherwise — and the
-/// proxy forwarded to it on trust. Whatever program held that port received the
-/// reader's conversation, and answered the health check in our name: a release
-/// binary whose helper never started once still reported the chat healthy
-/// (bw-8um.3.5). The port is now learned from our own child, so an address is
-/// only ever forwarded to while the child that named it is alive.
+use crate::workbench::{
+    actor::{ChatDb, StoreUpdate},
+    projection::fold_all,
+    protocol::{Command, Event},
+    registry::WorkbenchRegistry,
+    store::Session,
+};
+
+pub type EventStream = Pin<Box<dyn Stream<Item = Result<SseEvent, Infallible>> + Send>>;
+
 #[derive(Clone)]
-struct Live {
-    base: String,
-    token: Option<String>,
+pub struct WorkbenchState {
+    registry: Arc<WorkbenchRegistry>,
 }
 
-/// `None` — the state at startup and after every exit — means there is nothing
-/// of ours to forward to, and the proxy says so instead of guessing.
-fn live() -> &'static RwLock<Option<Live>> {
-    static LIVE: OnceLock<RwLock<Option<Live>>> = OnceLock::new();
-    LIVE.get_or_init(|| RwLock::new(None))
-}
-
-fn set_live(up: Option<Live>) {
-    if let Ok(mut slot) = live().write() {
-        *slot = up;
-    }
-}
-
-fn get_live() -> Option<Live> {
-    live().read().ok().and_then(|slot| slot.clone())
-}
-
-/// Carries the shared word to the helper. Loopback is not a boundary — any
-/// program on this machine can reach it — so the helper answers nobody else.
-const TOKEN_HEADER: HeaderName = HeaderName::from_static("x-atelier-workbench");
-
-/// The line the helper prints once it is listening, minus the address.
-const ANNOUNCE: &str = "[workbench] listening ";
-
-/// Describe one hop; copying them to the next breaks the stream.
-const HOP_BY_HOP: [&str; 8] = [
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailers",
-    "transfer-encoding",
-    "upgrade",
-];
-
-pub fn router() -> Router {
-    Router::new().fallback(proxy)
-}
-
-/// Forwards one request to the sidecar and streams the answer back.
-async fn proxy(req: Request) -> Response {
-    // No helper of ours up, no forwarding: this is the whole of the fix for a
-    // health check that used to answer 200 out of a stranger's process.
-    let Some(up) = get_live() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "The agent workbench is not running. It starts with the server; \
-             set BEADS_WORKBENCH_URL to point at your own instance.",
-        )
-            .into_response();
-    };
-
-    let (parts, body) = req.into_parts();
-
-    let path_and_query = parts
-        .uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/");
-    let target: Uri = match format!("{}{}", up.base, path_and_query).parse() {
-        Ok(u) => u,
-        Err(e) => return (StatusCode::BAD_GATEWAY, format!("bad sidecar uri: {e}")).into_response(),
-    };
-
-    let bytes = match axum::body::to_bytes(body, 32 * 1024 * 1024).await {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("body read failed: {e}")).into_response(),
-    };
-
-    let mut headers = HeaderMap::new();
-    for (name, value) in parts.headers.iter() {
-        if !HOP_BY_HOP.contains(&name.as_str())
-            && name != header::HOST
-            && name != TOKEN_HEADER
-        {
-            headers.insert(name.clone(), value.clone());
+impl WorkbenchState {
+    pub fn new(registry: WorkbenchRegistry) -> Self {
+        Self {
+            registry: Arc::new(registry),
         }
     }
-    // Ours, not the browser's: a page cannot borrow it by sending its own.
-    if let Some(token) = up.token.as_deref() {
-        if let Ok(value) = token.parse() {
-            headers.insert(TOKEN_HEADER, value);
-        }
-    }
-
-    // No timeout: an SSE stream stays open for the life of a chat.
-    let client = match reqwest::Client::builder().build() {
-        Ok(c) => c,
-        Err(e) => return (StatusCode::BAD_GATEWAY, format!("client: {e}")).into_response(),
-    };
-
-    let upstream = client
-        .request(parts.method, target.to_string())
-        .headers(headers)
-        .body(bytes)
-        .send()
-        .await;
-
-    let upstream = match upstream {
-        Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                format!(
-                    "The agent workbench is not running ({e}). It starts with the server; \
-                     set BEADS_WORKBENCH_URL to point at your own instance."
-                ),
-            )
-                .into_response()
-        }
-    };
-
-    let status = upstream.status();
-    let mut out = Response::builder().status(status);
-    for (name, value) in upstream.headers().iter() {
-        // Content-Length cannot survive re-framing as a stream.
-        if !HOP_BY_HOP.contains(&name.as_str()) && name != header::CONTENT_LENGTH {
-            out = out.header(name.clone(), value.clone());
-        }
-    }
-    if status.is_success() {
-        out = out.header(HeaderName::from_static("x-accel-buffering"), "no");
-    }
-
-    out.body(Body::from_stream(upstream.bytes_stream()))
-        .unwrap_or_else(|e| (StatusCode::BAD_GATEWAY, format!("stream: {e}")).into_response())
-}
-
-/// Opens one of the helper's streams from THIS process, rather than from the
-/// browser.
-///
-/// The browser allows six connections to one address across every window it
-/// has, and an event stream never gives its slot back — which is what left an
-/// ordinary read queued behind streams that never end (live.rs, bw-zkh4). A
-/// connection made here is not one of those six, so the window can hold one
-/// stream while the server holds as many as the feeds need.
-pub async fn upstream(path_and_query: &str) -> Result<reqwest::Response, String> {
-    let Some(up) = get_live() else {
-        return Err("no helper of ours is up".to_string());
-    };
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut asking = client.get(format!("{}{}", up.base, path_and_query));
-    // Ours, not the browser's, exactly as the proxy above sends it.
-    if let Some(token) = up.token.as_deref() {
-        asking = asking.header(TOKEN_HEADER, token);
-    }
-    let answer = asking.send().await.map_err(|e| e.to_string())?;
-    if !answer.status().is_success() {
-        return Err(format!("the helper answered {}", answer.status()));
-    }
-    Ok(answer)
-}
-
-/// Starts the sidecar beside the server and restarts it if it dies.
-///
-/// `laid_down` is the copy of the helper the product carried and wrote out
-/// beside the data; `None` when that could not be done. This used to be a path
-/// baked in at compile time — the build machine's own checkout — so every copy
-/// but the maintainer's started nothing at all (bw-8um.3.9).
-///
-/// `BEADS_WORKBENCH_URL` suppresses the spawn and proxies to that URL instead.
-/// `BEADS_WORKBENCH_ENTRY` names a helper to start instead of the carried one,
-/// which is how somebody working on the helper runs their own edits.
-pub fn spawn_sidecar(laid: Option<crate::helper::Laid>) {
-    if let Ok(url) = env::var("BEADS_WORKBENCH_URL") {
-        info!("workbench: BEADS_WORKBENCH_URL set — not spawning a sidecar");
-        // Named by hand, so it is trusted by hand: no word is sent, because
-        // whoever set this is running the helper themselves.
-        set_live(Some(Live {
-            base: url.trim_end_matches('/').to_string(),
-            token: None,
-        }));
-        return;
-    }
-    // A helper named by hand is somebody's own checkout, and its packages are
-    // their business; the carried one is fetched for.
-    let (entry, package): (PathBuf, Option<PathBuf>) = match env::var("BEADS_WORKBENCH_ENTRY") {
-        Ok(said) if !said.trim().is_empty() => (PathBuf::from(said), None),
-        _ => match laid {
-            Some(laid) => (laid.entry, Some(laid.package)),
-            None => {
-                warn!("workbench: the chat helper was not laid down — the Chat tab will not answer");
-                return;
-            }
-        },
-    };
-    if !entry.exists() {
-        warn!(
-            "workbench: no chat helper at {} — the Chat tab will not answer",
-            entry.display()
-        );
-        return;
-    }
-    let entry = entry.display().to_string();
-
-    tokio::spawn(async move {
-        // Invented here and told to nobody else, so a program that guesses the
-        // port still cannot drive the reader's chat.
-        let token = uuid::Uuid::new_v4().to_string();
-        // Bring the sidecar up and keep it up: whatever goes wrong on one try,
-        // the next is only a growing pause away (bw-oesd.2).
-        keep_alive(move || {
-            let entry = entry.clone();
-            let package = package.clone();
-            let token = token.clone();
-            async move { attempt_sidecar(entry, package, token).await }
-        })
-        .await;
-    });
-}
-
-/// Bring an attempt back every time it ends, waiting out a pause that grows with
-/// each failure and caps out, so no single failure -- a kit that would not
-/// fetch, a runtime that would not start, a helper that exited -- ends the Chat
-/// tab for the rest of the run (bw-oesd.2). The pause is the only thing between
-/// tries, so a machine that never comes good is retried gently rather than in a
-/// tight spin.
-async fn keep_alive<F, Fut>(mut attempt: F)
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = ()>,
-{
-    let mut backoff = Duration::from_secs(1);
-    loop {
-        attempt().await;
-        backoff = waited(backoff).await;
+    pub fn database(&self) -> &ChatDb {
+        self.registry.database()
     }
 }
 
-/// One try at a live sidecar: fetch the kit if it is not there yet, find and
-/// start the runtime, and stay with the helper until it exits. Every way this
-/// can fail returns rather than looping, because the thing above it --
-/// [`keep_alive`] -- turns a return into a wait and another try. Before this,
-/// two of these ways returned straight out of the supervisor instead, and a
-/// single first-run stumble -- the kit's one network fetch, or a runtime that
-/// would not start -- left the Chat tab dead for the rest of the run
-/// (bw-oesd.2).
-async fn attempt_sidecar(entry: String, package: Option<PathBuf>, token: String) {
-    // The kit the helper talks to Claude with is fetched here rather than
-    // before the server binds, so a first run serves the board while it happens
-    // and only the Chat tab waits. The fetch is guarded by a marker, so once it
-    // is done the later tries cost nothing.
-    if let Some(package) = &package {
-        if let Err(e) = crate::helper::fetch_kit(package).await {
-            warn!("workbench: {e} — the Chat tab will try again");
-            return;
-        }
-    }
-
-    info!("workbench: starting sidecar ({entry})");
-    // The runtime is looked for and started by its own path rather than by a
-    // bare name: a copy the machine starts at login was never handed the
-    // reader's own list of places, and the one thing the Chat tab is made of
-    // would be missing on a computer that has it (bw-oxrg). Asked again on every
-    // try, and the remembered answer dropped whenever it is no, so a runtime
-    // installed on the advice below is picked up without a restart.
-    let runtime = match crate::routes::find_runtime() {
-        Some(runtime) => runtime,
-        None => {
-            crate::routes::forget_tools();
-            warn!("workbench: no node on this computer — the Chat tab cannot answer. \
-                   Install Node {NEEDS}+ and it will be picked up here.");
-            return;
-        }
-    };
-    if let Some(said) = too_old(&runtime).await {
-        crate::routes::forget_tools();
-        warn!("workbench: {said} — the Chat tab cannot answer until there is a newer one.");
-        return;
-    }
-    let mut node = tokio::process::Command::new(&runtime);
-    node.args([
-        "--experimental-strip-types",
-        "--disable-warning=ExperimentalWarning",
-        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
-        &entry,
-    ]);
-    node.env("ATELIER_WORKBENCH_TOKEN", &token);
-    // Read, not inherited: the helper's first line says which port it bound, and
-    // that line is the only thing that opens the proxy.
-    node.stdout(Stdio::piped());
-    // Where this machine keeps our data is asked once, here, and told to the
-    // helper. Left to work it out, it knew one kind of machine and only one, and
-    // wrote its chats where nothing reads them (bw-8um.3.14).
-    if let Some(dir) = crate::identity::data_dir() {
-        node.env("ATELIER_DATA_DIR", dir);
-    }
-    if let Some(dir) = crate::identity::rules_dir() {
-        node.env("ATELIER_RULES_DIR", dir);
-    }
-    let child = node.kill_on_drop(true).spawn();
-
-    match child {
-        Err(e) => {
-            warn!("workbench: could not start node ({e}) — the Chat tab will try again");
-        }
-        Ok(mut c) => {
-            let said = c.stdout.take();
-            let mine = token.clone();
-            let listener = tokio::spawn(async move {
-                let Some(said) = said else { return };
-                let mut lines = BufReader::new(said).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    match line.strip_prefix(ANNOUNCE) {
-                        Some(address) => {
-                            let base = format!("http://{}", address.trim());
-                            info!("workbench: sidecar answering at {base}");
-                            set_live(Some(Live {
-                                base,
-                                token: Some(mine.clone()),
-                            }));
-                        }
-                        None => info!("workbench: {line}"),
-                    }
-                }
-            });
-            let status = c.wait().await;
-            // Forgotten before anything else can be reached at that port: the
-            // operating system is free to hand it out again the moment the child
-            // is gone.
-            set_live(None);
-            listener.abort();
-            warn!("workbench: sidecar exited ({status:?}); the Chat tab will restart it");
-        }
-    }
+pub fn router(state: WorkbenchState) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route("/sessions", get(sessions))
+        .route("/restore", get(restore))
+        .route("/session/:id", get(session))
+        .route("/history", get(history))
+        .route("/events", get(events))
+        .route("/watch", get(watch))
+        .route("/command", post(command))
+        .with_state(state)
 }
 
-/// The oldest runtime the helper can be started with, as a reader writes it.
-///
-/// The helper is TypeScript run straight off the disk, with
-/// `--experimental-strip-types`; nothing before this release knows that word.
-const NEEDS: &str = "22.6";
-
-/// The same, to compare a version against.
-const NEEDED: (u32, u32) = (22, 6);
-
-/// Wait out this pause, and give back the next, longer one.
-async fn waited(backoff: Duration) -> Duration {
-    tokio::time::sleep(backoff).await;
-    (backoff * 2).min(Duration::from_secs(30))
+async fn health() -> Json<Value> {
+    Json(json!({"status":"ok","workbench":"native"}))
 }
 
-/// What to tell a reader whose node is too old for the helper, if it is.
-///
-/// Asked before the start rather than found out from it: a runtime that does
-/// not know `--experimental-strip-types` quits on the spot, so left to the
-/// loop the reader is told the sidecar exited, over and over, and never why
-/// (bw-oxrg). A runtime that will not say what it is gets the benefit of the
-/// doubt and is started anyway.
-async fn too_old(runtime: &Path) -> Option<String> {
-    let said = tokio::process::Command::new(runtime)
-        .arg("--version")
-        .output()
-        .await
-        .ok()?;
-    let version = String::from_utf8_lossy(&said.stdout).trim().to_string();
-    (release(&version)? < NEEDED).then(|| {
-        format!(
-            "node {version} at {} is older than the {NEEDS} the chat helper needs",
-            runtime.display()
-        )
+#[derive(Deserialize)]
+struct SessionsQuery {
+    project: Option<String>,
+}
+
+async fn sessions(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<SessionsQuery>,
+) -> Result<Json<Vec<Session>>, ApiError> {
+    Ok(Json(state.database().list_sessions(query.project).await?))
+}
+
+#[derive(Deserialize)]
+struct RestoreQuery {
+    project: Option<String>,
+    #[allow(dead_code)]
+    path: Option<String>,
+    #[allow(dead_code)]
+    all: Option<String>,
+}
+
+fn folder_of(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+}
+
+fn restore_row(session: Session) -> Value {
+    let folder = folder_of(&session.cwd);
+    json!({
+        "sessionId": session.id, "externalId": session.external_id, "brand": session.brand,
+        "title": session.title, "lastActiveAt": session.last_active_at,
+        "lastSpokeAt": session.last_spoke_at, "state": session.state, "origin": session.origin,
+        "projectId": session.project_id, "cwdHint": session.cwd, "folder": folder,
+        "branch": Value::Null, "beads": [], "runningElsewhere": false, "held": Value::Null,
     })
 }
 
-/// The release a `node --version` line names, if it names one.
-fn release(said: &str) -> Option<(u32, u32)> {
-    let mut parts = said.trim().trim_start_matches('v').split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    Some((major, minor))
+async fn restore(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<RestoreQuery>,
+) -> Result<Json<Vec<Value>>, ApiError> {
+    let rows = state
+        .database()
+        .list_sessions(query.project)
+        .await?
+        .into_iter()
+        .map(restore_row)
+        .collect();
+    Ok(Json(rows))
+}
+
+async fn session(
+    State(state): State<WorkbenchState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let found = state
+        .database()
+        .list_sessions(None)
+        .await?
+        .into_iter()
+        .find(|session| session.id == id)
+        .ok_or_else(|| ApiError::not_found(format!("no session {id}")))?;
+    let folder = folder_of(&found.cwd);
+    Ok(Json(json!({
+        "sessionId": found.id, "origin": found.origin, "brand": found.brand,
+        "externalId": found.external_id, "runningElsewhere": false, "held": Value::Null,
+        "title": found.title, "cwd": found.cwd, "folder": folder, "branch": Value::Null, "beads": [],
+    })))
+}
+
+#[derive(Deserialize)]
+struct HistoryQuery {
+    session: String,
+    before: i64,
+}
+
+async fn history(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<HistoryQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let page = state
+        .database()
+        .transcript_items(query.session, Some(query.before), 40)
+        .await?;
+    Ok(Json(
+        json!({"items":page.items,"cursor":page.cursor,"hasOlder":page.has_older}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    session: String,
+    since: Option<i64>,
+}
+
+fn event_frame(event: &Event) -> SseEvent {
+    let seq = event
+        .fields
+        .get("seq")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    SseEvent::default()
+        .id(seq.to_string())
+        .json_data(event)
+        .expect("canonical event serializes")
+}
+
+fn snapshot_frame(view: &Value) -> SseEvent {
+    SseEvent::default()
+        .id(view["lastSeq"].as_i64().unwrap_or_default().to_string())
+        .event("snapshot")
+        .json_data(view)
+        .expect("projection serializes")
+}
+
+fn session_tail(receiver: broadcast::Receiver<Event>) -> EventStream {
+    Box::pin(stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(event) => return Some((Ok(event_frame(&event)), receiver)),
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }))
+}
+
+async fn events(
+    State(state): State<WorkbenchState>,
+    Query(query): Query<EventsQuery>,
+) -> Result<Sse<EventStream>, ApiError> {
+    // Subscribe before replay so an append racing the snapshot cannot fall in the gap.
+    let receiver = state.database().subscribe_session(&query.session);
+    let since = query.since.unwrap_or(0).max(0);
+    let initial = if since == 0 {
+        let view = snapshot(state.database(), &query.session).await?;
+        vec![Ok(snapshot_frame(&view))]
+    } else {
+        state
+            .database()
+            .events_since(query.session.clone(), since)
+            .await?
+            .iter()
+            .map(|event| Ok(event_frame(event)))
+            .collect()
+    };
+    let output: EventStream = Box::pin(stream::iter(initial).chain(session_tail(receiver)));
+    Ok(Sse::new(output).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(30))
+            .text("keep-alive"),
+    ))
+}
+
+pub(crate) async fn snapshot(database: &ChatDb, session_id: &str) -> Result<Value, String> {
+    let history = database.events_since(session_id.to_string(), 0).await?;
+    let page = database
+        .transcript_items(session_id.to_string(), None, 40)
+        .await?;
+    let mut view = fold_all(&history).view;
+    view["items"] = json!(page.items);
+    view["lastSeq"] = json!(page.newest_seq);
+    view["historyCursor"] = json!(page.cursor);
+    view["hasOlder"] = json!(page.has_older);
+    Ok(view)
+}
+
+fn watch_frame(value: Value) -> SseEvent {
+    SseEvent::default()
+        .json_data(value)
+        .expect("watch frame serializes")
+}
+
+fn all_tail(receiver: broadcast::Receiver<StoreUpdate>) -> EventStream {
+    Box::pin(stream::unfold(receiver, |mut receiver| async move {
+        loop {
+            match receiver.recv().await {
+                Ok(update) => {
+                    return Some((
+                        Ok(watch_frame(json!({"kind":"event","event":update.event}))),
+                        receiver,
+                    ))
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }))
+}
+
+async fn watch(State(state): State<WorkbenchState>) -> Result<Sse<EventStream>, ApiError> {
+    let receiver = state.database().subscribe_all();
+    let sessions = state.database().list_sessions(None).await?;
+    let initial = stream::iter(vec![
+        Ok(watch_frame(json!({"kind":"snapshot","sessions":sessions}))),
+        Ok(watch_frame(json!({"kind":"running","holds":[]}))),
+    ]);
+    let output: EventStream = Box::pin(initial.chain(all_tail(receiver)));
+    Ok(Sse::new(output).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(30))
+            .text("keep-alive"),
+    ))
+}
+
+async fn command(
+    State(state): State<WorkbenchState>,
+    Json(command): Json<Command>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(Json(state.registry.execute(&command).await?))
+}
+
+struct ApiError {
+    status: StatusCode,
+    message: String,
+}
+impl ApiError {
+    fn not_found(message: String) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message,
+        }
+    }
+}
+impl From<String> for ApiError {
+    fn from(message: String) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message,
+        }
+    }
+}
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response<Body> {
+        (self.status, Json(json!({"error":self.message}))).into_response()
+    }
+}
+
+// Kept only while the existing `/api/live` compatibility tests still exercise
+// an explicitly supplied test helper. Production installs use the native state
+// above; this seam is removed with the helper packaging in bw-oesd.12.3.
+fn compatibility_upstream() -> &'static std::sync::RwLock<Option<String>> {
+    static UPSTREAM: std::sync::OnceLock<std::sync::RwLock<Option<String>>> =
+        std::sync::OnceLock::new();
+    UPSTREAM.get_or_init(|| std::sync::RwLock::new(None))
+}
+
+pub fn spawn_sidecar(_: Option<crate::helper::Laid>) {
+    let supplied = std::env::var("BEADS_WORKBENCH_URL")
+        .ok()
+        .map(|value| value.trim_end_matches('/').to_string());
+    if let Ok(mut slot) = compatibility_upstream().write() {
+        *slot = supplied;
+    }
+}
+
+pub async fn upstream(path_and_query: &str) -> Result<reqwest::Response, String> {
+    let base = compatibility_upstream()
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .ok_or_else(|| "no compatibility helper configured".to_string())?;
+    let response = reqwest::Client::new()
+        .get(format!("{base}{path_and_query}"))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if response.status().is_success() {
+        Ok(response)
+    } else {
+        Err(format!(
+            "the compatibility helper answered {}",
+            response.status()
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::{
+        protocol::Event,
+        registry::{RegistryPaths, UnavailableFactory},
+        store::Session,
+    };
+    use axum::body::Body;
+    use futures::StreamExt;
+    use serde_json::json;
+    use tower::ServiceExt;
 
-    /// The bug this guards against: when the very first try to bring the sidecar
-    /// up failed -- the kit's one network fetch, or a runtime that would not
-    /// start -- the supervisor returned and the Chat tab was dead for the rest
-    /// of the run. `keep_alive` is what makes a failed try wait and come round
-    /// again, so a try that always "fails" here (returns at once) must be seen
-    /// more than once; a supervisor that gave up after the first would leave the
-    /// count at one forever.
-    #[tokio::test(start_paused = true)]
-    async fn a_failing_try_is_retried_rather_than_ending_the_chat_tab() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-
-        let tries = Arc::new(AtomicUsize::new(0));
-        let counted = tries.clone();
-        let supervisor = tokio::spawn(async move {
-            keep_alive(move || {
-                let counted = counted.clone();
-                async move {
-                    counted.fetch_add(1, Ordering::SeqCst);
-                }
-            })
-            .await;
-        });
-
-        // The test clock is paused, so the growing backoff between tries never
-        // costs wall-clock time: let the supervisor take its first try and
-        // settle onto its sleep, then walk the clock past several backoffs, each
-        // of which lets the next try run.
-        tokio::task::yield_now().await;
-        for _ in 0..6 {
-            tokio::time::advance(Duration::from_secs(60)).await;
-            tokio::task::yield_now().await;
-        }
-        supervisor.abort();
-
-        let seen = tries.load(Ordering::SeqCst);
-        assert!(
-            seen >= 3,
-            "a failing try must be retried, not left to end the Chat tab; saw {seen} tries"
-        );
+    fn fixture() -> (tempfile::TempDir, WorkbenchState) {
+        let directory = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&directory.path().join("workbench.db")).unwrap();
+        let paths = RegistryPaths {
+            home: directory.path().to_path_buf(),
+            claude_config: directory.path().join("claude"),
+            codex_home: directory.path().join("codex"),
+            media: directory.path().join("media"),
+        };
+        let registry = WorkbenchRegistry::new(database, paths, Arc::new(UnavailableFactory));
+        (directory, WorkbenchState::new(registry))
     }
 
-    /// A runtime is judged on what it says it is, and only turned away when
-    /// what it says is older than the word the helper is started with.
-    #[test]
-    fn a_runtime_older_than_the_helper_needs_is_the_only_one_turned_away() {
-        assert_eq!(release(NEEDS), Some(NEEDED), "the two ways of writing it say the same release");
-        assert_eq!(release("v22.6.0"), Some(NEEDED), "the oldest one that will do");
-        assert!(release("v20.11.1").expect("a release") < NEEDED, "before the word existed");
-        assert!(release("v22.5.9").expect("a release") < NEEDED, "the release just before it");
-        assert!(release("v22.6.0").expect("a release") >= NEEDED);
-        assert!(release("v24.0.1").expect("a release") >= NEEDED, "and everything after");
+    fn saved_session() -> Session {
+        Session {
+            id: "chat-1".into(),
+            brand: "codex".into(),
+            external_id: Some("thread-1".into()),
+            project_id: "project-1".into(),
+            project_path: "/work/project".into(),
+            cwd: "/work/project/tree".into(),
+            model: Some("gpt-5".into()),
+            permission_mode: "default".into(),
+            effort: Some("high".into()),
+            collaboration_mode: None,
+            title: Some("The chat that must remain visible".into()),
+            state: "dormant".into(),
+            origin: "app".into(),
+            created_at: "2026-08-30T00:00:00.000Z".into(),
+            last_active_at: "2026-08-30T00:01:00.000Z".into(),
+            last_spoke_at: Some("2026-08-30T00:00:30.000Z".into()),
+        }
     }
 
-    /// Nothing readable, no verdict: a runtime that will not say what it is
-    /// gets started rather than refused on a guess.
-    #[test]
-    fn a_runtime_that_names_no_release_is_not_judged_on_one() {
-        for said in ["", "node", "vNext", "v.6.0", "22"] {
-            assert_eq!(release(said), None, "{said:?} names no release");
-        }
+    fn notice() -> Event {
+        serde_json::from_value(json!({"type":"notice","sessionId":"chat-1","seq":0,"at":"2026-08-30T00:01:00.000Z","text":"still here","providerEvent":{"provider":"codex","threadId":"thread-1","eventId":"n-1","delivery":"live"}})).unwrap()
+    }
+
+    async fn first_chunk(response: Response<Body>) -> String {
+        let mut body = response.into_body().into_data_stream();
+        String::from_utf8(body.next().await.unwrap().unwrap().to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn native_workbench_routes_restore_saved_chats_and_stream_their_snapshot() {
+        let (_directory, state) = fixture();
+        state
+            .database()
+            .create_session(saved_session())
+            .await
+            .unwrap();
+        state.database().append(notice()).await.unwrap();
+        let app = router(state);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/restore?project=project-1&path=%2Fwork%2Fproject")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let rows: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(rows[0]["sessionId"], "chat-1");
+        assert_eq!(rows[0]["title"], "The chat that must remain visible");
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/events?session=chat-1&since=0")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let chunk = first_chunk(response).await;
+        assert!(chunk.contains("event: snapshot"), "{chunk}");
+        assert!(chunk.contains("still here"), "{chunk}");
+    }
+
+    #[tokio::test]
+    async fn native_workbench_routes_publish_the_all_chat_snapshot_and_live_tail() {
+        let (_directory, state) = fixture();
+        state
+            .database()
+            .create_session(saved_session())
+            .await
+            .unwrap();
+        let response = router(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/watch")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let chunk = first_chunk(response).await;
+        assert!(chunk.contains("snapshot"), "{chunk}");
+        assert!(chunk.contains("chat-1"), "{chunk}");
+    }
+
+    #[tokio::test]
+    async fn native_workbench_routes_execute_provider_independent_commands() {
+        let (_directory, state) = fixture();
+        let response = router(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/command")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"type":"provider-defaults.read","brand":"codex"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

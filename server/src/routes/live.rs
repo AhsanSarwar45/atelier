@@ -136,10 +136,110 @@ fn asked(flag: &Option<String>) -> bool {
     )
 }
 
+/// Feed the combined browser connection from the in-process database. This is
+/// the native equivalent of relaying the helper's `/watch` SSE stream.
+async fn relay_native_watch(state: workbench::WorkbenchState, tx: mpsc::Sender<Tagged>) {
+    let mut updates = state.database().subscribe_all();
+    let sessions = match state.database().list_sessions(None).await {
+        Ok(sessions) => sessions,
+        Err(_) => return,
+    };
+    for frame in [
+        serde_json::json!({"kind":"snapshot","sessions":sessions}),
+        serde_json::json!({"kind":"running","holds":[]}),
+    ] {
+        if tx
+            .send(Tagged::new(Some("workbench"), frame.to_string()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+    loop {
+        match updates.recv().await {
+            Ok(update) => {
+                let frame = serde_json::json!({"kind":"event","event":update.event});
+                if tx
+                    .send(Tagged::new(Some("workbench"), frame.to_string()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
+/// Feed one open chat into `/api/live` without a loopback HTTP hop.
+async fn relay_native_chat(
+    state: workbench::WorkbenchState,
+    session_id: String,
+    since: i64,
+    tx: mpsc::Sender<Tagged>,
+) {
+    let mut updates = state.database().subscribe_session(&session_id);
+    if since == 0 {
+        let Ok(snapshot) = workbench::snapshot(state.database(), &session_id).await else {
+            return;
+        };
+        if tx
+            .send(Tagged::scoped(
+                "chat.snapshot",
+                &session_id,
+                snapshot.to_string(),
+            ))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    } else if let Ok(events) = state
+        .database()
+        .events_since(session_id.clone(), since)
+        .await
+    {
+        for event in events {
+            let Ok(data) = serde_json::to_string(&event) else {
+                continue;
+            };
+            if tx
+                .send(Tagged::scoped("chat", &session_id, data))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+    loop {
+        match updates.recv().await {
+            Ok(event) => {
+                let Ok(data) = serde_json::to_string(&event) else {
+                    continue;
+                };
+                if tx
+                    .send(Tagged::scoped("chat", &session_id, data))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
 /// One connection carrying every feed this window needs.
 pub async fn live(
     Extension(dolt_manager): Extension<Arc<DoltManager>>,
     Extension(db): Extension<Arc<Database>>,
+    native: Option<Extension<workbench::WorkbenchState>>,
     Query(params): Query<LiveParams>,
     upgrade: Option<WebSocketUpgrade>,
 ) -> Response {
@@ -157,17 +257,30 @@ pub async fn live(
 
     if asked(&params.workbench) {
         let tx = tx.clone();
-        tokio::spawn(relay(Feed::new("/watch", "workbench"), tx));
+        match native.as_ref() {
+            Some(Extension(state)) => tokio::spawn(relay_native_watch(state.clone(), tx)),
+            None => tokio::spawn(relay(Feed::new("/watch", "workbench"), tx)),
+        };
     }
 
     if let Some(chat) = params.chat.filter(|c| !c.is_empty()) {
-        let base = format!("/events?session={}", urlencoded(&chat));
-        let feed = Feed {
-            since: Some(params.since.unwrap_or(0)),
-            scope: Some(chat),
-            ..Feed::new(&base, "chat")
+        match native.as_ref() {
+            Some(Extension(state)) => tokio::spawn(relay_native_chat(
+                state.clone(),
+                chat,
+                params.since.unwrap_or(0) as i64,
+                tx.clone(),
+            )),
+            None => {
+                let base = format!("/events?session={}", urlencoded(&chat));
+                let feed = Feed {
+                    since: Some(params.since.unwrap_or(0)),
+                    scope: Some(chat),
+                    ..Feed::new(&base, "chat")
+                };
+                tokio::spawn(relay(feed, tx.clone()))
+            }
         };
-        tokio::spawn(relay(feed, tx.clone()));
     }
 
     // The last sender is dropped here; a window watching nothing at all gets an
@@ -576,7 +689,10 @@ mod tests {
         std::env::set_var("BEADS_WORKBENCH_URL", a_helper(let_go.clone()).await);
         workbench::spawn_sidecar(None);
 
-        let home = directories::UserDirs::new().unwrap().home_dir().to_path_buf();
+        let home = directories::UserDirs::new()
+            .unwrap()
+            .home_dir()
+            .to_path_buf();
         let project = tempfile::TempDir::new_in(&home).unwrap();
         std::fs::create_dir_all(project.path().join(".beads")).unwrap();
 

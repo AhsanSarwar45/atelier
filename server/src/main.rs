@@ -24,8 +24,9 @@ mod reachable;
 mod routes;
 mod rules;
 mod service;
-mod terminal;
 mod serving;
+mod terminal;
+mod workbench;
 
 use axum::{
     body::Body,
@@ -377,6 +378,32 @@ async fn serve(open_browser: bool) {
     let database = Arc::new(db::Database::new().expect("Failed to initialize database"));
     info!("Database initialized");
 
+    // The native workbench opens the helper's existing database, so an
+    // upgrade changes the process serving chats without changing their home.
+    let data_dir = identity::data_dir().expect("Failed to resolve Atelier data directory");
+    let chat_db = workbench::actor::ChatDb::open(&data_dir.join("workbench.db"))
+        .expect("Failed to initialize chat database");
+    let home = directories::BaseDirs::new()
+        .map(|dirs| dirs.home_dir().to_path_buf())
+        .expect("Failed to resolve home directory");
+    let claude_config = env::var_os("CLAUDE_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".claude"));
+    let codex_home = env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    let registry = workbench::registry::WorkbenchRegistry::new(
+        chat_db,
+        workbench::registry::RegistryPaths {
+            home,
+            claude_config,
+            codex_home,
+            media: data_dir.join("presentation-media"),
+        },
+        Arc::new(workbench::registry::UnavailableFactory),
+    );
+    let workbench_state = routes::workbench::WorkbenchState::new(registry);
+
     // Initialize Dolt connection manager. Local boards already backed by Dolt
     // are brought up through bd before the read-ahead can fall back to stale
     // JSONL, then checked for the rest of this process's lifetime.
@@ -484,7 +511,10 @@ async fn serve(open_browser: bool) {
         .route("/api/fs/list", get(routes::fs::list_directory))
         .route("/api/fs/exists", get(routes::fs::path_exists))
         .route("/api/fs/media", get(routes::fs::media))
-        .route("/api/presentation-assets/:asset", get(routes::fs::presentation_asset))
+        .route(
+            "/api/presentation-assets/:asset",
+            get(routes::fs::presentation_asset),
+        )
         .route("/api/fs/roots", get(routes::fs::fs_roots))
         .route("/api/fs/open-external", post(routes::fs::open_external))
         .route("/api/bd/command", post(routes::cli::bd_command))
@@ -517,7 +547,10 @@ async fn serve(open_browser: bool) {
         // One connection for a whole window: the board, the helper's feed and
         // the open chat, each event tagged (routes/live.rs, bw-zkh4).
         .route("/api/live", get(routes::live::live))
-        .nest("/api/workbench", routes::workbench::router())
+        .nest(
+            "/api/workbench",
+            routes::workbench::router(workbench_state.clone()),
+        )
         // The shells are held by this process and not by any socket, so a page
         // that reloads finds what it left running (terminal/register.rs). The
         // guard that asks whether the caller is really talking to this machine
@@ -531,6 +564,7 @@ async fn serve(open_browser: bool) {
         .route("/api/update", post(routes::version::perform_update))
         .fallback(serve_static)
         .layer(middleware::from_fn(said_not_to_keep))
+        .layer(Extension(workbench_state))
         .layer(Extension(version_cache))
         .layer(Extension(database))
         .layer(Extension(dolt_manager))
