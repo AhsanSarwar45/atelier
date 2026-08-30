@@ -14,6 +14,7 @@ pub mod external;
 pub mod media;
 pub mod metadata;
 pub mod projection;
+pub mod provider;
 pub mod protocol;
 pub mod provider_defaults;
 pub mod registry;

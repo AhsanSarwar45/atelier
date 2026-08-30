@@ -4,8 +4,8 @@
 //! event sequence numbers and publishes only committed appends, so replay,
 //! per-chat tails and the app-wide watch all observe one monotone order.
 
-use super::protocol::Event;
-use super::store::{Session, Store, TranscriptItemPage};
+use super::protocol::{Event, EventKind};
+use super::store::{Session, SessionPatch, Store, TranscriptItemPage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -25,6 +25,10 @@ pub struct StoreUpdate {
 
 enum Command {
     CreateSession(Session, Reply<()>),
+    GetSession(String, Reply<Option<Session>>),
+    SessionByExternalId(String, Reply<Option<Session>>),
+    UpdateSession(String, SessionPatch, Option<String>, Reply<()>),
+    MarkSpoke(String, String, Reply<()>),
     ListSessions(Option<String>, Reply<Vec<Session>>),
     Append(Event, Reply<Option<Event>>),
     EventsSince(String, i64, Reply<Vec<Event>>),
@@ -106,6 +110,32 @@ impl ChatDb {
             .await
     }
 
+    pub async fn get_session(&self, id: String) -> Result<Option<Session>, String> {
+        self.request(|reply| Command::GetSession(id, reply)).await
+    }
+
+    pub async fn session_by_external_id(
+        &self,
+        external_id: String,
+    ) -> Result<Option<Session>, String> {
+        self.request(|reply| Command::SessionByExternalId(external_id, reply))
+            .await
+    }
+
+    pub async fn update_session(
+        &self,
+        id: String,
+        patch: SessionPatch,
+        touch_at: Option<String>,
+    ) -> Result<(), String> {
+        self.request(|reply| Command::UpdateSession(id, patch, touch_at, reply))
+            .await
+    }
+
+    pub async fn mark_spoke(&self, id: String, at: String) -> Result<(), String> {
+        self.request(|reply| Command::MarkSpoke(id, at, reply)).await
+    }
+
     pub async fn list_sessions(&self, project_id: Option<String>) -> Result<Vec<Session>, String> {
         self.request(|reply| Command::ListSessions(project_id, reply))
             .await
@@ -163,6 +193,33 @@ fn respond<T>(reply: Reply<T>, result: rusqlite::Result<T>) {
     let _ = reply.send(result.map_err(|error| error.to_string()));
 }
 
+fn string(event: &Event, name: &str) -> Option<String> {
+    event.fields.get(name).and_then(serde_json::Value::as_str).map(str::to_string)
+}
+
+fn apply_session_fact(store: &Store, session_id: &str, event: &Event) -> rusqlite::Result<()> {
+    let mut patch = SessionPatch::default();
+    match event.kind {
+        EventKind::SessionStarted => {
+            if event.fields.contains_key("externalId") { patch.external_id = Some(string(event, "externalId")); }
+            if event.fields.contains_key("model") { patch.model = Some(string(event, "model")); }
+            if let Some(mode) = string(event, "permissionMode") { patch.permission_mode = Some(mode); }
+            if event.fields.contains_key("effort") { patch.effort = Some(string(event, "effort")); }
+            if event.fields.contains_key("collaborationMode") { patch.collaboration_mode = Some(string(event, "collaborationMode")); }
+        }
+        EventKind::SessionState => patch.state = string(event, "state"),
+        EventKind::SessionPinned => {
+            if event.fields.contains_key("model") { patch.model = Some(string(event, "model")); }
+            if let Some(mode) = string(event, "permissionMode") { patch.permission_mode = Some(mode); }
+            if event.fields.contains_key("effort") { patch.effort = Some(string(event, "effort")); }
+            if event.fields.contains_key("collaborationMode") { patch.collaboration_mode = Some(string(event, "collaborationMode")); }
+        }
+        EventKind::SessionEnded => patch.state = Some("dormant".into()),
+        _ => return Ok(()),
+    }
+    store.update_session(session_id, patch, string(event, "at").as_deref())
+}
+
 fn run(
     store: Store,
     mut commands: mpsc::UnboundedReceiver<Command>,
@@ -174,6 +231,14 @@ fn run(
             Command::CreateSession(session, reply) => {
                 respond(reply, store.create_session(&session))
             }
+            Command::GetSession(id, reply) => respond(reply, store.get_session(&id)),
+            Command::SessionByExternalId(id, reply) => {
+                respond(reply, store.session_by_external_id(&id))
+            }
+            Command::UpdateSession(id, patch, touch_at, reply) => {
+                respond(reply, store.update_session(&id, patch, touch_at.as_deref()))
+            }
+            Command::MarkSpoke(id, at, reply) => respond(reply, store.mark_spoke(&id, &at)),
             Command::ListSessions(project_id, reply) => {
                 respond(reply, store.list_sessions(project_id.as_deref()))
             }
@@ -190,7 +255,10 @@ fn run(
                         .insert("seq".to_string(), serde_json::json!(seq));
                     store
                         .append_event(&event)
-                        .map(|appended| appended.then_some((seq, event)))
+                        .and_then(|appended| {
+                            if appended { apply_session_fact(&store, &session_id, &event)?; }
+                            Ok(appended.then_some((seq, event)))
+                        })
                 });
                 match result {
                     Ok(Some((seq, event))) => {

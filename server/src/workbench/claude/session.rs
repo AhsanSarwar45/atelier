@@ -25,7 +25,27 @@ impl NativeClaudeSession {
     pub async fn start(
         database: ChatDb,
         config: ClaudeTransportConfig,
+        session: Session,
+    ) -> Result<Self, String> {
+        Self::connect(database, config, session, true).await
+    }
+
+    /// Reattach the same durable row after its provider process or stream
+    /// disappears. Imported provider events carry stable identities, so the
+    /// chat actor drops replayed duplicates before assigning a new sequence.
+    pub async fn reconnect(
+        database: ChatDb,
+        config: ClaudeTransportConfig,
+        session: Session,
+    ) -> Result<Self, String> {
+        Self::connect(database, config, session, false).await
+    }
+
+    async fn connect(
+        database: ChatDb,
+        config: ClaudeTransportConfig,
         mut session: Session,
+        create: bool,
     ) -> Result<Self, String> {
         let resume = session.external_id.clone().or_else(|| {
             config
@@ -43,6 +63,11 @@ impl NativeClaudeSession {
             .ok_or_else(|| "Claude event stream was already taken".to_string())?;
         if resume.is_some() {
             session.external_id = resume.clone();
+        } else {
+            session.external_id = initialization["session_id"]
+                .as_str()
+                .or_else(|| initialization["sessionId"].as_str())
+                .map(str::to_string);
         }
         let live = ClaudeLiveState::new(
             initialization,
@@ -50,9 +75,11 @@ impl NativeClaudeSession {
             session.permission_mode.clone(),
             session.effort.clone(),
         );
-        if let Err(error) = database.create_session(session.clone()).await {
-            transport.close().await;
-            return Err(error);
+        if create {
+            if let Err(error) = database.create_session(session.clone()).await {
+                transport.close().await;
+                return Err(error);
+            }
         }
         let mut native = Self {
             database,

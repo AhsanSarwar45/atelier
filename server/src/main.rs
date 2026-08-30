@@ -400,7 +400,7 @@ async fn serve(open_browser: bool) {
             codex_home,
             media: data_dir.join("presentation-media"),
         },
-        Arc::new(workbench::registry::UnavailableFactory),
+        Arc::new(workbench::provider::NativeProviderFactory),
     );
     let workbench_state = routes::workbench::WorkbenchState::new(registry);
 

@@ -23,7 +23,26 @@ impl NativeCodexSession {
         database: ChatDb,
         config: CodexTransportConfig,
         options: StartOptions,
+        session: Session,
+    ) -> Result<Self, String> {
+        Self::connect(database, config, options, session, true).await
+    }
+
+    pub async fn reconnect(
+        database: ChatDb,
+        config: CodexTransportConfig,
+        options: StartOptions,
+        session: Session,
+    ) -> Result<Self, String> {
+        Self::connect(database, config, options, session, false).await
+    }
+
+    async fn connect(
+        database: ChatDb,
+        config: CodexTransportConfig,
+        options: StartOptions,
         mut session: Session,
+        create: bool,
     ) -> Result<Self, String> {
         let (driver, opened) = NativeCodexDriver::start(config, options)
             .await
@@ -37,9 +56,11 @@ impl NativeCodexSession {
             session.effort = started["effort"].as_str().map(str::to_string);
             session.collaboration_mode = started["collaborationMode"].as_str().map(str::to_string);
         }
-        if let Err(error) = database.create_session(session.clone()).await {
-            driver.close().await;
-            return Err(error);
+        if create {
+            if let Err(error) = database.create_session(session.clone()).await {
+                driver.close().await;
+                return Err(error);
+            }
         }
         let mut native = Self {
             database,
@@ -91,6 +112,69 @@ impl NativeCodexSession {
             .await
             .map_err(|error| error.to_string())?;
         self.persist(events).await
+    }
+
+    pub async fn answer_questions(
+        &mut self,
+        request_id: &str,
+        response: &Value,
+    ) -> Result<Vec<Event>, String> {
+        let answers = response["answers"].as_array().cloned().unwrap_or_default();
+        let events = self.driver.answer_questions(request_id, &answers).await?;
+        self.persist(events).await
+    }
+
+    pub async fn respond_plan(
+        &mut self,
+        proposal_id: &str,
+        action: &str,
+        feedback: Option<&str>,
+    ) -> Result<Vec<Event>, String> {
+        let events = self
+            .driver
+            .respond_plan(proposal_id, action, feedback)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.persist(events).await
+    }
+
+    pub async fn set_mode(&mut self, mode: &str) -> Result<Vec<Event>, String> {
+        let event = self.driver.set_mode(mode)?;
+        self.persist(vec![event]).await
+    }
+
+    pub async fn set_model(&mut self, model: &str) -> Result<Vec<Event>, String> {
+        let event = self.driver.set_model(model);
+        self.persist(vec![event]).await
+    }
+
+    pub async fn set_effort(&mut self, effort: &str) -> Result<Vec<Event>, String> {
+        let event = self.driver.set_effort(effort);
+        self.persist(vec![event]).await
+    }
+
+    pub async fn set_collaboration_mode(&mut self, mode: &str) -> Result<Vec<Event>, String> {
+        let event = self
+            .driver
+            .set_collaboration_mode(mode)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.persist(vec![event]).await
+    }
+
+    pub async fn interrupt(&mut self) -> Result<Vec<Event>, String> {
+        self.driver
+            .interrupt()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(Vec::new())
+    }
+
+    pub async fn stop_agent(&self, agent_id: &str) -> Result<(), String> {
+        self.driver
+            .stop_agent(agent_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn close(&self) {

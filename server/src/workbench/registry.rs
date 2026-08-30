@@ -14,7 +14,8 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use std::time::Duration;
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 pub type DriverFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 pub type LaunchFuture<'a> =
@@ -24,13 +25,22 @@ pub type LaunchFuture<'a> =
 pub trait ProviderDriver: Send {
     fn brand(&self) -> &'static str;
     fn command<'a>(&'a mut self, command: &'a Command) -> DriverFuture<'a>;
+    fn next<'a>(&'a mut self) -> DriverFuture<'a> {
+        Box::pin(async {
+            std::future::pending::<()>().await;
+            unreachable!()
+        })
+    }
+    fn reconnect<'a>(&'a mut self) -> DriverFuture<'a> {
+        Box::pin(async { Err("provider cannot reconnect".to_string()) })
+    }
     fn close<'a>(&'a mut self) -> DriverFuture<'a>;
 }
 
 pub struct LaunchedSession {
     pub session_id: String,
     pub reply: Value,
-    pub driver: Box<dyn ProviderDriver>,
+    pub driver: Option<Box<dyn ProviderDriver>>,
 }
 
 /// Starts or opens a provider transactionally. It must return only after the
@@ -62,7 +72,44 @@ pub struct RegistryPaths {
     pub media: PathBuf,
 }
 
-type Driver = Arc<Mutex<Box<dyn ProviderDriver>>>;
+enum DriverRequest {
+    Command(Command, oneshot::Sender<Result<Value, String>>),
+    Close(Command, oneshot::Sender<Result<Value, String>>),
+}
+
+type Driver = mpsc::UnboundedSender<DriverRequest>;
+
+async fn supervise_driver(mut driver: Box<dyn ProviderDriver>, mut requests: mpsc::UnboundedReceiver<DriverRequest>) {
+    loop {
+        match requests.try_recv() {
+            Ok(DriverRequest::Command(command, reply)) => {
+                let _ = reply.send(driver.command(&command).await);
+                continue;
+            }
+            Ok(DriverRequest::Close(command, reply)) => {
+                let result = driver.command(&command).await;
+                let closed = driver.close().await;
+                let _ = reply.send(result.and(closed.map(|_| json!({"ok":true}))));
+                return;
+            }
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                let _ = driver.close().await;
+                return;
+            }
+            Err(mpsc::error::TryRecvError::Empty) => {}
+        }
+
+        match tokio::time::timeout(Duration::from_millis(50), driver.next()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => {
+                if driver.reconnect().await.is_err() {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+            }
+            Err(_) => {}
+        }
+    }
+}
 
 pub struct WorkbenchRegistry {
     database: ChatDb,
@@ -140,15 +187,20 @@ impl WorkbenchRegistry {
     }
 
     async fn launch(&self, command: &Command) -> Result<Value, String> {
-        let launched = self.factory.launch(self.database.clone(), command).await?;
+        let mut launched = self.factory.launch(self.database.clone(), command).await?;
+        let Some(driver) = launched.driver.take() else {
+            return Ok(launched.reply);
+        };
         let mut drivers = self.drivers.write().await;
         if drivers.contains_key(&launched.session_id) {
             drop(drivers);
-            let mut driver = launched.driver;
+            let mut driver = driver;
             let _ = driver.close().await;
             return Err(format!("session {} is already open", launched.session_id));
         }
-        drivers.insert(launched.session_id, Arc::new(Mutex::new(launched.driver)));
+        let (requests, receiver) = mpsc::unbounded_channel();
+        tokio::spawn(supervise_driver(driver, receiver));
+        drivers.insert(launched.session_id, requests);
         Ok(launched.reply)
     }
 
@@ -170,14 +222,18 @@ impl WorkbenchRegistry {
             self.drivers.read().await.get(session_id).cloned()
         }
         .ok_or_else(|| format!("no live session {session_id}"))?;
-        let mut driver = driver.lock().await;
-        let result = driver.command(command).await;
-        if closing {
-            let closed = driver.close().await;
-            result.and(closed.map(|_| json!({"ok":true})))
+        let (reply, receive) = oneshot::channel();
+        let request = if closing {
+            DriverRequest::Close(command.clone(), reply)
         } else {
-            result
-        }
+            DriverRequest::Command(command.clone(), reply)
+        };
+        driver
+            .send(request)
+            .map_err(|_| format!("provider for {session_id} stopped"))?;
+        receive
+            .await
+            .map_err(|_| format!("provider for {session_id} stopped before replying"))?
     }
 
     /// Execute one already-decoded WBP command and return the exact JSON body
@@ -227,9 +283,14 @@ impl WorkbenchRegistry {
 
     pub async fn shutdown(&self) {
         let drivers = std::mem::take(&mut *self.drivers.write().await);
-        for (_, driver) in drivers {
-            let mut driver = driver.lock().await;
-            let _ = driver.close().await;
+        for (session_id, driver) in drivers {
+            let (reply, receive) = oneshot::channel();
+            let command = Command {
+                kind: CommandKind::SessionClose,
+                fields: serde_json::Map::from_iter([("sessionId".into(), json!(session_id))]),
+            };
+            let _ = driver.send(DriverRequest::Close(command, reply));
+            let _ = receive.await;
         }
     }
 }
@@ -237,6 +298,7 @@ impl WorkbenchRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::protocol::Event;
     use serde_json::Map;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -275,7 +337,7 @@ mod tests {
                 Ok(LaunchedSession {
                     session_id: "session-1".into(),
                     reply: json!({"id":"session-1","brand":brand}),
-                    driver: Box::new(FakeDriver { calls }),
+                    driver: Some(Box::new(FakeDriver { calls })),
                 })
             })
         }
@@ -374,5 +436,82 @@ mod tests {
             .await
             .is_err());
         assert!(!registry.has_driver("session-1").await);
+    }
+
+    struct ReconnectDriver {
+        database: ChatDb,
+        phase: usize,
+        reconnects: Arc<AtomicUsize>,
+    }
+
+    fn provider_event(identity: &str, text: &str) -> Event {
+        serde_json::from_value(json!({
+            "type":"notice", "sessionId":"session-1", "seq":0,
+            "at":"2026-08-30T00:00:00.000Z", "text":text,
+            "providerEvent": {"provider":"codex","threadId":"thread-1","eventId":identity,"delivery":"live"}
+        })).unwrap()
+    }
+
+    impl ProviderDriver for ReconnectDriver {
+        fn brand(&self) -> &'static str { "codex" }
+        fn command<'a>(&'a mut self, _: &'a Command) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+        fn next<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async move {
+                match self.phase {
+                    0 => {
+                        self.database.append(provider_event("same", "before drop")).await?;
+                        self.phase = 1;
+                        Err("stream dropped".into())
+                    }
+                    2 => {
+                        assert!(self.database.append(provider_event("same", "replayed")).await?.is_none());
+                        self.database.append(provider_event("next", "after reconnect")).await?;
+                        self.phase = 3;
+                        Ok(json!({"ok":true}))
+                    }
+                    _ => {
+                        std::future::pending::<()>().await;
+                        unreachable!()
+                    }
+                }
+            })
+        }
+        fn reconnect<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async move {
+                self.reconnects.fetch_add(1, Ordering::SeqCst);
+                self.phase = 2;
+                Ok(json!({"ok":true}))
+            })
+        }
+        fn close<'a>(&'a mut self) -> DriverFuture<'a> {
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+
+    #[tokio::test]
+    async fn native_workbench_supervisor_reconnects_without_duplicate_sequence_numbers() {
+        let root = tempfile::tempdir().unwrap();
+        let database = ChatDb::open(&root.path().join("workbench.db")).unwrap();
+        let reconnects = Arc::new(AtomicUsize::new(0));
+        let (send, receive) = mpsc::unbounded_channel();
+        let task = tokio::spawn(supervise_driver(Box::new(ReconnectDriver {
+            database: database.clone(), phase: 0, reconnects: reconnects.clone(),
+        }), receive));
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if database.events_since("session-1".into(), 0).await.unwrap().len() == 2 { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        let events = database.events_since("session-1".into(), 0).await.unwrap();
+        assert_eq!(events.iter().map(|event| event.fields["seq"].as_i64().unwrap()).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(events[0].fields["text"], "before drop");
+        assert_eq!(events[1].fields["text"], "after reconnect");
+        assert_eq!(reconnects.load(Ordering::SeqCst), 1);
+        drop(send);
+        task.await.unwrap();
     }
 }
