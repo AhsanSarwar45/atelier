@@ -22,7 +22,7 @@ use std::time::Duration;
 /// The sentence a first start owes the reader (doing.rs, `said_it`).
 const SAID: &str = "wired your chats up to say what they are doing";
 /// The last of the fixed lines a start prints before it wires anything up.
-const SETTLED: &str = "ready.";
+const SETTLED: &str = "Ready.";
 /// Long enough for a cold binary to bind and print; short enough to fail a run
 /// rather than hang it.
 const PATIENCE: Duration = Duration::from_secs(60);
