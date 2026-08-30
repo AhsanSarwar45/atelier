@@ -62,11 +62,11 @@ fn value(event: &Event, field: &str) -> Value {
 }
 
 fn string(event: &Event, field: &str) -> String {
-    event.fields[field].as_str().unwrap_or_default().to_string()
+    event.fields.get(field).and_then(Value::as_str).unwrap_or_default().to_string()
 }
 
 fn integer(event: &Event, field: &str) -> i64 {
-    event.fields[field].as_i64().unwrap_or_default()
+    event.fields.get(field).and_then(Value::as_i64).unwrap_or_default()
 }
 
 fn truthy_string(event: &Event, field: &str) -> Value {
@@ -254,7 +254,7 @@ pub fn fold_all(events: &[Event]) -> Projection {
             }
             EventKind::ToolCompleted => {
                 if let Some(at) = find(&items, "tool", &string(event, "toolCallId")) {
-                    items[at]["status"] = if event.fields["ok"].as_bool().unwrap_or(false) {
+                    items[at]["status"] = if event.fields.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                         json!("ok")
                     } else {
                         json!("failed")
@@ -329,7 +329,7 @@ pub fn fold_all(events: &[Event]) -> Projection {
             }
             EventKind::AgentProgress => {
                 if let Some(&at) = agent_at.get(&string(event, "agentId")) {
-                    let final_usage = event.fields["finalUsage"].as_bool().unwrap_or(false);
+                    let final_usage = event.fields.get("finalUsage").and_then(Value::as_bool).unwrap_or(false);
                     if is_over(&agents[at]["state"]) {
                         if final_usage {
                             for field in ["seconds", "tokens", "calls"] {

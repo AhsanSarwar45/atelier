@@ -396,17 +396,25 @@ impl Store {
     pub fn events_since(&self, session_id: &str, since: i64) -> rusqlite::Result<Vec<Event>> {
         let mut statement = self
             .connection
-            .prepare("SELECT json FROM event WHERE session_id = ?1 AND seq > ?2 ORDER BY seq")?;
+            .prepare("SELECT seq, json FROM event WHERE session_id = ?1 AND seq > ?2 ORDER BY seq")?;
         let rows =
-            statement.query_map(params![session_id, since], |row| row.get::<_, String>(0))?;
+            statement.query_map(params![session_id, since], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
         rows.map(|row| {
-            serde_json::from_str(&row?).map_err(|error| {
+            let (seq, json) = row?;
+            let mut event: Event = serde_json::from_str(&json).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
-                    0,
+                    1,
                     rusqlite::types::Type::Text,
                     Box::new(error),
                 )
-            })
+            })?;
+            // Legacy helper rows kept the sequence in the indexed SQL column
+            // but not always in their JSON. SQL is the durable ordering source
+            // for both old and native events, so decode it back onto the wire.
+            event.fields.insert("seq".to_string(), serde_json::json!(seq));
+            Ok(event)
         })
         .collect()
     }
@@ -1039,6 +1047,26 @@ mod tests {
 
         store.retract_message("chat-1", "answer-1").unwrap();
         assert!(store.search("kept", 100).unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_event_json_gets_its_durable_sql_sequence_back() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store.connection().execute(
+            "INSERT INTO event (session_id, seq, at, type, json) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                "legacy-chat",
+                41_i64,
+                "2026-08-20T00:00:00.000Z",
+                "notice",
+                r#"{"type":"notice","sessionId":"legacy-chat","at":"2026-08-20T00:00:00.000Z","text":"kept"}"#,
+            ],
+        ).unwrap();
+
+        let events = store.events_since("legacy-chat", 0).unwrap();
+        assert_eq!(events[0].fields["seq"], 41);
+        assert_eq!(fold_all(&events).view["lastSeq"], 41);
     }
 
     #[test]
