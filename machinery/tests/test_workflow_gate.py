@@ -1,5 +1,9 @@
 import importlib.util
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -198,6 +202,225 @@ class NamedEditTarget(unittest.TestCase):
     def test_an_unnamed_edit_call_is_still_guarded(self, _run, _waived):
         data = {"tool_name": "MultiEdit", "tool_input": {"edits": []}, "cwd": "/repo"}
         self.assertIn("dedicated ticket worktree", gate.reason(data))
+
+
+class PathsNotProse(unittest.TestCase):
+    """What a command does, rather than which words it happens to contain.
+
+    Every one of these was refused from the shared checkout because its verb
+    was on a list, however far from the project the verb was aimed. A worker
+    reported roughly half its calls turned down, read-only ones among them,
+    each passing on a retry or a rewording — which is the mark of a gate
+    reading prose (bw-p6pv).
+    """
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_copy_of_the_project_into_a_scratch_folder_changes_nothing(self, _r, _w):
+        self.assertIsNone(gate.reason(bash("cp -r machinery /tmp/land-sabotage")))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_deletion_wholly_outside_the_project_changes_nothing(self, _r, _w):
+        self.assertIsNone(gate.reason(bash("rm -rf /tmp/land-sabotage")))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_status_read_piped_into_another_command_changes_nothing(self, _r, _w):
+        command = "bd list --status in_progress | head -5 && bd --actor s-faf11db9 show bw-merge-slot"
+        self.assertIsNone(gate.reason(bash(command)))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_making_and_touching_and_emptying_outside_change_nothing(self, _r, _w):
+        for command in ("mkdir -p /tmp/scratch/x", "touch /tmp/a /tmp/b",
+                        "truncate -s 0 /tmp/log", "mv /tmp/a /tmp/b",
+                        "install -m 644 machinery/checks /tmp/checks"):
+            self.assertIsNone(gate.reason(bash(command)), command)
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_the_same_verbs_aimed_at_the_project_still_want_a_copy(self, _r, _w):
+        for command in ("rm -rf server/src", "rm -rf /repo/server",
+                        "cp /tmp/evil.rs server/src/needs.rs",
+                        "cp -r /tmp/x machinery", "mkdir -p server/src/new",
+                        "touch README.md", "truncate -s 0 README.md",
+                        "install -m 644 /tmp/x machinery/y"):
+            self.assertIn("dedicated ticket worktree", gate.reason(bash(command)),
+                          command)
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_move_out_of_the_project_empties_the_project_and_is_guarded(self, _r, _w):
+        # Unlike a copy, this end of it is a deletion here.
+        data = bash("mv server/src/needs.rs /tmp/gone.rs")
+        self.assertIn("dedicated ticket worktree", gate.reason(data))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_one_target_inside_guards_the_whole_command(self, _r, _w):
+        data = bash("rm -rf /tmp/a server/src")
+        self.assertIn("dedicated ticket worktree", gate.reason(data))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_a_word_the_shell_has_not_finished_with_is_not_a_path_yet(self, _r, _w):
+        # Neither is knowable without running it, and a guess either way is a
+        # gate judging a command it has not seen.
+        for command in ("rm -rf $HOME/somewhere", "rm -rf *.rs"):
+            self.assertIn("dedicated ticket worktree", gate.reason(bash(command)),
+                          command)
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_the_destination_is_read_from_minus_t_and_not_from_last_place(self, _r, _w):
+        # Taking the last word would call /tmp the source and the project the
+        # destination, which is the wrong answer twice over.
+        self.assertIsNone(gate.reason(bash("cp -t /tmp machinery/checks")))
+        self.assertIn("dedicated ticket worktree",
+                      gate.reason(bash("cp -t machinery /tmp/x")))
+        self.assertIn("dedicated ticket worktree",
+                      gate.reason(bash("cp --target-directory=machinery /tmp/x")))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(True, "/repo/.git"))
+    def test_output_redirected_into_the_project_is_still_a_change(self, _r, _w):
+        self.assertIn("dedicated ticket worktree", gate.reason(bash("echo hi > README.md")))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "run", return_value=(False, ""))
+    def test_a_project_that_cannot_be_located_guards_everything(self, _r, _w):
+        # No answer about where the project ends is not the answer "nowhere".
+        self.assertIn("dedicated ticket worktree", gate.reason(bash("rm -rf /tmp/x")))
+
+
+class HalfFinishedTeardown(unittest.TestCase):
+    """The three parts of a teardown, when only the first of them ran.
+
+    `rm -rf <copy> && git worktree prune && git branch -d <card>` stops after
+    the first part and the copy is gone while the branch stays. Every retry was
+    then refused, because the gate asked the board from inside the folder the
+    first part had deleted — so the branch could not be deleted at all, and the
+    land step could never reach its own acceptance (bw-p6pv, bw-dwxw).
+    """
+
+    TEARDOWN = ("rm -rf /repo/worktrees/bw-123 && git -C /repo worktree prune"
+                " && git -C /repo branch -d bw-123")
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "already_removed", return_value=True)
+    @patch.object(gate, "checked_out_for", return_value=False)
+    @patch.object(gate, "children_for", return_value=[{"status": "closed"}])
+    @patch.object(gate, "card_for", return_value={"id": "bw-123", "status": "closed"})
+    def test_a_teardown_can_be_finished_after_its_copy_has_gone(self, *_):
+        self.assertIsNone(gate.reason(bash(self.TEARDOWN)))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "already_removed", return_value=False)
+    @patch.object(gate, "checked_out_for", return_value=False)
+    @patch.object(gate, "children_for", return_value=[{"status": "closed"}])
+    @patch.object(gate, "card_for", return_value={"id": "bw-123", "status": "closed"})
+    def test_a_branch_holding_unlanded_work_is_still_not_removable(self, *_):
+        self.assertIn("not the registered copy", gate.reason(bash(self.TEARDOWN)))
+
+    @patch.object(gate.bc, "waived", return_value=None)
+    @patch.object(gate, "already_removed", return_value=True)
+    @patch.object(gate, "checked_out_for", return_value=False)
+    def test_the_board_is_asked_from_the_checkout_that_still_exists(self, *_):
+        asked = []
+
+        def remember(issue, cwd):
+            asked.append(cwd)
+            return {"id": issue, "status": "closed"}
+
+        with patch.object(gate, "card_for", remember):
+            gate.reason(bash(self.TEARDOWN))
+        self.assertEqual(asked, ["/repo"])
+
+
+class WhatACommandWrites(unittest.TestCase):
+    """Read directly, because the refusal above hides which half was wrong."""
+
+    def test_a_copy_writes_only_where_it_lands(self):
+        argv = ["cp", "-r", "machinery", "/tmp/x"]
+        self.assertEqual(gate.written_by("cp", argv), ["/tmp/x"])
+
+    def test_a_move_writes_at_both_ends(self):
+        argv = ["mv", "a", "b"]
+        self.assertEqual(gate.written_by("mv", argv), ["a", "b"])
+
+    def test_a_switch_that_swallows_a_word_does_not_leave_a_path_behind(self):
+        argv = ["install", "-m", "644", "src", "dst"]
+        self.assertEqual(gate.written_by("install", argv), ["dst"])
+
+    def test_a_bundled_switch_that_might_swallow_a_word_is_not_guessed_at(self):
+        self.assertIsNone(gate.written_by("touch", ["touch", "-rd", "x"]))
+
+    def test_a_lone_operand_copy_names_no_destination_to_judge(self):
+        self.assertIsNone(gate.written_by("cp", ["cp", "one"]))
+
+    def test_everything_after_a_double_dash_is_a_path(self):
+        self.assertEqual(gate.written_by("rm", ["rm", "-rf", "--", "-weird"]),
+                         ["-weird"])
+
+
+class ACopyAlreadyGone(unittest.TestCase):
+    """Driven against real Git, because what this permits is a branch deletion.
+
+    Mocking the answer here would test the wording of a question nobody asked
+    Git. The protection being relied on is Git's own: `branch -d` keeps a
+    branch that holds anything the main line has not taken.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = os.path.join(self.tmp, "root")
+        os.makedirs(os.path.join(self.root, "worktrees"))
+        self.git("init", "-b", "main")
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "t")
+        Path(self.root, "a").write_text("1")
+        self.git("add", "a")
+        self.git("commit", "-m", "first")
+
+    def git(self, *args):
+        subprocess.run(("git",) + args, cwd=self.root, check=True,
+                       capture_output=True)
+
+    def copy(self, issue, landed):
+        """A copy of the work, its branch either taken into main or not."""
+        path = os.path.join(self.root, "worktrees", issue)
+        self.git("worktree", "add", path, "-b", issue)
+        Path(path, "b").write_text("2")
+        subprocess.run(["git", "add", "b"], cwd=path, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-m", issue], cwd=path, check=True,
+                       capture_output=True)
+        if landed:
+            self.git("merge", "--ff-only", issue)
+        return path
+
+    def test_a_copy_that_is_still_there_is_not_already_gone(self):
+        path = self.copy("bw-1", landed=True)
+        self.assertFalse(gate.already_removed(self.root, path, "bw-1"))
+
+    def test_a_folder_gone_but_still_registered_is_not_gone(self):
+        path = self.copy("bw-1", landed=True)
+        shutil.rmtree(path)
+        self.assertFalse(gate.already_removed(self.root, path, "bw-1"))
+
+    def test_a_pruned_copy_of_landed_work_may_have_its_branch_removed(self):
+        path = self.copy("bw-1", landed=True)
+        shutil.rmtree(path)
+        self.git("worktree", "prune")
+        self.assertTrue(gate.already_removed(self.root, path, "bw-1"))
+
+    def test_a_pruned_copy_still_holding_work_may_not(self):
+        path = self.copy("bw-1", landed=False)
+        shutil.rmtree(path)
+        self.git("worktree", "prune")
+        self.assertFalse(gate.already_removed(self.root, path, "bw-1"))
 
 
 if __name__ == "__main__":
