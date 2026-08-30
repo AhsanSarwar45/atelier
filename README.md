@@ -135,6 +135,10 @@ service inherits no shell and so no PATH at all. What it cannot find is a
 runtime a version manager hides: an `nvm`, `fnm`, `volta` or `asdf` Node is
 picked up only when your own PATH names it.
 
+`atelier tools` prints each of them, whether it is here, and where — so a
+missing one is something you can see rather than something you infer from a
+screen that does not work.
+
 ### Homebrew (macOS / Linux)
 
 One command:

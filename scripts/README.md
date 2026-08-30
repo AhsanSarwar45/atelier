@@ -271,6 +271,36 @@ node --experimental-strip-types --disable-warning=ExperimentalWarning \
 It lives beside the helper rather than here because the library it drives is
 the helper's dependency, not the app's.
 
+## `fresh-machine.sh`
+
+What a reader actually has to install, proved by running the program on a
+computer that has none of it.
+
+Every folder, name ending and fallback in the tool lookup was written from
+documentation and read back by nobody: the rest of the checks all run here,
+where git, python, node, npm and bd are installed already and on the PATH. So
+"the app finds what it needs" was a claim about code that had never been put to
+a computer missing any of it (bw-dwxw).
+
+It takes a container holding none of the five and adds them back one at a time
+— none, git only, git and the board tool, all of them — and asks the program
+itself, with `atelier tools`, what it can see. Each case is asked twice: once
+normally, and once with the environment emptied, because a copy the machine
+starts at login is handed no PATH at all and that is the case the whole lookup
+exists for.
+
+The second case takes python back off after git goes on, because Fedora's git
+brings python with it. That is true of that distribution and not of others,
+and it is the reason the case is built rather than assumed.
+
+```
+bash scripts/fresh-machine.sh
+```
+
+Needs docker. `ATELIER_BINARY` checks a binary you already have; `IMAGE`
+changes the base, which must carry none of the five and a C library no older
+than the one the binary needs.
+
 ## Adding to these
 
 A new rule gets a fault injected against it before it is trusted — switch the

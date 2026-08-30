@@ -32,6 +32,8 @@ pub enum Ask {
     Where,
     /// Print where this computer keeps the data, and nothing else.
     DataDir,
+    /// Print each outside program the app starts and whether it is here.
+    Tools,
     /// Set a project up: lay the working rules down and wire that project to
     /// them. The words after it are passed to the rules' own joining tool.
     Init(Vec<String>),
@@ -113,6 +115,10 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
             None => Ask::Unknown("tool".to_string()),
         },
         "where" => Ask::Where,
+        // "What do I have to install?" had only ever been answerable by
+        // reading our own code. This is the answer, from the same lookup the
+        // server itself starts things with (bw-dwxw).
+        "tools" => Ask::Tools,
         "--data-dir" => Ask::DataDir,
         "--help" | "-h" | "help" => Ask::Help,
         "--version" | "-V" | "version" => Ask::Version,
@@ -137,6 +143,7 @@ Usage:
   atelier tool <name> [...]   Run a board workflow command installed with Atelier
                               (`present` validates rich chat output)
   atelier where               Print the addresses to open it at, and start nothing
+  atelier tools               Print each program Atelier starts, and where it is
   atelier service install     Have this computer start it at login, and keep it up
   atelier service uninstall   Stop having it started, and leave nothing behind
   atelier service status      Say whether this computer starts it
@@ -152,8 +159,8 @@ are changed in no way and have no board tab. A Beads project is registered once;
 its linked Git worktrees share that board. Personal SessionStart hooks inject
 the Atelier skill in Atelier-owned chats and the Beads skill only in registered
 projects; no CLAUDE.md or AGENTS.md is edited. `--beads` and `--chat` answer the
-question non-interactively. Beads setup needs python3 and `bd` on your path;
-init can be run again safely.
+question non-interactively. Beads setup needs python3 and `bd` installed —
+`atelier tools` says whether they are, and where; init can be run again safely.
 
 Where it listens:
   ATELIER_PORT                the port (default {PORT})

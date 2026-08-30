@@ -236,10 +236,18 @@ mod tests {
         fs::create_dir_all(project.join(".beads/dolt")).unwrap();
         let bd = temp.path().join("slow-bd");
         let finished = temp.path().join("finished");
+        let half_written = temp.path().join("half-written");
+        // The child writes elsewhere and renames into place, so the file
+        // appears only once it is whole. A plain `> finished` creates the file
+        // empty at the moment the shell opens the redirection, which is before
+        // `printf` puts anything in it — a watcher would then find the name and
+        // read nothing.
         fs::write(
             &bd,
             format!(
-                "#!/bin/sh\nsleep 0.1\nprintf finished > '{}'\n",
+                "#!/bin/sh\nsleep 0.1\nprintf finished > '{}'\nmv '{}' '{}'\n",
+                half_written.display(),
+                half_written.display(),
                 finished.display()
             ),
         )
@@ -247,7 +255,19 @@ mod tests {
         fs::set_permissions(&bd, fs::Permissions::from_mode(0o755)).unwrap();
 
         ensure_project_with_timeout(project, bd, Duration::from_millis(10)).await;
-        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        // Waited for rather than slept past. This used to sleep 150ms and then
+        // read, which is a bet that a machine with nothing else to do finishes
+        // a 100ms child in time; on a busy one it does not, and the test went
+        // red for a reason that had nothing to do with what it proves. What is
+        // being proved is that the child outlives our wait, not how quick it is.
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while !finished.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("bd was killed when our wait ended, instead of being left to finish");
 
         assert_eq!(fs::read_to_string(finished).unwrap(), "finished");
     }

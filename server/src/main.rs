@@ -13,6 +13,7 @@ mod helper;
 mod identity;
 mod laid_down;
 mod local_host;
+mod needs;
 mod published;
 mod reachable;
 mod routes;
@@ -214,6 +215,9 @@ async fn main() {
             }
         },
         command_line::Ask::Version => println!("{}", command_line::version()),
+        // Every outside program the app starts, and whether this computer has
+        // it. Nothing is started to answer it.
+        command_line::Ask::Tools => print!("{}", needs::printed()),
         // A copy the computer started at login printed its addresses into a
         // log nobody reads. Asking it where it is has to be something a person
         // can type, and it must not bring a second server up to answer
