@@ -423,12 +423,15 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err(format!("`{name}` is not the name of a gate"));
     }
-    // One gate the program answers to itself. Everything else here is a
+    // The gates the program answers to itself. Everything else here is a
     // script laid down beside the data and run with the reader's own python;
-    // this one has to work on a computer that has no python at all, which is
-    // most of the computers this ships to (bw-14ij.1).
+    // these have to work on a computer that has no python at all, which is
+    // most of the computers this ships to (bw-14ij.1, bw-oesd.4.1).
     if crate::doing::is_ours(name) {
         return Ok(crate::doing::run());
+    }
+    if crate::completion_gate::is_ours(name) {
+        return Ok(crate::completion_gate::run());
     }
     let mut looked = Vec::new();
     let mut found = None;

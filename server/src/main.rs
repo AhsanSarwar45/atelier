@@ -5,6 +5,7 @@
 
 mod board_gate;
 mod command_line;
+mod completion_gate;
 mod db;
 mod doing;
 mod dolt;
