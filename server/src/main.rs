@@ -25,6 +25,7 @@ mod routes;
 mod rules;
 mod service;
 mod terminal;
+mod workbench;
 mod serving;
 
 use axum::{

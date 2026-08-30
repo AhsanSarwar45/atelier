@@ -1,0 +1,175 @@
+//! Lossless Rust envelopes for the existing workbench wire protocol.
+//!
+//! The discriminator is typed so an unknown command, event, or app-wide frame
+//! is refused at the Rust boundary. Payload fields stay in a JSON map during
+//! the incremental port: this preserves old records byte-for-byte in meaning
+//! and lets each vertical slice replace its map with a typed payload without
+//! changing the browser contract all at once.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+
+macro_rules! wire_kinds {
+    ($name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
+        #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+        pub enum $name {
+            $(#[serde(rename = $wire)] $variant),+
+        }
+    };
+}
+
+wire_kinds!(CommandKind {
+    AgentFilesList => "agent-files.list",
+    AgentFilesRead => "agent-files.read",
+    ProviderDefaultsRead => "provider-defaults.read",
+    ProviderDefaultsWrite => "provider-defaults.write",
+    SessionStart => "session.start",
+    PromptSend => "prompt.send",
+    AskAnswer => "ask.answer",
+    QuestionAnswer => "question.answer",
+    PlanRespond => "plan.respond",
+    SessionStop => "session.stop",
+    SessionClose => "session.close",
+    AgentStop => "agent.stop",
+    AgentPark => "agent.park",
+    AgentSay => "agent.say",
+    SessionMode => "session.mode",
+    SessionModel => "session.model",
+    SessionEffort => "session.effort",
+    SessionCollaborationMode => "session.collaboration-mode",
+    SessionOpen => "session.open",
+    SessionResume => "session.resume",
+});
+
+wire_kinds!(EventKind {
+    SessionStarted => "session.started",
+    SessionState => "session.state",
+    SessionMenu => "session.menu",
+    SessionPinned => "session.pinned",
+    SessionEnded => "session.ended",
+    MessageStarted => "message.started",
+    TextDelta => "text.delta",
+    ThinkingDelta => "thinking.delta",
+    ThinkingProgress => "thinking.progress",
+    MessageCompleted => "message.completed",
+    MessageRetracted => "message.retracted",
+    ToolStarted => "tool.started",
+    ToolCompleted => "tool.completed",
+    ToolProgress => "tool.progress",
+    AgentStarted => "agent.started",
+    AgentProgress => "agent.progress",
+    AgentFinished => "agent.finished",
+    AgentRelayed => "agent.relayed",
+    AgentIdentified => "agent.identified",
+    Diff => "diff",
+    Todo => "todo",
+    Image => "image",
+    ImageCompare => "image.compare",
+    Widget => "widget",
+    AskPermission => "ask.permission",
+    AskResolved => "ask.resolved",
+    QuestionRequested => "question.requested",
+    QuestionResolved => "question.resolved",
+    PlanProposed => "plan.proposed",
+    PlanResolved => "plan.resolved",
+    Cost => "cost",
+    Context => "context",
+    LinkBead => "link.bead",
+    Error => "error",
+    ProviderMessage => "provider.message",
+    Notice => "notice",
+    Note => "note",
+    TranscriptReset => "transcript.reset",
+});
+
+wire_kinds!(WatchFrameKind {
+    Snapshot => "snapshot",
+    Opened => "opened",
+    Running => "running",
+    Outside => "outside",
+    Usage => "usage",
+    Event => "event",
+});
+
+/// A browser command posted to `/api/workbench/command`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Command {
+    #[serde(rename = "type")]
+    pub kind: CommandKind,
+    #[serde(flatten)]
+    pub fields: Map<String, Value>,
+}
+
+/// One durable event in a chat's append-only event stream.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Event {
+    #[serde(rename = "type")]
+    pub kind: EventKind,
+    #[serde(flatten)]
+    pub fields: Map<String, Value>,
+}
+
+/// One frame sent on the app-wide live stream.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct WatchFrame {
+    pub kind: WatchFrameKind,
+    #[serde(flatten)]
+    pub fields: Map<String, Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> Value {
+        serde_json::from_str(include_str!("../../tests/fixtures/workbench-contract.json")).unwrap()
+    }
+
+    fn round_trip<T>(rows: &[Value])
+    where
+        T: for<'de> Deserialize<'de> + Serialize,
+    {
+        for source in rows {
+            let parsed: T = serde_json::from_value(source.clone()).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap(), *source);
+        }
+    }
+
+    #[test]
+    fn workbench_wire_contract_round_trips_every_browser_command() {
+        let fixture = fixture();
+        round_trip::<Command>(fixture["commands"].as_array().unwrap());
+    }
+
+    #[test]
+    fn workbench_wire_contract_round_trips_every_server_event() {
+        let fixture = fixture();
+        round_trip::<Event>(fixture["events"].as_array().unwrap());
+    }
+
+    #[test]
+    fn workbench_wire_contract_round_trips_every_app_wide_frame() {
+        let fixture = fixture();
+        round_trip::<WatchFrame>(fixture["watchFrames"].as_array().unwrap());
+    }
+
+    #[test]
+    fn workbench_wire_contract_refuses_unknown_discriminators() {
+        assert!(serde_json::from_value::<Command>(serde_json::json!({
+            "type": "session.explodes",
+            "sessionId": "session-1"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<Event>(serde_json::json!({
+            "type": "message.vanishes",
+            "seq": 1,
+            "sessionId": "session-1",
+            "at": "2026-08-30T00:00:00.000Z"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<WatchFrame>(serde_json::json!({
+            "kind": "mystery"
+        }))
+        .is_err());
+    }
+}

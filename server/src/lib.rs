@@ -22,3 +22,4 @@ pub mod rules;
 pub mod service;
 pub mod serving;
 pub mod terminal;
+pub mod workbench;
