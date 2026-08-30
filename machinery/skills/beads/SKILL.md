@@ -63,10 +63,9 @@ must explain why the new job cannot fold into one that is already open.
    bd update <work-id> --claim
    ```
 
-   For work with two or more meaningful steps, publish the provider's live
-   checklist immediately after the claim and keep it current while working.
-   Beads remains the durable project record; the checklist is only the live
-   session view. Skip it for a genuinely one-step change.
+   Follow the Atelier skill's live-checklist rule. A checklist is available only
+   for an epic and is populated and updated from that epic's Beads children;
+   never maintain a second, provider-owned list of steps or statuses.
 
    One claim covers the job's run. Closing or landing a piece hands the next
    opened work item or lifecycle step to the same session; do not claim each

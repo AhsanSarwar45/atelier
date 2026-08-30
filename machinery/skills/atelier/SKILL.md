@@ -8,6 +8,16 @@ description: Use Atelier's native presentation tools for validated widgets, libr
 This session is hosted by Atelier. Use its chat-native presentation features when
 they make a relationship, change, or comparison easier to understand.
 
+## Live checklist
+
+A checklist is a view of an epic, not a second task list maintained by the
+agent. Show one only when the work has a Beads epic: pass that epic's ID as the
+single item in the provider checklist. Atelier replaces it with the epic's
+direct children and reads every title and status from Beads, so never copy the
+children into the checklist or update their checklist statuses by hand. For a
+standalone ticket or work with no epic, do not publish a checklist. The agent's
+only ongoing responsibility is keeping track of the ticket it is working on.
+
 ## Always use the presenter
 
 Never hand-author an `atelier-widget` or `atelier-image-compare` fence. Give the

@@ -31,4 +31,12 @@ describe('agent chat widget instructions', () => {
     for (const layout of ['flow', 'sequence', 'cycle', 'layers']) expect(instructions[0]).toContain(`\`${layout}\``);
     expect(instructions[0]).toMatch(/semantic accent colors automatically/i);
   });
+
+  it('makes the live checklist an epic-backed view instead of agent-maintained state', () => {
+    expect(instructions[0]).toMatch(/checklist is a view of an epic/i);
+    expect(instructions[0]).toMatch(/epic's ID as the\s+single item/i);
+    expect(instructions[0]).toMatch(/reads every title and status from Beads/i);
+    expect(instructions[0]).toMatch(/never[\s\S]*update .*checklist statuses by hand/i);
+    expect(instructions[0]).toMatch(/standalone ticket.*do not publish a checklist/i);
+  });
 });

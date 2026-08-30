@@ -122,7 +122,7 @@ export type Cost =
   | { kind: 'usd'; usd: number }
   | { kind: 'tokens'; input: number; output: number; total: number };
 
-/** One line of the agent's live checklist. */
+/** A provider plan row. A single row naming an epic becomes its board-backed checklist. */
 export interface TodoItem {
   id: string;
   text: string;

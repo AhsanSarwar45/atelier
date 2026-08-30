@@ -92,6 +92,7 @@ import { whatItRan, whileItRuns } from '@/workbench/said-what-it-ran';
 import { BrandIcon, ProviderBadge, brandName } from '@/workbench/brand-icon';
 import { workingLine } from '@/workbench/working-line';
 import { PictureViewer } from '@/workbench/picture-viewer';
+import { useEpicChecklist } from '@/workbench/epic-checklist';
 
 export { PictureViewer } from '@/workbench/picture-viewer';
 
@@ -433,7 +434,7 @@ function BackToNow({ missed, shown, onClick }: { missed: number; shown: boolean;
   );
 }
 
-/** The agent's checklist, as it stands right now. */
+/** An epic's board-backed checklist, as it stands right now. */
 export function TodoPanel({ items }: { items: TodoItem[] }) {
   const complete = items.filter((item) => item.status === 'completed').length;
   const allComplete = complete === items.length;
@@ -577,6 +578,7 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
   }, [projectId, projectPath, open, newBrand]);
   const view = useSession(sessionId);
   const facts = useSessionFacts(sessionId);
+  const checklist = useEpicChecklist(view.todos, projectPath);
   // What the board knows plus what this chat has been seen doing since.
   const cards = Array.from(new Set([...(facts?.beads ?? []), ...view.beads]));
   // A card the agent NAMED in its own words opens from where it is
@@ -1408,9 +1410,9 @@ export default function ChatTab({ projectId, projectPath, openSessionId }: ChatT
         </div>
       </div>
 
-      {view.todos.length > 0 && (
+      {checklist.length > 0 && (
         <div className="border-b border-border/60 px-4 py-2" aria-live="polite">
-          <TodoPanel items={view.todos} />
+          <TodoPanel items={checklist} />
         </div>
       )}
 
