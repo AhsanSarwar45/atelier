@@ -1234,6 +1234,7 @@ export const TranscriptRow = memo(function TranscriptRow({
     // is the only shape they have.
     case 'note':
     case 'notice':
+    case 'provider_message':
       return null;
     default:
       return <MessageRow item={item} mentions={mentions} onLook={onLook} />;

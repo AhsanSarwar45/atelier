@@ -44,6 +44,7 @@ import type { Audience, AgentControl, AgentKind, AgentState, CommandInfo, Execut
 import { claudeModelMenu, claudeModelRows } from './claude-models.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
+import { providerMessageFromText, type ProviderMessageSignal } from '../../../src/workbench/provider-messages.ts';
 
 /**
  * One model as the kit announced it, its thinking included.
@@ -1259,6 +1260,25 @@ export class ClaudeDriver implements Driver {
     });
   }
 
+  /** Claude's allowance packet translated into the same fact every brand emits. */
+  private allowance(m: Record<string, any>): void {
+    const info = m.rate_limit_info ?? {};
+    const state = info.errorCode === 'credits_required' ? 'credits_required' : String(info.status ?? 'allowed');
+    const blocked = state !== 'allowed' || String(info.overageStatus ?? '') === 'rejected';
+    const window = String(info.rateLimitType ?? 'session');
+    const retryAt = typeof info.resetsAt === 'number' ? new Date(info.resetsAt * 1000).toISOString() : null;
+    const signal: ProviderMessageSignal = {
+      id: `usage:${window}`,
+      kind: 'usage_limit',
+      phase: blocked ? 'active' : 'resolved',
+      severity: blocked ? 'blocking' : 'info',
+      scope: 'session',
+      retryAt,
+      detail: blocked ? JSON.stringify(m) : null,
+    };
+    this.emit({ type: 'provider.message', signal });
+  }
+
   /** Folds one checklist tool call into `todos` and republishes the whole list. */
   private applyChecklistCall(toolCallId: string, name: string, input: Record<string, unknown>): void {
     if (name === CHECKLIST_CREATE) {
@@ -2029,6 +2049,8 @@ export class ClaudeDriver implements Driver {
           this.emit({ type: 'message.completed', messageId });
           this.awaitingAnswer = false;
           this.emit({ type: 'session.state', state: 'idle', label: 'Ready' });
+        } else if (m.subtype === 'rate_limit_event') {
+          this.allowance(m);
         } else if (!helpers) {
           // Every other thing the session says about itself.
           const note = noteFor(m, (id) => this.agents.get(id)?.what ?? '');
@@ -2108,6 +2130,11 @@ export class ClaudeDriver implements Driver {
               return;
             }
             if (b.type !== 'text' || !String(b.text ?? '').trim()) return;
+            const providerSignal = sentBy === undefined ? providerMessageFromText(String(b.text)) : null;
+            if (providerSignal) {
+              this.emit({ type: 'provider.message', signal: { ...providerSignal, sourceMessageId: id } });
+              return;
+            }
             // The status that came just before may already have said this —
             // this chat's status, about this chat's own words. A helper speaks
             // under its own heading and its words are not lines of this
@@ -2126,6 +2153,10 @@ export class ClaudeDriver implements Driver {
         }
         (m.message?.content ?? []).forEach((b: Record<string, any>, index: number) => {
           if (b.type !== 'text') return;
+          if (sentBy === undefined) {
+            const signal = providerMessageFromText(String(b.text ?? ''));
+            if (signal) this.emit({ type: 'provider.message', signal: { ...signal, sourceMessageId: `${messageId}:${index}` } });
+          }
           for (const comparison of materializeComparisons(String(b.text ?? ''), this.cwd)) {
             this.emit({ type: 'image.compare', messageId: `${messageId}:${index}`, comparison });
           }

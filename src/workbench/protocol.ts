@@ -17,6 +17,7 @@
 import type { HeldChat } from './chat-state';
 import type { PlanUsage } from './plan-usage';
 import type { ChatWidget } from './chat-widgets';
+import type { ProviderMessageSignal } from './provider-messages';
 
 export type Brand = 'claude' | 'codex';
 
@@ -484,6 +485,8 @@ export type WbpEvent = EventBase &
     | { type: 'context'; used: number; window: number }
     | { type: 'link.bead'; beadId: string; via: 'tool' | 'brief' | 'manual' }
     | { type: 'error'; message: string; fatal: boolean }
+    /** Current provider/service condition, already translated out of vendor vocabulary. */
+    | { type: 'provider.message'; signal: ProviderMessageSignal }
     /**
      * A line the app says about the chat itself, not the agent's own words.
      *

@@ -41,6 +41,7 @@ import {
   whenItComesBack,
   whoFor,
 } from '@/workbench/machine-words';
+import { providerMessageReads } from '@/workbench/provider-messages';
 import type { Audience, MachineFamily, NoteRank } from '@/workbench/protocol';
 import type { TranscriptItem } from '@/workbench/use-session';
 
@@ -574,6 +575,22 @@ function machineLine(item: TranscriptItem): {
   text: string;
   body: string | null;
 } | null {
+  if (item.kind === 'provider_message') {
+    const signal = item.signal;
+    if (signal.phase === 'resolved' || (signal.retryAt && new Date(signal.retryAt).getTime() <= Date.now())) return null;
+    const family: MachineFamily = signal.severity === 'blocking' ? 'stopped'
+      : signal.severity === 'error' ? 'failed'
+        : signal.severity === 'warning' ? 'waiting' : 'breathing';
+    return {
+      id: item.id,
+      family,
+      audience: signal.severity === 'info' ? 'machine' : 'you',
+      kind: `provider/${signal.kind}`,
+      rank: 'note',
+      text: providerMessageReads(signal, Intl.DateTimeFormat().resolvedOptions().timeZone),
+      body: signal.detail ?? null,
+    };
+  }
   // The kit talking in the chat's own voice: an answer-shaped message whose
   // whole content is one of the sentences the kit writes itself. Filed by what
   // it means and quoted as it stands, because it is already written for a

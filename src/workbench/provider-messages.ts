@@ -42,6 +42,8 @@ export interface ProviderMessageSignal {
   /** ISO instant after which a time-bounded condition is no longer current. */
   retryAt?: string | null;
   action?: ProviderMessageAction | null;
+  /** Answer-shaped provider text this semantic signal replaces, when present. */
+  sourceMessageId?: string | null;
 }
 
 const TITLES: Record<ProviderMessageKind, string> = {
@@ -74,4 +76,39 @@ export function providerMessageReads(signal: ProviderMessageSignal, timeZone?: s
 
 export function isProviderMessageKind(value: string): value is ProviderMessageKind {
   return (PROVIDER_MESSAGE_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Compatibility reader for providers that still expose only prose. New
+ * adapters should prefer their structured signal and use this only at their
+ * boundary; vendor phrases never escape into the renderer.
+ */
+export function providerMessageFromText(text: string): ProviderMessageSignal | null {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const lower = flat.toLowerCase();
+  const usage = /(?:hit|reached).*(?:usage|session|weekly).*limit|out of (?:usage )?credits|usage limit/.test(lower);
+  const auth = /(?:sign|log)[ -]?in|authentication|unauthenticated|invalid api key/.test(lower);
+  const unavailable = /service unavailable|temporarily unavailable|overloaded/.test(lower);
+  const network = /network|connection (?:failed|lost|refused)|timed? out|dns/.test(lower);
+  const model = /model .*unavailable|model .*not (?:found|supported)/.test(lower);
+  const context = /context (?:window|length|limit)|too many tokens/.test(lower);
+  const rate = /rate limit|too many requests|http 429/.test(lower);
+  const kind: ProviderMessageKind | null = usage ? 'usage_limit' : auth ? 'authentication' : unavailable
+    ? 'service_unavailable' : network ? 'network' : model ? 'model_unavailable' : context
+      ? 'context_limit' : rate ? 'rate_limit' : null;
+  if (kind === null) return null;
+
+  const when = flat.match(/(?:try again at|resets?)\s+(.+?)(?:\.|$)/i)?.[1]?.replace(/(\d)(?:st|nd|rd|th)\b/g, '$1');
+  const parsed = when ? new Date(when) : null;
+  const href = flat.match(/https?:\/\/[^\s]+/)?.[0]?.replace(/[.,]$/, '') ?? null;
+  return {
+    id: kind === 'usage_limit' ? 'usage:session' : `condition:${kind}`,
+    kind,
+    phase: 'active',
+    severity: kind === 'usage_limit' || kind === 'authentication' ? 'blocking' : 'error',
+    scope: kind === 'usage_limit' || kind === 'authentication' ? 'session' : 'turn',
+    detail: flat,
+    retryAt: parsed && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null,
+    action: href ? { label: 'Manage usage', href } : null,
+  };
 }

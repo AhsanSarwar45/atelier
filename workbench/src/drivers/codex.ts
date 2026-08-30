@@ -12,6 +12,7 @@ import { widgetSpecs } from '../../../src/workbench/chat-widgets.ts';
 import { proposedPlanSpecs } from '../../../src/workbench/proposed-plan.ts';
 import { materializeComparisons } from '../materialize-chat-media.ts';
 import { effortInWords } from '../../../src/workbench/machine-words.ts';
+import { providerMessageFromText } from '../../../src/workbench/provider-messages.ts';
 import type { Driver, DriverEvent, PermissionAnswer, PromptInput, StartOptions } from './types.ts';
 import { AgentLifecycle, type ProviderAgentAdapter } from './agent-lifecycle.ts';
 import { commandExecution, offeredSlashCommand } from './slash-commands.ts';
@@ -1320,10 +1321,22 @@ export class CodexDriver implements Driver {
       this.dropImageDirs();
       const failed = p.turn?.status === 'failed';
       const interrupted = p.turn?.status === 'interrupted';
-      if (failed) this.emit({ type: 'error', message: p.turn?.error?.message || 'Codex turn failed', fatal: false });
+      if (failed) {
+        const message = p.turn?.error?.message || 'Codex turn failed';
+        const signal = providerMessageFromText(message);
+        if (signal) this.emit({ type: 'provider.message', signal });
+        else this.emit({ type: 'error', message, fatal: false });
+      } else {
+        for (const kind of ['rate_limit', 'service_unavailable', 'network', 'provider_error'] as const) {
+          this.emit({ type: 'provider.message', signal: { id: `condition:${kind}`, kind, phase: 'resolved', severity: 'info', scope: 'turn' } });
+        }
+      }
       this.emit({ type: 'session.state', state: failed ? 'errored' : interrupted ? 'stopped' : 'idle', label: failed ? 'Failed' : interrupted ? 'Stopped' : 'Ready' });
     } else if (method === 'error') {
-      this.emit({ type: 'error', message: p.error?.message || p.message || 'Codex error', fatal: false });
+      const message = p.error?.message || p.message || 'Codex error';
+      const signal = providerMessageFromText(message);
+      if (signal) this.emit({ type: 'provider.message', signal });
+      else this.emit({ type: 'error', message, fatal: false });
     } else if (method === 'item/fileChange/patchUpdated') {
       for (const change of p.changes ?? []) this.emit({ type: 'diff', toolCallId: p.itemId, path: change.path, ...patchSides(change.diff ?? '') });
     } else if (method === 'item/commandExecution/outputDelta' || method === 'item/fileChange/outputDelta') {

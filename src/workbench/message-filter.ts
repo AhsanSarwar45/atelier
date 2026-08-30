@@ -227,6 +227,7 @@ export function kindOf(item: TranscriptItem): KindId {
     // answered above. Kept so the switch stays exhaustive over the kinds.
     case 'note':
     case 'notice':
+    case 'provider_message':
       return STATUS;
   }
 }

@@ -45,6 +45,7 @@ import type {
   WbpEvent,
 } from './protocol';
 import type { ChatWidget } from './chat-widgets';
+import type { ProviderMessageSignal } from './provider-messages';
 // With its extension, which is not a style: this file is read two ways. The
 // browser's build resolves it either way; the sidecar is Node running the
 // TypeScript as it stands, and Node resolves the exact filename or nothing —
@@ -190,6 +191,12 @@ export interface TranscriptNotice {
   audience?: Audience;
 }
 
+export interface TranscriptProviderMessage {
+  kind: 'provider_message';
+  id: string;
+  signal: ProviderMessageSignal;
+}
+
 export type TranscriptItem =
   | TranscriptMessage
   | TranscriptThinking
@@ -198,7 +205,8 @@ export type TranscriptItem =
   | TranscriptQuestion
   | TranscriptPlan
   | TranscriptNote
-  | TranscriptNotice;
+  | TranscriptNotice
+  | TranscriptProviderMessage;
 
 /**
  * One piece of work the chat sent away, as the panel draws it
@@ -751,6 +759,21 @@ export function reduce(view: SessionView, e: WbpEvent): SessionView {
       next.error = e.message;
       return next;
 
+    case 'provider.message': {
+      // A provider condition is current state, not an immutable chat utterance.
+      // Its stable id replaces the previous observation and resolution removes
+      // it. If prose was streamed before its meaning arrived, remove that
+      // answer-shaped row as part of the same projection.
+      const without = items.filter((it) =>
+        !(it.kind === 'provider_message' && it.id === e.signal.id) &&
+        !(e.signal.sourceMessageId && it.kind === 'message' && it.id === e.signal.sourceMessageId));
+      next.error = null;
+      next.items = e.signal.phase === 'resolved'
+        ? without
+        : [...without, { kind: 'provider_message', id: e.signal.id, signal: e.signal }];
+      return next;
+    }
+
     case 'notice':
       next.items = [...next.items, { kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family, audience: e.audience }];
       return next;
@@ -1178,6 +1201,17 @@ export function foldAll(events: readonly WbpEvent[]): SessionView {
       case 'error':
         view.error = e.message;
         break;
+
+      case 'provider.message': {
+        for (let at = items.length - 1; at >= 0; at -= 1) {
+          const item = items[at]!;
+          if ((item.kind === 'provider_message' && item.id === e.signal.id) ||
+              (e.signal.sourceMessageId && item.kind === 'message' && item.id === e.signal.sourceMessageId)) items.splice(at, 1);
+        }
+        view.error = null;
+        if (e.signal.phase === 'active') items.push({ kind: 'provider_message', id: e.signal.id, signal: e.signal });
+        break;
+      }
 
       case 'notice':
         items.push({ kind: 'notice', id: `notice-${e.seq}`, text: e.text, family: e.family, audience: e.audience });
