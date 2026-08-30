@@ -448,7 +448,7 @@ describe('Codex app-server requests', () => {
       threadId: 'thread',
       collaborationMode: {
         mode: 'plan',
-        settings: { model: 'gpt-5.6-sol', reasoning_effort: 'xhigh', developer_instructions: null },
+        settings: { model: 'gpt-5.6-sol', reasoning_effort: 'xhigh', developer_instructions: '' },
       },
     }]);
     expect(calls[1][1].collaborationMode).toEqual(calls[0][1].collaborationMode);

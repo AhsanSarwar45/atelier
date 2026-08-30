@@ -2,13 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const policy = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8');
-const claudeStyle = readFileSync('.claude/output-styles/manager.md', 'utf8');
 
 describe('visual proof instructions', () => {
-  it.each([
-    ['shared provider policy', policy],
-    ['Claude manager style', claudeStyle],
-  ])('%s requires comparisons for changes and an image for new visuals', (_name, instructions) => {
+  it('requires comparisons for changes and an image for new visuals', () => {
+    const instructions = policy;
     expect(instructions).toMatch(/every visual change/i);
     expect(instructions).toMatch(/before editing/i);
     expect(instructions).toMatch(/again\s+after(?:ward)?/i);

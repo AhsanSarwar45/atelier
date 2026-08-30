@@ -43,15 +43,28 @@ class JoinInstructionsTest(unittest.TestCase):
 
             self.assertNotIn("publish-gate.py", settings.read_text())
 
-    def test_beads_review_handoff_names_the_personal_reviewer_contract(self):
+    def test_beads_review_handoff_names_the_bundled_reviewer_contract(self):
         skill = (ROOT / "machinery/skills/beads/SKILL.md").read_text()
-        reviewer = (ROOT / ".claude/agents/reviewer.md").read_text()
+        reviewer = (ROOT / "machinery/workers/external-review.md").read_text()
 
         self.assertIn("run only `machinery/board/review <job-id>`", skill)
-        self.assertIn("personal `external-review` runner", skill)
-        self.assertIn("personal Claude agent named `reviewer`", skill)
-        self.assertIn("model: sonnet", reviewer)
-        self.assertRegex(reviewer, r"(?m)^skills:\n  - external-review$")
+        self.assertIn("provider-neutral", skill)
+        self.assertIn("installs no", skill)
+        self.assertIn("Work read-only", reviewer)
+        self.assertFalse((ROOT / ".claude/agents/reviewer.md").exists())
+        self.assertFalse((ROOT / "machinery/skills/external-review/SKILL.md").exists())
+
+    def test_repository_carries_no_provider_agent_skill_command_or_output_style(self):
+        for kind in ("agents", "skills", "commands", "output-styles"):
+            directory = ROOT / ".claude" / kind
+            held = [] if not directory.exists() else [path for path in directory.rglob("*")
+                                                       if path.is_file() or path.is_symlink()]
+            self.assertFalse(held, kind)
+        self.assertEqual(
+            ["atelier", "beads"],
+            sorted(path.name for path in (ROOT / "machinery/skills").iterdir()
+                   if (path / "SKILL.md").is_file()),
+        )
 
     def test_migration_never_replaces_a_registry_published_concurrently(self):
         join = load_join()
@@ -128,6 +141,29 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertIn('"command": "mine"', settings)
             self.assertIn("my-session-context.py", settings)
             self.assertNotIn('atelier hook session-context.py', settings)
+
+    def test_personal_cleanup_removes_byte_identical_legacy_copy_but_keeps_modified_copy(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            agents = root / ".claude/agents"
+            agents.mkdir(parents=True)
+            owned = agents / "reviewer.md"
+            modified = agents / "scout.md"
+            owned.write_bytes(b"old Atelier definition")
+            modified.write_bytes(b"user changed this definition")
+            join.MACHINE = str(root / ".claude")
+            join.CODEX_MACHINE = str(root / ".codex")
+            join.PERSONAL_BIN = str(root / "bin")
+            join.LEGACY_FILE_HASHES = {
+                ("agents", "reviewer.md"): __import__("hashlib").sha256(owned.read_bytes()).hexdigest(),
+                ("agents", "scout.md"): __import__("hashlib").sha256(b"original scout").hexdigest(),
+            }
+
+            join.install(lambda _: None)
+
+            self.assertFalse(owned.exists())
+            self.assertEqual(b"user changed this definition", modified.read_bytes())
 
     def test_malformed_personal_settings_are_left_byte_for_byte(self):
         join = load_join()

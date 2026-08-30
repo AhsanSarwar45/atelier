@@ -1,13 +1,13 @@
 //! The working rules the product carries: the board tools, the session gates,
-//! and the workers and skills a session reads.
+//! and the internal workers and skills a session reads.
 //!
 //! Three things had to be true at once for a teammate to get a working project
 //! out of one install. The rules had to travel inside the binary, because a
 //! machine that has never held this repository has nowhere to read them from.
 //! They had to land in a shape the rules themselves already understand — `join`
-//! and `project.py` work out where they live from their own file's path, and
-//! the craft has to sit in a `.claude/` one level above the machinery, because
-//! that is the one place Claude Code looks. And the gates a project ends up
+//! and `project.py` work out where they live from their own file's path.
+//! Provider-facing policy is injected when Atelier starts a session rather than
+//! placed where a provider scans the user's home. The gates a project ends up
 //! wired to could not be paths, because a path is one person's home folder
 //! written into a file everybody else clones (bw-8um.3.3).
 //!
@@ -35,20 +35,6 @@ use std::process::Command;
 #[exclude = "**/*.pyc"]
 struct Machinery;
 
-/// The workers, skills, commands and house voice a session reads.
-///
-/// `settings.json` stays behind. It is the wiring of one project — which gates
-/// run on which tool — and `join` writes each project its own, merged into
-/// whatever that project already had.
-#[derive(Embed)]
-#[folder = "../.claude/"]
-#[exclude = "settings.json"]
-#[exclude = "settings.local.json"]
-#[exclude = "RESUME.md"]
-#[exclude = "**/__pycache__/**"]
-#[exclude = "**/*.pyc"]
-struct Craft;
-
 /// Where the machinery lands under the rules folder.
 ///
 /// `project.py` reads its own file's path to find the registry beside it and
@@ -56,22 +42,64 @@ struct Craft;
 /// contract and not a label.
 pub const MACHINERY: &str = "machinery";
 
-/// And where the craft lands: one level above the machinery, never inside it,
-/// because Claude Code reads a checkout's `.claude/` and nowhere else.
-pub const CRAFT: &str = ".claude";
-
 /// The word `join` writes into a project's gates instead of a path, when this
 /// program is the one running it.
 const GATE_WORD: &str = "ATELIER_GATE_WORD";
+
+const RETIRED_RULE_FILES: &[&str] = &[
+    ".claude/agents/general-purpose.md",
+    ".claude/agents/researcher.md",
+    ".claude/agents/reviewer.md",
+    ".claude/agents/scout.md",
+    ".claude/agents/screen-check.md",
+    ".claude/commands/docs-cleanup.md",
+    ".claude/output-styles/manager.md",
+    ".claude/skills/compact-handoff/SKILL.md",
+    ".claude/skills/judge-against-reference/SKILL.md",
+    ".claude/skills/read-image/SKILL.md",
+    ".claude/skills/spec/SKILL.md",
+    "machinery/skills/external-review/SKILL.md",
+    "machinery/skills/external-review/references/practices.md",
+    "machinery/hooks/picture-gate.py",
+    "machinery/hooks/agent-fence.py",
+    "machinery/hooks/session-context.py",
+];
+
+fn remove_retired_rule_files(dir: &Path) -> Result<(), String> {
+    for relative in RETIRED_RULE_FILES {
+        let path = dir.join(relative);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("{}: {error}", path.display())),
+        }
+    }
+    for relative in [
+        ".claude/skills/compact-handoff",
+        ".claude/skills/judge-against-reference",
+        ".claude/skills/read-image",
+        ".claude/skills/spec",
+        ".claude/skills",
+        ".claude/agents",
+        ".claude/commands",
+        ".claude/output-styles",
+        ".claude",
+        "machinery/skills/external-review/references",
+        "machinery/skills/external-review",
+    ] {
+        let _ = std::fs::remove_dir(dir.join(relative));
+    }
+    Ok(())
+}
 
 /// Lay the rules down beside the data, and say where they went.
 pub fn install() -> Result<PathBuf, String> {
     let Some(dir) = crate::identity::rules_dir() else {
         return Err("this computer names no folder for a program's data".to_string());
     };
-    let mut files = crate::laid_down::gather::<Machinery>(MACHINERY)?;
-    files.extend(crate::laid_down::gather::<Craft>(CRAFT)?);
+    let files = crate::laid_down::gather::<Machinery>(MACHINERY)?;
     crate::laid_down::install(&dir, &files)?;
+    remove_retired_rule_files(&dir)?;
     runnable(&dir, &files);
     Ok(dir)
 }
@@ -118,9 +146,7 @@ pub fn init(rest: &[String]) -> Result<i32, String> {
     init_with(rest, &mut input, &mut output)
 }
 
-/// Install personal skills and conditional provider hooks without joining a repository.
-/// Service installation calls this once for the whole computer; init calls the
-/// same path so machines that do not use a login service still receive it.
+/// Remove exact legacy Atelier-owned provider artifacts without joining a repository.
 pub fn install_personal() -> Result<i32, String> {
     let dir = install()?;
     let join = dir.join(MACHINERY).join("join");
@@ -366,6 +392,7 @@ fn tool_path(name: &str, dir: &Path) -> Result<PathBuf, String> {
         "board/job" => Path::new("board").join("job"),
         "board/land" => Path::new("board").join("land"),
         "checks" => PathBuf::from("checks"),
+        "review" => Path::new("workers").join("review.py"),
         _ => return Err(format!("`{name}` is not an Atelier workflow tool")),
     };
     Ok(dir.join(MACHINERY).join(relative))
@@ -419,9 +446,7 @@ mod tests {
     use std::io::Cursor;
 
     fn carried() -> crate::laid_down::Carried {
-        let mut files = crate::laid_down::gather::<Machinery>(MACHINERY).unwrap();
-        files.extend(crate::laid_down::gather::<Craft>(CRAFT).unwrap());
-        files
+        crate::laid_down::gather::<Machinery>(MACHINERY).unwrap()
     }
 
     #[test]
@@ -434,8 +459,8 @@ mod tests {
             "machinery/board/job",
             "machinery/skills/atelier/SKILL.md",
             "machinery/skills/beads/SKILL.md",
-            "machinery/hooks/session-context.py",
-            ".claude/output-styles/manager.md",
+            "machinery/workers/external-review.md",
+            "machinery/workers/screen-check.md",
         ] {
             assert!(
                 files.iter().any(|(name, _)| name == want),
@@ -445,15 +470,29 @@ mod tests {
     }
 
     #[test]
-    fn the_craft_sits_beside_the_machinery_and_not_inside_it() {
-        // Claude Code reads a checkout's `.claude/` and nowhere else, and
-        // `join` finds it one level above its own file. Nesting it under the
-        // machinery would leave every worker and skill unread.
+    fn no_provider_customization_is_carried_into_a_user_directory() {
         let files = carried();
-        assert!(files.iter().any(|(name, _)| name.starts_with(".claude/")));
         assert!(!files
             .iter()
-            .any(|(name, _)| name.contains("machinery/.claude")));
+            .any(|(name, _)| name.starts_with(".claude/") || name.starts_with(".codex/")));
+    }
+
+    #[test]
+    fn retired_rules_are_removed_without_touching_neighboring_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let retired = dir.path().join(".claude/agents/reviewer.md");
+        let neighbor = dir.path().join(".claude/agents/mine.md");
+        std::fs::create_dir_all(retired.parent().unwrap()).unwrap();
+        std::fs::write(&retired, "old Atelier reviewer").unwrap();
+        std::fs::write(&neighbor, "user-owned neighbor").unwrap();
+
+        remove_retired_rule_files(dir.path()).unwrap();
+
+        assert!(!retired.exists());
+        assert_eq!(
+            std::fs::read_to_string(neighbor).unwrap(),
+            "user-owned neighbor"
+        );
     }
 
     #[test]
@@ -560,6 +599,10 @@ mod tests {
         assert_eq!(
             tool_path("checks", dir).unwrap(),
             dir.join("machinery/checks")
+        );
+        assert_eq!(
+            tool_path("review", dir).unwrap(),
+            dir.join("machinery/workers/review.py")
         );
         for name in ["../join", "hooks/board-gate.py", "board/review", ""] {
             assert!(tool_path(name, dir)

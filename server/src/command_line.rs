@@ -142,7 +142,8 @@ Usage:
                               Print `beads` or `chat` for this folder
   atelier tool <name> [...]   Run a board workflow command installed with Atelier
                               (`present` validates rich output; `screen-check`
-                              captures and assesses visual evidence)
+                              captures visual evidence; `review` runs an
+                              isolated external code review)
   atelier where               Print the addresses to open it at, and start nothing
   atelier tools               Print each program Atelier starts, and where it is
   atelier service install     Have this computer start it at login, and keep it up

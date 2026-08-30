@@ -21,8 +21,8 @@ home folder (bw-8um.3.7). Cloning beads-web now brings the board tools, the
 gates and the workers with it.
 
 Everything here finds itself from its own file, so the clone can sit anywhere,
-and personal provider settings name the startup hook through the installed
-`atelier` command rather than a path off somebody's disk.
+and the app injects canonical session policy from its own rules when it starts
+or resumes a registered project's chat.
 
 Two things are of the machine and not of the clone, so neither is tracked:
 `projects.toml` and per-project declarations under Atelier's personal data
@@ -30,9 +30,9 @@ directory, plus the board each Beads project keeps under its own `.beads`.
 `join` migrates the old rules-local registry and repository-local
 `machinery.toml` byte-for-byte before relying on the personal copies.
 
-The shared craft the workers use is not in here: the agents, the skills, the
-commands and the house voice are the repository's own `.claude/`, so a fresh
-clone behaves the way the team does without anything being wired first.
+Worker instructions and the Atelier and Beads skills live under `machinery/`.
+They are injected or invoked at runtime. Atelier creates no agents, skills,
+commands, output styles, executables, or hooks in Claude or Codex user homes.
 
 It is safe to run again. A project already joined is looked over and left
 alone; only what is missing is put right.
@@ -47,9 +47,8 @@ alone; only what is missing is put right.
    is moved to where the server looks, its record of how it runs is rewritten,
    the server is started, and the count is read again. If the number changed,
    the whole move is undone and the board is handed back exactly as it was.
-3. **Wires personal startup hooks** for Claude and Codex. They inject the
-   Atelier skill only in Atelier-owned sessions and the Beads skill only when
-   the external registry resolves the current checkout or worktree.
+3. **Cleans up old Atelier-owned provider links and hooks.** It removes only
+   exact legacy targets and leaves every neighboring user customization intact.
 4. **Sets the session history ceiling** where it is missing or too high.
 5. **Puts the project on the board screen's list**, matched by where the project
    lives, so it appears without anyone typing a path into the screen.

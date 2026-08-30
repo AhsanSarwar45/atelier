@@ -4,10 +4,10 @@ import { visualArtifact } from '../../src/workbench/visual-artifacts';
 
 const skill = readFileSync('machinery/skills/atelier/SKILL.md', 'utf8');
 const reference = readFileSync('machinery/skills/atelier/references/visual-artifacts.md', 'utf8');
-const claude = readFileSync('.claude/output-styles/manager.md', 'utf8');
 
 describe('visual artifact agent guidance', () => {
-  it.each([skill, claude])('routes agents among every rich visual mode', (text) => {
+  it('routes agents among every rich visual mode', () => {
+    const text = skill;
     for (const term of ['Mermaid', 'React Flow', 'Motion', 'mockup', 'full-screen']) expect(text).toContain(term);
   });
   it('explains the decision boundary and provider-neutral presenter path', () => {

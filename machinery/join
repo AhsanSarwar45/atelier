@@ -18,18 +18,14 @@ merely reported —
                        unserved one. A board already here is MOVED, and the move
                        counts its cards on both sides and puts itself back if the
                        count changes
-  agent policy         personal SessionStart hooks inject the Atelier skill in
-                       Atelier-owned chats and the Beads skill only for a project
-                       present in this registry
+  agent policy         Atelier injects its canonical policy when it starts or
+                       resumes a registered project's session; provider homes
+                       are not modified
   the board screen     one row in the screen's own list of projects, found by
                        where the project lives, so its cards are on the screen
                        without anybody typing a path into it
-  the shared .claude   Claude Code reads agents, skills and output styles out
-                       of the machine-wide `~/.claude/`, so the canonical copies
-                       are versioned here and that home holds symlinks at them —
-                       a link, never a copy. One install serves every project; a
-                       project that wants a subject-flavoured variant keeps its
-                       own beside it, which overrides the shared one by name.
+  legacy cleanup       exact symlinks and hooks from older Atelier releases are
+                       removed only when their target proves Atelier owns them
   the board's role    a fork infers a contributor and routes `bd list` at a
                        planning store; a project that pours work is a maintainer
   the landing guard    git only runs a hook it finds in the checkout itself, so
@@ -49,7 +45,6 @@ pointing and no logic.
 """
 import argparse
 import datetime
-import filecmp
 import hashlib
 import json
 import os
@@ -68,14 +63,28 @@ import project  # noqa: E402
 # Where a project that carried the tools itself kept them, and what belongs at
 # each path. The machinery's own layout is the other half of the pair.
 FORWARD = {"scripts/board": "board", "scripts/hooks": "hooks"}
-# Claude Code reads these out of a project's own `.claude/`, so a project shares
-# them by pointing at this home rather than by holding a copy.
-SHARED = ("agents", "skills", "output-styles", "commands")
-# And where this home keeps them: the repository the machinery ships inside, in
-# its own `.claude/`. Not under `machinery/`, because Claude Code reads a
-# checkout's craft from that one path and nowhere else — so a fresh clone of the
-# product arrives with the workers, the skills, the commands and the house voice
-# already wired, and nothing has to be pointed at anything first (bw-8um.3.7).
+# Old releases linked these definitions into provider homes. Keep their exact
+# names after retiring the sources so broken legacy symlinks can still be
+# identified without touching neighboring user files.
+LEGACY_SHARED = {
+    "agents": ("general-purpose.md", "researcher.md", "reviewer.md", "scout.md", "screen-check.md"),
+    "skills": ("compact-handoff", "judge-against-reference", "read-image", "spec"),
+    "output-styles": ("manager.md",),
+    "commands": ("docs-cleanup.md",),
+}
+LEGACY_FILE_HASHES = {
+    ("agents", "general-purpose.md"): "d63abf84950747f2a2b1365a9c95d1a53ac847d836b88371d1a47d7f502dbb27",
+    ("agents", "researcher.md"): "7244154fe1f74ed7083add634f557466e8d42eaaad4b0ebeb5ea1fb9aca7c2c7",
+    ("agents", "reviewer.md"): "d2a8b3dfbf0f3eabc202899698b179577657d6746af94b55a698ec345746ca10",
+    ("agents", "scout.md"): "eb39e1a12379b12aba74399f2c3b921e087ea1a81792e1087049bece094eb6fa",
+    ("agents", "screen-check.md"): "c6e85486bc4dbf5aa376a3465c4e14db2d116e6394faba774aebe2f2dd31dc90",
+    ("commands", "docs-cleanup.md"): "5fe37092730a7f63d79c246d5add5c359b4a07e79d44c2c499b4f77a82a65876",
+    ("output-styles", "manager.md"): "e48731c823d89c79fce251b12ccf1a27e0d38a26ced452b518a72ce67ecb27b1",
+    ("skills", "compact-handoff"): "47a5030d409d23812427cb2d2211002429bbcaf14f3d706a80a362ffa2ba7b03",
+    ("skills", "judge-against-reference"): "f121ff72200361d968cd0b7688e55364c3d8953784d8e96adc32a79d204009c6",
+    ("skills", "read-image"): "e811e46d5fe6dda247c6dbec87c8ae6c624680e2306ff7be463d607c45762e69",
+    ("skills", "spec"): "5ab2c25e8cd877b4790a286434e6a8ad7773356268a28356224725c87436f080",
+}
 CRAFT = os.path.join(os.path.dirname(HOME), ".claude")
 # The shape of inferred project metadata, kept beside this file and written
 # only into Atelier's external data directory.
@@ -688,36 +697,33 @@ CODEX_MACHINE = os.environ.get("ATELIER_CODEX_HOME") or os.path.expanduser("~/.c
 PERSONAL_BIN = os.environ.get("ATELIER_PERSONAL_BIN") or os.path.expanduser("~/.local/bin")
 
 
-def same(here, there):
-    """Whether two definitions are the same thing, file or folder.
-
-    A skill is a folder and an agent is a file, and both arrive in the machine
-    home the same way — written there first, taken in here after — so both have
-    to be recognised as already-identical before a link may replace one.
-    """
-    if os.path.isdir(here) != os.path.isdir(there):
-        return False
-    if os.path.isdir(here):
-        left = filecmp.dircmp(here, there)
-        return not (left.left_only or left.right_only or left.diff_files
-                    or left.funny_files or left.subdirs)
-    return open(here, errors="replace").read() == open(there, errors="replace").read()
-
-
 def install(say):
     """Remove only personal provider artifacts demonstrably owned by Atelier."""
-    for kind in SHARED:
-        mine = os.path.join(CRAFT, kind)
-        if not os.path.isdir(mine):
-            continue
+    for kind, names in LEGACY_SHARED.items():
         where = os.path.join(MACHINE, kind)
         if not os.path.isdir(where):
             continue
-        for name in sorted(os.listdir(mine)):
-            link, target = os.path.join(where, name), os.path.join(mine, name)
+        for name in names:
+            link, target = os.path.join(where, name), os.path.join(CRAFT, kind, name)
             if os.path.islink(link) and os.path.realpath(link) == target:
                 os.remove(link)
                 say("removed Atelier-owned %s" % link)
+                continue
+            copied = os.path.join(link, "SKILL.md") if kind == "skills" else link
+            expected = LEGACY_FILE_HASHES.get((kind, name))
+            try:
+                with open(copied, "rb") as source:
+                    matches = expected and hashlib.sha256(source.read()).hexdigest() == expected
+            except OSError:
+                matches = False
+            if matches:
+                os.remove(copied)
+                if kind == "skills":
+                    try:
+                        os.rmdir(link)
+                    except OSError:
+                        pass
+                say("removed byte-identical Atelier-owned %s" % copied)
     for provider in (MACHINE, CODEX_MACHINE):
         for name in ("atelier", "beads", "external-review"):
             link = os.path.join(provider, "skills", name)
@@ -1168,7 +1174,6 @@ def standing(root, session_root=None):
 TOUCHING = ("Edit|Write|MultiEdit|NotebookEdit|Bash|AskUserQuestion|ExitPlanMode|"
             "Agent|Task|Monitor|TaskCreate|SendMessage")
 WIRING = (
-    ("PreToolUse", "Agent|Skill", ("agent-fence.py",)),
     ("PreToolUse", "Bash|Edit|Write|MultiEdit|NotebookEdit", ("workflow-gate.py",)),
     ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
                             "board-status-gate.py")),
@@ -1180,7 +1185,6 @@ WIRING = (
     ("Stop", "", ("completion-gate.py", "board-gate.py")),
 )
 CODEX_WIRING = (
-    ("PreToolUse", "spawn_agent", ("agent-fence.py",)),
     ("PreToolUse", "Bash|apply_patch|Edit|Write", ("workflow-gate.py",)),
     ("PreToolUse", "Bash", ("board-actor.py", "board-merge-gate.py",
                             "board-status-gate.py")),
@@ -1193,7 +1197,7 @@ CODEX_WIRING = (
 # not merely omitted for new projects, or `atelier init` leaves old deadlocks
 # installed forever.
 RETIRED_GATES = (
-    "report-gate.py", "publish-gate.py", "plan-doc-lint.py", "picture-gate.py",
+    "report-gate.py", "publish-gate.py", "plan-doc-lint.py", "picture-gate.py", "agent-fence.py",
     "slice-gate.py", "helper-proof.py", "habit-reading.py",
 )
 # The house voice. Set where a project says nothing, never over a project that
@@ -1205,35 +1209,6 @@ CEILING = "autoCompactWindow"
 # sessions at 599k tokens a request on a million-token window, and the card's bar
 # is per-request load under this — so a ceiling set above it never fires first.
 CEILING_MAX = 200000
-
-
-# A gate is only wired to the tools it was told to listen for, and the fence
-# guards two of them: a lead can be started by naming the agent or by naming its
-# skill, and a project that wired the fence to the Agent tool alone leaves the
-# second route open while reading as wired (mch-1p2.3). The hook's name in the
-# file says nothing about that, so the tools beside it are read too.
-FENCE = "agent-fence.py"
-FENCE_TOOLS = ("Agent", "Skill")
-
-
-def half_heard(text):
-    """The tools the fence is wired to hear, when they are not all of them."""
-    try:
-        events = (json.loads(text).get("hooks") or {}).get("PreToolUse") or []
-    except (ValueError, AttributeError):
-        return []
-    for block in events:
-        if not any(FENCE in (h.get("command") or "")
-                   for h in (block.get("hooks") or [])):
-            continue
-        heard = str(block.get("matcher") or "")
-        deaf = [tool for tool in FENCE_TOOLS
-                if not re.search(r"\b%s\b" % tool, heard)]
-        if deaf:
-            return ["%s is wired to %r in .claude/settings.json, which never hears "
-                    "%s — a lead started that way is refused nothing" %
-                    (FENCE, heard, " or ".join(deaf))]
-    return []
 
 
 def runs(command, name):
@@ -1470,7 +1445,6 @@ def unwired(root):
     missing = [name for _, _, names in WIRING for name in names if name not in text]
     said = ["%s is wired into no event in .claude/settings.json" % ", ".join(missing)] \
         if missing else []
-    said += half_heard(text)
     try:
         found = json.loads(text).get(CEILING)
     except (ValueError, AttributeError):
@@ -1497,7 +1471,7 @@ def main():
     ap.add_argument("--check", action="store_true",
                     help="say where every registered project stands, and change nothing")
     ap.add_argument("--personal", action="store_true",
-                    help="install personal provider capabilities, and join no project")
+                    help="remove legacy Atelier-owned provider artifacts, and join no project")
     ap.add_argument("--mode", metavar="PATH",
                     help="print beads or chat for a project, and change nothing")
     ap.add_argument("--chat-only", metavar="PATH",
@@ -1507,7 +1481,7 @@ def main():
     if a.personal:
         said = []
         install_tolerantly(said.append)
-        print("\n".join(said) or "nothing to do — personal Atelier instructions are current")
+        print("\n".join(said) or "nothing to do — no legacy Atelier provider artifacts found")
         return
 
     if a.mode:
@@ -1562,9 +1536,8 @@ def main():
     # After the board is where it is going to be, never before: everything below
     # asks the board something, and asking one that is mid-move answers for the
     # copy that is about to stop existing.
-    # Provider context is wired once at personal scope. SessionStart resolves
-    # this registration, including from any linked worktree, so no provider
-    # settings are written into the repository.
+    # Atelier resolves this registration when it starts or resumes a session,
+    # including from linked worktrees. Provider homes are not part of the path.
     tidy(root, said.append)
     listing(root, decl, said.append)
     states(root, said.append)

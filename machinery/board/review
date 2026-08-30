@@ -2,7 +2,7 @@
 """The outside reader of a job, run by the board rather than by the session.
 
 A review is only a review if whoever did it did not write the change, so this
-runs as its own process under its own board identity: a headless `claude` that
+runs as its own process under its own board identity: an isolated provider worker that
 never saw the work being done, reading the diff and the job's own definition of
 done. What it found becomes the job's own pieces, it signs the goal with the
 commits it was shown, and it opens the gate holding the job shut — see
@@ -276,7 +276,7 @@ instruction to do something; those belong in `where` and `why`. Write `fixed_whe
 as something anyone can run and what it must produce, never "it works".
 
 Answer with one JSON object and nothing before or after it. This is the same
-schema the personal reviewer runner validates:
+schema the Atelier review runner validates:
 
 {"verdict": "<PASS or NEEDS_WORK>",
  "summary": "<one sentence: what you read and what you conclude>",
@@ -296,22 +296,17 @@ schema the personal reviewer runner validates:
 
 
 def run_reviewer(prompt, actor, goal_id, repo, base, head, here):
-    """Use the machine's named personal reviewer through its bounded runner.
-
-    Model, tools, and reviewer policy belong to the personal ``reviewer`` agent;
-    this project supplies only immutable scope and evidence. Stderr is inherited
-    so the runner's heartbeat reaches the detached run log while stdout remains a
-    machine-readable verdict.
-    """
+    """Use Atelier's provider-neutral bounded runner and internal policy."""
     env = dict(os.environ, BEADS_ACTOR=actor)
     for name in project.env(DECL, "REVIEWER"):
         env[name] = goal_id
-    cmd = ["external-review", "--repo", repo, "--base", base, "--head", head,
+    runner = os.path.join(os.path.dirname(HERE), "workers", "review.py")
+    cmd = [sys.executable, runner, "--repo", repo, "--base", base, "--head", head,
            "--spec", prompt, "--evidence", "Atelier ran its declared checks before review.",
            "--timeout", "600", "--output-dir", here]
     run = subprocess.run(cmd, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
                          stderr=None, timeout=630)
-    return run.stdout or "", "external-review exit %d" % run.returncode
+    return run.stdout or "", "Atelier external review exit %d" % run.returncode
 
 
 def run_log(goal_id):

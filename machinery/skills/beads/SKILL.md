@@ -102,13 +102,12 @@ must explain why the new job cannot fold into one that is already open.
      for localized routine work, documentation, tests, and mechanical edits.
    - When warranted, run only `machinery/board/review <job-id>` exactly once
      before teardown; do not invoke a model, reviewer agent, or review skill
-     directly. The command delegates to the personal `external-review` runner,
-     which invokes the personal Claude agent named `reviewer`. That agent's
-     definition selects Sonnet, constrains its tools and turns, and preloads the
-     `external-review` skill. This personal wiring is installed by Atelier and
-     is intentionally outside the project worktree.
+     directly. The command delegates to Atelier's bundled, provider-neutral
+     review worker. Its internal policy, read-only provider adapters, timeout,
+     evidence packet, and result schema travel with Atelier; it installs no
+     agent, skill, command, hook, or executable into a provider home.
    - Review is never launched automatically. PASS, NEEDS_WORK, timeout,
-     cancellation, malformed output, missing personal wiring, and account limits
+     cancellation, malformed output, unavailable providers, and account limits
      all consume the job's one attempt. Fix any findings and land them; never
      invoke the reviewer again.
    - Without external review, continue directly to done or manager review. After

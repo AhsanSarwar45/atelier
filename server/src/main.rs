@@ -174,7 +174,7 @@ async fn main() {
             }
             if action == service::Action::Install {
                 if let Err(e) = rules::install_personal() {
-                    eprintln!("warning: Atelier's personal skills and hooks could not be installed: {e}");
+                    eprintln!("warning: Atelier's legacy provider artifacts could not be cleaned up safely: {e}");
                 }
             }
         }
