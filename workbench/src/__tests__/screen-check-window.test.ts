@@ -17,7 +17,7 @@ describe('native screen-check windows', () => {
     const seen: string[] = []; const execute: any = (command: string, args: string[]) => {
       seen.push(`${command} ${args.join(' ')}`);
       if (command === 'screencapture' || command === 'import' || (command === 'powershell.exe' && args.join(' ').includes('PrintWindow'))) writeFileSync(args.at(-1)!, png);
-      return { status: 0, stdout: command === 'wmctrl' ? '0x2 0 1 0 0 10 10 host title' : command === 'xprop' ? '_NET_ACTIVE_WINDOW(WINDOW): window id # 0x2' : '[]', stderr: '' };
+      return { status: 0, stdout: command === 'wmctrl' ? '0x2 0 1 0 0 10 10 host title' : command === 'xprop' && args[0] === '-root' ? '_NET_ACTIVE_WINDOW(WINDOW): window id # 0x2' : command === 'xprop' ? '_NET_WM_STATE(ATOM) = ' : '[]', stderr: '' };
     };
     const apple = nativeWindowAdapter('darwin', {}, execute); apple.preflight(); apple.list();
     const linux = nativeWindowAdapter('linux', { DISPLAY: ':1' }, execute); linux.preflight(); linux.list();
@@ -25,6 +25,7 @@ describe('native screen-check windows', () => {
     expect(apple.capture('42')).toEqual(png); expect(linux.capture('0x2')).toEqual(png); expect(windows.capture('9')).toEqual(png);
     expect(seen.some((item) => item.startsWith('osascript '))).toBe(true);
     expect(seen.some((item) => item === 'wmctrl -lpG')).toBe(true);
+    expect(seen.some((item) => item === 'xprop -id 0x2 _NET_WM_STATE')).toBe(true);
     expect(seen.some((item) => item.startsWith('screencapture -x -l 42'))).toBe(true);
     expect(seen.some((item) => item.startsWith('import -window 0x2'))).toBe(true);
     expect(seen.some((item) => item.includes('PrintWindow'))).toBe(true);
@@ -50,5 +51,14 @@ describe('native screen-check windows', () => {
     expect(focused.foreground).toBe(true);
     const adapter: WindowAdapter = { name: 'fake-x11', preflight: () => undefined, list: () => [focused], capture: () => Buffer.from('same') };
     await expect(stableWindowCapture('0x03c00007', adapter, 1, 2)).resolves.toEqual(expect.objectContaining({ window: focused }));
+  });
+
+  it('treats desktop -1 as sticky and uses the X11 hidden state for minimization', async () => {
+    const row = '0x03c00007 -1 123 1 2 300 200 host Sticky window';
+    const sticky = parseLinuxWindows(row, '0x3c00007')[0]; expect(sticky).toEqual(expect.objectContaining({ visible: true, minimized: false, foreground: true }));
+    const hidden = parseLinuxWindows(row, '0x3c00007', ['0x3c00007'])[0]; expect(hidden).toEqual(expect.objectContaining({ visible: false, minimized: true }));
+    const capture = () => Buffer.from('same');
+    await expect(stableWindowCapture(sticky.id, { name: 'x11', preflight: () => undefined, list: () => [sticky], capture }, 1, 2)).resolves.toBeTruthy();
+    await expect(stableWindowCapture(hidden.id, { name: 'x11', preflight: () => undefined, list: () => [hidden], capture }, 1, 2)).rejects.toThrow('hidden or minimized');
   });
 });

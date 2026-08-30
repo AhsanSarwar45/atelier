@@ -25,11 +25,12 @@ export function parseAppleWindows(stdout: string): NativeWindow[] {
     visible: true, minimized: false, foreground: Boolean(row.foreground) }));
 }
 
-export function parseLinuxWindows(stdout: string, foregroundId = ''): NativeWindow[] {
-  const foreground = windowId(foregroundId);
+export function parseLinuxWindows(stdout: string, foregroundId = '', hiddenIds: Iterable<string> = []): NativeWindow[] {
+  const foreground = windowId(foregroundId); const hidden = new Set(Array.from(hiddenIds, windowId));
   return stdout.split(/\r?\n/).filter(Boolean).map((line) => {
     const parts = line.trim().split(/\s+/); if (parts.length < 8) throw new Error(`WINDOW_DISCOVERY_UNAVAILABLE: unreadable wmctrl row: ${line}`);
-    return { id: parts[0], minimized: parts[1] === '-1', visible: parts[1] !== '-1', foreground: windowId(parts[0]) === foreground, owner: `pid ${parts[2]}`,
+    const minimized = hidden.has(windowId(parts[0]));
+    return { id: parts[0], minimized, visible: !minimized, foreground: windowId(parts[0]) === foreground, owner: `pid ${parts[2]}`,
       bounds: { x: Number(parts[3]), y: Number(parts[4]), width: Number(parts[5]), height: Number(parts[6]) }, title: parts.slice(8).join(' ') || parts[7] };
   });
 }
@@ -63,7 +64,14 @@ export function nativeWindowAdapter(platform = process.platform, environment = p
     return { name: 'linux-window', preflight: () => { command('CAPTURE_PERMISSION_REQUIRED: cannot access the X display', execute('xdpyinfo', [])); },
       list: () => {
         const active = command('WINDOW_DISCOVERY_UNAVAILABLE: install xprop', execute('xprop', ['-root', '_NET_ACTIVE_WINDOW'])).match(/0x[0-9a-f]+/i)?.[0] ?? '';
-        return parseLinuxWindows(command('WINDOW_DISCOVERY_UNAVAILABLE: install wmctrl', execute('wmctrl', ['-lpG'])).trim(), active);
+        const listing = command('WINDOW_DISCOVERY_UNAVAILABLE: install wmctrl', execute('wmctrl', ['-lpG'])).trim(); const rows = parseLinuxWindows(listing, active);
+        const inspected = new Set<string>(); const hidden = new Set<string>();
+        for (const row of rows) {
+          const state = execute('xprop', ['-id', row.id, '_NET_WM_STATE']);
+          if (state.error || state.status !== 0) continue;
+          inspected.add(windowId(row.id)); if (/(?:^|[ ,])_NET_WM_STATE_HIDDEN(?:$|[ ,])/m.test(state.stdout)) hidden.add(row.id);
+        }
+        return parseLinuxWindows(listing, active, hidden).filter((row) => inspected.has(windowId(row.id)));
       },
       capture: (id) => captureFile((out) => execute('import', ['-window', id, out]), 'CAPTURE_PERMISSION_REQUIRED: install ImageMagick and grant window capture') };
   }
