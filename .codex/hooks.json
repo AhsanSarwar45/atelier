@@ -51,7 +51,6 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "command": "bd codex-hook UserPromptSubmit", "statusMessage": "Refreshing Beads context", "type": "command" },
           { "command": "python3 \"$(git rev-parse --show-toplevel)/workbench/hooks/session-doing.py\"", "type": "command" }
         ]
       }

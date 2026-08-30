@@ -1050,6 +1050,21 @@ def runs(command, name):
                for word in (command or "").split())
 
 
+def redundant_codex_prompt_prime(command):
+    """Whether this is the old full-context refresh on every user prompt.
+
+    SessionStart already supplies the board context, and PostCompact schedules
+    it again after context recovery. Running the same prime on every prompt
+    prints a second full copy at startup and keeps repeating it throughout the
+    conversation. Match only the exact Beads-owned command so neighboring user
+    prompt hooks remain untouched.
+    """
+    try:
+        return shlex.split(command or "") == ["bd", "codex-hook", "UserPromptSubmit"]
+    except ValueError:
+        return False
+
+
 def gate(root, name):
     """Where this project types the gate of this name, or "" if nowhere.
 
@@ -1215,7 +1230,8 @@ def wire_codex(root, say):
         for block in blocks:
             block["hooks"] = [h for h in (block.get("hooks") or [])
                               if not any(runs(h.get("command"), name)
-                                         for name in RETIRED_GATES)]
+                                         for name in RETIRED_GATES)
+                              and not redundant_codex_prompt_prime(h.get("command"))]
     wired = []
     for event, matcher, names in CODEX_WIRING:
         blocks = hooks.setdefault(event, [])

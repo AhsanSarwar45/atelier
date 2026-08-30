@@ -42,6 +42,34 @@ class JoinInstructionsTest(unittest.TestCase):
 
             self.assertNotIn("publish-gate.py", settings.read_text())
 
+    def test_codex_wiring_removes_only_the_redundant_prompt_prime(self):
+        join = load_join()
+        with tempfile.TemporaryDirectory() as held:
+            root = Path(held)
+            settings = root / ".codex" / "hooks.json"
+            settings.parent.mkdir()
+            settings.write_text(json.dumps({"hooks": {
+                "SessionStart": [{"hooks": [{
+                    "type": "command", "command": "bd codex-hook SessionStart",
+                }]}],
+                "UserPromptSubmit": [{"hooks": [
+                    {"type": "command", "command": "bd codex-hook UserPromptSubmit"},
+                    {"type": "command", "command": "my-prompt-hook"},
+                ]}],
+            }}))
+
+            join.wire_codex(str(root), lambda _: None)
+
+            wired = json.loads(settings.read_text())["hooks"]
+            prompt_commands = [hook["command"]
+                               for block in wired["UserPromptSubmit"]
+                               for hook in block["hooks"]]
+            start_commands = [hook["command"]
+                              for block in wired["SessionStart"]
+                              for hook in block["hooks"]]
+            self.assertEqual(prompt_commands, ["my-prompt-hook"])
+            self.assertEqual(start_commands, ["bd codex-hook SessionStart"])
+
     def test_beads_review_handoff_names_the_bundled_reviewer_contract(self):
         skill = (ROOT / "machinery/skills/beads/SKILL.md").read_text()
         reviewer = (ROOT / "machinery/workers/external-review.md").read_text()

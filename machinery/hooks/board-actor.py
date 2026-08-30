@@ -95,6 +95,10 @@ def main():
         return
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
+        # A PreToolUse response that changes the input is a decision, not merely
+        # context. Both Claude and Codex reject `updatedInput` without the
+        # matching explicit allow and report the hook itself as failed.
+        "permissionDecision": "allow",
         "permissionDecisionReason": "board identity",
         "updatedInput": dict(data.get("tool_input") or {}, command=stamped),
     }}))
