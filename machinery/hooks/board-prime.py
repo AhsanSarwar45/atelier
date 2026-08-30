@@ -117,7 +117,7 @@ def cards(args, root):
 def main():
     data = json.load(sys.stdin)
     root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
-    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
+    if not bc.enabled(root) or bc.reviewing():
         return
     name = bc.actor(data.get("session_id"), data.get("cwd"))
     bc.bd(["reclaim", "--older-than", "10m", "--actor", name], root)

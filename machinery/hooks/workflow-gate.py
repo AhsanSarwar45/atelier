@@ -463,6 +463,8 @@ def reason(data):
         return "The separate copy names no readable Beads issue %s." % issue
     if not mutates(data, cwd):
         return None
+    if not bc.enabled(bc.board_root(cwd)):
+        return None
     # The manager may explicitly take the board off one session for a small,
     # direct change. board/waive records their words against this exact session
     # and expires the exemption automatically; every other session and every

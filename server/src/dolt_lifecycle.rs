@@ -47,9 +47,16 @@ pub async fn ensure_registered(db: &Database, bd: &Path) {
         }
     };
 
+    let Some(data_dir) = crate::identity::data_dir() else { return; };
     let starts = projects
         .into_iter()
-        .map(|project| PathBuf::from(project.path))
+        .filter_map(|project| {
+            let raw = project.local_path.as_deref().unwrap_or(&project.path);
+            let path = PathBuf::from(raw);
+            crate::project_manifest::locate(&path, &data_dir)
+                .filter(|found| found.manifest.project.use_beads)
+                .map(|_| path)
+        })
         .filter(|path| managed_project(path))
         .map(|path| ensure_project(path, bd.to_path_buf()));
     join_all(starts).await;
@@ -175,6 +182,9 @@ mod tests {
                 is_test: false,
             })
             .unwrap();
+            let mut manifest = crate::project_manifest::infer(path);
+            manifest.project.use_beads = true;
+            crate::project_manifest::create(path, temp.path(), crate::project_manifest::ManifestStorage::Repository, &manifest).unwrap();
         }
 
         let bd = fake_bd(temp.path());
@@ -190,6 +200,25 @@ mod tests {
         assert!(invoked[0].ends_with(" dolt start"));
         assert!(invoked[1].ends_with(" dolt start"));
         assert!(invoked.iter().all(|line| !line.contains("jsonl")));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dolt_lifecycle_ignores_a_board_when_project_settings_disable_beads() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("disabled");
+        fs::create_dir_all(project.join(".beads/dolt")).unwrap();
+        let mut manifest = crate::project_manifest::infer(&project);
+        manifest.project.use_beads = false;
+        crate::project_manifest::create(&project, temp.path(), crate::project_manifest::ManifestStorage::Repository, &manifest).unwrap();
+        let db = Database::new_in_memory().unwrap();
+        db.create_project(CreateProjectInput { name: "disabled".into(), path: project.to_string_lossy().into_owned(),
+            local_path: None, is_test: false }).unwrap();
+        let bd = fake_bd(temp.path());
+
+        ensure_registered(&db, &bd).await;
+
+        assert!(!temp.path().join("bd.calls").exists());
     }
 
     #[cfg(unix)]

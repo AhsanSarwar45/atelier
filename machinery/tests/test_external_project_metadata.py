@@ -20,6 +20,29 @@ def load_project():
 
 
 class ExternalProjectMetadataTests(unittest.TestCase):
+    def test_schema_commands_keep_their_names_and_path_filters(self):
+        project = load_project()
+        declaration = project.Declaration("/tmp/example", {
+            "schema_version": 1,
+            "project": {"display_name": "Example", "use_beads": True},
+            "git": {"completed_work_branch": "ours"},
+            "beads": {"issue_id_prefix": "ex"},
+            "verification": {"commands": [
+                {"name": "Server", "command": "cargo test", "paths": ["server/"]},
+                {"name": "UI", "command": "npm test", "paths": ["src/"]},
+            ]},
+        })
+
+        loader = importlib.machinery.SourceFileLoader(
+            "manifest_checks_test", str(ROOT / "machinery/checks"))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        checks = importlib.util.module_from_spec(spec)
+        loader.exec_module(checks)
+        suites = checks.suites(declaration)
+
+        self.assertEqual(["Server", "UI"], [suite.name for suite in suites])
+        self.assertEqual([("server/",), ("src/",)], [suite.paths for suite in suites])
+
     def test_external_declaration_is_shared_without_repository_file(self):
         project = load_project()
         with tempfile.TemporaryDirectory() as held:
@@ -28,7 +51,16 @@ class ExternalProjectMetadataTests(unittest.TestCase):
             project.REGISTRY = str(Path(held) / "personal/projects.toml")
             declaration = Path(project.declaration_path(str(root)))
             declaration.parent.mkdir(parents=True)
-            declaration.write_text('name="project"\nprefix="prj"\nareas=["api"]\n')
+            declaration.write_text('''schema_version = 1
+[project]
+display_name = "project"
+use_beads = true
+[beads]
+issue_id_prefix = "prj"
+work_areas = ["api"]
+[git]
+completed_work_branch = "main"
+''')
 
             read = project.of(str(root))
 
@@ -42,7 +74,7 @@ class ExternalProjectMetadataTests(unittest.TestCase):
         self.assertFalse(any("project.DECLARATION" in path.read_text()
                              for path in paths))
 
-    def test_legacy_checks_are_read_from_the_linked_worktree(self):
+    def test_repository_manifest_checks_are_read_from_the_linked_worktree(self):
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
             main = root / "project"
@@ -53,12 +85,33 @@ class ExternalProjectMetadataTests(unittest.TestCase):
                             "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(main), "config", "user.name", "Test"],
                            check=True)
-            (main / "machinery.toml").write_text('checks = "echo main-checks"\n')
-            subprocess.run(["git", "-C", str(main), "add", "machinery.toml"], check=True)
+            (main / ".atelier").mkdir()
+            (main / ".atelier/project.toml").write_text('''schema_version = 1
+[project]
+display_name = "project"
+use_beads = true
+[beads]
+issue_id_prefix = "prj"
+[git]
+completed_work_branch = "main"
+[verification]
+commands = [{ name = "Project", command = "echo main-checks" }]
+''')
+            subprocess.run(["git", "-C", str(main), "add", ".atelier/project.toml"], check=True)
             subprocess.run(["git", "-C", str(main), "commit", "-qm", "base"], check=True)
             subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "-b", "job",
                             str(tree)], check=True)
-            (tree / "machinery.toml").write_text('checks = "echo worktree-checks"\n')
+            (tree / ".atelier/project.toml").write_text('''schema_version = 1
+[project]
+display_name = "project"
+use_beads = true
+[beads]
+issue_id_prefix = "prj"
+[git]
+completed_work_branch = "main"
+[verification]
+commands = [{ name = "Project", command = "echo worktree-checks" }]
+''')
             environment = dict(os.environ, ATELIER_DATA_DIR=str(root / "personal"))
 
             run = subprocess.run([str(ROOT / "machinery/checks"), "--dry", "--all"],

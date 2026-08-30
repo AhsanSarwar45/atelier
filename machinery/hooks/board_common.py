@@ -20,6 +20,11 @@ STATE_DIR = os.path.join(
 )
 BD_TIMEOUT = 20  # seconds; a hook must never outlive a hung board
 
+
+def enabled(root):
+    """The manifest, not a leftover .beads directory, enables the workflow."""
+    return project.of(root).use_beads
+
 # Edits here are not project work and never demand a card.
 IGNORED = ("/.beads/", "/scratchpad/", "/.git/", "/node_modules/", "/target/")
 

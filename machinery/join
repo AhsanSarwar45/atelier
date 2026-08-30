@@ -6,8 +6,8 @@ Nothing is ever copied into it: it runs the tools and the gates in place, out of
 this one home. Joining is these things, and each of them is fixed rather than
 merely reported —
 
-  project metadata     inferred once and kept beside Atelier's personal project
-                       registry, never in the repository
+  project settings     created by `atelier init`, either in personal Atelier data
+                       or in the repository at .atelier/project.toml
   the register         one line in personal Atelier data, so `lands:<name>` on
                        a goal means something and a commit in one checkout may
                        name the ids of a project whose work lands there
@@ -44,14 +44,12 @@ pointing and no logic.
     machinery/join --check                say where every registered project stands
 """
 import argparse
-import datetime
 import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
-import sqlite3
 import subprocess
 import sys
 import uuid
@@ -86,23 +84,6 @@ LEGACY_FILE_HASHES = {
     ("skills", "spec"): "5ab2c25e8cd877b4790a286434e6a8ad7773356268a28356224725c87436f080",
 }
 CRAFT = os.path.join(os.path.dirname(HOME), ".claude")
-# The shape of inferred project metadata, kept beside this file and written
-# only into Atelier's external data directory.
-EXAMPLE = "project.example.toml"
-# The board screen's own list of projects. A project whose board runs perfectly
-# is still not on the screen until a row here names where it lives, and typing
-# that path into the screen by hand is the last piece of joining anybody was
-# still doing themselves.
-#
-# The app names itself once, in the product's `identity.rs`, and asks the
-# operating system where a program of that name keeps its data. These two lines
-# are that answer written out for the systems this machinery runs on.
-APP = "atelier"
-LIST = "settings.db"
-# How long to wait for the screen's own writer to let go of the list. The screen
-# may be running while a project joins, and sqlite lets one writer in at a time.
-LIST_WAIT = 10
-
 FORWARDER = '''#!/usr/bin/env python3
 """A forwarder, not the tool (cor-up1g).
 
@@ -925,42 +906,9 @@ def unregister(root, say):
             say("unlisted %s from the Beads project registry" % registered)
     # Chat-only is still an Atelier project: its card and chat remain, while the
     # absence from the Beads registry is what suppresses the board tab/workflow.
-    listing(registered, decl, say, uses_beads=False)
-    metadata = project.declaration_path(registered)
-    try:
-        os.remove(metadata)
-        say("removed external Atelier metadata for %s" % registered)
-    except FileNotFoundError:
-        pass
-
-
-def declaring(root):
-    """Give a project external, deterministic metadata in one run."""
-    base = os.path.basename(root.rstrip("/")) or "project"
-    brand = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_").upper()
-    letters = re.sub(r"[^a-z]", "", base.lower())
-    prefix = (letters + "prj")[:3]
-    used = {project.of(path).prefix for path in project.registry().values()}
-    if prefix in used:
-        digest = hashlib.sha256(os.path.realpath(root).encode()).digest()
-        prefix = "".join(chr(ord("a") + byte % 26) for byte in digest[:3])
-    _, branch = git(["branch", "--show-current"], root)
-    branch = branch or "main"
-    with open(os.path.join(HOME, EXAMPLE)) as source:
-        text = source.read()
-    for was, now in ((r'^name = "example"$', 'name = ' + quoted(base)),
-                     (r'^prefix = "ex"$', 'prefix = ' + quoted(prefix)),
-                     (r'^lands_on = "main"$', 'lands_on = ' + quoted(branch)),
-                     (r'^brand = "EXAMPLE"$', 'brand = ' + quoted(brand)),
-                     (r'^checks = ".*"$', 'checks = ""'),
-                     (r'^persona = ".*"$', 'persona = ' + quoted(
-                         "the %s project — what it is, in one line" % base))):
-        text = re.sub(was, lambda _, now=now: now, text, count=1, flags=re.M)
-    where = project.declaration_path(root)
-    os.makedirs(os.path.dirname(where), exist_ok=True)
-    with open(where, "w") as fh:
-        fh.write(text)
-    return where
+    # The project manifest belongs to the project in both modes. Turning Beads
+    # off removes workflow registration and managed hooks, but keeps every
+    # dormant Beads choice so turning it back on is lossless.
 
 
 def migrate_registry(say):
@@ -994,137 +942,15 @@ def copy_if_absent(source, destination):
 
 
 def ensure_declaration(root, say):
-    """Preserve a legacy declaration byte-for-byte before inferring one."""
-    where = project.declaration_path(root)
+    """Require the initializer's schema-1 manifest; joining never invents policy."""
+    repository = project.repository_declaration_path(root)
+    personal = project.declaration_path(root)
+    where = repository if os.path.exists(repository) else personal
     if os.path.exists(where):
         return where
-    legacy = project.legacy_declaration_path(root)
-    if os.path.exists(legacy):
-        if copy_if_absent(legacy, where):
-            say("moved  legacy project metadata into personal Atelier data at %s" % where)
-        return where
-    where = declaring(root)
-    say("wrote  %s — inferred external metadata for this project" % where)
-    return where
-
-
-def project_list():
-    """Where the board screen keeps this machine's list of projects."""
-    return os.path.join(project.atelier_data_dir(), LIST)
-
-
-def called(decl):
-    """The name the screen shows a project it has never seen before.
-
-    Only ever used for a row that does not exist yet: a project already on the
-    screen is called whatever the person who put it there called it, and joining
-    is not the moment to rename somebody's project under them.
-    """
-    return " ".join(word.capitalize()
-                    for word in re.split(r"[-_\s]+", decl.name) if word) or decl.name
-
-
-def opened():
-    """The screen's project list, or None when there is none to open.
-
-    Never created here. The list's shape belongs to the product, which builds it
-    and migrates it on the way up; a second maker of the same tables is a second
-    thing to keep in step, and it would be wrong the first time the product adds
-    a column.
-    """
-    where = project_list()
-    if not os.path.exists(where):
-        return None
-    try:
-        return sqlite3.connect(where, timeout=LIST_WAIT)
-    except sqlite3.Error:
-        return None
-
-
-def listing(root, decl, say, uses_beads=True):
-    """Keep this project's row in the board screen's list, matched on where the
-    project lives.
-
-    The path is what the row is about, so it is what the row is found by: a
-    project renamed in its own declaration is the same project, and a second row
-    for the same directory is a duplicate the screen would show twice.
-    """
-    where = project_list()
-    db = opened()
-    if db is None:
-        say("unseen %s is not on the board screen: this machine has no %s, so the "
-            "screen has never been run here. Everything else about this project "
-            "is joined; run the app once and re-join to put it on the list."
-            % (root, where))
-        return
-    try:
-        columns = {column[1] for column in db.execute("PRAGMA table_info(projects)")}
-        capability = ", uses_beads" if "uses_beads" in columns else ""
-        row = db.execute(
-            "SELECT name, archived_at, is_test%s FROM projects WHERE path = ?"
-            % capability, (root,)).fetchone()
-        if row is None:
-            now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            if capability:
-                db.execute("INSERT INTO projects (id, name, path, local_path, "
-                           "last_opened, created_at, is_test, uses_beads) "
-                           "VALUES (?,?,?,?,?,?,0,?)",
-                           (str(uuid.uuid4()), called(decl), root, None, now, now,
-                            int(uses_beads)))
-            else:
-                db.execute("INSERT INTO projects (id, name, path, local_path, "
-                           "last_opened, created_at, is_test) VALUES (?,?,?,?,?,?,0)",
-                           (str(uuid.uuid4()), called(decl), root, None, now, now))
-            db.commit()
-            say("shown  %s is on the board screen's list as %s" % (root, called(decl)))
-            return
-        held, archived, test = row[:3]
-        recorded = bool(row[3]) if capability else uses_beads
-        if not archived and not test and recorded == uses_beads:
-            return
-        if capability:
-            db.execute("UPDATE projects SET archived_at = NULL, is_test = 0, "
-                       "uses_beads = ? WHERE path = ?", (int(uses_beads), root))
-        else:
-            db.execute("UPDATE projects SET archived_at = NULL, is_test = 0 "
-                       "WHERE path = ?", (root,))
-        db.commit()
-        say("shown  %s was %s on the board screen's list and is back on it as %s"
-            % (root, "archived" if archived else "marked a test project", held))
-    except sqlite3.Error as why:
-        # A list that will not answer is worth one line and no more: every other
-        # part of joining has already happened, and the screen is not the board.
-        say("unseen %s could not be written into %s (%s), so this project is not "
-            "on the board screen" % (root, where, why))
-    finally:
-        db.close()
-
-
-def unlisted(root):
-    """Said when the board screen would not show this project."""
-    where = project_list()
-    db = opened()
-    if db is None:
-        return ["the board screen has never run on this machine (no %s), so there "
-                "is no list for %s to be on" % (where, root)]
-    try:
-        row = db.execute("SELECT archived_at, is_test FROM projects WHERE path = ?",
-                         (root,)).fetchone()
-    except sqlite3.Error as why:
-        return ["the board screen's list at %s could not be read (%s)" % (where, why)]
-    finally:
-        db.close()
-    if row is None:
-        return ["%s is on no row of the board screen's list, so its cards are not "
-                "on the screen however well its board runs; `machinery/join %s` "
-                "puts it there" % (root, root)]
-    if row[0]:
-        return ["%s is archived on the board screen's list, so the screen does not "
-                "show it; `machinery/join %s` brings it back" % (root, root)]
-    if row[1]:
-        return ["%s is marked a test project on the board screen's list, so the "
-                "screen hides it; `machinery/join %s` unmarks it" % (root, root)]
-    return []
+    raise SystemExit(
+        "This project has no Atelier settings. Run `atelier init %s`; it will show "
+        "the inferred choices before saving them." % root)
 
 
 def standing(root, session_root=None):
@@ -1148,7 +974,6 @@ def standing(root, session_root=None):
         said += unsigned(root)
     if decl.name not in project.registry():
         said.append("not in the register (%s)" % project.REGISTRY)
-    said += unlisted(root)
     code, role = git(["config", "--get", "beads.role"], root)
     if role != "maintainer":
         said.append("git config beads.role is %r — a fork infers a contributor and "
@@ -1472,8 +1297,6 @@ def main():
                     help="say where every registered project stands, and change nothing")
     ap.add_argument("--personal", action="store_true",
                     help="remove legacy Atelier-owned provider artifacts, and join no project")
-    ap.add_argument("--mode", metavar="PATH",
-                    help="print beads or chat for a project, and change nothing")
     ap.add_argument("--chat-only", metavar="PATH",
                     help="remove a project's external Beads registration only")
     a = ap.parse_args()
@@ -1482,10 +1305,6 @@ def main():
         said = []
         install_tolerantly(said.append)
         print("\n".join(said) or "nothing to do — no legacy Atelier provider artifacts found")
-        return
-
-    if a.mode:
-        print("beads" if registered_root(a.mode) else "chat")
         return
 
     if a.chat_only:
@@ -1539,7 +1358,6 @@ def main():
     # Atelier resolves this registration when it starts or resumes a session,
     # including from linked worktrees. Provider homes are not part of the path.
     tidy(root, said.append)
-    listing(root, decl, said.append)
     states(root, said.append)
     # After the states and never before them: these are the cards the board
     # refused for want of the word it has just been told.

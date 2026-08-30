@@ -1,7 +1,6 @@
 import importlib.machinery
 import importlib.util
 import json
-import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -191,18 +190,8 @@ class JoinInstructionsTest(unittest.TestCase):
 
             before = {path.name: path.read_bytes() for path in root.iterdir()}
             join.project.REGISTRY = str(root / "external" / "projects.toml")
-            screen = root / "settings.db"
-            db = sqlite3.connect(screen)
-            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
-                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
-                       "is_test INTEGER DEFAULT 0, archived_at TEXT, "
-                       "uses_beads INTEGER NOT NULL DEFAULT 1)")
-            db.commit()
-            db.close()
-            join.opened = lambda: sqlite3.connect(screen)
             join.unregister(str(root), lambda _: None)
-            after = {path.name: path.read_bytes() for path in root.iterdir()
-                     if path != screen}
+            after = {path.name: path.read_bytes() for path in root.iterdir()}
             self.assertEqual(after, before)
 
     def test_a_linked_worktree_inherits_the_main_projects_registration(self):
@@ -224,16 +213,6 @@ class JoinInstructionsTest(unittest.TestCase):
             join.project.REGISTRY = str(registry)
             self.assertEqual(join.project_root(str(tree)), str(main.resolve()))
             registry.write_text('[projects]\nexample = "%s"\n' % main)
-            screen = root / "screen.sqlite"
-            db = sqlite3.connect(screen)
-            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
-                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
-                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
-            db.execute("INSERT INTO projects (name, path, is_test) VALUES (?,?,0)",
-                       ("Company Project", str(main)))
-            db.commit()
-            db.close()
-            join.opened = lambda: sqlite3.connect(screen)
             before = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
 
             self.assertEqual(join.registered_root(str(main)), str(main.resolve()))
@@ -243,70 +222,8 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertIsNone(join.registered_root(str(main)))
             after = {path.name: path.read_bytes() for path in tree.iterdir() if path.is_file()}
             self.assertEqual(after, before)
-            db = sqlite3.connect(screen)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
-            self.assertEqual(("Company Project", str(main)),
-                             db.execute("SELECT name, path FROM projects").fetchone())
-            db.close()
 
-    def test_chat_only_keeps_a_project_row_stored_through_a_symlink(self):
-        join = load_join()
-        with tempfile.TemporaryDirectory() as held:
-            root = Path(held)
-            project = root / "real-project"
-            project.mkdir()
-            alias = root / "project-link"
-            alias.symlink_to(project, target_is_directory=True)
-            registry = root / "projects.toml"
-            registry.write_text('[projects]\nexample = "%s"\n' % alias)
-            join.project.REGISTRY = str(registry)
-            screen = root / "screen.sqlite"
-            db = sqlite3.connect(screen)
-            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
-                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
-                       "is_test INTEGER DEFAULT 0, archived_at TEXT)")
-            db.execute("INSERT INTO projects (name, path, is_test) VALUES (?,?,0)",
-                       ("Linked Project", str(alias)))
-            db.commit()
-            db.close()
-            join.opened = lambda: sqlite3.connect(screen)
-
-            join.unregister(str(alias), lambda _: None)
-
-            db = sqlite3.connect(screen)
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM projects").fetchone()[0], 1)
-            self.assertEqual(("Linked Project", str(alias)),
-                             db.execute("SELECT name, path FROM projects").fetchone())
-            db.close()
-
-    def test_new_chat_only_project_is_added_to_atelier_without_beads_registration(self):
-        join = load_join()
-        with tempfile.TemporaryDirectory() as held:
-            root = Path(held)
-            project = root / "keystone"
-            project.mkdir()
-            join.project.REGISTRY = str(root / "personal/projects.toml")
-            join.project.LEGACY_REGISTRY = str(root / "rules/projects.toml")
-            screen = root / "settings.db"
-            db = sqlite3.connect(screen)
-            db.execute("CREATE TABLE projects (id TEXT, name TEXT, path TEXT, "
-                       "local_path TEXT, last_opened TEXT, created_at TEXT, "
-                       "is_test INTEGER DEFAULT 0, archived_at TEXT, "
-                       "uses_beads INTEGER NOT NULL DEFAULT 1)")
-            db.commit()
-            db.close()
-            join.opened = lambda: sqlite3.connect(screen)
-
-            join.unregister(str(project), lambda _: None)
-
-            db = sqlite3.connect(screen)
-            row = db.execute("SELECT name, path, uses_beads FROM projects").fetchone()
-            db.close()
-            self.assertEqual(("Keystone", str(project), 0), row)
-            self.assertFalse(Path(join.project.REGISTRY).exists())
-            self.assertFalse(Path(join.project.declaration_path(str(project))).exists())
-
-    def test_legacy_registry_and_declaration_move_to_personal_data_verbatim(self):
+    def test_join_refuses_to_invent_project_settings(self):
         join = load_join()
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
@@ -318,21 +235,13 @@ class JoinInstructionsTest(unittest.TestCase):
             personal_registry = root / "personal/projects.toml"
             join.project.LEGACY_REGISTRY = str(legacy_registry)
             join.project.REGISTRY = str(personal_registry)
-            legacy = project / "machinery.toml"
-            declaration = ('name = "company"\nprefix = "cmp"\nlands_on = "ship"\n'
-                           'agent_merges = true\nareas = ["billing", "api"]\n'
-                           'checks = "make test"\n[review]\npersona = "Company"\n'
-                           'proves = "run it"\n')
-            legacy.write_text(declaration)
-
             messages = []
             join.migrate_registry(messages.append)
-            join.ensure_declaration(str(project), messages.append)
+            with self.assertRaisesRegex(SystemExit, "atelier init"):
+                join.ensure_declaration(str(project), messages.append)
 
             self.assertEqual(personal_registry.read_text(), legacy_registry.read_text())
-            self.assertEqual(Path(join.project.declaration_path(str(project))).read_text(),
-                             declaration)
-            self.assertEqual(legacy.read_text(), declaration)
+            self.assertFalse(Path(join.project.declaration_path(str(project))).exists())
 
     def test_provider_home_failure_does_not_fail_project_registration(self):
         join = load_join()
@@ -341,18 +250,26 @@ class JoinInstructionsTest(unittest.TestCase):
             self.assertFalse(join.install_tolerantly(messages.append))
         self.assertIn("project registration is still complete", messages[0])
 
-    def test_a_new_beads_declaration_needs_no_second_question(self):
+    def test_join_accepts_initializer_manifest_without_a_second_question(self):
         join = load_join()
         with tempfile.TemporaryDirectory() as held:
             root = Path(held)
             join.project.REGISTRY = str(root / "projects.toml")
             project = root / "company-project"
             project.mkdir()
-            where = Path(join.declaring(str(project)))
-            declaration = where.read_text()
-            self.assertRegex(declaration, r'(?m)^prefix = "[a-z]{3}"$')
-            self.assertIn("agent_merges = false", declaration)
-            self.assertNotIn('prefix = ""', declaration)
+            where = Path(join.project.declaration_path(str(project)))
+            where.parent.mkdir(parents=True)
+            where.write_text('''schema_version = 1
+[project]
+display_name = "company-project"
+use_beads = true
+[beads]
+issue_id_prefix = "com"
+[git]
+completed_work_branch = "main"
+agents_may_merge_completed_work = false
+''')
+            self.assertEqual(str(where), join.ensure_declaration(str(project), lambda _: None))
             self.assertFalse((project / "machinery.toml").exists())
             self.assertTrue(str(where).startswith(str(root / "projects")))
 

@@ -19,7 +19,6 @@ mod personal;
 mod project_manifest;
 mod published;
 mod reachable;
-mod registry;
 mod routes;
 mod rules;
 mod service;
@@ -193,7 +192,7 @@ async fn main() {
                 std::process::exit(1);
             }
         },
-        command_line::Ask::ProjectMode(rest) => match rules::project_mode(&rest) {
+        command_line::Ask::ProjectBeads(rest) => match rules::project_beads(&rest) {
             Ok(mode) => println!("{mode}"),
             Err(e) => {
                 eprintln!("{e}");

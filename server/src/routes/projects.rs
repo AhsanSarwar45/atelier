@@ -14,6 +14,7 @@ use crate::db::{
     CachedCounts, CreateProjectInput, CreateTagInput, Database, DbError, ProjectTagInput,
     ProjectWithTags, Tag, UpdateProjectInput,
 };
+use crate::project_manifest::{self, LocatedManifest, ManifestStorage, ProjectManifest};
 
 /// Application state containing the database
 pub type AppState = Arc<Database>;
@@ -30,11 +31,245 @@ pub struct SuccessResponse {
     pub success: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeProjectInput { pub path: String }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectProbe {
+    pub manifest: ProjectManifest,
+    pub existing: bool,
+    pub storage: Option<ManifestStorage>,
+    pub manifest_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InitializeProjectInput {
+    pub path: String,
+    pub storage: ManifestStorage,
+    pub manifest: ProjectManifest,
+    #[serde(default)]
+    pub is_test: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSettingsAnswer {
+    #[serde(flatten)]
+    pub located: LocatedManifest,
+}
+
+#[derive(Deserialize)]
+pub struct MoveManifestInput { pub storage: ManifestStorage }
+
+fn manifest_error(error: String) -> (StatusCode, Json<ErrorResponse>) {
+    (StatusCode::BAD_REQUEST, Json(ErrorResponse { error }))
+}
+
+fn local_root(project: &crate::db::Project) -> Result<std::path::PathBuf, String> {
+    let raw = project.local_path.as_deref().unwrap_or(&project.path);
+    if raw.starts_with("dolt://") { return Err("this project has no local repository".into()); }
+    std::fs::canonicalize(raw).map_err(|error| format!("{raw} could not be read: {error}"))
+}
+
+fn located_for(path: &str, local_path: Option<&str>, data: &std::path::Path) -> Option<LocatedManifest> {
+    let raw = local_path.unwrap_or(path);
+    if raw.starts_with("dolt://") {
+        project_manifest::locate_key(path, data)
+    } else {
+        std::fs::canonicalize(raw).ok().and_then(|root| project_manifest::locate(&root, data))
+    }
+}
+
+fn data_dir() -> Result<std::path::PathBuf, String> {
+    crate::identity::data_dir().ok_or_else(|| "Atelier has no personal data directory".into())
+}
+
+fn board_has_issues(root: &std::path::Path) -> bool {
+    std::process::Command::new("bd").arg("list").args(["--limit", "1", "--json"])
+        .current_dir(root).output().map(|out| out.status.success() && String::from_utf8_lossy(&out.stdout).trim() != "[]").unwrap_or(false)
+}
+
+fn has_linked_worktrees(root: &std::path::Path) -> bool {
+    std::process::Command::new("git").arg("-C").arg(root).args(["worktree", "list", "--porcelain"])
+        .output().ok().filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).lines().filter(|line| line.starts_with("worktree ")).count() > 1)
+        .unwrap_or(false)
+}
+
+fn apply_beads_mode(root: &std::path::Path, enabled: bool) -> Result<(), String> {
+    let join = if root.join("machinery/board/job").is_file() {
+        root.join("machinery/join")
+    } else {
+        crate::rules::install()?.join("machinery/join")
+    };
+    let python = crate::routes::find_python().ok_or_else(|| "Python is required to change Beads registration".to_string())?;
+    let mut command = std::process::Command::new(python);
+    command.arg(join);
+    if !enabled { command.arg("--chat-only"); }
+    let done = command.arg(root).output().map_err(|error| error.to_string())?;
+    if done.status.success() { Ok(()) } else {
+        Err(String::from_utf8_lossy(&done.stderr).trim().to_string())
+    }
+}
+
+pub async fn probe_project(
+    Json(input): Json<ProbeProjectInput>,
+) -> Result<Json<ProjectProbe>, (StatusCode, Json<ErrorResponse>)> {
+    if input.path.starts_with("dolt://") {
+        let data = data_dir().map_err(manifest_error)?;
+        if let Some(located) = project_manifest::locate_key(&input.path, &data) {
+            return Ok(Json(ProjectProbe { manifest: located.manifest, existing: true,
+                storage: Some(ManifestStorage::Personal), manifest_path: Some(located.path.to_string_lossy().to_string()) }));
+        }
+        let name = input.path.trim_start_matches("dolt://").replace(['_', '-'], " ");
+        return Ok(Json(ProjectProbe { manifest: project_manifest::infer_virtual(&name), existing: false,
+            storage: None, manifest_path: None }));
+    }
+    let root = std::fs::canonicalize(&input.path)
+        .map_err(|error| manifest_error(format!("{} could not be read: {error}", input.path)))?;
+    if let Some(located) = project_manifest::locate(&root, &data_dir().map_err(manifest_error)?) {
+        return Ok(Json(ProjectProbe {
+            manifest: located.manifest,
+            existing: true,
+            storage: Some(located.storage),
+            manifest_path: Some(located.path.to_string_lossy().to_string()),
+        }));
+    }
+    Ok(Json(ProjectProbe { manifest: project_manifest::infer(&root), existing: false, storage: None, manifest_path: None }))
+}
+
+pub async fn initialize_project(
+    State(db): State<AppState>,
+    Json(input): Json<InitializeProjectInput>,
+) -> Result<(StatusCode, Json<ProjectWithTags>), (StatusCode, Json<ErrorResponse>)> {
+    if db.get_project_by_path(&input.path).map_err(db_error_response)?.is_some() {
+        return Err((StatusCode::CONFLICT, Json(ErrorResponse { error: "This project is already on the home screen".into() })));
+    }
+    let data = data_dir().map_err(manifest_error)?;
+    let virtual_project = input.path.starts_with("dolt://");
+    if virtual_project && input.storage != ManifestStorage::Personal {
+        return Err(manifest_error("A project without a local repository keeps its settings on this computer".into()));
+    }
+    let root = if virtual_project { None } else { Some(std::fs::canonicalize(&input.path)
+        .map_err(|error| manifest_error(format!("{} could not be read: {error}", input.path)))?) };
+    let existing = if virtual_project { project_manifest::locate_key(&input.path, &data) }
+        else { project_manifest::locate(root.as_ref().unwrap(), &data) };
+    if !virtual_project && input.manifest.project.use_beads
+        && !project_manifest::branch_exists(root.as_ref().unwrap(), &input.manifest.git.completed_work_branch) {
+        return Err(manifest_error("Completed-work branch must be an existing project branch".into()));
+    }
+    let (manifest, created_path, previous) = if let Some(existing) = existing {
+        if !virtual_project && existing.manifest.beads.issue_id_prefix != input.manifest.beads.issue_id_prefix
+            && board_has_issues(root.as_ref().unwrap()) {
+            return Err(manifest_error("Issue ID prefix cannot change after the board has issued IDs".into()));
+        }
+        if !virtual_project && existing.manifest.git.completed_work_branch != input.manifest.git.completed_work_branch
+            && has_linked_worktrees(root.as_ref().unwrap()) {
+            return Err(manifest_error("Completed-work branch cannot change while linked worktrees exist".into()));
+        }
+        let previous = Some((existing.manifest.clone(), existing.storage));
+        project_manifest::write_atomic(&existing.path, &input.manifest).map_err(manifest_error)?;
+        if !virtual_project && existing.storage != input.storage {
+            if let Err(error) = project_manifest::move_to(root.as_ref().unwrap(), &data, input.storage) {
+                let _ = project_manifest::write_atomic(&existing.path, &existing.manifest);
+                return Err(manifest_error(error));
+            }
+        }
+        (input.manifest, None, previous)
+    } else {
+        let path = if virtual_project { project_manifest::create_key(&input.path, &data, &input.manifest) }
+            else { project_manifest::create(root.as_ref().unwrap(), &data, input.storage, &input.manifest) }
+            .map_err(manifest_error)?;
+        (input.manifest, Some(path), None)
+    };
+    if !virtual_project {
+        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), manifest.project.use_beads) {
+            if let Some(path) = created_path { let _ = std::fs::remove_file(path); }
+            if let Some((old, storage)) = previous {
+                if let Some(current) = project_manifest::locate(root.as_ref().unwrap(), &data) {
+                    let _ = project_manifest::write_atomic(&current.path, &old);
+                    if current.storage != storage { let _ = project_manifest::move_to(root.as_ref().unwrap(), &data, storage); }
+                }
+            }
+            return Err(manifest_error(error));
+        }
+    }
+    let project = db.create_project(CreateProjectInput {
+        name: manifest.project.display_name,
+        path: root.as_ref().map(|path| path.to_string_lossy().to_string()).unwrap_or(input.path),
+        local_path: None,
+        is_test: input.is_test,
+    }).map_err(db_error_response)?;
+    Ok((StatusCode::CREATED, Json(ProjectWithTags {
+        id: project.id, name: project.name, path: project.path, local_path: project.local_path,
+        tags: vec![], last_opened: project.last_opened, created_at: project.created_at,
+        archived_at: project.archived_at, is_test: project.is_test,
+    })))
+}
+
+pub async fn get_project_settings(
+    State(db): State<AppState>, Path(id): Path<String>,
+) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
+    let project = db.get_project(&id).map_err(db_error_response)?;
+    let located = located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
+        .ok_or_else(|| manifest_error("project has no manifest; initialize it first".into()))?;
+    Ok(Json(ProjectSettingsAnswer { located }))
+}
+
+pub async fn update_project_settings(
+    State(db): State<AppState>, Path(id): Path<String>, Json(manifest): Json<ProjectManifest>,
+) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
+    let project = db.get_project(&id).map_err(db_error_response)?;
+    let virtual_project = project.local_path.is_none() && project.path.starts_with("dolt://");
+    let root = if virtual_project { None } else { Some(local_root(&project).map_err(manifest_error)?) };
+    let located = located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
+        .ok_or_else(|| manifest_error("project has no manifest; initialize it first".into()))?;
+    if !virtual_project && manifest.project.use_beads
+        && !project_manifest::branch_exists(root.as_ref().unwrap(), &manifest.git.completed_work_branch) {
+        return Err(manifest_error("Completed-work branch must be an existing project branch".into()));
+    }
+    if !virtual_project && located.manifest.beads.issue_id_prefix != manifest.beads.issue_id_prefix && board_has_issues(root.as_ref().unwrap()) {
+        return Err(manifest_error("Issue ID prefix cannot change after the board has issued IDs".into()));
+    }
+    if !virtual_project && located.manifest.git.completed_work_branch != manifest.git.completed_work_branch && has_linked_worktrees(root.as_ref().unwrap()) {
+        return Err(manifest_error("Completed-work branch cannot change while linked worktrees exist".into()));
+    }
+    project_manifest::write_atomic(&located.path, &manifest).map_err(manifest_error)?;
+    if !virtual_project && located.manifest.project.use_beads != manifest.project.use_beads {
+        if let Err(error) = apply_beads_mode(root.as_ref().unwrap(), manifest.project.use_beads) {
+            let _ = project_manifest::write_atomic(&located.path, &located.manifest);
+            return Err(manifest_error(error));
+        }
+    }
+    if manifest.project.display_name != project.name {
+        db.update_project(&id, UpdateProjectInput { name: Some(manifest.project.display_name.clone()), path: None, local_path: None })
+            .map_err(db_error_response)?;
+    }
+    Ok(Json(ProjectSettingsAnswer { located: LocatedManifest { manifest, ..located } }))
+}
+
+pub async fn move_project_manifest(
+    State(db): State<AppState>, Path(id): Path<String>, Json(input): Json<MoveManifestInput>,
+) -> Result<Json<ProjectSettingsAnswer>, (StatusCode, Json<ErrorResponse>)> {
+    let project = db.get_project(&id).map_err(db_error_response)?;
+    if project.local_path.is_none() && project.path.starts_with("dolt://") {
+        return Err(manifest_error("Repository storage requires a local repository".into()));
+    }
+    let root = local_root(&project).map_err(manifest_error)?;
+    let path = project_manifest::move_to(&root, &data_dir().map_err(manifest_error)?, input.storage).map_err(manifest_error)?;
+    let located = project_manifest::locate(&root, &data_dir().map_err(manifest_error)?)
+        .ok_or_else(|| manifest_error(format!("{} was written but could not be read", path.display())))?;
+    Ok(Json(ProjectSettingsAnswer { located }))
+}
+
 impl DbError {
     fn status_code(&self) -> StatusCode {
         match self {
             DbError::ProjectNotFound(_) | DbError::TagNotFound(_) => StatusCode::NOT_FOUND,
-            DbError::Sqlite(_) | DbError::PathError => StatusCode::INTERNAL_SERVER_ERROR,
+            DbError::Sqlite(_) | DbError::PathError | DbError::ProjectSettings(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -104,8 +339,10 @@ pub async fn list_projects(
                 None
             }
         };
+        let uses_beads = located_for(&project.path, project.local_path.as_deref(), &data_dir().map_err(manifest_error)?)
+            .map(|found| found.manifest.project.use_beads).unwrap_or(false);
         result.push(ProjectWithTagsAndCounts {
-            uses_beads: db.project_uses_beads(&project.id).map_err(db_error_response)?,
+            uses_beads,
             project,
             cached_counts,
         });
@@ -258,6 +495,10 @@ pub fn project_routes() -> axum::Router<AppState> {
         .route("/projects/:id/archive", patch(archive_project))
         .route("/projects/:id/unarchive", patch(unarchive_project))
         .route("/projects/:id/touch", post(touch_project))
+        .route("/projects/probe", post(probe_project))
+        .route("/projects/initialize", post(initialize_project))
+        .route("/projects/:id/settings", get(get_project_settings).patch(update_project_settings))
+        .route("/projects/:id/settings/move", post(move_project_manifest))
         // Tag routes
         .route("/tags", get(list_tags).post(create_tag))
         .route("/tags/:id", delete(delete_tag))

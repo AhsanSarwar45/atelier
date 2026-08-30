@@ -114,7 +114,7 @@ const RULES: Array<[string, string]> = [
   ['atelier tool board/land bw-7ks.24', 'Landed bw-7ks.24'],
   ['atelier tool checks', 'Ran the project checks'],
   ['atelier init --beads .', 'Set up Atelier for a project'],
-  ['atelier project mode .', 'Checked the project’s Atelier mode'],
+  ['atelier project beads .', 'Checked whether project task tracking is enabled'],
   ['atelier service install', 'Set Atelier to start at login'],
   ['atelier service uninstall', 'Stopped Atelier from starting at login'],
   ['atelier service status', 'Checked whether Atelier starts at login'],

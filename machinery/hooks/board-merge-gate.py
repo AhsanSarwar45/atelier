@@ -183,7 +183,7 @@ def refusal(subject, name, where):
     said = REFUSED % (subject, name, project.declaration_path(where))
     try:
         decl = project.of(where)
-        board = os.path.isdir(os.path.join(project.root(where), ".beads"))
+        board = project.of(where).use_beads
     except Exception:
         return said
     if board and decl.lands_on in decl.protected:
@@ -1274,7 +1274,7 @@ def main():
     # running, and only for what actually writes to the line that board measures
     # every close against.
     root = bc.board_root(home)
-    if not os.path.isdir(os.path.join(root, ".beads")):
+    if not project.of(root).use_beads:
         return
     lands_on = project.of(root).lands_on
     here = [(verb, rest) for verb, where, line, rest in made

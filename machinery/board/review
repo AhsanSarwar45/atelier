@@ -645,6 +645,9 @@ def main():
     ap.add_argument("job", help="the goal to read; a job's old review card also names it")
     a = ap.parse_args()
 
+    if DECL.external_review == "never":
+        sys.exit("External review is disabled in this project's settings.")
+
     asked = card(a.job)
     # A job poured before the reading stopped being a piece still has its review
     # card, and that id still resolves to the job for its one explicit invocation.

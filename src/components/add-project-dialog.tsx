@@ -7,6 +7,7 @@ import { Folder, Loader2, FolderSearch, Database, Server } from "lucide-react";
 import { FolderBrowser } from "@/components/folder-browser";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -17,24 +18,24 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Panel, panelVariants } from "@/components/ui/panel";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import * as api from "@/lib/api";
-import type { DoltDatabase, DoltServer } from "@/lib/api";
-import type { CreateProjectInput } from "@/lib/db";
+import type { DoltDatabase, DoltServer, ManifestStorage, ProjectManifest } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 
 interface AddProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddProject: (input: CreateProjectInput) => Promise<void>;
+  onInitialized?: () => Promise<void> | void;
   existingProjectNames?: string[];
 }
 
 export function AddProjectDialog({
   open: isOpen,
   onOpenChange,
-  onAddProject,
+  onInitialized,
   existingProjectNames = [],
 }: AddProjectDialogProps) {
   const [projectPath, setProjectPath] = useState<string>("");
@@ -49,6 +50,9 @@ export function AddProjectDialog({
   const [doltLoading, setDoltLoading] = useState(false);
   const [doltServers, setDoltServers] = useState<DoltServer[]>([]);
   const [serversLoading, setServersLoading] = useState(false);
+  const [manifest, setManifest] = useState<ProjectManifest | null>(null);
+  const [storage, setStorage] = useState<ManifestStorage>('personal');
+  const [branches, setBranches] = useState<string[]>([]);
   const { toast } = useToast();
 
   // Fetch Dolt databases and per-project servers when dialog opens
@@ -88,6 +92,9 @@ export function AddProjectDialog({
     setBrowsing(false);
     setBrowserPath("");
     setIsValidating(false);
+    setManifest(null);
+    setStorage('personal');
+    setBranches([]);
   };
 
   const handleOpenChange = (open: boolean) => {
@@ -109,24 +116,16 @@ export function AddProjectDialog({
 
     try {
       const cleanPath = path.trim().replace(/[/\\]+$/, "");
-      const result = await api.fs.exists(`${cleanPath}/.beads`);
-
-      if (!result.exists) {
-        setPathError("No .beads folder found. Run `bd init` in your project first.");
-        toast({
-          title: "No .beads folder found",
-          description: "Run `bd init` in your project first.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Extract folder name as default project name
-      const pathParts = cleanPath.split(/[/\\]/);
-      const defaultName = pathParts[pathParts.length - 1] || "Untitled Project";
+      const [probe, gitBranches] = await Promise.all([
+        api.projects.probe(cleanPath),
+        api.git.branches(cleanPath).catch(() => ({ current: '', branches: [] })),
+      ]);
 
       setProjectPath(cleanPath);
-      setProjectName(defaultName);
+      setProjectName(probe.manifest.project.display_name);
+      setManifest(probe.manifest);
+      setStorage(probe.storage ?? 'personal');
+      setBranches(gitBranches.branches.map((branch) => branch.name));
       setShowNameInput(true);
       setBrowsing(false);
     } catch (err) {
@@ -154,84 +153,36 @@ export function AddProjectDialog({
       (!dbName || !existingNamesLower.includes(dbName));
   });
 
-  const handleServerQuickAdd = async (server: DoltServer) => {
-    setIsSubmitting(true);
-    try {
-      const pathParts = server.project_path.split(/[/\\]/);
-      const name = (server.project_path && pathParts[pathParts.length - 1])
-        || server.db_name
-        || `Port ${server.port}`;
-      await onAddProject({
-        name,
-        path: server.project_path,
-      });
-      toast({
-        title: "Project added",
-        description: `"${name}" added from per-project Dolt server (port ${server.port}).`,
-      });
-      resetState();
-      onOpenChange(false);
-    } catch (err) {
-      console.error("Error adding project from server:", err);
-      toast({
-        title: "Error",
-        description: "Failed to add project. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+  const handleServerQuickAdd = (server: DoltServer) => {
+    setProjectPath(server.project_path);
+    void validateAndProceed(server.project_path);
   };
 
-  const handleDoltQuickAdd = async (db: DoltDatabase) => {
-    setIsSubmitting(true);
-    try {
-      await onAddProject({
-        name: db.project_name,
-        path: `dolt://${db.name}`,
-      });
-      toast({
-        title: "Project added",
-        description: `"${db.project_name}" added from Dolt.`,
-      });
-      resetState();
-      onOpenChange(false);
-    } catch (err) {
-      console.error("Error adding Dolt project:", err);
-      toast({
-        title: "Error",
-        description: "Failed to add project. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+  const handleDoltQuickAdd = (db: DoltDatabase) => {
+    const source = `dolt://${db.name}`;
+    setProjectPath(source);
+    void validateAndProceed(source);
   };
 
-  const handleBrowseSelect = (path: string, hasBeads: boolean) => {
+  const handleBrowseSelect = (path: string, _hasBeads: boolean) => {
     setProjectPath(path);
     setBrowsing(false);
-    if (hasBeads) {
-      validateAndProceed(path);
-    } else {
-      setPathError("No .beads folder found. Run `bd init` in your project first.");
-    }
+    validateAndProceed(path);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!projectPath || !projectName.trim()) {
+    if (!projectPath || !projectName.trim() || !manifest) {
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      await onAddProject({
-        name: projectName.trim(),
-        path: projectPath,
-      });
+      const ready = { ...manifest, project: { ...manifest.project, display_name: projectName.trim() } };
+      await api.projects.initialize(projectPath, storage, ready);
+      await onInitialized?.();
 
       toast({
         title: "Project added",
@@ -243,8 +194,8 @@ export function AddProjectDialog({
     } catch (err) {
       console.error("Error adding project:", err);
       toast({
-        title: "Error",
-        description: "Failed to add project. Please try again.",
+        title: "Project could not be added",
+        description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -303,7 +254,7 @@ export function AddProjectDialog({
                   })}
                 </div>
                 <p className="text-xs text-t-muted">
-                  Auto-discovered from running Dolt servers. Click to add with full path.
+                  Auto-discovered from running Dolt servers. Choose one to review its project settings.
                 </p>
               </div>
             )}
@@ -329,8 +280,7 @@ export function AddProjectDialog({
                   ))}
                 </div>
                 <p className="text-xs text-t-muted">
-                  Click to add instantly (read-only via Dolt SQL).
-                  Memory and Agents require a local project folder — add via path instead.
+                  Choose one to review its project settings. Memory and Agents still require a local folder.
                 </p>
               </div>
             )}
@@ -389,7 +339,7 @@ export function AddProjectDialog({
                   <p className="text-sm text-danger">{pathError}</p>
                 )}
                 <p className="text-xs text-t-muted">
-                  Enter the full path to your project folder (must contain a .beads folder).
+                  Enter the full path to any readable project folder.
                 </p>
               </div>
             )}
@@ -426,6 +376,52 @@ export function AddProjectDialog({
                   autoFocus
                 />
               </div>
+              {manifest && (
+                <>
+                  <label className="flex items-center gap-2 text-sm text-t-secondary">
+                    <Checkbox
+                      checked={manifest.project.use_beads}
+                      onCheckedChange={(checked) => setManifest({ ...manifest, project: { ...manifest.project, use_beads: checked === true } })}
+                    />
+                    Use task tracking for project work
+                  </label>
+                  <div className="space-y-2">
+                    <label htmlFor="manifest-storage" className="text-sm font-medium text-t-secondary">Store project settings</label>
+                    <Select
+                      value={storage}
+                      onValueChange={(value) => setStorage(value as ManifestStorage)}
+                    >
+                      <SelectTrigger id="manifest-storage"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="personal">Only on this computer</SelectItem>
+                        <SelectItem value="repository">In .atelier/project.toml</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {manifest.project.use_beads && (
+                    <>
+                      <div className="space-y-2">
+                        <label htmlFor="issue-prefix" className="text-sm font-medium text-t-secondary">Issue ID prefix</label>
+                        <Input id="issue-prefix" value={manifest.beads.issue_id_prefix} onChange={(event) => setManifest({ ...manifest, beads: { ...manifest.beads, issue_id_prefix: event.target.value } })} />
+                      </div>
+                      <div className="space-y-2">
+                        <label htmlFor="completed-branch" className="text-sm font-medium text-t-secondary">Completed-work branch</label>
+                        <Input id="completed-branch" list="project-branches" value={manifest.git.completed_work_branch} onChange={(event) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: event.target.value } })} />
+                        <datalist id="project-branches">{branches.map((branch) => <option key={branch} value={branch} />)}</datalist>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-t-secondary">
+                        <Checkbox checked={manifest.git.agents_may_merge_completed_work} onCheckedChange={(checked) => setManifest({ ...manifest, git: { ...manifest.git, agents_may_merge_completed_work: checked === true } })} />
+                        Allow agents to merge completed work
+                      </label>
+                    </>
+                  )}
+                  <Panel inset="sm" className="space-y-1 text-xs text-t-muted">
+                    <p>{manifest.verification.commands.length} verification command(s) inferred</p>
+                    <p>{manifest.beads.work_areas.length} work area(s) inferred</p>
+                    <p>External review: {manifest.review.external_review.replace('_', ' ')}</p>
+                  </Panel>
+                </>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-t-secondary">Location</label>
                 <Panel inset="sm" className="truncate text-sm text-t-tertiary">

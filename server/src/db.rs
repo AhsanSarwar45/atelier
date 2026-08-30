@@ -22,6 +22,8 @@ pub enum DbError {
     TagNotFound(String),
     #[error("Database path error")]
     PathError,
+    #[error("Project settings migration failed: {0}")]
+    ProjectSettings(String),
 }
 
 impl Serialize for DbError {
@@ -277,11 +279,15 @@ impl Database {
             (5, "ALTER TABLE project_bead_counts ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0"),
             (6, "ALTER TABLE projects ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0"),
             (7, "ALTER TABLE projects ADD COLUMN uses_beads INTEGER NOT NULL DEFAULT 1"),
+            (8, "ALTER TABLE projects DROP COLUMN uses_beads"),
         ];
 
         let now = Utc::now().to_rfc3339();
         for (version, sql) in migrations {
             if version > current_version {
+                if version == 8 {
+                    migrate_project_settings(conn)?;
+                }
                 conn.execute_batch(sql)?;
                 if version == 7 {
                     // Older rows predate an explicit capability. Backfill that
@@ -398,18 +404,6 @@ impl Database {
         }
 
         Ok(result)
-    }
-
-    /// Whether Atelier should expose board features for a saved project.
-    /// This is an explicit registration choice, not a filesystem probe.
-    pub fn project_uses_beads(&self, id: &str) -> Result<bool, DbError> {
-        let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "SELECT uses_beads FROM projects WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        )
-        .map_err(DbError::from)
     }
 
     /// Gets projects, optionally including archived and/or test projects
@@ -536,6 +530,18 @@ impl Database {
         )?;
 
         Ok(project)
+    }
+
+    pub fn get_project(&self, id: &str) -> Result<Project, DbError> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, name, path, local_path, last_opened, created_at, archived_at, is_test FROM projects WHERE id = ?1",
+            params![id],
+            |row| Ok(Project {
+                id: row.get(0)?, name: row.get(1)?, path: row.get(2)?, local_path: row.get(3)?,
+                last_opened: row.get(4)?, created_at: row.get(5)?, archived_at: row.get(6)?, is_test: row.get(7)?,
+            }),
+        ).optional()?.ok_or_else(|| DbError::ProjectNotFound(id.to_string()))
     }
 
     /// Deletes a project by ID
@@ -821,6 +827,27 @@ impl Database {
 
         Ok(())
     }
+}
+
+fn migrate_project_settings(conn: &Connection) -> Result<(), DbError> {
+    let data_dir = crate::identity::data_dir().ok_or(DbError::PathError)?;
+    let mut stmt = conn.prepare("SELECT path, local_path, uses_beads FROM projects")?;
+    let rows = stmt.query_map([], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, bool>(2)?,
+    )))?.collect::<SqliteResult<Vec<_>>>()?;
+    drop(stmt);
+    for (path, local_path, use_beads) in rows {
+        let raw = local_path.as_deref().unwrap_or(&path);
+        if raw.starts_with("dolt://") { continue; }
+        let Ok(root) = std::fs::canonicalize(raw) else { continue; };
+        if crate::project_manifest::locate(&root, &data_dir).is_some() { continue; }
+        let mut manifest = crate::project_manifest::infer(&root);
+        manifest.project.use_beads = use_beads;
+        crate::project_manifest::create(
+            &root, &data_dir, crate::project_manifest::ManifestStorage::Personal, &manifest,
+        ).map_err(DbError::ProjectSettings)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

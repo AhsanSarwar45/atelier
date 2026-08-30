@@ -153,18 +153,6 @@ def repository_declaration_path(path):
     return os.path.join(working_tree(path), ".atelier", "project.toml")
 
 
-def old_external_declaration_path(path):
-    """The one-time migration source used by installations predating schema 1."""
-    key = git_identity(path) or os.path.realpath(path)
-    digest = hashlib.sha256(key.encode()).hexdigest()
-    return os.path.join(os.path.dirname(REGISTRY), "projects", digest + ".toml")
-
-
-def legacy_declaration_path(path):
-    """The repository-local declaration used before personal metadata."""
-    return os.path.join(working_tree(path), "machinery.toml")
-
-
 def root(path=None):
     """The registered main checkout for path, or Git's checkout when unjoined."""
     here = os.path.abspath(path or os.getcwd())
@@ -211,8 +199,16 @@ class Declaration:
         # A project that declares none still runs the step; its note says what
         # was run by hand instead.
         commands = verify.get("commands") or []
-        self.checks = (" && ".join(row.get("command", "") for row in commands
-                                   if row.get("command")) if modern else data.get("checks")) or ""
+        self.verification_commands = [
+            {
+                "name": str(row.get("name") or "").strip(),
+                "command": str(row.get("command") or "").strip(),
+                "paths": [str(path) for path in (row.get("paths") or []) if str(path)],
+            }
+            for row in commands if isinstance(row, dict) and row.get("command")
+        ] if modern else []
+        self.checks = (" && ".join(row["command"] for row in self.verification_commands)
+                       if modern else data.get("checks")) or ""
         # Whether an agent may put work onto this project's shipping lines itself.
         # False everywhere it is not said, so a checkout that has never been
         # thought about is protected rather than open.
@@ -266,21 +262,13 @@ def _read(path):
 def of(path=None):
     """The declaration of the project holding `path`."""
     where = root(path)
-    repository = repository_declaration_path(path or where)
+    repository = repository_declaration_path(path or os.getcwd())
     personal = declaration_path(where)
     source = repository if os.path.isfile(repository) else personal
     data = _read(source)
-    declared_at = where
-    key = ("external", where)
-    if not data:
-        # One-time upgrade sources. Runtime behavior is immediately projected
-        # into the schema-1 Declaration above; writers publish only schema 1.
-        declared_at = working_tree(path)
-        key = ("legacy", os.path.realpath(declared_at))
-        data = _read(old_external_declaration_path(where)) or \
-            _read(legacy_declaration_path(declared_at))
+    key = ("external", os.path.realpath(source))
     if key not in _DECLS:
-        _DECLS[key] = Declaration(declared_at, data)
+        _DECLS[key] = Declaration(where, data)
     return _DECLS[key]
 
 

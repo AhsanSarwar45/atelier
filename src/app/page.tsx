@@ -17,7 +17,6 @@ import { Panel } from "@/components/ui/panel";
 import { ReadFailed } from "@/components/ui/read-failed";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProjects } from "@/hooks/use-projects";
-import { useToast } from "@/hooks/use-toast";
 import { PRODUCT_NAME } from "@/lib/identity";
 import { WorkbenchStatus } from "@/workbench/globals";
 
@@ -25,8 +24,7 @@ export default function ProjectsPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  const { projects, isLoading, loadingStatus, error, showArchived, addProject, updateProjectTags, refetch, archiveProject, unarchiveProject, deleteProject, toggleShowArchived } = useProjects();
-  const { toast } = useToast();
+  const { projects, isLoading, loadingStatus, error, showArchived, updateProjectTags, refetch, archiveProject, unarchiveProject, deleteProject, toggleShowArchived } = useProjects();
 
   // Get all unique tags across projects
   const allTags = useMemo(() => {
@@ -74,21 +72,6 @@ export default function ProjectsPage() {
   };
 
   const hasActiveFilters = searchQuery.trim() !== "" || selectedTagIds.length > 0;
-
-  const handleAddProject = async (input: { name: string; path: string }) => {
-    // Check for duplicate
-    const isDuplicate = projects.some(p => p.path === input.path);
-    if (isDuplicate) {
-      toast({
-        title: "Project already exists",
-        description: "This project is already in your dashboard.",
-        variant: "destructive",
-      });
-      throw new Error("Project already exists"); // Let the dialog know it failed
-    }
-    await addProject(input);
-  };
-
 
   return (
     // One bar here too, and only the list beneath it scrolls: what is waiting
@@ -316,7 +299,7 @@ export default function ProjectsPage() {
       <AddProjectDialog
         open={isAddDialogOpen}
         onOpenChange={setIsAddDialogOpen}
-        onAddProject={handleAddProject}
+        onInitialized={refetch}
         existingProjectNames={projects.map((p) => p.name)}
       />
 

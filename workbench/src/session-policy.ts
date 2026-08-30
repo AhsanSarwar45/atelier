@@ -1,5 +1,6 @@
 /** Atelier-owned session policy, supplied at runtime rather than installed into a provider home. */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,41 +37,59 @@ function gitIdentity(path: string): string | null {
 }
 
 /** Read only the [projects] string paths written by machinery/project.py. */
-function registeredRoots(): string[] {
+function manifestText(cwd: string): string | null {
+  const repository = join(cwd, '.atelier', 'project.toml');
+  if (existsSync(repository)) return readFileSync(repository, 'utf8');
   const data = process.env.ATELIER_DATA_DIR;
-  if (!data) return [];
-  const registry = join(data, 'projects.toml');
-  if (!existsSync(registry)) return [];
-  const text = readFileSync(registry, 'utf8');
-  const start = text.search(/^\[projects\]\s*$/m);
-  if (start < 0) return [];
-  const tail = text.slice(start).replace(/^\[projects\]\s*$/m, '');
-  const next = tail.search(/^\[/m);
-  const section = next < 0 ? tail : tail.slice(0, next);
-  return [...section.matchAll(/^\s*[^#=]+?\s*=\s*(["'])(.*?)\1\s*(?:#.*)?$/gm)]
-    .map((match) => match[2]!)
-    .filter(Boolean);
+  const identity = gitIdentity(cwd);
+  if (!data || !identity) return null;
+  const id = createHash('sha256').update(identity).digest('hex');
+  const personal = join(data, 'projects', id, 'project.toml');
+  return existsSync(personal) ? readFileSync(personal, 'utf8') : null;
 }
 
 export function isBeadsRegistered(cwd: string): boolean {
-  let here: string;
-  try { here = realpathSync(cwd); } catch { return false; }
-  const identity = gitIdentity(here);
-  return registeredRoots().some((root) => {
-    try {
-      const registered = realpathSync(root);
-      return registered === here || (identity !== null && gitIdentity(registered) === identity);
-    } catch { return false; }
-  });
+  return /^\s*use_beads\s*=\s*true\s*$/m.test(manifestText(cwd) ?? '');
+}
+
+function projectGuidance(cwd: string): string {
+  const manifest = manifestText(cwd);
+  if (!manifest) return 'This project has no Atelier project manifest.';
+  const section = (name: string) => {
+    const tail = manifest.slice(Math.max(0, manifest.search(new RegExp(`^\\[${name}\\]\\s*$`, 'm'))));
+    const next = tail.slice(1).search(/^\[/m);
+    return next < 0 ? tail : tail.slice(0, next + 1);
+  };
+  const value = (key: string, inSection?: string) => (inSection ? section(inSection) : manifest)
+    .match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"\\s*$`, 'm'))?.[1] ?? '';
+  const flag = (key: string, inSection?: string) => (inSection ? section(inSection) : manifest)
+    .match(new RegExp(`^\\s*${key}\\s*=\\s*(true|false)\\s*$`, 'm'))?.[1] === 'true';
+  const deployment = value('command', 'deployment');
+  const lines = [
+    `Project: ${value('display_name') || cwd}`,
+    value('summary') && `Project context: ${value('summary')}`,
+    value('completed_work_branch') && `Completed work branch: ${value('completed_work_branch')}`,
+    value('evidence_requirements') && `Required evidence: ${value('evidence_requirements')}`,
+    value('setup_command') && `Setup command: ${value('setup_command')}`,
+    value('start_command') && `Start command: ${value('start_command')}`,
+    value('build_command') && `Build command: ${value('build_command')}`,
+    flag('visual_proof_for_ui_changes', 'verification')
+      ? 'This project requires visual proof for interface changes.'
+      : 'This project does not require visual proof for interface changes.',
+    value('external_review', 'review') && `External review policy: ${value('external_review', 'review')}. This policy authorizes any review it allows; do not ask for separate permission.`,
+    deployment && `Deployment command: ${deployment}`,
+    deployment && flag('requires_confirmation', 'deployment') && 'Ask for explicit permission immediately before running the deployment command.',
+  ].filter(Boolean);
+  return lines.join('\n');
 }
 
 export function sessionPolicy(cwd: string): string {
   const root = skillsRoot();
-  const parts = [`<!-- ${SESSION_POLICY_MARKER} -->`, bodyOf(join(root, 'atelier', 'SKILL.md'))];
+  const parts = [`<!-- ${SESSION_POLICY_MARKER} -->`, bodyOf(join(root, 'atelier', 'SKILL.md')), projectGuidance(cwd)];
   if (isBeadsRegistered(cwd)) {
     parts.push(bodyOf(join(root, 'beads', 'SKILL.md')), 'This session is in a Beads-registered project.');
   } else {
-    parts.push('This session is not in a Beads-registered project. Do not use Beads for its work.');
+    parts.push('This project does not use Beads. Do not use Beads, Beads cards, or the Beads lifecycle for its work.');
   }
   return parts.join('\n\n');
 }

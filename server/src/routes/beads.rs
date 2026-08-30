@@ -749,6 +749,20 @@ pub async fn read_beads(
     // Normalize Windows backslashes to forward slashes
     let path = params.path.replace('\\', "/");
 
+    if let Ok(Some(project)) = db.get_project_by_path(&path) {
+        let raw = project.local_path.as_deref().unwrap_or(&project.path);
+        let enabled = crate::identity::data_dir().and_then(|data| {
+            if raw.starts_with(DOLT_PATH_PREFIX) {
+                crate::project_manifest::locate_key(&project.path, &data)
+            } else {
+                crate::project_manifest::locate(Path::new(raw), &data)
+            }
+        }).is_some_and(|found| found.manifest.project.use_beads);
+        if !enabled {
+            return (StatusCode::NOT_FOUND, board_error("Beads is disabled for this project"));
+        }
+    }
+
     let counted = params.counts.is_some();
 
     // Direct Dolt read for dolt:// paths (no filesystem needed)
@@ -871,7 +885,15 @@ pub fn read_boards_ahead(dolt_manager: Arc<DoltManager>, db: Arc<Database>) {
         };
         let started = Instant::now();
         let mut read = 0usize;
+        let data_dir = crate::identity::data_dir();
         for project in boards_to_read_ahead(&projects) {
+            let raw = project.local_path.as_deref().unwrap_or(&project.path);
+            let enabled = if raw.starts_with(DOLT_PATH_PREFIX) {
+                data_dir.as_ref().and_then(|data| crate::project_manifest::locate_key(&project.path, data))
+            } else {
+                data_dir.as_ref().and_then(|data| crate::project_manifest::locate(Path::new(raw), data))
+            }.is_some_and(|found| found.manifest.project.use_beads);
+            if !enabled { continue; }
             if refresh_board(&dolt_manager, &db, &project.path).await {
                 read += 1;
             }

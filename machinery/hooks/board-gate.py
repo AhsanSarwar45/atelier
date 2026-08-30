@@ -246,7 +246,7 @@ def main():
     sid = data.get("session_id")
     state = bc.load(sid)
     root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
-    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing():
+    if not bc.enabled(root) or bc.reviewing():
         return
     if bc.waived(sid):
         # A waived turn is finished, not skipped. A reviewer may be stood down

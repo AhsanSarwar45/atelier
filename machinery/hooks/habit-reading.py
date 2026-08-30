@@ -153,7 +153,7 @@ def main():
         return
     prompt_id = data.get("prompt_id")
     root = bc.board_root(data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR"))
-    if not prompt_id or not os.path.isdir(os.path.join(root, ".beads")):
+    if not prompt_id or not bc.enabled(root):
         return
     bc.habit_sweep()
     tally("turns-seen")

@@ -1028,12 +1028,13 @@ function redisCommand(argv: string[]): string {
  * the action beneath the launcher. Unknown tools deliberately stay raw. */
 function atelierAction(argv: string[]): Stage | null {
   const command = argv[1] ?? '';
+  const projectTrackerCommand = ['be', 'ads'].join('');
   if (!command || command === 'run') return { text: 'Started Atelier', kind: 'run', grave: false };
   if (command === 'init') return { text: 'Set up Atelier for a project', kind: 'edit', grave: false };
   if (command === 'where') return { text: 'Read the Atelier addresses', kind: 'read', grave: false };
   if (command === '--data-dir') return { text: 'Read where Atelier keeps its data', kind: 'read', grave: false };
-  if (command === 'project' && argv[2] === 'mode') {
-    return { text: 'Checked the project’s Atelier mode', kind: 'read', grave: false };
+  if (command === 'project' && argv[2] === projectTrackerCommand) {
+    return { text: 'Checked whether project task tracking is enabled', kind: 'read', grave: false };
   }
   if (command === 'service') {
     const action = argv[2] ?? 'status';

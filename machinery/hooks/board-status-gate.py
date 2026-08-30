@@ -906,7 +906,7 @@ def main():
     raw = bc.said(data)
     cmd = bc.unshelled(raw)
     root = bc.board_root(bc.where(data))
-    if not os.path.isdir(os.path.join(root, ".beads")) or bc.reviewing() \
+    if not bc.enabled(root) or bc.reviewing() \
             or bc.waived(data.get("session_id")):
         return
     sections.use(root)

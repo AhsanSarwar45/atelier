@@ -6,6 +6,7 @@ import { Archive, Folder, FolderSearch, Loader2, Trash2 } from "lucide-react";
 
 import { FolderBrowser } from "@/components/folder-browser";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -15,8 +16,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { updateProject } from "@/lib/db";
+import * as api from "@/lib/api";
+import type { ManifestStorage, ProjectManifest } from "@/lib/api";
 
 interface ProjectSettingsDialogProps {
   open: boolean;
@@ -30,6 +35,14 @@ interface ProjectSettingsDialogProps {
   onArchive?: () => void;
   onDelete?: () => void;
 }
+
+const commaList = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
+
+const verificationLines = (value: string): ProjectManifest['verification']['commands'] =>
+  value.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [name = '', command = '', paths = ''] = line.split('|').map((part) => part.trim());
+    return { name, command, paths: commaList(paths) };
+  });
 
 export function ProjectSettingsDialog({
   open,
@@ -50,6 +63,9 @@ export function ProjectSettingsDialog({
   const [browserPath, setBrowserPath] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pathError, setPathError] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<ProjectManifest | null>(null);
+  const [storage, setStorage] = useState<ManifestStorage>('personal');
+  const [branches, setBranches] = useState<string[]>([]);
   const { toast } = useToast();
 
   const isDolt = projectPath.startsWith("dolt://");
@@ -62,8 +78,16 @@ export function ProjectSettingsDialog({
       setLocalPath(projectLocalPath || "");
       setBrowsing(null);
       setPathError(null);
+      api.projects.settings(projectId).then((answer) => {
+        setManifest(answer.manifest);
+        setStorage(answer.storage);
+      }).catch(() => setManifest(null));
+      const gitPath = projectLocalPath || projectPath;
+      if (!gitPath.startsWith('dolt://')) {
+        api.git.branches(gitPath).then((answer) => setBranches(answer.branches.map((branch) => branch.name))).catch(() => setBranches([]));
+      }
     }
-  }, [open, projectName, projectPath, projectLocalPath]);
+  }, [open, projectId, projectName, projectPath, projectLocalPath]);
 
   const handleBrowseSelect = (selectedPath: string) => {
     if (browsing === "localPath") {
@@ -96,7 +120,7 @@ export function ProjectSettingsDialog({
     const pathChanged = trimmedPath !== projectPath;
     const localPathChanged = trimmedLocalPath !== (projectLocalPath || "");
 
-    if (!nameChanged && !pathChanged && !localPathChanged) {
+    if (!nameChanged && !pathChanged && !localPathChanged && !manifest) {
       onOpenChange(false);
       return;
     }
@@ -104,6 +128,11 @@ export function ProjectSettingsDialog({
     setIsSubmitting(true);
 
     try {
+      if (manifest) {
+        const updated = { ...manifest, project: { ...manifest.project, display_name: trimmedName } };
+        const answer = await api.projects.updateSettings(projectId, updated);
+        if (answer.storage !== storage) await api.projects.moveSettings(projectId, storage);
+      }
       await updateProject({
         id: projectId,
         ...(nameChanged && { name: trimmedName }),
@@ -121,8 +150,8 @@ export function ProjectSettingsDialog({
     } catch (err) {
       console.error("Error updating project:", err);
       toast({
-        title: "Error",
-        description: "Failed to update project settings.",
+        title: "Settings could not be saved",
+        description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -203,11 +232,11 @@ export function ProjectSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Project Settings</DialogTitle>
           <DialogDescription>
-            Update project name and folder path.
+            Project identity, workflow, verification, review, and local storage.
           </DialogDescription>
         </DialogHeader>
 
@@ -281,6 +310,44 @@ export function ProjectSettingsDialog({
               "localPath",
               "/path/to/your/project",
               !localPath ? "Set a folder path to enable Memory, Agents, and bd CLI." : undefined,
+            )}
+
+            {manifest && (
+              <div className="grid gap-6 border-t border-b-default pt-5 md:grid-cols-2">
+                <section className="space-y-3">
+                  <h3 className="font-medium text-t-primary">Workflow</h3>
+                  <label className="flex items-center gap-2 text-sm"><Checkbox checked={manifest.project.use_beads} onCheckedChange={(checked) => setManifest({ ...manifest, project: { ...manifest.project, use_beads: checked === true } })} />Use task tracking for project work</label>
+                  <label className="block space-y-1 text-sm"><span>Project summary</span><Input value={manifest.project.summary} onChange={(e) => setManifest({ ...manifest, project: { ...manifest.project, summary: e.target.value } })} /></label>
+                  {manifest.project.use_beads && <>
+                    <label className="block space-y-1 text-sm"><span>Issue ID prefix</span><Input value={manifest.beads.issue_id_prefix} onChange={(e) => setManifest({ ...manifest, beads: { ...manifest.beads, issue_id_prefix: e.target.value } })} /></label>
+                    <label className="block space-y-1 text-sm"><span>Completed-work branch</span><Input list="settings-branches" value={manifest.git.completed_work_branch} onChange={(e) => setManifest({ ...manifest, git: { ...manifest.git, completed_work_branch: e.target.value } })} /><datalist id="settings-branches">{branches.map((branch) => <option key={branch} value={branch} />)}</datalist></label>
+                    <label className="flex items-center gap-2 text-sm"><Checkbox checked={manifest.git.agents_may_merge_completed_work} onCheckedChange={(checked) => setManifest({ ...manifest, git: { ...manifest.git, agents_may_merge_completed_work: checked === true } })} />Allow agents to merge completed work</label>
+                    <label className="block space-y-1 text-sm"><span>Protected branches</span><Input value={manifest.git.protected_branches.join(', ')} onChange={(e) => setManifest({ ...manifest, git: { ...manifest.git, protected_branches: commaList(e.target.value) } })} /></label>
+                    <label className="block space-y-1 text-sm"><span>Work areas</span><Input value={manifest.beads.work_areas.join(', ')} onChange={(e) => setManifest({ ...manifest, beads: { ...manifest.beads, work_areas: commaList(e.target.value) } })} /></label>
+                  </>}
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="font-medium text-t-primary">Review and evidence</h3>
+                  <label className="block space-y-1 text-sm"><span>External review</span><Select value={manifest.review.external_review} onValueChange={(value) => setManifest({ ...manifest, review: { ...manifest.review, external_review: value as ProjectManifest['review']['external_review'] } })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="agent_decides">Agent decides</SelectItem><SelectItem value="always">Always</SelectItem><SelectItem value="never">Never</SelectItem></SelectContent></Select></label>
+                  <label className="block space-y-1 text-sm"><span>Evidence requirements</span><Input value={manifest.review.evidence_requirements} onChange={(e) => setManifest({ ...manifest, review: { ...manifest.review, evidence_requirements: e.target.value } })} /></label>
+                  <label className="flex items-center gap-2 text-sm"><Checkbox checked={manifest.verification.visual_proof_for_ui_changes} onCheckedChange={(checked) => setManifest({ ...manifest, verification: { ...manifest.verification, visual_proof_for_ui_changes: checked === true } })} />Require visual proof for interface changes</label>
+                  <label className="block space-y-1 text-sm"><span>Verification commands</span><Textarea className="min-h-24 font-mono text-xs" value={manifest.verification.commands.map((c) => `${c.name} | ${c.command} | ${(c.paths || []).join(',')}`).join('\n')} onChange={(e) => setManifest({ ...manifest, verification: { ...manifest.verification, commands: verificationLines(e.target.value) } })} /></label>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="font-medium text-t-primary">Development</h3>
+                  {(['setup_command', 'start_command', 'build_command'] as const).map((key) => <label key={key} className="block space-y-1 text-sm"><span>{key.replace('_', ' ')}</span><Input value={manifest.development[key]} onChange={(e) => setManifest({ ...manifest, development: { ...manifest.development, [key]: e.target.value } })} /></label>)}
+                  <label className="block space-y-1 text-sm"><span>Deployment command</span><Input value={manifest.deployment.command} onChange={(e) => setManifest({ ...manifest, deployment: { ...manifest.deployment, command: e.target.value } })} /></label>
+                  <label className="flex items-center gap-2 text-sm"><Checkbox checked={manifest.deployment.requires_confirmation} onCheckedChange={(checked) => setManifest({ ...manifest, deployment: { ...manifest.deployment, requires_confirmation: checked === true } })} />Require confirmation before deployment</label>
+                </section>
+
+                <section className="space-y-3">
+                  <h3 className="font-medium text-t-primary">Storage and related projects</h3>
+                  <label className="block space-y-1 text-sm"><span>Project settings location</span><Select value={storage} onValueChange={(value) => setStorage(value as ManifestStorage)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="personal">Only on this computer</SelectItem><SelectItem value="repository" disabled={isDolt && !localPath}>In .atelier/project.toml</SelectItem></SelectContent></Select>{isDolt && !localPath && <span className="text-xs text-t-muted">Repository storage becomes available after a local folder is connected.</span>}</label>
+                  <label className="block space-y-1 text-sm"><span>Delivery projects</span><Input value={manifest.cross_project.delivery_projects.join(', ')} onChange={(e) => setManifest({ ...manifest, cross_project: { delivery_projects: commaList(e.target.value) } })} /></label>
+                </section>
+              </div>
             )}
           </div>
 

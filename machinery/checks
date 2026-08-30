@@ -207,6 +207,10 @@ class Suite:
 
 def suites(decl):
     """Every suite this project's own declared line runs, in the order it runs them."""
+    declared = getattr(decl, "verification_commands", None)
+    if declared:
+        return [Suite(row.get("name") or slug(row["command"]), row["command"],
+                      row.get("paths") or ()) for row in declared]
     out = []
     for cmd in parts(decl.checks or ""):
         found = next(((name, paths) for name, pattern, paths in KNOWN

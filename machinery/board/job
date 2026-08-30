@@ -175,6 +175,11 @@ def chosen(a):
     # naming one is told what happened to it rather than "no step called that".
     alias = {verb.lower(): sid for sid, verb, _, _, _ in spine.STEPS + spine.RETIRED}
     take = [alias.get(s.strip(), s.strip()) for s in (a.steps or "").split(",") if s.strip()]
+    if DECL.external_review == "always" and "review" not in take:
+        take.append("review")
+    elif DECL.external_review == "never" and "review" in take:
+        bar("This project's settings disable external review. Change External review "
+            "in Project Settings before adding the review step.")
     # Still accepted, never demanded: the pours and the scripts written while the
     # board asked for one still run, and what they say stays on the goal.
     skips = {}

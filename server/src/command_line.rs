@@ -37,8 +37,8 @@ pub enum Ask {
     /// Set a project up: lay the working rules down and wire that project to
     /// them. The words after it are passed to the rules' own joining tool.
     Init(Vec<String>),
-    /// Say whether a folder belongs to a registered Beads project.
-    ProjectMode(Vec<String>),
+    /// Say whether Beads is enabled for a folder.
+    ProjectBeads(Vec<String>),
     /// Run one session gate by name, on behalf of a project whose settings
     /// name a word rather than a path.
     Hook { name: String, rest: Vec<String> },
@@ -94,8 +94,8 @@ pub fn asked<I: IntoIterator<Item = String>>(args: I) -> Ask {
         // Everything after the word goes to the joining tool untouched, so
         // its flags do not have to be listed in two places to keep working.
         "init" => Ask::Init(args[1..].to_vec()),
-        "project" if args.get(1).map(String::as_str) == Some("mode") => {
-            Ask::ProjectMode(args[2..].to_vec())
+        "project" if args.get(1).map(String::as_str) == Some("beads") => {
+            Ask::ProjectBeads(args[2..].to_vec())
         }
         // Not for typing. It is what a project's own settings file names, so
         // the gates it runs are a word every machine has instead of one
@@ -137,8 +137,8 @@ Usage:
   atelier run --no-browser    Start without opening a browser
   atelier                     Same as `run --no-browser`
   atelier init [folder]       Configure a project
-  atelier project mode [folder]
-                              Print `beads` or `chat` for this folder
+  atelier project beads [folder]
+                              Print whether Beads is enabled for this folder
   atelier tool <name> [...]   Run an Atelier tool
   atelier where               Show app addresses
   atelier tools               Show dependencies
@@ -151,8 +151,8 @@ Usage:
 
 `atelier run` starts the app and chat service.
 
-`init` selects Beads or chat-only mode. Use `--beads` or `--chat` to skip the
-prompt. Run `atelier tools` to check Beads dependencies.
+`init` asks whether the project uses Beads. Use `--beads` or `--chat` to skip
+that question. Run `atelier tools` to check Beads dependencies.
 
 Environment:
   ATELIER_PORT                Port (default {PORT})
@@ -226,11 +226,11 @@ mod tests {
     }
 
     #[test]
-    fn project_mode_is_a_read_only_question_with_an_optional_folder() {
-        assert_eq!(ask(&["project", "mode"]), Ask::ProjectMode(vec![]));
+    fn project_beads_is_a_read_only_question_with_an_optional_folder() {
+        assert_eq!(ask(&["project", "beads"]), Ask::ProjectBeads(vec![]));
         assert_eq!(
-            ask(&["project", "mode", "."]),
-            Ask::ProjectMode(vec![".".into()])
+            ask(&["project", "beads", "."]),
+            Ask::ProjectBeads(vec![".".into()])
         );
     }
 

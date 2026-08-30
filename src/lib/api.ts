@@ -16,6 +16,33 @@ export interface CreateProjectInput {
   path: string;
 }
 
+export type ManifestStorage = 'personal' | 'repository';
+
+export interface ProjectManifest {
+  schema_version: number;
+  project: { display_name: string; use_beads: boolean; summary: string };
+  git: { completed_work_branch: string; agents_may_merge_completed_work: boolean; protected_branches: string[] };
+  beads: { issue_id_prefix: string; work_areas: string[] };
+  verification: { visual_proof_for_ui_changes: boolean; commands: { name: string; command: string; paths?: string[] }[] };
+  review: { external_review: 'agent_decides' | 'always' | 'never'; evidence_requirements: string };
+  development: { setup_command: string; start_command: string; build_command: string };
+  deployment: { command: string; requires_confirmation: boolean };
+  cross_project: { delivery_projects: string[] };
+}
+
+export interface ProjectProbe {
+  manifest: ProjectManifest;
+  existing: boolean;
+  storage?: ManifestStorage;
+  manifestPath?: string;
+}
+
+export interface ProjectSettingsAnswer {
+  manifest: ProjectManifest;
+  path: string;
+  storage: ManifestStorage;
+}
+
 /**
  * Input for creating a new tag
  */
@@ -259,6 +286,27 @@ export const projects = {
   touch: (id: string) => fetchApi<void>(`/api/projects/${id}/touch`, { method: 'POST' }),
 
   listAll: () => fetchApi<Project[]>('/api/projects?include_archived=true'),
+
+  probe: (path: string) => fetchApi<ProjectProbe>('/api/projects/probe', {
+    method: 'POST', body: JSON.stringify({ path }),
+  }),
+
+  initialize: (path: string, storage: ManifestStorage, manifest: ProjectManifest) =>
+    fetchApi<Project>('/api/projects/initialize', {
+      method: 'POST', body: JSON.stringify({ path, storage, manifest }),
+    }),
+
+  settings: (id: string) => fetchApi<ProjectSettingsAnswer>(`/api/projects/${id}/settings`),
+
+  updateSettings: (id: string, manifest: ProjectManifest) =>
+    fetchApi<ProjectSettingsAnswer>(`/api/projects/${id}/settings`, {
+      method: 'PATCH', body: JSON.stringify(manifest),
+    }),
+
+  moveSettings: (id: string, storage: ManifestStorage) =>
+    fetchApi<ProjectSettingsAnswer>(`/api/projects/${id}/settings/move`, {
+      method: 'POST', body: JSON.stringify({ storage }),
+    }),
 };
 
 /**

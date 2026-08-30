@@ -23,7 +23,8 @@ function fixture(registered: boolean): string {
   roots.push(root);
   const project = join(root, 'project');
   mkdirSync(project);
-  writeFileSync(join(root, 'projects.toml'), registered ? `[projects]\nexample = ${JSON.stringify(project)}\n` : '[projects]\n');
+  mkdirSync(join(project, '.atelier'));
+  writeFileSync(join(project, '.atelier', 'project.toml'), `schema_version = 1\n[project]\ndisplay_name = "Example"\nuse_beads = ${registered}\n`);
   process.env.ATELIER_DATA_DIR = root;
   process.env.ATELIER_RULES_DIR = resolve('.');
   return project;
@@ -44,7 +45,7 @@ describe('runtime session policy', () => {
     const policy = sessionPolicy(project);
     expect(policy).toContain('# Atelier');
     expect(policy).not.toContain('# Atelier workflow');
-    expect(policy).toContain('not in a Beads-registered project');
+    expect(policy).toContain('does not use Beads');
   });
 
   it('hands the same policy to Codex as developer instructions', () => {

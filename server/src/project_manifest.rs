@@ -171,6 +171,26 @@ pub fn personal_path(root: &Path, data_dir: &Path) -> PathBuf {
     data_dir.join("projects").join(project_id(root)).join("project.toml")
 }
 
+pub fn personal_path_for_key(key: &str, data_dir: &Path) -> PathBuf {
+    let digest = Sha256::digest(key.as_bytes());
+    let id: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    data_dir.join("projects").join(id).join("project.toml")
+}
+
+pub fn locate_key(key: &str, data_dir: &Path) -> Option<LocatedManifest> {
+    let path = personal_path_for_key(key, data_dir);
+    read(&path).ok().map(|manifest| LocatedManifest {
+        manifest, path, storage: ManifestStorage::Personal,
+    })
+}
+
+pub fn create_key(key: &str, data_dir: &Path, manifest: &ProjectManifest) -> Result<PathBuf, String> {
+    let path = personal_path_for_key(key, data_dir);
+    if path.exists() { return Err(format!("{} already exists", path.display())); }
+    write_atomic(&path, manifest)?;
+    Ok(path)
+}
+
 pub fn repository_path(root: &Path) -> PathBuf { root.join(REPOSITORY_MANIFEST) }
 
 pub fn locate(root: &Path, data_dir: &Path) -> Option<LocatedManifest> {
@@ -294,6 +314,10 @@ fn existing_branches(root: &Path) -> Vec<String> {
         .lines().map(str::to_string).collect()
 }
 
+pub fn branch_exists(root: &Path, branch: &str) -> bool {
+    existing_branches(root).iter().any(|existing| existing == branch)
+}
+
 pub fn infer(root: &Path) -> ProjectManifest {
     let name = root.file_name().and_then(|name| name.to_str()).unwrap_or("Project").to_string();
     let current = git(root, &["branch", "--show-current"]);
@@ -322,6 +346,19 @@ pub fn infer(root: &Path) -> ProjectManifest {
         verification: VerificationSettings { visual_proof_for_ui_changes: root.join("package.json").is_file(), commands },
         review: ReviewSettings::default(), development,
         deployment: DeploymentSettings::default(), cross_project: CrossProjectSettings::default(),
+    }
+}
+
+pub fn infer_virtual(name: &str) -> ProjectManifest {
+    let name = if name.trim().is_empty() { "Project" } else { name.trim() };
+    ProjectManifest {
+        schema_version: SCHEMA_VERSION,
+        project: ProjectSettings { display_name: name.into(), use_beads: true, summary: String::new() },
+        git: GitSettings { completed_work_branch: "main".into(), agents_may_merge_completed_work: false, protected_branches: vec!["main".into()] },
+        beads: BeadsSettings { issue_id_prefix: prefix(name), work_areas: vec!["product".into(), "operations".into()] },
+        verification: VerificationSettings::default(), review: ReviewSettings::default(),
+        development: DevelopmentSettings::default(), deployment: DeploymentSettings::default(),
+        cross_project: CrossProjectSettings::default(),
     }
 }
 
@@ -374,6 +411,21 @@ mod tests {
         assert!(validate(&manifest).is_ok());
         manifest.project.use_beads = true;
         assert!(validate(&manifest).unwrap_err().contains("issue_id_prefix"));
+    }
+
+    #[test]
+    fn board_only_project_has_one_personal_manifest_too() {
+        let held = tempdir().unwrap();
+        let key = "dolt://keystone";
+        let manifest = infer_virtual("Keystone");
+
+        let path = create_key(key, held.path(), &manifest).unwrap();
+        let found = locate_key(key, held.path()).unwrap();
+
+        assert_eq!(path, found.path);
+        assert_eq!(ManifestStorage::Personal, found.storage);
+        assert!(found.manifest.project.use_beads);
+        assert_eq!("Keystone", found.manifest.project.display_name);
     }
 
     #[test]
