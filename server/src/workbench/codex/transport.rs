@@ -374,6 +374,28 @@ mod tests {
             let result = match method {
                 "initialize" => json!({"server": "fake"}),
                 "echo" => message["params"].clone(),
+                "thread/list" => {
+                    if message["params"]["cursor"].is_null() {
+                        json!({"data":[
+                            {"id":"inside","cwd":"/project","path":"/rollout/inside.jsonl"},
+                            {"id":"outside","cwd":"/elsewhere","path":"/rollout/outside.jsonl"}
+                        ],"nextCursor":"next"})
+                    } else {
+                        json!({"data":[{"id":"nested","cwd":"/project/nested","path":"/rollout/nested.jsonl"}],"nextCursor":null})
+                    }
+                }
+                "thread/read" => json!({"thread":{"id":message["params"]["threadId"],"turns":[]}}),
+                "account/usage/read" => json!({"threadUsage":{"groups":[
+                    {"inputTokens":2,"outputTokens":3,"totalTokens":5},
+                    {"inputTokens":7,"outputTokens":11}
+                ]}}),
+                "model/list" => {
+                    json!({"data":[{"model":"gpt-5","displayName":"GPT-5","description":"Model","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"high"}],"defaultReasoningEffort":"high"}]})
+                }
+                "skills/list" => {
+                    json!({"data":[{"skills":[{"name":"beads","description":"Use beads","path":"/skills/beads","enabled":true}]}]})
+                }
+                "collaborationMode/list" => json!({"data":[{"mode":"plan","name":"Plan"}]}),
                 "fail" => {
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0", "id":id, "error":{"code":-1,"message":"deliberate"}})).unwrap();
                     stdout.flush().unwrap();
@@ -485,5 +507,35 @@ mod tests {
             CodexTransport::start(config).await,
             Err(CodexTransportError::Start(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn native_codex_history_discovers_all_pages_filters_folders_and_reads_one_chat() {
+        use crate::workbench::codex::history::{list_threads, menu, read_thread, thread_usage};
+        let transport = CodexTransport::start(fake_config()).await.unwrap();
+        let found = list_threads(&transport, Some(Path::new("/project")), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            found
+                .iter()
+                .map(|thread| thread["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["inside", "nested"]
+        );
+        assert_eq!(
+            read_thread(&transport, "inside").await.unwrap()["id"],
+            "inside"
+        );
+        assert_eq!(
+            thread_usage(&transport, "inside").await.unwrap(),
+            Some((9, 14, 23))
+        );
+        let capabilities = menu(&transport, Path::new("/project"), Some("gpt-5")).await;
+        assert_eq!(capabilities["models"][1]["value"], "gpt-5");
+        assert_eq!(capabilities["efforts"][0]["value"], "high");
+        assert_eq!(capabilities["collaborationModes"][0]["value"], "plan");
+        assert_eq!(capabilities["skills"], json!(["beads"]));
+        transport.close().await;
     }
 }
