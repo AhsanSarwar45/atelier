@@ -27,7 +27,7 @@ jobs:
             artifact: atelier-linux-x64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: atelier-win-x64.exe
+            artifact: atelier-win-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -56,19 +56,40 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: server
 
-      - name: Copy binary (Unix)
+      # Each release archive carries the program and a checked Node 24.20.0
+      # runtime side by side, so the machine that unpacks it needs no Node of its
+      # own for the Chat tab (bw-oesd.2).
+      - name: Bundle archive (Unix)
         if: runner.os != 'Windows'
-        run: cp server/target/${{ matrix.target }}/release/atelier ${{ matrix.artifact }}
+        run: |
+          bash scripts/bundle-node.sh \
+            --target "${{ matrix.target }}" \
+            --binary "server/target/${{ matrix.target }}/release/atelier" \
+            --out "${{ matrix.artifact }}.tar.gz"
 
-      - name: Copy binary (Windows)
+      - name: Bundle archive (Windows)
         if: runner.os == 'Windows'
-        run: copy server\target\${{ matrix.target }}\release\atelier.exe ${{ matrix.artifact }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $node = 'v24.20.0'
+          $base = "node-$node-win-x64"
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/$node/$base.zip" -OutFile node.zip
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/$node/SHASUMS256.txt" -OutFile SHASUMS256.txt
+          $want = ((Select-String -Path SHASUMS256.txt -Pattern "  $base.zip$").Line -split '\s+')[0]
+          $got = (Get-FileHash node.zip -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $want) { throw "node zip does not match Node's published fingerprint" }
+          Expand-Archive node.zip -DestinationPath nodedir
+          New-Item -ItemType Directory -Force -Path stage | Out-Null
+          Copy-Item "server/target/${{ matrix.target }}/release/atelier.exe" stage/atelier.exe
+          Copy-Item "nodedir/$base/node.exe" stage/node.exe
+          Compress-Archive -Path stage/* -DestinationPath "${{ matrix.artifact }}.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.*
 
   release:
     needs: build
@@ -120,9 +141,9 @@ jobs:
           fi
           TAG="${{ inputs.version || github.ref_name }}"
           VERSION="${TAG#v}"
-          ARM=$(sha256sum release/atelier-darwin-arm64 | cut -d' ' -f1)
-          INTEL=$(sha256sum release/atelier-darwin-x64 | cut -d' ' -f1)
-          LINUX=$(sha256sum release/atelier-linux-x64 | cut -d' ' -f1)
+          ARM=$(sha256sum release/atelier-darwin-arm64.tar.gz | cut -d' ' -f1)
+          INTEL=$(sha256sum release/atelier-darwin-x64.tar.gz | cut -d' ' -f1)
+          LINUX=$(sha256sum release/atelier-linux-x64.tar.gz | cut -d' ' -f1)
           git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/AhsanSarwar45/homebrew-atelier.git" tap
           mkdir -p tap/Formula
           sed -e "s|__VERSION__|${VERSION}|g" \
