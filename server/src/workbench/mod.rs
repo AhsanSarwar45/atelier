@@ -5,3 +5,4 @@
 //! services move behind them.
 
 pub mod protocol;
+pub mod store;
