@@ -4,7 +4,13 @@
 //! helper. Moving the writer into Axum must not make an existing conversation
 //! disappear or require an export/import step.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
+use crate::workbench::protocol::Event;
+use rusqlite::types::Value as SqlValue;
+use rusqlite::{
+    params, params_from_iter, Connection, OptionalExtension, Row, Transaction, TransactionBehavior,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -84,6 +90,69 @@ pub struct Store {
     connection: Connection,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Session {
+    pub id: String,
+    pub brand: String,
+    pub external_id: Option<String>,
+    pub project_id: String,
+    pub project_path: String,
+    pub cwd: String,
+    pub model: Option<String>,
+    pub permission_mode: String,
+    pub effort: Option<String>,
+    pub collaboration_mode: Option<String>,
+    pub title: Option<String>,
+    pub state: String,
+    pub origin: String,
+    pub created_at: String,
+    pub last_active_at: String,
+    pub last_spoke_at: Option<String>,
+}
+
+/// `Some(None)` clears a nullable setting; `None` leaves it untouched.
+#[derive(Clone, Debug, Default)]
+pub struct SessionPatch {
+    pub external_id: Option<Option<String>>,
+    pub title: Option<Option<String>>,
+    pub state: Option<String>,
+    pub model: Option<Option<String>>,
+    pub permission_mode: Option<String>,
+    pub effort: Option<Option<String>>,
+    pub collaboration_mode: Option<Option<String>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SearchHit {
+    pub session_id: String,
+    pub message_id: String,
+    pub role: String,
+    pub text: String,
+    pub at: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Turn {
+    pub session_id: String,
+    pub project_id: String,
+    pub brand: String,
+    pub at: String,
+    pub usd: Option<f64>,
+    pub input: Option<i64>,
+    pub output: Option<i64>,
+    pub total: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spend {
+    pub day: String,
+    pub project_id: String,
+    pub brand: String,
+    pub usd: f64,
+    pub tokens: i64,
+}
+
 impl Store {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(parent) = path.parent() {
@@ -106,10 +175,385 @@ impl Store {
             .map(|version| version.max(0) as usize)
     }
 
+    pub fn create_session(&self, session: &Session) -> rusqlite::Result<()> {
+        self.connection.execute(
+            r#"INSERT INTO session
+                 (id, brand, external_id, project_id, project_path, cwd, model,
+                  permission_mode, effort, collaboration_mode, title, state,
+                  origin, created_at, last_active_at, last_spoke_at)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"#,
+            params![
+                session.id,
+                session.brand,
+                session.external_id,
+                session.project_id,
+                session.project_path,
+                session.cwd,
+                session.model,
+                session.permission_mode,
+                session.effort,
+                session.collaboration_mode,
+                session.title,
+                session.state,
+                session.origin,
+                session.created_at,
+                session.last_active_at,
+                session.last_spoke_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_session(
+        &self,
+        id: &str,
+        patch: SessionPatch,
+        touch_at: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let mut sets = Vec::new();
+        let mut values = Vec::<SqlValue>::new();
+        let mut nullable = |column: &str, value: Option<Option<String>>| {
+            if let Some(value) = value {
+                sets.push(format!("{column} = ?"));
+                values.push(value.map(SqlValue::Text).unwrap_or(SqlValue::Null));
+            }
+        };
+        nullable("external_id", patch.external_id);
+        nullable("title", patch.title);
+        nullable("model", patch.model);
+        nullable("effort", patch.effort);
+        nullable("collaboration_mode", patch.collaboration_mode);
+        if let Some(state) = patch.state {
+            sets.push("state = ?".to_string());
+            values.push(SqlValue::Text(state));
+        }
+        if let Some(mode) = patch.permission_mode {
+            sets.push("permission_mode = ?".to_string());
+            values.push(SqlValue::Text(mode));
+        }
+        if let Some(at) = touch_at {
+            sets.push("last_active_at = ?".to_string());
+            values.push(SqlValue::Text(at.to_string()));
+        }
+        if sets.is_empty() {
+            return Ok(());
+        }
+        values.push(SqlValue::Text(id.to_string()));
+        self.connection.execute(
+            &format!("UPDATE session SET {} WHERE id = ?", sets.join(", ")),
+            params_from_iter(values),
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_spoke(&self, id: &str, at: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "UPDATE session SET last_spoke_at = ?1 WHERE id = ?2",
+            params![at, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_session(&self, id: &str) -> rusqlite::Result<Option<Session>> {
+        self.connection
+            .query_row(
+                "SELECT * FROM session WHERE id = ?1",
+                [id],
+                session_from_row,
+            )
+            .optional()
+    }
+
+    pub fn session_by_external_id(&self, external_id: &str) -> rusqlite::Result<Option<Session>> {
+        self.connection
+            .query_row(
+                "SELECT * FROM session WHERE external_id = ?1 ORDER BY last_active_at DESC LIMIT 1",
+                [external_id],
+                session_from_row,
+            )
+            .optional()
+    }
+
+    pub fn list_sessions(&self, project_id: Option<&str>) -> rusqlite::Result<Vec<Session>> {
+        let (sql, parameter): (&str, Option<&str>) = match project_id {
+            Some(project_id) => (
+                "SELECT * FROM session WHERE project_id = ?1 ORDER BY COALESCE(last_spoke_at, last_active_at) DESC",
+                Some(project_id),
+            ),
+            None => (
+                "SELECT * FROM session ORDER BY COALESCE(last_spoke_at, last_active_at) DESC",
+                None,
+            ),
+        };
+        let mut statement = self.connection.prepare(sql)?;
+        let found = match parameter {
+            Some(project_id) => statement
+                .query_map([project_id], session_from_row)?
+                .collect(),
+            None => statement.query_map([], session_from_row)?.collect(),
+        };
+        found
+    }
+
+    pub fn mark_all_dormant(&self) -> rusqlite::Result<usize> {
+        self.connection.execute(
+            "UPDATE session SET state = 'dormant' WHERE state != 'dormant'",
+            [],
+        )
+    }
+
+    pub fn next_seq(&self, session_id: &str) -> rusqlite::Result<i64> {
+        self.connection.query_row(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM event WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+    }
+
+    /// Append once across live, replay, and snapshot delivery of one provider event.
+    pub fn append_event(&self, event: &Event) -> rusqlite::Result<bool> {
+        let session_id = event_string(event, "sessionId")?;
+        let seq = event
+            .fields
+            .get("seq")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| rusqlite::Error::InvalidParameterName("event.seq".to_string()))?;
+        let at = event_string(event, "at")?;
+        let kind = serde_json::to_value(event.kind)
+            .map_err(json_error)?
+            .as_str()
+            .unwrap()
+            .to_string();
+        let identity = event
+            .fields
+            .get("providerEvent")
+            .and_then(serde_json::Value::as_object);
+        let provider = identity
+            .and_then(|value| value.get("provider"))
+            .and_then(serde_json::Value::as_str);
+        let thread_id = identity
+            .and_then(|value| value.get("threadId"))
+            .and_then(serde_json::Value::as_str);
+        let event_id = identity
+            .and_then(|value| value.get("eventId"))
+            .and_then(serde_json::Value::as_str);
+        let json = serde_json::to_string(event).map_err(json_error)?;
+        let changed = self.connection.execute(
+            r#"INSERT INTO event
+                 (session_id, seq, at, type, json, provider, provider_thread_id, provider_event_id)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+               ON CONFLICT(session_id, provider, provider_thread_id, provider_event_id)
+                 WHERE provider_event_id IS NOT NULL DO NOTHING"#,
+            params![session_id, seq, at, kind, json, provider, thread_id, event_id],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub fn events_since(&self, session_id: &str, since: i64) -> rusqlite::Result<Vec<Event>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT json FROM event WHERE session_id = ?1 AND seq > ?2 ORDER BY seq")?;
+        let rows =
+            statement.query_map(params![session_id, since], |row| row.get::<_, String>(0))?;
+        rows.map(|row| {
+            serde_json::from_str(&row?).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })
+        .collect()
+    }
+
+    pub fn open_message(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        role: &str,
+        at: &str,
+    ) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "INSERT OR IGNORE INTO message (session_id, message_id, role, text, at) VALUES (?1,?2,?3,'',?4)",
+            params![session_id, message_id, role, at],
+        )?;
+        Ok(())
+    }
+
+    pub fn grow_message(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "UPDATE message SET text = text || ?1 WHERE session_id = ?2 AND message_id = ?3",
+            params![text, session_id, message_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn retract_message(&self, session_id: &str, message_id: &str) -> rusqlite::Result<()> {
+        self.connection.execute(
+            "DELETE FROM message WHERE session_id = ?1 AND message_id = ?2",
+            params![session_id, message_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn search(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let mut statement = self.connection.prepare(
+            r#"SELECT session_id, message_id, role, text, at FROM message
+               WHERE text LIKE ?1 ESCAPE '\' ORDER BY at DESC LIMIT ?2"#,
+        )?;
+        let found = statement
+            .query_map(params![format!("%{escaped}%"), limit as i64], |row| {
+                Ok(SearchHit {
+                    session_id: row.get(0)?,
+                    message_id: row.get(1)?,
+                    role: row.get(2)?,
+                    text: row.get(3)?,
+                    at: row.get(4)?,
+                })
+            })?
+            .collect();
+        found
+    }
+
+    pub fn remember_turn(&self, turn: &Turn) -> rusqlite::Result<()> {
+        self.connection.execute(
+            r#"INSERT OR REPLACE INTO turn
+                 (session_id, project_id, brand, day, at, usd, input, output, total)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
+            params![
+                turn.session_id,
+                turn.project_id,
+                turn.brand,
+                turn.at.get(..10).unwrap_or(&turn.at),
+                turn.at,
+                turn.usd,
+                turn.input,
+                turn.output,
+                turn.total,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn spend(&self) -> rusqlite::Result<Vec<Spend>> {
+        let mut statement = self.connection.prepare(
+            r#"SELECT day, project_id, brand,
+                      COALESCE(SUM(usd), 0), COALESCE(SUM(total), 0)
+               FROM turn GROUP BY day, project_id, brand ORDER BY day"#,
+        )?;
+        let found = statement
+            .query_map([], |row| {
+                Ok(Spend {
+                    day: row.get(0)?,
+                    project_id: row.get(1)?,
+                    brand: row.get(2)?,
+                    usd: row.get(3)?,
+                    tokens: row.get(4)?,
+                })
+            })?
+            .collect();
+        found
+    }
+
+    pub fn remember_bead_link(
+        &self,
+        session_id: &str,
+        bead_id: &str,
+        via: &str,
+        first_seen_at: &str,
+    ) -> rusqlite::Result<bool> {
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO bead_link (session_id, bead_id, via, first_seen_at) VALUES (?1,?2,?3,?4)",
+                params![session_id, bead_id, via, first_seen_at],
+            )
+            .map(|changed| changed == 1)
+    }
+
+    pub fn beads_for_session(&self, session_id: &str) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.connection.prepare(
+            "SELECT bead_id FROM bead_link WHERE session_id = ?1 ORDER BY first_seen_at",
+        )?;
+        let found = statement
+            .query_map([session_id], |row| row.get(0))?
+            .collect();
+        found
+    }
+
+    pub fn beads_for_sessions(
+        &self,
+        session_ids: &[String],
+    ) -> rusqlite::Result<HashMap<String, Vec<String>>> {
+        let mut grouped = HashMap::new();
+        if session_ids.is_empty() {
+            return Ok(grouped);
+        }
+        let ids = serde_json::to_string(session_ids).map_err(json_error)?;
+        let mut statement = self.connection.prepare(
+            r#"SELECT session_id, bead_id FROM bead_link
+               WHERE session_id IN (SELECT value FROM json_each(?1))
+               ORDER BY first_seen_at"#,
+        )?;
+        let rows = statement.query_map([ids], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (session_id, bead_id) = row?;
+            grouped
+                .entry(session_id)
+                .or_insert_with(Vec::new)
+                .push(bead_id);
+        }
+        Ok(grouped)
+    }
+
     #[cfg(test)]
     fn connection(&self) -> &Connection {
         &self.connection
     }
+}
+
+fn session_from_row(row: &Row<'_>) -> rusqlite::Result<Session> {
+    Ok(Session {
+        id: row.get("id")?,
+        brand: row.get("brand")?,
+        external_id: row.get("external_id")?,
+        project_id: row.get("project_id")?,
+        project_path: row.get("project_path")?,
+        cwd: row.get("cwd")?,
+        model: row.get("model")?,
+        permission_mode: row.get("permission_mode")?,
+        effort: row.get("effort")?,
+        collaboration_mode: row.get("collaboration_mode")?,
+        title: row.get("title")?,
+        state: row.get("state")?,
+        origin: row.get("origin")?,
+        created_at: row.get("created_at")?,
+        last_active_at: row.get("last_active_at")?,
+        last_spoke_at: row.get("last_spoke_at")?,
+    })
+}
+
+fn event_string<'a>(event: &'a Event, field: &str) -> rusqlite::Result<&'a str> {
+    event
+        .fields
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| rusqlite::Error::InvalidParameterName(format!("event.{field}")))
+}
+
+fn json_error(error: serde_json::Error) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
 
 fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
@@ -191,6 +635,227 @@ fn columns(transaction: &Transaction<'_>, table: &str) -> rusqlite::Result<Vec<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session(id: &str, brand: &str, external_id: Option<&str>, at: &str) -> Session {
+        Session {
+            id: id.to_string(),
+            brand: brand.to_string(),
+            external_id: external_id.map(str::to_string),
+            project_id: "project-1".to_string(),
+            project_path: "/project".to_string(),
+            cwd: "/project".to_string(),
+            model: Some("model-1".to_string()),
+            permission_mode: "default".to_string(),
+            effort: Some("high".to_string()),
+            collaboration_mode: None,
+            title: Some(format!("Chat {id}")),
+            state: "idle".to_string(),
+            origin: "app".to_string(),
+            created_at: at.to_string(),
+            last_active_at: at.to_string(),
+            last_spoke_at: None,
+        }
+    }
+
+    #[test]
+    fn workbench_core_store_creates_updates_and_orders_sessions() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session(
+                "older",
+                "claude",
+                Some("native-older"),
+                "2026-08-20T00:00:00.000Z",
+            ))
+            .unwrap();
+        store
+            .create_session(&session(
+                "newer",
+                "codex",
+                Some("native-newer"),
+                "2026-08-21T00:00:00.000Z",
+            ))
+            .unwrap();
+
+        store
+            .update_session(
+                "older",
+                SessionPatch {
+                    title: Some(Some("Renamed".to_string())),
+                    model: Some(None),
+                    collaboration_mode: Some(Some("plan".to_string())),
+                    state: Some("streaming".to_string()),
+                    ..SessionPatch::default()
+                },
+                Some("2026-08-22T00:00:00.000Z"),
+            )
+            .unwrap();
+        store
+            .mark_spoke("newer", "2026-08-23T00:00:00.000Z")
+            .unwrap();
+
+        let older = store.get_session("older").unwrap().unwrap();
+        assert_eq!(older.title.as_deref(), Some("Renamed"));
+        assert_eq!(older.model, None);
+        assert_eq!(older.collaboration_mode.as_deref(), Some("plan"));
+        assert_eq!(older.state, "streaming");
+        assert_eq!(
+            store
+                .session_by_external_id("native-older")
+                .unwrap()
+                .unwrap()
+                .id,
+            "older"
+        );
+        assert_eq!(
+            store
+                .list_sessions(Some("project-1"))
+                .unwrap()
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<_>>(),
+            ["newer", "older"]
+        );
+        assert_eq!(store.mark_all_dormant().unwrap(), 2);
+        assert!(store
+            .list_sessions(None)
+            .unwrap()
+            .iter()
+            .all(|row| row.state == "dormant"));
+    }
+
+    #[test]
+    fn workbench_core_store_appends_once_and_keeps_search_costs_and_links() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("workbench.db")).unwrap();
+        store
+            .create_session(&session(
+                "chat-1",
+                "claude",
+                Some("native-1"),
+                "2026-08-20T00:00:00.000Z",
+            ))
+            .unwrap();
+        let live: Event = serde_json::from_value(serde_json::json!({
+            "seq": 1,
+            "sessionId": "chat-1",
+            "at": "2026-08-20T00:00:01.000Z",
+            "type": "text.delta",
+            "messageId": "answer-1",
+            "text": "kept exactly",
+            "providerEvent": {
+                "provider": "claude",
+                "threadId": "native-1",
+                "eventId": "answer-1:text:0",
+                "delivery": "live"
+            }
+        }))
+        .unwrap();
+        let replay: Event = serde_json::from_value(serde_json::json!({
+            "seq": 2,
+            "sessionId": "chat-1",
+            "at": "2026-08-20T00:00:01.000Z",
+            "type": "text.delta",
+            "messageId": "answer-1",
+            "text": "kept exactly",
+            "providerEvent": {
+                "provider": "claude",
+                "threadId": "native-1",
+                "eventId": "answer-1:text:0",
+                "delivery": "replay"
+            }
+        }))
+        .unwrap();
+        assert!(store.append_event(&live).unwrap());
+        assert!(!store.append_event(&replay).unwrap());
+        assert_eq!(store.next_seq("chat-1").unwrap(), 2);
+        assert_eq!(store.events_since("chat-1", 0).unwrap(), [live]);
+
+        store
+            .open_message(
+                "chat-1",
+                "answer-1",
+                "assistant",
+                "2026-08-20T00:00:01.000Z",
+            )
+            .unwrap();
+        store
+            .grow_message("chat-1", "answer-1", "100% kept exactly")
+            .unwrap();
+        let found = store.search("% kept", 100).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].text, "100% kept exactly");
+
+        store
+            .remember_turn(&Turn {
+                session_id: "chat-1".to_string(),
+                project_id: "project-1".to_string(),
+                brand: "claude".to_string(),
+                at: "2026-08-20T00:01:00.000Z".to_string(),
+                usd: Some(0.25),
+                input: None,
+                output: None,
+                total: None,
+            })
+            .unwrap();
+        store
+            .remember_turn(&Turn {
+                session_id: "codex-chat".to_string(),
+                project_id: "project-1".to_string(),
+                brand: "codex".to_string(),
+                at: "2026-08-20T00:02:00.000Z".to_string(),
+                usd: None,
+                input: Some(10),
+                output: Some(20),
+                total: Some(30),
+            })
+            .unwrap();
+        assert_eq!(
+            store.spend().unwrap(),
+            [
+                Spend {
+                    day: "2026-08-20".to_string(),
+                    project_id: "project-1".to_string(),
+                    brand: "claude".to_string(),
+                    usd: 0.25,
+                    tokens: 0,
+                },
+                Spend {
+                    day: "2026-08-20".to_string(),
+                    project_id: "project-1".to_string(),
+                    brand: "codex".to_string(),
+                    usd: 0.0,
+                    tokens: 30,
+                },
+            ]
+        );
+
+        assert!(store
+            .remember_bead_link("chat-1", "bw-one", "tool", "2026-08-20T00:00:02.000Z")
+            .unwrap());
+        assert!(!store
+            .remember_bead_link("chat-1", "bw-one", "brief", "2026-08-20T00:00:03.000Z")
+            .unwrap());
+        store
+            .remember_bead_link("chat-1", "bw-two", "manual", "2026-08-20T00:00:04.000Z")
+            .unwrap();
+        assert_eq!(
+            store.beads_for_session("chat-1").unwrap(),
+            ["bw-one", "bw-two"]
+        );
+        assert_eq!(
+            store
+                .beads_for_sessions(&["chat-1".to_string()])
+                .unwrap()
+                .get("chat-1")
+                .unwrap(),
+            &["bw-one".to_string(), "bw-two".to_string()]
+        );
+
+        store.retract_message("chat-1", "answer-1").unwrap();
+        assert!(store.search("kept", 100).unwrap().is_empty());
+    }
 
     fn count(connection: &Connection, table: &str) -> i64 {
         connection
