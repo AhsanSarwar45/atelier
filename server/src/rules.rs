@@ -433,6 +433,9 @@ pub fn hook(name: &str, rest: &[String]) -> Result<i32, String> {
     if crate::completion_gate::is_ours(name) {
         return Ok(crate::completion_gate::run());
     }
+    if crate::board_push::is_ours(name) {
+        return Ok(crate::board_push::run());
+    }
     let mut looked = Vec::new();
     let mut found = None;
     for place in gate_places(name) {

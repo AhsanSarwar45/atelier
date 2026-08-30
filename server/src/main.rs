@@ -4,6 +4,7 @@
 //! behind them. The one name the product answers to lives in `identity.rs`.
 
 mod board_gate;
+mod board_push;
 mod command_line;
 mod completion_gate;
 mod db;
