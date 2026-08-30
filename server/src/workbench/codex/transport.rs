@@ -393,6 +393,7 @@ mod tests {
                 }
                 "turn/start" => {
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}})).unwrap();
+                    writeln!(stdout, "{}", json!({"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"itemId":"message-1","delta":"CODEX_NATIVE_STREAM"}})).unwrap();
                     writeln!(stdout, "{}", json!({"jsonrpc":"2.0","id":88,"method":"item/commandExecution/requestApproval","params":{"itemId":"shell-1","command":"cargo test"}})).unwrap();
                     json!({"turn":{"id":"turn-1"}})
                 }

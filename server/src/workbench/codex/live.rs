@@ -76,6 +76,7 @@ pub struct CodexLiveState {
     agents: HashSet<String>,
     elicitation: HashMap<String, (Value, usize, serde_json::Map<String, Value>)>,
     responses: Vec<(Value, Result<Value, Value>)>,
+    diagnostic_seq: u64,
 }
 
 impl CodexLiveState {
@@ -105,26 +106,32 @@ impl CodexLiveState {
         match inbound {
             CodexInbound::Notification { method, params } => self.notification(&method, &params),
             CodexInbound::Request { id, method, params } => self.request(id, &method, &params),
-            CodexInbound::ProtocolLine(line) => vec![event(
-                "note",
-                [
-                    ("noteId", json!(format!("protocol:{}", self.messages.len()))),
+            CodexInbound::ProtocolLine(line) => {
+                self.diagnostic_seq += 1;
+                vec![event(
+                    "note",
+                    [
+                    ("noteId", json!(format!("protocol:{}", self.diagnostic_seq))),
                     ("rank", json!("detail")),
                     ("kind", json!("protocol")),
                     ("text", json!(line)),
                     ("body", Value::Null),
                 ],
-            )],
-            CodexInbound::Stderr(line) => vec![event(
-                "note",
-                [
-                    ("noteId", json!(format!("stderr:{}", self.messages.len()))),
+                )]
+            }
+            CodexInbound::Stderr(line) => {
+                self.diagnostic_seq += 1;
+                vec![event(
+                    "note",
+                    [
+                    ("noteId", json!(format!("stderr:{}", self.diagnostic_seq))),
                     ("rank", json!("detail")),
                     ("kind", json!("stderr")),
                     ("text", json!(line)),
                     ("body", Value::Null),
                 ],
-            )],
+                )]
+            }
             CodexInbound::Exited(detail) => vec![event(
                 "error",
                 [
@@ -957,6 +964,16 @@ mod tests {
             params: json!({}),
         });
         assert!(state.take_responses()[0].1.as_ref().unwrap()["currentTimeAt"].is_number());
+    }
+    #[test]
+    fn native_codex_live_gives_each_diagnostic_line_a_distinct_transcript_id() {
+        let mut state = CodexLiveState::new(&options());
+        let first = state.handle(CodexInbound::ProtocolLine("one".into()));
+        let second = state.handle(CodexInbound::ProtocolLine("two".into()));
+        let third = state.handle(CodexInbound::Stderr("three".into()));
+        assert_eq!(first[0]["noteId"], "protocol:1");
+        assert_eq!(second[0]["noteId"], "protocol:2");
+        assert_eq!(third[0]["noteId"], "stderr:3");
     }
     #[test]
     fn native_codex_live_proposes_and_resolves_provider_plans() {
